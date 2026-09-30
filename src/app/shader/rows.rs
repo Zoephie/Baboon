@@ -881,12 +881,13 @@ pub(in crate::app) fn shader_color_row(
     tag: &TagFile,
 ) -> ShaderGridRow {
     let (slot, _) = compile_real_constant(parameter, instance);
-    let default_color =
-        material_color_from_argb(&parameter.parameter_name, parameter.default_color.0);
     let is_argb_parameter = matches!(
         parameter.parameter_type.map(|kind| kind.get()),
         Some(RenderMethodParameterType::ArgbColor)
     );
+    let default_color =
+        material_color_from_argb(&parameter.parameter_name, parameter.default_color.0)
+            .with_alpha_available(is_argb_parameter);
     let mut raw_color = instance
         .map(|param| argb_to_rgba(param.color_parameter.0))
         .unwrap_or(slot);
@@ -900,7 +901,8 @@ pub(in crate::app) fn shader_color_row(
         raw_color[1],
         raw_color[2],
         raw_color[3],
-    );
+    )
+    .with_alpha_available(is_argb_parameter);
     let default_function_hex =
         default_shader_color_function_hex(parameter.default_color.0, is_argb_parameter);
     let create_target = param_index
@@ -960,7 +962,8 @@ pub(in crate::app) fn shader_color_row(
                     rgba[1],
                     rgba[2],
                     rgba[3],
-                );
+                )
+                .with_alpha_available(is_argb_parameter);
                 let mut row = ShaderGridRow {
                     label: parameter.parameter_name.clone(),
                     default_cell: Some(ShaderGridCell {

@@ -169,20 +169,21 @@ pub(in crate::app) fn draw_bitmap_preview_data(
         .expect("a valid bitmap preview always uploads a texture")
         .clone();
     if preview.show_checkerboard && preview.checker_texture.is_none() {
-        let mut rgba = Vec::with_capacity(8 * 8 * 4);
-        for y in 0..8 {
-            for x in 0..8 {
-                let white = (x / 4 + y / 4) % 2 == 0;
+        let texture_size = ALPHA_CHECKER_TILE_SIZE * 2;
+        let mut rgba = Vec::with_capacity(texture_size * texture_size * 4);
+        for y in 0..texture_size {
+            for x in 0..texture_size {
+                let white = (x / ALPHA_CHECKER_TILE_SIZE + y / ALPHA_CHECKER_TILE_SIZE) % 2 == 0;
                 rgba.extend_from_slice(if white {
-                    &[255, 255, 255, 13]
+                    &ALPHA_CHECKER_LIGHT_RGBA
                 } else {
-                    &[0, 0, 0, 13]
+                    &ALPHA_CHECKER_DARK_RGBA
                 });
             }
         }
         preview.checker_texture = Some(ctx.load_texture(
             format!("bitmap_checkerboard_{texture_key}"),
-            egui::ColorImage::from_rgba_unmultiplied([8, 8], &rgba),
+            egui::ColorImage::from_rgba_unmultiplied([texture_size, texture_size], &rgba),
             egui::TextureOptions::NEAREST_REPEAT,
         ));
     }
@@ -804,10 +805,13 @@ fn draw_bitmap_canvas_and_footer(
         && let Some(checker_texture) = checker_texture
     {
         let uv = egui::Rect::from_min_max(
-            egui::pos2(clipped_img_rect.left() / 8.0, clipped_img_rect.top() / 8.0),
             egui::pos2(
-                clipped_img_rect.right() / 8.0,
-                clipped_img_rect.bottom() / 8.0,
+                clipped_img_rect.left() / (ALPHA_CHECKER_TILE_SIZE * 2) as f32,
+                clipped_img_rect.top() / (ALPHA_CHECKER_TILE_SIZE * 2) as f32,
+            ),
+            egui::pos2(
+                clipped_img_rect.right() / (ALPHA_CHECKER_TILE_SIZE * 2) as f32,
+                clipped_img_rect.bottom() / (ALPHA_CHECKER_TILE_SIZE * 2) as f32,
             ),
         );
         painter.image(checker_texture.id(), clipped_img_rect, uv, Color32::WHITE);

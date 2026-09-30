@@ -45,7 +45,7 @@ fn loaded_prefs_are_written_back_unchanged() {
         tool_commands_left_width: MIN_TOOL_COMMANDS_LEFT_WIDTH + 40.0,
         tool_commands_collapsed_categories: HashSet::from(["build".to_owned()]),
         recent_folders: vec![PathBuf::from("/recent")],
-        custom_color_swatches: vec![Some([1, 2, 3, 4])],
+        custom_color_swatches: vec![Some(ColorPaletteSwatch::named([1, 2, 3, 4], "Sample"))],
         palette_last_dir: Some(PathBuf::from("/palettes")),
         ..GuiPrefs::default()
     };

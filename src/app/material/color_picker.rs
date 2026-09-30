@@ -6,15 +6,21 @@ use super::*;
 #[derive(Clone)]
 pub(in crate::app) struct MaterialColorPopup {
     title: String,
+    original_color: [f32; 4],
     red: f32,
     green: f32,
     blue: f32,
     alpha: f32,
+    hue: u8,
+    saturation: u8,
+    brightness: u8,
+    alpha_available: bool,
     pub(in crate::app) sc_hex: String,
-    pc_hex_input: String,
-    pc_hex_error: Option<String>,
+    hex_input: String,
+    hex_error: Option<String>,
     palette_status: Option<String>,
     confirm_clear_palette: bool,
+    show_save_palette_dialog: bool,
     /// When Some, clicking OK writes a constant-color function blob to this path.
     write_path: Option<String>,
     /// When Some, clicking OK writes a plain RGB/ARGB color value to this path
@@ -60,12 +66,18 @@ impl MaterialColorPopup {
         let green = green.clamp(0.0, 1.0);
         let blue = blue.clamp(0.0, 1.0);
         let alpha = alpha.clamp(0.0, 1.0);
+        let (hue, saturation, brightness) = rgb_to_hsb_255(red, green, blue);
         Self {
             title: clean_field_name(title),
+            original_color: [red, green, blue, alpha],
             red,
             green,
             blue,
             alpha,
+            hue,
+            saturation,
+            brightness,
+            alpha_available: true,
             sc_hex: format!(
                 "sc#{}, {}, {}, {}",
                 format_pc_float(alpha),
@@ -73,10 +85,11 @@ impl MaterialColorPopup {
                 format_pc_float(green),
                 format_pc_float(blue)
             ),
-            pc_hex_input: format_rgb_hex(red, green, blue),
-            pc_hex_error: None,
+            hex_input: format_rgb_hex(red, green, blue),
+            hex_error: None,
             palette_status: None,
             confirm_clear_palette: false,
+            show_save_palette_dialog: false,
             write_path: None,
             write_color_field: None,
             create_shader_op: None,
@@ -105,6 +118,7 @@ impl MaterialColorPopup {
         path: impl Into<String>,
         argb: bool,
     ) -> Self {
+        self = self.with_alpha_available(argb);
         self.tag_key = tag_key.into();
         self.write_color_field = Some(ColorFieldWrite {
             path: path.into(),
@@ -138,6 +152,11 @@ impl MaterialColorPopup {
         tag_key: impl Into<String>,
         op: H2ShaderParamOp,
     ) -> Self {
+        self.alpha_available = !matches!(&op, H2ShaderParamOp::EditTemplateBackedValue { .. });
+        if !self.alpha_available {
+            self.alpha = 1.0;
+            self.original_color[3] = 1.0;
+        }
         self.tag_key = tag_key.into();
         self.create_h2_shader_param_op = Some(op);
         self
@@ -148,10 +167,20 @@ impl MaterialColorPopup {
         target: FunctionDraftColorTarget,
         original_alpha: u8,
     ) -> Self {
+        self = self.with_alpha_available(false);
         self.function_draft_color = Some(FunctionDraftColorWrite {
             target,
             original_alpha,
         });
+        self
+    }
+
+    pub(in crate::app) fn with_alpha_available(mut self, available: bool) -> Self {
+        self.alpha_available = available;
+        if !available {
+            self.alpha = 1.0;
+            self.original_color[3] = 1.0;
+        }
         self
     }
 
@@ -164,17 +193,57 @@ impl MaterialColorPopup {
         )
     }
 
+    fn original_color32(&self) -> Color32 {
+        Color32::from_rgba_unmultiplied(
+            float_channel_to_u8(self.original_color[0]),
+            float_channel_to_u8(self.original_color[1]),
+            float_channel_to_u8(self.original_color[2]),
+            float_channel_to_u8(self.original_color[3]),
+        )
+    }
+
     fn set_rgb_bytes(&mut self, red: u8, green: u8, blue: u8) {
-        self.red = byte_to_float(red);
-        self.green = byte_to_float(green);
-        self.blue = byte_to_float(blue);
-        self.pc_hex_input = format!("#{red:02X}{green:02X}{blue:02X}");
-        self.pc_hex_error = None;
+        self.set_rgb_components(
+            byte_to_float(red),
+            byte_to_float(green),
+            byte_to_float(blue),
+        );
+        self.hex_input = format!("#{red:02X}{green:02X}{blue:02X}");
+        self.hex_error = None;
+    }
+
+    fn set_rgb_components(&mut self, red: f32, green: f32, blue: f32) {
+        self.red = red.clamp(0.0, 1.0);
+        self.green = green.clamp(0.0, 1.0);
+        self.blue = blue.clamp(0.0, 1.0);
+        let (hue, saturation, brightness) = rgb_to_hsb_255(self.red, self.green, self.blue);
+        self.brightness = brightness;
+        if brightness != 0 {
+            self.saturation = saturation;
+            if saturation != 0 {
+                self.hue = hue;
+            }
+        }
+    }
+
+    fn update_rgb_from_hsb(&mut self) {
+        let (red, green, blue) = hsb_to_rgb(
+            self.hue as f32 / 255.0,
+            self.saturation as f32 / 255.0,
+            self.brightness as f32 / 255.0,
+        );
+        self.red = red;
+        self.green = green;
+        self.blue = blue;
+        self.hex_input = format_rgb_hex(red, green, blue);
+        self.hex_error = None;
     }
 
     fn set_rgba_bytes(&mut self, red: u8, green: u8, blue: u8, alpha: u8) {
         self.set_rgb_bytes(red, green, blue);
-        self.alpha = byte_to_float(alpha);
+        if self.alpha_available {
+            self.alpha = byte_to_float(alpha);
+        }
     }
 }
 
@@ -184,13 +253,10 @@ pub(in crate::app) fn color_popup_for_value(
     formatted: &str,
 ) -> Option<MaterialColorPopup> {
     match value {
-        TagFieldData::RealRgbColor(color) => Some(MaterialColorPopup::new(
-            title,
-            color.red,
-            color.green,
-            color.blue,
-            1.0,
-        )),
+        TagFieldData::RealRgbColor(color) => Some(
+            MaterialColorPopup::new(title, color.red, color.green, color.blue, 1.0)
+                .with_alpha_available(false),
+        ),
         TagFieldData::RealArgbColor(color) => Some(MaterialColorPopup::new(
             title,
             color.red,
@@ -200,13 +266,16 @@ pub(in crate::app) fn color_popup_for_value(
         )),
         TagFieldData::RgbColor(color) => {
             let raw = color.0;
-            Some(MaterialColorPopup::new(
-                title,
-                byte_to_float(((raw >> 16) & 0xFF) as u8),
-                byte_to_float(((raw >> 8) & 0xFF) as u8),
-                byte_to_float((raw & 0xFF) as u8),
-                1.0,
-            ))
+            Some(
+                MaterialColorPopup::new(
+                    title,
+                    byte_to_float(((raw >> 16) & 0xFF) as u8),
+                    byte_to_float(((raw >> 8) & 0xFF) as u8),
+                    byte_to_float((raw & 0xFF) as u8),
+                    1.0,
+                )
+                .with_alpha_available(false),
+            )
         }
         TagFieldData::ArgbColor(color) => {
             let raw = color.0;
@@ -275,11 +344,10 @@ pub(in crate::app) enum ColorPopupResult {
 pub(in crate::app) fn draw_color_popup(
     ctx: &egui::Context,
     color_popup: &mut Option<MaterialColorPopup>,
-    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    custom_swatches: &mut Vec<Option<ColorPaletteSwatch>>,
     palette_last_dir: &mut Option<PathBuf>,
 ) -> Option<ColorPopupResult> {
     let color = color_popup.as_mut()?;
-    let mut open = true;
     let mut close = false;
     let editable = color.write_path.is_some()
         || color.write_color_field.is_some()
@@ -288,14 +356,23 @@ pub(in crate::app) fn draw_color_popup(
         || color.create_h2_shader_param_op.is_some()
         || color.function_draft_color.is_some();
     let mut result: Option<ColorPopupResult> = None;
-    egui::Window::new(color.title.clone())
+    let window_title = format!("Color Picker - {}", color.title);
+    egui::Window::new("Color Picker")
+        .id(egui::Id::new("material_color_picker"))
+        .title_bar(false)
         .collapsible(false)
+        .movable(true)
         .resizable(false)
-        .open(&mut open)
-        .default_size(Vec2::new(448.0, 480.0))
+        .default_size(Vec2::new(560.0, 480.0))
         .show(ctx, |ui| {
+            super::super::ui::draw_icon_window_header_without_close(
+                ui,
+                &window_title,
+                ButtonIcon::ColorPicker,
+            );
+            ui.separator();
             if editable {
-                draw_color_picker_editor(ui, color, custom_swatches, palette_last_dir);
+                draw_color_picker_editor(ui, color, custom_swatches);
             } else {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(80.0), Sense::hover());
@@ -306,125 +383,131 @@ pub(in crate::app) fn draw_color_popup(
                     draw_color_channel_table(ui, color);
                 });
             }
-            ui.add_space(10.0);
-            let sc_hex = format!(
-                "sc#{}, {}, {}, {}",
-                format_pc_float(color.alpha),
-                format_pc_float(color.red),
-                format_pc_float(color.green),
-                format_pc_float(color.blue)
-            );
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("PC Hex:").color(text_dark()));
-                let response = draw_copy_text(ui, &sc_hex, 225.0);
-                if response.clicked() {
-                    ui.output_mut(|output| output.copied_text = sc_hex.clone());
-                }
-            });
             if !editable {
+                ui.add_space(10.0);
+                let sc_hex = current_pc_hex(color);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("PC Hex:").color(text_dark()));
+                    let response = draw_copy_text(ui, &sc_hex, 225.0);
+                    if response.clicked() {
+                        ui.output_mut(|output| output.copied_text = sc_hex.clone());
+                    }
+                });
                 ui.small(RichText::new("Click PC Hex to copy").color(subtle_dark()));
+            } else {
+                draw_palette_feedback(ui, color, custom_swatches);
             }
             ui.add_space(10.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("OK").clicked() {
-                    if let Some(target) = color.function_draft_color {
-                        let argb = ((target.original_alpha as u32) << 24)
-                            | ((float_channel_to_u8(color.red) as u32) << 16)
-                            | ((float_channel_to_u8(color.green) as u32) << 8)
-                            | float_channel_to_u8(color.blue) as u32;
-                        result = Some(ColorPopupResult::FunctionDraftColor {
-                            target: target.target,
-                            argb,
-                        });
-                    } else if let Some(field) = color.write_color_field.clone() {
-                        // Plain color value: emit the channel string the field
-                        // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
-                        let input = if field.argb {
-                            format!(
-                                "{}, {}, {}, {}",
-                                color.alpha, color.red, color.green, color.blue
-                            )
-                        } else {
-                            format!("{}, {}, {}", color.red, color.green, color.blue)
-                        };
-                        result = Some(ColorPopupResult::FieldEdit {
-                            tag_key: color.tag_key.clone(),
-                            edit: PendingFieldEdit {
-                                path: field.path,
-                                input,
-                            },
-                        });
-                    } else if let Some(path) = color.write_path.clone() {
-                        let hex = constant_color_function_hex(
-                            color.red,
-                            color.green,
-                            color.blue,
-                            color.alpha,
-                        );
-                        result = Some(ColorPopupResult::FieldEdit {
-                            tag_key: color.tag_key.clone(),
-                            edit: PendingFieldEdit { path, input: hex },
-                        });
-                    } else if let Some(mut op) = color.create_shader_op.clone() {
-                        op.initial_function_hex = constant_color_function_hex(
-                            color.red,
-                            color.green,
-                            color.blue,
-                            color.alpha,
-                        );
-                        result = Some(ColorPopupResult::ShaderOp {
-                            tag_key: color.tag_key.clone(),
-                            op,
-                        });
-                    } else if let Some(mut op) = color.create_shader_param_op.clone() {
-                        if let Some(animated) = op.animated_parameters.first_mut() {
-                            animated.initial_function_hex = constant_color_function_hex(
+            ui.horizontal(|ui| {
+                if editable {
+                    draw_palette_file_buttons(ui, color, custom_swatches, palette_last_dir);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if editable && icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked()
+                    {
+                        close = true;
+                    }
+                    if icon_text_button(ui, ButtonIcon::Confirm, "OK", true).clicked() {
+                        if let Some(target) = color.function_draft_color {
+                            let argb = ((target.original_alpha as u32) << 24)
+                                | ((float_channel_to_u8(color.red) as u32) << 16)
+                                | ((float_channel_to_u8(color.green) as u32) << 8)
+                                | float_channel_to_u8(color.blue) as u32;
+                            result = Some(ColorPopupResult::FunctionDraftColor {
+                                target: target.target,
+                                argb,
+                            });
+                        } else if let Some(field) = color.write_color_field.clone() {
+                            // Plain color value: emit the channel string the field
+                            // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
+                            let input = if field.argb {
+                                format!(
+                                    "{}, {}, {}, {}",
+                                    color.alpha, color.red, color.green, color.blue
+                                )
+                            } else {
+                                format!("{}, {}, {}", color.red, color.green, color.blue)
+                            };
+                            result = Some(ColorPopupResult::FieldEdit {
+                                tag_key: color.tag_key.clone(),
+                                edit: PendingFieldEdit {
+                                    path: field.path,
+                                    input,
+                                },
+                            });
+                        } else if let Some(path) = color.write_path.clone() {
+                            let hex = constant_color_function_hex(
                                 color.red,
                                 color.green,
                                 color.blue,
                                 color.alpha,
                             );
-                        }
-                        result = Some(ColorPopupResult::ShaderParamOp {
-                            tag_key: color.tag_key.clone(),
-                            op,
-                        });
-                    } else if let Some(mut op) = color.create_h2_shader_param_op.clone() {
-                        match &mut op {
-                            H2ShaderParamOp::EditTemplateBackedValue { input, .. } => {
-                                *input = format!("{}, {}, {}", color.red, color.green, color.blue);
-                            }
-                            H2ShaderParamOp::EnsureAnimationProperty {
-                                initial_function_data,
-                                ..
-                            }
-                            | H2ShaderParamOp::EditFunctionData {
-                                data: initial_function_data,
-                                ..
-                            } => {
-                                *initial_function_data = h2_constant_color_function_data(
+                            result = Some(ColorPopupResult::FieldEdit {
+                                tag_key: color.tag_key.clone(),
+                                edit: PendingFieldEdit { path, input: hex },
+                            });
+                        } else if let Some(mut op) = color.create_shader_op.clone() {
+                            op.initial_function_hex = constant_color_function_hex(
+                                color.red,
+                                color.green,
+                                color.blue,
+                                color.alpha,
+                            );
+                            result = Some(ColorPopupResult::ShaderOp {
+                                tag_key: color.tag_key.clone(),
+                                op,
+                            });
+                        } else if let Some(mut op) = color.create_shader_param_op.clone() {
+                            if let Some(animated) = op.animated_parameters.first_mut() {
+                                animated.initial_function_hex = constant_color_function_hex(
                                     color.red,
                                     color.green,
                                     color.blue,
                                     color.alpha,
-                                    Some(initial_function_data.as_slice()),
                                 );
                             }
-                            H2ShaderParamOp::SwitchTemplate { .. } => {}
+                            result = Some(ColorPopupResult::ShaderParamOp {
+                                tag_key: color.tag_key.clone(),
+                                op,
+                            });
+                        } else if let Some(mut op) = color.create_h2_shader_param_op.clone() {
+                            match &mut op {
+                                H2ShaderParamOp::EditTemplateBackedValue { input, .. } => {
+                                    *input =
+                                        format!("{}, {}, {}", color.red, color.green, color.blue);
+                                }
+                                H2ShaderParamOp::EnsureAnimationProperty {
+                                    initial_function_data,
+                                    ..
+                                }
+                                | H2ShaderParamOp::EditFunctionData {
+                                    data: initial_function_data,
+                                    ..
+                                } => {
+                                    *initial_function_data = h2_constant_color_function_data(
+                                        color.red,
+                                        color.green,
+                                        color.blue,
+                                        color.alpha,
+                                        Some(initial_function_data.as_slice()),
+                                    );
+                                }
+                                H2ShaderParamOp::SwitchTemplate { .. } => {}
+                            }
+                            result = Some(ColorPopupResult::H2ShaderParamOp {
+                                tag_key: color.tag_key.clone(),
+                                op,
+                            });
                         }
-                        result = Some(ColorPopupResult::H2ShaderParamOp {
-                            tag_key: color.tag_key.clone(),
-                            op,
-                        });
+                        close = true;
                     }
-                    close = true;
-                }
-                if editable && ui.button("Cancel").clicked() {
-                    close = true;
-                }
+                });
             });
         });
-    if close || !open {
+    if editable && !close && color.show_save_palette_dialog {
+        draw_save_palette_format_dialog(ctx, color, custom_swatches, palette_last_dir);
+    }
+    if close {
         *color_popup = None;
     }
     result
@@ -433,160 +516,347 @@ pub(in crate::app) fn draw_color_popup(
 pub(in crate::app) fn draw_color_picker_editor(
     ui: &mut Ui,
     color: &mut MaterialColorPopup,
-    custom_swatches: &mut Vec<Option<[u8; 4]>>,
-    palette_last_dir: &mut Option<PathBuf>,
+    custom_swatches: &mut Vec<Option<ColorPaletteSwatch>>,
 ) {
-    ui.horizontal(|ui| {
-        draw_color_sv_square(ui, color);
-        ui.add_space(8.0);
-        draw_color_hue_strip(ui, color);
-        ui.add_space(10.0);
-        ui.vertical(|ui| {
-            draw_color_numeric_editor(ui, color);
-            ui.add_space(8.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(84.0, 56.0), Sense::hover());
-            ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
-            ui.painter()
-                .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
-            ui.painter()
-                .rect_filled(rect.shrink(5.0), 0.0, color.color32());
-        });
+    ui.add_space(10.0);
+    let alpha_width = if color.alpha_available {
+        COLOR_SLIDER_GAP + COLOR_SLIDER_WIDTH
+    } else {
+        0.0
+    };
+    let color_controls_width = 248.0 + COLOR_SLIDER_GAP + COLOR_SLIDER_WIDTH + alpha_width;
+    let top_row_width = color_controls_width + 18.0 + COLOR_NUMERIC_PANEL_WIDTH;
+    let left_padding = ((ui.available_width() - top_row_width) * 0.5).max(0.0);
+    ui.horizontal_top(|ui| {
+        ui.add_space(left_padding);
+        ui.allocate_ui_with_layout(
+            Vec2::new(color_controls_width, COLOR_TOP_ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                draw_color_sv_square(ui, color);
+                ui.add_space(COLOR_SLIDER_GAP);
+                draw_color_hue_strip(ui, color);
+                if color.alpha_available {
+                    ui.add_space(COLOR_SLIDER_GAP);
+                    draw_color_alpha_strip(ui, color);
+                }
+            },
+        );
+        ui.add_space(18.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(COLOR_NUMERIC_PANEL_WIDTH, COLOR_TOP_ROW_HEIGHT),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| draw_color_numeric_editor(ui, color),
+        );
     });
     ui.add_space(8.0);
-    draw_palette_grid(ui, color);
-    ui.add_space(8.0);
-    draw_custom_color_swatches(ui, color, custom_swatches);
-    draw_palette_file_controls(ui, color, custom_swatches, palette_last_dir);
-    ui.add_space(8.0);
-    draw_editable_pc_hex(ui, color);
+    ui.separator();
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        draw_custom_color_swatches(ui, color, custom_swatches);
+        ui.add_space(6.0);
+        let (divider, _) =
+            ui.allocate_exact_size(Vec2::new(1.0, color_palette_grid_size().y), Sense::hover());
+        ui.painter().vline(
+            divider.center().x,
+            divider.y_range(),
+            Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color),
+        );
+        ui.add_space(6.0);
+        draw_color_comparison(ui, color);
+    });
+    ui.add_space(6.0);
+    ui.separator();
 }
 
-pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColorPopup) {
-    let size = Vec2::new(248.0, 268.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-    let (h, s, b) = rgb_to_hsb_255(color.red, color.green, color.blue);
-    for y in 0..64 {
-        let y0 = rect.top() + rect.height() * y as f32 / 64.0;
-        let y1 = rect.top() + rect.height() * (y + 1) as f32 / 64.0;
-        let bri = 1.0 - (y as f32 + 0.5) / 64.0;
-        for x in 0..64 {
-            let x0 = rect.left() + rect.width() * x as f32 / 64.0;
-            let x1 = rect.left() + rect.width() * (x + 1) as f32 / 64.0;
-            let sat = (x as f32 + 0.5) / 64.0;
-            let (r, g, blue) = hsb_to_rgb(h as f32 / 255.0, sat, bri);
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
-                0.0,
+fn draw_color_comparison(ui: &mut Ui, color: &MaterialColorPopup) {
+    let (container, response) =
+        ui.allocate_exact_size(Vec2::new(84.0, color_palette_grid_size().y), Sense::hover());
+    let font = TextStyle::Small.resolve(ui.style());
+    let current_label =
+        ui.painter()
+            .layout_no_wrap("current".to_owned(), font.clone(), subtle_dark());
+    let new_label = ui
+        .painter()
+        .layout_no_wrap("new".to_owned(), font, subtle_dark());
+    const LABEL_GAP: f32 = 3.0;
+    let content_height = current_label.size().y + LABEL_GAP + 56.0 + LABEL_GAP + new_label.size().y;
+    let content_top = container.center().y - content_height * 0.5;
+    let current_pos = egui::pos2(
+        container.center().x - current_label.size().x * 0.5,
+        content_top,
+    );
+    ui.painter()
+        .galley(current_pos, current_label.clone(), subtle_dark());
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            container.left(),
+            current_pos.y + current_label.size().y + LABEL_GAP,
+        ),
+        Vec2::new(84.0, 56.0),
+    );
+    let current_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.center().y));
+    let new_rect = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.center().y), rect.max);
+    if color.alpha_available {
+        paint_alpha_checkerboard(ui.painter(), rect);
+    }
+    ui.painter()
+        .rect_filled(current_rect, 0.0, color.original_color32());
+    ui.painter().rect_filled(new_rect, 0.0, color.color32());
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left(), rect.center().y),
+            egui::pos2(rect.right(), rect.center().y),
+        ],
+        Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+    );
+    ui.painter()
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+    ui.painter().galley(
+        egui::pos2(
+            container.center().x - new_label.size().x * 0.5,
+            rect.bottom() + LABEL_GAP,
+        ),
+        new_label,
+        subtle_dark(),
+    );
+    response.on_hover_cursor(egui::CursorIcon::Default);
+}
+
+fn paint_sv_gradient(painter: &egui::Painter, rect: egui::Rect, hue: f32) {
+    const STEPS: usize = 64;
+    let mut mesh = egui::Mesh::default();
+    mesh.reserve_vertices((STEPS + 1) * (STEPS + 1));
+    mesh.reserve_triangles(STEPS * STEPS * 2);
+    for y in 0..=STEPS {
+        let brightness = 1.0 - y as f32 / STEPS as f32;
+        for x in 0..=STEPS {
+            let saturation = x as f32 / STEPS as f32;
+            let (red, green, blue) = hsb_to_rgb(hue, saturation, brightness);
+            mesh.colored_vertex(
+                egui::pos2(
+                    egui::lerp(rect.left()..=rect.right(), saturation),
+                    egui::lerp(rect.top()..=rect.bottom(), y as f32 / STEPS as f32),
+                ),
                 Color32::from_rgb(
-                    float_channel_to_u8(r),
-                    float_channel_to_u8(g),
+                    float_channel_to_u8(red),
+                    float_channel_to_u8(green),
                     float_channel_to_u8(blue),
                 ),
             );
         }
     }
+    let stride = (STEPS + 1) as u32;
+    for y in 0..STEPS as u32 {
+        for x in 0..STEPS as u32 {
+            let top_left = y * stride + x;
+            let top_right = top_left + 1;
+            let bottom_left = top_left + stride;
+            let bottom_right = bottom_left + 1;
+            mesh.add_triangle(top_left, top_right, bottom_right);
+            mesh.add_triangle(top_left, bottom_right, bottom_left);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn paint_hue_gradient(painter: &egui::Painter, rect: egui::Rect) {
+    const STEPS: usize = 128;
+    let mut mesh = egui::Mesh::default();
+    mesh.reserve_vertices((STEPS + 1) * 2);
+    mesh.reserve_triangles(STEPS * 2);
+    for step in 0..=STEPS {
+        let position = step as f32 / STEPS as f32;
+        let (red, green, blue) = hsb_to_rgb(1.0 - position, 1.0, 1.0);
+        let color = Color32::from_rgb(
+            float_channel_to_u8(red),
+            float_channel_to_u8(green),
+            float_channel_to_u8(blue),
+        );
+        let y = egui::lerp(rect.top()..=rect.bottom(), position);
+        mesh.colored_vertex(egui::pos2(rect.left(), y), color);
+        mesh.colored_vertex(egui::pos2(rect.right(), y), color);
+    }
+    for step in 0..STEPS as u32 {
+        let top_left = step * 2;
+        let top_right = top_left + 1;
+        let bottom_left = top_left + 2;
+        let bottom_right = top_left + 3;
+        mesh.add_triangle(top_left, top_right, bottom_right);
+        mesh.add_triangle(top_left, bottom_right, bottom_left);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn paint_alpha_gradient(painter: &egui::Painter, rect: egui::Rect) {
+    const STEPS: usize = 64;
+    let mut mesh = egui::Mesh::default();
+    mesh.reserve_vertices((STEPS + 1) * 2);
+    mesh.reserve_triangles(STEPS * 2);
+    for step in 0..=STEPS {
+        let position = step as f32 / STEPS as f32;
+        let opacity = float_channel_to_u8(1.0 - position);
+        let color = Color32::from_white_alpha(opacity);
+        let y = egui::lerp(rect.top()..=rect.bottom(), position);
+        mesh.colored_vertex(egui::pos2(rect.left(), y), color);
+        mesh.colored_vertex(egui::pos2(rect.right(), y), color);
+    }
+    for step in 0..STEPS as u32 {
+        let top_left = step * 2;
+        let top_right = top_left + 1;
+        let bottom_left = top_left + 2;
+        let bottom_right = top_left + 3;
+        mesh.add_triangle(top_left, top_right, bottom_right);
+        mesh.add_triangle(top_left, bottom_right, bottom_left);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn paint_color_slider_marker(painter: &egui::Painter, strip: egui::Rect, y: f32, fill: Color32) {
+    let outer = egui::Rect::from_center_size(
+        egui::pos2(strip.center().x, y),
+        Vec2::new(strip.width() + 8.0, 6.0),
+    );
+    painter.rect_filled(outer, 0.0, Color32::BLACK);
+    painter.rect_filled(outer.shrink(1.0), 0.0, Color32::WHITE);
+    painter.rect_filled(outer.shrink(2.0), 0.0, fill);
+}
+
+pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColorPopup) {
+    let size = Vec2::new(248.0, 268.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    paint_sv_gradient(ui.painter(), rect, color.hue as f32 / 255.0);
     ui.painter()
         .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     let cursor = egui::pos2(
-        egui::lerp(rect.left()..=rect.right(), s as f32 / 255.0),
-        egui::lerp(rect.bottom()..=rect.top(), b as f32 / 255.0),
+        egui::lerp(rect.left()..=rect.right(), color.saturation as f32 / 255.0),
+        egui::lerp(rect.bottom()..=rect.top(), color.brightness as f32 / 255.0),
     );
+    let selected = Color32::from_rgb(
+        float_channel_to_u8(color.red),
+        float_channel_to_u8(color.green),
+        float_channel_to_u8(color.blue),
+    );
+    ui.painter().circle_filled(cursor, 4.0, selected);
     ui.painter()
-        .circle_stroke(cursor, 5.0, Stroke::new(1.0_f32, Color32::BLACK));
+        .circle_stroke(cursor, 6.0, Stroke::new(1.0_f32, Color32::BLACK));
     ui.painter()
-        .circle_stroke(cursor, 4.0, Stroke::new(1.0_f32, Color32::WHITE));
+        .circle_stroke(cursor, 5.0, Stroke::new(1.0_f32, Color32::WHITE));
     if response.dragged() || response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let sat = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
             let bri = (1.0 - (pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
-            let (r, g, b) = hsb_to_rgb(h as f32 / 255.0, sat, bri);
-            color.red = r;
-            color.green = g;
-            color.blue = b;
+            color.saturation = float_channel_to_u8(sat);
+            color.brightness = float_channel_to_u8(bri);
+            color.update_rgb_from_hsb();
         }
     }
 }
 
 pub(in crate::app) fn draw_color_hue_strip(ui: &mut Ui, color: &mut MaterialColorPopup) {
-    let (h, s, b) = rgb_to_hsb_255(color.red, color.green, color.blue);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(22.0, 268.0), Sense::click_and_drag());
-    for i in 0..128 {
-        let t0 = i as f32 / 128.0;
-        let t1 = (i + 1) as f32 / 128.0;
-        let hue = 1.0 - (i as f32 + 0.5) / 128.0;
-        let (r, g, blue) = hsb_to_rgb(hue, 1.0, 1.0);
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(rect.left(), egui::lerp(rect.top()..=rect.bottom(), t0)),
-                egui::pos2(rect.right(), egui::lerp(rect.top()..=rect.bottom(), t1)),
-            ),
-            0.0,
-            Color32::from_rgb(
-                float_channel_to_u8(r),
-                float_channel_to_u8(g),
-                float_channel_to_u8(blue),
-            ),
-        );
-    }
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(COLOR_SLIDER_WIDTH, 268.0),
+        Sense::click_and_drag(),
+    );
+    paint_hue_gradient(ui.painter(), rect);
     ui.painter()
         .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
-    let marker_y = egui::lerp(rect.bottom()..=rect.top(), h as f32 / 255.0);
-    ui.painter().line_segment(
-        [
-            egui::pos2(rect.left() - 4.0, marker_y),
-            egui::pos2(rect.right() + 4.0, marker_y),
-        ],
-        Stroke::new(1.0_f32, Color32::BLACK),
+    let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.hue as f32 / 255.0);
+    let (red, green, blue) = hsb_to_rgb(color.hue as f32 / 255.0, 1.0, 1.0);
+    paint_color_slider_marker(
+        ui.painter(),
+        rect,
+        marker_y,
+        Color32::from_rgb(
+            float_channel_to_u8(red),
+            float_channel_to_u8(green),
+            float_channel_to_u8(blue),
+        ),
     );
     if response.dragged() || response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let hue = (1.0 - (pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
-            let (r, g, blue) = hsb_to_rgb(hue, s as f32 / 255.0, b as f32 / 255.0);
-            color.red = r;
-            color.green = g;
-            color.blue = blue;
+            color.hue = float_channel_to_u8(hue);
+            color.update_rgb_from_hsb();
+        }
+    }
+}
+
+pub(in crate::app) fn draw_color_alpha_strip(ui: &mut Ui, color: &mut MaterialColorPopup) {
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(COLOR_SLIDER_WIDTH, 268.0),
+        Sense::click_and_drag(),
+    );
+    paint_alpha_checkerboard(ui.painter(), rect);
+    paint_alpha_gradient(ui.painter(), rect);
+    ui.painter()
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+    let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.alpha);
+    let alpha = float_channel_to_u8(color.alpha);
+    paint_color_slider_marker(ui.painter(), rect, marker_y, Color32::from_gray(alpha));
+    if response.dragged() || response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            color.alpha = (1.0 - (pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
         }
     }
 }
 
 pub(in crate::app) fn draw_color_numeric_editor(ui: &mut Ui, color: &mut MaterialColorPopup) {
-    let (mut h, mut s, mut b) = rgb_to_hsb_255(color.red, color.green, color.blue);
-    egui::Grid::new("material_color_picker_values")
-        .spacing(Vec2::new(6.0, 4.0))
-        .show(ui, |ui| {
-            ui.label("");
-            ui.label(RichText::new("Xenon").color(text_dark()).small());
-            ui.label(RichText::new("PC").color(text_dark()).small());
-            ui.end_row();
-            let h_pc = h as f32 / 255.0;
-            let s_pc = s as f32 / 255.0;
-            let b_pc = b as f32 / 255.0;
-            let h_changed = draw_color_byte_row(ui, "H:", &mut h, h_pc);
-            let s_changed = draw_color_byte_row(ui, "S:", &mut s, s_pc);
-            let b_changed = draw_color_byte_row(ui, "B:", &mut b, b_pc);
-            if h_changed || s_changed || b_changed {
-                let (r, g, blue) = hsb_to_rgb(h as f32 / 255.0, s as f32 / 255.0, b as f32 / 255.0);
-                color.red = r;
-                color.green = g;
-                color.blue = blue;
-            }
-            let mut r = float_channel_to_u8(color.red);
-            let mut g = float_channel_to_u8(color.green);
-            let mut blue = float_channel_to_u8(color.blue);
-            let mut a = float_channel_to_u8(color.alpha);
-            if draw_color_byte_row(ui, "R:", &mut r, color.red) {
-                color.red = byte_to_float(r);
-            }
-            if draw_color_byte_row(ui, "G:", &mut g, color.green) {
-                color.green = byte_to_float(g);
-            }
-            if draw_color_byte_row(ui, "B:", &mut blue, color.blue) {
-                color.blue = byte_to_float(blue);
-            }
-            if draw_color_byte_row(ui, "A:", &mut a, color.alpha) {
-                color.alpha = byte_to_float(a);
-            }
+    let (mut h, mut s, mut b) = (color.hue, color.saturation, color.brightness);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                Vec2::new(COLOR_ROW_LABEL_WIDTH, COLOR_ROW_HEIGHT),
+                egui::Label::new(""),
+            );
+            ui.add_sized(
+                Vec2::new(48.0, 20.0),
+                egui::Label::new(RichText::new("Xenon").color(text_dark()).small())
+                    .halign(egui::Align::Center),
+            )
+            .on_hover_cursor(egui::CursorIcon::Default);
+            ui.add_sized(
+                Vec2::new(54.0, 20.0),
+                egui::Label::new(RichText::new("PC").color(text_dark()).small())
+                    .halign(egui::Align::Center),
+            )
+            .on_hover_cursor(egui::CursorIcon::Default);
         });
+        let h_pc = h as f32 / 255.0;
+        let s_pc = s as f32 / 255.0;
+        let b_pc = b as f32 / 255.0;
+        let h_changed = draw_color_byte_row(ui, "H:", &mut h, h_pc);
+        let s_changed = draw_color_byte_row(ui, "S:", &mut s, s_pc);
+        let b_changed = draw_color_byte_row(ui, "B:", &mut b, b_pc);
+        if h_changed || s_changed || b_changed {
+            color.hue = h;
+            color.saturation = s;
+            color.brightness = b;
+            color.update_rgb_from_hsb();
+        }
+
+        ui.separator();
+        let mut r = float_channel_to_u8(color.red);
+        let mut g = float_channel_to_u8(color.green);
+        let mut blue = float_channel_to_u8(color.blue);
+        let mut a = float_channel_to_u8(color.alpha);
+        if draw_color_byte_row(ui, "R:", &mut r, color.red) {
+            color.set_rgb_components(byte_to_float(r), color.green, color.blue);
+        }
+        if draw_color_byte_row(ui, "G:", &mut g, color.green) {
+            color.set_rgb_components(color.red, byte_to_float(g), color.blue);
+        }
+        if draw_color_byte_row(ui, "B:", &mut blue, color.blue) {
+            color.set_rgb_components(color.red, color.green, byte_to_float(blue));
+        }
+        if color.alpha_available && draw_color_byte_row(ui, "A:", &mut a, color.alpha) {
+            color.alpha = byte_to_float(a);
+        }
+
+        ui.separator();
+        draw_color_hex_rows(ui, color);
+    });
 }
 
 pub(in crate::app) fn draw_color_byte_row(
@@ -595,200 +865,260 @@ pub(in crate::app) fn draw_color_byte_row(
     value: &mut u8,
     pc: f32,
 ) -> bool {
-    ui.label(RichText::new(label).color(text_dark()).strong());
-    let mut v = *value as i32;
-    let changed = ui
-        .add_sized(
-            Vec2::new(48.0, 20.0),
-            egui::DragValue::new(&mut v).range(0..=255).speed(1.0),
-        )
-        .changed();
-    if changed {
-        *value = v.clamp(0, 255) as u8;
-    }
-    let mut pc_value = pc;
-    let pc_changed = ui
-        .add_sized(
-            Vec2::new(54.0, 20.0),
-            egui::DragValue::new(&mut pc_value)
-                .range(0.0..=1.0)
-                .speed(0.01),
-        )
-        .changed();
-    if pc_changed {
-        *value = float_channel_to_u8(pc_value);
-    }
-    ui.end_row();
-    changed || pc_changed
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        draw_color_row_label(ui, label);
+        let mut v = *value as i32;
+        let changed = ui
+            .add_sized(
+                Vec2::new(48.0, 20.0),
+                egui::DragValue::new(&mut v).range(0..=255).speed(1.0),
+            )
+            .changed();
+        if changed {
+            *value = v.clamp(0, 255) as u8;
+        }
+        let mut pc_value = pc;
+        let pc_changed = ui
+            .add_sized(
+                Vec2::new(54.0, 20.0),
+                egui::DragValue::new(&mut pc_value)
+                    .range(0.0..=1.0)
+                    .speed(0.01),
+            )
+            .changed();
+        if pc_changed {
+            *value = float_channel_to_u8(pc_value);
+        }
+        changed || pc_changed
+    })
+    .inner
 }
 
-pub(in crate::app) fn draw_palette_grid(ui: &mut Ui, color: &mut MaterialColorPopup) {
-    const PALETTE: &[(u8, u8, u8)] = &[
-        (255, 0, 0),
-        (0, 255, 0),
-        (0, 0, 255),
-        (255, 255, 0),
-        (0, 255, 255),
-        (255, 0, 255),
-        (255, 255, 255),
-        (224, 224, 224),
-        (192, 192, 192),
-        (160, 160, 160),
-        (128, 128, 128),
-        (96, 96, 96),
-        (64, 64, 64),
-        (32, 32, 32),
-        (0, 0, 0),
-        (128, 0, 0),
-        (0, 128, 0),
-        (0, 0, 128),
-        (128, 128, 0),
-        (0, 128, 128),
-        (128, 0, 128),
-        (255, 128, 128),
-        (128, 255, 128),
-        (128, 128, 255),
-        (255, 192, 128),
-        (255, 128, 0),
-        (128, 64, 0),
-        (64, 32, 0),
-        (255, 220, 180),
-        (180, 120, 80),
-        (90, 50, 35),
-        (60, 32, 24),
-        (255, 180, 220),
-        (220, 90, 160),
-        (140, 50, 120),
-        (70, 30, 80),
-        (180, 220, 255),
-        (90, 160, 220),
-        (40, 100, 180),
-        (20, 60, 110),
-        (210, 255, 180),
-        (140, 220, 80),
-        (80, 160, 40),
-        (40, 90, 24),
-        (240, 240, 220),
-        (210, 200, 150),
-        (160, 145, 90),
-        (95, 85, 55),
-    ];
-    egui::Grid::new("material_color_palette")
-        .spacing(Vec2::new(5.0, 5.0))
-        .show(ui, |ui| {
-            for (i, &(r, g, b)) in PALETTE.iter().enumerate() {
-                let (rect, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-                ui.painter()
-                    .rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
-                ui.painter()
-                    .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
-                if response.clicked() {
-                    color.set_rgb_bytes(r, g, b);
-                }
-                if (i + 1) % 16 == 0 {
-                    ui.end_row();
-                }
-            }
-        });
+fn draw_color_row_label(ui: &mut Ui, label: &str) {
+    ui.add_sized(
+        Vec2::new(COLOR_ROW_LABEL_WIDTH, COLOR_ROW_HEIGHT),
+        egui::Label::new(RichText::new(label).color(text_dark()).strong()).halign(egui::Align::Max),
+    )
+    .on_hover_cursor(egui::CursorIcon::Default);
+}
+
+const COLOR_ROW_LABEL_WIDTH: f32 = 48.0;
+const COLOR_ROW_HEIGHT: f32 = BUTTON_HEIGHT;
+const COLOR_COMBINED_FIELD_WIDTH: f32 = 108.0;
+const COLOR_NUMERIC_PANEL_WIDTH: f32 = COLOR_ROW_LABEL_WIDTH + 6.0 + 48.0 + 6.0 + 54.0;
+const COLOR_TOP_ROW_HEIGHT: f32 = 300.0;
+const COLOR_SLIDER_WIDTH: f32 = 22.0;
+const COLOR_SLIDER_GAP: f32 = 12.0;
+const COLOR_PALETTE_COLUMNS: usize = 16;
+const COLOR_SWATCH_SIZE: f32 = 24.0;
+const COLOR_SWATCH_GAP: f32 = 4.0;
+
+fn color_palette_grid_size() -> Vec2 {
+    let rows = CUSTOM_COLOR_SWATCH_COUNT.div_ceil(COLOR_PALETTE_COLUMNS);
+    Vec2::new(
+        COLOR_PALETTE_COLUMNS as f32 * COLOR_SWATCH_SIZE
+            + (COLOR_PALETTE_COLUMNS - 1) as f32 * COLOR_SWATCH_GAP,
+        rows as f32 * COLOR_SWATCH_SIZE + (rows - 1) as f32 * COLOR_SWATCH_GAP,
+    )
 }
 
 pub(in crate::app) fn draw_custom_color_swatches(
     ui: &mut Ui,
     color: &mut MaterialColorPopup,
-    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    custom_swatches: &mut Vec<Option<ColorPaletteSwatch>>,
 ) {
     if custom_swatches.len() < CUSTOM_COLOR_SWATCH_COUNT {
         custom_swatches.resize(CUSTOM_COLOR_SWATCH_COUNT, None);
     }
-    ui.label(
-        RichText::new("Custom swatches")
-            .color(subtle_dark())
-            .small(),
-    );
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(5.0, 5.0);
-        for index in 0..CUSTOM_COLOR_SWATCH_COUNT {
-            let (rect, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-            match custom_swatches[index] {
-                Some([r, g, b, a]) => {
-                    ui.painter().rect_filled(
-                        rect,
-                        0.0,
-                        Color32::from_rgba_unmultiplied(r, g, b, a),
-                    );
-                    if response.clicked() {
-                        color.set_rgba_bytes(r, g, b, a);
-                    }
+    let size = color_palette_grid_size();
+    let (palette_rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    for index in 0..CUSTOM_COLOR_SWATCH_COUNT {
+        let column = index % COLOR_PALETTE_COLUMNS;
+        let row = index / COLOR_PALETTE_COLUMNS;
+        let min = palette_rect.min
+            + Vec2::new(
+                column as f32 * (COLOR_SWATCH_SIZE + COLOR_SWATCH_GAP),
+                row as f32 * (COLOR_SWATCH_SIZE + COLOR_SWATCH_GAP),
+            );
+        let rect = egui::Rect::from_min_size(min, Vec2::splat(COLOR_SWATCH_SIZE));
+        let response = ui.interact(
+            rect,
+            ui.id().with(("material_color_palette_swatch", index)),
+            Sense::click(),
+        );
+        match custom_swatches[index].as_ref() {
+            Some(swatch) => {
+                let [r, g, b, a] = swatch.rgba;
+                ui.painter()
+                    .rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+                if response.clicked() {
+                    color.set_rgba_bytes(r, g, b, a);
                 }
-                None => {
-                    draw_empty_custom_swatch(ui, rect);
-                }
             }
-            ui.painter()
-                .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
-            if response.secondary_clicked() {
-                custom_swatches[index] = Some([
-                    float_channel_to_u8(color.red),
-                    float_channel_to_u8(color.green),
-                    float_channel_to_u8(color.blue),
-                    float_channel_to_u8(color.alpha),
-                ]);
-            }
-            response
-                .on_hover_text("Left-click to apply. Right-click to save the current colour here.");
-            if (index + 1) % 16 == 0 {
-                ui.end_row();
-            }
+            None => draw_empty_custom_swatch(ui, rect),
         }
-    });
-    if ui
-        .small_button("Save current colour to first empty slot")
-        .clicked()
-    {
-        let slot = custom_swatches
-            .iter()
-            .position(Option::is_none)
-            .unwrap_or(0);
-        custom_swatches[slot] = Some([
-            float_channel_to_u8(color.red),
-            float_channel_to_u8(color.green),
-            float_channel_to_u8(color.blue),
-            float_channel_to_u8(color.alpha),
-        ]);
+        ui.painter()
+            .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        if response.secondary_clicked() {
+            custom_swatches[index] = Some(ColorPaletteSwatch::unnamed([
+                float_channel_to_u8(color.red),
+                float_channel_to_u8(color.green),
+                float_channel_to_u8(color.blue),
+                float_channel_to_u8(color.alpha),
+            ]));
+        }
+        let instructions = "Left-click to apply. Right-click to save the current colour here.";
+        if let Some(name) = custom_swatches[index]
+            .as_ref()
+            .and_then(|swatch| swatch.name.as_deref())
+        {
+            response.on_hover_text(format!("{name}\n{instructions}"));
+        } else {
+            response.on_hover_text(instructions);
+        }
     }
 }
 
-pub(in crate::app) fn draw_palette_file_controls(
+pub(in crate::app) fn draw_palette_file_buttons(
     ui: &mut Ui,
     color: &mut MaterialColorPopup,
-    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    custom_swatches: &mut Vec<Option<ColorPaletteSwatch>>,
     palette_last_dir: &mut Option<PathBuf>,
 ) {
-    ui.horizontal(|ui| {
-        if ui.small_button("Save Palette...").clicked() {
-            match save_custom_palette(custom_swatches, palette_last_dir) {
-                Ok(Some(path)) => {
-                    color.palette_status = Some(format!("Saved palette: {}", path.display()))
-                }
-                Ok(None) => {}
-                Err(error) => color.palette_status = Some(error),
+    if ui
+        .add(egui::Button::new("Load Palette...").min_size(Vec2::new(0.0, BUTTON_HEIGHT)))
+        .clicked()
+    {
+        match load_custom_palette(palette_last_dir) {
+            Ok(Some(swatches)) => {
+                *custom_swatches = swatches;
+                color.palette_status = Some("Loaded palette".to_owned());
+                color.confirm_clear_palette = false;
             }
+            Ok(None) => {}
+            Err(error) => color.palette_status = Some(error),
         }
-        if ui.small_button("Load Palette...").clicked() {
-            match load_custom_palette(palette_last_dir) {
-                Ok(Some(swatches)) => {
-                    *custom_swatches = swatches;
-                    color.palette_status = Some("Loaded palette".to_owned());
-                    color.confirm_clear_palette = false;
+    }
+    if icon_text_button(ui, ButtonIcon::Save, "Save Palette...", true).clicked() {
+        color.show_save_palette_dialog = true;
+    }
+    if ui
+        .add(egui::Button::new("Clear Palette").min_size(Vec2::new(0.0, BUTTON_HEIGHT)))
+        .clicked()
+    {
+        color.confirm_clear_palette = true;
+    }
+}
+
+fn draw_save_palette_format_dialog(
+    ctx: &egui::Context,
+    color: &mut MaterialColorPopup,
+    custom_swatches: &[Option<ColorPaletteSwatch>],
+    palette_last_dir: &mut Option<PathBuf>,
+) {
+    let mut open = true;
+    egui::Window::new("Save Palette Format")
+        .id(egui::Id::new("save_palette_format_dialog"))
+        .title_bar(false)
+        .collapsible(false)
+        .movable(true)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .fixed_size(Vec2::new(420.0, 225.0))
+        .show(ctx, |ui| {
+            super::super::ui::draw_icon_window_header(
+                ui,
+                "Save Palette",
+                ButtonIcon::Save,
+                &mut open,
+            );
+            ui.separator();
+            ui.add_space(6.0);
+            ui.label(RichText::new("Choose a palette format:").color(text_dark()));
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new("Baboon Palette...")
+                            .min_size(Vec2::new(132.0, BUTTON_HEIGHT)),
+                    )
+                    .clicked()
+                {
+                    match save_custom_palette(custom_swatches, palette_last_dir) {
+                        Ok(Some(path)) => {
+                            color.palette_status =
+                                Some(format!("Saved palette: {}", path.display()));
+                            open = false;
+                        }
+                        Ok(None) => {}
+                        Err(error) => color.palette_status = Some(error),
+                    }
                 }
-                Ok(None) => {}
-                Err(error) => color.palette_status = Some(error),
-            }
-        }
-        if ui.small_button("Clear Palette").clicked() {
-            color.confirm_clear_palette = true;
-        }
-    });
+                ui.add_sized(
+                    Vec2::new(245.0, 36.0),
+                    egui::Label::new(
+                        RichText::new(
+                            "Native format; preserves RGBA transparency, names, and all 64 slots.",
+                        )
+                        .color(subtle_dark())
+                        .small(),
+                    )
+                    .wrap(),
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new("Halo 3 .txt...")
+                            .min_size(Vec2::new(132.0, BUTTON_HEIGHT)),
+                    )
+                    .clicked()
+                {
+                    match save_halo3_palette(custom_swatches, palette_last_dir) {
+                        Ok(Some(path)) => {
+                            color.palette_status = Some(format!(
+                                "Saved Halo 3 RGB palette: {}",
+                                path.display()
+                            ));
+                            open = false;
+                        }
+                        Ok(None) => {}
+                        Err(error) => color.palette_status = Some(error),
+                    }
+                }
+                ui.add_sized(
+                    Vec2::new(245.0, 36.0),
+                    egui::Label::new(
+                        RichText::new(
+                            "Halo 3-compatible RGB format; preserves names but does not store alpha.",
+                        )
+                        .color(subtle_dark())
+                        .small(),
+                    )
+                    .wrap(),
+                );
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_text_button(ui, ButtonIcon::Clear, "Cancel", true).clicked() {
+                    open = false;
+                }
+            });
+        });
+    if !open {
+        color.show_save_palette_dialog = false;
+    }
+}
+
+fn draw_palette_feedback(
+    ui: &mut Ui,
+    color: &mut MaterialColorPopup,
+    custom_swatches: &mut Vec<Option<ColorPaletteSwatch>>,
+) {
     if color.confirm_clear_palette {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Clear all custom swatches?").color(text_dark()));
@@ -808,7 +1138,7 @@ pub(in crate::app) fn draw_palette_file_controls(
 }
 
 pub(in crate::app) fn save_custom_palette(
-    custom_swatches: &[Option<[u8; 4]>],
+    custom_swatches: &[Option<ColorPaletteSwatch>],
     palette_last_dir: &mut Option<PathBuf>,
 ) -> Result<Option<PathBuf>, String> {
     let start_dir = palette_last_dir
@@ -840,16 +1170,46 @@ pub(in crate::app) fn save_custom_palette(
     Ok(Some(path))
 }
 
+pub(in crate::app) fn save_halo3_palette(
+    custom_swatches: &[Option<ColorPaletteSwatch>],
+    palette_last_dir: &mut Option<PathBuf>,
+) -> Result<Option<PathBuf>, String> {
+    let start_dir = palette_last_dir
+        .clone()
+        .or_else(documents_dir)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some(mut path) = rfd::FileDialog::new()
+        .set_title("Save Halo 3 Color Preferences")
+        .add_filter("Halo 3 Color Preferences", &["txt"])
+        .set_directory(start_dir)
+        .set_file_name("color_preferences.txt")
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    if path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+        path.set_extension("txt");
+    }
+    std::fs::write(&path, encode_halo3_color_preferences(custom_swatches))
+        .map_err(|error| format!("Could not save Halo 3 palette: {error}"))?;
+    if let Some(parent) = path.parent() {
+        *palette_last_dir = Some(parent.to_path_buf());
+    }
+    Ok(Some(path))
+}
+
 pub(in crate::app) fn load_custom_palette(
     palette_last_dir: &mut Option<PathBuf>,
-) -> Result<Option<Vec<Option<[u8; 4]>>>, String> {
+) -> Result<Option<Vec<Option<ColorPaletteSwatch>>>, String> {
     let start_dir = palette_last_dir
         .clone()
         .or_else(documents_dir)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Load Baboon Palette")
+        .set_title("Load Color Palette")
+        .add_filter("Color Palettes", &["baboon_palette", "txt"])
         .add_filter("Baboon Palette", &["baboon_palette"])
+        .add_filter("Halo 3 Color Preferences", &["txt"])
         .set_directory(start_dir)
         .pick_file()
     else {
@@ -857,14 +1217,17 @@ pub(in crate::app) fn load_custom_palette(
     };
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("Could not load palette: {error}"))?;
-    let swatches = decode_baboon_palette(&text)?;
+    let swatches = decode_color_palette(&text)?;
     if let Some(parent) = path.parent() {
         *palette_last_dir = Some(parent.to_path_buf());
     }
     Ok(Some(swatches))
 }
 
-pub(in crate::app) fn encode_baboon_palette(name: &str, swatches: &[Option<[u8; 4]>]) -> String {
+pub(in crate::app) fn encode_baboon_palette(
+    name: &str,
+    swatches: &[Option<ColorPaletteSwatch>],
+) -> String {
     let mut out = String::new();
     out.push_str("# Baboon Colour Palette\n");
     out.push_str("# Name: ");
@@ -875,15 +1238,60 @@ pub(in crate::app) fn encode_baboon_palette(name: &str, swatches: &[Option<[u8; 
     });
     out.push('\n');
     for index in 0..CUSTOM_COLOR_SWATCH_COUNT {
-        match swatches.get(index).copied().flatten() {
-            Some([r, g, b, a]) => out.push_str(&format!("#{r:02X}{g:02X}{b:02X}{a:02X}\n")),
+        match swatches.get(index).and_then(Option::as_ref) {
+            Some(swatch) => {
+                let [r, g, b, a] = swatch.rgba;
+                out.push_str(&format!("#{r:02X}{g:02X}{b:02X}{a:02X}"));
+                if let Some(name) = swatch.name.as_deref() {
+                    out.push('\t');
+                    out.push_str(&name.replace(['\r', '\n', '\t'], " "));
+                }
+                out.push('\n');
+            }
             None => out.push_str("#empty\n"),
         }
     }
     out
 }
 
-pub(in crate::app) fn decode_baboon_palette(text: &str) -> Result<Vec<Option<[u8; 4]>>, String> {
+pub(in crate::app) fn encode_halo3_color_preferences(
+    swatches: &[Option<ColorPaletteSwatch>],
+) -> String {
+    let mut out = String::new();
+    for (slot, swatch) in swatches.iter().take(CUSTOM_COLOR_SWATCH_COUNT).enumerate() {
+        let Some(swatch) = swatch else {
+            continue;
+        };
+        let [red, green, blue, _alpha] = swatch.rgba;
+        let name = swatch
+            .name
+            .as_deref()
+            .unwrap_or("")
+            .replace(['\r', '\n'], " ");
+        out.push_str(&format!("{slot},{red},{green},{blue},{name}\r\n"));
+    }
+    out
+}
+
+pub(in crate::app) fn default_color_swatches() -> Vec<Option<ColorPaletteSwatch>> {
+    decode_baboon_palette(include_str!("../../../assets/default.baboon_palette"))
+        .expect("the bundled Baboon palette must be valid")
+}
+
+pub(in crate::app) fn decode_color_palette(
+    text: &str,
+) -> Result<Vec<Option<ColorPaletteSwatch>>, String> {
+    let first = text.lines().map(str::trim).find(|line| !line.is_empty());
+    if first.is_some_and(|line| line.starts_with('#')) {
+        decode_baboon_palette(text)
+    } else {
+        decode_halo3_color_preferences(text)
+    }
+}
+
+pub(in crate::app) fn decode_baboon_palette(
+    text: &str,
+) -> Result<Vec<Option<ColorPaletteSwatch>>, String> {
     let mut swatches = Vec::with_capacity(CUSTOM_COLOR_SWATCH_COUNT);
     for line in text.lines() {
         let trimmed = line.trim();
@@ -895,8 +1303,8 @@ pub(in crate::app) fn decode_baboon_palette(text: &str) -> Result<Vec<Option<[u8
         }
         if trimmed.eq_ignore_ascii_case("#empty") {
             swatches.push(None);
-        } else if let Some(color) = parse_palette_rgba(trimmed) {
-            swatches.push(Some(color));
+        } else if let Some((color, name)) = parse_baboon_palette_entry(trimmed) {
+            swatches.push(Some(ColorPaletteSwatch::named(color, name)));
         } else if trimmed.starts_with('#') {
             continue;
         } else {
@@ -908,6 +1316,66 @@ pub(in crate::app) fn decode_baboon_palette(text: &str) -> Result<Vec<Option<[u8
     }
     swatches.resize(CUSTOM_COLOR_SWATCH_COUNT, None);
     Ok(swatches)
+}
+
+fn parse_baboon_palette_entry(text: &str) -> Option<([u8; 4], &str)> {
+    let (color, name) = text.split_once('\t').unwrap_or((text, ""));
+    Some((parse_palette_rgba(color)?, name))
+}
+
+pub(in crate::app) fn decode_halo3_color_preferences(
+    text: &str,
+) -> Result<Vec<Option<ColorPaletteSwatch>>, String> {
+    let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+    let mut found = false;
+    for (line_number, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut fields = trimmed.splitn(5, ',');
+        let invalid = || {
+            format!(
+                "Invalid Halo 3 palette entry on line {}: {trimmed}",
+                line_number + 1
+            )
+        };
+        let slot = fields
+            .next()
+            .and_then(|value| {
+                value
+                    .trim()
+                    .trim_start_matches('\u{feff}')
+                    .parse::<usize>()
+                    .ok()
+            })
+            .ok_or_else(invalid)?;
+        let red = fields
+            .next()
+            .and_then(|value| value.trim().parse::<u8>().ok())
+            .ok_or_else(invalid)?;
+        let green = fields
+            .next()
+            .and_then(|value| value.trim().parse::<u8>().ok())
+            .ok_or_else(invalid)?;
+        let blue = fields
+            .next()
+            .and_then(|value| value.trim().parse::<u8>().ok())
+            .ok_or_else(invalid)?;
+        let name = fields.next().ok_or_else(invalid)?;
+        if slot >= CUSTOM_COLOR_SWATCH_COUNT {
+            return Err(format!(
+                "Halo 3 palette slot {slot} on line {} is outside 0-{}",
+                line_number + 1,
+                CUSTOM_COLOR_SWATCH_COUNT - 1
+            ));
+        }
+        swatches[slot] = Some(ColorPaletteSwatch::named([red, green, blue, 255], name));
+        found = true;
+    }
+    found
+        .then_some(swatches)
+        .ok_or_else(|| "The Halo 3 palette is empty".to_owned())
 }
 
 fn parse_palette_rgba(text: &str) -> Option<[u8; 4]> {
@@ -941,28 +1409,67 @@ fn draw_empty_custom_swatch(ui: &mut Ui, rect: egui::Rect) {
         .line_segment([rect.right_top(), rect.left_bottom()], stroke);
 }
 
-pub(in crate::app) fn draw_editable_pc_hex(ui: &mut Ui, color: &mut MaterialColorPopup) {
+fn current_pc_hex(color: &MaterialColorPopup) -> String {
+    format!(
+        "sc#{}, {}, {}, {}",
+        format_pc_float(color.alpha),
+        format_pc_float(color.red),
+        format_pc_float(color.green),
+        format_pc_float(color.blue)
+    )
+}
+
+pub(in crate::app) fn draw_color_hex_rows(ui: &mut Ui, color: &mut MaterialColorPopup) {
     let current_hex = format_rgb_hex(color.red, color.green, color.blue);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Hex:").color(text_dark()));
+        ui.spacing_mut().item_spacing.x = 6.0;
+        draw_color_row_label(ui, "Hex:");
         let response = ui.add_sized(
-            Vec2::new(118.0, 20.0),
-            egui::TextEdit::singleline(&mut color.pc_hex_input)
+            Vec2::new(COLOR_COMBINED_FIELD_WIDTH, COLOR_ROW_HEIGHT),
+            egui::TextEdit::singleline(&mut color.hex_input)
                 .hint_text(placeholder_text("#RRGGBB"))
-                .desired_width(118.0),
+                .vertical_align(egui::Align::Center)
+                .desired_width(COLOR_COMBINED_FIELD_WIDTH),
         );
-        if !response.has_focus() && color.pc_hex_input != current_hex {
-            color.pc_hex_input = current_hex;
+        if response.changed()
+            && let Ok([r, g, b]) = parse_rgb_hex(&color.hex_input)
+        {
+            color.set_rgb_components(byte_to_float(r), byte_to_float(g), byte_to_float(b));
+            color.hex_error = None;
         }
         let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if response.lost_focus() && enter_pressed {
-            match parse_rgb_hex(&color.pc_hex_input) {
+        if response.lost_focus() || (response.has_focus() && enter_pressed) {
+            match parse_rgb_hex(&color.hex_input) {
                 Ok([r, g, b]) => color.set_rgb_bytes(r, g, b),
-                Err(error) => color.pc_hex_error = Some(error),
+                Err(error) => color.hex_error = Some(error),
             }
         }
+        if !response.has_focus() && color.hex_error.is_none() && color.hex_input != current_hex {
+            color.hex_input = current_hex;
+        }
     });
-    if let Some(error) = color.pc_hex_error.as_deref() {
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        draw_color_row_label(ui, "PC Hex:");
+        let pc_hex = current_pc_hex(color);
+        let response = ui.add_sized(
+            Vec2::new(COLOR_COMBINED_FIELD_WIDTH, COLOR_ROW_HEIGHT),
+            egui::Button::new(
+                RichText::new(truncate_for_cell(
+                    &pc_hex,
+                    COLOR_COMBINED_FIELD_WIDTH - 12.0,
+                ))
+                .monospace()
+                .small(),
+            ),
+        );
+        if response.clicked() {
+            ui.output_mut(|output| output.copied_text = pc_hex.clone());
+        }
+        response.on_hover_text(format!("{pc_hex}\nClick to copy PC Hex"));
+    });
+    if let Some(error) = color.hex_error.as_deref() {
         ui.small(RichText::new(error).color(Color32::from_rgb(220, 80, 80)));
     }
 }
@@ -999,7 +1506,9 @@ pub(in crate::app) fn draw_color_channel_table(ui: &mut Ui, color: &MaterialColo
                 draw_color_channel_row(ui, "R:", float_channel_to_u8(color.red), color.red);
                 draw_color_channel_row(ui, "G:", float_channel_to_u8(color.green), color.green);
                 draw_color_channel_row(ui, "B:", float_channel_to_u8(color.blue), color.blue);
-                draw_color_channel_row(ui, "A:", float_channel_to_u8(color.alpha), color.alpha);
+                if color.alpha_available {
+                    draw_color_channel_row(ui, "A:", float_channel_to_u8(color.alpha), color.alpha);
+                }
                 draw_hsb_row(ui, "H:", hue);
                 draw_hsb_row(ui, "S:", saturation);
                 draw_hsb_row(ui, "B:", brightness);
@@ -1058,4 +1567,54 @@ pub(in crate::app) fn truncate_for_cell(text: &str, width: f32) -> String {
         .collect::<String>();
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_rgb_picker_pins_alpha_opaque_even_when_an_rgba_swatch_is_applied() {
+        let mut popup =
+            MaterialColorPopup::new("rgb", 0.1, 0.2, 0.3, 0.4).with_alpha_available(false);
+
+        assert!(!popup.alpha_available);
+        assert_eq!(popup.alpha, 1.0);
+        assert_eq!(popup.original_color[3], 1.0);
+
+        popup.set_rgba_bytes(10, 20, 30, 40);
+        assert_eq!(popup.alpha, 1.0);
+    }
+
+    #[test]
+    fn achromatic_rgb_changes_preserve_undefined_hsb_components() {
+        let mut popup = MaterialColorPopup::new("color", 0.0, 0.0, 1.0, 1.0);
+        let blue_hue = popup.hue;
+
+        popup.set_rgb_components(0.5, 0.5, 0.5);
+        assert_eq!(popup.hue, blue_hue);
+        assert_eq!(popup.saturation, 0);
+
+        popup.hue = 91;
+        popup.saturation = 173;
+        popup.set_rgb_components(0.0, 0.0, 0.0);
+        assert_eq!(popup.hue, 91);
+        assert_eq!(popup.saturation, 173);
+        assert_eq!(popup.brightness, 0);
+    }
+
+    #[test]
+    fn hsb_state_keeps_black_cursor_position_and_the_top_hue_endpoint() {
+        let mut popup = MaterialColorPopup::new("color", 1.0, 0.0, 0.0, 1.0);
+        popup.hue = 255;
+        popup.saturation = 211;
+        popup.brightness = 0;
+
+        popup.update_rgb_from_hsb();
+
+        assert_eq!(popup.hue, 255);
+        assert_eq!(popup.saturation, 211);
+        assert_eq!(popup.brightness, 0);
+        assert_eq!([popup.red, popup.green, popup.blue], [0.0, 0.0, 0.0]);
+    }
 }

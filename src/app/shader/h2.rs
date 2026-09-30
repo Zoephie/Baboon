@@ -856,8 +856,9 @@ fn h2_template_base_parameter_row(
         } else {
             fallback.clone()
         };
-        let color =
-            (parameter_type == 2).then(|| MaterialColorPopup::new(&label, 0.0, 0.0, 0.0, 1.0));
+        let color = (parameter_type == 2).then(|| {
+            MaterialColorPopup::new(&label, 0.0, 0.0, 0.0, 1.0).with_alpha_available(false)
+        });
         let kind = if parameter_type == 2 {
             ShaderRowEditKind::H2CreateTemplateColor {
                 parameters_block_path: "parameters".to_owned(),
