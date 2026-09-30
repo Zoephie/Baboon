@@ -58,14 +58,10 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let path = output.join(format!("{stem}.{kind}.jms"));
             let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
-            // Halo 1 collision is node-local with no bind transform in the tag,
-            // so there is no skeleton to miss there.
-            let composes_a_skeleton =
-                !(collision && blam_tags::game::Game::of(&tag) == blam_tags::game::Game::Halo1);
             Ok(format!(
                 "Extracted {group_name} geometry {}{}",
                 path.display(),
-                if skeleton.is_none() && composes_a_skeleton {
+                if skeleton.is_none() {
                     " (no owning model found, so every bone is at the origin — \
                      extract the .model that references this tag instead)"
                 } else {
@@ -155,12 +151,14 @@ pub(in crate::app) fn owning_model_skeleton(
             return Some(skeleton);
         }
     }
-    // No `.model` beside the tag (or it named no usable skeleton) — a
-    // render_model at the same path is the next-best owner.
-    let render =
-        load_referenced_tag_from_source(source, &reference, "render_model", b"mode").ok()?;
+    // No `.model` beside the tag (or it named no usable skeleton) — a render
+    // tag at the same path is the next-best owner. Halo CE has no hlmt wrapper
+    // and calls that tag `gbxmodel`; later engines call it `render_model`.
+    let render = load_referenced_tag_from_source(source, &reference, "render_model", b"mode")
+        .or_else(|_| load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2"))
+        .ok()?;
     Some(ModelSkeleton {
-        nodes: render_jms_for_game(&render).ok()?.nodes,
+        nodes: render_model_skeleton(&render).ok()?,
         campaign_evolved: None,
     })
 }
@@ -174,9 +172,9 @@ pub(in crate::app) fn model_skeleton(source: &TagSource, model: &TagFile) -> Opt
         if let Ok(render) =
             load_referenced_tag_from_source(source, &reference, "render_model", b"mode")
         {
-            if let Ok(jms) = render_jms_for_game(&render) {
+            if let Ok(nodes) = render_model_skeleton(&render) {
                 return Some(ModelSkeleton {
-                    nodes: jms.nodes,
+                    nodes,
                     campaign_evolved: None,
                 });
             }
@@ -192,6 +190,55 @@ pub(in crate::app) fn model_skeleton(source: &TagSource, model: &TagFile) -> Opt
         nodes,
         campaign_evolved: Some(skeleton),
     })
+}
+
+/// Read the bind pose through the same [`RenderModel`] conversion as the live
+/// preview, then compose it to world space in JMS centimetres. This matters on
+/// Halo CE: gbxmodel stores the inverse of each parent-relative bind rotation,
+/// and `RenderModel::from_tag` corrects that historical on-disk convention.
+pub(in crate::app) fn render_model_skeleton(
+    tag: &TagFile,
+) -> anyhow::Result<Vec<blam_tags::JmsNode>> {
+    let model = RenderModel::from_tag(tag)?;
+    Ok(render_model_skeleton_nodes(&model))
+}
+
+fn render_model_skeleton_nodes(model: &RenderModel) -> Vec<blam_tags::JmsNode> {
+    let mut world: Vec<blam_tags::JmsNode> = Vec::with_capacity(model.nodes.len());
+    for node in &model.nodes {
+        let local_rotation = node.default_rotation.normalized();
+        let local_translation = node.default_translation;
+        let (rotation, translation) = if node.parent_node >= 0
+            && let Some(parent) = world.get(node.parent_node as usize)
+        {
+            (
+                (parent.rotation * local_rotation).normalized(),
+                parent.translation
+                    + (parent.rotation
+                        * blam_tags::math::RealVector3d {
+                            i: local_translation.x * 100.0,
+                            j: local_translation.y * 100.0,
+                            k: local_translation.z * 100.0,
+                        }),
+            )
+        } else {
+            (
+                local_rotation,
+                blam_tags::math::RealPoint3d {
+                    x: local_translation.x * 100.0,
+                    y: local_translation.y * 100.0,
+                    z: local_translation.z * 100.0,
+                },
+            )
+        };
+        world.push(blam_tags::JmsNode {
+            name: node.name.clone(),
+            parent: node.parent_node,
+            rotation,
+            translation,
+        });
+    }
+    world
 }
 
 /// A tag's own reference path, in the backslash form tag references use.
@@ -236,14 +283,287 @@ pub(in crate::app) fn collision_jms_for_game(
     skeleton: Option<&[blam_tags::JmsNode]>,
 ) -> anyhow::Result<JmsFile> {
     Ok(match blam_tags::game::Game::of(tag) {
-        // Halo 1 collision vertices are already node-local and the tag holds no
-        // bind transform, so there is nothing to compose a skeleton against.
-        blam_tags::game::Game::Halo1 => JmsFile::from_model_collision_geometry(tag)?,
+        // CE stores each BSP under a node and indexes it by that node's
+        // region/permutation. Keep that hierarchy instead of turning the node
+        // name into a JMS material label, and compose the node-local points
+        // against the same-path gbxmodel skeleton when one is available.
+        blam_tags::game::Game::Halo1 => halo1_collision_jms(tag, skeleton)?,
         _ => match skeleton {
             Some(skeleton) => JmsFile::from_collision_model_with_skeleton(tag, skeleton)?,
             None => JmsFile::from_collision_model(tag)?,
         },
     })
+}
+
+#[derive(Clone, Copy)]
+struct CeCollisionEdge {
+    start_vertex: i32,
+    end_vertex: i32,
+    forward_edge: i32,
+    reverse_edge: i32,
+    left_surface: i32,
+    right_surface: i32,
+}
+
+/// Reconstruct a CE collision JMS while retaining the tag's actual
+/// region/permutation cells. `blam-tags`' generic CE exporter labels cells by
+/// node name, which is useful for a flat geometry export but is not enough for
+/// the preview: Model Setup then mistakes `bip01 pelvis` for a permutation and
+/// region, and multiple BSPs on one node lose their permutation identity.
+fn halo1_collision_jms(
+    tag: &TagFile,
+    skeleton: Option<&[blam_tags::JmsNode]>,
+) -> anyhow::Result<JmsFile> {
+    let root = tag.root();
+    let regions = root
+        .field_path("regions")
+        .and_then(|field| field.as_block())
+        .ok_or_else(|| anyhow::anyhow!("model_collision_geometry has no regions block"))?;
+    let nodes = root
+        .field_path("nodes")
+        .and_then(|field| field.as_block())
+        .ok_or_else(|| anyhow::anyhow!("model_collision_geometry has no nodes block"))?;
+    let collision_materials = root
+        .field_path("materials")
+        .and_then(|field| field.as_block())
+        .ok_or_else(|| anyhow::anyhow!("model_collision_geometry has no materials block"))?;
+
+    // Reuse the shared reader for node names/parents. CE collision tags do not
+    // carry bind transforms, so the returned identity transforms are exactly
+    // what an unposed standalone export needs.
+    let mut out = JmsFile::from_model_collision_geometry(tag)?;
+    out.materials.clear();
+    out.vertices.clear();
+    out.triangles.clear();
+    out.regions.clear();
+    for region_index in 0..regions.len() {
+        let name = regions
+            .element(region_index)
+            .and_then(|region| region.read_string("name"))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| format!("region {region_index}"));
+        out.regions.push(name);
+    }
+
+    let skeleton_map = skeleton.map(|target| {
+        out.nodes
+            .iter()
+            .map(|source| target.iter().position(|node| node.name == source.name))
+            .collect::<Vec<_>>()
+    });
+    if let (Some(skeleton), Some(map)) = (skeleton, skeleton_map.as_ref()) {
+        for (node, target_index) in out.nodes.iter_mut().zip(map) {
+            let Some(target) = target_index.and_then(|index| skeleton.get(index)) else {
+                continue;
+            };
+            node.rotation = target.rotation;
+            node.translation = target.translation;
+        }
+    }
+
+    for node_index in 0..nodes.len() {
+        let Some(node) = nodes.element(node_index) else {
+            continue;
+        };
+        let region_index = node.read_int_any("region").unwrap_or(-1) as i32;
+        let region = (region_index >= 0)
+            .then(|| regions.element(region_index as usize))
+            .flatten();
+        let region_name = region
+            .as_ref()
+            .and_then(|region| region.read_string("name"))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "default".to_owned());
+        let permutations = region
+            .as_ref()
+            .and_then(|region| region.field("permutations"))
+            .and_then(|field| field.as_block());
+        let Some(bsps) = node.field("bsps").and_then(|field| field.as_block()) else {
+            continue;
+        };
+
+        for bsp_index in 0..bsps.len() {
+            let permutation_name = permutations
+                .as_ref()
+                .and_then(|permutations| permutations.element(bsp_index))
+                .and_then(|permutation| permutation.read_string("name"))
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "default".to_owned());
+            let Some(bsp) = bsps.element(bsp_index) else {
+                continue;
+            };
+            append_halo1_collision_bsp(
+                &bsp,
+                node_index,
+                region_index,
+                &region_name,
+                &permutation_name,
+                &collision_materials,
+                skeleton,
+                skeleton_map.as_deref(),
+                &mut out,
+            );
+        }
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_halo1_collision_bsp(
+    bsp: &TagStruct<'_>,
+    node_index: usize,
+    region_index: i32,
+    region_name: &str,
+    permutation_name: &str,
+    collision_materials: &TagBlock<'_>,
+    skeleton: Option<&[blam_tags::JmsNode]>,
+    skeleton_map: Option<&[Option<usize>]>,
+    out: &mut JmsFile,
+) {
+    let Some(surfaces) = bsp.field("surfaces").and_then(|field| field.as_block()) else {
+        return;
+    };
+    let Some(edges) = bsp.field("edges").and_then(|field| field.as_block()) else {
+        return;
+    };
+    let Some(vertices) = bsp.field("vertices").and_then(|field| field.as_block()) else {
+        return;
+    };
+
+    let edge_rows = (0..edges.len())
+        .filter_map(|index| edges.element(index))
+        .map(|edge| CeCollisionEdge {
+            start_vertex: edge.read_int_any("start vertex").unwrap_or(-1) as i32,
+            end_vertex: edge.read_int_any("end vertex").unwrap_or(-1) as i32,
+            forward_edge: edge.read_int_any("forward edge").unwrap_or(-1) as i32,
+            reverse_edge: edge.read_int_any("reverse edge").unwrap_or(-1) as i32,
+            left_surface: edge.read_int_any("left surface").unwrap_or(-1) as i32,
+            right_surface: edge.read_int_any("right surface").unwrap_or(-1) as i32,
+        })
+        .collect::<Vec<_>>();
+    let points = (0..vertices.len())
+        .filter_map(|index| vertices.element(index))
+        .map(
+            |vertex| match vertex.field("point").and_then(|field| field.value()) {
+                Some(TagFieldData::RealPoint3d(point)) => point,
+                Some(TagFieldData::RealVector3d(vector)) => blam_tags::math::RealPoint3d {
+                    x: vector.i,
+                    y: vector.j,
+                    z: vector.k,
+                },
+                _ => blam_tags::math::RealPoint3d::ZERO,
+            },
+        )
+        .map(|point| {
+            let local = point * 100.0;
+            let target = skeleton_map
+                .and_then(|map| map.get(node_index))
+                .copied()
+                .flatten();
+            match target.and_then(|index| skeleton.and_then(|nodes| nodes.get(index))) {
+                Some(node) => node.translation + node.rotation.rotate(local.as_vector()),
+                None => local,
+            }
+        })
+        .collect::<Vec<_>>();
+    let target_node = skeleton_map
+        .and_then(|map| map.get(node_index))
+        .copied()
+        .flatten()
+        .unwrap_or(node_index) as i16;
+
+    for surface_index in 0..surfaces.len() {
+        let Some(surface) = surfaces.element(surface_index) else {
+            continue;
+        };
+        let first_edge = surface.read_int_any("first edge").unwrap_or(-1) as i32;
+        let polygon = walk_halo1_collision_surface(surface_index as i32, first_edge, &edge_rows);
+        if polygon.len() < 3 {
+            continue;
+        }
+        let source_material = surface.read_int_any("material").unwrap_or(-1) as i32;
+        let shader_name = (source_material >= 0)
+            .then(|| collision_materials.element(source_material as usize))
+            .flatten()
+            .and_then(|material| material.read_string("name"))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "default".to_owned());
+        let label = format!("{permutation_name} {region_name}");
+        let material_index = out
+            .materials
+            .iter()
+            .position(|material| material.name == shader_name && material.material_name == label)
+            .unwrap_or_else(|| {
+                out.materials.push(blam_tags::JmsMaterial {
+                    name: shader_name,
+                    material_name: label,
+                });
+                out.materials.len() - 1
+            }) as i32;
+
+        for corner in 1..polygon.len() - 1 {
+            let triangle = [polygon[0], polygon[corner], polygon[corner + 1]];
+            let base = out.vertices.len() as u32;
+            for point_index in triangle {
+                let position = points
+                    .get(point_index as usize)
+                    .copied()
+                    .unwrap_or(blam_tags::math::RealPoint3d::ZERO);
+                out.vertices.push(blam_tags::JmsVertex {
+                    position,
+                    normal: blam_tags::math::RealVector3d {
+                        i: 0.0,
+                        j: 0.0,
+                        k: 1.0,
+                    },
+                    tangent: None,
+                    binormal: None,
+                    node_sets: vec![(target_node, 1.0)],
+                    uvs: vec![blam_tags::math::RealPoint2d::ZERO],
+                    color: None,
+                });
+            }
+            out.triangles.push(blam_tags::JmsTriangle {
+                material: material_index,
+                v: [base, base + 1, base + 2],
+                region: region_index.max(0),
+            });
+        }
+    }
+}
+
+fn walk_halo1_collision_surface(
+    surface: i32,
+    first_edge: i32,
+    edges: &[CeCollisionEdge],
+) -> Vec<i32> {
+    if first_edge < 0 {
+        return Vec::new();
+    }
+    let mut polygon = Vec::new();
+    let mut edge_index = first_edge;
+    for _ in 0..=edges.len() {
+        let Some(edge) = edges.get(edge_index as usize) else {
+            break;
+        };
+        let next = if edge.left_surface == surface {
+            polygon.push(edge.start_vertex);
+            edge.forward_edge
+        } else if edge.right_surface == surface {
+            polygon.push(edge.end_vertex);
+            edge.reverse_edge
+        } else {
+            break;
+        };
+        if next == first_edge {
+            break;
+        }
+        if next < 0 || next == edge_index {
+            return Vec::new();
+        }
+        edge_index = next;
+    }
+    polygon
 }
 
 /// Halo 2 physics models store their shapes flat; Halo 3 and later nest them
@@ -634,6 +954,132 @@ pub(in crate::app) fn extract_scenario_geometry(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn add(tag: &mut TagFile, path: &str) {
+        add_block_element(tag, path).unwrap_or_else(|error| panic!("add {path}: {error}"));
+    }
+
+    fn set(tag: &mut TagFile, path: &str, value: &str) {
+        apply_field_edit(tag, path, value)
+            .unwrap_or_else(|error| panic!("set {path} to {value:?}: {error}"));
+    }
+
+    /// CE's collision hierarchy is node -> BSP index, with the node selecting
+    /// a region and the BSP index selecting one of that region's permutations.
+    /// The old generic export instead wrote the node name into the material
+    /// label, which made Model Setup show `pelvis` / `bip01` and left the
+    /// node-local hull at the origin. Exercise the complete synthetic tag path.
+    #[test]
+    fn halo1_collision_uses_region_permutation_names_and_gbxmodel_pose() {
+        let mut tag = TagFile::new(test_definition_path(
+            "haloce_mcc/model_collision_geometry.json",
+        ))
+        .expect("load CE collision definition");
+
+        add(&mut tag, "materials");
+        set(&mut tag, "materials[0]/name", "cyborg armor");
+        add(&mut tag, "regions");
+        set(&mut tag, "regions[0]/name", "body");
+        add(&mut tag, "regions[0]/permutations");
+        set(&mut tag, "regions[0]/permutations[0]/name", "base");
+        add(&mut tag, "nodes");
+        set(&mut tag, "nodes[0]/name", "bip01 pelvis");
+        set(&mut tag, "nodes[0]/region", "0");
+        add(&mut tag, "nodes[0]/bsps");
+        add(&mut tag, "nodes[0]/bsps[0]/surfaces");
+        set(&mut tag, "nodes[0]/bsps[0]/surfaces[0]/first edge", "0");
+        set(&mut tag, "nodes[0]/bsps[0]/surfaces[0]/material", "0");
+        for edge in 0..3 {
+            add(&mut tag, "nodes[0]/bsps[0]/edges");
+            set(
+                &mut tag,
+                &format!("nodes[0]/bsps[0]/edges[{edge}]/start vertex"),
+                &edge.to_string(),
+            );
+            set(
+                &mut tag,
+                &format!("nodes[0]/bsps[0]/edges[{edge}]/end vertex"),
+                &((edge + 1) % 3).to_string(),
+            );
+            set(
+                &mut tag,
+                &format!("nodes[0]/bsps[0]/edges[{edge}]/forward edge"),
+                &((edge + 1) % 3).to_string(),
+            );
+            set(
+                &mut tag,
+                &format!("nodes[0]/bsps[0]/edges[{edge}]/left surface"),
+                "0",
+            );
+        }
+        for (index, point) in ["0, 0, 0", "1, 0, 0", "0, 1, 0"].into_iter().enumerate() {
+            add(&mut tag, "nodes[0]/bsps[0]/vertices");
+            set(
+                &mut tag,
+                &format!("nodes[0]/bsps[0]/vertices[{index}]/point"),
+                point,
+            );
+        }
+
+        let skeleton = vec![blam_tags::JmsNode {
+            name: "bip01 pelvis".to_owned(),
+            parent: -1,
+            rotation: blam_tags::math::RealQuaternion::IDENTITY,
+            translation: blam_tags::math::RealPoint3d {
+                x: 250.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }];
+        let jms = halo1_collision_jms(&tag, Some(&skeleton)).expect("build CE collision JMS");
+
+        assert_eq!(jms.regions, ["body"]);
+        assert_eq!(jms.materials.len(), 1);
+        assert_eq!(jms.materials[0].material_name, "base body");
+        assert_eq!(jms.triangles.len(), 1);
+        assert_eq!(jms.triangles[0].region, 0);
+        assert_eq!(jms.vertices[0].position.x, 250.0);
+        assert_eq!(jms.vertices[0].node_sets, [(0, 1.0)]);
+        assert_eq!(jms.nodes[0].translation.x, 250.0);
+    }
+
+    #[test]
+    fn preview_skeleton_uses_canonical_render_model_pose() {
+        let mut model = RenderModel::default();
+        // This is the corrected rotation produced by the CE gbxmodel reader;
+        // the raw tag stores the conjugate (-i, -j, -k, w).
+        model.nodes.push(blam_tags::render_model::Node {
+            name: "root".to_owned(),
+            parent_node: -1,
+            first_child_node: -1,
+            next_sibling_node: -1,
+            default_translation: blam_tags::math::RealPoint3d {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            default_rotation: blam_tags::math::RealQuaternion {
+                i: 0.70710677,
+                j: 0.0,
+                k: 0.0,
+                w: 0.70710677,
+            },
+            inverse_forward: Default::default(),
+            inverse_left: Default::default(),
+            inverse_up: Default::default(),
+            inverse_position: Default::default(),
+            inverse_scale: 1.0,
+            distance_from_parent: 0.0,
+        });
+
+        let nodes = render_model_skeleton_nodes(&model);
+        assert_eq!(nodes.len(), 1);
+        assert!((nodes[0].rotation.i - 0.70710677).abs() < 1.0e-5);
+        assert!((nodes[0].rotation.w - 0.70710677).abs() < 1.0e-5);
+        assert_eq!(nodes[0].translation.x, 100.0);
+        assert_eq!(nodes[0].translation.y, 200.0);
+        assert_eq!(nodes[0].translation.z, 300.0);
+    }
 
     #[test]
     fn a_tags_own_reference_path_drops_only_the_group_extension() {

@@ -225,7 +225,11 @@ impl Baboon {
             self.prefs.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
-            let model_preview = if is_previewable_geometry_group(entry.group_tag, names) {
+            let model_preview = if is_previewable_geometry_group_for_game(
+                entry.group_tag,
+                names,
+                source.and_then(|source| source.game.as_deref()),
+            ) {
                 kit.model_previews.entry(key.clone()).or_default()
             } else {
                 local_model_preview = ModelPreviewState::default();

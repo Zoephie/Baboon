@@ -233,6 +233,32 @@ pub(super) fn load_model_preview(
         ));
     }
 
+    // Halo CE object-family tags are the equivalent of later engines' model
+    // wrapper: the object directly names its gbxmodel, collision, animation,
+    // and legacy physics tags. Start with the render reference here; collision
+    // is added by the background overlay path.
+    if blam_tags::game::Game::of(model_tag) == blam_tags::game::Game::Halo1
+        && is_object_family_group(model_tag.header.group_tag)
+    {
+        let Some(source) = source else {
+            return Err("Halo CE object preview requires a loaded source.".to_owned());
+        };
+        let reference = tag_ref_path(&model_tag.root(), "model")
+            .ok_or("This object references no gbxmodel.")?;
+        let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
+            .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
+        let preview = build_render_preview(&render)?;
+        if preview.batches.is_empty() {
+            return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
+        }
+        return Ok(model_preview_data(
+            entry.key.clone(),
+            reference,
+            preview,
+            Vec::new(),
+        ));
+    }
+
     // Collision and physics tags carry no render geometry of their own —
     // their preview is derived: collision BSPs walked into triangles, physics
     // primitives tessellated. Posed on the owning `.model`'s skeleton when
