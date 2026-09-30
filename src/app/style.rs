@@ -14,6 +14,34 @@ pub(super) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
 /// Visual separation between an icon and its label: two points of spacing
 /// plus the label's four-point inner inset from the design specification.
 pub(super) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;
+pub(super) const ALPHA_CHECKER_TILE_SIZE: usize = 4;
+pub(super) const ALPHA_CHECKER_LIGHT_RGBA: [u8; 4] = [255, 255, 255, 13];
+pub(super) const ALPHA_CHECKER_DARK_RGBA: [u8; 4] = [0, 0, 0, 13];
+
+pub(super) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
+    let tile = ALPHA_CHECKER_TILE_SIZE as f32;
+    painter.rect_filled(rect, 0.0, editor_bg());
+    let clipped = painter.with_clip_rect(rect);
+    let columns = (rect.width() / tile).ceil() as usize;
+    let rows = (rect.height() / tile).ceil() as usize;
+    for row in 0..rows {
+        for column in 0..columns {
+            let rgba = if (column + row) % 2 == 0 {
+                ALPHA_CHECKER_LIGHT_RGBA
+            } else {
+                ALPHA_CHECKER_DARK_RGBA
+            };
+            clipped.rect_filled(
+                egui::Rect::from_min_size(
+                    rect.min + Vec2::new(column as f32 * tile, row as f32 * tile),
+                    Vec2::splat(tile),
+                ),
+                0.0,
+                Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]),
+            );
+        }
+    }
+}
 
 pub(super) fn foundation_visuals() -> egui::Visuals {
     let mut visuals = if is_dark_mode() {

@@ -394,7 +394,7 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) tool_commands_collapsed_categories: HashSet<String>,
     pub(in crate::app) recent_folders: Vec<PathBuf>,
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
-    pub(in crate::app) custom_color_swatches: Vec<Option<[u8; 4]>>,
+    pub(in crate::app) custom_color_swatches: Vec<Option<ColorPaletteSwatch>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
 }
 
@@ -433,7 +433,7 @@ impl Default for GuiPrefs {
             tool_commands_collapsed_categories: HashSet::new(),
             recent_folders: Vec::new(),
             editing_kit_favorites: Vec::new(),
-            custom_color_swatches: vec![None; CUSTOM_COLOR_SWATCH_COUNT],
+            custom_color_swatches: default_color_swatches(),
             palette_last_dir: None,
         }
     }
@@ -484,4 +484,25 @@ pub(in crate::app) const MIN_TOOL_COMMANDS_WINDOW_SIZE: Vec2 = Vec2::new(600.0, 
 pub(in crate::app) const DEFAULT_TOOL_COMMANDS_LEFT_WIDTH: f32 = 280.0;
 pub(in crate::app) const MIN_TOOL_COMMANDS_LEFT_WIDTH: f32 = 200.0;
 pub(in crate::app) const MAX_RECENT_FOLDERS: usize = 10;
-pub(in crate::app) const CUSTOM_COLOR_SWATCH_COUNT: usize = 16;
+pub(in crate::app) const CUSTOM_COLOR_SWATCH_COUNT: usize = 64;
+pub(in crate::app) const LEGACY_CUSTOM_COLOR_SWATCH_COUNT: usize = 16;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct ColorPaletteSwatch {
+    pub(in crate::app) rgba: [u8; 4],
+    pub(in crate::app) name: Option<String>,
+}
+
+impl ColorPaletteSwatch {
+    pub(in crate::app) fn unnamed(rgba: [u8; 4]) -> Self {
+        Self { rgba, name: None }
+    }
+
+    pub(in crate::app) fn named(rgba: [u8; 4], name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            rgba,
+            name: (!name.trim().is_empty()).then(|| name.trim().to_owned()),
+        }
+    }
+}

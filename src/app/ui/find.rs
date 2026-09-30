@@ -205,7 +205,9 @@ impl Baboon {
         }
         if !open || query_escape {
             self.find.close();
-            ctx.data_mut(|data| data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id()));
+            ctx.data_mut(|data| {
+                data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
+            });
         }
     }
 }
@@ -214,7 +216,29 @@ fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
     draw_icon_window_header(ui, "Find", ButtonIcon::Find, open);
 }
 
-pub(super) fn draw_icon_window_header(ui: &mut Ui, title: &str, icon: ButtonIcon, open: &mut bool) {
+pub(in crate::app) fn draw_icon_window_header(
+    ui: &mut Ui,
+    title: &str,
+    icon: ButtonIcon,
+    open: &mut bool,
+) {
+    draw_icon_window_header_impl(ui, title, icon, Some(open));
+}
+
+pub(in crate::app) fn draw_icon_window_header_without_close(
+    ui: &mut Ui,
+    title: &str,
+    icon: ButtonIcon,
+) {
+    draw_icon_window_header_impl(ui, title, icon, None);
+}
+
+fn draw_icon_window_header_impl(
+    ui: &mut Ui,
+    title: &str,
+    icon: ButtonIcon,
+    open: Option<&mut bool>,
+) {
     const HEADER_HEIGHT: f32 = 28.0;
     const TITLE_ICON_SIZE: f32 = 18.0;
     const TITLE_GAP: f32 = 7.0;
@@ -245,29 +269,31 @@ pub(super) fn draw_icon_window_header(ui: &mut Ui, title: &str, icon: ButtonIcon
         text_dark(),
     );
 
-    let close_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.right() - 10.0, rect.center().y),
-        Vec2::splat(20.0),
-    );
-    let close = ui
-        .interact(
-            close_rect,
-            ui.id().with("window_header_close"),
-            Sense::click(),
-        )
-        .on_hover_text(format!("Close {title}"));
-    let color = ui.style().interact(&close).fg_stroke.color;
-    let cross = close_rect.shrink(5.0);
-    ui.painter().line_segment(
-        [cross.left_top(), cross.right_bottom()],
-        Stroke::new(1.5_f32, color),
-    );
-    ui.painter().line_segment(
-        [cross.right_top(), cross.left_bottom()],
-        Stroke::new(1.5_f32, color),
-    );
-    if close.clicked() {
-        *open = false;
+    if let Some(open) = open {
+        let close_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 10.0, rect.center().y),
+            Vec2::splat(20.0),
+        );
+        let close = ui
+            .interact(
+                close_rect,
+                ui.id().with("window_header_close"),
+                Sense::click(),
+            )
+            .on_hover_text(format!("Close {title}"));
+        let color = ui.style().interact(&close).fg_stroke.color;
+        let cross = close_rect.shrink(5.0);
+        ui.painter().line_segment(
+            [cross.left_top(), cross.right_bottom()],
+            Stroke::new(1.5_f32, color),
+        );
+        ui.painter().line_segment(
+            [cross.right_top(), cross.left_bottom()],
+            Stroke::new(1.5_f32, color),
+        );
+        if close.clicked() {
+            *open = false;
+        }
     }
 }
 

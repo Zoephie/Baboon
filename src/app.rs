@@ -1124,22 +1124,40 @@ mod tests {
     #[test]
     fn baboon_palette_format_round_trips_custom_swatches() {
         let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
-        swatches[0] = Some([0, 0, 0, 255]);
-        swatches[1] = Some([255, 87, 51, 255]);
-        swatches[3] = Some([51, 255, 87, 128]);
+        swatches[0] = Some(ColorPaletteSwatch::named([0, 0, 0, 255], "Black"));
+        swatches[1] = Some(ColorPaletteSwatch::unnamed([255, 87, 51, 255]));
+        swatches[3] = Some(ColorPaletteSwatch::unnamed([51, 255, 87, 128]));
 
         let encoded = encode_baboon_palette("My Custom Palette", &swatches);
         assert!(encoded.contains("# Baboon Colour Palette"));
         assert!(encoded.contains("# Name: My Custom Palette"));
         assert!(encoded.contains("#FF5733FF"));
+        assert!(encoded.contains("#000000FF\tBlack"));
         assert!(encoded.contains("#empty"));
 
         let decoded = decode_baboon_palette(&encoded).unwrap();
         assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
-        assert_eq!(decoded[0], Some([0, 0, 0, 255]));
-        assert_eq!(decoded[1], Some([255, 87, 51, 255]));
+        assert_eq!(
+            decoded[0],
+            Some(ColorPaletteSwatch::named([0, 0, 0, 255], "Black"))
+        );
+        assert_eq!(
+            decoded[1],
+            Some(ColorPaletteSwatch::unnamed([255, 87, 51, 255]))
+        );
         assert_eq!(decoded[2], None);
-        assert_eq!(decoded[3], Some([51, 255, 87, 128]));
+        assert_eq!(
+            decoded[3],
+            Some(ColorPaletteSwatch::unnamed([51, 255, 87, 128]))
+        );
+    }
+
+    #[test]
+    fn bundled_default_palette_has_48_colors_and_16_empty_slots() {
+        let swatches = default_color_swatches();
+        assert_eq!(swatches.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert!(swatches[..48].iter().all(Option::is_some));
+        assert!(swatches[48..].iter().all(Option::is_none));
     }
 
     #[test]
@@ -1150,9 +1168,56 @@ mod tests {
         .unwrap();
 
         assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
-        assert_eq!(decoded[0], Some([17, 34, 51, 68]));
+        assert_eq!(
+            decoded[0],
+            Some(ColorPaletteSwatch::unnamed([17, 34, 51, 68]))
+        );
         assert_eq!(decoded[1], None);
         assert!(decoded[2..].iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn halo3_color_preferences_load_by_slot_with_names_and_opaque_alpha() {
+        let decoded = decode_halo3_color_preferences(
+            "\u{feff}1,0,255,0,Green\n0,255,0,0,Red\n2,255,255,255,\n",
+        )
+        .unwrap();
+
+        assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(
+            decoded[0],
+            Some(ColorPaletteSwatch::named([255, 0, 0, 255], "Red"))
+        );
+        assert_eq!(
+            decoded[1],
+            Some(ColorPaletteSwatch::named([0, 255, 0, 255], "Green"))
+        );
+        assert_eq!(
+            decoded[2],
+            Some(ColorPaletteSwatch::unnamed([255, 255, 255, 255]))
+        );
+        assert_eq!(decoded[3], None);
+    }
+
+    #[test]
+    fn halo3_color_preferences_save_rgb_slots_and_names() {
+        let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+        swatches[0] = Some(ColorPaletteSwatch::named([255, 16, 0, 127], "Warm red"));
+        swatches[2] = Some(ColorPaletteSwatch::unnamed([1, 2, 3, 255]));
+
+        let encoded = encode_halo3_color_preferences(&swatches);
+        assert_eq!(encoded, "0,255,16,0,Warm red\r\n2,1,2,3,\r\n");
+
+        let decoded = decode_halo3_color_preferences(&encoded).unwrap();
+        assert_eq!(
+            decoded[0],
+            Some(ColorPaletteSwatch::named([255, 16, 0, 255], "Warm red"))
+        );
+        assert_eq!(
+            decoded[2],
+            Some(ColorPaletteSwatch::unnamed([1, 2, 3, 255]))
+        );
+        assert_eq!(decoded[1], None);
     }
 
     #[test]

@@ -212,7 +212,8 @@ pub(in crate::app) fn draw_foundation_color_row(
                 "Click to inspect color"
             });
         if response.clicked() {
-            let mut popup = MaterialColorPopup::new(&meta.label, r, g, b, a);
+            let mut popup =
+                MaterialColorPopup::new(&meta.label, r, g, b, a).with_alpha_available(argb);
             if editable {
                 popup = popup.with_color_field(edit.tag_key, path, argb);
             }

@@ -421,15 +421,34 @@ pub(super) fn clean_favorite_relative_path(path: PathBuf) -> Option<PathBuf> {
     Some(path)
 }
 
-fn load_custom_color_swatches(value: &Value) -> Vec<Option<[u8; 4]>> {
-    let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
-    if let Some(items) = value.get("custom_color_swatches").and_then(Value::as_array) {
-        for (index, item) in items.iter().take(CUSTOM_COLOR_SWATCH_COUNT).enumerate() {
-            let Some(text) = item.as_str() else {
-                continue;
-            };
-            swatches[index] = parse_pref_rgba(text);
-        }
+fn load_custom_color_swatches(value: &Value) -> Vec<Option<ColorPaletteSwatch>> {
+    let Some(items) = value.get("custom_color_swatches").and_then(Value::as_array) else {
+        return default_color_swatches();
+    };
+    let legacy = items.len() <= LEGACY_CUSTOM_COLOR_SWATCH_COUNT;
+    let mut swatches = if legacy {
+        default_color_swatches()
+    } else {
+        vec![None; CUSTOM_COLOR_SWATCH_COUNT]
+    };
+    let start = if legacy {
+        CUSTOM_COLOR_SWATCH_COUNT - LEGACY_CUSTOM_COLOR_SWATCH_COUNT
+    } else {
+        0
+    };
+    for (index, item) in items.iter().take(CUSTOM_COLOR_SWATCH_COUNT).enumerate() {
+        swatches[start + index] = if let Some(text) = item.as_str() {
+            parse_pref_rgba(text).map(ColorPaletteSwatch::unnamed)
+        } else {
+            let rgba = item
+                .get("rgba")
+                .and_then(Value::as_str)
+                .and_then(parse_pref_rgba);
+            rgba.map(|rgba| {
+                let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
+                ColorPaletteSwatch::named(rgba, name)
+            })
+        };
     }
     swatches
 }
@@ -675,7 +694,14 @@ fn prefs_to_value(
             })
         }).collect::<Vec<_>>(),
         "custom_color_swatches": prefs.custom_color_swatches.iter().map(|swatch| {
-            swatch.map(|rgba| format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]))
+            swatch.as_ref().map(|swatch| {
+                let rgba = swatch.rgba;
+                let encoded = format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]);
+                match swatch.name.as_deref() {
+                    Some(name) => json!({ "rgba": encoded, "name": name }),
+                    None => Value::String(encoded),
+                }
+            })
         }).collect::<Vec<_>>(),
         "palette_last_dir": prefs.palette_last_dir.as_ref().map(|path| path.display().to_string()),
         "storage_mode": crate::storage::active_mode().map(crate::storage::StorageMode::as_str),
@@ -1109,7 +1135,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_color_swatches_load_as_fixed_global_slots() {
+    fn legacy_custom_color_swatches_migrate_to_last_row() {
         let value = serde_json::json!({
             "custom_color_swatches": [
                 "#FF0000FF",
@@ -1121,10 +1147,35 @@ mod tests {
 
         let swatches = load_custom_color_swatches(&value);
         assert_eq!(swatches.len(), CUSTOM_COLOR_SWATCH_COUNT);
-        assert_eq!(swatches[0], Some([255, 0, 0, 255]));
-        assert_eq!(swatches[1], None);
-        assert_eq!(swatches[2], Some([51, 102, 153, 128]));
-        assert_eq!(swatches[3], None);
+        assert_eq!(
+            swatches[0],
+            Some(ColorPaletteSwatch::unnamed([255, 0, 0, 255]))
+        );
+        assert_eq!(
+            swatches[48],
+            Some(ColorPaletteSwatch::unnamed([255, 0, 0, 255]))
+        );
+        assert_eq!(swatches[49], None);
+        assert_eq!(
+            swatches[50],
+            Some(ColorPaletteSwatch::unnamed([51, 102, 153, 128]))
+        );
+        assert_eq!(swatches[51], None);
+    }
+
+    #[test]
+    fn named_color_swatches_load_from_preferences() {
+        let value = serde_json::json!({
+            "custom_color_swatches": [
+                { "rgba": "#FF0000FF", "name": "Red" }
+            ]
+        });
+
+        let swatches = load_custom_color_swatches(&value);
+        assert_eq!(
+            swatches[48],
+            Some(ColorPaletteSwatch::named([255, 0, 0, 255], "Red"))
+        );
     }
 
     #[test]

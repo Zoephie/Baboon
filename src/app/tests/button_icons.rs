@@ -14,6 +14,8 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::ChannelBlue,
         ButtonIcon::ChannelGreen,
         ButtonIcon::ChannelRed,
+        ButtonIcon::ColorPicker,
+        ButtonIcon::Confirm,
         ButtonIcon::Clear,
         ButtonIcon::Closed,
         ButtonIcon::CopyPath,
