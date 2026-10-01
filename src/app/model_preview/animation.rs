@@ -5,6 +5,7 @@
 
 use super::*;
 use blam_tags::math::Matrix4;
+use blam_tags::animation::classic::{CeAnimation, CeAnimations};
 use blam_tags::{Animation, AnimationGraph, JmaKind, NodeTransform, Skeleton};
 
 /// Halo's animation clock. No tag carries a rate; the engine (and the JMA
@@ -56,6 +57,28 @@ impl PreviewNodeTransform {
 pub(crate) struct DecodedAnimationPose {
     pub skeleton_names: Vec<String>,
     pub frames: Vec<Vec<PreviewNodeTransform>>,
+}
+
+impl DecodedAnimationPose {
+    fn new(skeleton: &Skeleton, pose: &blam_tags::Pose) -> Self {
+        Self {
+            skeleton_names: skeleton
+                .nodes
+                .iter()
+                .map(|node| node.name.clone())
+                .collect(),
+            frames: pose
+                .frames
+                .iter()
+                .map(|frame| {
+                    frame
+                        .iter()
+                        .map(PreviewNodeTransform::from_node_transform)
+                        .collect()
+                })
+                .collect(),
+        }
+    }
 }
 
 /// A decoded animation mapped onto `RenderModelPreview::nodes` order, ready
@@ -369,12 +392,16 @@ impl Baboon {
         let Some(entry) = kit.entry_for_key(key).cloned() else {
             return;
         };
-        if entry.group_tag != u32::from_be_bytes(*b"hlmt") {
-            return;
-        }
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
             return;
         };
+        // A `.model` names its graph; a Halo CE object has no `.model` and
+        // names its `model_animations` itself, the way it names its gbxmodel.
+        let names_a_graph = entry.group_tag == u32::from_be_bytes(*b"hlmt")
+            || (is_object_family_group(entry.group_tag) && source_is_halo1(&source));
+        if !names_a_graph {
+            return;
+        }
         let stamp = KitStamp {
             kit: kit.id,
             generation: kit.generation,
@@ -573,35 +600,108 @@ impl Baboon {
     }
 }
 
+/// Whether a kit is Halo CE, whose objects stand in for the `.model`.
+fn source_is_halo1(source: &TagSource) -> bool {
+    matches!(source, TagSource::LooseFolder { game: Some(game), .. } if game.starts_with("haloce"))
+}
+
 /// Worker half of the list request.
 fn list_model_animations(
     source: &TagSource,
     entry: &TagEntry,
 ) -> Result<Vec<PreviewAnimationEntry>, String> {
     let model = crate::source::read_entry(source, entry).map_err(|error| error.to_string())?;
-    // Classic models only: Campaign Evolved previews reconstruct from Unreal
-    // and its animations live in Unreal assets; H1/H2 geometry carries no
-    // per-vertex skinning through this pipeline.
-    if blam_tags::game::Game::of(&model) != blam_tags::game::Game::Halo3 {
-        return Err("Animation playback needs a Halo 3-family model.".to_owned());
+    // A Halo CE object names its `model_animations`; Halo 2 and the Halo 3
+    // family name a `model_animation_graph` from the `.model`.
+    match blam_tags::game::Game::of(&model) {
+        blam_tags::game::Game::Halo1 => {
+            let antr = load_object_animations(source, &model)?;
+            Ok(CeAnimations::new(&antr)
+                .iter()
+                .map(|animation| PreviewAnimationEntry {
+                    name: animation
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("animation {}", animation.index)),
+                    frame_count: animation.frame_count,
+                    kind: ce_jma_kind(animation).extension(),
+                    playable: animation.frame_count > 0,
+                })
+                .collect())
+        }
+        blam_tags::game::Game::Halo2 | blam_tags::game::Game::Halo3 => {
+            let jmad_ref = tag_ref_path(&model.root(), "animation")
+                .ok_or("This model references no animation graph.")?;
+            let jmad =
+                load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
+                    .map_err(|error| error.to_string())?;
+            let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
+            Ok(animation
+                .iter()
+                .map(|group| PreviewAnimationEntry {
+                    name: group
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("animation {}", group.index)),
+                    frame_count: group.frame_count.max(0) as u16,
+                    kind: blam_tags::extract::animation::jma_kind_for(group).extension(),
+                    playable: !group.blob.is_empty(),
+                })
+                .collect())
+        }
     }
-    let jmad_ref = tag_ref_path(&model.root(), "animation")
-        .ok_or("This model references no animation graph.")?;
-    let jmad = load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
-        .map_err(|error| error.to_string())?;
-    let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
-    Ok(animation
+}
+
+/// A Halo CE object's `model_animations`.
+fn load_object_animations(source: &TagSource, object: &TagFile) -> Result<TagFile, String> {
+    let reference = tag_ref_path(&object.root(), "animation graph")
+        .ok_or("This object references no model_animations.")?;
+    load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")
+        .map_err(|error| error.to_string())
+}
+
+fn ce_jma_kind(animation: &CeAnimation<'_>) -> JmaKind {
+    JmaKind::from_metadata(
+        animation.animation_type.as_deref(),
+        animation.frame_info_type.as_deref(),
+        animation.world_relative,
+    )
+}
+
+/// Halo CE's rest pose for an animation skeleton: the gbxmodel's node
+/// defaults matched by name, in the tag's own rotation convention (the one the
+/// animation decodes in). A `model_animations` carries no rest pose of its
+/// own, so a node the gbxmodel lacks rests at identity.
+fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> Vec<NodeTransform> {
+    let mut by_name: HashMap<String, NodeTransform> = HashMap::new();
+    if let Some(nodes) = gbxmodel
+        .and_then(|tag| tag.root().field("nodes"))
+        .and_then(|field| field.as_block())
+    {
+        for node in (0..nodes.len()).filter_map(|index| nodes.element(index)) {
+            let Some(name) = node.read_string("name") else {
+                continue;
+            };
+            let translation = node.read_vec3("default translation");
+            by_name.insert(
+                name,
+                NodeTransform {
+                    translation: blam_tags::math::RealPoint3d {
+                        x: translation.i,
+                        y: translation.j,
+                        z: translation.k,
+                    },
+                    rotation: node.read_quat("default rotation"),
+                    scale: 1.0,
+                },
+            );
+        }
+    }
+    skeleton
+        .nodes
         .iter()
-        .map(|group| PreviewAnimationEntry {
-            name: group
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("animation {}", group.index)),
-            frame_count: group.frame_count.max(0) as u16,
-            kind: blam_tags::extract::animation::jma_kind_for(group).extension(),
-            playable: !group.blob.is_empty(),
-        })
-        .collect())
+        .map(|node| by_name.get(&node.name).copied().unwrap_or(NodeTransform::IDENTITY))
+        .collect()
 }
 
 /// Worker half of the decode request: the extractor's exact composition
@@ -612,6 +712,9 @@ fn decode_model_animation(
     animation_index: usize,
 ) -> Result<DecodedAnimationPose, String> {
     let model = crate::source::read_entry(source, entry).map_err(|error| error.to_string())?;
+    if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
+        return decode_ce_animation(source, &model, animation_index);
+    }
     let root = model.root();
     let jmad_ref =
         tag_ref_path(&root, "animation").ok_or("This model references no animation graph.")?;
@@ -677,21 +780,44 @@ fn decode_model_animation(
         _ => clip.pose(&skeleton, Some(&defaults)),
     };
 
-    Ok(DecodedAnimationPose {
-        skeleton_names: skeleton
-            .nodes
-            .iter()
-            .map(|node| node.name.clone())
-            .collect(),
-        frames: pose
-            .frames
-            .iter()
-            .map(|frame| {
-                frame
-                    .iter()
-                    .map(PreviewNodeTransform::from_node_transform)
-                    .collect()
-            })
-            .collect(),
-    })
+    Ok(DecodedAnimationPose::new(&skeleton, &pose))
+}
+
+/// The Halo CE half of [`decode_model_animation`]: the extractor's recipe
+/// (`write_ce_group_jma`), on the gbxmodel's rest pose.
+fn decode_ce_animation(
+    source: &TagSource,
+    object: &TagFile,
+    animation_index: usize,
+) -> Result<DecodedAnimationPose, String> {
+    let antr = load_object_animations(source, object)?;
+    let animations = CeAnimations::new(&antr);
+    let animation = animations
+        .get(animation_index)
+        .ok_or("The graph no longer lists this animation.")?;
+    let skeleton = Skeleton::from_tag(&antr);
+    let gbxmodel = tag_ref_path(&object.root(), "model").and_then(|reference| {
+        load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2").ok()
+    });
+    let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
+    let clip = animation.decode();
+    let mut pose = match ce_jma_kind(animation) {
+        JmaKind::Jmo => clip.overlay_pose(&skeleton, &rest).1,
+        JmaKind::Jmr => clip.replacement_pose(&skeleton, &rest),
+        _ => clip.pose(&skeleton, Some(&rest)),
+    };
+    // CE rotations, rest pose and animation alike, are stored inverted
+    // relative to the forward chaining the preview runs: the engine feeds
+    // both into the same orientations (`model_get_node_orientations`, CE
+    // Anniversary X360), and `RenderModel` conjugates the gbxmodel's. Over
+    // the standing animations of six characters, frame 0 sits a median 20-36°
+    // from the bind pose conjugated and 49-102° as stored; Halo 2 is the
+    // mirror image, closer as stored.
+    for frame in &mut pose.frames {
+        for transform in frame {
+            let q = transform.rotation;
+            transform.rotation = RealQuaternion { i: -q.i, j: -q.j, k: -q.k, w: q.w };
+        }
+    }
+    Ok(DecodedAnimationPose::new(&skeleton, &pose))
 }
