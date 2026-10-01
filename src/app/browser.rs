@@ -143,6 +143,92 @@ pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
         .is_some_and(|game| game == "haloce_evolved")
 }
 
+fn browser_sound_language_id() -> egui::Id {
+    egui::Id::new("browser_sound_language")
+}
+
+/// Publish the shared sound player's last-selected language for browser menus.
+/// `None` is the game's preferred English bank; name it rather than exposing
+/// the implementation term "Default" in an extraction command.
+pub(in crate::app) fn set_browser_sound_language(
+    ui: &Ui,
+    game: Option<&str>,
+    language: Option<&str>,
+) {
+    let label = sound_language_label(game, language);
+    ui.data_mut(|data| data.insert_temp(browser_sound_language_id(), label));
+}
+
+fn sound_language_label(game: Option<&str>, language: Option<&str>) -> String {
+    match language {
+        Some(language) => crate::app::editor::language_label(language),
+        None if matches!(game, Some("halo4_mcc") | Some("halo2amp_mcc")) => {
+            "English (US)".to_owned()
+        }
+        None => "English".to_owned(),
+    }
+}
+
+pub(in crate::app) fn browser_sound_language(ui: &Ui) -> String {
+    ui.data(|data| data.get_temp::<String>(browser_sound_language_id()))
+        .unwrap_or_else(|| "English".to_owned())
+}
+
+fn browser_sound_available_languages_id() -> egui::Id {
+    egui::Id::new("browser_sound_available_languages")
+}
+
+/// Publish how many localized bank sets are actually installed. `None` means
+/// the source does not use an external per-language bank family.
+pub(in crate::app) fn set_browser_sound_available_languages(
+    ui: &Ui,
+    game: Option<&str>,
+    tags_root: Option<&Path>,
+) {
+    let count = tags_root.and_then(|root| match game {
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc") => {
+            Some(blam_tags::audio::SoundBanks::available_languages(root).len())
+        }
+        Some("halo4_mcc") | Some("halo2amp_mcc") => {
+            Some(blam_tags::audio::WwiseBanks::available_languages(root).len())
+        }
+        _ => None,
+    });
+    ui.data_mut(|data| data.insert_temp(browser_sound_available_languages_id(), count));
+}
+
+pub(in crate::app) fn browser_sound_available_languages(ui: &Ui) -> Option<usize> {
+    ui.data(|data| data.get_temp(browser_sound_available_languages_id()))
+        .flatten()
+}
+
+fn browser_entries_scanning_id() -> egui::Id {
+    egui::Id::new("browser_entries_scanning")
+}
+
+pub(in crate::app) fn set_browser_entries_scanning(ui: &Ui, scanning: bool) {
+    ui.data_mut(|data| data.insert_temp(browser_entries_scanning_id(), scanning));
+}
+
+pub(in crate::app) fn browser_entries_scanning(ui: &Ui) -> bool {
+    ui.data(|data| {
+        data.get_temp(browser_entries_scanning_id())
+            .unwrap_or(false)
+    })
+}
+
+fn browser_loose_source_id() -> egui::Id {
+    egui::Id::new("browser_loose_source")
+}
+
+pub(in crate::app) fn set_browser_loose_source(ui: &Ui, loose: bool) {
+    ui.data_mut(|data| data.insert_temp(browser_loose_source_id(), loose));
+}
+
+pub(in crate::app) fn browser_loose_source(ui: &Ui) -> bool {
+    ui.data(|data| data.get_temp(browser_loose_source_id()).unwrap_or(false))
+}
+
 /// What the kit currently being drawn can launch a scenario in, published the
 /// same way and for the same reason as the modified set: the row menu offers
 /// Sapien and tag_test, and the tree's drawing functions have no other route to
@@ -183,6 +269,24 @@ pub(in crate::app) fn removed_wash() -> Color32 {
 
 pub(in crate::app) fn added_wash() -> Color32 {
     Color32::from_rgb(28, 46, 32)
+}
+
+#[cfg(test)]
+mod sound_language_tests {
+    use super::*;
+
+    #[test]
+    fn extraction_names_the_games_default_language() {
+        assert_eq!(sound_language_label(Some("halo3_mcc"), None), "English");
+        assert_eq!(
+            sound_language_label(Some("halo4_mcc"), None),
+            "English (US)"
+        );
+        assert_eq!(
+            sound_language_label(Some("halo3_mcc"), Some("portuguese")),
+            "Portuguese"
+        );
+    }
 }
 
 /// Colour for a value or element that is going away. Paired with a `-` marker,

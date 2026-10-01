@@ -16,8 +16,8 @@
 //! entries in the Halo 2 kit the estimate lands unambiguously on one of the
 //! engine's four rates, and on the same one for every entry of a tag.
 
-use super::*;
 use super::super::audio::InlineCodec;
+use super::*;
 
 /// The engine's sample rates (`sound_definitions.h`), the only ones a tag can hold.
 const H2_SAMPLE_RATES: [u32; 4] = [22_050, 32_000, 44_100, 48_000];
@@ -72,9 +72,8 @@ pub(in crate::app) struct H2Sound {
 fn language_permutation_info<'a>(root: &TagStruct<'a>) -> Option<TagBlock<'a>> {
     root.fields().find_map(|field| {
         let block = field.as_block()?;
-        (0..block.len()).find_map(|index| {
-            find_block_field(&block.element(index)?, "language permutation info")
-        })
+        (0..block.len())
+            .find_map(|index| find_block_field(&block.element(index)?, "language permutation info"))
     })
 }
 
@@ -187,7 +186,8 @@ impl H2Sound {
             _ if encoding.to_ascii_lowercase().contains("codec") => 1.0,
             _ => 0.5,
         };
-        let tag_rate = read_enum_clean(&root, "sample rate").map_or(48_000, |name| h2_rate_for(&name));
+        let tag_rate =
+            read_enum_clean(&root, "sample rate").map_or(48_000, |name| h2_rate_for(&name));
 
         let mut groups = Vec::with_capacity(lpi.len());
         let mut languages: Vec<(i64, String)> = Vec::new();
@@ -207,8 +207,8 @@ impl H2Sound {
                 };
                 let language = read_enum_clean(&entry, "language")
                     .unwrap_or_else(|| H2_DEFAULT_LANGUAGE.to_owned());
-                let compression =
-                    read_enum_clean(&entry, "compression").unwrap_or_else(|| tag_compression.clone());
+                let compression = read_enum_clean(&entry, "compression")
+                    .unwrap_or_else(|| tag_compression.clone());
                 let sample_bytes = first_data_len(&entry, 0);
                 if sample_bytes == 0 {
                     continue; // a language slot with no audio in it
@@ -246,7 +246,9 @@ impl H2Sound {
     /// Whether `entry` was encoded by something other than the tool, so the
     /// tag's rate isn't its own.
     fn is_legacy(&self, entry: &H2Entry) -> bool {
-        !entry.compression.eq_ignore_ascii_case(&self.tag_compression)
+        !entry
+            .compression
+            .eq_ignore_ascii_case(&self.tag_compression)
     }
 
     fn frames(&self, entry: &H2Entry) -> Option<f64> {
@@ -356,7 +358,11 @@ impl H2Sound {
     }
 
     /// The samples and chunk offsets of `entry`, copied out of the tag.
-    pub(in crate::app) fn samples(&self, tag: &TagFile, entry: &H2Entry) -> Option<(Vec<u8>, Vec<usize>)> {
+    pub(in crate::app) fn samples(
+        &self,
+        tag: &TagFile,
+        entry: &H2Entry,
+    ) -> Option<(Vec<u8>, Vec<usize>)> {
         let root = tag.root();
         let lpi = language_permutation_info(&root)?;
         let element = entry_struct(&lpi, entry.lpi, entry.raw)?;

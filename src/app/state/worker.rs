@@ -360,6 +360,13 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<Vec<TagEntry>, String>,
     },
+    /// A user-requested recursive folder materialization for bulk extractors.
+    FolderExtractablesLoaded {
+        stamp: KitStamp,
+        rel_path: PathBuf,
+        label: String,
+        result: Result<Vec<TagEntry>, String>,
+    },
     // Full recursive entry scan progress for a loose-folder source.
     EntryIndexScanProgress {
         stamp: KitStamp,

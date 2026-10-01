@@ -203,6 +203,33 @@ impl Baboon {
         false
     }
 
+    pub(super) fn handle_folder_extractables_loaded(
+        &mut self,
+        stamp: KitStamp,
+        rel_path: PathBuf,
+        label: String,
+        result: Result<Vec<TagEntry>, String>,
+    ) -> bool {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        self.kits[kit_index].scanning_entries = false;
+        self.kits[kit_index].index_jobs.entry_progress = None;
+        match result {
+            Ok(entries) => {
+                let count = entries.len();
+                self.install_folder_extractables(kit_index, &rel_path, entries);
+                self.status = format!(
+                    "Loaded the entire {label} folder: {count} tag(s) available for extraction"
+                );
+            }
+            Err(error) => {
+                self.status = format!("Could not load the entire {label} folder: {error}")
+            }
+        }
+        false
+    }
+
     /// Applies `WorkerMessage::EntryIndexScanProgress`, rejecting stale or inactive scans.
     pub(super) fn handle_entry_index_scan_progress(
         &mut self,
