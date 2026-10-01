@@ -95,25 +95,7 @@ pub(super) fn draw_model_viewport(
 
     let camera = PreviewCamera::new(data, state, rect);
     let preview = Arc::clone(&data.preview);
-    let visible_batches = preview
-        .batches
-        .iter()
-        .enumerate()
-        .filter_map(|(index, batch)| {
-            // The overlay toggles are draw-time filters: the collision and
-            // physics layers sit merged in the geometry from the moment the
-            // worker delivers them, and showing or hiding them costs one
-            // batch-list rebuild — not the tag re-reads that froze the frame
-            // when the toggles re-merged the preview. Gated on
-            // `overlays_loaded` so a standalone collision/physics tag — whose
-            // MAIN content uses these region names — is never filtered.
-            if !model_layer_visible(state, batch.layer) {
-                return None;
-            }
-            let selection = state.region_selections.get(&batch.region_name)?;
-            (selection.enabled && selection.permutation == batch.permutation_name).then_some(index)
-        })
-        .collect::<Vec<_>>();
+    let visible_batches = visible_batch_indices(&preview, state);
     let skinning_rows = animation_skinning_rows(data, state);
     let frame = ModelGpuFrame {
         preview,
@@ -224,6 +206,64 @@ pub(super) fn draw_model_viewport(
             }
         }
     }
+}
+
+/// The batches the current toggles and region selections draw.
+///
+/// The overlay toggles are draw-time filters: the collision and physics
+/// layers sit merged in the geometry from the moment the worker delivers
+/// them, and showing or hiding them costs one batch-list rebuild — not the
+/// tag re-reads that froze the frame when the toggles re-merged the preview.
+/// Gated on `overlays_loaded` so a standalone collision/physics tag — whose
+/// MAIN content uses these region names — is never filtered.
+///
+/// An overlay region shares its selection with the render region of the same
+/// name, so it follows the variant when its permutations are named like the
+/// render model's. When they aren't — a Halo CE gbxmodel names its monitor
+/// permutations `monitor`/`lightning-100` while the collision model's only
+/// one is `__base` — the selected name matches no overlay batch, and the
+/// overlay draws its region's first permutation instead of vanishing.
+pub(super) fn visible_batch_indices(
+    preview: &RenderModelPreview,
+    state: &ModelPreviewState,
+) -> Vec<usize> {
+    let overlay_has_selected = |layer: ModelPreviewLayer, region: &str, permutation: &str| {
+        preview.batches.iter().any(|batch| {
+            batch.layer == layer
+                && batch.region_name == region
+                && batch.permutation_name == permutation
+        })
+    };
+    let overlay_first_permutation = |layer: ModelPreviewLayer, region: &str| {
+        preview
+            .batches
+            .iter()
+            .find(|batch| batch.layer == layer && batch.region_name == region)
+            .map(|batch| batch.permutation_name.as_str())
+    };
+    preview
+        .batches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, batch)| {
+            if !model_layer_visible(state, batch.layer) {
+                return None;
+            }
+            let selection = state.region_selections.get(&batch.region_name)?;
+            if !selection.enabled {
+                return None;
+            }
+            if selection.permutation == batch.permutation_name {
+                return Some(index);
+            }
+            let is_overlay = state.overlays_loaded && batch.layer != ModelPreviewLayer::Render;
+            (is_overlay
+                && !overlay_has_selected(batch.layer, &batch.region_name, &selection.permutation)
+                && overlay_first_permutation(batch.layer, &batch.region_name)
+                    == Some(batch.permutation_name.as_str()))
+            .then_some(index)
+        })
+        .collect()
 }
 
 fn model_layer_visible(state: &ModelPreviewState, layer: ModelPreviewLayer) -> bool {
