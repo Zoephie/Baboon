@@ -1238,6 +1238,8 @@ struct ModelGlRenderer {
     uv_scale_b: Option<glow::NativeUniformLocation>,
     /// One sampler location per slot, in `TextureSlot` order.
     samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
+    /// Bound to every slot a material lacks; see [`Self::bind_material`].
+    placeholder: Option<glow::NativeTexture>,
 }
 
 /// One material's textures on the GPU, in `TextureSlot` order.
@@ -1311,6 +1313,7 @@ impl ModelGlRenderer {
                 uv_scale_a: gl.get_uniform_location(program, "u_uv_scale_a"),
                 uv_scale_b: gl.get_uniform_location(program, "u_uv_scale_b"),
                 samplers: SAMPLER_UNIFORMS.map(|name| gl.get_uniform_location(program, name)),
+                placeholder: upload_placeholder_texture(gl),
             })
         }
     }
@@ -1452,9 +1455,13 @@ impl ModelGlRenderer {
 
     /// Bind one material's textures, and tell the shader which slots are live.
     ///
-    /// A slot with no texture is left unbound and flagged absent rather than
-    /// bound to a dummy: sampling an unbound unit is defined to return black,
-    /// which a `have` flag of zero makes the shader skip entirely.
+    /// A slot with no texture is flagged absent, which makes the shader skip
+    /// it, and gets the 1x1 placeholder bound rather than nothing. Leaving
+    /// the slot on texture 0 is legal GL, but macOS's driver checks every
+    /// active sampler at each draw, whether or not the shader branch reads it,
+    /// and logs "unit 0 GLD_TEXTURE_INDEX_2D is unloadable" for any batch
+    /// without a base map. That includes every batch while the textures are
+    /// still loading.
     unsafe fn bind_material(&self, gl: &glow::Context, material: Option<&MaterialGlTextures>) {
         let mut have = [0.0f32; SLOT_COUNT];
         let mut scales = [1.0f32; SLOT_COUNT];
@@ -1467,7 +1474,7 @@ impl ModelGlRenderer {
             }
             unsafe {
                 gl.active_texture(glow::TEXTURE0 + index as u32);
-                gl.bind_texture(glow::TEXTURE_2D, texture);
+                gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
             }
         }
         unsafe {
@@ -2582,6 +2589,33 @@ pub(super) fn point3_to_array(p: RealPoint3d) -> [f32; 3] {
 
 pub(super) fn vector3_to_array(v: RealVector3d) -> [f32; 3] {
     [v.i, v.j, v.k]
+}
+
+/// The texture bound to a slot whose material has none: one opaque white
+/// texel, never sampled for its value (the slot's `have` flag is zero), only
+/// there so the unit holds a complete texture. Complete means a non-mipmap
+/// minification filter. GL's default filter expects mipmaps, and with one
+/// level it would leave this texture as incomplete as texture 0.
+unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            1,
+            1,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            Some(&[255, 255, 255, 255]),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Some(texture)
+    }
 }
 
 /// Upload one decoded texture, with mipmaps and the wrap modes the shader
