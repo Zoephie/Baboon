@@ -60,7 +60,7 @@ impl EditingKitValidationCache {
             .map(|profile| {
                 (
                     profile.id.clone(),
-                    validate_editing_kit_profile_layout(&profile.root, &profile.game),
+                    validate_profile_layout(profile),
                 )
             })
             .collect();
@@ -85,7 +85,7 @@ impl EditingKitValidationCache {
         &mut self,
         profile: &CustomEditingKitProfile,
     ) -> Result<EditingKitLayout, String> {
-        let status = validate_editing_kit_profile_layout(&profile.root, &profile.game);
+        let status = validate_profile_layout(profile);
         self.custom_layouts
             .insert(profile.id.clone(), status.clone());
         self.custom_icon_errors
@@ -326,15 +326,163 @@ pub(super) fn canonical_or_clean(path: &Path) -> PathBuf {
     clean_recent_path(fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
 }
 
-pub(super) fn custom_profile_root_conflicts(
+/// A profile's layout: its chosen tags and data folders when it has them (see
+/// [`validate_kit_layout`]), otherwise the folders found under its root.
+pub(super) fn validate_profile_layout(
+    profile: &CustomEditingKitProfile,
+) -> Result<EditingKitLayout, String> {
+    validate_kit_layout(
+        &profile.root,
+        &profile.game,
+        profile.tags_folder.as_deref(),
+        profile.data_folder.as_deref(),
+    )
+}
+
+/// The layout of a kit at `root` that may name its own tags and data folders,
+/// each relative to `root` or absolute.
+///
+/// With neither named, or for an engine that can't use them, this is the
+/// ordinary discovery. With either named, `root` is taken as the kit root as
+/// given (no search beneath it), the named folders must exist, and an unnamed
+/// one falls back to the root's own `tags`/`data`.
+pub(super) fn validate_kit_layout(
+    root: &Path,
+    game: &str,
+    tags_folder: Option<&Path>,
+    data_folder: Option<&Path>,
+) -> Result<EditingKitLayout, String> {
+    if !kit_folders_are_choosable(game) || (tags_folder.is_none() && data_folder.is_none()) {
+        return validate_editing_kit_profile_layout(root, game);
+    }
+    if !root.is_dir() {
+        return Err(format!("Folder not found: {}", root.display()));
+    }
+    let root = canonical_or_clean(root);
+    let tags = match tags_folder {
+        Some(folder) => {
+            let tags = root.join(folder);
+            if !tags.is_dir() {
+                return Err(format!("Tags folder not found: {}", tags.display()));
+            }
+            tags
+        }
+        None => find_named_child(&root, "tags").ok_or_else(|| {
+            format!(
+                "Required tags directory was not found under {}",
+                root.display()
+            )
+        })?,
+    };
+    let data = match data_folder {
+        Some(folder) => {
+            let data = root.join(folder);
+            if !data.is_dir() {
+                return Err(format!("Data folder not found: {}", data.display()));
+            }
+            Some(data)
+        }
+        None => find_named_child(&root, "data"),
+    };
+    Ok(EditingKitLayout {
+        tags: canonical_or_clean(&tags),
+        data: data.map(|data| canonical_or_clean(&data)),
+        root,
+    })
+}
+
+/// The tags folder that identifies a profile's kit: two profiles may share a
+/// root, but not a tags folder. A profile that doesn't validate is identified
+/// by where its tags folder would be.
+pub(super) fn profile_tags_folder(profile: &CustomEditingKitProfile) -> PathBuf {
+    validate_profile_layout(profile)
+        .map(|layout| layout.tags)
+        .unwrap_or_else(|_| {
+            canonical_or_clean(&profile.root).join(
+                profile
+                    .tags_folder
+                    .as_deref()
+                    .filter(|_| kit_folders_are_choosable(&profile.game))
+                    .unwrap_or(Path::new("tags")),
+            )
+        })
+}
+
+/// What a profile stores for a chosen tags or data folder (`default_name` is
+/// `tags` or `data`): nothing when it is the root's own folder of that name, so
+/// a kit left on its defaults saves as it always did and passes its tools no
+/// folder options; otherwise the folder relative to the root when it is
+/// inside it, or absolute.
+pub(super) fn folder_to_store(
+    root: &Path,
+    folder: Option<&Path>,
+    default_name: &str,
+) -> Option<PathBuf> {
+    let folder = folder?;
+    let default = find_named_child(root, default_name).map(|path| canonical_or_clean(&path));
+    if default
+        .as_deref()
+        .is_some_and(|default| same_recent_path(default, folder))
+    {
+        return None;
+    }
+    Some(
+        folder
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|_| folder.to_path_buf()),
+    )
+}
+
+/// The child folders of `root` whose names contain `needle` (`tags` or
+/// `data`), sorted: the choices offered beside a kit's tags and data folder
+/// inputs.
+pub(super) fn kit_folder_candidates(root: &Path, needle: &str) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .filter(|name| name.to_ascii_lowercase().contains(needle))
+        .collect();
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names
+}
+
+/// The name of `root`'s own `tags` or `data` folder, as it is spelled on disk,
+/// for filling a folder input when the root is chosen.
+pub(super) fn default_kit_folder_name(root: &Path, default_name: &str) -> Option<String> {
+    find_named_child(root, default_name)
+        .and_then(|path| path.file_name()?.to_str().map(str::to_owned))
+}
+
+/// The folder that tells a profile's kit apart when it is listed: its root, or
+/// for a kit that chose its own folders (whose root other kits may share), its
+/// tags folder.
+pub(super) fn profile_location<'a>(
+    profile: &'a CustomEditingKitProfile,
+    layout: Option<&'a EditingKitLayout>,
+) -> &'a Path {
+    match layout {
+        Some(layout) if profile.has_chosen_folders() => &layout.tags,
+        Some(layout) => &layout.root,
+        None => &profile.root,
+    }
+}
+
+/// Whether another profile already uses `resolved_tags` as its tags folder.
+/// Kits may share a root, but two kits on one tags folder would share its
+/// index, favorites and keywords while each believing it owned them.
+pub(super) fn custom_profile_tags_conflicts(
     profiles: &[CustomEditingKitProfile],
     editing_profile_id: Option<&str>,
-    resolved_root: &Path,
+    resolved_tags: &Path,
 ) -> bool {
     profiles.iter().any(|profile| {
         Some(profile.id.as_str()) != editing_profile_id
-            && validate_editing_kit_profile_layout(&profile.root, &profile.game)
-                .is_ok_and(|layout| same_recent_path(&layout.root, resolved_root))
+            && validate_profile_layout(profile)
+                .is_ok_and(|layout| same_recent_path(&layout.tags, resolved_tags))
     })
 }
 
@@ -764,16 +912,18 @@ mod tests {
             game: "halo3_mcc".to_owned(),
             root: root.clone(),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         }];
-        assert!(custom_profile_root_conflicts(
+        assert!(custom_profile_tags_conflicts(
             &profiles,
             None,
-            &canonical_or_clean(&root)
+            &canonical_or_clean(&root.join("tags"))
         ));
-        assert!(!custom_profile_root_conflicts(
+        assert!(!custom_profile_tags_conflicts(
             &profiles,
             Some("existing"),
-            &canonical_or_clean(&root)
+            &canonical_or_clean(&root.join("tags"))
         ));
         let _ = fs::remove_dir_all(outer);
     }
@@ -817,6 +967,8 @@ mod tests {
             game: "halo3_mcc".to_owned(),
             root: base.clone(),
             icon: Some(relative.clone()),
+            tags_folder: None,
+            data_folder: None,
         };
         remove_unreferenced_custom_icon_at(
             &base,
@@ -846,5 +998,122 @@ mod tests {
         .unwrap();
         assert_eq!(renamed_relative.parent(), relative.parent());
         let _ = fs::remove_dir_all(base);
+    }
+
+    fn kit_with_two_folder_sets(label: &str) -> (PathBuf, PathBuf) {
+        let outer = temp_dir(label);
+        let root = outer.join("H2EK");
+        for folder in ["tags", "data", "tags_moda", "data_moda"] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        (outer, canonical_or_clean(&root))
+    }
+
+    fn profile(
+        id: &str,
+        game: &str,
+        root: &Path,
+        tags: Option<&str>,
+        data: Option<&str>,
+    ) -> CustomEditingKitProfile {
+        CustomEditingKitProfile {
+            read_only: false,
+            git_tracked: false,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            game: game.to_owned(),
+            root: root.to_path_buf(),
+            icon: None,
+            tags_folder: tags.map(PathBuf::from),
+            data_folder: data.map(PathBuf::from),
+        }
+    }
+
+    #[test]
+    fn chosen_folders_resolve_against_the_root_and_must_exist() {
+        let (outer, root) = kit_with_two_folder_sets("chosen-folders");
+        let chosen = validate_kit_layout(
+            &root,
+            "halo2_mcc",
+            Some(Path::new("tags_moda")),
+            Some(Path::new("data_moda")),
+        )
+        .unwrap();
+        // Only one named: the other is the root's own.
+        let tags_only =
+            validate_kit_layout(&root, "haloce_mcc", Some(Path::new("tags_moda")), None).unwrap();
+        // Absolute folders stand on their own.
+        let absolute =
+            validate_kit_layout(&root, "halo2_mcc", Some(&root.join("tags_moda")), None).unwrap();
+        let missing = validate_kit_layout(&root, "halo2_mcc", Some(Path::new("tags_modb")), None)
+            .unwrap_err();
+        // An engine whose tools can't follow them ignores them.
+        let halo3 = validate_kit_layout(
+            &root,
+            "halo3_mcc",
+            Some(Path::new("tags_moda")),
+            Some(Path::new("data_moda")),
+        )
+        .unwrap();
+        let _ = fs::remove_dir_all(outer);
+
+        assert_eq!(chosen.root, root);
+        assert_eq!(chosen.tags, root.join("tags_moda"));
+        assert_eq!(chosen.data, Some(root.join("data_moda")));
+        assert_eq!(tags_only.tags, root.join("tags_moda"));
+        assert_eq!(tags_only.data, Some(root.join("data")));
+        assert_eq!(absolute.tags, root.join("tags_moda"));
+        assert!(missing.contains("Tags folder not found"), "{missing}");
+        assert_eq!(halo3.tags, root.join("tags"));
+    }
+
+    #[test]
+    fn only_folders_other_than_the_roots_own_are_stored() {
+        let (outer, root) = kit_with_two_folder_sets("stored-folders");
+        let elsewhere = outer.join("elsewhere_tags");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let elsewhere = canonical_or_clean(&elsewhere);
+        let own = folder_to_store(&root, Some(&root.join("tags")), "tags");
+        let inside = folder_to_store(&root, Some(&root.join("tags_moda")), "tags");
+        let outside = folder_to_store(&root, Some(&elsewhere), "tags");
+        let _ = fs::remove_dir_all(outer);
+        assert_eq!(own, None);
+        assert_eq!(inside, Some(PathBuf::from("tags_moda")));
+        assert_eq!(outside, Some(elsewhere));
+    }
+
+    /// Kits may share a root; they may not share a tags folder.
+    #[test]
+    fn kits_sharing_a_root_conflict_only_on_a_shared_tags_folder() {
+        let (outer, root) = kit_with_two_folder_sets("shared-root");
+        let profiles = vec![profile("stock", "halo2_mcc", &root, None, None)];
+        let stock_tags = canonical_or_clean(&root.join("tags"));
+        let moda_tags = canonical_or_clean(&root.join("tags_moda"));
+        let conflicts_with_stock = custom_profile_tags_conflicts(&profiles, None, &stock_tags);
+        let conflicts_with_moda = custom_profile_tags_conflicts(&profiles, None, &moda_tags);
+        let moda = profile(
+            "moda",
+            "halo2_mcc",
+            &root,
+            Some("tags_moda"),
+            Some("data_moda"),
+        );
+        let identity = profile_tags_folder(&moda);
+        let _ = fs::remove_dir_all(outer);
+        assert!(conflicts_with_stock);
+        assert!(!conflicts_with_moda);
+        assert_eq!(identity, moda_tags);
+    }
+
+    #[test]
+    fn the_quick_picks_are_the_roots_matching_folders() {
+        let (outer, root) = kit_with_two_folder_sets("candidates");
+        let tags = kit_folder_candidates(&root, "tags");
+        let data = kit_folder_candidates(&root, "data");
+        let default_tags = default_kit_folder_name(&root, "tags");
+        let _ = fs::remove_dir_all(outer);
+        assert_eq!(tags, vec!["tags".to_owned(), "tags_moda".to_owned()]);
+        assert_eq!(data, vec!["data".to_owned(), "data_moda".to_owned()]);
+        assert_eq!(default_tags.as_deref(), Some("tags"));
     }
 }

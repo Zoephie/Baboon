@@ -43,18 +43,27 @@ mod editing_kit_card_tests {
             game: "halo2_mcc".to_owned(),
             root: PathBuf::from("C:/Kits/Protected"),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         };
         let identity = EditingKitProfileIdentity {
             id: profile.id.clone(),
             name: profile.name.clone(),
         };
         assert!(profile.is_read_only_for(Some(&identity), None));
-        assert!(profile.is_read_only_for(None, Some(&profile.root)));
+        assert!(profile.is_read_only_for(None, Some(&profile.root.join("tags"))));
         assert!(profile.is_read_only_for(
             None,
             Some(&profile.root.join("tags/objects/example.weapon"))
         ));
         assert!(!profile.is_read_only_for(None, Some(Path::new("C:/Kits/Other"))));
+        // A Halo 2 kit can share its root with another kit using another tags
+        // folder; this kit's read-only setting doesn't reach that one.
+        assert!(!profile.is_read_only_for(None, Some(&profile.root.join("tags_moda"))));
+        let mut halo3 = profile.clone();
+        halo3.game = "halo3_mcc".to_owned();
+        assert!(halo3.is_read_only_for(None, Some(&halo3.root)));
+        assert!(halo3.is_read_only_for(None, Some(&halo3.root.join("tags_moda"))));
         assert!(CustomEditingKitDraft::from_profile(&profile).read_only);
         profile.git_tracked = true;
         assert!(CustomEditingKitDraft::from_profile(&profile).git_tracked);
@@ -66,7 +75,7 @@ mod editing_kit_card_tests {
 
         let ctx = egui::Context::default();
         ctx.set_style(foundation_style());
-        for game in ["halo2_mcc", "haloce_evolved"] {
+        for game in ["halo2_mcc", "haloce_mcc", "halo3_mcc", "haloce_evolved"] {
             let mut draft = CustomEditingKitDraft::new();
             draft.game = game.to_owned();
             let output = ctx.run(Default::default(), |ctx| {
@@ -84,7 +93,55 @@ mod editing_kit_card_tests {
                 egui::Shape::Text(text) if text.galley.text() == "Tracked in Git")
             });
             assert_eq!(git_checkbox_visible, game != "haloce_evolved");
+            // Only kits whose tools take -tags_dir/-data_dir offer the folders.
+            let folders_visible = output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "Tags Folder")
+            });
+            assert_eq!(
+                folders_visible,
+                matches!(game, "haloce_mcc" | "halo2_mcc"),
+                "{game}"
+            );
         }
+    }
+
+    /// Choosing a root fills the folders the user hasn't chosen with the root's
+    /// own `tags` and `data`; a folder the user picked survives a root change.
+    #[test]
+    fn choosing_a_root_fills_only_the_folders_still_on_auto() {
+        let outer = crate::test_kits::unique_temp_dir("kit-folder-autofill");
+        let first = outer.join("H2EK");
+        let second = outer.join("H2EK-copy");
+        for root in [&first, &second] {
+            for folder in ["tags", "Data", "tags_moda"] {
+                std::fs::create_dir_all(root.join(folder)).unwrap();
+            }
+        }
+        let mut draft = CustomEditingKitDraft::new();
+        draft.game = "halo2_mcc".to_owned();
+        draft.root_input = first.display().to_string();
+        refill_kit_folders(&mut draft);
+        let filled = (
+            draft.tags_folder_input.clone(),
+            draft.data_folder_input.clone(),
+        );
+
+        draft.tags_folder_input = "tags_moda".to_owned();
+        draft.tags_folder_auto = false;
+        draft.root_input = second.display().to_string();
+        refill_kit_folders(&mut draft);
+        let after_user_pick = draft.tags_folder_input.clone();
+
+        let mut halo3 = CustomEditingKitDraft::new();
+        halo3.game = "halo3_mcc".to_owned();
+        halo3.root_input = first.display().to_string();
+        refill_kit_folders(&mut halo3);
+        let _ = std::fs::remove_dir_all(&outer);
+
+        assert_eq!(filled, ("tags".to_owned(), "Data".to_owned()));
+        assert_eq!(after_user_pick, "tags_moda");
+        assert!(halo3.tags_folder_input.is_empty() && halo3.data_folder_input.is_empty());
     }
 
     #[test]
@@ -100,7 +157,9 @@ mod editing_kit_card_tests {
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        Vec2::new(600.0, 500.0),
+                        // Tall enough for the Halo 2 form's folder rows; the
+                        // dialog scrolls when a screen is shorter.
+                        Vec2::new(600.0, 900.0),
                     )),
                     ..Default::default()
                 },
@@ -111,7 +170,7 @@ mod editing_kit_card_tests {
                         assert!(!actions.save && !actions.cancel && !actions.remove);
                         assert!(ui.min_rect().right() <= right + 1.0, "form fields overflow");
                         assert!(
-                            ui.next_widget_position().y < 480.0,
+                            ui.next_widget_position().y < 880.0,
                             "form unexpectedly fills height"
                         );
                     });
@@ -352,6 +411,8 @@ mod editing_kit_card_tests {
                 game: "halo2_mcc".to_owned(),
                 root: PathBuf::from(format!("C:/Kits/{id}")),
                 icon: None,
+                tags_folder: None,
+                data_folder: None,
             })
             .collect();
         let original = profiles.clone();
@@ -901,6 +962,7 @@ fn draw_editing_kit_form(
                         .selectable_value(&mut draft.game, (*game).to_owned(), *label)
                         .changed()
                     {
+                        refill_kit_folders(draft);
                         ui_repaint_for_kit_draft(ui);
                     }
                 }
@@ -923,6 +985,7 @@ fn draw_editing_kit_form(
             .changed()
         {
             draft.error = None;
+            refill_kit_folders(draft);
             ui_repaint_for_kit_draft(ui);
         }
         if icon_text_button(ui, ButtonIcon::Browse, "Browse", true).clicked()
@@ -932,14 +995,28 @@ fn draw_editing_kit_form(
         {
             draft.root_input = path.display().to_string();
             draft.error = None;
+            refill_kit_folders(draft);
             ui_repaint_for_kit_draft(ui);
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
             draft.root_input.clear();
             draft.error = None;
+            refill_kit_folders(draft);
             ui_repaint_for_kit_draft(ui);
         }
     });
+    if kit_folders_are_choosable(&draft.game) {
+        draw_kit_folder_input(ui, draft, KitFolder::Tags);
+        draw_kit_folder_input(ui, draft, KitFolder::Data);
+        ui.label(
+            RichText::new(
+                "Leave a folder empty to use the root's own. Its tools are pointed at \
+                 other folders with -tags_dir and -data_dir.",
+            )
+            .small()
+            .color(subtle_dark()),
+        );
+    }
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Custom Icon (.png)");
     ui.horizontal(|ui| {
@@ -1051,6 +1128,121 @@ fn draw_editing_kit_form(
 
 fn ui_repaint_for_kit_draft(ui: &Ui) {
     ui.ctx().request_repaint();
+}
+
+#[derive(Clone, Copy)]
+enum KitFolder {
+    Tags,
+    Data,
+}
+
+impl KitFolder {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Tags => "tags",
+            Self::Data => "data",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags Folder",
+            Self::Data => "Data Folder",
+        }
+    }
+
+    fn input(self, draft: &mut CustomEditingKitDraft) -> (&mut String, &mut bool) {
+        match self {
+            Self::Tags => (&mut draft.tags_folder_input, &mut draft.tags_folder_auto),
+            Self::Data => (&mut draft.data_folder_input, &mut draft.data_folder_auto),
+        }
+    }
+}
+
+/// Fill the folder inputs the user hasn't chosen with the root's own `tags`
+/// and `data` folders, after the root or engine changes.
+fn refill_kit_folders(draft: &mut CustomEditingKitDraft) {
+    if !kit_folders_are_choosable(&draft.game) {
+        return;
+    }
+    let root = PathBuf::from(draft.root_input.trim());
+    for folder in [KitFolder::Tags, KitFolder::Data] {
+        let (input, auto) = folder.input(draft);
+        if *auto {
+            *input = default_kit_folder_name(&root, folder.name()).unwrap_or_default();
+        }
+    }
+}
+
+/// One folder row: the path (relative to the root, or absolute), Browse,
+/// Clear, and the root's folders with matching names as quick picks.
+fn draw_kit_folder_input(ui: &mut Ui, draft: &mut CustomEditingKitDraft, folder: KitFolder) {
+    let root = PathBuf::from(draft.root_input.trim());
+    ui.add_space(8.0);
+    editing_kit_field_label(ui, folder.label());
+    ui.horizontal(|ui| {
+        let width = (ui.available_width()
+            - editing_kit_action_width(ui, "Browse")
+            - editing_kit_action_width(ui, "Clear")
+            - ui.spacing().item_spacing.x * 2.0
+            - 8.0)
+            .max(40.0);
+        let hint = format!("{} (the root's own)", folder.name());
+        let (input, auto) = folder.input(draft);
+        if ui
+            .add(editing_kit_text_input(input, width).hint_text(placeholder_text(&hint)))
+            .changed()
+        {
+            *auto = input.trim().is_empty();
+            ui_repaint_for_kit_draft(ui);
+        }
+        if icon_text_button(ui, ButtonIcon::Browse, "Browse", true).clicked() {
+            let mut dialog = rfd::FileDialog::new().set_title(format!("Select {}", folder.label()));
+            if root.is_dir() {
+                dialog = dialog.set_directory(&root);
+            }
+            if let Some(path) = dialog.pick_folder() {
+                *input = path
+                    .strip_prefix(&root)
+                    .map(Path::to_path_buf)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string();
+                *auto = false;
+                ui_repaint_for_kit_draft(ui);
+            }
+        }
+        if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
+            input.clear();
+            *auto = true;
+            ui_repaint_for_kit_draft(ui);
+        }
+    });
+    // Listing the root on every frame would read the disk 60 times a second,
+    // so the choices are kept per root and folder kind.
+    let cache_id = egui::Id::new(("editing_kit_folder_candidates", folder.name(), &root));
+    let candidates = ui
+        .ctx()
+        .data(|data| data.get_temp::<Arc<Vec<String>>>(cache_id))
+        .unwrap_or_else(|| {
+            let candidates = Arc::new(kit_folder_candidates(&root, folder.name()));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(cache_id, Arc::clone(&candidates)));
+            candidates
+        });
+    if candidates.len() > 1 {
+        ui.horizontal_wrapped(|ui| {
+            let (input, auto) = folder.input(draft);
+            for name in candidates.iter() {
+                let selected = input.trim().eq_ignore_ascii_case(name);
+                if ui.selectable_label(selected, name).clicked() {
+                    *input = name.clone();
+                    *auto = false;
+                    ui_repaint_for_kit_draft(ui);
+                }
+            }
+        });
+    }
 }
 
 fn settings_window_body(
@@ -1430,7 +1622,7 @@ impl Baboon {
                     editing_kit_card_with_read_only(
                         ui,
                         &profile.name,
-                        &profile.root,
+                        profile_location(&profile, validation.as_ref().ok()),
                         texture.as_ref(),
                         validation.as_ref().err().map(String::as_str),
                         warning.as_deref(),
@@ -1545,21 +1737,40 @@ impl Baboon {
             return false;
         };
         let root_input = PathBuf::from(draft.root_input.trim());
-        let layout = match validate_editing_kit_profile_layout(&root_input, &game) {
+        let choosable = kit_folders_are_choosable(&game);
+        let folder_input = |input: &str| {
+            Some(input.trim())
+                .filter(|input| choosable && !input.is_empty())
+                .map(PathBuf::from)
+        };
+        let tags_input = folder_input(&draft.tags_folder_input);
+        let data_input = folder_input(&draft.data_folder_input);
+        let layout = match validate_kit_layout(
+            &root_input,
+            &game,
+            tags_input.as_deref(),
+            data_input.as_deref(),
+        ) {
             Ok(layout) => layout,
             Err(error) => {
                 draft.error = Some(error);
                 return false;
             }
         };
-        if custom_profile_root_conflicts(
+        if custom_profile_tags_conflicts(
             &self.prefs.custom_editing_kit_profiles,
             draft.editing_id.as_deref(),
-            &layout.root,
+            &layout.tags,
         ) {
-            draft.error = Some("Another editing kit already uses this root".to_owned());
+            draft.error = Some("Another editing kit already uses this tags folder".to_owned());
             return false;
         }
+        let tags_folder = choosable
+            .then(|| folder_to_store(&layout.root, Some(&layout.tags), "tags"))
+            .flatten();
+        let data_folder = choosable
+            .then(|| folder_to_store(&layout.root, layout.data.as_deref(), "data"))
+            .flatten();
 
         let id = draft
             .editing_id
@@ -1603,6 +1814,8 @@ impl Baboon {
             game,
             root: layout.root,
             icon,
+            tags_folder,
+            data_folder,
         };
         let previous_profiles = self.prefs.custom_editing_kit_profiles.clone();
         let previous = existing_profile;
@@ -1635,8 +1848,10 @@ impl Baboon {
         self.refresh_editing_kit_validation();
 
         if let Some(previous) = previous {
-            let source_changed =
-                previous.game != profile.game || !same_recent_path(&previous.root, &profile.root);
+            let source_changed = previous.game != profile.game
+                || !same_recent_path(&previous.root, &profile.root)
+                || previous.tags_folder != profile.tags_folder
+                || previous.data_folder != profile.data_folder;
             for kit in &mut self.kits {
                 if kit
                     .profile

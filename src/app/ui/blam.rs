@@ -27,9 +27,7 @@ impl Baboon {
     /// splits, and resizes like any open tag.
     pub(super) fn draw_blam_pane(&mut self, ui: &mut Ui, kit_index: usize) {
         let kit_id = self.kits[kit_index].id;
-        let data_root = self
-            .editing_kit_root_for(kit_index)
-            .map(|root| root.join("data"));
+        let data_root = self.kit_layout_for(kit_index).map(|layout| layout.data);
 
         // Re-detect when the asset path changes (or a rescan was forced), not
         // every frame — the ticks follow the typed path without hammering disk.

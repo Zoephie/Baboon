@@ -48,7 +48,7 @@ impl Baboon {
             self.kits[kit_index].blam.status = "Pick an asset data folder first".to_owned();
             return;
         }
-        let Some(kit_root) = self.editing_kit_root_for(kit_index) else {
+        let Some(layout) = self.kit_layout_for(kit_index) else {
             self.kits[kit_index].blam.status =
                 "This workspace has no loose editing kit to import into".to_owned();
             return;
@@ -79,7 +79,7 @@ impl Baboon {
             .to_owned();
         let blam = &self.kits[kit_index].blam;
         let job = BlamImportJob {
-            data_dir: kit_root.join("data").join(&asset_rel),
+            data_dir: layout.data.join(&asset_rel),
             tags_root,
             asset_rel,
             asset_name,

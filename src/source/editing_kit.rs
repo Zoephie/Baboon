@@ -11,6 +11,11 @@ pub(crate) fn resolve_folder_root(
     let game = ek_root.as_ref().map(|(_, game)| *game);
     let scan_root = if is_tags_folder(selected_root) {
         selected_root.to_path_buf()
+    } else if let Some(tags) = ek_root
+        .as_ref()
+        .and_then(|(ek_root, _)| other_tags_folder(ek_root, selected_root))
+    {
+        tags
     } else if let Some((ek_root, _)) = ek_root {
         let tags = ek_root.join("tags");
         if !tags.is_dir() {
@@ -30,6 +35,23 @@ pub(crate) fn resolve_folder_root(
         label,
         game,
     })
+}
+
+/// The folder under `ek_root` holding `selected`, when its name contains
+/// `tags` but isn't the root's own `tags` folder: a kit keeping another tags
+/// folder (`tags_moda`) beside the stock one. Picking it, or a folder inside
+/// it, browses that folder rather than the root's `tags`.
+fn other_tags_folder(ek_root: &Path, selected: &Path) -> Option<PathBuf> {
+    let child = selected.strip_prefix(ek_root).ok()?.components().next()?;
+    let std::path::Component::Normal(name) = child else {
+        return None;
+    };
+    let name = name.to_str()?;
+    if name.eq_ignore_ascii_case("tags") || !name.to_ascii_lowercase().contains("tags") {
+        return None;
+    }
+    let folder = ek_root.join(name);
+    folder.is_dir().then_some(folder)
 }
 
 fn find_tags_folder(selected_root: &Path) -> Option<PathBuf> {
@@ -138,7 +160,11 @@ fn folder_source_label(
         .map(str::to_owned)
         .unwrap_or_else(|| selected_root.display().to_string());
     let mut label = if scan_root != selected_root {
-        format!("{selected_label}/tags")
+        let scan_name = scan_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("tags");
+        format!("{selected_label}/{scan_name}")
     } else {
         selected_label
     };

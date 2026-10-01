@@ -715,7 +715,11 @@ impl Baboon {
                     let tooltip = validation
                         .as_ref()
                         .map(|layout| {
-                            format!("Load {} from {}", profile.name, layout.root.display())
+                            format!(
+                                "Load {} from {}",
+                                profile.name,
+                                profile_location(&profile, Some(layout)).display()
+                            )
                         })
                         .unwrap_or_else(|error| {
                             format!("{} is unavailable: {error}", profile.name)

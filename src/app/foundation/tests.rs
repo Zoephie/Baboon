@@ -583,6 +583,7 @@ pub(in crate::app) mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         };
         let catalog = tag_reference_catalog_for_source(&container_source, true)
             .expect("container source should expose a catalog");
@@ -605,6 +606,7 @@ pub(in crate::app) mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         };
         assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
     }

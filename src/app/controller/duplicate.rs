@@ -1701,6 +1701,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -2089,6 +2090,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         };
 
         crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);

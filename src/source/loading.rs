@@ -37,6 +37,7 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         initial_tag: Some((key, tag)),
         key_hints: Default::default(),
         complete_scan: false,
+        chosen_kit_layout: None,
     })
 }
 
@@ -120,6 +121,7 @@ fn load_resolved_folder(
         reverse_dependencies,
         initial_tag: None,
         key_hints: Default::default(),
+        chosen_kit_layout: None,
     })
 }
 
@@ -178,6 +180,7 @@ pub fn load_monolithic_blob_index(
         key_hints: Default::default(),
         complete_scan: false,
         reverse_dependencies: None,
+        chosen_kit_layout: None,
     })
 }
 
@@ -713,6 +716,7 @@ fn build_container_set(
         key_hints: Default::default(),
         complete_scan: false,
         reverse_dependencies: None,
+        chosen_kit_layout: None,
     })
 }
 

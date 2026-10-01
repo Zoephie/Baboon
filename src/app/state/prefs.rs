@@ -129,6 +129,31 @@ pub(in crate::app) struct CustomEditingKitProfile {
     /// Relative to the active data directory, with legacy executable-relative lookup.
     /// `None` uses the bundled engine artwork.
     pub(in crate::app) icon: Option<PathBuf>,
+    /// The kit's tags and data folders, relative to `root` or absolute; `None`
+    /// is the root's own `tags`/`data`. Only kits whose tools accept
+    /// `-tags_dir`/`-data_dir` can set them (see [`kit_folders_are_choosable`]).
+    pub(in crate::app) tags_folder: Option<PathBuf>,
+    pub(in crate::app) data_folder: Option<PathBuf>,
+}
+
+/// Whether a kit of `game` can use tags and data folders other than its root's
+/// own `tags` and `data`.
+///
+/// Only the Halo CE and Halo 2 MCC tools take `-tags_dir`/`-data_dir`. The
+/// Halo 3-era tools open `tags\` and `data\` relative to the folder they run
+/// in and accept no option to change it (checked in IDA for the Halo 3 and
+/// Reach `tool.exe`), so a kit editing another folder would have its tools
+/// working on a different one.
+pub(in crate::app) fn kit_folders_are_choosable(game: &str) -> bool {
+    matches!(game, "haloce_mcc" | "halo2_mcc")
+}
+
+impl CustomEditingKitProfile {
+    /// Whether this profile names a tags or data folder of its own.
+    pub(in crate::app) fn has_chosen_folders(&self) -> bool {
+        kit_folders_are_choosable(&self.game)
+            && (self.tags_folder.is_some() || self.data_folder.is_some())
+    }
 }
 
 impl CustomEditingKitProfile {
@@ -137,13 +162,29 @@ impl CustomEditingKitProfile {
         identity: Option<&EditingKitProfileIdentity>,
         root: Option<&Path>,
     ) -> bool {
+        let scope = self.read_only_scope();
         self.read_only
             && self.game != "haloce_evolved"
             && (identity.is_some_and(|identity| identity.id == self.id)
                 || root.is_some_and(|root| {
                     root.ancestors()
-                        .any(|ancestor| same_recent_path(ancestor, &self.root))
+                        .any(|ancestor| same_recent_path(ancestor, &scope))
                 }))
+    }
+
+    /// The folder a read-only profile protects for tags not opened through it.
+    ///
+    /// Its root, except for an engine whose kits may share a root: there it is
+    /// its tags folder, so a read-only kit doesn't make a writable kit beside
+    /// it read-only too. Worked out without touching the disk, since the
+    /// banner asks every frame; a default tags folder is taken to be `tags`.
+    fn read_only_scope(&self) -> PathBuf {
+        if kit_folders_are_choosable(&self.game) {
+            self.root
+                .join(self.tags_folder.as_deref().unwrap_or(Path::new("tags")))
+        } else {
+            self.root.clone()
+        }
     }
 }
 
@@ -168,6 +209,14 @@ pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) name: String,
     pub(in crate::app) game: String,
     pub(in crate::app) root_input: String,
+    /// The tags and data folder inputs, shown only for engines that can use
+    /// them. Empty is the root's own folder.
+    pub(in crate::app) tags_folder_input: String,
+    pub(in crate::app) data_folder_input: String,
+    /// Whether each folder input still holds what choosing the root filled in.
+    /// Changing the root refills only these, never a folder the user picked.
+    pub(in crate::app) tags_folder_auto: bool,
+    pub(in crate::app) data_folder_auto: bool,
     pub(in crate::app) icon: CustomEditingKitIconDraft,
     pub(in crate::app) error: Option<String>,
     pub(in crate::app) icon_warning: Option<String>,
@@ -188,6 +237,10 @@ impl CustomEditingKitDraft {
             name: String::new(),
             game: "halo2_mcc".to_owned(),
             root_input: String::new(),
+            tags_folder_input: String::new(),
+            data_folder_input: String::new(),
+            tags_folder_auto: true,
+            data_folder_auto: true,
             icon: CustomEditingKitIconDraft::Default,
             error: None,
             icon_warning: None,
@@ -202,6 +255,10 @@ impl CustomEditingKitDraft {
             name: profile.name.clone(),
             game: profile.game.clone(),
             root_input: profile.root.display().to_string(),
+            tags_folder_input: folder_input(profile.tags_folder.as_deref()),
+            data_folder_input: folder_input(profile.data_folder.as_deref()),
+            tags_folder_auto: profile.tags_folder.is_none(),
+            data_folder_auto: profile.data_folder.is_none(),
             icon: profile
                 .icon
                 .clone()
@@ -211,6 +268,12 @@ impl CustomEditingKitDraft {
             icon_warning: None,
         }
     }
+}
+
+fn folder_input(folder: Option<&Path>) -> String {
+    folder
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_default()
 }
 
 pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 8] = [

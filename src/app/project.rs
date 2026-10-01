@@ -2865,6 +2865,7 @@ mod overlay_adoption_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
         let mut project = ActiveCampaignProject::fresh(PathBuf::from("recovery.baboon"), 0.0);
         project.pending_new_overlays.push(CampaignProjectOverlay {

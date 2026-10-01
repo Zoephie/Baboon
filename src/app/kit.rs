@@ -667,6 +667,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
         kit.parsed_tags
             .insert("tag".to_owned(), TagDocument::modified(tag));

@@ -617,6 +617,8 @@ mod tests {
             game: "halo2_mcc".to_owned(),
             root: PathBuf::from(id),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         }
     }
 
@@ -801,6 +803,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
         app.kits[0].git_review.repo_root = Some(root.clone());
         let generation = app.kits[0].generation;

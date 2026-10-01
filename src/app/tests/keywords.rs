@@ -20,3 +20,36 @@ fn add_dedupes_and_remove_clears() {
     store.remove("file:a", "wip");
     assert!(store.keywords("file:a").is_empty());
 }
+
+/// Two kits of one game share its sidecar. Each used to write back the whole
+/// map it loaded, so whichever saved second erased the first one's keywords.
+#[test]
+fn two_kits_of_one_game_keep_each_others_keywords() {
+    let dir = std::env::temp_dir().join(format!("baboon-keywords-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("halo2_mcc_keywords.json");
+    let mut first = KeywordStore::default();
+    let mut second = KeywordStore::default();
+    first.load_at(Some(path.clone()));
+    second.load_at(Some(path.clone()));
+
+    first.add("file:a", "hero");
+    first.save_if_dirty();
+    second.add("file:b", "wip");
+    second.save_if_dirty();
+    // A removal is a change too, and must not bring back what was removed.
+    first.remove("file:a", "hero");
+    first.save_if_dirty();
+
+    let mut reloaded = KeywordStore::default();
+    reloaded.load_at(Some(path));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(reloaded.keywords("file:a").is_empty());
+    assert_eq!(reloaded.keywords("file:b"), &["wip"]);
+    assert_eq!(second.keywords("file:b"), &["wip"]);
+    assert_eq!(
+        first.keywords("file:b"),
+        &["wip"],
+        "the first kit sees the second's on its next save"
+    );
+}

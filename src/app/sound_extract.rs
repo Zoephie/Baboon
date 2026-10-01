@@ -20,6 +20,7 @@
 use std::path::{Path, PathBuf};
 
 use super::audio::InlineCodec;
+use crate::source::KitLayout;
 
 /// One file to write during an extraction.
 pub(super) struct ExtractItem {
@@ -91,29 +92,22 @@ pub(super) fn sanitize_component(name: &str) -> String {
     }
 }
 
-/// The `data\` root for a source: sibling of the `tags\` root in an editing kit
-/// The `data\` (default) or `data_<language>\` root beside the tags tree
-/// (`<EK>/tags` → `<EK>/data[_<lang>]`) — the tool exports/imports non-default
-/// languages from `data_<language>\`.
-pub(super) fn data_root_for_language(tags_root: &Path, language: Option<&str>) -> Option<PathBuf> {
-    let ek = tags_root.parent()?;
-    Some(match language {
-        Some(lang) => ek.join(format!("data_{lang}")),
-        None => ek.join("data"),
-    })
-}
-
 /// The reimport-layout base directory for a tag: `data[_<language>]\<tag path
-/// minus extension>\`. `abs_tag_path` is the loose `.sound` file; `tags_root` its
-/// root. `language = None` → `data\` (the default/primary language).
+/// minus extension>\`, in the kit's data folder for `language` (see
+/// [`KitLayout::data_for_language`]); the tool exports and imports non-default
+/// languages from `data_<language>\`. `abs_tag_path` is the loose `.sound` file,
+/// which must be under the kit's tags folder.
 pub(super) fn reimport_base_dir_lang(
-    tags_root: &Path,
+    layout: &KitLayout,
     abs_tag_path: &Path,
     language: Option<&str>,
 ) -> Option<PathBuf> {
-    let data_root = data_root_for_language(tags_root, language)?;
-    let rel = abs_tag_path.strip_prefix(tags_root).ok()?;
-    Some(data_root.join(rel.with_extension("")))
+    let rel = abs_tag_path.strip_prefix(&layout.tags).ok()?;
+    Some(
+        layout
+            .data_for_language(language)
+            .join(rel.with_extension("")),
+    )
 }
 
 /// Write interleaved 16-bit PCM as a canonical little-endian WAV, creating
@@ -192,15 +186,15 @@ mod tests {
 
     #[test]
     fn extract_base_dir_mirrors_the_tag() {
-        let tags_root = Path::new("/ek/tags");
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags")).unwrap();
         let tag = Path::new("/ek/tags/sound/weapons/rifle.sound");
         assert_eq!(
-            reimport_base_dir_lang(tags_root, tag, None).unwrap(),
+            reimport_base_dir_lang(&layout, tag, None).unwrap(),
             PathBuf::from("/ek/data/sound/weapons/rifle")
         );
         // A non-default language routes to `data_<lang>\`.
         assert_eq!(
-            reimport_base_dir_lang(tags_root, tag, Some("french")).unwrap(),
+            reimport_base_dir_lang(&layout, tag, Some("french")).unwrap(),
             PathBuf::from("/ek/data_french/sound/weapons/rifle")
         );
     }

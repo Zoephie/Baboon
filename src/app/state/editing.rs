@@ -433,6 +433,10 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) definitions_root: Option<&'a Path>,
     pub(in crate::app) names: Option<&'a TagNameIndex>,
     pub(in crate::app) tags_root: Option<&'a Path>,
+    /// The loaded kit's root, tags and data folders, for anything that writes
+    /// into the kit's data folder (sound extraction). `None` outside a loose
+    /// editing kit.
+    pub(in crate::app) kit_layout: Option<&'a KitLayout>,
     /// Entries available to source-aware bitmap hover previews. Loose sources
     /// can also synthesize an entry from `tags_root` when their lazy browser
     /// tree has not visited the referenced folder yet.
@@ -566,6 +570,7 @@ impl<'a> FieldEditContext<'a> {
             definitions_root: None,
             names: None,
             tags_root: None,
+            kit_layout: None,
             bitmap_hover_entries: None,
             tag_reference_catalog: None,
             tag_reference_picker: &mut sinks.tag_reference_picker,

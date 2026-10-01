@@ -478,9 +478,10 @@ impl Baboon {
     }
 
     pub(super) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
-        let kit_root = self.editing_kit_root();
-        let data_root = kit_root.as_ref().map(|root| root.join("data"));
-        let tags_root = kit_root.as_ref().map(|root| root.join("tags"));
+        let layout = self.kit_layout_for(self.active);
+        let kit_root = layout.as_ref().map(|layout| layout.root.clone());
+        let data_root = layout.as_ref().map(|layout| layout.data.clone());
+        let tags_root = layout.as_ref().map(|layout| layout.tags.clone());
         let start_dir = match kind {
             ToolCommandArgKind::PathData => data_root.as_deref(),
             ToolCommandArgKind::PathTag => tags_root.as_deref(),

@@ -1803,6 +1803,8 @@ mod apply_doc_ops_tests {
             game: "halo3_mcc".to_owned(),
             root: PathBuf::from("/nowhere"),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         };
         app.kits[0].profile = Some(EditingKitProfileIdentity {
             id: profile.id.clone(),

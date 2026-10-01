@@ -146,6 +146,7 @@ impl Baboon {
             TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
             _ => None,
         });
+        let kit_layout = source.and_then(LoadedSourceData::kit_layout);
         let mut edit_context = FieldEditContext {
             view_scope: scope,
             tag_key: &key,
@@ -163,6 +164,7 @@ impl Baboon {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
             }),
+            kit_layout: kit_layout.as_ref(),
             bitmap_hover_entries: source.map(LoadedSourceData::full_entry_set),
             tag_reference_catalog: source
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),

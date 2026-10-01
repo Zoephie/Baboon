@@ -356,6 +356,7 @@ mod library_scan_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
         app.active = 0;
 
