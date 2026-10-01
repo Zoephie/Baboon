@@ -36,11 +36,12 @@ pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use variants::*;
 
-// The material resolver currently understands the render-method shader/bitmap
-// formats validated for H3EK and HREK. Other kits may share a tag container
+// The material resolver understands the render-method shaders validated for
+// H3EK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's
+// model and environment shaders. Other kits may share a tag container
 // generation, but that alone does not make their texture path supported.
 fn model_preview_supports_textures(game: Option<&str>) -> bool {
-    matches!(game, Some("halo3_mcc" | "haloreach_mcc"))
+    matches!(game, Some("halo3_mcc" | "haloreach_mcc" | "halo2_mcc" | "haloce_mcc"))
 }
 
 #[cfg(test)]
@@ -51,10 +52,10 @@ mod texture_availability_tests {
     fn textured_shading_is_limited_to_supported_editing_kits() {
         assert!(model_preview_supports_textures(Some("halo3_mcc")));
         assert!(model_preview_supports_textures(Some("haloreach_mcc")));
+        assert!(model_preview_supports_textures(Some("halo2_mcc")));
+        assert!(model_preview_supports_textures(Some("haloce_mcc")));
         for game in [
             None,
-            Some("haloce_mcc"),
-            Some("halo2_mcc"),
             Some("halo3odst_mcc"),
             Some("halo4_mcc"),
             Some("halo2amp_mcc"),
@@ -1475,12 +1476,13 @@ fn texture_resolve_note(
     }
     if !partial.is_empty() {
         summary.push(format!(
-            "{} read without their render method definition",
+            "{} read without their definition or template defaults",
             partial.len()
         ));
         detail.push(format!(
-            "Read from the shader's own parameters, without option defaults such as \
-             detail-map tiling:\n{}",
+            "Read from the shader's own parameters, without the defaults its render \
+             method definition or shader template supplies, such as detail-map \
+             tiling:\n{}",
             partial.join("\n")
         ));
     }
@@ -2167,7 +2169,7 @@ mod texture_note_tests {
         let (summary, detail) = texture_resolve_note(&textures, &materials).unwrap();
         assert_eq!(
             summary,
-            "1 of 3 materials untextured; 1 read without their render method definition \
+            "1 of 3 materials untextured; 1 read without their definition or template defaults \
              — hover for why"
         );
         assert!(detail.contains("shaders/a: shader tag not found"));

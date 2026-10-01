@@ -347,3 +347,135 @@ fn a_real_kits_animation_decodes_into_frames() {
         "non-finite transforms in frame 0"
     );
 }
+
+/// Angle between two `[i, j, k, w]` rotations, in degrees.
+fn rotation_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
+    let dot = a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>().abs().min(1.0);
+    2.0 * dot.acos().to_degrees()
+}
+
+/// Drive a real kit's model through the panel's own path — the preview load,
+/// the animation list, the decode — and check what playback consumes: the
+/// geometry is skinned across the skeleton, every decoded node lands on a
+/// preview node, and an idle's first frame sits closer to the bind pose in the
+/// rotation convention the decode picked than in the opposite one. That last
+/// check is the one a wrong conjugation fails.
+fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
+    let tag = crate::source::read_entry(&source, &entry).expect("tag reads");
+    let names = TagNameIndex::load_game(crate::test_kits::definitions(), game).expect("tag names");
+    let data = crate::app::model_preview::loading::load_model_preview(
+        &tag,
+        &entry,
+        &names,
+        Some(&source),
+        &Default::default(),
+    )
+    .expect("preview loads");
+    let nodes = &data.preview.nodes;
+
+    // Before the engine read skinning for these games, every vertex was on node 0.
+    let skinned: std::collections::BTreeSet<usize> = data
+        .preview
+        .vertices
+        .iter()
+        .flat_map(|vertex| {
+            vertex
+                .node_indices
+                .iter()
+                .zip(vertex.node_weights)
+                .filter(|(_, weight)| *weight > 0.0)
+                .map(|(index, _)| (*index + 0.5) as usize)
+        })
+        .collect();
+    assert!(
+        skinned.len() > 10 && skinned.iter().all(|&node| node < nodes.len()),
+        "{}: weighted nodes {skinned:?} of {}",
+        entry.display_path,
+        nodes.len()
+    );
+
+    let list = list_model_animations(&source, &entry).expect("animation list");
+    let index = list
+        .iter()
+        .position(|animation| animation.name == idle)
+        .unwrap_or_else(|| panic!("{}: no '{idle}' in {} animations", entry.display_path, list.len()));
+    assert!(list[index].playable);
+    let decoded = decode_model_animation(&source, &entry, index).expect("decode");
+    assert_eq!(decoded.frames.len(), list[index].frame_count as usize);
+
+    let by_name: HashMap<&str, &RenderModelPreviewNode> =
+        nodes.iter().map(|node| (node.name.as_str(), node)).collect();
+    let (mut chosen, mut opposite) = (Vec::new(), Vec::new());
+    for (name, transform) in decoded.skeleton_names.iter().zip(&decoded.frames[0]) {
+        let node = by_name
+            .get(name.as_str())
+            .unwrap_or_else(|| panic!("{}: animated node '{name}' is not in the preview", entry.display_path));
+        let [i, j, k, w] = transform.rotation;
+        chosen.push(rotation_angle(transform.rotation, node.bind_rotation));
+        opposite.push(rotation_angle([-i, -j, -k, w], node.bind_rotation));
+    }
+    let median = |mut values: Vec<f32>| {
+        values.sort_by(f32::total_cmp);
+        values[values.len() / 2]
+    };
+    let (chosen, opposite) = (median(chosen), median(opposite));
+    eprintln!(
+        "{}: '{idle}' frame 0 median {chosen:.1}° from bind, {opposite:.1}° in the opposite convention",
+        entry.display_path
+    );
+    assert!(
+        chosen < opposite,
+        "{}: '{idle}' frame 0 is nearer the bind pose with its rotations conjugated \
+         ({opposite:.1}° vs {chosen:.1}°)",
+        entry.display_path
+    );
+}
+
+/// A Halo CE object stands in for the `.model`: it names the gbxmodel and the
+/// `model_animations` both. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
+#[test]
+fn a_halo_ce_biped_plays_its_idle() {
+    let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+    let rel = "characters/cyborg/cyborg.biped";
+    if !tags.join(rel).is_file() {
+        eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
+        return;
+    }
+    let source = TagSource::LooseFolder {
+        root: tags.clone(),
+        game: Some("haloce_mcc".to_owned()),
+        definitions_root: crate::test_kits::definitions().to_path_buf(),
+    };
+    let entry = TagEntry {
+        key: format!("file:{}", tags.join(rel).display()),
+        display_path: rel.to_owned(),
+        group_tag: u32::from_be_bytes(*b"bipd"),
+        group_name: Some("biped".to_owned()),
+        location: TagEntryLocation::LooseFile(tags.join(rel)),
+    };
+    plays_a_classic_idle(source, entry, "haloce_mcc", "stand rifle idle");
+}
+
+/// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
+#[test]
+fn a_halo_2_model_plays_its_idle() {
+    let tags = crate::test_kits::h2ek_tags();
+    let rel = "objects/characters/masterchief/masterchief.model";
+    if !tags.join(rel).is_file() {
+        eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
+        return;
+    }
+    let source = TagSource::LooseFolder {
+        root: tags.clone(),
+        game: Some("halo2_mcc".to_owned()),
+        definitions_root: crate::test_kits::definitions().to_path_buf(),
+    };
+    let entry = TagEntry {
+        key: format!("file:{}", tags.join(rel).display()),
+        display_path: rel.to_owned(),
+        group_tag: u32::from_be_bytes(*b"hlmt"),
+        group_name: Some("model".to_owned()),
+        location: TagEntryLocation::LooseFile(tags.join(rel)),
+    };
+    plays_a_classic_idle(source, entry, "halo2_mcc", "combat:rifle:idle");
+}

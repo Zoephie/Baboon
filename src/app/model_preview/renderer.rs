@@ -712,6 +712,7 @@ const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_bump",
     "u_tex_bump_detail",
     "u_tex_alpha",
+    "u_tex_multipurpose",
 ];
 
 /// Build the two GLSL sources.
@@ -848,12 +849,21 @@ fn model_shader_sources(
              uniform sampler2D u_tex_bump;\n\
              uniform sampler2D u_tex_bump_detail;\n\
              uniform sampler2D u_tex_alpha;\n\
-             // Which slots this material bound, and each one's UV multiplier.\n\
-             // Slots 0-3 in the `_a` vectors, slot 4 in `_b.x`.\n\
+             uniform sampler2D u_tex_multipurpose;\n\
+             // Which slots this material bound: 0-3 in `u_have_a`, 4-5 in\n\
+             // `u_have_b.xy`. Each slot's UV multiplier is a per-axis pair:\n\
+             // base and detail in `_a`, bump and bump detail in `_b`, alpha\n\
+             // and multipurpose in `_c`.\n\
              uniform vec4 u_have_a;\n\
              uniform vec4 u_have_b;\n\
              uniform vec4 u_uv_scale_a;\n\
              uniform vec4 u_uv_scale_b;\n\
+             uniform vec4 u_uv_scale_c;\n\
+             // Detail combine: x the function (0 the Halo 3 linear-space\n\
+             // biased multiply; 1-3 Halo CE's biased multiply, multiply and\n\
+             // biased add, on stored values), y the CE detail mask (0 none),\n\
+             // z the Xbox multipurpose channel order.\n\
+             uniform vec4 u_detail;\n\
              uniform vec3 u_base_color;\n\
              uniform float u_unlit;\n\
              uniform float u_shaded;\n\
@@ -869,16 +879,36 @@ fn model_shader_sources(
                      // is not opacity in Halo — it carries a mask, most often\n\
                      // specular — so treating it as coverage punched holes\n\
                      // through every character whose diffuse had a dark mask.\n\
-                     if (u_have_b.x > 0.5 && {sample}(u_tex_alpha, v_uv * u_uv_scale_b.x).a < 0.5) discard;\n\
+                     if (u_have_b.x > 0.5 && {sample}(u_tex_alpha, v_uv * u_uv_scale_c.xy).a < 0.5) discard;\n\
                      if (u_have_a.x > 0.5) {{\n\
-                         albedo = to_linear({sample}(u_tex_base, v_uv * u_uv_scale_a.x).rgb);\n\
+                         albedo = to_linear({sample}(u_tex_base, v_uv * u_uv_scale_a.xy).rgb);\n\
                      }}\n\
                      // Halo detail maps are grey-centred and modulate: mid-grey\n\
                      // leaves the base untouched, darker and lighter push it.\n\
                      // They tile — commonly sixteen times — so the scale matters.\n\
                      if (u_have_a.y > 0.5) {{\n\
-                         vec3 detail = to_linear({sample}(u_tex_detail, v_uv * u_uv_scale_a.y).rgb);\n\
-                         albedo = clamp(albedo * detail * 2.0, 0.0, 1.0);\n\
+                         vec3 detail = {sample}(u_tex_detail, v_uv * u_uv_scale_a.zw).rgb;\n\
+                         if (u_detail.x < 0.5) {{\n\
+                             albedo = clamp(albedo * to_linear(detail) * 2.0, 0.0, 1.0);\n\
+                         }} else {{\n\
+                             // Halo CE's ShaderModel() (fx/model_common.h): the\n\
+                             // mask lerps the detail toward its function's\n\
+                             // neutral value, then combines with the base.\n\
+                             float mask = 1.0;\n\
+                             if (u_detail.y > 0.5 && u_have_b.y > 0.5) {{\n\
+                                 vec4 mp = {sample}(u_tex_multipurpose, v_uv * u_uv_scale_c.zw);\n\
+                                 if (u_detail.z > 0.5) mp = mp.agrb;\n\
+                                 float k = u_detail.y;\n\
+                                 float channel = k < 2.5 ? mp.b : (k < 4.5 ? mp.g : (k < 6.5 ? mp.a : mp.r));\n\
+                                 mask = mod(k, 2.0) > 0.5 ? 1.0 - channel : channel;\n\
+                             }}\n\
+                             vec3 neutral = u_detail.x > 1.5 && u_detail.x < 2.5 ? vec3(1.0) : vec3(0.5);\n\
+                             vec3 d = mix(neutral, detail, mask);\n\
+                             vec3 base = to_srgb(albedo);\n\
+                             vec3 combined = u_detail.x < 1.5 ? base * d * 2.0\n\
+                                 : (u_detail.x < 2.5 ? base * d : base + 2.0 * d - 1.0);\n\
+                             albedo = to_linear(clamp(combined, 0.0, 1.0));\n\
+                         }}\n\
                      }}\n\
                  }}\n\
                  vec3 normal = normalize(v_normal);\n\
@@ -898,7 +928,7 @@ fn model_shader_sources(
                          // the authored tangent frame with no negation.\n\
                          vec3 tn = vec3(0.0, 0.0, 1.0);\n\
                          if (u_have_a.z > 0.5) {{\n\
-                             vec2 sampled = {sample}(u_tex_bump, v_uv * u_uv_scale_a.z).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
+                             vec2 sampled = {sample}(u_tex_bump, v_uv * u_uv_scale_b.xy).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
                              tn = vec3(sampled, sqrt(1.0 - min(dot(sampled, sampled), 1.0)));\n\
                          }}\n\
                          // A detail normal tiles far finer than the base one\n\
@@ -906,7 +936,7 @@ fn model_shader_sources(
                          // the engine's stock combine — staying stable when\n\
                          // either map is flat.\n\
                          if (u_have_a.w > 0.5) {{\n\
-                             vec2 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_a.w).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
+                             vec2 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_b.zw).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
                              tn = vec3(tn.xy + dn, tn.z);\n\
                          }}\n\
                          tn = normalize(tn);\n\
@@ -1191,15 +1221,15 @@ impl ModelGpuSlot {
             .iter()
             .map(|material| {
                 let mut uploaded = MaterialGlTextures::default();
-                for (slot, _) in SLOT_PARAMETERS {
+                for slot in ALL_SLOTS {
                     let index = slot as usize;
-                    uploaded.uv_scales[index] = 1.0;
                     let Some(image) = material.get(slot) else {
                         continue;
                     };
                     uploaded.uv_scales[index] = image.scale;
                     uploaded.textures[index] = unsafe { upload_texture(gl, image) };
                 }
+                uploaded.detail = material.detail;
                 uploaded
             })
             .collect();
@@ -1236,21 +1266,27 @@ struct ModelGlRenderer {
     have_b: Option<glow::NativeUniformLocation>,
     uv_scale_a: Option<glow::NativeUniformLocation>,
     uv_scale_b: Option<glow::NativeUniformLocation>,
+    uv_scale_c: Option<glow::NativeUniformLocation>,
+    detail: Option<glow::NativeUniformLocation>,
     /// One sampler location per slot, in `TextureSlot` order.
     samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
+    /// Bound to every slot a material lacks; see [`Self::bind_material`].
+    placeholder: Option<glow::NativeTexture>,
 }
 
 /// One material's textures on the GPU, in `TextureSlot` order.
 struct MaterialGlTextures {
     textures: [Option<glow::NativeTexture>; SLOT_COUNT],
-    uv_scales: [f32; SLOT_COUNT],
+    uv_scales: [[f32; 2]; SLOT_COUNT],
+    detail: DetailComposition,
 }
 
 impl Default for MaterialGlTextures {
     fn default() -> Self {
         Self {
             textures: Default::default(),
-            uv_scales: [1.0; SLOT_COUNT],
+            uv_scales: [[1.0; 2]; SLOT_COUNT],
+            detail: DetailComposition::default(),
         }
     }
 }
@@ -1310,7 +1346,10 @@ impl ModelGlRenderer {
                 have_b: gl.get_uniform_location(program, "u_have_b"),
                 uv_scale_a: gl.get_uniform_location(program, "u_uv_scale_a"),
                 uv_scale_b: gl.get_uniform_location(program, "u_uv_scale_b"),
+                uv_scale_c: gl.get_uniform_location(program, "u_uv_scale_c"),
+                detail: gl.get_uniform_location(program, "u_detail"),
                 samplers: SAMPLER_UNIFORMS.map(|name| gl.get_uniform_location(program, name)),
+                placeholder: upload_placeholder_texture(gl),
             })
         }
     }
@@ -1452,13 +1491,17 @@ impl ModelGlRenderer {
 
     /// Bind one material's textures, and tell the shader which slots are live.
     ///
-    /// A slot with no texture is left unbound and flagged absent rather than
-    /// bound to a dummy: sampling an unbound unit is defined to return black,
-    /// which a `have` flag of zero makes the shader skip entirely.
+    /// A slot with no texture is flagged absent, which makes the shader skip
+    /// it, and gets the 1x1 placeholder bound rather than nothing. Leaving
+    /// the slot on texture 0 is legal GL, but macOS's driver checks every
+    /// active sampler at each draw, whether or not the shader branch reads it,
+    /// and logs "unit 0 GLD_TEXTURE_INDEX_2D is unloadable" for any batch
+    /// without a base map. That includes every batch while the textures are
+    /// still loading.
     unsafe fn bind_material(&self, gl: &glow::Context, material: Option<&MaterialGlTextures>) {
         let mut have = [0.0f32; SLOT_COUNT];
-        let mut scales = [1.0f32; SLOT_COUNT];
-        for (slot, _) in SLOT_PARAMETERS {
+        let mut scales = [[1.0f32; 2]; SLOT_COUNT];
+        for slot in ALL_SLOTS {
             let index = slot as usize;
             let texture = material.and_then(|material| material.textures[index]);
             have[index] = if texture.is_some() { 1.0 } else { 0.0 };
@@ -1467,7 +1510,7 @@ impl ModelGlRenderer {
             }
             unsafe {
                 gl.active_texture(glow::TEXTURE0 + index as u32);
-                gl.bind_texture(glow::TEXTURE_2D, texture);
+                gl.bind_texture(glow::TEXTURE_2D, texture.or(self.placeholder));
             }
         }
         unsafe {
@@ -1479,13 +1522,28 @@ impl ModelGlRenderer {
                 gl.uniform_4_f32(Some(location), have[0], have[1], have[2], have[3]);
             }
             if let Some(location) = &self.have_b {
-                gl.uniform_4_f32(Some(location), have[4], 0.0, 0.0, 0.0);
+                gl.uniform_4_f32(Some(location), have[4], have[5], 0.0, 0.0);
             }
-            if let Some(location) = &self.uv_scale_a {
-                gl.uniform_4_f32(Some(location), scales[0], scales[1], scales[2], scales[3]);
+            for (location, [first, second]) in [
+                (&self.uv_scale_a, [0, 1]),
+                (&self.uv_scale_b, [2, 3]),
+                (&self.uv_scale_c, [4, 5]),
+            ] {
+                if let Some(location) = location {
+                    let ([a, b], [c, d]) = (scales[first], scales[second]);
+                    gl.uniform_4_f32(Some(location), a, b, c, d);
+                }
             }
-            if let Some(location) = &self.uv_scale_b {
-                gl.uniform_4_f32(Some(location), scales[4], 1.0, 1.0, 1.0);
+            if let Some(location) = &self.detail {
+                let detail = material.map(|material| material.detail).unwrap_or_default();
+                let function = match detail.function {
+                    DetailFunction::LinearBiasedMultiply => 0.0,
+                    DetailFunction::BiasedMultiply => 1.0,
+                    DetailFunction::Multiply => 2.0,
+                    DetailFunction::BiasedAdd => 3.0,
+                };
+                let xbox = if detail.xbox_channel_order { 1.0 } else { 0.0 };
+                gl.uniform_4_f32(Some(location), function, detail.mask as f32, xbox, 0.0);
             }
         }
     }
@@ -1777,6 +1835,46 @@ mod gpu_renderer_tests {
         }
     }
 
+    /// `both_shader_dialects_declare_what_the_renderer_binds` reads the GLSL
+    /// as text; a compile error would still
+    /// only surface at runtime, as a preview that draws nothing. With
+    /// `glslangValidator` on PATH (`brew install glslang`), compile every
+    /// dialect egui can hand the renderer; without it, skip by name.
+    #[test]
+    fn every_shader_dialect_compiles_under_glslang() {
+        if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+            eprintln!("skipping: glslangValidator is not on PATH (brew install glslang)");
+            return;
+        }
+        let dir = crate::test_kits::unique_temp_dir("model_preview_glsl");
+        for (index, (declaration, modern, precision)) in [
+            ("#version 330\n", true, ""),
+            ("#version 140\n", true, ""),
+            ("#version 300 es\n", true, "precision mediump float;\n"),
+            ("#version 120\n", false, ""),
+            ("#version 100\n", false, "precision mediump float;\n"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (vertex, fragment) = model_shader_sources(declaration, modern, precision);
+            for (stage, source) in [("vert", vertex), ("frag", fragment)] {
+                let path = dir.join(format!("model_{index}.{stage}"));
+                std::fs::write(&path, source).expect("write shader");
+                let output = std::process::Command::new("glslangValidator")
+                    .arg(&path)
+                    .output()
+                    .expect("run glslangValidator");
+                assert!(
+                    output.status.success(),
+                    "{} {stage} does not compile:\n{}",
+                    declaration.trim(),
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+    }
+
     #[test]
     fn both_shader_dialects_declare_what_the_renderer_binds() {
         for (declaration, modern, precision) in [
@@ -1909,7 +2007,7 @@ mod gpu_renderer_tests {
                 "the fragment shader should discard only on the alpha-test map"
             );
             assert!(
-                fragment.contains("u_tex_alpha, v_uv * u_uv_scale_b.x).a < 0.5) discard"),
+                fragment.contains("u_tex_alpha, v_uv * u_uv_scale_c.xy).a < 0.5) discard"),
                 "the one discard should be the alpha-test map's"
             );
 
@@ -2582,6 +2680,33 @@ pub(super) fn point3_to_array(p: RealPoint3d) -> [f32; 3] {
 
 pub(super) fn vector3_to_array(v: RealVector3d) -> [f32; 3] {
     [v.i, v.j, v.k]
+}
+
+/// The texture bound to a slot whose material has none: one opaque white
+/// texel, never sampled for its value (the slot's `have` flag is zero), only
+/// there so the unit holds a complete texture. Complete means a non-mipmap
+/// minification filter. GL's default filter expects mipmaps, and with one
+/// level it would leave this texture as incomplete as texture 0.
+unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            1,
+            1,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            Some(&[255, 255, 255, 255]),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Some(texture)
+    }
 }
 
 /// Upload one decoded texture, with mipmaps and the wrap modes the shader
