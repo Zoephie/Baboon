@@ -315,6 +315,8 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
             game: "halo3_mcc".to_owned(),
             root: root.join("temporarily-missing-one"),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         },
         CustomEditingKitProfile {
             read_only: false,
@@ -324,6 +326,8 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
             game: "haloreach_mcc".to_owned(),
             root: root.join("temporarily-missing-two"),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         },
     ];
     let paths = HashMap::from([("halo2_mcc".to_owned(), h2)]);

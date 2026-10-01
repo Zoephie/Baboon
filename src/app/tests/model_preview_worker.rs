@@ -58,6 +58,7 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
         initial_tag: None,
         key_hints: Default::default(),
         complete_scan: true,
+        chosen_kit_layout: None,
     });
     let preview = ModelPreviewState {
         active_tab: ModelTagPanelTab::ModelPreview,

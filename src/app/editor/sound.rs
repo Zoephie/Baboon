@@ -984,12 +984,13 @@ pub(super) fn build_extract_items(
 pub(in crate::app) fn browser_sound_extract_items(
     tag: &TagFile,
     abs_tag_path: &std::path::Path,
-    tags_root: &std::path::Path,
+    layout: &KitLayout,
     game: Option<&str>,
     selected_language: Option<&str>,
     all_languages: bool,
     shared_fmod_banks: Option<&blam_tags::audio::SoundBanks>,
 ) -> Vec<ExtractItem> {
+    let tags_root = layout.tags.as_path();
     let h2 = h2_sound_for_game(tag, game);
     let sound_rel = sound_tag_rel(abs_tag_path, tags_root);
     let events = h4_event_names(tag);
@@ -1047,7 +1048,7 @@ pub(in crate::app) fn browser_sound_extract_items(
                 .as_deref()
                 .filter(|language| !is_default_external_language(language))
         };
-        let Some(base) = reimport_base_dir_lang(tags_root, abs_tag_path, data_language) else {
+        let Some(base) = reimport_base_dir_lang(layout, abs_tag_path, data_language) else {
             continue;
         };
         if !events.is_empty() {
@@ -1636,9 +1637,9 @@ pub(in crate::app) fn draw_sound_player(
         let base_for = |language: Option<&str>| {
             abs_tag_path
                 .as_deref()
-                .zip(edit.tags_root)
-                .and_then(|(tag_path, root)| {
-                    reimport_base_dir_lang(root, tag_path, data_language(language).as_deref())
+                .zip(edit.kit_layout)
+                .and_then(|(tag_path, layout)| {
+                    reimport_base_dir_lang(layout, tag_path, data_language(language).as_deref())
                 })
         };
         let extract_base = base_for(if shared_fmod_audio {
@@ -2081,6 +2082,7 @@ fn draw_referenced_sound_cell(
     refs: &[(u32, String)],
     game: Option<&str>,
     tags_root: Option<&std::path::Path>,
+    kit_layout: Option<&KitLayout>,
     definitions_root: Option<&std::path::Path>,
     language: Option<&str>,
     container_source: bool,
@@ -2141,8 +2143,8 @@ fn draw_referenced_sound_cell(
                         });
                     } else if let Some((sound, abs)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
-                        && let Some(base) =
-                            tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
+                        && let Some(base) = kit_layout
+                            .and_then(|layout| reimport_base_dir_lang(layout, &abs, language))
                     {
                         let items = referenced_sound_extract_items(
                             &sound,
@@ -2223,6 +2225,7 @@ pub(in crate::app) fn draw_dialogue_summary(
     // Copies so the grid closure needn't borrow `edit`.
     let game = edit.game;
     let tags_root = edit.tags_root;
+    let kit_layout = edit.kit_layout;
     let defs = edit.definitions_root;
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
@@ -2262,6 +2265,7 @@ pub(in crate::app) fn draw_dialogue_summary(
                                 &row.sounds,
                                 game,
                                 tags_root,
+                                kit_layout,
                                 defs,
                                 language,
                                 container_source,
@@ -2342,6 +2346,7 @@ pub(in crate::app) fn draw_sound_looping_player(
     let mut clicked = ReferencedSoundClick::default();
     let game = edit.game;
     let tags_root = edit.tags_root;
+    let kit_layout = edit.kit_layout;
     let defs = edit.definitions_root;
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
@@ -2371,6 +2376,7 @@ pub(in crate::app) fn draw_sound_looping_player(
                                 &one,
                                 game,
                                 tags_root,
+                                kit_layout,
                                 defs,
                                 language,
                                 container_source,

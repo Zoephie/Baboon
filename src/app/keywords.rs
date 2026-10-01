@@ -2,31 +2,35 @@
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! binaries). Keyed by tag entry key → sorted, unique, lowercased keywords.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+/// One kit's view of its game's keyword sidecar.
+///
+/// Every kit of a game shares the one sidecar, and several can be open at
+/// once (kits sharing a root, or two copies of a kit). So a save writes only
+/// the tags this kit changed over what is on disk now, rather than the whole
+/// map as this kit loaded it, which dropped every other kit's changes made
+/// since.
 #[derive(Default)]
 pub(super) struct KeywordStore {
-    game: Option<String>,
+    /// The game's sidecar file; `None` for a source with no game.
+    path: Option<std::path::PathBuf>,
     by_tag: BTreeMap<String, Vec<String>>,
-    dirty: bool,
+    /// Tag keys whose keywords this kit changed since it last saved.
+    touched: BTreeSet<String>,
 }
 
 impl KeywordStore {
     /// Load the sidecar for `game` (clears state for `None` / non-folder sources).
     pub(super) fn load_for_game(&mut self, game: Option<&str>) {
-        self.by_tag.clear();
-        self.dirty = false;
-        self.game = game.map(str::to_owned);
-        let Some(game) = game else {
-            return;
-        };
-        let Ok(text) = std::fs::read_to_string(crate::source::keywords_path(game)) else {
-            return;
-        };
-        let Ok(map) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&text) else {
-            return;
-        };
-        self.by_tag = map;
+        self.load_at(game.map(crate::source::keywords_path));
+    }
+
+    /// Load the sidecar at `path`; `None` leaves the store empty.
+    pub(super) fn load_at(&mut self, path: Option<std::path::PathBuf>) {
+        self.touched.clear();
+        self.by_tag = path.as_deref().map(read_sidecar).unwrap_or_default();
+        self.path = path;
     }
 
     pub(super) fn keywords(&self, tag_key: &str) -> &[String] {
@@ -42,7 +46,7 @@ impl KeywordStore {
         if !list.iter().any(|existing| existing == &keyword) {
             list.push(keyword);
             list.sort();
-            self.dirty = true;
+            self.touched.insert(tag_key.to_owned());
         }
     }
 
@@ -55,7 +59,7 @@ impl KeywordStore {
                 self.by_tag.remove(tag_key);
             }
             if changed {
-                self.dirty = true;
+                self.touched.insert(tag_key.to_owned());
             }
         }
     }
@@ -64,7 +68,7 @@ impl KeywordStore {
     /// tag stops appearing in keyword browsing and its rows leave the sidecar.
     pub(super) fn forget_tag(&mut self, tag_key: &str) {
         if self.by_tag.remove(tag_key).is_some() {
-            self.dirty = true;
+            self.touched.insert(tag_key.to_owned());
         }
     }
 
@@ -89,7 +93,8 @@ impl KeywordStore {
             }
         }
         list.sort();
-        self.dirty = true;
+        self.touched.insert(old_key.to_owned());
+        self.touched.insert(new_key.to_owned());
     }
 
     /// All keywords with how many tags carry each, sorted by name.
@@ -113,14 +118,27 @@ impl KeywordStore {
     }
 
     pub(super) fn save_if_dirty(&mut self) {
-        if !self.dirty {
+        if self.touched.is_empty() {
             return;
         }
-        self.dirty = false;
-        let Some(game) = self.game.as_deref() else {
+        let touched = std::mem::take(&mut self.touched);
+        let Some(path) = self.path.clone() else {
             return;
         };
-        let path = crate::source::keywords_path(game);
+        // What another kit of this game saved since this one loaded, with
+        // this kit's changes laid over it; this kit then sees theirs too.
+        let mut merged = read_sidecar(&path);
+        for key in touched {
+            match self.by_tag.get(&key) {
+                Some(keywords) => {
+                    merged.insert(key, keywords.clone());
+                }
+                None => {
+                    merged.remove(&key);
+                }
+            }
+        }
+        self.by_tag = merged;
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -128,6 +146,13 @@ impl KeywordStore {
             let _ = std::fs::write(path, text);
         }
     }
+}
+
+fn read_sidecar(path: &std::path::Path) -> BTreeMap<String, Vec<String>> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

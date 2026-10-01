@@ -42,6 +42,7 @@ fn app_with_mixed_kit() -> Baboon {
         initial_tag: None,
         key_hints: Default::default(),
         complete_scan: true,
+        chosen_kit_layout: None,
     });
     app
 }

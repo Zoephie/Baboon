@@ -571,6 +571,19 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
             .filter(|icon| !icon.is_empty())
             .map(PathBuf::from)
             .filter(|icon| safe_custom_icon_relative_path(icon));
+        // Read only for the kits that can use them, so a value left behind by
+        // a changed engine never redirects a kit whose tools can't follow it.
+        let folder = |key: &str| {
+            entry
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|folder| !folder.is_empty() && kit_folders_are_choosable(game))
+                .map(PathBuf::from)
+                .map(clean_recent_path)
+        };
+        let tags_folder = folder("tags_folder");
+        let data_folder = folder("data_folder");
         profiles.push(CustomEditingKitProfile {
             read_only: game != "haloce_evolved"
                 && entry
@@ -586,6 +599,8 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
             game: game.to_owned(),
             root,
             icon,
+            tags_folder,
+            data_folder,
         });
     }
     profiles
@@ -595,7 +610,7 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
     profiles
         .iter()
         .map(|profile| {
-            json!({
+            let mut value = json!({
                 "id": profile.id,
                 "read_only": profile.read_only,
                 "git_tracked": profile.git_tracked,
@@ -603,7 +618,18 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
                 "game": profile.game,
                 "root": profile.root.display().to_string(),
                 "icon": profile.icon.as_ref().map(|path| path.display().to_string()),
-            })
+            });
+            // Written only when set, so a kit using its root's own folders
+            // saves exactly as it did before these existed.
+            for (key, folder) in [
+                ("tags_folder", &profile.tags_folder),
+                ("data_folder", &profile.data_folder),
+            ] {
+                if let Some(folder) = folder {
+                    value[key] = Value::String(folder.display().to_string());
+                }
+            }
+            value
         })
         .collect()
 }
@@ -1605,6 +1631,52 @@ mod session_tests {
         assert!(prompt.checked_kits()[0].folders.is_empty());
     }
 
+    /// A kit's chosen folders survive a save and load. A kit on its root's own
+    /// folders saves no folder keys at all, exactly as before they existed,
+    /// and an engine whose tools can't use them reads them as unset.
+    #[test]
+    fn chosen_kit_folders_round_trip_and_stay_out_of_other_kits() {
+        let profile = |id: &str, game: &str, tags: Option<&str>, data: Option<&str>| {
+            CustomEditingKitProfile {
+                read_only: false,
+                git_tracked: false,
+                id: id.to_owned(),
+                name: id.to_owned(),
+                game: game.to_owned(),
+                root: PathBuf::from("/kits/H2EK"),
+                icon: None,
+                tags_folder: tags.map(PathBuf::from),
+                data_folder: data.map(PathBuf::from),
+            }
+        };
+        let moda = profile(
+            "00000000-0000-4000-8000-00000000000a",
+            "halo2_mcc",
+            Some("tags_moda"),
+            Some("/elsewhere/data_moda"),
+        );
+        let stock = profile(
+            "00000000-0000-4000-8000-00000000000b",
+            "halo2_mcc",
+            None,
+            None,
+        );
+        let saved = custom_editing_kit_profiles_value(&[moda.clone(), stock.clone()]);
+        assert!(saved[1].get("tags_folder").is_none() && saved[1].get("data_folder").is_none());
+        let loaded = load_custom_editing_kit_profiles(&json!({ "editing_kit_profiles": saved }));
+        assert_eq!(loaded, vec![moda, stock]);
+
+        let mut halo3 = custom_editing_kit_profiles_value(&[profile(
+            "00000000-0000-4000-8000-00000000000c",
+            "halo3_mcc",
+            None,
+            None,
+        )]);
+        halo3[0]["tags_folder"] = json!("tags_moda");
+        let loaded = load_custom_editing_kit_profiles(&json!({ "editing_kit_profiles": halo3 }));
+        assert_eq!(loaded[0].tags_folder, None);
+    }
+
     #[test]
     fn restore_prompt_resolves_the_current_custom_project_name_and_root() {
         let root = std::env::temp_dir();
@@ -1618,6 +1690,8 @@ mod session_tests {
             game: "halo2_mcc".to_owned(),
             root: root.clone(),
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         };
 
         let prompt = LastOpenedWindowsPrompt::from_session(

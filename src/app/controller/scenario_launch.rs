@@ -21,6 +21,9 @@ pub(super) struct ScenarioLaunchContext {
     pub(super) scenario_file: PathBuf,
     pub(super) scenario_path: String,
     pub(super) game: String,
+    /// `-tags_dir`/`-data_dir` for a Halo CE or Halo 2 kit using folders other
+    /// than its root's own; see [`kit_tool_folder_options`].
+    pub(super) tool_options: Vec<(&'static str, PathBuf)>,
 }
 
 pub(super) fn scenario_launch_context(
@@ -39,17 +42,17 @@ pub(super) fn scenario_launch_context(
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Err("Scenario launching requires a loaded loose editing-kit folder".to_owned());
     };
-    if !root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("tags"))
-    {
+    let layout = source
+        .kit_layout()
+        .ok_or_else(|| "Could not determine the editing-kit root".to_owned())?;
+    // Sapien and tag_test open `tags\<scenario>` relative to the folder they
+    // run in, so only the root's own tags folder can be launched from, unless
+    // the tools can be told where it is.
+    if !layout.tags_is_root_tags_folder() && !kit_folders_are_choosable(game) {
         return Err("Scenario launching requires the editing kit's tags folder".to_owned());
     }
-    let kit_root = root
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "Could not determine the editing-kit root".to_owned())?;
+    let tool_options = kit_tool_folder_options(&layout, Some(game));
+    let kit_root = layout.root;
     let TagEntryLocation::LooseFile(path) = &entry.location else {
         return Err("Scenario launching requires a loose scenario tag".to_owned());
     };
@@ -97,6 +100,7 @@ pub(super) fn scenario_launch_context(
         scenario_file: path.clone(),
         scenario_path,
         game: game.to_owned(),
+        tool_options,
     })
 }
 
@@ -164,19 +168,13 @@ pub(in crate::app) fn scenario_launch_availability_with(
     else {
         return unsupported;
     };
-    let TagSource::LooseFolder { root, .. } = &source.source else {
+    let Some(layout) = source
+        .kit_layout()
+        .filter(|layout| layout.tags_is_root_tags_folder() || kit_folders_are_choosable(game))
+    else {
         return unsupported;
     };
-    if !root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("tags"))
-    {
-        return unsupported;
-    }
-    let Some(kit_root) = root.parent() else {
-        return unsupported;
-    };
+    let kit_root = layout.root.as_path();
     ScenarioLaunchAvailability {
         supported: true,
         offers_sapien: sapien_supports_scenario_argument(game),
@@ -409,6 +407,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 

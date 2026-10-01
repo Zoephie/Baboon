@@ -1122,6 +1122,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -1587,6 +1588,32 @@ mod tests {
 
         assert!(error.contains("expected tags folder was missing"));
         assert!(error.contains("HREK"));
+    }
+
+    /// A kit keeping a second tags folder beside the stock one opens that
+    /// folder when it (or a folder in it) is picked. Picking the root, the
+    /// stock tags folder, or the data folder still opens the stock `tags`.
+    #[test]
+    fn another_tags_folder_under_an_ek_root_opens_itself() {
+        let root = temp_dir("other_tags_folder");
+        let ek_root = root.join("H2EK");
+        for folder in ["tags", "tags_moda/objects", "data", "data_moda"] {
+            fs::create_dir_all(ek_root.join(folder)).unwrap();
+        }
+        let scan = |selected: &Path| resolve_folder_root(selected, &[]).unwrap().scan_root;
+
+        let other = scan(&ek_root.join("tags_moda"));
+        let inside = scan(&ek_root.join("tags_moda/objects"));
+        let stock = scan(&ek_root);
+        let from_data = scan(&ek_root.join("data_moda"));
+        let label = resolve_folder_root(&ek_root, &[]).unwrap().label;
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(other, ek_root.join("tags_moda"));
+        assert_eq!(inside, ek_root.join("tags_moda"));
+        assert_eq!(stock, ek_root.join("tags"));
+        assert_eq!(from_data, ek_root.join("tags"));
+        assert_eq!(label, "H2EK/tags (halo2_mcc)");
     }
 
     #[test]

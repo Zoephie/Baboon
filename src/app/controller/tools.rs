@@ -20,16 +20,22 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
         else {
             continue;
         };
-        let root = validate_builtin_editing_kit(shortcut, Some(path))
+        let layout = validate_builtin_editing_kit(shortcut, Some(path));
+        let root = layout
             .layout()
             .map(|layout| layout.root.clone())
             .unwrap_or_else(|| canonical_or_clean(path));
-        if profiles.iter().any(|profile| {
-            let existing = validate_editing_kit_profile_layout(&profile.root, &profile.game)
-                .map(|layout| layout.root)
-                .unwrap_or_else(|_| canonical_or_clean(&profile.root));
-            same_recent_path(&existing, &root)
-        }) {
+        // Kits may share a root (a CE or H2 kit choosing another tags folder
+        // beside the stock one), so the stock kit is already there only when
+        // a profile uses its tags folder.
+        let tags = layout
+            .layout()
+            .map(|layout| layout.tags.clone())
+            .unwrap_or_else(|| root.join("tags"));
+        if profiles
+            .iter()
+            .any(|profile| same_recent_path(&profile_tags_folder(profile), &tags))
+        {
             continue;
         }
         // Stable IDs prevent identity churn if legacy preferences are read again.
@@ -46,6 +52,8 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
             game: shortcut.game.to_owned(),
             root,
             icon: None,
+            tags_folder: None,
+            data_folder: None,
         });
         added += 1;
     }

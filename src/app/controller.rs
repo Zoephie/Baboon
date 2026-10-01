@@ -15,6 +15,8 @@ use terminal::{
     stream_terminal_output, trim_terminal_lines,
 };
 mod tools;
+mod kit_tool_options;
+use kit_tool_options::*;
 pub(super) use tools::add_standard_editing_kit_profiles;
 use tools::*;
 mod scenario_launch;
@@ -1353,6 +1355,13 @@ impl Baboon {
             self.begin_load_iostore_container_set_path(paks, path, ctx);
             return;
         }
+        // A kit's own tags folder opens that kit, with the data folder and
+        // tool options it names, rather than as a bare folder whose data
+        // folder would be guessed.
+        if let Some(profile) = self.profile_using_chosen_tags_folder(&path) {
+            self.load_custom_editing_kit_profile(profile, ctx);
+            return;
+        }
         if self.open_kit_for(&path) {
             self.status = format!("Switched to {}", path.display());
             return;
@@ -1385,6 +1394,22 @@ impl Baboon {
             });
             ctx.request_repaint();
         });
+    }
+
+    /// The profile that chose `path` as its tags folder, if any. Read from the
+    /// validated layouts already cached, so asking costs no disk access.
+    fn profile_using_chosen_tags_folder(&self, path: &Path) -> Option<CustomEditingKitProfile> {
+        let path = canonical_or_clean(path);
+        self.prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .filter(|profile| profile.has_chosen_folders())
+            .find(|profile| {
+                self.editing_kit_validation
+                    .custom(&profile.id)
+                    .is_ok_and(|layout| same_recent_path(&layout.tags, &path))
+            })
+            .cloned()
     }
 
     pub(super) fn begin_load_monolithic(&mut self, ctx: egui::Context) {
@@ -3110,6 +3135,8 @@ impl Baboon {
             self.status = "Run requires a loaded editing-kit folder".to_owned();
             return;
         };
+        // Rewritten before it is echoed, so the terminal shows what really ran.
+        let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
         self.kits[self.active].terminal_open = true;
         self.terminal
             .lines
@@ -4312,7 +4339,7 @@ impl Baboon {
     }
 
     fn loaded_data_root(&self) -> Option<PathBuf> {
-        Some(self.editing_kit_root()?.join("data"))
+        Some(self.kit_layout_for(self.active)?.data)
     }
 
     /// Show a browser folder in File Explorer.
@@ -4769,6 +4796,10 @@ impl Baboon {
                     .ok()
                 })
                 .flatten();
+                let Some(layout) = self.kit_layout_for(self.active) else {
+                    self.status = "Could not resolve the editing kit's data folder".to_owned();
+                    return;
+                };
                 let mut items = Vec::new();
                 let mut read_errors = 0usize;
                 for entry in &entries {
@@ -4785,7 +4816,7 @@ impl Baboon {
                         Ok(tag) => items.extend(crate::app::editor::browser_sound_extract_items(
                             &tag,
                             &abs,
-                            &root,
+                            &layout,
                             game.as_deref(),
                             selected_language.as_deref(),
                             all_languages,
@@ -8303,12 +8334,16 @@ impl Baboon {
         let Some(kit) = self.kits.get(kit_index) else {
             return false;
         };
-        let root =
-            self.editing_kit_root_for(kit_index)
-                .or_else(|| match &kit.source.as_ref()?.source {
-                    TagSource::SingleFile { path } => Some(path.clone()),
-                    _ => None,
-                });
+        // The tags folder rather than the kit root: every folder above the
+        // root is above the tags folder too, so this matches at least what the
+        // root did and never makes a read-only kit writable.
+        let root = self
+            .kit_layout_for(kit_index)
+            .map(|layout| layout.tags)
+            .or_else(|| match &kit.source.as_ref()?.source {
+                TagSource::SingleFile { path } => Some(path.clone()),
+                _ => None,
+            });
         self.prefs
             .custom_editing_kit_profiles
             .iter()
@@ -8327,18 +8362,12 @@ impl Baboon {
     }
 
     pub(super) fn editing_kit_root_for(&self, kit_index: usize) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.kits[kit_index].source.as_ref()?.source
-        else {
-            return None;
-        };
-        if root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("tags"))
-        {
-            return root.parent().map(Path::to_path_buf);
-        }
-        Some(root.clone())
+        Some(self.kit_layout_for(kit_index)?.root)
+    }
+
+    /// The loaded kit's root, tags and data folders. See [`KitLayout`].
+    pub(super) fn kit_layout_for(&self, kit_index: usize) -> Option<KitLayout> {
+        self.kits.get(kit_index)?.source.as_ref()?.kit_layout()
     }
 
     pub(super) fn kit_tool_path(&self, executable_name: &str) -> Option<PathBuf> {
@@ -8430,6 +8459,9 @@ impl Baboon {
         }
 
         let mut process = Command::new(&executable);
+        for (option, folder) in &context.tool_options {
+            process.arg(option).arg(folder);
+        }
         process
             .arg(&context.scenario_file)
             .current_dir(&context.kit_root);
@@ -8497,6 +8529,9 @@ impl Baboon {
             return;
         }
         let mut process = Command::new(&executable);
+        for (option, folder) in &context.tool_options {
+            process.arg(option).arg(folder);
+        }
         process.current_dir(&context.kit_root);
         match process.spawn() {
             Ok(_) => {
@@ -8526,7 +8561,7 @@ impl Baboon {
             self.settings_open = true;
             return;
         }
-        self.spawn_tool("Blender", &path, path.parent().map(Path::to_path_buf));
+        self.spawn_tool("Blender", &path, path.parent().map(Path::to_path_buf), &[]);
     }
 
     pub(super) fn choose_blender_path(&mut self) {
@@ -8587,6 +8622,7 @@ impl Baboon {
                 shortcut.game.to_owned(),
                 game_display_name(shortcut.game).to_owned(),
                 None,
+                false,
                 ctx,
             );
         }
@@ -8608,12 +8644,37 @@ impl Baboon {
             );
             return;
         };
-        let Some(path) = self
-            .prefs
-            .custom_editing_kit_profiles
-            .iter()
-            .find(|profile| profile.game == shortcut.game)
-            .map(|profile| profile.root.clone())
+        // Several kits of one game can share a root, each with its own tags
+        // folder; the one holding the first tag named is the one meant.
+        let profiles = &self.prefs.custom_editing_kit_profiles;
+        let first_absolute = launch.tag_paths.iter().find(|path| path.is_absolute());
+        let profile = first_absolute
+            .and_then(|tag| {
+                let tag = canonical_or_clean(tag);
+                profiles.iter().find(|profile| {
+                    profile.game == shortcut.game && tag.starts_with(profile_tags_folder(profile))
+                })
+            })
+            .or_else(|| {
+                profiles
+                    .iter()
+                    .find(|profile| profile.game == shortcut.game)
+            })
+            .cloned();
+        if let Some(profile) = profile
+            .as_ref()
+            .filter(|profile| profile.has_chosen_folders())
+            .cloned()
+        {
+            self.kits[self.active].pending_launch_tags = Some(launch.tag_paths);
+            if !self.load_custom_editing_kit_profile(profile, ctx) {
+                self.kits[self.active].pending_launch_tags = None;
+                self.status = format!("Command line: {}", self.status);
+            }
+            return;
+        }
+        let Some(path) = profile
+            .map(|profile| profile.root)
             .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game).cloned())
         else {
             self.status = format!(
@@ -8635,6 +8696,7 @@ impl Baboon {
             shortcut.game.to_owned(),
             game_display_name(shortcut.game).to_owned(),
             None,
+            false,
             ctx,
         );
     }
@@ -8705,6 +8767,7 @@ impl Baboon {
             });
             return true;
         }
+        let chosen_folders = profile.has_chosen_folders();
         self.begin_load_editing_kit_layout(
             layout,
             profile.game.clone(),
@@ -8713,19 +8776,41 @@ impl Baboon {
                 id: profile.id,
                 name: profile.name,
             }),
+            chosen_folders,
             ctx,
         );
         true
     }
 
+    /// Load a kit from its validated layout. `chosen_folders` is a profile
+    /// that names its own tags or data folder: the loaded source then carries
+    /// exactly this layout, rather than working out its root and data folder
+    /// from its tags folder, and the kit is identified by its tags folder,
+    /// since its root may be shared with other kits.
     fn begin_load_editing_kit_layout(
         &mut self,
         layout: EditingKitLayout,
         game: String,
         label: String,
         profile: Option<EditingKitProfileIdentity>,
+        chosen_folders: bool,
         ctx: egui::Context,
     ) {
+        let chosen_layout = chosen_folders.then(|| KitLayout {
+            root: layout.root.clone(),
+            tags: layout.tags.clone(),
+            data: layout
+                .data
+                .clone()
+                .unwrap_or_else(|| layout.root.join("data")),
+        });
+        // What the kit is remembered and matched by: its root, unless other
+        // kits may share that root, when it is its tags folder.
+        let identity_path = if chosen_folders {
+            layout.tags.clone()
+        } else {
+            layout.root.clone()
+        };
         if let Some(profile_identity) = profile.as_ref() {
             if let Some(index) = self.kits.iter().position(|kit| {
                 kit.profile.as_ref().map(|open| open.id.as_str())
@@ -8735,16 +8820,26 @@ impl Baboon {
                 self.status = format!("Switched to {}", label);
                 return;
             }
-            if let Some(index) = self.kits.iter().position(|kit| {
-                kit.requested_path
-                    .as_deref()
-                    .is_some_and(|open| same_recent_path(open, &layout.root))
-                    && kit
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.game.as_deref())
-                        == Some(game.as_str())
-            }) {
+            // A kit already open on this profile's tags folder (opened as a
+            // folder) becomes this profile's. Matched on the tags folder, not
+            // the root: kits sharing a root are different kits.
+            if !chosen_folders
+                && let Some(index) = self.kits.iter().position(|kit| {
+                    kit.requested_path
+                        .as_deref()
+                        .is_some_and(|open| same_recent_path(open, &layout.root))
+                        && kit
+                            .source
+                            .as_ref()
+                            .and_then(LoadedSourceData::kit_layout)
+                            .is_some_and(|open| same_recent_path(&open.tags, &layout.tags))
+                        && kit
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.game.as_deref())
+                            == Some(game.as_str())
+                })
+            {
                 self.active = index;
                 self.kits[index].profile = Some(profile_identity.clone());
                 self.status = format!("Switched to {}", label);
@@ -8753,7 +8848,7 @@ impl Baboon {
             if !self.kits[self.active].can_accept_source_load() {
                 self.add_kit();
             }
-            self.kits[self.active].requested_path = Some(layout.root.clone());
+            self.kits[self.active].requested_path = Some(identity_path.clone());
         } else if self.open_kit_for(&layout.root) {
             self.status = format!("Switched to {}", label);
             return;
@@ -8764,10 +8859,14 @@ impl Baboon {
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
         let tags_root = layout.tags;
-        let recent_path = layout.root.clone();
+        let recent_path = identity_path;
         self.status = format!("Indexing {} as {game}", tags_root.display());
         thread::spawn(move || {
             let result = load_editing_kit_layout(tags_root, label, game, &names, &definitions_root)
+                .map(|mut source| {
+                    source.chosen_kit_layout = chosen_layout;
+                    source
+                })
                 .map_err(|error| error.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
                 kit,
@@ -8854,7 +8953,8 @@ impl Baboon {
             self.status = format!("{label} executable not found: {}", path.display());
             return;
         }
-        self.spawn_tool(label, &path, self.editing_kit_root());
+        let options = self.active_kit_tool_folder_options();
+        self.spawn_tool(label, &path, self.editing_kit_root(), &options);
     }
 
     fn launch_kit_tool_clearing_startup(
@@ -8880,11 +8980,21 @@ impl Baboon {
             self.status = error;
             return;
         }
-        self.spawn_tool(label, &path, Some(root));
+        let options = self.active_kit_tool_folder_options();
+        self.spawn_tool(label, &path, Some(root), &options);
     }
 
-    fn spawn_tool(&mut self, label: &str, path: &Path, work_dir: Option<PathBuf>) {
+    fn spawn_tool(
+        &mut self,
+        label: &str,
+        path: &Path,
+        work_dir: Option<PathBuf>,
+        options: &[(&'static str, PathBuf)],
+    ) {
         let mut command = Command::new(path);
+        for (option, folder) in options {
+            command.arg(option).arg(folder);
+        }
         if let Some(work_dir) = work_dir {
             command.current_dir(work_dir);
         }
@@ -9070,7 +9180,7 @@ impl Baboon {
             self.status = "Bitmap reimport requires a loose tags folder".to_owned();
             return;
         };
-        let Some(work_dir) = tags_root.parent().map(Path::to_path_buf) else {
+        let Some(work_dir) = self.kit_layout_for(self.active).map(|layout| layout.root) else {
             self.status = "Could not resolve editing-kit root".to_owned();
             return;
         };
@@ -9078,7 +9188,10 @@ impl Baboon {
             self.status = "Could not resolve bitmap data path".to_owned();
             return;
         };
-        let command = format!("tool bitmaps \"{data_path}\"");
+        let command = with_tool_folder_options(
+            &format!("tool bitmaps \"{data_path}\""),
+            &self.active_kit_tool_folder_options(),
+        );
         self.kits[self.active].terminal_open = true;
         self.terminal
             .lines
@@ -10221,6 +10334,7 @@ mod tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         };
 
         let saved_path = root.join("saved").join("cyborg.gbxmodel");
@@ -10735,6 +10849,7 @@ mod listing_entries_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -12494,6 +12609,7 @@ mod dependency_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -13004,6 +13120,7 @@ mod dependency_database_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -13084,6 +13201,7 @@ mod refresh_reference_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
 
         app.apply_entry_index_refresh(
@@ -13159,6 +13277,7 @@ mod saved_tag_index_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         });
         crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
         app.kits[0]

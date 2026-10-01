@@ -1350,10 +1350,11 @@ mod tests {
             Some("__baboon_shared_bank_only__"),
         )
         .expect("open shared H3 FMOD bank");
+        let layout = KitLayout::from_tags_folder(&tags_root).expect("kit layout");
         let mut items = browser_sound_extract_items(
             &tag,
             &path,
-            &tags_root,
+            &layout,
             Some("halo3_mcc"),
             None,
             true,
@@ -1388,7 +1389,7 @@ mod tests {
         let sfx_items = browser_sound_extract_items(
             &sfx_tag,
             &sfx_path,
-            &tags_root,
+            &layout,
             Some("halo3_mcc"),
             Some("french"),
             true,

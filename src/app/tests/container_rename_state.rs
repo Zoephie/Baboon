@@ -72,6 +72,7 @@ fn source_with_one_tag() -> LoadedSourceData {
         initial_tag: None,
         key_hints: Default::default(),
         complete_scan: false,
+        chosen_kit_layout: None,
     }
 }
 

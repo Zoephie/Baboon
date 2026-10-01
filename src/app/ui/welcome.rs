@@ -252,7 +252,12 @@ impl Baboon {
                                                                 let tooltip = validation
                                                             .as_ref()
                                                             .map(|layout| {
-                                                                layout.root.display().to_string()
+                                                                profile_location(
+                                                                    profile,
+                                                                    Some(layout),
+                                                                )
+                                                                .display()
+                                                                .to_string()
                                                             })
                                                             .unwrap_or_else(|error| {
                                                                 format!(

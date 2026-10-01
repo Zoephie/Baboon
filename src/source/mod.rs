@@ -428,6 +428,10 @@ pub struct LoadedSourceData {
     /// scans to, and reading it as "not scanned" made an empty folder rescan
     /// forever.
     pub complete_scan: bool,
+    /// The kit folders a profile chose, for a kit that names its own tags or
+    /// data folder. `None` derives them from the tags folder; see
+    /// [`Self::kit_layout`].
+    pub chosen_kit_layout: Option<KitLayout>,
 }
 
 #[cfg(test)]
@@ -457,7 +461,83 @@ pub enum EntryList {
     All,
 }
 
+/// The three folders of a loose editing kit: the kit root (where its tools live
+/// and run from), its tags folder, and its data folder.
+///
+/// This is the one place a kit's root and data folder are worked out from its
+/// tags folder. Everything that needs either asks [`LoadedSourceData::kit_layout`]
+/// instead of taking the tags folder's parent or appending `data` itself, so the
+/// rule can change in one place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KitLayout {
+    pub root: PathBuf,
+    pub tags: PathBuf,
+    pub data: PathBuf,
+}
+
+impl KitLayout {
+    /// The layout around a tags folder: its parent is the kit root, and the
+    /// data folder is `<root>/data`, whether or not it exists yet. `None` for a
+    /// tags folder with no parent.
+    pub fn from_tags_folder(tags: &Path) -> Option<Self> {
+        let root = tags.parent()?.to_path_buf();
+        Some(Self {
+            data: root.join("data"),
+            tags: tags.to_path_buf(),
+            root,
+        })
+    }
+
+    /// The data folder for `language`: the data folder itself for the default
+    /// language, otherwise its `_<language>` sibling (`data` → `data_french`),
+    /// which is where the tools read and write non-default languages.
+    pub fn data_for_language(&self, language: Option<&str>) -> PathBuf {
+        let Some(language) = language else {
+            return self.data.clone();
+        };
+        let mut name = self
+            .data
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .unwrap_or_else(|| "data".into());
+        name.push(format!("_{language}"));
+        self.data.with_file_name(name)
+    }
+
+    /// Whether the data folder is the root's own `data` folder.
+    pub fn data_is_root_data_folder(&self) -> bool {
+        self.data
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("data"))
+            && self.data.parent() == Some(self.root.as_path())
+    }
+
+    /// Whether the tags folder is the root's own `tags` folder, the only one the
+    /// Halo 3-era tools can see: they open `tags\...` relative to the folder they
+    /// run in and take no option to look elsewhere.
+    pub fn tags_is_root_tags_folder(&self) -> bool {
+        self.tags
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("tags"))
+            && self.tags.parent() == Some(self.root.as_path())
+    }
+}
+
 impl LoadedSourceData {
+    /// This source's editing-kit layout, for a loose folder; `None` for every
+    /// other kind of source, which has no kit root or data folder.
+    pub fn kit_layout(&self) -> Option<KitLayout> {
+        match &self.source {
+            TagSource::LooseFolder { root, .. } => self
+                .chosen_kit_layout
+                .clone()
+                .or_else(|| KitLayout::from_tags_folder(root)),
+            _ => None,
+        }
+    }
+
     /// Add `entry`, or replace the entry that has its key, and keep both lists,
     /// both trees and the on-disk entry index in step with it.
     ///
@@ -867,6 +947,7 @@ mod entry_key_hint_tests {
             initial_tag: None,
             key_hints: Default::default(),
             complete_scan: false,
+            chosen_kit_layout: None,
         }
     }
 
@@ -940,5 +1021,73 @@ mod entry_key_hint_tests {
         assert!(packages.remove(PACKAGE, 0));
         assert_eq!(packages.lookup(PACKAGE), None);
         assert!(packages.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod kit_layout_tests {
+    use super::*;
+
+    #[test]
+    fn a_kits_root_and_data_sit_beside_its_tags_folder() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags")).unwrap();
+        assert_eq!(layout.root, PathBuf::from("/ek"));
+        assert_eq!(layout.tags, PathBuf::from("/ek/tags"));
+        assert_eq!(layout.data, PathBuf::from("/ek/data"));
+        assert!(layout.tags_is_root_tags_folder());
+    }
+
+    /// A folder of loose tags with another name still has its parent for a
+    /// root, the same as the terminal and sound extraction always used; the
+    /// tools can't see it, so scenario launching refuses it.
+    #[test]
+    fn a_tags_folder_with_another_name_is_not_the_tools_folder() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags_moda")).unwrap();
+        assert_eq!(layout.root, PathBuf::from("/ek"));
+        assert_eq!(layout.data, PathBuf::from("/ek/data"));
+        assert!(!layout.tags_is_root_tags_folder());
+        assert!(KitLayout::from_tags_folder(Path::new("/")).is_none());
+    }
+
+    #[test]
+    fn non_default_languages_use_the_data_folders_language_sibling() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags")).unwrap();
+        assert_eq!(layout.data_for_language(None), PathBuf::from("/ek/data"));
+        assert_eq!(
+            layout.data_for_language(Some("french")),
+            PathBuf::from("/ek/data_french")
+        );
+    }
+
+    #[test]
+    fn only_a_loose_folder_has_a_kit_layout() {
+        let loose = TagSource::LooseFolder {
+            root: PathBuf::from("/ek/tags"),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let single = TagSource::SingleFile {
+            path: PathBuf::from("/ek/tags/a.weapon"),
+        };
+        let with = |source| LoadedSourceData {
+            label: String::new(),
+            source,
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        assert_eq!(
+            with(loose).kit_layout().map(|layout| layout.root),
+            Some(PathBuf::from("/ek"))
+        );
+        assert_eq!(with(single).kit_layout(), None);
     }
 }
