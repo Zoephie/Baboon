@@ -284,12 +284,132 @@ fn detail_tiling_comes_from_the_option_defaults() {
             .get(slot)
             .expect("dervish carries both detail maps");
         assert!(
-            (image.scale - 16.0).abs() < 0.01,
-            "detail tiling should come from the option default, got {}",
+            image.scale.iter().all(|scale| (scale - 16.0).abs() < 0.01),
+            "detail tiling should come from the option default, got {:?}",
             image.scale
         );
     }
     // The base map is not a detail map and must not inherit its tiling.
     let base = material.get(TextureSlot::Base).expect("a base map");
-    assert!((base.scale - 1.0).abs() < 0.01, "base scale {}", base.scale);
+    assert!(base.scale.iter().all(|scale| (scale - 1.0).abs() < 0.01), "base scale {:?}", base.scale);
+}
+
+
+/// One classic shader, resolved the way the preview resolves a material.
+fn resolve_classic(source: &TagSource, path: &str, group: &[u8; 4]) -> MaterialTextures {
+    resolve_model_textures(
+        source,
+        &[RenderModelPreviewMaterial {
+            shader_path: path.to_owned(),
+            shader_group: u32::from_be_bytes(*group),
+        }],
+    )
+    .remove(0)
+}
+
+/// Halo CE model shading, against `BLAM_TEST_HCEEK` (the kit's `tags`).
+/// Each case pairs with one that sets the opposite flag, so a resolver that
+/// ignored the flag fails one of them.
+#[test]
+fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
+    let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+    if !tags.join("characters/cyborg/shaders/armor.shader_model").is_file() {
+        eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
+        return;
+    }
+    let source = loose_source(tags, "haloce_mcc");
+
+    // The cyborg's armor: every map, its detail masked by the reflection
+    // channel in Xbox order, tiled ten times, alpha tested on the base.
+    let armor = resolve_classic(&source, r"characters\cyborg\shaders\armor", b"soso");
+    assert_eq!(armor.error, None);
+    for slot in [TextureSlot::Base, TextureSlot::Detail, TextureSlot::Multipurpose] {
+        assert!(armor.get(slot).is_some(), "armor lacks {slot:?}");
+    }
+    assert_eq!(
+        armor.detail,
+        DetailComposition {
+            function: DetailFunction::BiasedMultiply,
+            mask: 2,
+            xbox_channel_order: true,
+        }
+    );
+    // `detail map v scale` ships 0, which can only mean 1.
+    assert_eq!(armor.get(TextureSlot::Detail).unwrap().scale, [10.0, 10.0]);
+    assert!(armor.get(TextureSlot::AlphaTest).is_some(), "armor is alpha tested");
+    assert!(armor.get(TextureSlot::Bump).is_none());
+
+    // `not alpha tested`: the same resolver must leave the alpha slot empty.
+    let metal = resolve_classic(&source, r"scenery\c_metalwide\shaders\c_metal", b"soso");
+    assert!(metal.get(TextureSlot::Base).is_some());
+    assert!(metal.get(TextureSlot::AlphaTest).is_none(), "c_metal is not alpha tested");
+
+    // An alpha-tested environment shader tests on its bump map's alpha, and
+    // never shades the bump: on a model, CE bump is lightmap-only.
+    let teleporter = resolve_classic(
+        &source,
+        r"scenery\teleporter_base\shaders\teleporter_base",
+        b"senv",
+    );
+    assert!(teleporter.get(TextureSlot::Base).is_some());
+    assert!(teleporter.get(TextureSlot::AlphaTest).is_some());
+    assert!(teleporter.get(TextureSlot::Bump).is_none());
+    assert_eq!(teleporter.detail.mask, 0);
+
+    // Transparent effects stay untextured, and say why.
+    let shield = resolve_classic(
+        &source,
+        r"characters\cyborg\shaders\light shield",
+        b"schi",
+    );
+    assert!(shield.error.as_deref().is_some_and(|error| error.contains("transparent")));
+    assert!(shield.slots.iter().all(Option::is_none));
+    // `smet` is Halo 4's `structure_meta` in the cross-game extension table;
+    // the kit's own names make it `shader_transparent_meter`, so the shader
+    // loads and is reported as what it is rather than as a missing file.
+    let meter = resolve_classic(&source, r"vehicles\warthog\shaders\meter engine", b"smet");
+    assert!(
+        meter.error.as_deref().is_some_and(|error| error.contains("transparent")),
+        "{:?}",
+        meter.error
+    );
+}
+
+/// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).
+#[test]
+fn halo_2_shaders_resolve_parameters_over_template_defaults() {
+    let tags = crate::test_kits::h2ek_tags();
+    if !tags.join("objects/characters/masterchief/shaders/masterchief.shader").is_file() {
+        eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
+        return;
+    }
+    let source = loose_source(tags, "halo2_mcc");
+
+    // The chief authors his maps, and his detail tiling as a `bitmap scale
+    // x`/`y` pair of 9 with no uniform; reading only the uniform fell back to
+    // the template's 16.
+    let chief = resolve_classic(&source, r"objects\characters\masterchief\shaders\masterchief", b"shad");
+    assert_eq!(chief.error, None);
+    assert!(!chief.used_shader_parameters_only, "the template should load");
+    for slot in [TextureSlot::Base, TextureSlot::Detail, TextureSlot::Bump] {
+        assert!(chief.get(slot).is_some(), "masterchief lacks {slot:?}");
+    }
+    assert_eq!(chief.get(TextureSlot::Detail).unwrap().scale, [9.0, 9.0]);
+    assert_eq!(chief.get(TextureSlot::Base).unwrap().scale, [1.0, 1.0]);
+    assert_eq!(chief.detail.function, DetailFunction::BiasedMultiply);
+    assert!(chief.get(TextureSlot::AlphaTest).is_none(), "tex_bump does not alpha test");
+
+    // brute_shoulder_armor names no detail_map at all: its template supplies
+    // both the bitmap (`default_detail`) and the tiling (16).
+    let shoulder = resolve_classic(
+        &source,
+        r"objects\characters\brute\shaders\brute_shoulder_armor",
+        b"shad",
+    );
+    assert_eq!(shoulder.get(TextureSlot::Detail).expect("template default detail").scale, [16.0, 16.0]);
+
+    // A base-alpha alpha-test template with no alpha_test_map cuts out on the
+    // base map.
+    let shotgun = resolve_classic(&source, r"objects\weapons\rifle\shotgun\shaders\shotgun_primary", b"shad");
+    assert!(shotgun.get(TextureSlot::AlphaTest).is_some(), "shotgun_primary alpha tests");
 }
