@@ -1202,8 +1202,9 @@ fn draw_model_view_settings_menu(
         });
         ui.checkbox(&mut state.perspective, "Perspective Projection")
             .on_hover_text(
-                "Perspective projection instead of the flat orthographic view. The framing at \
-                 the orbit point stays identical, so toggling never jumps.",
+                "Perspective projection with a 60° lens; zooming moves the camera closer. Clear \
+                 it for the flat orthographic view. The framing at the orbit point stays \
+                 identical, so toggling never jumps.",
             );
         ui.horizontal(|ui| {
             ui.label("Preview Size");

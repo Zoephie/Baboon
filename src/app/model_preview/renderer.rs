@@ -68,29 +68,26 @@ pub(super) fn draw_model_viewport(
             state.pitch = (state.pitch + delta.y * 0.01).clamp(-1.45, 1.45);
         }
     }
-    if response.hovered() {
-        let scroll = ui.input(|i| i.raw_scroll_delta.y);
-        if scroll.abs() > f32::EPSILON {
-            let old_scale = state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
-            let new_scale =
-                (old_scale * (scroll / 450.0).exp()).clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
-            // Zoom toward the cursor: shift the orbit point so the geometry
-            // under the pointer stays put. Without this, zooming into a BSP
-            // always dives at its center and the doorway drifts offscreen.
-            if let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) {
-                let towards = pointer - rect.center();
-                let factor = 1.0 / (fit * old_scale) - 1.0 / (fit * new_scale);
-                let moved = unrotate_view_vector(
-                    state.yaw,
-                    state.pitch,
-                    [towards.x * factor, 0.0, -towards.y * factor],
-                );
-                state.focus[0] += moved[0];
-                state.focus[1] += moved[1];
-                state.focus[2] += moved[2];
-            }
-            state.scale = new_scale;
+    if let Some(scroll) = viewport_wheel_zoom(ui, &response) {
+        let old_scale = state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+        let new_scale =
+            (old_scale * (scroll / 450.0).exp()).clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+        // Zoom toward the cursor: shift the orbit point so the geometry
+        // under the pointer stays put. Without this, zooming into a BSP
+        // always dives at its center and the doorway drifts offscreen.
+        if let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) {
+            let towards = pointer - rect.center();
+            let factor = 1.0 / (fit * old_scale) - 1.0 / (fit * new_scale);
+            let moved = unrotate_view_vector(
+                state.yaw,
+                state.pitch,
+                [towards.x * factor, 0.0, -towards.y * factor],
+            );
+            state.focus[0] += moved[0];
+            state.focus[1] += moved[1];
+            state.focus[2] += moved[2];
         }
+        state.scale = new_scale;
     }
 
     let camera = PreviewCamera::new(data, state, rect);
@@ -137,7 +134,10 @@ pub(super) fn draw_model_viewport(
         let positions = armature_node_positions(data, state);
         let projected = positions
             .iter()
-            .map(|&position| camera.project(position).pos)
+            .map(|&position| {
+                let projected = camera.project(position);
+                projected.in_front.then_some(projected.pos)
+            })
             .collect::<Vec<_>>();
         let hover_pos = response
             .hovered()
@@ -145,11 +145,11 @@ pub(super) fn draw_model_viewport(
             .flatten();
         let mut hovered: Option<(usize, egui::Pos2, f32)> = None;
         for (index, node) in data.preview.nodes.iter().enumerate() {
-            let Some(&joint) = projected.get(index) else {
+            let Some(&Some(joint)) = projected.get(index) else {
                 continue;
             };
             if node.parent >= 0 {
-                let Some(&parent) = projected.get(node.parent as usize) else {
+                let Some(&Some(parent)) = projected.get(node.parent as usize) else {
                     continue;
                 };
                 painter.line_segment(
@@ -194,6 +194,9 @@ pub(super) fn draw_model_viewport(
             }
             let (position, axes) = animated_marker_transform(marker, skinning_rows.as_deref());
             let projected = camera.project(position);
+            if !projected.in_front {
+                continue;
+            }
             let axis_deltas = marker_axis_screen_deltas(&camera, axes);
             draw_marker_axes(&painter, projected.pos, axis_deltas);
             if hover_pos.is_some_and(|pos| marker_axes_hovered(pos, projected.pos, axis_deltas)) {
@@ -398,7 +401,9 @@ fn draw_model_error_shape<'a>(
 ) {
     match &error.shape {
         ModelErrorShape::Point(point) => {
-            let position = project_error_point(camera, point, skinning_rows);
+            let Some(position) = project_error_point(camera, point, skinning_rows) else {
+                return;
+            };
             painter.circle_filled(position, 4.5, color);
             painter.circle_stroke(position, 5.5, Stroke::new(1.25_f32, Color32::WHITE));
             hover.consider_point(position, 8.0, &error.label, label_color);
@@ -414,13 +419,18 @@ fn draw_model_error_shape<'a>(
                 start_world[1] + normal[1] * length,
                 start_world[2] + normal[2] * length,
             ];
-            let start = camera.project(start_world).pos;
-            let end = camera.project(end_world).pos;
+            let (start, end) = (camera.project(start_world), camera.project(end_world));
+            if !start.in_front || !end.in_front {
+                return;
+            }
+            let (start, end) = (start.pos, end.pos);
             painter.line_segment([start, end], Stroke::new(3.0_f32, color));
             hover.consider_segment(start, end, &error.label, label_color);
         }
         ModelErrorShape::Polyline(points) => {
-            let projected = project_error_points(camera, points, skinning_rows);
+            let Some(projected) = project_error_points(camera, points, skinning_rows) else {
+                return;
+            };
             for pair in projected.windows(2) {
                 painter.line_segment([pair[0], pair[1]], Stroke::new(3.0_f32, color));
                 hover.consider_segment(pair[0], pair[1], &error.label, label_color);
@@ -451,7 +461,9 @@ fn draw_model_error_face<'a>(
     skinning_rows: Option<&[[f32; 4]]>,
     hover: &mut ErrorHoverState<'a>,
 ) {
-    let projected = project_error_points(camera, points, skinning_rows);
+    let Some(projected) = project_error_points(camera, points, skinning_rows) else {
+        return;
+    };
     if projected.len() < 3 {
         return;
     }
@@ -485,21 +497,23 @@ fn draw_model_error_face<'a>(
     }
 }
 
+/// `None` behind the perspective eye, where an overlay cannot be drawn.
 fn project_error_point(
     camera: &PreviewCamera,
     point: &ModelErrorPoint,
     skinning_rows: Option<&[[f32; 4]]>,
-) -> egui::Pos2 {
-    camera
-        .project(animated_error_point(point, skinning_rows))
-        .pos
+) -> Option<egui::Pos2> {
+    let projected = camera.project(animated_error_point(point, skinning_rows));
+    projected.in_front.then_some(projected.pos)
 }
 
+/// `None` when any point is behind the perspective eye: a shape that crosses
+/// the near plane has no faithful 2D outline.
 fn project_error_points(
     camera: &PreviewCamera,
     points: &[ModelErrorPoint],
     skinning_rows: Option<&[[f32; 4]]>,
-) -> Vec<egui::Pos2> {
+) -> Option<Vec<egui::Pos2>> {
     points
         .iter()
         .map(|point| project_error_point(camera, point, skinning_rows))
@@ -642,17 +656,32 @@ struct ModelGpuCamera {
     /// spreads the extended render distance across NDC depth; see
     /// `gpu_uniforms`.
     depth_map: [f32; 2],
-    /// 1.0 = perspective divide on, 0.0 = orthographic.
+    /// `1 / eye` in scaled view units: `w = 1 + view.y · this`. 0.0 is the
+    /// orthographic view.
     perspective: f32,
 }
 
-/// Perspective geometry, shared between the shader and the CPU-side marker
-/// projection. The eye sits at view-space `y = -d` with `d = 2 · depth_radius
-/// · scale`; the depth bound is `r = 1.05 · depth_radius · scale`, so `r/d`
-/// is this constant. From it: `w = 1 + view.y · depth_scale · (r/d)` (which
-/// is 1 exactly at the focus plane, keeping the framing identical to the
-/// orthographic view there and bounded ≥ 0.5 for all in-range geometry).
-const PERSPECTIVE_R_OVER_D: f32 = 1.05 / 2.0;
+/// Perspective's vertical field of view (across the viewport's shorter side),
+/// fixed so zooming moves the eye rather than narrowing the lens.
+///
+/// The eye sits on the view axis at the distance where this lens frames the
+/// focus plane exactly as the orthographic view does at the same zoom, so
+/// `w = 1 + view.y / eye` is 1 at the orbit point: toggling the projection
+/// never jumps, and pan and zoom-to-cursor keep their orthographic math
+/// there. The fit spans `1.1 · radius` each side of the focus in *scaled*
+/// view units at every zoom, so in those units `eye = 1.1 · radius /
+/// tan(fov / 2)` is constant — and in world units it shrinks as `1 / scale`.
+/// That is the dolly: zooming in walks the eye toward the orbit point and the
+/// perspective deepens, where the old fixed eye at two radii only magnified
+/// the picture and flattened toward orthographic the closer one looked.
+const PERSPECTIVE_FOV_Y: f32 = 60.0 * std::f32::consts::PI / 180.0;
+
+/// The perspective near plane, as a fraction of the eye's distance to the
+/// orbit point. Small, because a dolly brings the eye right up to (and
+/// inside) geometry, and anything nearer than this is clipped away — but not
+/// smaller: depth precision falls with the near plane, and at the deepest
+/// zoom on a level 1% left distant walls fighting.
+const PERSPECTIVE_NEAR_FRACTION: f32 = 0.05;
 
 /// How many depth windows of render distance the clip range covers, beyond
 /// the one the framing math is built around. Depth clipping is remapped —
@@ -786,7 +815,6 @@ fn model_shader_sources(
     };
     // Position and normal are required; the rest are read only on the
     // shaded path and a driver may drop them from an unused program.
-    let persp_ratio = PERSPECTIVE_R_OVER_D;
     let bone_rows = MAX_PREVIEW_BONES * 3;
     let vertex_source = format!(
         "{}{precision}\
@@ -802,9 +830,10 @@ fn model_shader_sources(
              uniform vec2 u_angles;\n\
              uniform vec2 u_clip_scale;\n\
              uniform float u_depth_scale;\n\
-             // Depth remap `z = t * x + y`: extends the render distance\n\
-             // without moving the perspective eye. See PREVIEW_RENDER_DISTANCE.\n\
+             // Depth remap `z = t * x + y` across the near and far planes.\n\
+             // See PREVIEW_RENDER_DISTANCE.\n\
              uniform vec2 u_depth_map;\n\
+             // 1 / eye distance (scaled view units); 0 is orthographic.\n\
              uniform float u_perspective;\n\
              // Skinning: three vec4 rows of an affine matrix per bone,\n\
              // bind-relative (world * inverse_bind), so zero-weight vertices\n\
@@ -861,8 +890,8 @@ fn model_shader_sources(
                  // Perspective: the eye sits along -Y so w grows with depth;\n\
                  // at the focus plane (view.y = 0) w is exactly 1 and the\n\
                  // framing matches the orthographic view. See the derivation\n\
-                 // on PERSPECTIVE_R_OVER_D.\n\
-                 float w = mix(1.0, 1.0 + view.y * u_depth_scale * {persp_ratio}, u_perspective);\n\
+                 // on PERSPECTIVE_FOV_Y.\n\
+                 float w = 1.0 + view.y * u_perspective;\n\
                  float z_clip = view.y * u_depth_scale * u_depth_map.x + u_depth_map.y;\n\
                  gl_Position = vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
                  vec3 source_normal = length(normal_in) > 0.0001 ? normalize(normal_in) : vec3(0.0, 0.0, 1.0);\n\
@@ -1817,30 +1846,130 @@ mod gpu_renderer_tests {
     }
 
     /// The extended render distance must clip exactly at its declared bounds
-    /// and never bend the perspective: the near plane stays at t = -1, the
-    /// far plane reaches t = K, and post-divide depth stays monotone in t.
+    /// in both projections, wherever the dolly has put the eye: near plane
+    /// just in front of the eye, far plane at t = K, and post-divide depth
+    /// monotone between them so the depth test orders correctly.
     #[test]
-    fn depth_remap_extends_the_clip_range_without_moving_the_eye() {
+    fn depth_remap_clips_at_the_near_and_far_planes_for_any_eye() {
         let k = PREVIEW_RENDER_DISTANCE;
-        let rd = PERSPECTIVE_R_OVER_D;
 
         // Orthographic: w = 1, so z = t·x + y must span NDC over t ∈ [-K, K].
-        let [x, y] = depth_map_coefficients(false);
+        let [x, y] = depth_map_coefficients(None);
         assert!(((-k) * x + y - -1.0).abs() < 1e-5);
         assert!((k * x + y - 1.0).abs() < 1e-5);
 
-        // Perspective: w = 1 + t·rd. Near plane pinned at t = -1, far at K.
-        let [x, y] = depth_map_coefficients(true);
-        let z = |t: f32| t * x + y;
-        let w = |t: f32| 1.0 + t * rd;
-        assert!((z(-1.0) - -w(-1.0)).abs() < 1e-5, "near plane moved");
-        assert!((z(k) - w(k)).abs() < 1e-5, "far plane short of K");
-        // z/w monotone in t ⇔ x − rd·y > 0.
-        assert!(x - rd * y > 0.0, "post-divide depth not monotone");
-        // The remap collapses to the pre-remap projection at K = 1: the same
-        // formulas with K = 1 give x = 1, y = rd.
-        let x1 = (2.0 + rd * (1.0 - 1.0)) / (1.0 + 1.0);
-        assert!((x1 - 1.0).abs() < 1e-6 && (x1 - (1.0 - rd) - rd).abs() < 1e-6);
+        // Perspective, from the default framing's eye down to a dolly deep
+        // inside a level.
+        for eye in [1.9, 0.5, 0.02, 0.0005] {
+            let [x, y] = depth_map_coefficients(Some(eye));
+            let z = |t: f32| t * x + y;
+            let w = |t: f32| 1.0 + t / eye;
+            let near = -eye * (1.0 - PERSPECTIVE_NEAR_FRACTION);
+            let tolerance = 1e-4 * w(k);
+            assert!(
+                (z(near) + w(near)).abs() < tolerance,
+                "eye {eye}: near plane moved"
+            );
+            assert!(
+                (z(k) - w(k)).abs() < tolerance,
+                "eye {eye}: far plane short of K"
+            );
+            let samples = (0..=64)
+                .map(|step| near + (k - near) * step as f32 / 64.0)
+                .map(|t| z(t) / w(t))
+                .collect::<Vec<_>>();
+            // Strictly increasing wherever f32 can tell the samples apart;
+            // at the deepest dolly the far samples round together, so ties
+            // are allowed there but never a reversal.
+            assert!(
+                samples.windows(2).all(|pair| if eye >= 0.02 {
+                    pair[1] > pair[0]
+                } else {
+                    pair[1] >= pair[0]
+                }),
+                "eye {eye}: post-divide depth not monotone"
+            );
+        }
+    }
+
+    fn camera(scale: f32, perspective: bool) -> PreviewCamera {
+        PreviewCamera {
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
+            center: [0.0; 3],
+            radius: 1.0,
+            depth_radius: 1.0,
+            // Unrotated: view space is world space, the eye looks along +Y.
+            yaw: 0.0,
+            pitch: 0.0,
+            scale,
+            perspective,
+        }
+    }
+
+    /// How far from the viewport center a point lands, in pixels.
+    fn screen_offset(camera: &PreviewCamera, point: [f32; 3]) -> f32 {
+        (camera.project(point).pos - camera.rect.center()).length()
+    }
+
+    /// On the orbit point's plane, perspective frames exactly like the
+    /// orthographic view at every zoom, so toggling never jumps and the
+    /// pan / zoom-to-cursor math holds in both.
+    #[test]
+    fn perspective_matches_orthographic_at_the_focus_plane() {
+        for scale in [0.05, 1.0, 20.0, 400.0] {
+            let point = [0.3 / scale, 0.0, 0.2 / scale];
+            let flat = camera(scale, false).project(point).pos;
+            let deep = camera(scale, true).project(point).pos;
+            assert!(
+                (flat - deep).length() < 1e-3,
+                "scale {scale}: {flat:?} vs {deep:?}"
+            );
+        }
+    }
+
+    /// The reported defect: zooming in only magnified the picture, so the
+    /// perspective stayed the same strength and up close looked flat. With
+    /// the eye dollying in, a point the same world distance nearer the
+    /// camera than the orbit point grows ever larger relative to one on the
+    /// focus plane.
+    #[test]
+    fn zooming_in_dollies_the_eye_and_deepens_the_perspective() {
+        let convergence = |scale: f32| {
+            let camera = camera(scale, true);
+            let offset = 0.1 / scale;
+            let nearer = screen_offset(&camera, [offset, -0.2, 0.0]);
+            let on_plane = screen_offset(&camera, [offset, 0.0, 0.0]);
+            nearer / on_plane
+        };
+        let (wide, close) = (convergence(1.0), convergence(8.0));
+        assert!(wide > 1.05, "no perspective at the default zoom: {wide}");
+        assert!(
+            close > wide * 1.5,
+            "zoom did not deepen the perspective: {wide} → {close}"
+        );
+
+        // The lens itself does not change: at every zoom the eye sits where
+        // a 60° field of view frames the focus plane, `1.1 · radius /
+        // tan(30°)` out in scaled units — `1 / scale` of that in world units.
+        for scale in [1.0, 8.0, 100.0] {
+            let eye_world = camera(scale, true).eye_distance() / scale;
+            let expected = 1.1 / (30.0f32.to_radians().tan() * scale);
+            assert!((eye_world - expected).abs() < 1e-5 * expected.max(1.0));
+        }
+    }
+
+    /// Overlays behind the eye are dropped rather than drawn stretched across
+    /// the viewport; the orthographic view has no eye and keeps everything.
+    #[test]
+    fn overlay_points_behind_the_eye_are_not_drawn() {
+        let scale = 10.0;
+        let perspective = camera(scale, true);
+        let eye_world = perspective.eye_distance() / scale;
+        let in_front = [0.0, -eye_world * 0.5, 0.0];
+        let behind = [0.0, -eye_world * 1.5, 0.0];
+        assert!(perspective.project(in_front).in_front);
+        assert!(!perspective.project(behind).in_front);
+        assert!(camera(scale, false).project(behind).in_front);
     }
 
     #[test]
@@ -2300,6 +2429,8 @@ pub(in crate::app) fn material_color(index: u16) -> Color32 {
 
 struct ProjectedPoint {
     pos: egui::Pos2,
+    /// In front of the perspective near plane; always true orthographically.
+    in_front: bool,
 }
 
 /// The camera's zoom bounds. Wide on purpose: 5× was plenty for a vehicle but
@@ -2408,14 +2539,31 @@ impl PreviewCamera {
         let fit = self.rect.width().min(self.rect.height()) / (self.radius * 2.2).max(0.001);
         // The same divide the vertex shader applies, so markers stay glued to
         // their geometry in either projection.
-        let w = if self.perspective {
-            let depth_scale = 1.0 / (self.depth_radius * self.scale * 1.05).max(0.001);
-            (1.0 + rotated[1] * depth_scale * PERSPECTIVE_R_OVER_D).max(0.05)
-        } else {
-            1.0
-        };
+        let w = 1.0 + rotated[1] * self.inverse_eye();
+        // The GPU clips at the near plane; an overlay point past it is behind
+        // (or level with) the eye and has no place on screen.
+        let in_front = w >= PERSPECTIVE_NEAR_FRACTION;
+        let w = w.max(PERSPECTIVE_NEAR_FRACTION);
         let screen = self.rect.center() + Vec2::new(rotated[0] * fit / w, -rotated[2] * fit / w);
-        ProjectedPoint { pos: screen }
+        ProjectedPoint {
+            pos: screen,
+            in_front,
+        }
+    }
+
+    /// Eye distance from the orbit point in scaled view units; see
+    /// [`PERSPECTIVE_FOV_Y`].
+    fn eye_distance(&self) -> f32 {
+        (self.radius * 1.1).max(0.001) / (PERSPECTIVE_FOV_Y * 0.5).tan()
+    }
+
+    /// `1 / eye` for perspective, 0 for the orthographic view.
+    fn inverse_eye(&self) -> f32 {
+        if self.perspective {
+            1.0 / self.eye_distance()
+        } else {
+            0.0
+        }
     }
 
     fn gpu_uniforms(&self) -> ModelGpuCamera {
@@ -2432,16 +2580,14 @@ impl PreviewCamera {
             // focus-grown radius safely maps all depths inside NDC even when
             // the orbit point sits far from the bounds center.
             depth_scale: 1.0 / (self.depth_radius * self.scale * 1.05).max(0.001),
-            // Depth remap `z = t·x + y` with `t = view.y · depth_scale`. With
-            // K = PREVIEW_RENDER_DISTANCE and rd = PERSPECTIVE_R_OVER_D:
-            // orthographic keeps t ∈ [-K, K] inside NDC; perspective keeps
-            // its near plane at t = -1 (just short of the eye at t ≈ -1.9)
-            // and pushes the far plane out to t = K by solving the linear
-            // map through z(-1) = -w(-1) and z(K) = w(K). At K = 1 both
-            // collapse to the pre-remap projection, and z/w stays monotone
-            // in t because x - rd·y > 0 for every K ≥ 1.
-            depth_map: depth_map_coefficients(self.perspective),
-            perspective: if self.perspective { 1.0 } else { 0.0 },
+            // Depth remap `z = t·x + y` with `t = view.y · depth_scale`;
+            // see `depth_map_coefficients`.
+            depth_map: depth_map_coefficients(
+                self.perspective.then(|| {
+                    self.eye_distance() / (self.depth_radius * self.scale * 1.05).max(0.001)
+                }),
+            ),
+            perspective: self.inverse_eye(),
         }
     }
 
@@ -2452,14 +2598,23 @@ impl PreviewCamera {
 
 /// The `[x, y]` of the shader's depth remap `z = t·x + y`, with `t = view.y ·
 /// depth_scale` (documented at the `depth_map` field of `ModelGpuCamera`).
-fn depth_map_coefficients(perspective: bool) -> [f32; 2] {
-    if perspective {
-        let x = (2.0 + PERSPECTIVE_R_OVER_D * (PREVIEW_RENDER_DISTANCE - 1.0))
-            / (PREVIEW_RENDER_DISTANCE + 1.0);
-        [x, x - (1.0 - PERSPECTIVE_R_OVER_D)]
-    } else {
-        [1.0 / PREVIEW_RENDER_DISTANCE, 0.0]
-    }
+///
+/// `t` is depth in units of the depth window, and the far plane sits at
+/// `t = K` (`PREVIEW_RENDER_DISTANCE`) in both projections. Orthographic maps
+/// `[-K, K]` straight onto NDC. Perspective takes `eye` — the eye's distance,
+/// in the same units — and solves the line through `z(n) = -w(n)` and
+/// `z(K) = w(K)`, with `w(t) = 1 + t / eye` and the near plane `n` just in
+/// front of the eye. `z / w` is monotone in `t` between them, so the depth
+/// test orders correctly however close the dolly brings the eye.
+fn depth_map_coefficients(eye: Option<f32>) -> [f32; 2] {
+    let k = PREVIEW_RENDER_DISTANCE;
+    let Some(eye) = eye.filter(|eye| eye.is_finite() && *eye > 0.0) else {
+        return [1.0 / k, 0.0];
+    };
+    let near = -eye * (1.0 - PERSPECTIVE_NEAR_FRACTION);
+    let w = |t: f32| 1.0 + t / eye;
+    let x = (w(k) + w(near)) / (k - near);
+    [x, -w(near) - x * near]
 }
 
 /// Build flat preview geometry with draw batches grouped by region and

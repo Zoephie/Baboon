@@ -1995,6 +1995,24 @@ impl Baboon {
                 self.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
             }
         });
+        draw_speed_row(
+            ui,
+            "Scroll speed",
+            "How far the mouse wheel or trackpad scrolls lists and panels. \
+             100% is the original speed.",
+            &mut self.prefs.scroll_speed,
+            MIN_SCROLL_SPEED..=MAX_SCROLL_SPEED,
+            DEFAULT_SCROLL_SPEED,
+        );
+        draw_speed_row(
+            ui,
+            "Zoom speed",
+            "How fast the mouse wheel zooms the model and bitmap viewports. \
+             100% is the original speed.",
+            &mut self.prefs.zoom_speed,
+            MIN_ZOOM_SPEED..=MAX_ZOOM_SPEED,
+            DEFAULT_ZOOM_SPEED,
+        );
     }
 
     pub(super) fn draw_settings_tools_tab(&mut self, ui: &mut Ui) {
@@ -2081,6 +2099,40 @@ fn draw_ui_scale_input(ui: &mut Ui, ui_scale: &mut f32) {
     if response.changed() {
         *ui_scale = ui_scale_from_percent(percent);
     }
+}
+
+/// A speed multiplier: slider, percentage box, and Reset.
+fn draw_speed_row(
+    ui: &mut Ui,
+    label: &str,
+    hover: &str,
+    speed: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    default: f32,
+) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).color(subtle_dark()))
+            .on_hover_text(hover);
+        ui.add(
+            egui::Slider::new(speed, range.clone())
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+        );
+        let mut percent = *speed * 100.0;
+        let response = ui.add(
+            egui::DragValue::new(&mut percent)
+                .range(range.start() * 100.0..=range.end() * 100.0)
+                .speed(1.0)
+                .max_decimals(0)
+                .suffix("%"),
+        );
+        if response.changed() {
+            *speed = (percent / 100.0).clamp(*range.start(), *range.end());
+        }
+        if ui.button("Reset").clicked() {
+            *speed = default;
+        }
+    });
 }
 
 fn ui_scale_percent(ui_scale: f32) -> f32 {

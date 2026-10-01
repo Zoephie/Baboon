@@ -1415,6 +1415,8 @@ impl Baboon {
         crate::format::set_angles_in_degrees(self.prefs.angles_in_degrees);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.prefs.scroll_to_cycle_dropdowns);
+        apply_scroll_speed(ctx, self.prefs.scroll_speed);
+        set_zoom_speed(ctx, self.prefs.zoom_speed);
         // Opened before any pane draws and settled after the last one, so a
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);

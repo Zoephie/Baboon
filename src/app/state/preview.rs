@@ -238,10 +238,11 @@ pub(in crate::app) struct ModelPreviewState {
     /// the collision/physics layers on screen — a frame-level filter, so
     /// toggling never rebuilds geometry.
     pub(in crate::app) show_render: bool,
-    /// Perspective projection instead of the default orthographic one. The
-    /// eye sits two (focus-grown) radii out along the view axis, scaled so
-    /// the focus plane matches the orthographic framing exactly — toggling
-    /// never jumps, and the zoom slider keeps one meaning in both.
+    /// Perspective projection (the default) instead of orthographic. A fixed
+    /// 60° lens whose eye dollies toward the orbit point as the zoom grows,
+    /// placed so the focus plane matches the orthographic framing exactly —
+    /// toggling never jumps, and the zoom slider keeps one meaning in both.
+    /// The tag pane keeps it in step with `GuiPrefs::model_preview_perspective`.
     pub(in crate::app) perspective: bool,
     /// Animation playback (selection, clock, decoded pose) for `.model`
     /// previews.
@@ -286,7 +287,7 @@ impl Default for ModelPreviewState {
             show_backfaces: false,
             textures_pending: false,
             show_render: true,
-            perspective: false,
+            perspective: true,
             animation: PreviewAnimationPlayback::default(),
             show_grid: true,
             scale: 1.0,

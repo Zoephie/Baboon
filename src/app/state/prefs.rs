@@ -445,7 +445,15 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) dark_mode: bool,
     pub(in crate::app) ui_scale: f32,
+    /// Multiplier on mouse-wheel and trackpad scrolling in scroll areas.
+    /// 1.0 is egui's own speed, which is what Baboon always scrolled at.
+    pub(in crate::app) scroll_speed: f32,
+    /// Multiplier on mouse-wheel zoom in the model and bitmap viewports.
+    pub(in crate::app) zoom_speed: f32,
     pub(in crate::app) model_preview_size: f32,
+    /// The model preview's projection: perspective, or orthographic when
+    /// cleared. Shared by every tag pane and remembered across sessions.
+    pub(in crate::app) model_preview_perspective: bool,
     pub(in crate::app) bitmap_preview_view: BitmapPreviewViewSettings,
     pub(in crate::app) blender_path: Option<PathBuf>,
     pub(in crate::app) editing_kit_paths: HashMap<String, PathBuf>,
@@ -481,7 +489,10 @@ impl Default for GuiPrefs {
             expert_mode: false,
             dark_mode: false,
             ui_scale: DEFAULT_UI_SCALE,
+            scroll_speed: DEFAULT_SCROLL_SPEED,
+            zoom_speed: DEFAULT_ZOOM_SPEED,
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
+            model_preview_perspective: true,
             bitmap_preview_view: BitmapPreviewViewSettings::default(),
             blender_path: None,
             editing_kit_paths: HashMap::new(),
@@ -505,6 +516,14 @@ impl Default for GuiPrefs {
 pub(in crate::app) const DEFAULT_UI_SCALE: f32 = 1.0;
 pub(in crate::app) const MIN_UI_SCALE: f32 = 0.6;
 pub(in crate::app) const MAX_UI_SCALE: f32 = 1.5;
+
+pub(in crate::app) const DEFAULT_SCROLL_SPEED: f32 = 1.0;
+pub(in crate::app) const MIN_SCROLL_SPEED: f32 = 0.5;
+pub(in crate::app) const MAX_SCROLL_SPEED: f32 = 4.0;
+
+pub(in crate::app) const DEFAULT_ZOOM_SPEED: f32 = 1.0;
+pub(in crate::app) const MIN_ZOOM_SPEED: f32 = 0.25;
+pub(in crate::app) const MAX_ZOOM_SPEED: f32 = 4.0;
 
 #[cfg(test)]
 mod tests {
