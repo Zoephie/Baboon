@@ -1109,12 +1109,17 @@ fn draw_model_view_settings_menu(
                     ModelViewCheckboxIcon::Tag(*b"mode"),
                     "Render Model",
                 );
-                model_view_icon_checkbox(
-                    ui,
-                    &mut state.show_collision,
-                    ModelViewCheckboxIcon::Tag(*b"coll"),
-                    "Collision Model",
-                );
+                let has_collision =
+                    overlay_layer_available(data, state, ModelPreviewLayer::Collision);
+                ui.add_enabled_ui(has_collision, |ui| {
+                    model_view_icon_checkbox(
+                        ui,
+                        &mut state.show_collision,
+                        ModelViewCheckboxIcon::Tag(*b"coll"),
+                        "Collision Model",
+                    )
+                    .on_disabled_hover_text("This model has no collision model, or it has no drawable geometry.");
+                });
                 if tag.header.group_tag.to_be_bytes() == *b"hlmt" {
                     model_view_icon_checkbox(
                         ui,
@@ -1226,6 +1231,18 @@ enum ModelViewCheckboxIcon {
     Tag([u8; 4]),
     Markers,
     Errors,
+}
+
+/// Whether an overlay toggle has anything to show. Until the overlay worker
+/// reports back the answer is unknown, so the toggle stays enabled; after
+/// it, a layer with no batches means the model names no such tag, or the
+/// reference did not resolve to anything drawable.
+fn overlay_layer_available(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    layer: ModelPreviewLayer,
+) -> bool {
+    !state.overlays_loaded || data.preview.batches.iter().any(|batch| batch.layer == layer)
 }
 
 fn model_view_icon_checkbox(
@@ -1777,6 +1794,161 @@ mod tests {
             &state,
             &data.preview.regions[1]
         ));
+    }
+
+    fn layer_batch(
+        region: &str,
+        permutation: &str,
+        layer: ModelPreviewLayer,
+    ) -> RenderModelPreviewBatch {
+        RenderModelPreviewBatch {
+            region_name: region.into(),
+            permutation_name: permutation.into(),
+            layer,
+            ..Default::default()
+        }
+    }
+
+    fn select(state: &mut ModelPreviewState, region: &str, permutation: &str) {
+        state.region_selections.insert(
+            region.into(),
+            ModelRegionSelection {
+                enabled: true,
+                permutation: permutation.into(),
+            },
+        );
+    }
+
+    /// An overlay that shares a region name but none of its permutation
+    /// names falls back to its own first permutation; one that does share
+    /// the name follows the selection, and render batches never fall back.
+    #[test]
+    fn overlay_permutations_follow_the_selection_or_fall_back() {
+        use ModelPreviewLayer::{Collision, Render};
+        let preview = RenderModelPreview {
+            batches: vec![
+                layer_batch("__unnamed", "monitor", Render),
+                layer_batch("__unnamed", "lightning-100", Render),
+                layer_batch("__unnamed", "__base", Collision),
+                layer_batch("__unnamed", "damaged", Collision),
+                layer_batch("hull", "base", Render),
+                layer_batch("hull", "base", Collision),
+                layer_batch("hull", "broken", Collision),
+            ],
+            ..Default::default()
+        };
+        let mut state = ModelPreviewState {
+            overlays_loaded: true,
+            show_render: true,
+            show_collision: true,
+            ..Default::default()
+        };
+        select(&mut state, "__unnamed", "monitor");
+        select(&mut state, "hull", "base");
+        assert_eq!(
+            renderer::visible_batch_indices(&preview, &state),
+            [0, 2, 4, 5]
+        );
+
+        // A matching collision permutation wins over the fallback.
+        select(&mut state, "hull", "broken");
+        assert_eq!(renderer::visible_batch_indices(&preview, &state), [0, 2, 6]);
+
+        // A disabled region hides its overlay too.
+        state
+            .region_selections
+            .get_mut("__unnamed")
+            .unwrap()
+            .enabled = false;
+        assert_eq!(renderer::visible_batch_indices(&preview, &state), [6]);
+
+        // A standalone tag's batches are the primary preview: exact match only.
+        state.overlays_loaded = false;
+        select(&mut state, "__unnamed", "monitor");
+        assert_eq!(renderer::visible_batch_indices(&preview, &state), [0, 6]);
+    }
+
+    /// The monitor biped against `BLAM_TEST_HCEEK` (the kit's `tags`): its
+    /// gbxmodel and collision model share the `__unnamed` region but no
+    /// permutation name, which hid the collision layer entirely.
+    #[test]
+    fn halo_ce_monitor_collision_overlay_is_drawn() {
+        let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+        let biped = tags.join("characters/monitor/monitor.biped");
+        if !biped.is_file() {
+            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
+            return;
+        }
+        let definitions = crate::app::locate_definitions_root();
+        let source = TagSource::LooseFolder {
+            root: tags,
+            game: Some("haloce_mcc".into()),
+            definitions_root: definitions.clone(),
+        };
+        let object = crate::source::read_tag_from_bytes(
+            &std::fs::read(&biped).unwrap(),
+            Some("haloce_mcc"),
+            Some(definitions.as_path()),
+            u32::from_be_bytes(*b"bipd"),
+        )
+        .unwrap();
+        let render = load_referenced_tag_from_source(
+            &source,
+            r"characters\monitor\monitor",
+            "gbxmodel",
+            b"mod2",
+        )
+        .unwrap();
+        let mut preview = build_render_preview(&render).unwrap();
+        let collision =
+            halo1_object_collision_overlay(&object, &source).expect("collision overlay");
+        merge_preview_append(&mut preview, &collision);
+        let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+        let mut state = ModelPreviewState {
+            overlays_loaded: true,
+            show_render: true,
+            show_collision: true,
+            ..Default::default()
+        };
+        reset_model_preview_selection(&mut state, &data, None);
+
+        let visible = renderer::visible_batch_indices(&data.preview, &state);
+        let layers = |layer| {
+            visible
+                .iter()
+                .filter(|&&index| data.preview.batches[index].layer == layer)
+                .count()
+        };
+        assert!(layers(ModelPreviewLayer::Render) > 0);
+        assert!(
+            layers(ModelPreviewLayer::Collision) > 0,
+            "collision batches hidden"
+        );
+    }
+
+    /// The collision toggle disables only once the overlays have landed
+    /// without a collision layer.
+    #[test]
+    fn collision_toggle_is_available_only_with_collision_geometry() {
+        let render_only = RenderModelPreview {
+            batches: vec![layer_batch("body", "base", ModelPreviewLayer::Render)],
+            ..Default::default()
+        };
+        let mut with_collision = render_only.clone();
+        with_collision
+            .batches
+            .push(layer_batch("body", "base", ModelPreviewLayer::Collision));
+        let render_only =
+            model_preview_data(String::new(), String::new(), render_only, Vec::new());
+        let with_collision =
+            model_preview_data(String::new(), String::new(), with_collision, Vec::new());
+        let mut state = ModelPreviewState::default();
+        let collision = ModelPreviewLayer::Collision;
+
+        assert!(overlay_layer_available(&render_only, &state, collision), "unknown yet");
+        state.overlays_loaded = true;
+        assert!(!overlay_layer_available(&render_only, &state, collision));
+        assert!(overlay_layer_available(&with_collision, &state, collision));
     }
 
     #[test]
