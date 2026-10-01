@@ -753,26 +753,23 @@ fn draw_bitmap_canvas_and_footer(
     // Scroll-to-zoom, anchored at the cursor (the image pixel under the
     // pointer stays fixed). All math is self-contained in this frame, so
     // there's no one-frame feedback lag.
-    if canvas_resp.hovered() {
-        let scroll = ui.input(|i| i.raw_scroll_delta.y);
-        if scroll.abs() > f32::EPSILON {
-            let old_zoom = preview.zoom;
-            let factor = (scroll / 240.0).exp();
-            let min_zoom = fit_zoom.min(0.25);
-            let new_zoom = (old_zoom * factor).clamp(min_zoom, 32.0);
-            if (new_zoom - old_zoom).abs() > f32::EPSILON {
-                if let Some(ptr) = ui.input(|i| i.pointer.hover_pos()) {
-                    // Image top-left in screen space at the current zoom.
-                    let center = canvas_rect.center();
-                    let img_tl = center + preview.pan - image_size * old_zoom * 0.5;
-                    // Pixel coordinate under the cursor.
-                    let img_px = (ptr - img_tl) / old_zoom;
-                    // Solve for the pan that keeps img_px under the cursor.
-                    let new_img_tl = ptr - img_px * new_zoom;
-                    preview.pan = new_img_tl - center + image_size * new_zoom * 0.5;
-                }
-                preview.zoom = new_zoom;
+    if let Some(scroll) = viewport_wheel_zoom(ui, &canvas_resp) {
+        let old_zoom = preview.zoom;
+        let factor = (scroll / 240.0).exp();
+        let min_zoom = fit_zoom.min(0.25);
+        let new_zoom = (old_zoom * factor).clamp(min_zoom, 32.0);
+        if (new_zoom - old_zoom).abs() > f32::EPSILON {
+            if let Some(ptr) = ui.input(|i| i.pointer.hover_pos()) {
+                // Image top-left in screen space at the current zoom.
+                let center = canvas_rect.center();
+                let img_tl = center + preview.pan - image_size * old_zoom * 0.5;
+                // Pixel coordinate under the cursor.
+                let img_px = (ptr - img_tl) / old_zoom;
+                // Solve for the pan that keeps img_px under the cursor.
+                let new_img_tl = ptr - img_px * new_zoom;
+                preview.pan = new_img_tl - center + image_size * new_zoom * 0.5;
             }
+            preview.zoom = new_zoom;
         }
     }
 

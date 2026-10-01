@@ -188,12 +188,28 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .map(|value| value as f32)
             .unwrap_or(DEFAULT_UI_SCALE)
             .clamp(MIN_UI_SCALE, MAX_UI_SCALE),
+        scroll_speed: value
+            .get("scroll_speed")
+            .and_then(Value::as_f64)
+            .map(|value| value as f32)
+            .unwrap_or(DEFAULT_SCROLL_SPEED)
+            .clamp(MIN_SCROLL_SPEED, MAX_SCROLL_SPEED),
+        zoom_speed: value
+            .get("zoom_speed")
+            .and_then(Value::as_f64)
+            .map(|value| value as f32)
+            .unwrap_or(DEFAULT_ZOOM_SPEED)
+            .clamp(MIN_ZOOM_SPEED, MAX_ZOOM_SPEED),
         model_preview_size: value
             .get("model_preview_size")
             .and_then(Value::as_f64)
             .map(|value| value as f32)
             .unwrap_or(DEFAULT_MODEL_PREVIEW_SIZE)
             .clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE),
+        model_preview_perspective: value
+            .get("model_preview_perspective")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         bitmap_preview_view: BitmapPreviewViewSettings {
             bg: value
                 .get("bitmap_preview_background")
@@ -695,7 +711,10 @@ fn prefs_to_value(
         "expert_mode": prefs.expert_mode,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,
+        "scroll_speed": prefs.scroll_speed,
+        "zoom_speed": prefs.zoom_speed,
         "model_preview_size": prefs.model_preview_size,
+        "model_preview_perspective": prefs.model_preview_perspective,
         "bitmap_preview_background": prefs.bitmap_preview_view.bg.as_str(),
         "bitmap_preview_checkerboard": prefs.bitmap_preview_view.show_checkerboard,
         "bitmap_preview_border": prefs.bitmap_preview_view.show_border,

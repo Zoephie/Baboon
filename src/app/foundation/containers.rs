@@ -2116,6 +2116,20 @@ fn consume_mouse_wheel_ctx(ctx: &egui::Context) {
     });
 }
 
+/// Scale this frame's wheel/trackpad scrolling by the user's scroll speed.
+///
+/// Only `smooth_scroll_delta` is scaled: it is what every `ScrollArea` (and
+/// the tab bar's wheel) moves by. The model and bitmap viewports zoom on
+/// `raw_scroll_delta`, which is left alone so the setting cannot change how
+/// fast they zoom. egui spreads a wheel notch over several frames and hands
+/// out a slice per frame, so scaling each slice scales the whole notch.
+/// Called once per frame, before any pane draws.
+pub(in crate::app) fn apply_scroll_speed(ctx: &egui::Context, scroll_speed: f32) {
+    if scroll_speed != 1.0 {
+        ctx.input_mut(|input| input.smooth_scroll_delta *= scroll_speed);
+    }
+}
+
 pub(in crate::app) fn set_combo_scroll_cycle_enabled(ctx: &egui::Context, enabled: bool) {
     ctx.data_mut(|data| data.insert_temp(combo_scroll_cycle_enabled_id(), enabled));
 }
@@ -2238,8 +2252,9 @@ enum WheelOwner {
     /// A gesture is in flight and nothing has claimed it yet, because the frame
     /// it started on has not finished drawing.
     Undecided,
-    /// A dropdown claimed it and keeps it until the gesture ends.
-    Dropdown(egui::Id),
+    /// A widget that acts on the wheel itself — a dropdown cycling, a
+    /// viewport zooming — claimed it and keeps it until the gesture ends.
+    Widget(egui::Id),
     /// Nothing claimed it, so it is panel scrolling and stays that way.
     Panel,
 }
@@ -2308,20 +2323,55 @@ pub(in crate::app) fn end_wheel_gesture(ctx: &egui::Context) {
     });
 }
 
+/// The wheel's vertical travel this frame, for a viewport that zooms on it.
+///
+/// Like a dropdown, a viewport may only take a wheel gesture that began on
+/// it: one that started as panel scrolling keeps scrolling the panel when the
+/// cursor slides over the viewport, instead of the viewport stealing it to
+/// zoom. A gesture the viewport does own is consumed — including the smoothed
+/// tail egui spreads over later frames — so the panel under it does not also
+/// scroll while it zooms. Scaled by the user's zoom speed.
+pub(in crate::app) fn viewport_wheel_zoom(ui: &Ui, response: &egui::Response) -> Option<f32> {
+    if !response.hovered() || !claim_wheel_gesture(ui.ctx(), response.id) {
+        return None;
+    }
+    let scroll = ui.input(|input| input.raw_scroll_delta.y);
+    ui.ctx().input_mut(|input| {
+        input.raw_scroll_delta = Vec2::ZERO;
+        input.smooth_scroll_delta = Vec2::ZERO;
+    });
+    let zoom_speed = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(zoom_speed_id()))
+        .unwrap_or(1.0);
+    (scroll.abs() > f32::EPSILON).then_some(scroll * zoom_speed)
+}
+
+/// Publish the user's viewport zoom speed for [`viewport_wheel_zoom`], once
+/// per frame — the viewports draw far from `Baboon`, like the dropdowns that
+/// [`set_combo_scroll_cycle_enabled`] reaches the same way.
+pub(in crate::app) fn set_zoom_speed(ctx: &egui::Context, zoom_speed: f32) {
+    ctx.data_mut(|data| data.insert_temp(zoom_speed_id(), zoom_speed));
+}
+
+fn zoom_speed_id() -> egui::Id {
+    egui::Id::new("viewport_zoom_speed")
+}
+
 /// Whether `id` may act on this frame's wheel events.
 fn claim_wheel_gesture(ctx: &egui::Context, id: egui::Id) -> bool {
     let Some(gesture) = ctx.data(|data| data.get_temp::<WheelGesture>(wheel_gesture_id())) else {
         return false;
     };
     match gesture.owner {
-        WheelOwner::Dropdown(owner) => owner == id,
+        WheelOwner::Widget(owner) => owner == id,
         WheelOwner::Panel => false,
         WheelOwner::Undecided => {
             ctx.data_mut(|data| {
                 data.insert_temp(
                     wheel_gesture_id(),
                     WheelGesture {
-                        owner: WheelOwner::Dropdown(id),
+                        owner: WheelOwner::Widget(id),
                         ..gesture
                     },
                 );
@@ -3121,6 +3171,188 @@ mod palette_repro_tests {
             "{} failure(s):\n{failures:#?}",
             failures.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod scroll_speed_tests {
+    use super::*;
+
+    /// One frame with one trackpad-sized scroll (small enough that egui
+    /// applies it unsmoothed), returning `(smooth, raw)` as panes see them.
+    fn scrolled(scroll_speed: f32) -> (f32, f32) {
+        let ctx = egui::Context::default();
+        let mut seen = (0.0, 0.0);
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::Vec2::new(0.0, -4.0),
+                    modifiers: Default::default(),
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                apply_scroll_speed(ctx, scroll_speed);
+                seen = ctx.input(|input| (input.smooth_scroll_delta.y, input.raw_scroll_delta.y));
+            },
+        );
+        seen
+    }
+
+    #[test]
+    fn scroll_speed_scales_scrolling_but_not_viewport_zoom() {
+        assert_eq!(scrolled(1.0), (-4.0, -4.0), "100% is egui's own speed");
+        assert_eq!(scrolled(2.5), (-10.0, -4.0));
+        assert_eq!(scrolled(0.5), (-2.0, -4.0));
+    }
+
+    /// A Windows wheel notch arrives in lines, which egui smooths over many
+    /// frames; the distance travelled over the whole notch scales too.
+    #[test]
+    fn scroll_speed_scales_a_whole_smoothed_wheel_notch() {
+        let travelled = |scroll_speed: f32| {
+            let ctx = egui::Context::default();
+            let mut total = 0.0;
+            for frame in 0..240 {
+                let events = if frame == 0 {
+                    vec![egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::Vec2::new(0.0, -1.0),
+                        modifiers: Default::default(),
+                    }]
+                } else {
+                    Vec::new()
+                };
+                let _ = ctx.run(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        apply_scroll_speed(ctx, scroll_speed);
+                        total += ctx.input(|input| input.smooth_scroll_delta.y);
+                    },
+                );
+            }
+            total
+        };
+        let base = travelled(1.0);
+        assert!((base + 40.0).abs() < 0.01, "one line is 40 points: {base}");
+        assert!((travelled(3.0) - base * 3.0).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
+mod viewport_wheel_tests {
+    use super::*;
+
+    const VIEWPORT: egui::Rect = egui::Rect {
+        min: egui::Pos2::new(0.0, 150.0),
+        max: egui::Pos2::new(400.0, 350.0),
+    };
+    const OVER_PANEL: egui::Pos2 = egui::Pos2::new(200.0, 50.0);
+    const OVER_VIEWPORT: egui::Pos2 = egui::Pos2::new(200.0, 250.0);
+
+    /// One frame of a scrolling pane with a viewport in it: optionally a
+    /// wheel event at `pointer`. Returns the viewport's zoom travel and the
+    /// pane's scroll offset after the frame.
+    fn frame(ctx: &egui::Context, wheel: bool, pointer: egui::Pos2) -> (Option<f32>, f32) {
+        let mut events = vec![egui::Event::PointerMoved(pointer)];
+        if wheel {
+            // Trackpad-sized, so egui applies it this frame rather than
+            // smoothing it over the next ones.
+            events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::Vec2::new(0.0, -4.0),
+                modifiers: Default::default(),
+            });
+        }
+        let mut zoom = None;
+        let mut offset = 0.0;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(400.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                begin_wheel_gesture(ctx);
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none())
+                    .show(ctx, |ui| {
+                        let output = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+                            ui.allocate_exact_size(
+                                egui::Vec2::new(400.0, 150.0),
+                                egui::Sense::hover(),
+                            );
+                            let (_, response) = ui.allocate_exact_size(
+                                VIEWPORT.size(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            zoom = viewport_wheel_zoom(ui, &response);
+                            ui.allocate_exact_size(
+                                egui::Vec2::new(400.0, 4000.0),
+                                egui::Sense::hover(),
+                            );
+                        });
+                        offset = output.state.offset.y;
+                    });
+                end_wheel_gesture(ctx);
+            },
+        );
+        (zoom, offset)
+    }
+
+    /// A pane that has been on screen a frame, as any the user scrolls has:
+    /// egui hit-tests against the previous frame's widgets, so nothing is
+    /// hovered on the first.
+    fn ctx(pointer: egui::Pos2) -> egui::Context {
+        let ctx = egui::Context::default();
+        frame(&ctx, false, pointer);
+        ctx
+    }
+
+    /// The reported defect: scrolling the pane, the cursor passes over the
+    /// viewport, which took the wheel and zoomed instead of letting the pane
+    /// keep scrolling.
+    #[test]
+    fn a_viewport_scrolled_past_mid_gesture_does_not_zoom() {
+        let ctx = ctx(OVER_PANEL);
+        let (zoom, mut offset) = frame(&ctx, true, OVER_PANEL);
+        assert_eq!(zoom, None);
+        assert!(offset > 0.0, "the pane scrolled");
+        for _ in 0..5 {
+            let (zoom, next) = frame(&ctx, true, OVER_VIEWPORT);
+            assert_eq!(zoom, None, "the viewport stole a panel scroll");
+            assert!(
+                next > offset,
+                "the pane stopped scrolling under the viewport"
+            );
+            offset = next;
+        }
+    }
+
+    /// Deliberate use still zooms, and the pane under the viewport holds
+    /// still while it does.
+    #[test]
+    fn a_viewport_pointed_at_first_zooms_and_the_pane_holds() {
+        let ctx = ctx(OVER_VIEWPORT);
+        for _ in 0..3 {
+            let (zoom, offset) = frame(&ctx, true, OVER_VIEWPORT);
+            assert_eq!(zoom, Some(-4.0));
+            assert_eq!(offset, 0.0, "the pane scrolled under a zoom");
+        }
+    }
+
+    #[test]
+    fn zoom_speed_scales_the_zoom() {
+        let ctx = ctx(OVER_VIEWPORT);
+        set_zoom_speed(&ctx, 2.5);
+        assert_eq!(frame(&ctx, true, OVER_VIEWPORT).0, Some(-10.0));
     }
 }
 

@@ -53,6 +53,7 @@ impl Baboon {
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
         let bitmap_preview_view = self.prefs.bitmap_preview_view;
+        let model_preview_perspective = self.prefs.model_preview_perspective;
 
         let Some(doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
@@ -237,6 +238,9 @@ impl Baboon {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
             };
+            // One projection for every pane, as the bitmap view settings are:
+            // applied going in, and a toggle in this pane written back.
+            model_preview.perspective = model_preview_perspective;
             let document_revision = (doc.id, doc.dirty.revision(), kit.generation);
             draw_tag(
                 ui,
@@ -256,6 +260,7 @@ impl Baboon {
                 self.prefs.expert_mode,
                 &mut edit_context,
             );
+            self.prefs.model_preview_perspective = model_preview.perspective;
         }
 
         let find_filter_block_jump = ctx.data_mut(|data| {
