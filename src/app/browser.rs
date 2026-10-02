@@ -143,6 +143,21 @@ pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
         .is_some_and(|game| game == "haloce_evolved")
 }
 
+/// Whether the loaded game's bitmap tags keep the source image they were
+/// imported from. CE and Halo 2 keep it as a compressed color plate (1817 of
+/// the 1818 stock CE bitmaps, 4067 of the 4184 H2 ones). Halo 3 onward has a
+/// `source data` field instead, empty in all 11161 stock Halo 3 bitmaps, so
+/// there is nothing to recover there.
+pub(in crate::app) fn bitmaps_keep_source_images(game: &str) -> bool {
+    matches!(game, "haloce_mcc" | "halo2_mcc")
+}
+
+/// [`bitmaps_keep_source_images`] for the game the browser is drawing.
+pub(in crate::app) fn browser_game_keeps_bitmap_sources(ui: &Ui) -> bool {
+    ui.data(|data| data.get_temp::<String>(browser_game_id()))
+        .is_some_and(|game| bitmaps_keep_source_images(&game))
+}
+
 fn browser_sound_language_id() -> egui::Id {
     egui::Id::new("browser_sound_language")
 }
