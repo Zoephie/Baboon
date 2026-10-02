@@ -9,6 +9,8 @@ mod terminal;
 pub(super) use terminal::open_terminal_log;
 #[cfg(test)]
 use terminal::terminal_log_timestamp;
+#[cfg(target_os = "windows")]
+use terminal::windows_shell_command;
 use terminal::{
     TerminalStopResult, append_terminal_log_path, create_terminal_log_file,
     run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
@@ -3170,14 +3172,7 @@ impl Baboon {
         thread::spawn(move || {
             let mut log_error_reported = false;
             #[cfg(target_os = "windows")]
-            let mut cmd = {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                let mut c = std::process::Command::new("cmd");
-                c.creation_flags(CREATE_NO_WINDOW);
-                c.args(["/C", &format!("{command} 2>&1")]);
-                c
-            };
+            let mut cmd = windows_shell_command(&command);
             #[cfg(not(target_os = "windows"))]
             let mut cmd = {
                 #[cfg(unix)]
