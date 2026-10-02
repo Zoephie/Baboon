@@ -59,6 +59,11 @@ pub(in crate::app) enum BrowserAction {
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),
+    /// Recover a bitmap tag's source image (its color plate).
+    ExtractBitmapSource(String),
+    /// Recover the source images of a folder's bitmap tags, keeping their
+    /// tag folders.
+    ExtractBitmapSourceFolder(Vec<String>),
     /// Extract the audio represented by one or more `.sound` tags without
     /// opening them. `all_languages = false` uses the shared audio language;
     /// true exports every language available to each tag/source.

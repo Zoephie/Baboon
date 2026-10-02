@@ -4198,6 +4198,12 @@ impl Baboon {
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
             BrowserAction::ExtractBitmapFolder(keys) => self.begin_extract_bitmap_folder(keys, ctx),
+            BrowserAction::ExtractBitmapSource(key) => {
+                self.begin_extract_bitmap_sources(vec![key], false, ctx)
+            }
+            BrowserAction::ExtractBitmapSourceFolder(keys) => {
+                self.begin_extract_bitmap_sources(keys, true, ctx)
+            }
             BrowserAction::ExtractSound {
                 keys,
                 all_languages,
@@ -4722,6 +4728,51 @@ impl Baboon {
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = extract_bitmap_images(&source, &entry, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Recovers the color plates of `keys` into a folder the user picks,
+    /// starting from the active kit's data folder. A `folder` extract keeps
+    /// each tag's folder under it; a single tag lands in it directly.
+    pub(super) fn begin_extract_bitmap_sources(
+        &mut self,
+        keys: Vec<String>,
+        folder: bool,
+        ctx: egui::Context,
+    ) {
+        let Some(source_data) = self.source() else {
+            return;
+        };
+        let entries = keys
+            .iter()
+            .filter_map(|key| source_data.entries.iter().find(|entry| entry.key == *key))
+            .cloned()
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
+            self.status = "No bitmap tags found".to_owned();
+            return;
+        }
+        let source = source_data.source.clone();
+        let mut dialog = rfd::FileDialog::new().set_title("Extract Bitmap Source");
+        if let Some(layout) = self.kit_layout_for(self.active) {
+            dialog = dialog.set_directory(layout.data);
+        }
+        let Some(output) = dialog.pick_folder() else {
+            return;
+        };
+        self.status = match entries.as_slice() {
+            [entry] if !folder => format!("Extracting bitmap source for {}", entry.display_path),
+            entries => format!("Extracting {} bitmap source(s)", entries.len()),
+        };
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = match entries.as_slice() {
+                [entry] if !folder => extract_bitmap_source(&source, entry, &output),
+                entries => extract_bitmap_sources(&source, entries, &output),
+            }
+            .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
