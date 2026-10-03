@@ -596,6 +596,27 @@ pub(super) fn is_render_method_layout_group(group_tag: u32) -> bool {
 }
 
 impl Kit {
+    /// Set one tag's references in the loaded reference index, or with `None`
+    /// drop the tag from it. Every change made during a session goes through
+    /// here, so a rebuild running at the time can be told about it.
+    pub(super) fn set_tag_references(&mut self, key: &str, references: Option<Vec<DependencyRef>>) {
+        if let Some(index) = self
+            .source
+            .as_mut()
+            .and_then(|source| source.reverse_dependencies.as_mut())
+        {
+            match &references {
+                Some(references) => index.set_tag_dependencies(key.to_owned(), references.clone()),
+                None => index.clear_tag(key),
+            }
+        }
+        if self.index_jobs.building_references {
+            self.index_jobs
+                .references_changed_during_build
+                .insert(key.to_owned(), references);
+        }
+    }
+
     /// Drop every cached render-method definition and option, and move the
     /// epoch on so open shader grids rebuild.
     ///
@@ -1039,6 +1060,12 @@ pub(super) struct IndexJobs {
     pub(super) references_for_entry_index: bool,
     pub(super) reference_progress: Option<ReferenceIndexProgressState>,
     pub(super) entry_progress: Option<EntryIndexProgressState>,
+    /// Tags whose references changed (a save, a refresh, a new or deleted tag)
+    /// while a reference-index build was running, with what they are now;
+    /// `None` for a tag that is gone. The build read those tags before the
+    /// change, so its result is patched with these before it replaces the
+    /// index, rather than reverting them. See [`Kit::set_tag_references`].
+    pub(super) references_changed_during_build: HashMap<String, Option<Vec<DependencyRef>>>,
 }
 
 #[cfg(test)]

@@ -19,9 +19,26 @@ impl Baboon {
         self.kits[kit_index].index_jobs.building_references = false;
         let paired_entry_index_build =
             std::mem::take(&mut self.kits[kit_index].index_jobs.references_for_entry_index);
+        let changed_during_build = std::mem::take(
+            &mut self.kits[kit_index]
+                .index_jobs
+                .references_changed_during_build,
+        );
         self.show_entry_index_wait_notice = false;
         if self.resolve_stamp(stamp).is_none() {
             return true;
+        }
+        // The build read every tag before it started returning; a tag saved,
+        // refreshed, created or deleted since then was read as it was. Those
+        // changes are laid over the result, or replacing the index (and the
+        // saved one) with it would undo them, and since the saved tag's
+        // fingerprint is current, no refresh would ever bring them back.
+        let mut index = index;
+        for (key, references) in changed_during_build {
+            match references {
+                Some(references) => index.set_tag_dependencies(key, references),
+                None => index.clear_tag(&key),
+            }
         }
         if let Some(source) = self.kits[kit_index].source.as_mut() {
             let n = index.len();

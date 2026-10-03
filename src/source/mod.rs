@@ -689,6 +689,9 @@ pub struct EntryIndexRefresh {
     /// References of each touched tag, read by whoever applies the refresh.
     /// Empty from [`crate::source::refresh_entry_index`] itself.
     pub touched_dependencies: Vec<(String, Vec<DependencyRef>)>,
+    /// What could not be read or written while applying the refresh to the
+    /// on-disk indexes, for the status line. Empty from the refresh itself.
+    pub errors: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

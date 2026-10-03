@@ -2416,12 +2416,7 @@ impl Baboon {
             collect_tag_dependency_refs(tag.root(), &mut refs);
             refs
         };
-        if let Some(index) = self
-            .source_mut()
-            .and_then(|source| source.reverse_dependencies.as_mut())
-        {
-            index.set_tag_dependencies(key.clone(), dependencies);
-        }
+        self.kits[self.active].set_tag_references(&key, Some(dependencies));
         self.kits[self.active]
             .parsed_tags
             .insert(key, TagDocument::modified(tag));
@@ -3060,6 +3055,7 @@ impl Baboon {
             removed,
             removed_keys,
             touched_dependencies,
+            errors,
             ..
         } = refresh;
         let n = entries.len();
@@ -3069,17 +3065,11 @@ impl Baboon {
         // this used to, left "References to" unavailable until a manual
         // rebuild after any change the refresh noticed, including the user's
         // own saves.
-        if let Some(index) = self.kits[kit_index]
-            .source
-            .as_mut()
-            .and_then(|source| source.reverse_dependencies.as_mut())
-        {
-            for key in &removed_keys {
-                index.clear_tag(key);
-            }
-            for (key, deps) in touched_dependencies {
-                index.set_tag_dependencies(key, deps);
-            }
+        for key in &removed_keys {
+            self.kits[kit_index].set_tag_references(key, None);
+        }
+        for (key, deps) in touched_dependencies {
+            self.kits[kit_index].set_tag_references(&key, Some(deps));
         }
         self.status = browser_refresh_error.map_or_else(
             || {
@@ -3089,6 +3079,13 @@ impl Baboon {
             },
             |error| format!("Index updated, but browser refresh failed: {error}"),
         );
+        if let Some(first) = errors.first() {
+            self.status = format!(
+                "{}; {} tag(s) could not be indexed, first {first}",
+                self.status,
+                errors.len()
+            );
+        }
     }
 
     /// Adopt a complete entry set for a kit: the full list and its group tree,
@@ -3466,10 +3463,8 @@ impl Baboon {
         }
         if let Some(source) = kit_state.source.as_mut() {
             source.remove_entry(key, &folder_seeds);
-            if let Some(index) = source.reverse_dependencies.as_mut() {
-                index.clear_tag(key);
-            }
         }
+        kit_state.set_tag_references(key, None);
         kit_state.generation = kit_state.generation.wrapping_add(1);
         true
     }
@@ -5603,6 +5598,10 @@ impl Baboon {
     /// patched in) dropped the whole reference index for it. Writing the row
     /// here means the refresh sees nothing to do, and the references are the
     /// ones the saved document holds.
+    ///
+    /// The row and the references are written in one transaction, so a
+    /// failure leaves both as they were and the refresh picks the change up;
+    /// the failure goes to the terminal, with the other index warnings.
     fn record_saved_tag_in_indexes(&mut self, entry: &TagEntry, dependencies: Vec<DependencyRef>) {
         let Some(source) = self.source_mut() else {
             return;
@@ -5610,14 +5609,19 @@ impl Baboon {
         if let (TagSource::LooseFolder { root, .. }, Some(game)) =
             (&source.source, source.game.as_deref())
             && !source.all_entries.is_empty()
+            && let Err(error) = crate::source::upsert_entry_with_dependencies(
+                game,
+                root,
+                entry,
+                Some(&dependencies),
+            )
         {
-            let _ = crate::source::upsert_entry_index_row(game, root, entry);
-            let _ =
-                crate::source::save_tag_dependencies(game, root, &entry.key, Some(&dependencies));
+            let _ = self.tx.send(WorkerMessage::TerminalLine(format!(
+                "Warning: could not record {} in the tag index: {error:#}",
+                entry.display_path
+            )));
         }
-        if let Some(index) = source.reverse_dependencies.as_mut() {
-            index.set_tag_dependencies(entry.key.clone(), dependencies);
-        }
+        self.kits[self.active].set_tag_references(&entry.key, Some(dependencies));
     }
 
     pub(super) fn current_source_is_container(&self) -> bool {
@@ -8120,6 +8124,10 @@ impl Baboon {
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         self.kits[self.active].index_jobs.building_references = true;
+        self.kits[self.active]
+            .index_jobs
+            .references_changed_during_build
+            .clear();
         self.kits[self.active].index_jobs.references_for_entry_index = paired_entry_index_build;
         self.kits[self.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
             label: "Building reference index...".to_owned(),
@@ -12328,14 +12336,35 @@ fn persist_entry_index_changes(
     mut refresh: EntryIndexRefresh,
 ) -> EntryIndexRefresh {
     for key in &refresh.removed_keys {
-        let _ = crate::source::delete_entry_index_row(game, root, key);
-        let _ = crate::source::save_tag_dependencies(game, root, key, None);
+        if let Err(error) = crate::source::delete_entry_with_dependencies(game, root, key) {
+            refresh.errors.push(format!("{key}: {error:#}"));
+        }
     }
+    // Each tag's row (its fingerprint) and its references go in one
+    // transaction. Written apart with the errors dropped, a failure between
+    // them left a current fingerprint over stale references, and no later
+    // refresh would look at that tag again.
     for entry in &refresh.touched {
-        let _ = crate::source::upsert_entry_index_row(game, root, entry);
-        if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
-            let _ = crate::source::save_tag_dependencies(game, root, &entry.key, Some(&deps));
-            refresh.touched_dependencies.push((entry.key.clone(), deps));
+        let references = read_entry_dependencies(tag_source, entry);
+        let written = crate::source::upsert_entry_with_dependencies(
+            game,
+            root,
+            entry,
+            references.as_deref().ok(),
+        );
+        if let Err(error) = written {
+            refresh
+                .errors
+                .push(format!("{}: {error:#}", entry.display_path));
+        }
+        match references {
+            Ok(references) => refresh
+                .touched_dependencies
+                .push((entry.key.clone(), references)),
+            Err(error) => refresh.errors.push(format!(
+                "{}: could not read its references: {error}",
+                entry.display_path
+            )),
         }
     }
     refresh
@@ -13494,6 +13523,7 @@ mod refresh_reference_tests {
                 touched: Vec::new(),
                 removed_keys: vec!["file:gone".to_owned()],
                 touched_dependencies: vec![("file:new".to_owned(), vec![target.clone()])],
+                errors: Vec::new(),
             },
             egui::Context::default(),
         );
@@ -13583,6 +13613,136 @@ mod saved_tag_index_tests {
             "the refresh finds the save already indexed"
         );
         assert_eq!(referrers, Some(vec![entry.key.clone()]));
+    }
+
+    /// A reference-index build reads every tag before it reports. A tag saved
+    /// while it ran had its new references recorded, and then the finished
+    /// build replaced the index with what it had read before the save. The
+    /// saved tag's fingerprint was current, so no refresh ever fixed it.
+    #[test]
+    fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-save-during-build-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = format!("save_build_{}", root.file_name().unwrap().to_string_lossy());
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let path = root.join("objects/crate.model");
+        let mut tag = TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
+        tag.write_atomic(&path).unwrap();
+        let names = TagNameIndex::default();
+        let entries =
+            crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        crate::source::save_entry_index(&game, &root, &entries).unwrap();
+        let entry = entries[0].clone();
+
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: Some(game.clone()),
+                definitions_root: PathBuf::new(),
+            },
+            names: names.clone(),
+            game: None,
+            entries: entries.clone(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: entries.clone(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        // A build starts, and reads the tag as it is: pointing at nothing.
+        let stamp = app.kit_stamp();
+        app.kits[0].index_jobs.building_references = true;
+        let mut read_before_the_save = ReverseDependencyIndex::default();
+        read_before_the_save.set_tag_dependencies(entry.key.clone(), Vec::new());
+
+        // Then the tag is edited and saved while the build is still running.
+        crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
+        app.kits[0]
+            .parsed_tags
+            .insert(entry.key.clone(), TagDocument::modified(tag));
+        let saved = app.save_tag_by_key(&entry.key);
+        app.handle_reverse_dependencies_built(stamp, read_before_the_save, 0);
+
+        let referrers = app.kits[0]
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.as_ref())
+            .map(|index| {
+                index
+                    .dependents_for(u32::from_be_bytes(*b"mode"), "objects\\crate")
+                    .to_vec()
+            });
+        crate::source::remove_test_index_rows(&game);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(saved.is_ok(), "{saved:?}");
+        assert_eq!(referrers, Some(vec![entry.key.clone()]));
+        assert!(
+            app.kits[0]
+                .index_jobs
+                .references_changed_during_build
+                .is_empty(),
+            "the changes are spent once the build lands"
+        );
+    }
+
+    /// The refresh used to drop every write error and every unreadable tag
+    /// without a word; they now reach the status line.
+    #[test]
+    fn a_refresh_reports_a_tag_whose_references_cannot_be_read() {
+        let root = crate::test_kits::unique_temp_dir("refresh-errors");
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let good = root.join("objects/good.model");
+        TagFile::new(locate_definitions_root().join("halo3_mcc/model.json"))
+            .unwrap()
+            .write_atomic(&good)
+            .unwrap();
+        let bad = root.join("objects/bad.model");
+        std::fs::write(&bad, b"not a tag").unwrap();
+        let entry = |path: &Path| TagEntry {
+            key: format!("file:{}", path.display()),
+            display_path: path
+                .strip_prefix(&root)
+                .unwrap()
+                .display()
+                .to_string(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(path.to_path_buf()),
+        };
+        let refresh = EntryIndexRefresh {
+            entries: Vec::new(),
+            changed: true,
+            added: 2,
+            updated: 0,
+            removed: 0,
+            touched: vec![entry(&good), entry(&bad)],
+            removed_keys: Vec::new(),
+            touched_dependencies: Vec::new(),
+            errors: Vec::new(),
+        };
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let game = format!("refresh_errors_{}", std::process::id());
+        let refresh = persist_entry_index_changes(&game, &root, &source, refresh);
+        crate::source::remove_test_index_rows(&game);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(refresh.touched_dependencies.len(), 1, "the good tag is read");
+        assert_eq!(refresh.errors.len(), 1, "{:?}", refresh.errors);
+        assert!(refresh.errors[0].contains("bad.model"), "{:?}", refresh.errors);
     }
 
     /// The shader grid reads definitions and options through per-kit caches

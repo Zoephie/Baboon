@@ -329,6 +329,7 @@ mod tests {
             touched,
             removed_keys: removed.into_iter().map(str::to_owned).collect(),
             touched_dependencies: Vec::new(),
+            errors: Vec::new(),
         };
         assert!(!refresh_touches_render_methods(&refresh(
             vec![entry(b"hlmt", "file:a.model")],

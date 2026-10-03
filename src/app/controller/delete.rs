@@ -59,10 +59,8 @@ fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
     let folder_seeds = kit.folder_seeds();
     if let Some(source) = kit.source.as_mut() {
         source.remove_entry(key, &folder_seeds);
-        if let Some(index) = source.reverse_dependencies.as_mut() {
-            index.clear_tag(key);
-        }
     }
+    kit.set_tag_references(key, None);
     // Keywords are a sidecar keyed by tag key, so they outlive the tag unless
     // they are dropped here.
     kit.keywords.forget_tag(key);

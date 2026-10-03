@@ -77,6 +77,67 @@ pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Resu
     let Some(source_id) = source_id(&conn, game, root)? else {
         return Ok(false);
     };
+    upsert_entry_row(&conn, source_id, root, entry)?;
+    Ok(true)
+}
+
+/// Record one tag's index row and its references together, in one
+/// transaction: [`upsert_entry_index_row`] and [`save_tag_dependencies`] at
+/// once. `references` is `None` to leave the tag's references as they are.
+///
+/// The row holds the file's fingerprint, which is what tells the next refresh
+/// the tag is up to date. Written apart, a failure between the two left the
+/// fingerprint current over references that were not, which no later refresh
+/// would notice. Together, a failure leaves both as they were, and the next
+/// refresh sees the change again. Whether it wrote (`false` when `root` has no
+/// index yet).
+pub fn upsert_entry_with_dependencies(
+    game: &str,
+    root: &Path,
+    entry: &TagEntry,
+    references: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let tx = conn
+        .transaction()
+        .context("begin entry and dependency transaction")?;
+    upsert_entry_row(&tx, source_id, root, entry)?;
+    if let Some(references) = references {
+        replace_tag_dependencies(&tx, source_id, &entry.key, Some(references))?;
+    }
+    tx.commit().context("commit entry and dependencies")?;
+    Ok(true)
+}
+
+/// Remove one tag's index row and its references in one transaction; see
+/// [`upsert_entry_with_dependencies`].
+pub fn delete_entry_with_dependencies(game: &str, root: &Path, key: &str) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let tx = conn
+        .transaction()
+        .context("begin entry and dependency removal")?;
+    tx.execute(
+        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+        params![source_id, key],
+    )
+    .context("delete entry index row")?;
+    replace_tag_dependencies(&tx, source_id, key, None)?;
+    tx.commit().context("commit entry and dependency removal")?;
+    Ok(true)
+}
+
+fn upsert_entry_row(
+    conn: &Connection,
+    source_id: i64,
+    root: &Path,
+    entry: &TagEntry,
+) -> Result<()> {
     let mut upsert = conn
         .prepare(
             "INSERT INTO entries (
@@ -94,7 +155,7 @@ pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Resu
         )
         .context("prepare entry index upsert")?;
     execute_entry_row(&mut upsert, source_id, root, entry).context("upsert entry index row")?;
-    Ok(true)
+    Ok(())
 }
 
 /// Remove one tag's row from an existing index. Like
@@ -124,6 +185,10 @@ pub(crate) fn remove_test_index_rows(game: &str) {
 /// them (`deps: None`). Like [`upsert_entry_index_row`], it does nothing for a
 /// folder with no reference index, since a partial graph would load back as a
 /// complete one. Whether it wrote.
+///
+/// Only tests write references alone now: the app writes them with the tag's
+/// row, through [`upsert_entry_with_dependencies`].
+#[cfg(test)]
 pub fn save_tag_dependencies(
     game: &str,
     root: &Path,
@@ -134,7 +199,22 @@ pub fn save_tag_dependencies(
     let Some(source_id) = source_id(&conn, game, root)? else {
         return Ok(false);
     };
-    let has_index: bool = conn
+    let tx = conn
+        .transaction()
+        .context("begin tag dependency transaction")?;
+    let wrote = replace_tag_dependencies(&tx, source_id, tag_key, deps)?;
+    tx.commit().context("commit tag dependencies")?;
+    Ok(wrote)
+}
+
+/// [`save_tag_dependencies`] inside a transaction the caller commits.
+fn replace_tag_dependencies(
+    tx: &Connection,
+    source_id: i64,
+    tag_key: &str,
+    deps: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let has_index: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM indexed_tags WHERE source_id = ?1)",
             params![source_id],
@@ -144,9 +224,6 @@ pub fn save_tag_dependencies(
     if !has_index {
         return Ok(false);
     }
-    let tx = conn
-        .transaction()
-        .context("begin tag dependency transaction")?;
     tx.execute(
         "DELETE FROM dependencies WHERE source_id = ?1 AND tag_key = ?2",
         params![source_id, tag_key],
@@ -181,7 +258,6 @@ pub fn save_tag_dependencies(
                 .context("insert tag dependency row")?;
         }
     }
-    tx.commit().context("commit tag dependencies")?;
     Ok(true)
 }
 
@@ -489,6 +565,7 @@ fn refresh_entry_index_from_cache(
         touched,
         removed_keys,
         touched_dependencies: Vec::new(),
+        errors: Vec::new(),
     })
 }
 
@@ -585,8 +662,24 @@ pub(super) fn open_index_db() -> Result<Connection> {
     }
     let conn =
         Connection::open(&path).with_context(|| format!("open index db {}", path.display()))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .context("enable index db WAL mode")?;
+    // Switching to WAL needs the file to itself, and that request can fail at
+    // once with "database is locked", busy timeout or not, when another
+    // connection is using it; workers opening a fresh database together raced
+    // to do it. Its failures used to be dropped and are reported now. The
+    // switch is made under a process-wide lock, and only when the file is
+    // not in WAL mode already (it stays in WAL once switched).
+    static SWITCH_TO_WAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let switching = SWITCH_TO_WAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let journal_mode: String = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .context("read index db journal mode")?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .context("enable index db WAL mode")?;
+    }
+    drop(switching);
     conn.pragma_update(None, "synchronous", "NORMAL")
         .context("set index db synchronous mode")?;
     conn.pragma_update(None, "foreign_keys", "ON")
