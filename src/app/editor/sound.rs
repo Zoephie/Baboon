@@ -435,87 +435,6 @@ pub(super) fn language_choices(
     })
 }
 
-/// Shared transport row for every sound-player variant: Stop, a volume slider, a
-/// language selector (when the source is localized), and the status line. All
-/// changes queue a [`super::audio::SoundAction`] the app drains after rendering.
-fn draw_sound_transport(
-    ui: &mut Ui,
-    edit: &mut FieldEditContext<'_>,
-    languages: &[LanguageChoice],
-) {
-    ui.horizontal(|ui| {
-        draw_transport_buttons(ui, edit);
-        draw_sound_output_controls(ui, edit, languages);
-    });
-    draw_sound_errors(ui, edit);
-}
-
-/// Play/pause, stop, loop, the interim timeline slider and the time, for the
-/// players that do not have the clip player yet.
-fn draw_transport_buttons(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
-    let playback = edit.sound_playback.clone();
-    let playing = playback.as_ref().is_some_and(|p| p.playing);
-    let (icon, hover) = if playing {
-        ("\u{23F8}", "Pause")
-    } else {
-        ("\u{25B6}", "Play from the playhead")
-    };
-    if ui
-        .add_enabled(playback.is_some(), egui::Button::new(icon))
-        .on_hover_text(hover)
-        .on_disabled_hover_text("Play a permutation below first")
-        .clicked()
-    {
-        edit.sound_play_request
-            .push_back(super::audio::SoundAction::TogglePause);
-    }
-    if ui
-        .button(RichText::new("\u{25A0}"))
-        .on_hover_text("Stop and rewind")
-        .clicked()
-    {
-        edit.sound_play_request
-            .push_back(super::audio::SoundAction::Stop);
-    }
-    let mut looping = edit.sound_looping;
-    if ui
-        .toggle_value(&mut looping, "\u{27F2}")
-        .on_hover_text("Loop")
-        .changed()
-    {
-        edit.sound_play_request
-            .push_back(super::audio::SoundAction::SetLooping(looping));
-    }
-    if let Some(playback) = &playback {
-        // The timeline until the waveform replaces it: dragging seeks as it
-        // goes, so the sound scrubs, and a click jumps straight there.
-        let mut position = playback.position;
-        ui.spacing_mut().slider_width = 220.0;
-        if ui
-            .add(
-                egui::Slider::new(&mut position, 0.0..=playback.duration.max(0.001))
-                    .show_value(false)
-                    .trailing_fill(true),
-            )
-            .on_hover_text("Drag to scrub, click to jump")
-            .changed()
-        {
-            edit.sound_play_request
-                .push_back(super::audio::SoundAction::Seek(position));
-        }
-        ui.label(
-            RichText::new(format!(
-                "{} / {}",
-                format_play_time(playback.position),
-                format_play_time(playback.duration)
-            ))
-            .monospace()
-            .color(text_dark()),
-        )
-        .on_hover_text(&playback.label);
-    }
-}
-
 /// Volume, the language choice and the status line, shared by every player.
 pub(super) fn draw_sound_output_controls(
     ui: &mut Ui,
@@ -2332,7 +2251,9 @@ pub(in crate::app) fn draw_dialogue_summary(
     .default_open(true)
     .show(ui, |ui| {
         if clips.is_empty() {
-            draw_sound_transport(ui, edit, &languages);
+            // Nothing to play: just the volume, language and status.
+            ui.horizontal(|ui| draw_sound_output_controls(ui, edit, &languages));
+            draw_sound_errors(ui, edit);
         } else {
             draw_clip_player(ui, edit, "dialogue", &clips, &languages, &mut play);
         }
