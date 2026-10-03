@@ -58,10 +58,24 @@ pub(super) fn with_tool_folder_options(
     }
     let options = options
         .iter()
-        .map(|(option, path)| format!("{option} \"{}\"", path.display()))
+        .map(|(option, path)| format!("{option} {}", crt_quoted(&path.display().to_string())))
         .collect::<Vec<_>>()
         .join(" ");
     format!("{program} {options}{rest}")
+}
+
+/// `argument` in double quotes, as the Microsoft C runtime the tools parse
+/// their command line with reads it back.
+///
+/// The runtime takes backslashes literally except before a quote, where `\"`
+/// is a literal quote and a doubled backslash is one backslash. So a folder
+/// ending in a backslash, such as a drive root `D:\`, came out as `"D:\"`: its
+/// closing quote read as part of the argument, which swallowed the rest of
+/// the command line. Trailing backslashes are doubled to keep them; a
+/// Windows path holds no quotes, so nothing else needs escaping.
+fn crt_quoted(argument: &str) -> String {
+    let trailing = argument.len() - argument.trim_end_matches('\\').len();
+    format!("\"{argument}{}\"", "\\".repeat(trailing))
 }
 
 impl Baboon {
@@ -109,6 +123,81 @@ mod tests {
         // The Halo 3-era tools can't take them, so they're never added there.
         assert!(kit_tool_folder_options(&moda, Some("halo3_mcc")).is_empty());
         assert!(kit_tool_folder_options(&moda, None).is_empty());
+    }
+
+    /// How the Microsoft C runtime splits a command line into arguments:
+    /// backslashes are literal unless they precede a quote, where each pair
+    /// is one backslash and an odd one escapes the quote; a bare quote
+    /// toggles quoting.
+    fn crt_argv(line: &str) -> Vec<String> {
+        let (mut args, mut current, mut quoted, mut started) =
+            (Vec::new(), String::new(), false, false);
+        let chars: Vec<char> = line.chars().collect();
+        let mut index = 0;
+        while index < chars.len() {
+            match chars[index] {
+                '\\' => {
+                    let run = chars[index..].iter().take_while(|&&c| c == '\\').count();
+                    index += run;
+                    if chars.get(index) == Some(&'"') {
+                        current.extend(std::iter::repeat_n('\\', run / 2));
+                        if run % 2 == 1 {
+                            current.push('"');
+                            index += 1;
+                        }
+                    } else {
+                        current.extend(std::iter::repeat_n('\\', run));
+                    }
+                    started = true;
+                    continue;
+                }
+                '"' => {
+                    quoted = !quoted;
+                    started = true;
+                }
+                ' ' if !quoted => {
+                    if started {
+                        args.push(std::mem::take(&mut current));
+                        started = false;
+                    }
+                }
+                c => {
+                    current.push(c);
+                    started = true;
+                }
+            }
+            index += 1;
+        }
+        if started {
+            args.push(current);
+        }
+        args
+    }
+
+    /// A folder ending in a backslash, a drive root above all, reaches the
+    /// tool whole, and the arguments after it are still separate.
+    #[test]
+    fn a_folder_ending_in_a_backslash_reaches_the_tool_whole() {
+        let options = vec![
+            ("-tags_dir", PathBuf::from("D:\\")),
+            ("-data_dir", PathBuf::from("E:\\kits\\data moda\\")),
+        ];
+        let line = with_tool_folder_options("tool bitmaps \"levels\\a\"", &options);
+        assert_eq!(
+            crt_argv(&line),
+            [
+                "tool",
+                "-tags_dir",
+                "D:\\",
+                "-data_dir",
+                "E:\\kits\\data moda\\",
+                "bitmaps",
+                "levels\\a",
+            ],
+            "{line}"
+        );
+        // And one that does not end in a backslash is quoted as it always was.
+        assert_eq!(crt_quoted("D:\\tags"), "\"D:\\tags\"");
     }
 
     #[test]
