@@ -18,7 +18,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -159,6 +159,9 @@ pub(super) enum SoundAction {
     Seek(f64),
     /// Loop the sound (and every sound played after) or not.
     SetLooping(bool),
+    /// Play at this multiple of the recorded rate, `0..=MAX_SPEED`: the sound
+    /// playing now and every one after. Pitch moves with it.
+    SetSpeed(f32),
     /// Play only `start..end` seconds of the requesting tab's clip, or all of
     /// it. Remembered for the tab and clip, so it holds for a voice that
     /// starts later.
@@ -337,6 +340,17 @@ fn play_from(position: u64, (start, end): (u64, u64)) -> u64 {
     }
 }
 
+/// Playback speed, as a multiple of the recorded rate. Wrapped, like
+/// [`Volume`], so [`AudioState`] can derive `Default` while starting at 1×.
+#[derive(Clone, Copy)]
+pub(super) struct Speed(f32);
+
+impl Default for Speed {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 /// The rodio output device.
 struct Engine {
     handle: OutputStreamHandle,
@@ -368,19 +382,30 @@ struct PlaybackShared {
     /// sound while `region_end` is `NO_REGION`.
     region_start: AtomicU64,
     region_end: AtomicU64,
+    /// Frames of the sound played per output frame, as `f32` bits: 1 plays
+    /// it as recorded, 2 twice as fast (and an octave up), 0 holds still.
+    speed: AtomicU32,
 }
+
+/// The playback speed range, as a multiple of the recorded rate.
+pub(super) const MAX_SPEED: f32 = 5.0;
 
 const NO_REGION: u64 = u64::MAX;
 
 impl PlaybackShared {
-    fn new(looping: bool) -> Self {
+    fn new(looping: bool, speed: f32) -> Self {
         Self {
             frame: AtomicU64::new(0),
             seek: AtomicU64::new(NO_SEEK),
             looping: AtomicBool::new(looping),
             region_start: AtomicU64::new(0),
             region_end: AtomicU64::new(NO_REGION),
+            speed: AtomicU32::new(speed.to_bits()),
         }
+    }
+
+    fn speed(&self) -> f32 {
+        f32::from_bits(self.speed.load(Ordering::Relaxed))
     }
 
     /// The frames played, `start..end`, within a sound of `frames` frames.
@@ -404,8 +429,42 @@ struct PcmSource {
     shared: Arc<PlaybackShared>,
     channels: u16,
     frames: u64,
-    frame: u64,
+    /// Where in the sound the next output frame is read, in frames: whole
+    /// at 1× speed, fractional otherwise.
+    cursor: f64,
+    /// The output frame being emitted, one channel at a time.
+    out: Vec<i16>,
     channel: u16,
+}
+
+impl PcmSource {
+    fn new(pcm: Arc<DecodedPcm>, shared: Arc<PlaybackShared>, start: u64) -> Self {
+        let channels = pcm.channels;
+        Self {
+            frames: pcm.frame_count() as u64,
+            pcm,
+            shared,
+            channels,
+            cursor: start as f64,
+            out: vec![0; channels as usize],
+            channel: 0,
+        }
+    }
+
+    /// Channel `channel` at `cursor`, between its two nearest frames (the
+    /// sample itself on a whole frame). `end` bounds the frame interpolated
+    /// towards, so a region does not blend in what follows it.
+    fn sample_at(&self, channel: usize, end: u64) -> i16 {
+        let channels = self.channels as usize;
+        let frame = self.cursor.floor() as u64;
+        let at = |frame: u64| f32::from(self.pcm.samples[frame as usize * channels + channel]);
+        let fraction = (self.cursor - frame as f64) as f32;
+        if fraction == 0.0 {
+            return at(frame) as i16;
+        }
+        let next = (frame + 1).min(end.saturating_sub(1)).max(frame);
+        (at(frame) + (at(next) - at(frame)) * fraction).round() as i16
+    }
 }
 
 impl Iterator for PcmSource {
@@ -415,26 +474,37 @@ impl Iterator for PcmSource {
         if self.channel == 0 {
             let seek = self.shared.seek.swap(NO_SEEK, Ordering::Relaxed);
             if seek != NO_SEEK {
-                self.frame = seek.min(self.frames);
+                self.cursor = seek.min(self.frames) as f64;
             }
             // The end of the region (or of the sound): wrap to its start when
             // looping, else stop there.
             let (start, end) = self.shared.region(self.frames);
-            if self.frame >= end {
+            if self.cursor.floor() as u64 >= end {
                 if !self.shared.looping.load(Ordering::Relaxed) || end <= start {
                     self.shared.frame.store(end, Ordering::Relaxed);
                     return None;
                 }
-                self.frame = start;
+                self.cursor = start as f64;
+            }
+            // At 0× the playhead holds still, silently.
+            let speed = self.shared.speed();
+            for channel in 0..self.channels as usize {
+                self.out[channel] = if speed > 0.0 {
+                    self.sample_at(channel, end)
+                } else {
+                    0
+                };
             }
         }
-        let sample =
-            self.pcm.samples[(self.frame * self.channels as u64 + self.channel as u64) as usize];
+        let sample = self.out[self.channel as usize];
         self.channel += 1;
+        // The frame is played once its last channel is out.
         if self.channel == self.channels {
             self.channel = 0;
-            self.frame += 1;
-            self.shared.frame.store(self.frame, Ordering::Relaxed);
+            self.cursor += f64::from(self.shared.speed().max(0.0));
+            self.shared
+                .frame
+                .store(self.cursor.floor() as u64, Ordering::Relaxed);
         }
         Some(sample)
     }
@@ -480,6 +550,7 @@ impl Voice {
         owner: Option<SoundOwner>,
         clip: Option<String>,
         looping: bool,
+        speed: f32,
     ) -> Self {
         // Fold >2 channels down to stereo for the output device.
         let decoded = waveform.pcm();
@@ -498,7 +569,7 @@ impl Voice {
             label,
             waveform,
             pcm,
-            shared: Arc::new(PlaybackShared::new(looping)),
+            shared: Arc::new(PlaybackShared::new(looping, speed)),
             sink: None,
         }
     }
@@ -540,14 +611,7 @@ impl Voice {
             return;
         };
         sink.set_volume(volume);
-        sink.append(PcmSource {
-            pcm: self.pcm.clone(),
-            shared: self.shared.clone(),
-            channels: self.pcm.channels,
-            frames: self.frames(),
-            frame: start,
-            channel: 0,
-        });
+        sink.append(PcmSource::new(self.pcm.clone(), self.shared.clone(), start));
         self.sink = Some(sink);
     }
 
@@ -632,6 +696,8 @@ pub(super) struct AudioState {
     voice: Option<Voice>,
     /// Whether sounds loop; carried from one voice to the next.
     looping: bool,
+    /// How fast sounds play; carried from one voice to the next.
+    speed: Speed,
     /// The tab the action being processed came from, and the clip it names.
     request_owner: Option<SoundOwner>,
     request_clip: Option<String>,
@@ -1311,6 +1377,11 @@ impl AudioState {
         self.looping
     }
 
+    /// How fast sounds play, as a multiple of the recorded rate.
+    pub(super) fn speed(&self) -> f32 {
+        self.speed.0
+    }
+
     /// Whether a sound is playing — the UI repaints every frame while one is,
     /// to move its playhead.
     pub(super) fn is_playing(&self) -> bool {
@@ -1544,6 +1615,14 @@ impl AudioState {
                 ctx.request_repaint();
                 return;
             }
+            SoundAction::SetSpeed(speed) => {
+                let speed = speed.clamp(0.0, MAX_SPEED);
+                self.speed = Speed(speed);
+                if let Some(voice) = self.voice.as_ref() {
+                    voice.shared.speed.store(speed.to_bits(), Ordering::Relaxed);
+                }
+                return;
+            }
             SoundAction::SetLooping(looping) => {
                 self.looping = looping;
                 if let Some(voice) = self.voice.as_ref() {
@@ -1698,6 +1777,7 @@ impl AudioState {
             owner.clone(),
             clip,
             self.looping,
+            self.speed.0,
         );
         // A region the tab set on this clip before it was loaded holds.
         let region = owner
@@ -2000,15 +2080,8 @@ mod tests {
     }
 
     fn pcm_source(pcm: &Arc<DecodedPcm>, looping: bool) -> (PcmSource, Arc<PlaybackShared>) {
-        let shared = Arc::new(PlaybackShared::new(looping));
-        let source = PcmSource {
-            pcm: pcm.clone(),
-            shared: shared.clone(),
-            channels: 2,
-            frames: pcm.frame_count() as u64,
-            frame: 0,
-            channel: 0,
-        };
+        let shared = Arc::new(PlaybackShared::new(looping, 1.0));
+        let source = PcmSource::new(pcm.clone(), shared.clone(), 0);
         (source, shared)
     }
 
@@ -2043,7 +2116,7 @@ mod tests {
     /// player can move and read.
     #[test]
     fn a_stopped_voice_keeps_a_playhead_the_player_can_move() {
-        let voice = Voice::new(wave(1000), "x".to_owned(), None, None, false);
+        let voice = Voice::new(wave(1000), "x".to_owned(), None, None, false, 1.0);
         voice.seek(250);
         let view = voice.view();
         assert_eq!(view.position, 0.25);
@@ -2069,6 +2142,7 @@ mod tests {
                 Some(a.clone()),
                 None,
                 false,
+                1.0,
             )),
             decode_owner: Some(a.clone()),
             wwise_deferred: Some(("event".to_owned(), "a".to_owned(), Some(a.clone()), None)),
@@ -2106,6 +2180,7 @@ mod tests {
                 Some(a.clone()),
                 None,
                 false,
+                1.0,
             )),
             ..Default::default()
         };
@@ -2254,6 +2329,7 @@ mod tests {
                 Some(a.clone()),
                 None,
                 false,
+                1.0,
             )),
             status: Some("\u{25B6} a".to_owned()),
             status_owner: Some(a.clone()),
@@ -2395,5 +2471,63 @@ mod tests {
             None,
             "another clip took the region"
         );
+    }
+
+    /// Speed steps through the sound: 2× every other frame, ½× halfway
+    /// between frames (not past a region's end), 0× silence with the
+    /// playhead held.
+    #[test]
+    fn the_source_plays_at_the_speed_set() {
+        let pcm = numbered(10);
+        let (source, shared) = pcm_source(&pcm, false);
+        shared.speed.store(2.0f32.to_bits(), Ordering::Relaxed);
+        let left: Vec<i16> = source.step_by(2).collect();
+        assert_eq!(left, [0, 20, 40, 60, 80]);
+
+        let (source, shared) = pcm_source(&pcm, false);
+        shared.speed.store(0.5f32.to_bits(), Ordering::Relaxed);
+        shared.region_start.store(0, Ordering::Relaxed);
+        shared.region_end.store(2, Ordering::Relaxed);
+        let left: Vec<i16> = source.step_by(2).collect();
+        assert_eq!(
+            left,
+            [0, 5, 10, 10],
+            "halfway between frames, held at the region's last"
+        );
+
+        let (mut source, shared) = pcm_source(&pcm, false);
+        shared.speed.store(0.0f32.to_bits(), Ordering::Relaxed);
+        shared.seek.store(4, Ordering::Relaxed);
+        let held: Vec<i16> = source.by_ref().take(20).collect();
+        assert!(held.iter().all(|sample| *sample == 0), "{held:?}");
+        assert_eq!(
+            shared.frame.load(Ordering::Relaxed),
+            4,
+            "the playhead moved at 0x"
+        );
+    }
+
+    /// Speed is clamped to its range and reaches the sound playing now.
+    #[test]
+    fn setting_the_speed_reaches_the_sound_playing() {
+        let mut audio = AudioState {
+            voice: Some(Voice::new(
+                wave(100),
+                "a".to_owned(),
+                None,
+                None,
+                false,
+                1.0,
+            )),
+            ..Default::default()
+        };
+        assert_eq!(audio.speed(), 1.0, "speed starts at 1x");
+        audio.pending.push_back(SoundAction::SetSpeed(7.0).into());
+        audio.process(None, &egui::Context::default());
+        assert_eq!(audio.speed(), MAX_SPEED);
+        assert_eq!(audio.voice.as_ref().unwrap().shared.speed(), MAX_SPEED);
+        audio.pending.push_back(SoundAction::SetSpeed(-1.0).into());
+        audio.process(None, &egui::Context::default());
+        assert_eq!(audio.speed(), 0.0);
     }
 }

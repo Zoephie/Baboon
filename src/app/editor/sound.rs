@@ -456,6 +456,37 @@ pub(super) fn draw_sound_output_controls(
         edit.sound_play_request
             .push_back(super::audio::SoundAction::SetVolume(volume));
     }
+    let mut speed = edit.sound_speed;
+    let response = ui
+        .add(
+            egui::Slider::new(&mut speed, 0.0..=super::audio::MAX_SPEED)
+                .text(RichText::new(SPEED_ICON).color(subtle_dark()))
+                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                .custom_parser(|text| {
+                    text.trim()
+                        .trim_end_matches('%')
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .map(|percent| percent / 100.0)
+                }),
+        )
+        .on_hover_text("Playback speed; pitch moves with it. Double-click for 100%.");
+    // A slider senses drags only, so its response never reports a click; a
+    // double-click is read off the pointer while over it.
+    let reset = response.hovered()
+        && ui.input(|input| {
+            input
+                .pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+        });
+    if reset {
+        speed = 1.0;
+    }
+    if response.changed() || reset {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::SetSpeed(speed));
+    }
     // Language selector — picks which localized audio plays and is
     // extracted (to `data_<lang>\`). A language this source lacks shows as
     // the default, which is what plays.

@@ -33,12 +33,16 @@ pub(super) enum ClipPlay {
 /// none of the app's fonts and drew as an empty box.
 const RANDOM_ICON: &str = "\u{1F500}";
 
+/// The playback speed slider's label.
+pub(super) const SPEED_ICON: &str = "\u{23E9}";
+
 /// The zoom-out button: a minus sign, matching the plus beside it.
 const ZOOM_OUT_ICON: &str = "\u{2212}";
 
 /// Every glyph the player draws, which the tests check the app's fonts have.
 #[cfg(test)]
-const PLAYER_GLYPHS: [&str; 11] = [
+const PLAYER_GLYPHS: [&str; 12] = [
+    SPEED_ICON,
     ZOOM_OUT_ICON,
     "\u{25C0}",
     "\u{25B6}",
@@ -1265,6 +1269,8 @@ mod tests {
         previewed: Vec<String>,
         /// The tab's preview, as the audio state would hand it over.
         preview: Option<Preview>,
+        /// Playback speed, as the audio state would hand it over.
+        speed: f32,
         timeline: egui::Rect,
     }
 
@@ -1282,6 +1288,7 @@ mod tests {
                 time: 0.0,
                 previewed: Vec::new(),
                 preview: None,
+                speed: 1.0,
                 timeline: egui::Rect::NOTHING,
             }
         }
@@ -1293,6 +1300,7 @@ mod tests {
             let mut sinks = EditSinks::default();
             let playback = self.playback.clone();
             let preview = self.preview.clone();
+            let speed = self.speed;
             let focused = self.focused;
             let queued = &mut self.queued;
             let timeline = &mut self.timeline;
@@ -1312,6 +1320,7 @@ mod tests {
                         edit.sound_play_request = SoundRequests::new(queued, Some(owner()));
                         edit.sound_playback = playback.clone();
                         edit.sound_preview = preview.clone();
+                        edit.sound_speed = speed;
                         edit.sound_has_focus = focused;
                         let top = ui.cursor().top();
                         draw_clip_player(ui, &mut edit, "test", &clips, &[], &mut |index| {
@@ -1484,6 +1493,7 @@ mod tests {
                             format!("region {start:.1}-{end:.1}")
                         }
                         SoundAction::SetRegion(None) => "region none".to_owned(),
+                        SoundAction::SetSpeed(speed) => format!("speed {speed:.2}"),
                         _ => "other".to_owned(),
                     };
                     (request.clip, action)
@@ -2261,5 +2271,49 @@ mod tests {
         // With no region, Stop only stops.
         h.click(stop);
         assert_eq!(h.take(), [(None, "stop".to_owned())]);
+    }
+
+    /// The speed slider reads out a percentage, and a double-click puts it
+    /// back to 100%.
+    #[test]
+    fn the_speed_slider_shows_a_percentage_and_resets() {
+        let mut h = Harness::new();
+        h.speed = 2.5;
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        assert!(
+            h.texts.iter().any(|(text, _)| text == SPEED_ICON),
+            "no speed slider"
+        );
+        let value = h.find("250%", 0);
+        h.take();
+        // Double-click the slider's track, just left of its value.
+        let track = value - egui::vec2(60.0, 0.0);
+        for offset in [6.0, 3.0, 0.0] {
+            h.frame(vec![egui::Event::PointerMoved(
+                track - egui::vec2(offset, 0.0),
+            )]);
+        }
+        let button = |pressed| egui::Event::PointerButton {
+            pos: track,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(vec![button(true)]);
+        h.frame(vec![button(false)]);
+        h.frame(vec![button(true)]);
+        h.frame(vec![button(false)]);
+        let speeds: Vec<String> = h
+            .take()
+            .into_iter()
+            .map(|(_, action)| action)
+            .filter(|action| action.starts_with("speed"))
+            .collect();
+        assert_eq!(
+            speeds.last().map(String::as_str),
+            Some("speed 1.00"),
+            "{speeds:?}"
+        );
     }
 }

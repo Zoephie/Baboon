@@ -141,6 +141,7 @@ impl Baboon {
         // what makes it stick.
         let expand_all = kit.pending_expand.remove(&key);
         let sound_volume = self.audio.volume();
+        let sound_speed = self.audio.speed();
         let sound_owner = crate::app::audio::SoundOwner {
             kit: kit_id,
             key: key.clone(),
@@ -196,6 +197,7 @@ impl Baboon {
             ),
             sound_status: self.audio.status.as_deref().filter(|_| sound_status_shown),
             sound_volume,
+            sound_speed,
             sound_playback,
             sound_looping,
             sound_preview,

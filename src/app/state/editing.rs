@@ -467,6 +467,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) sound_status: Option<&'a str>,
     /// Current playback volume (linear, 0.0..=1.0), for the sound-player slider.
     pub(in crate::app) sound_volume: f32,
+    /// Playback speed (a multiple of the recorded rate), for its slider.
+    pub(in crate::app) sound_speed: f32,
     /// The sound this pane's tab has loaded (playing, paused or finished), for
     /// the transport; `None` while the loaded sound, if any, is another tab's.
     pub(in crate::app) sound_playback: Option<super::audio::PlaybackView>,
@@ -603,6 +605,7 @@ impl<'a> FieldEditContext<'a> {
             ),
             sound_status: None,
             sound_volume: 1.0,
+            sound_speed: 1.0,
             sound_playback: None,
             sound_looping: false,
             sound_preview: None,
