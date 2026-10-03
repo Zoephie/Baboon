@@ -344,6 +344,8 @@ pub struct Baboon {
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
     rename_tag: Option<RenameTagState>,
+    /// Rename Folder dialog for a loose tags folder, if one is open.
+    loose_folder_rename: Option<LooseFolderRenameState>,
     /// New/Rename Folder dialog for a container source, if one is open.
     container_folder_dialog: Option<ContainerFolderDialog>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
@@ -636,6 +638,7 @@ impl Baboon {
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
+            loose_folder_rename: None,
             container_folder_dialog: None,
             kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
