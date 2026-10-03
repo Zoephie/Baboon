@@ -19,6 +19,14 @@ pub(super) struct PlayerClip {
     pub(super) duration: Option<f64>,
 }
 
+/// How a clip is played: an action for the audio queue, or — for a sound a
+/// Campaign Evolved tag references — a request the app resolves to one after
+/// the frame.
+pub(super) enum ClipPlay {
+    Action(SoundAction),
+    CeRef(CeSoundRefRequest),
+}
+
 /// Height of the time ruler above the timeline's track.
 const RULER_HEIGHT: f32 = 14.0;
 /// Height of the track for mono and stereo, and before a clip is loaded.
@@ -45,7 +53,7 @@ pub(super) fn draw_clip_player(
     id_salt: &str,
     clips: &[PlayerClip],
     languages: &[LanguageChoice],
-    play: &mut dyn FnMut(usize) -> Option<SoundAction>,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) -> usize {
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
@@ -196,6 +204,25 @@ pub(in crate::app::editor) fn clip_selection_id(id_salt: &str, tag_key: &str) ->
     egui::Id::new(("clip_player_selection", id_salt, tag_key))
 }
 
+/// Select clip `index` in the player `id_salt` of this tab and play it — for a
+/// list beside the player (the dialogue overview) whose rows play through it.
+pub(super) fn play_clip_now(
+    ctx: &egui::Context,
+    edit: &mut FieldEditContext<'_>,
+    id_salt: &str,
+    clips: &[PlayerClip],
+    index: usize,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
+) {
+    let Some(clip) = clips.get(index) else {
+        return;
+    };
+    ctx.data_mut(|data| {
+        data.insert_temp(clip_selection_id(id_salt, edit.tag_key), clip.id.clone())
+    });
+    queue_play(edit, clips, index, play);
+}
+
 /// `group ▸ name`, or the name alone.
 fn clip_title(clip: &PlayerClip) -> String {
     match &clip.group {
@@ -210,7 +237,7 @@ fn toggle_or_play(
     clips: &[PlayerClip],
     selected: usize,
     loaded: Option<&PlaybackView>,
-    play: &mut dyn FnMut(usize) -> Option<SoundAction>,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) {
     if loaded.is_some() {
         edit.sound_play_request.push_back(SoundAction::TogglePause);
@@ -223,17 +250,28 @@ fn queue_play(
     edit: &mut FieldEditContext<'_>,
     clips: &[PlayerClip],
     index: usize,
-    play: &mut dyn FnMut(usize) -> Option<SoundAction>,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) {
-    if let Some(action) = play(index) {
-        edit.sound_play_request
-            .play_clip(action, clips[index].id.clone());
+    match play(index) {
+        Some(ClipPlay::Action(action)) => edit
+            .sound_play_request
+            .play_clip(action, clips[index].id.clone()),
+        Some(ClipPlay::CeRef(mut request)) => {
+            request.clip = Some(clips[index].id.clone());
+            *edit.ce_sound_ref_request = Some(request);
+        }
+        None => {}
     }
 }
 
 /// Whether a play for `index` was already queued this frame (by Random).
 fn queued_play_for(edit: &FieldEditContext<'_>, clips: &[PlayerClip], index: usize) -> bool {
-    edit.sound_play_request.queued_clip(&clips[index].id)
+    let id = clips[index].id.as_str();
+    edit.sound_play_request.queued_clip(id)
+        || edit
+            .ce_sound_ref_request
+            .as_ref()
+            .is_some_and(|request| request.clip.as_deref() == Some(id))
 }
 
 /// Another index than `current` out of `len`, at random.
@@ -261,7 +299,7 @@ fn draw_timeline(
     clips: &[PlayerClip],
     selected: usize,
     loaded: Option<&PlaybackView>,
-    play: &mut dyn FnMut(usize) -> Option<SoundAction>,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) {
     let duration = loaded
         .map(|playback| playback.duration)
@@ -586,11 +624,11 @@ mod tests {
                         edit.sound_has_focus = focused;
                         let top = ui.cursor().top();
                         draw_clip_player(ui, &mut edit, "test", &clips, &[], &mut |index| {
-                            Some(SoundAction::PlayEvent {
+                            Some(ClipPlay::Action(SoundAction::PlayEvent {
                                 event_name: clips[index].name.clone(),
                                 label: clips[index].name.clone(),
                                 tags_root: None,
-                            })
+                            }))
                         });
                         // The timeline is the second row, under the clip row.
                         let _ = top;

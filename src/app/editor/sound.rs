@@ -1162,12 +1162,34 @@ fn draw_wwise_event_player(
     edit: &mut FieldEditContext<'_>,
 ) {
     let languages = language_choices(edit, None);
+    // Name the field each event comes from only when there is more than one
+    // kind of them.
+    let grouped = events.iter().any(|(label, _)| *label != events[0].0);
     egui::CollapsingHeader::new(
         RichText::new(format!("Sound \u{2014} Wwise event ({})", events.len())).color(text_dark()),
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit, &languages);
+        let language = edit.sound_language.unwrap_or("");
+        let clips: Vec<PlayerClip> = events
+            .iter()
+            .map(|(label, name)| PlayerClip {
+                id: format!("event:{name}:{language}"),
+                name: name.clone(),
+                group: grouped.then(|| (*label).to_owned()),
+                duration: None,
+            })
+            .collect();
+        let tags_root = edit.tags_root;
+        let selected =
+            draw_clip_player(ui, edit, "wwise_event", &clips, &languages, &mut |index| {
+                let name = &events[index].1;
+                Some(ClipPlay::Action(super::audio::SoundAction::PlayEvent {
+                    event_name: name.clone(),
+                    label: name.clone(),
+                    tags_root: tags_root.map(std::path::Path::to_path_buf),
+                }))
+            });
         ui.label(
             RichText::new(
                 "Wwise-authored \u{2014} audio lives in sound\\pc\\*.pck; \
@@ -1175,51 +1197,32 @@ fn draw_wwise_event_player(
             )
             .color(subtle_dark()),
         );
-        egui::Grid::new("wwise_events")
-            .striped(true)
-            .num_columns(4)
-            .show(ui, |ui| {
-                for (label, name) in events {
-                    if ui
-                        .small_button("\u{25B6}")
-                        .on_hover_text("Play this Wwise event from the sound banks")
-                        .clicked()
-                    {
-                        edit.sound_play_request
-                            .push_back(super::audio::SoundAction::PlayEvent {
-                                event_name: name.clone(),
-                                label: name.clone(),
-                                tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                            });
-                    }
-                    if ui
-                        .small_button("\u{2B07}")
-                        .on_hover_text("Extract this event to WAV")
-                        .clicked()
-                    {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Extract Wwise event")
-                            .set_file_name(format!("{}.wav", sanitize_component(name)))
-                            .save_file()
-                        {
-                            *edit.sound_extract_request = Some(ExtractRequest {
-                                items: vec![ExtractItem {
-                                    out_path: path,
-                                    source: ExtractSource::Event {
-                                        name: name.clone(),
-                                        language: edit.sound_language.map(str::to_owned),
-                                    },
-                                }],
-                                tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                                label: name.clone(),
-                            });
-                        }
-                    }
-                    ui.label(RichText::new(*label).color(subtle_dark()));
-                    ui.label(RichText::new(name).color(text_dark()));
-                    ui.end_row();
-                }
-            });
+        let (label, name) = &events[selected];
+        ui.horizontal(|ui| {
+            if ui
+                .small_button("\u{2B07}")
+                .on_hover_text("Extract this event to WAV")
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_title("Extract Wwise event")
+                    .set_file_name(format!("{}.wav", sanitize_component(name)))
+                    .save_file()
+            {
+                *edit.sound_extract_request = Some(ExtractRequest {
+                    items: vec![ExtractItem {
+                        out_path: path,
+                        source: ExtractSource::Event {
+                            name: name.clone(),
+                            language: edit.sound_language.map(str::to_owned),
+                        },
+                    }],
+                    tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                    label: name.clone(),
+                });
+            }
+            ui.label(RichText::new(*label).color(subtle_dark()));
+            ui.label(RichText::new(name).color(text_dark()));
+        });
     });
 }
 
@@ -1274,7 +1277,39 @@ fn draw_ce_wwise_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit, &language_picker);
+        if media.is_empty() {
+            ui.label(RichText::new("(no media in this language)").color(subtle_dark()));
+            return;
+        }
+        // Name the event each file plays for only when there is more than one.
+        let grouped = media.iter().any(|m| m.event_name != media[0].event_name);
+        let clips: Vec<PlayerClip> = media
+            .iter()
+            .enumerate()
+            .map(|(index, m)| PlayerClip {
+                id: format!("ce:{selected}:{index}:{}", m.source_name),
+                name: m.display_name(),
+                group: grouped.then(|| m.event_name.clone()),
+                duration: None,
+            })
+            .collect();
+        let paks_root = edit.ce_paks_root;
+        let chosen = draw_clip_player(
+            ui,
+            edit,
+            "ce_media",
+            &clips,
+            &language_picker,
+            &mut |index| {
+                paks_root.map(|root| {
+                    ClipPlay::Action(super::audio::SoundAction::PlayCeMedia {
+                        paks_root: root.to_path_buf(),
+                        media: Box::new(media[index].clone()),
+                        label: media[index].display_name(),
+                    })
+                })
+            },
+        );
         ui.label(
             RichText::new(if localized {
                 "Wwise-authored \u{2014} localized voice; media lives in the \
@@ -1295,102 +1330,67 @@ fn draw_ce_wwise_player(
             );
         }
 
-        // Whole-tag extract. CE media is addressed directly in the pak set, so
-        // unlike the Halo 4 event player this needs no prior playback.
-        if !media.is_empty()
-            && let Some(root) = edit.ce_paks_root
-        {
-            ui.horizontal(|ui| {
-                if ui
+        // The selected file, then the whole tag. CE media is addressed
+        // directly in the pak set, so unlike the Halo 4 event player this
+        // needs no prior playback.
+        let m = media[chosen];
+        ui.horizontal(|ui| {
+            if ui
+                .small_button("\u{2B07}")
+                .on_hover_text("Extract this permutation to WAV")
+                .clicked()
+                && let Some(root) = edit.ce_paks_root
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_title("Extract Wwise media")
+                    .set_file_name(format!("{}.wav", sanitize_component(&m.display_name())))
+                    .save_file()
+            {
+                *edit.sound_extract_request = Some(ExtractRequest {
+                    items: vec![ExtractItem {
+                        out_path: path,
+                        source: ExtractSource::CeMedia {
+                            paks_root: root.to_path_buf(),
+                            media: Box::new(m.clone()),
+                        },
+                    }],
+                    tags_root: None,
+                    label: m.display_name(),
+                });
+            }
+            ui.label(RichText::new(m.display_name()).color(text_dark()))
+                .on_hover_text(&m.source_name);
+            ui.label(RichText::new(&m.event_name).color(subtle_dark()));
+            ui.label(RichText::new(m.location_label()).color(subtle_dark()));
+            if let Some(root) = edit.ce_paks_root
+                && ui
                     .button(RichText::new("\u{2B07} Extract all"))
                     .on_hover_text("Extract every permutation of this language to WAV")
                     .clicked()
-                    && let Some(base) = rfd::FileDialog::new()
-                        .set_title("Extract Wwise media")
-                        .pick_folder()
-                {
-                    let items = media
-                        .iter()
-                        .map(|m| ExtractItem {
-                            out_path: base
-                                .join(format!("{}.wav", sanitize_component(&m.display_name()))),
-                            source: ExtractSource::CeMedia {
-                                paks_root: root.to_path_buf(),
-                                media: Box::new((*m).clone()),
-                            },
-                        })
-                        .collect();
-                    *edit.sound_extract_request = Some(ExtractRequest {
-                        items,
-                        tags_root: None,
-                        label: base
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "sound".to_owned()),
-                    });
-                }
-            });
-        }
-
-        egui::Grid::new("ce_wwise_media")
-            .striped(true)
-            .num_columns(5)
-            .show(ui, |ui| {
-                for m in &media {
-                    if ui
-                        .small_button("\u{25B6}")
-                        .on_hover_text("Play this permutation")
-                        .clicked()
-                    {
-                        match edit.ce_paks_root {
-                            Some(root) => {
-                                edit.sound_play_request.push_back(
-                                    super::audio::SoundAction::PlayCeMedia {
-                                        paks_root: root.to_path_buf(),
-                                        media: Box::new((*m).clone()),
-                                        label: m.display_name(),
-                                    },
-                                );
-                            }
-                            // Shouldn't happen for a container source, but a
-                            // click that does nothing at all is worse than one
-                            // that says why.
-                            None => {
-                                if let Some(status) = edit.status.as_deref_mut() {
-                                    "no container source for Wwise media".clone_into(status);
-                                }
-                            }
-                        }
-                    }
-                    if ui
-                        .small_button("\u{2B07}")
-                        .on_hover_text("Extract this permutation to WAV")
-                        .clicked()
-                        && let Some(root) = edit.ce_paks_root
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_title("Extract Wwise media")
-                            .set_file_name(format!("{}.wav", sanitize_component(&m.display_name())))
-                            .save_file()
-                    {
-                        *edit.sound_extract_request = Some(ExtractRequest {
-                            items: vec![ExtractItem {
-                                out_path: path,
-                                source: ExtractSource::CeMedia {
-                                    paks_root: root.to_path_buf(),
-                                    media: Box::new((*m).clone()),
-                                },
-                            }],
-                            tags_root: None,
-                            label: m.display_name(),
-                        });
-                    }
-                    ui.label(RichText::new(m.display_name()).color(text_dark()))
-                        .on_hover_text(&m.source_name);
-                    ui.label(RichText::new(&m.event_name).color(subtle_dark()));
-                    ui.label(RichText::new(m.location_label()).color(subtle_dark()));
-                    ui.end_row();
-                }
-            });
+                && let Some(base) = rfd::FileDialog::new()
+                    .set_title("Extract Wwise media")
+                    .pick_folder()
+            {
+                let items = media
+                    .iter()
+                    .map(|m| ExtractItem {
+                        out_path: base
+                            .join(format!("{}.wav", sanitize_component(&m.display_name()))),
+                        source: ExtractSource::CeMedia {
+                            paks_root: root.to_path_buf(),
+                            media: Box::new((*m).clone()),
+                        },
+                    })
+                    .collect();
+                *edit.sound_extract_request = Some(ExtractRequest {
+                    items,
+                    tags_root: None,
+                    label: base
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "sound".to_owned()),
+                });
+            }
+        });
     });
 }
 
@@ -1685,7 +1685,7 @@ pub(in crate::app) fn draw_sound_player(
             .collect();
         let tags_root = edit.tags_root;
         let selected = draw_clip_player(ui, edit, "sound", &clips, &languages, &mut |index| {
-            row_play_action(tag, &rows[index], source, tags_root)
+            row_play_action(tag, &rows[index], source, tags_root).map(ClipPlay::Action)
         });
         let row = &rows[selected];
         draw_sound_format_line(ui, tag, &rows, source);
@@ -2051,13 +2051,52 @@ fn referenced_sound_extract_items(
     build_extract_items(tag, &rows, source, base, false)
 }
 
+/// A referenced sound as a player clip: `id` names it within the player.
+fn referenced_clip(id: String, group: Option<String>, name: String) -> PlayerClip {
+    PlayerClip {
+        id,
+        name,
+        group,
+        duration: None,
+    }
+}
+
+/// How a referenced sound plays: its tag's first permutation (or Halo 4
+/// event), loaded from the tags folder — or, on a Campaign Evolved mount, a
+/// reference the app resolves to the tag's Wwise media.
+#[allow(clippy::too_many_arguments)]
+fn referenced_clip_play(
+    group: u32,
+    path: &str,
+    game: Option<&str>,
+    tags_root: Option<&std::path::Path>,
+    definitions_root: Option<&std::path::Path>,
+    language: Option<&str>,
+    container_source: bool,
+) -> Option<ClipPlay> {
+    let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
+    if container_source {
+        return Some(ClipPlay::CeRef(CeSoundRefRequest {
+            group_tag: group,
+            reference: path.to_owned(),
+            label,
+            extract: false,
+            clip: None,
+        }));
+    }
+    let (sound, _) = load_referenced_sound(game, tags_root, definitions_root, path, group)?;
+    referenced_sound_play_action(&sound, game, Some(path), language, tags_root)
+        .map(ClipPlay::Action)
+}
+
 /// What a click on a referenced-sound row produced. A container source can only
 /// yield `ce_ref`: the referenced tag holds no samples, so the app resolves its
 /// Wwise binding after the frame.
 #[derive(Default)]
 struct ReferencedSoundClick {
     open: Option<OpenTagRequest>,
-    play: Option<super::audio::SoundAction>,
+    /// A row's ▶: the player clip to select and play.
+    select: Option<usize>,
     extract: Option<ExtractRequest>,
     ce_ref: Option<CeSoundRefRequest>,
 }
@@ -2067,18 +2106,26 @@ impl ReferencedSoundClick {
     /// per frame, so a later row's `Some` simply wins.
     fn take_from(&mut self, other: Self) {
         self.open = other.open.or(self.open.take());
-        self.play = other.play.or(self.play.take());
+        self.select = other.select.or(self.select.take());
         self.extract = other.extract.or(self.extract.take());
         self.ce_ref = other.ce_ref.or(self.ce_ref.take());
     }
 
-    /// Hand every collected request to the app.
-    fn apply(self, edit: &mut FieldEditContext<'_>) {
+    /// Hand every collected request to the app; a row's ▶ plays through the
+    /// player `id_salt` over `clips`.
+    fn apply(
+        self,
+        ctx: &egui::Context,
+        edit: &mut FieldEditContext<'_>,
+        id_salt: &str,
+        clips: &[PlayerClip],
+        play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
+    ) {
         if self.open.is_some() {
             *edit.open_request = self.open;
         }
-        if let Some(play) = self.play {
-            edit.sound_play_request.push_back(play);
+        if let Some(index) = self.select {
+            play_clip_now(ctx, edit, id_salt, clips, index, play);
         }
         if self.extract.is_some() {
             *edit.sound_extract_request = self.extract;
@@ -2093,12 +2140,17 @@ impl ReferencedSoundClick {
 /// open-label per ref. Shared by the dialogue and sound_looping players; kept out
 /// of `edit` so the grid closure needn't borrow it mutably.
 ///
+/// `clips[i]` is the player clip ref `i` plays as; ▶ selects and plays it in
+/// the player. Without `clips` there is no ▶ (the player already has one).
+///
 /// `container_source` marks a Campaign Evolved mount, where there is no tags
 /// root to load the referenced tag from — and nothing worth loading if there
 /// were, since CE sound tags carry no samples.
+#[allow(clippy::too_many_arguments)] // copies out of `edit`, so the grid closure needn't borrow it
 fn draw_referenced_sound_cell(
     ui: &mut Ui,
     refs: &[(u32, String)],
+    clips: Option<&[Option<usize>]>,
     game: Option<&str>,
     tags_root: Option<&std::path::Path>,
     kit_layout: Option<&KitLayout>,
@@ -2112,34 +2164,17 @@ fn draw_referenced_sound_cell(
         return click;
     }
     ui.vertical(|ui| {
-        for (group, path) in refs {
+        for (index, (group, path)) in refs.iter().enumerate() {
             ui.horizontal(|ui| {
                 let is_sound = &group.to_be_bytes() == b"snd!";
                 let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
-                if is_sound
+                if let Some(clip) = clips.and_then(|clips| clips.get(index).copied().flatten())
                     && ui
                         .small_button("\u{25B6}")
-                        .on_hover_text("Play this referenced sound")
+                        .on_hover_text("Play this referenced sound in the player")
                         .clicked()
                 {
-                    if container_source {
-                        click.ce_ref = Some(CeSoundRefRequest {
-                            group_tag: *group,
-                            reference: path.clone(),
-                            label: label.clone(),
-                            extract: false,
-                        });
-                    } else if let Some((sound, _)) =
-                        load_referenced_sound(game, tags_root, definitions_root, path, *group)
-                    {
-                        click.play = referenced_sound_play_action(
-                            &sound,
-                            game,
-                            Some(path.as_str()),
-                            language,
-                            tags_root,
-                        );
-                    }
+                    click.select = Some(clip);
                 }
                 // Deliberately a second `if`: chaining these would skip drawing
                 // the extract button on the frame Play is clicked.
@@ -2159,6 +2194,7 @@ fn draw_referenced_sound_cell(
                             reference: path.clone(),
                             label,
                             extract: true,
+                            clip: None,
                         });
                     } else if let Some((sound, abs)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
@@ -2249,6 +2285,41 @@ pub(in crate::app) fn draw_dialogue_summary(
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
     let languages = language_choices(edit, None);
+    // Every referenced sound is a clip in one player; a row's ▶ plays its
+    // sound through it.
+    let language_key = language.unwrap_or("");
+    let mut clips: Vec<PlayerClip> = Vec::new();
+    let mut clip_refs: Vec<(u32, String)> = Vec::new();
+    let mut row_clips: Vec<Vec<Option<usize>>> = Vec::new();
+    for (row_index, row) in rows.iter().enumerate() {
+        let mut ids = Vec::new();
+        for (sound_index, (group, path)) in row.sounds.iter().enumerate() {
+            if &group.to_be_bytes() != b"snd!" {
+                ids.push(None);
+                continue;
+            }
+            ids.push(Some(clips.len()));
+            clips.push(referenced_clip(
+                format!("ref:{row_index}:{sound_index}:{path}:{language_key}"),
+                Some(row.name.clone()),
+                path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned(),
+            ));
+            clip_refs.push((*group, path.clone()));
+        }
+        row_clips.push(ids);
+    }
+    let mut play = |index: usize| {
+        let (group, path) = &clip_refs[index];
+        referenced_clip_play(
+            *group,
+            path,
+            game,
+            tags_root,
+            defs,
+            language,
+            container_source,
+        )
+    };
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Dialogue Overview ({total} vocalizations, {total_sounds} sounds)"
@@ -2257,55 +2328,69 @@ pub(in crate::app) fn draw_dialogue_summary(
         .color(text_dark()),
     )
     .id_salt("dialogue_overview")
-    .default_open(total <= 40)
+    .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit, &languages);
+        if clips.is_empty() {
+            draw_sound_transport(ui, edit, &languages);
+        } else {
+            draw_clip_player(ui, edit, "dialogue", &clips, &languages, &mut play);
+        }
         if total == 0 {
             ui.label(RichText::new("(no vocalizations)").color(subtle_dark()));
             return;
         }
-        egui::ScrollArea::vertical()
-            .id_salt("dialogue_overview_scroll")
-            .max_height(280.0)
-            .show(ui, |ui| {
-                egui::Grid::new("dialogue_overview_grid")
-                    .striped(true)
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        for header in ["vocalization", "sound(s)"] {
-                            ui.label(RichText::new(header).strong().color(subtle_dark()));
-                        }
-
-                        ui.end_row();
-                        for row in &rows {
-                            ui.label(RichText::new(&row.name).color(text_dark()));
-                            let click = draw_referenced_sound_cell(
-                                ui,
-                                &row.sounds,
-                                game,
-                                tags_root,
-                                kit_layout,
-                                defs,
-                                language,
-                                container_source,
-                            );
-                            clicked.take_from(click);
+        // The player stays in view; the table of every vocalization, which
+        // runs to hundreds of rows, starts closed past 40.
+        egui::CollapsingHeader::new(
+            RichText::new(format!("Vocalizations ({total})")).color(text_dark()),
+        )
+        .id_salt("dialogue_vocalizations")
+        .default_open(total <= 40)
+        .show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("dialogue_overview_scroll")
+                .max_height(280.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("dialogue_overview_grid")
+                        .striped(true)
+                        .num_columns(2)
+                        .show(ui, |ui| {
+                            for header in ["vocalization", "sound(s)"] {
+                                ui.label(RichText::new(header).strong().color(subtle_dark()));
+                            }
 
                             ui.end_row();
-                        }
-                    });
-                if total > MAX_ROWS {
-                    ui.label(
-                        RichText::new(format!(
-                            "… {} more vocalizations not shown",
-                            total - MAX_ROWS
-                        ))
-                        .color(subtle_dark()),
-                    );
-                }
-            });
+                            for (row, row_clips) in rows.iter().zip(&row_clips) {
+                                ui.label(RichText::new(&row.name).color(text_dark()));
+                                let click = draw_referenced_sound_cell(
+                                    ui,
+                                    &row.sounds,
+                                    Some(row_clips),
+                                    game,
+                                    tags_root,
+                                    kit_layout,
+                                    defs,
+                                    language,
+                                    container_source,
+                                );
+                                clicked.take_from(click);
+
+                                ui.end_row();
+                            }
+                        });
+                    if total > MAX_ROWS {
+                        ui.label(
+                            RichText::new(format!(
+                                "… {} more vocalizations not shown",
+                                total - MAX_ROWS
+                            ))
+                            .color(subtle_dark()),
+                        );
+                    }
+                });
+        });
     });
-    clicked.apply(edit);
+    clicked.apply(&ui.ctx().clone(), edit, "dialogue", &clips, &mut play);
     ui.add_space(6.0);
 }
 
@@ -2370,6 +2455,39 @@ pub(in crate::app) fn draw_sound_looping_player(
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
     let languages = language_choices(edit, None);
+    // One clip per component sound, listed under its track (or "detail
+    // sounds") as the part it plays.
+    let language_key = language.unwrap_or("");
+    let clips: Vec<PlayerClip> = refs
+        .iter()
+        .enumerate()
+        .map(|(index, (label, _, path))| {
+            let (owner, part) = label.split_once(" \u{00B7} ").unwrap_or((label, ""));
+            let group = if owner.starts_with("detail ") {
+                "detail sounds".to_owned()
+            } else {
+                owner.to_owned()
+            };
+            let leaf = path.rsplit(['\\', '/']).next().unwrap_or(path);
+            referenced_clip(
+                format!("ref:{index}:{path}:{language_key}"),
+                Some(group),
+                format!("{part} \u{00B7} {leaf}"),
+            )
+        })
+        .collect();
+    let mut play = |index: usize| {
+        let (_, group, path) = &refs[index];
+        referenced_clip_play(
+            *group,
+            path,
+            game,
+            tags_root,
+            defs,
+            language,
+            container_source,
+        )
+    };
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Sound Looping \u{2014} {} component sound(s)",
@@ -2379,33 +2497,22 @@ pub(in crate::app) fn draw_sound_looping_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit, &languages);
-        egui::ScrollArea::vertical()
-            .max_height(240.0)
-            .show(ui, |ui| {
-                egui::Grid::new("sound_looping_grid")
-                    .striped(true)
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        for (label, group, path) in &refs {
-                            ui.label(RichText::new(label).color(subtle_dark()));
-                            let one = [(*group, path.clone())];
-                            clicked.take_from(draw_referenced_sound_cell(
-                                ui,
-                                &one,
-                                game,
-                                tags_root,
-                                kit_layout,
-                                defs,
-                                language,
-                                container_source,
-                            ));
-                            ui.end_row();
-                        }
-                    });
-            });
+        let selected = draw_clip_player(ui, edit, "looping", &clips, &languages, &mut play);
+        // The selected component: open it, or extract it.
+        let (_, group, path) = &refs[selected];
+        clicked.take_from(draw_referenced_sound_cell(
+            ui,
+            &[(*group, path.clone())],
+            None,
+            game,
+            tags_root,
+            kit_layout,
+            defs,
+            language,
+            container_source,
+        ));
     });
-    clicked.apply(edit);
+    clicked.apply(&ui.ctx().clone(), edit, "looping", &clips, &mut play);
     ui.add_space(6.0);
 }
 
@@ -2561,3 +2668,7 @@ pub(in crate::app) fn draw_material_effects_summary(
     }
     ui.add_space(6.0);
 }
+
+#[cfg(test)]
+#[path = "../tests/sound_players.rs"]
+mod sound_players;

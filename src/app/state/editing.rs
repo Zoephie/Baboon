@@ -275,6 +275,8 @@ pub(in crate::app) struct CeSoundRefRequest {
     pub(in crate::app) label: String,
     /// Extract every permutation to a chosen folder instead of playing one.
     pub(in crate::app) extract: bool,
+    /// The player clip a play is for, carried to the play it becomes.
+    pub(in crate::app) clip: Option<String>,
 }
 
 /// Read-only tag catalog exposed to reference pickers for sources whose tags do

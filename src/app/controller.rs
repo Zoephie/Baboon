@@ -994,7 +994,7 @@ impl Baboon {
                     kit: kit_id,
                     key: tab_key,
                 }),
-                clip: None,
+                clip: request.clip.clone(),
                 action: crate::app::audio::SoundAction::PlayCeMedia {
                     paks_root,
                     label: format!("{} \u{00B7} {}", request.label, first.display_name()),
