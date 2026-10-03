@@ -1317,6 +1317,11 @@ impl Baboon {
                 .find(|kit| kit.id == owner.kit)
                 .is_some_and(|kit| kit.open_tabs.contains(&owner.key))
         });
+        // And the players forget what they kept for a tab that is gone.
+        crate::app::editor::forget_closed_players(ctx, |tag_key| {
+            kits.iter()
+                .any(|kit| kit.open_tabs.iter().any(|key| key == tag_key))
+        });
         let sound_root = if !self.audio.pending.is_empty() {
             self.source_tags_root().map(std::path::Path::to_path_buf)
         } else {

@@ -4,6 +4,8 @@
 
 use super::*;
 
+use std::collections::HashSet;
+
 use crate::app::audio::{PlaybackView, Preview, PreviewState, SoundAction};
 
 /// One clip the player can choose: a permutation, an event, a media file.
@@ -80,6 +82,7 @@ pub(super) fn draw_clip_player(
     languages: &[LanguageChoice],
     play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) -> usize {
+    register_player(ui.ctx(), id_salt, edit.tag_key);
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
     // Listed, stepped through and defaulted in display order: groups as the
@@ -440,8 +443,11 @@ fn request_preview(
     play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) {
     let id = clips[index].id.clone();
-    let nothing = egui::Id::new(("clip_player_nothing_to_preview", edit.tag_key, id.as_str()));
-    if ui.data(|data| data.get_temp::<bool>(nothing)).is_some() {
+    let nothing = nothing_to_preview_id(edit.tag_key);
+    let known = ui
+        .data(|data| data.get_temp::<HashSet<String>>(nothing))
+        .unwrap_or_default();
+    if known.contains(&id) {
         return;
     }
     match play(index) {
@@ -454,7 +460,10 @@ fn request_preview(
                 *edit.ce_sound_ref_request = Some(request);
             }
         }
-        None => ui.data_mut(|data| data.insert_temp(nothing, true)),
+        None => ui.data_mut(|data| {
+            data.get_temp_mut_or_default::<HashSet<String>>(nothing)
+                .insert(id);
+        }),
     }
 }
 
@@ -532,7 +541,7 @@ fn draw_timeline(
     );
     let mut view = load_view(ui, edit.tag_key, &clip_id, duration, min_span);
     let playing = loaded.is_some_and(|playback| playback.playing);
-    let was_playing_id = egui::Id::new(("clip_player_was_playing", edit.tag_key));
+    let was_playing_id = was_playing_id(edit.tag_key);
     if playing
         && !ui
             .data(|data| data.get_temp::<bool>(was_playing_id))
@@ -686,7 +695,7 @@ fn draw_timeline(
 
     // Selecting: a drag across the lanes draws a region from where it began,
     // or moves the edge it began on.
-    let drag_id = egui::Id::new(("clip_player_drag_anchor", edit.tag_key));
+    let drag_id = drag_anchor_id(edit.tag_key);
     if response.drag_started()
         && let Some(origin) = origin.filter(|origin| !in_ruler(*origin))
         && duration > 0.0
@@ -845,6 +854,63 @@ impl View {
     fn whole(&self, duration: f64) -> bool {
         self.span >= duration - 1e-9
     }
+}
+
+/// The clips of a tab's player that have nothing to preview.
+fn nothing_to_preview_id(tag_key: &str) -> egui::Id {
+    egui::Id::new(("clip_player_nothing_to_preview", tag_key))
+}
+
+fn was_playing_id(tag_key: &str) -> egui::Id {
+    egui::Id::new(("clip_player_was_playing", tag_key))
+}
+
+fn drag_anchor_id(tag_key: &str) -> egui::Id {
+    egui::Id::new(("clip_player_drag_anchor", tag_key))
+}
+
+/// Every player drawn, as (player, tab), so a closed tab's can be forgotten.
+fn players_id() -> egui::Id {
+    egui::Id::new("clip_players")
+}
+
+fn register_player(ctx: &egui::Context, id_salt: &str, tag_key: &str) {
+    ctx.data_mut(|data| {
+        let players = data.get_temp_mut_or_default::<HashSet<(String, String)>>(players_id());
+        if !players.contains(&(id_salt.to_owned(), tag_key.to_owned())) {
+            players.insert((id_salt.to_owned(), tag_key.to_owned()));
+        }
+    });
+}
+
+/// Forget what each closed tab's player kept — its selection, region, view
+/// and the rest — once `is_open` says the tab is gone. Run every frame,
+/// like the audio state's own check, so every way a tab closes counts.
+pub(in crate::app) fn forget_closed_players(ctx: &egui::Context, is_open: impl Fn(&str) -> bool) {
+    let closed: Vec<(String, String)> = ctx.data(|data| {
+        data.get_temp::<HashSet<(String, String)>>(players_id())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, tag_key)| !is_open(tag_key))
+            .collect()
+    });
+    if closed.is_empty() {
+        return;
+    }
+    ctx.data_mut(|data| {
+        for (id_salt, tag_key) in &closed {
+            data.remove::<String>(clip_selection_id(id_salt, tag_key));
+            data.remove::<(String, f64, f64)>(clip_region_id(tag_key));
+            data.remove::<(String, View)>(clip_view_id(tag_key));
+            data.remove::<HashSet<String>>(nothing_to_preview_id(tag_key));
+            data.remove::<bool>(was_playing_id(tag_key));
+            data.remove::<f64>(drag_anchor_id(tag_key));
+        }
+        let players = data.get_temp_mut_or_default::<HashSet<(String, String)>>(players_id());
+        for player in &closed {
+            players.remove(player);
+        }
+    });
 }
 
 fn clip_view_id(tag_key: &str) -> egui::Id {
@@ -2100,5 +2166,35 @@ mod tests {
         }
         let view = stored_view(&h).expect("no view stored");
         assert!(view.span < 2.0, "Ctrl/Cmd + wheel did not zoom: {view:?}");
+    }
+
+    /// Closing a tab forgets what its player kept; another tab's stays.
+    #[test]
+    fn closing_a_tab_forgets_its_player() {
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", false));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        let next = h.find("\u{25B6}", 0);
+        h.click(next);
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        let kept = |h: &Harness| {
+            h.ctx.data(|data| {
+                (
+                    data.get_temp::<String>(clip_selection_id("test", "test"))
+                        .is_some(),
+                    data.get_temp::<(String, f64, f64)>(clip_region_id("test"))
+                        .is_some(),
+                )
+            })
+        };
+        assert_eq!(kept(&h), (true, true), "nothing was kept to forget");
+
+        forget_closed_players(&h.ctx, |tag_key| tag_key == "test");
+        assert_eq!(kept(&h), (true, true), "an open tab's player was forgotten");
+
+        forget_closed_players(&h.ctx, |_| false);
+        assert_eq!(kept(&h), (false, false), "a closed tab's player was kept");
     }
 }

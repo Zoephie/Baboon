@@ -8,6 +8,7 @@ pub(in crate::app) use h2::*;
 mod player;
 #[cfg(test)]
 pub(super) use player::clip_selection_id;
+pub(in crate::app) use player::forget_closed_players;
 use player::*;
 
 /// The `sound_classes` (`sncl`) tag group.
