@@ -294,8 +294,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // holding the reference — so a renamed render-method definition leaves a
     // cached hit under a path that no longer resolves. They are pure caches, so
     // dropping them costs one re-resolve and cannot be wrong.
-    kit.rmdf_cache.clear();
-    kit.rmop_cache.clear();
+    kit.forget_render_methods();
     kit.h2_templates = H2TemplateCache::default();
 
     // Forces `modified_tags` to be rebuilt: it maps keys to entries, and the

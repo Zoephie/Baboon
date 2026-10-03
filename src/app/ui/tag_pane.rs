@@ -269,7 +269,12 @@ impl Baboon {
             // One projection for every pane, as the bitmap view settings are:
             // applied going in, and a toggle in this pane written back.
             model_preview.perspective = model_preview_perspective;
-            let document_revision = (doc.id, doc.dirty.revision(), kit.generation);
+            let document_revision = (
+                doc.id,
+                doc.dirty.revision(),
+                kit.generation,
+                kit.render_method_epoch,
+            );
             draw_tag(
                 ui,
                 &doc.tag,

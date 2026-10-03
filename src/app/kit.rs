@@ -89,6 +89,10 @@ pub(super) struct Kit {
     pub(super) index_jobs: IndexJobs,
     /// Source-local render-method option cache; `None` is a cached miss.
     pub(super) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
+    /// Moves on whenever `rmdf_cache` and `rmop_cache` are cleared, so the
+    /// shader grid, which memoises its model per document revision, rebuilds
+    /// from the definitions as they are now.
+    pub(super) render_method_epoch: u64,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
     /// one walks several packages.
     pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
@@ -228,6 +232,7 @@ impl Kit {
             h2_templates: H2TemplateCache::default(),
             index_jobs: IndexJobs::default(),
             rmop_cache: HashMap::new(),
+            render_method_epoch: 0,
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
             find_filter_applied: HashMap::new(),
@@ -581,6 +586,28 @@ impl Baboon {
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
         };
+    }
+}
+
+/// The groups whose tags the shader grid reads through `rmdf_cache` and
+/// `rmop_cache`.
+pub(super) fn is_render_method_layout_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"rmdf") || group_tag == u32::from_be_bytes(*b"rmop")
+}
+
+impl Kit {
+    /// Drop every cached render-method definition and option, and move the
+    /// epoch on so open shader grids rebuild.
+    ///
+    /// The caches are keyed by the referenced path and never checked against
+    /// the file again, so saving a definition or option (or creating one that
+    /// was a cached miss) left the grid showing the old parameters until the
+    /// source was reloaded. They are pure caches: dropping them costs one
+    /// re-read each and cannot be wrong.
+    pub(super) fn forget_render_methods(&mut self) {
+        self.rmdf_cache.clear();
+        self.rmop_cache.clear();
+        self.render_method_epoch = self.render_method_epoch.wrapping_add(1);
     }
 }
 

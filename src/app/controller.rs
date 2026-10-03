@@ -5565,6 +5565,11 @@ impl Baboon {
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
             doc.dirty.clear();
         }
+        // The save also writes the index row, so the periodic refresh will
+        // not see this file change; the shader grid has to hear it here.
+        if is_render_method_layout_group(entry.group_tag) {
+            self.kits[self.active].forget_render_methods();
+        }
         self.record_saved_tag_in_indexes(&entry, dependencies);
         Ok(output)
     }
@@ -13522,6 +13527,86 @@ mod saved_tag_index_tests {
             "the refresh finds the save already indexed"
         );
         assert_eq!(referrers, Some(vec![entry.key.clone()]));
+    }
+
+    /// The shader grid reads definitions and options through per-kit caches
+    /// that never looked at the file again, so saving one left the grid
+    /// showing the old parameters until the source was reloaded.
+    #[test]
+    fn saving_a_render_method_option_drops_the_cached_ones() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-save-rmop-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = format!("save_rmop_{}", root.file_name().unwrap().to_string_lossy());
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        for (file, group) in [
+            ("shaders/bump.render_method_option", "render_method_option"),
+            ("shaders/crate.model", "model"),
+        ] {
+            TagFile::new(locate_definitions_root().join(format!("halo3_mcc/{group}.json")))
+                .unwrap()
+                .write_atomic(root.join(file))
+                .unwrap();
+        }
+        let names = TagNameIndex::default();
+        let entries =
+            crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: Some(game.clone()),
+                definitions_root: PathBuf::new(),
+            },
+            names: names.clone(),
+            game: Some(game.clone()),
+            entries: entries.clone(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let key_of = |group: &[u8; 4]| {
+            entries
+                .iter()
+                .find(|entry| entry.group_tag == u32::from_be_bytes(*group))
+                .map(|entry| entry.key.clone())
+                .unwrap()
+        };
+        let save = |app: &mut Baboon, key: &str, group: &str| {
+            let tag =
+                TagFile::new(locate_definitions_root().join(format!("halo3_mcc/{group}.json")))
+                    .unwrap();
+            app.kits[0]
+                .parsed_tags
+                .insert(key.to_owned(), TagDocument::modified(tag));
+            app.kits[0]
+                .rmop_cache
+                .insert("rmop:shaders\\bump".to_owned(), None);
+            let epoch = app.kits[0].render_method_epoch;
+            let saved = app.save_tag_by_key(key);
+            assert!(saved.is_ok(), "{saved:?}");
+            (
+                app.kits[0].rmop_cache.is_empty(),
+                app.kits[0].render_method_epoch != epoch,
+            )
+        };
+
+        let model = save(&mut app, &key_of(b"hlmt"), "model");
+        let option = save(&mut app, &key_of(b"rmop"), "render_method_option");
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(model, (false, false), "saving another group leaves them");
+        assert_eq!(option, (true, true), "saving an option drops them");
     }
 }
 

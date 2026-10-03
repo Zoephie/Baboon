@@ -272,6 +272,12 @@ impl Baboon {
         self.schedule_next_entry_index_refresh(kit_index, ctx);
         match result {
             Ok(refresh) if refresh.changed => {
+                // A definition or option written by anything but a Baboon
+                // save (a recompile, an import, a new file) reaches the
+                // shader grid here.
+                if refresh_touches_render_methods(&refresh) {
+                    self.kits[kit_index].forget_render_methods();
+                }
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
             }
             Ok(_) => {}
@@ -281,6 +287,20 @@ impl Baboon {
     }
 }
 
+/// Whether a refresh added, changed or removed a render-method definition or
+/// option. Removed tags are known only by key, which for a loose file ends in
+/// its extension.
+fn refresh_touches_render_methods(refresh: &EntryIndexRefresh) -> bool {
+    refresh
+        .touched
+        .iter()
+        .any(|entry| is_render_method_layout_group(entry.group_tag))
+        || refresh.removed_keys.iter().any(|key| {
+            let key = key.to_ascii_lowercase();
+            key.ends_with(".render_method_definition") || key.ends_with(".render_method_option")
+        })
+}
+
 fn campaign_evolved_surface_on_load() -> KitSurface {
     KitSurface::Tags
 }
@@ -288,6 +308,41 @@ fn campaign_evolved_surface_on_load() -> KitSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A refresh that saw a definition or option change, appear or go asks
+    /// the shader grid to re-read them; one that saw only other tags does not.
+    #[test]
+    fn a_refresh_notices_render_method_changes() {
+        let entry = |group: &[u8; 4], key: &str| TagEntry {
+            key: key.to_owned(),
+            display_path: key.to_owned(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        };
+        let refresh = |touched: Vec<TagEntry>, removed: Vec<&str>| EntryIndexRefresh {
+            entries: Vec::new(),
+            changed: true,
+            added: 0,
+            updated: 0,
+            removed: 0,
+            touched,
+            removed_keys: removed.into_iter().map(str::to_owned).collect(),
+            touched_dependencies: Vec::new(),
+        };
+        assert!(!refresh_touches_render_methods(&refresh(
+            vec![entry(b"hlmt", "file:a.model")],
+            vec!["file:b.weapon"],
+        )));
+        assert!(refresh_touches_render_methods(&refresh(
+            vec![entry(b"rmdf", "file:shaders/shader.render_method_definition")],
+            Vec::new(),
+        )));
+        assert!(refresh_touches_render_methods(&refresh(
+            Vec::new(),
+            vec!["file:shaders/bump.render_method_option"],
+        )));
+    }
 
     #[test]
     fn campaign_evolved_projects_open_on_tags() {

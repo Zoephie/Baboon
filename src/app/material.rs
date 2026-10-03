@@ -16,7 +16,7 @@ thread_local! {
 pub(super) fn draw_material_tag(
     ui: &mut Ui,
     tag: &TagFile,
-    document_revision: (u64, u64, u64),
+    document_revision: (u64, u64, u64, u64),
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
@@ -46,7 +46,7 @@ pub(super) fn draw_material_tag(
                 // every frame.
                 let memo = egui::Id::new(("shader_editor_model", document_revision.0));
                 let cached = ui.ctx().data(|data| {
-                    data.get_temp::<((u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(memo)
+                    data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(memo)
                 });
                 let model = match cached {
                     Some((revision, model)) if revision == document_revision => model,
@@ -842,7 +842,7 @@ mod shader_model_memo_tests {
             .expect("a Halo 3 shader whose grid builds");
 
         let ctx = egui::Context::default();
-        let mut draw = |revision: (u64, u64, u64)| {
+        let mut draw = |revision: (u64, u64, u64, u64)| {
             let _ = ctx.run(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     crate::app::foundation::extracted_tests::tests::with_test_edit_context(
@@ -869,11 +869,11 @@ mod shader_model_memo_tests {
         };
         SHADER_MODELS_BUILT.with(|built| built.set(0));
         for _ in 0..3 {
-            draw((7, 1, 0));
+            draw((7, 1, 0, 0));
         }
         assert_eq!(SHADER_MODELS_BUILT.with(std::cell::Cell::get), 1);
         let memo = ctx.data(|data| {
-            data.get_temp::<((u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::new((
+            data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::new((
                 "shader_editor_model",
                 7u64,
             )))
@@ -882,11 +882,17 @@ mod shader_model_memo_tests {
             memo.is_some_and(|(_, model)| model.is_some()),
             "the grid was drawn"
         );
-        draw((7, 2, 0));
+        draw((7, 2, 0, 0));
         assert_eq!(
             SHADER_MODELS_BUILT.with(std::cell::Cell::get),
             2,
             "an edit rebuilds it"
+        );
+        draw((7, 2, 0, 1));
+        assert_eq!(
+            SHADER_MODELS_BUILT.with(std::cell::Cell::get),
+            3,
+            "and so does a saved definition or option"
         );
     }
 }
