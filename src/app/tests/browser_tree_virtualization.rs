@@ -201,8 +201,9 @@ impl Browser {
         }
     }
 
-    /// Press and release on the first row labelled `label`.
-    fn click_row(&mut self, label: &str) {
+    /// Press and release on the first row labelled `label`. Returns the
+    /// release frame, the one the click lands on.
+    fn click_row(&mut self, label: &str) -> Frame {
         let (_, top) = self
             .last
             .iter()
@@ -222,7 +223,7 @@ impl Browser {
             vec![egui::Event::PointerMoved(pos), button(true)],
             None,
         );
-        self.frame(None, "", vec![button(false)], None);
+        self.frame(None, "", vec![button(false)], None)
     }
 }
 
@@ -326,6 +327,28 @@ fn a_folder_scrolled_away_mid_animation_is_measured_again() {
             &full.scrolled(offset),
             &format!("after the collapse, offset {offset}"),
         );
+    }
+}
+
+/// Clicking a tag must not end the tree's draw early. When the rows after
+/// the clicked one went undrawn for that frame, the content came up short,
+/// the scroll area clamped its offset to fit, and the browser jumped until
+/// the clicked row sat at the bottom of the viewport.
+#[test]
+fn clicking_a_tag_draws_the_rest_of_the_tree() {
+    for skips in [true, false] {
+        let mut browser = Browser::new(skips);
+        browser.scrolled(90_000.0);
+        let before = browser.scrolled(90_000.0);
+        let (label, _) = before.visible[before.visible.len() / 2].clone();
+        assert!(label.starts_with("file:"), "aimed at `{label}`, not a tag");
+        let clicked = browser.click_row(&label);
+        let context = format!("skips {skips}, clicking `{label}`");
+        assert_eq!(
+            clicked.content_height, before.content_height,
+            "{context}: the tree came up short on the click frame"
+        );
+        assert_eq!(clicked.visible, before.visible, "{context}: rows moved");
     }
 }
 

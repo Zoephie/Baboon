@@ -3,34 +3,179 @@
 
 use super::*;
 
+use blam_tags::game::Game;
+use blam_tags::jms_generation::Halo1Permutation;
+
+/// Write `jms` the way `target`'s tools import it.
+///
+/// Halo 2 and later take one file, `<dir>/<file_name>`, at the target's JMS
+/// version. Halo CE takes a permutation from a file's name, so an H2/H3-form
+/// JMS is split into one `<halo1_dir>/<permutation>.jms` per permutation; one
+/// that is already Halo CE's (a collision JMS built from a Halo CE tag) is
+/// written as it is. Whatever the target cannot hold is added to `notes`.
+fn write_jms_for_target(
+    jms: &JmsFile,
+    source: Game,
+    target: Game,
+    dir: &Path,
+    file_name: &str,
+    halo1_dir: &Path,
+    notes: &mut Vec<String>,
+) -> anyhow::Result<Vec<PathBuf>> {
+    if target == Game::Halo1 && source != Game::Halo1 {
+        let (permutations, warnings) = jms.split_for_halo1();
+        notes.extend(warnings);
+        return write_halo1_permutations(&permutations, halo1_dir);
+    }
+    fs::create_dir_all(dir)?;
+    let path = dir.join(file_name);
+    let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
+    jms.write(&mut file, target.jms_version())?;
+    Ok(vec![path])
+}
+
+/// One Halo CE JMS per permutation, named for it, in `dir`.
+fn write_halo1_permutations(
+    permutations: &[Halo1Permutation],
+    dir: &Path,
+) -> anyhow::Result<Vec<PathBuf>> {
+    fs::create_dir_all(dir)?;
+    let mut written = Vec::with_capacity(permutations.len());
+    for permutation in permutations {
+        let path = dir.join(permutation.file_name());
+        let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
+        permutation
+            .jms
+            .write(&mut file, Game::Halo1.jms_version())?;
+        written.push(path);
+    }
+    Ok(written)
+}
+
+/// A render model's geometry for `target`. A Halo CE gbxmodel is read one
+/// permutation at a time — the form Halo CE tool.exe imports — and, for a
+/// later target, merged into one file whose material lines carry each
+/// triangle's permutation and region.
+fn write_render_geometry(
+    tag: &TagFile,
+    target: Game,
+    dir: &Path,
+    stem: &str,
+    halo1_dir: &Path,
+    notes: &mut Vec<String>,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let source = Game::of(tag);
+    if source != Game::Halo1 {
+        let jms = render_jms_for_game(tag)?;
+        return write_jms_for_target(
+            &jms,
+            source,
+            target,
+            dir,
+            &format!("{stem}.render.jms"),
+            halo1_dir,
+            notes,
+        );
+    }
+    let permutations = JmsFile::gbxmodel_permutation_names(tag)
+        .into_iter()
+        .map(|name| {
+            let jms = JmsFile::from_gbxmodel_permutation(tag, Some(&name))?;
+            Ok(Halo1Permutation { name, jms })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    if target == Game::Halo1 {
+        return write_halo1_permutations(&permutations, halo1_dir);
+    }
+    let (jms, warnings) = JmsFile::merge_halo1_permutations(&permutations);
+    notes.extend(warnings);
+    write_jms_for_target(
+        &jms,
+        target,
+        target,
+        dir,
+        &format!("{stem}.render.jms"),
+        halo1_dir,
+        notes,
+    )
+}
+
+/// The ASS version `target` reads, or — Halo CE has no ASS — the source's,
+/// with a note saying so.
+fn ass_version_for(source: Game, target: Game, notes: &mut Vec<String>) -> u32 {
+    match target.ass_version() {
+        Some(version) => version as u32,
+        None => {
+            notes.push(
+                "Halo CE has no ASS format, so ASS geometry keeps this game's version".to_owned(),
+            );
+            source.ass_version().unwrap_or(7) as u32
+        }
+    }
+}
+
+/// `message`, with `notes` after it.
+fn with_notes(mut message: String, notes: &[String]) -> String {
+    if !notes.is_empty() {
+        message.push_str(&format!(" — {}", notes.join("; ")));
+    }
+    message
+}
+
+/// The file paths written, for a status line.
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Extract `entry`'s geometry for `target`'s tools: the JMS and ASS versions
+/// that game imports, and for Halo CE one JMS per permutation (see
+/// [`write_jms_for_target`]). Level and particle geometry keep the source
+/// game's form.
 pub(in crate::app) fn extract_geometry_for_entry(
     source: &TagSource,
     entry: &TagEntry,
     output: &Path,
+    target: Game,
 ) -> anyhow::Result<String> {
     match &entry.group_tag.to_be_bytes() {
-        b"hlmt" => extract_model_geometry(source, entry, output),
-        b"scnr" => extract_scenario_geometry(source, entry, output),
+        b"hlmt" => extract_model_geometry(source, entry, output, target),
+        b"scnr" => extract_scenario_geometry(source, entry, output, target),
         b"sbsp" => {
             let tag = read_entry(source, entry)?;
+            let mut notes = Vec::new();
+            let version = ass_version_for(Game::of(&tag), target, &mut notes);
             let ass = AssFile::from_scenario_structure_bsp(&tag)?;
             fs::create_dir_all(output)?;
             let path = output.join(format!("{}.ASS", tag_file_stem(entry)));
             let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            ass.write(&mut file)?;
-            Ok(format!("Extracted BSP geometry {}", path.display()))
+            ass.write_version(&mut file, version)?;
+            Ok(with_notes(
+                format!("Extracted BSP geometry {}", path.display()),
+                &notes,
+            ))
         }
         b"mode" | b"mod2" => {
             let tag = read_entry(source, entry)?;
-            fs::create_dir_all(output)?;
             let stem = tag_file_stem(entry);
-            let jms = render_jms_for_game(&tag)?;
-            let path = output.join(format!("{stem}.render.jms"));
-            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
-            Ok(format!(
-                "Extracted render_model geometry {}",
-                path.display()
+            let mut notes = Vec::new();
+            let written = write_render_geometry(
+                &tag,
+                target,
+                output,
+                &stem,
+                &output.join("models"),
+                &mut notes,
+            )?;
+            Ok(with_notes(
+                format!(
+                    "Extracted render_model geometry {}",
+                    display_paths(&written)
+                ),
+                &notes,
             ))
         }
         // Neither of these tags stores its own bone transforms, so both need the
@@ -55,18 +200,33 @@ pub(in crate::app) fn extract_geometry_for_entry(
             } else {
                 ("physics_model", "physics")
             };
-            let path = output.join(format!("{stem}.{kind}.jms"));
-            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
-            Ok(format!(
-                "Extracted {group_name} geometry {}{}",
-                path.display(),
-                if skeleton.is_none() {
-                    " (no owning model found, so every bone is at the origin — \
-                     extract the .model that references this tag instead)"
-                } else {
-                    ""
-                }
+            let source_game = Game::of(&tag);
+            let mut notes = Vec::new();
+            if skeleton.is_none() {
+                notes.push(
+                    "no owning model found, so every bone is at the origin — extract the \
+                     .model that references this tag instead"
+                        .to_owned(),
+                );
+            }
+            if !collision && target == Game::Halo1 && source_game != Game::Halo1 {
+                anyhow::bail!("Halo CE has no physics model, so there is nothing to write for it");
+            }
+            let written = write_jms_for_target(
+                &jms,
+                source_game,
+                target,
+                output,
+                &format!("{stem}.{kind}.jms"),
+                &output.join("physics"),
+                &mut notes,
+            )?;
+            Ok(with_notes(
+                format!(
+                    "Extracted {group_name} geometry {}",
+                    display_paths(&written)
+                ),
+                &notes,
             ))
         }
         // A particle_model is the merged geometry of every object in the
@@ -91,13 +251,18 @@ pub(in crate::app) fn extract_geometry_for_entry(
                 .map(|e| e.path.display().to_string())
                 .unwrap_or_default();
             Ok(format!(
-                "Extracted particle geometry {manifest} ({objects} object{}){}",
+                "Extracted particle geometry {manifest} ({objects} object{}){}{}",
                 if objects == 1 { "" } else { "s" },
                 if summary.names_are_authentic {
                     ""
                 } else {
                     " — this engine stores no object names, so they are \
                      numbered from the tag name"
+                },
+                if target == Game::of(&tag) {
+                    ""
+                } else {
+                    " — particle geometry is written in this game's own form"
                 },
             ))
         }
@@ -586,7 +751,9 @@ pub(in crate::app) fn extract_model_geometry(
     source: &TagSource,
     entry: &TagEntry,
     output: &Path,
+    target: Game,
 ) -> anyhow::Result<String> {
+    let mut notes = Vec::new();
     let model = read_entry(source, entry)?;
     let root = model.root();
     let render_ref = tag_ref_path(&root, "render model");
@@ -619,18 +786,20 @@ pub(in crate::app) fn extract_model_geometry(
                     &model, entry, source, skel_ref,
                 ) {
                     Ok(jms) => {
-                        let render_dir = output.join("render");
-                        fs::create_dir_all(&render_dir)?;
-                        let path = render_dir.join(format!("{stem}.render.jms"));
-                        let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
                         // Campaign Evolved runs on the Halo Reach engine, whose
-                        // toolset uses the Halo 3-era JMS format (8213) — N-influence
-                        // vertices with region/permutation encoded in the material
-                        // slot names — not the rigid Halo 1 8200 layout (2-influence
-                        // vertices + a per-triangle region section this path never
-                        // populates, which desyncs the importer).
-                        jms.write(&mut file, 8213)?;
-                        emitted.push(format!("render {}", path.display()));
+                        // toolset uses the Halo 3-era JMS form — N-influence
+                        // vertices with region/permutation in the material slot
+                        // names — so that is what this JMS is built in.
+                        let written = write_jms_for_target(
+                            &jms,
+                            Game::Halo3,
+                            target,
+                            &output.join("render"),
+                            &format!("{stem}.render.jms"),
+                            &output.join("models"),
+                            &mut notes,
+                        )?;
+                        emitted.push(format!("render {}", display_paths(&written)));
                     }
                     Err(error) => skipped.push(format!("render (CE): {error}")),
                 }
@@ -651,10 +820,6 @@ pub(in crate::app) fn extract_model_geometry(
         },
         None => None,
     };
-    let render_jms_version = render_tag
-        .as_ref()
-        .map(|tag| blam_tags::game::Game::of(tag).jms_version())
-        .unwrap_or(8213);
     // Campaign Evolved has no render_model to take a skeleton from, so collision
     // hulls stayed in bone-local space (every limb stacked on the pelvis) and
     // physics shapes hung off bones that were all at the origin. The
@@ -686,19 +851,26 @@ pub(in crate::app) fn extract_model_geometry(
 
     if let Some(tag) = render_tag.as_ref() {
         let render_dir = output.join("render");
-        fs::create_dir_all(&render_dir)?;
-        let game = blam_tags::game::Game::of(tag);
-        if matches!(game, blam_tags::game::Game::Halo3) && render_model_prefers_ass(tag) {
+        let game = Game::of(tag);
+        if matches!(game, Game::Halo3) && render_model_prefers_ass(tag) {
+            let version = ass_version_for(game, target, &mut notes);
             let ass = AssFile::from_render_model(tag)?;
+            fs::create_dir_all(&render_dir)?;
             let path = render_dir.join(format!("{stem}.render.ASS"));
             let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            ass.write(&mut file)?;
+            ass.write_version(&mut file, version)?;
             emitted.push(format!("render {}", path.display()));
         } else if let Some(jms) = render_jms_for_skeleton.as_ref() {
-            let path = render_dir.join(format!("{stem}.render.jms"));
-            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            jms.write(&mut file, render_jms_version)?;
-            emitted.push(format!("render {}", path.display()));
+            let written = write_jms_for_target(
+                jms,
+                game,
+                target,
+                &render_dir,
+                &format!("{stem}.render.jms"),
+                &output.join("models"),
+                &mut notes,
+            )?;
+            emitted.push(format!("render {}", display_paths(&written)));
         }
     }
 
@@ -706,16 +878,20 @@ pub(in crate::app) fn extract_model_geometry(
         Some(reference) => {
             match load_referenced_tag_from_source(source, reference, "collision_model", b"coll") {
                 Ok(tag) => {
-                    let collision_dir = output.join("collision");
-                    fs::create_dir_all(&collision_dir)?;
                     let mut jms = collision_jms_for_game(&tag, skeleton)?;
                     if let Some(skel) = campaign_evolved_skeleton.as_ref() {
                         jms.reorient_for_campaign_evolved(skel);
                     }
-                    let path = collision_dir.join(format!("{stem}.collision.jms"));
-                    let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-                    jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
-                    emitted.push(format!("collision {}", path.display()));
+                    let written = write_jms_for_target(
+                        &jms,
+                        Game::of(&tag),
+                        target,
+                        &output.join("collision"),
+                        &format!("{stem}.collision.jms"),
+                        &output.join("physics"),
+                        &mut notes,
+                    )?;
+                    emitted.push(format!("collision {}", display_paths(&written)));
                 }
                 Err(error) => skipped.push(format!("collision: {error}")),
             }
@@ -726,6 +902,9 @@ pub(in crate::app) fn extract_model_geometry(
     match physics_ref.as_deref() {
         Some(reference) => {
             match load_referenced_tag_from_source(source, reference, "physics_model", b"phmo") {
+                Ok(_) if target == Game::Halo1 => {
+                    skipped.push("physics: Halo CE has no physics model".to_owned());
+                }
                 Ok(tag) => {
                     let physics_dir = output.join("physics");
                     fs::create_dir_all(&physics_dir)?;
@@ -735,7 +914,7 @@ pub(in crate::app) fn extract_model_geometry(
                     }
                     let path = physics_dir.join(format!("{stem}.physics.jms"));
                     let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-                    jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
+                    jms.write(&mut file, target.jms_version())?;
                     emitted.push(format!("physics {}", path.display()));
                 }
                 Err(error) => skipped.push(format!("physics: {error}")),
@@ -758,7 +937,7 @@ pub(in crate::app) fn extract_model_geometry(
     if !skipped.is_empty() {
         message.push_str(&format!("; skipped {}", skipped.join("; ")));
     }
-    Ok(message)
+    Ok(with_notes(message, &notes))
 }
 
 pub(in crate::app) fn load_referenced_tag_from_source(
@@ -901,6 +1080,7 @@ pub(in crate::app) fn extract_animations_for_entry(
     source: &TagSource,
     entry: &TagEntry,
     output: &Path,
+    target: Game,
 ) -> anyhow::Result<String> {
     let tag = read_entry(source, entry)?;
     let resolver = SourceResolver { source };
@@ -913,12 +1093,13 @@ pub(in crate::app) fn extract_animations_for_entry(
     let owner = animation_graph_owner(source, entry, &tag);
     let input = owner.as_ref().unwrap_or(&tag);
     let summary =
-        blam_tags::extract::animation::animations_to_dir(input, &resolver, output, &stem)?;
+        blam_tags::extract::animation::animations_to_dir(input, &resolver, output, &stem, target)?;
     let mut message = format!(
-        "Extracted {} animation(s) from {} into {}",
+        "Extracted {} animation(s) from {} into {} (JMA {})",
         summary.written,
         entry.display_path,
         output.display(),
+        target.jma_version(),
     );
     if summary.skipped > 0 {
         message.push_str(&format!(" ({} skipped)", summary.skipped));
@@ -933,6 +1114,7 @@ pub(in crate::app) fn extract_scenario_geometry(
     source: &TagSource,
     entry: &TagEntry,
     output: &Path,
+    target: Game,
 ) -> anyhow::Result<String> {
     let tag = read_entry(source, entry)?;
     let resolver = SourceResolver { source };
@@ -947,6 +1129,9 @@ pub(in crate::app) fn extract_scenario_geometry(
     );
     if !summary.warnings.is_empty() {
         message.push_str(&format!(" ({} warning(s))", summary.warnings.len()));
+    }
+    if target != Game::of(&tag) {
+        message.push_str(" — level geometry is written in this game's own form");
     }
     Ok(message)
 }
@@ -1257,8 +1442,8 @@ mod tests {
             // Geometry menu actually calls.
             let out = std::env::temp_dir().join("baboon_standalone_geometry_test");
             let _ = std::fs::remove_dir_all(&out);
-            let message =
-                extract_geometry_for_entry(&source, &entry, &out).expect("extract geometry");
+            let message = extract_geometry_for_entry(&source, &entry, &out, Game::Halo3)
+                .expect("extract geometry");
             println!("{message}");
             assert!(
                 !message.contains("no owning model"),
@@ -1411,7 +1596,8 @@ mod tests {
         let bsp = find("c10/_generated_/level_a", b"sbsp")
             .or_else(|| find("level_a", b"sbsp"))
             .expect("no c10 level_a scenario_structure_bsp mounted");
-        let msg = extract_geometry_for_entry(&loaded.source, &bsp, &out).expect("export BSP");
+        let msg = extract_geometry_for_entry(&loaded.source, &bsp, &out, Game::Halo3)
+            .expect("export BSP");
         println!("{msg}");
         let ass = out.join(format!("{}.ASS", tag_file_stem(&bsp)));
         let len = std::fs::metadata(&ass).expect("BSP ASS written").len();
@@ -1424,7 +1610,8 @@ mod tests {
 
         // Scenario → one file per referenced BSP.
         let scnr = find("c10", b"scnr").expect("no c10 scenario mounted");
-        let msg = extract_scenario_geometry(&loaded.source, &scnr, &out).expect("export scenario");
+        let msg = extract_scenario_geometry(&loaded.source, &scnr, &out, Game::Halo3)
+            .expect("export scenario");
         println!("{msg}");
         let structure = out.join(tag_file_stem(&scnr)).join("structure");
         let emitted: Vec<_> = std::fs::read_dir(&structure)
@@ -1450,6 +1637,9 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+#[path = "../tests/extract_targets.rs"]
+mod extract_targets;
 #[cfg(test)]
 #[path = "../tests/particle_model_extract_menu.rs"]
 mod particle_model_extract_menu;

@@ -84,7 +84,7 @@ pub(in crate::app) fn paint_bitmap_hover_preview(
     texture: &egui::TextureHandle,
     text: &str,
 ) {
-    if !response.hovered() || response.dragged() {
+    if !response.hovered() || response.dragged() || !hover_popup_due(ui) {
         return;
     }
     let Some(pointer) = ui.ctx().pointer_latest_pos() else {
