@@ -13,6 +13,7 @@ mod delete_confirm;
 mod exported_mod;
 mod import_tag;
 mod keyword_chooser;
+mod loose_folder_rename;
 mod mod_export;
 mod new_tag;
 mod operation_notice;

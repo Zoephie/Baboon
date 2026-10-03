@@ -1421,6 +1421,17 @@ impl Baboon {
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);
         self.handle_app_close_request(ctx);
+        // A folder move or rename is rewriting tags on disk. Nothing may edit,
+        // save or open them until it lands, so no shortcut or dropped file is
+        // taken, and no text field keeps the keyboard.
+        if self.folder_refactor.is_some() {
+            ctx.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
+            return;
+        }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
             self.find.open = true;
             self.find.focus_query = true;
@@ -1496,7 +1507,52 @@ impl Baboon {
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);
+        self.draw_loose_folder_rename_window(ctx);
+        self.draw_folder_refactor_lock(ctx);
         end_wheel_gesture(ctx);
+    }
+
+    /// While a folder move or rename runs, cover the whole window with a layer
+    /// that takes every click, drag and scroll, and show its progress on it.
+    ///
+    /// The job rewrites tags on disk from a snapshot taken when it started; an
+    /// edit, save or second refactor in the meantime would be overwritten or
+    /// would race it. Drawn last and in the foreground so no window or panel
+    /// sits above it.
+    fn draw_folder_refactor_lock(&mut self, ctx: &egui::Context) {
+        let Some(progress) = &self.folder_refactor else {
+            return;
+        };
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("folder_refactor_lock"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+                ui.painter()
+                    .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+                let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(panel), |ui| {
+                    Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_width(panel.width());
+                        ui.label(RichText::new(&progress.label).strong().color(text_dark()));
+                        ui.add_space(4.0);
+                        let bar = match progress.progress {
+                            Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
+                            None => egui::ProgressBar::new(0.0).animate(true),
+                        };
+                        ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Baboon is locked until references are updated.")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    });
+                });
+            });
+        ctx.request_repaint_after(PROGRESS_REPAINT);
     }
 }
 
@@ -1710,3 +1766,7 @@ mod terminal_output_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/folder_refactor_lock.rs"]
+mod folder_refactor_lock_tests;

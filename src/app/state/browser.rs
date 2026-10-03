@@ -23,6 +23,12 @@ pub(in crate::app) enum BrowserAction {
         rel_path: PathBuf,
         label: String,
     },
+    /// Rename this loose folder in place and rewrite every reference to the
+    /// tags beneath it.
+    RenameLooseFolder {
+        rel_path: PathBuf,
+        label: String,
+    },
     MoveLooseFolder {
         rel_path: PathBuf,
         label: String,
@@ -187,6 +193,32 @@ pub(in crate::app) struct ContainerFolderDialog {
     pub(in crate::app) focus_input: bool,
     /// Validation failure from the last apply, shown beside the field.
     pub(in crate::app) error: Option<String>,
+}
+
+/// The Rename Folder dialog for a loose tags folder.
+///
+/// What it will change is counted when the dialog opens, so the user confirms
+/// against numbers rather than a promise. The apply is the folder move job with
+/// the folder's own parent as the destination and the new name as its leaf.
+pub(in crate::app) struct LooseFolderRenameState {
+    /// Workspace this was raised from; resolved again on apply.
+    pub(in crate::app) kit: KitId,
+    /// The folder, relative to the tags root.
+    pub(in crate::app) rel_path: PathBuf,
+    /// Its parent, forward slashes, empty for the root. Shown read-only.
+    pub(in crate::app) parent_display: String,
+    /// Its current name.
+    pub(in crate::app) old_name: String,
+    pub(in crate::app) name_input: String,
+    pub(in crate::app) focus_input: bool,
+    /// Validation failure from the last apply, shown beside the field.
+    pub(in crate::app) error: Option<String>,
+    /// Tags beneath the folder, nested folders included. Each one's path changes.
+    pub(in crate::app) tag_count: usize,
+    /// Tags outside the folder that reference one inside it, as display paths.
+    /// `None` when no dependency index is loaded: the job still finds and
+    /// rewrites them, it just cannot be counted up front.
+    pub(in crate::app) outside_referrers: Option<Vec<String>>,
 }
 
 /// The name dialog's product-level operation. Storage details such as whether

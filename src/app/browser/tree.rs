@@ -1978,6 +1978,16 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     rel_path: &Path,
     label: &str,
 ) -> Option<BrowserAction> {
+    if context_menu_button(ui, "Rename...")
+        .on_hover_text("Rename this folder and update every reference to the tags inside it")
+        .clicked()
+    {
+        ui.close_menu();
+        return Some(BrowserAction::RenameLooseFolder {
+            rel_path: rel_path.to_path_buf(),
+            label: label.to_owned(),
+        });
+    }
     if context_menu_button(ui, "Move to...").clicked() {
         ui.close_menu();
         return Some(BrowserAction::MoveLooseFolder {
