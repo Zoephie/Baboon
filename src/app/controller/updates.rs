@@ -85,9 +85,6 @@ fn fetch_latest_release_powershell(
     channel: UpdateChannel,
     api_url: &str,
 ) -> Result<UpdateCheckResult, String> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let script = format!(
         "$ErrorActionPreference = 'Stop'; \
          $headers = @{{ 'User-Agent' = 'Baboon' }}; \
@@ -109,8 +106,7 @@ fn fetch_latest_release_powershell(
              exit 1; \
          }}"
     );
-    let output = Command::new("powershell.exe")
-        .creation_flags(CREATE_NO_WINDOW)
+    let output = background_command("powershell.exe")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",

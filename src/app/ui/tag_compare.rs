@@ -4,7 +4,6 @@ use super::*;
 use egui_extras::{Column, TableBuilder};
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// `text`, cut from the start with an ellipsis until `measure` says it fits.
 pub(super) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
@@ -98,7 +97,7 @@ fn matching_tag_path(current_key: &str, current_root: &Path, other_root: &Path) 
 }
 
 fn git_relative_tag_path(kit_root: &Path, tag_path: &Path) -> Result<String, String> {
-    let root_output = Command::new("git")
+    let root_output = background_command("git")
         .arg("-C")
         .arg(kit_root)
         .args(["rev-parse", "--show-toplevel"])
@@ -138,7 +137,7 @@ fn git_tag_bytes(kit_root: &Path, tag_path: &Path, revision: &str) -> Result<Vec
         return Err("Invalid Git commit selection.".to_owned());
     }
     let relative = git_relative_tag_path(kit_root, tag_path)?;
-    let output = Command::new("git")
+    let output = background_command("git")
         .arg("-C")
         .arg(kit_root)
         .arg("show")
@@ -155,7 +154,7 @@ fn git_tag_bytes(kit_root: &Path, tag_path: &Path, revision: &str) -> Result<Vec
 }
 
 fn git_commit_parent(kit_root: &Path, revision: &str) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let output = background_command("git")
         .arg("-C")
         .arg(kit_root)
         .args(["rev-list", "--parents", "-n", "1", revision])
@@ -180,7 +179,7 @@ fn git_tag_bytes_if_present(
 ) -> Result<Option<Vec<u8>>, String> {
     let relative = git_relative_tag_path(kit_root, tag_path)?;
     let object = format!("{revision}:{relative}");
-    let exists = Command::new("git")
+    let exists = background_command("git")
         .arg("-C")
         .arg(kit_root)
         .args(["cat-file", "-e", &object])
@@ -200,7 +199,7 @@ fn git_tag_history(
     skip: usize,
 ) -> Result<(Vec<GitHistoryCommit>, bool), String> {
     let relative = git_relative_tag_path(kit_root, tag_path)?;
-    let output = Command::new("git")
+    let output = background_command("git")
         .arg("-C")
         .arg(kit_root)
         .arg("log")

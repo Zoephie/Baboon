@@ -897,6 +897,26 @@ fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
 }
 
+/// A command for a helper program Baboon runs out of sight: `git`,
+/// `taskkill`, PowerShell, `cmd`.
+///
+/// On Windows it starts with `CREATE_NO_WINDOW`. A release build is a
+/// GUI-subsystem program with no console of its own, so Windows gives every
+/// console program it starts a new console window, which flashes up over
+/// Baboon. Elsewhere this is `Command::new` exactly.
+pub(crate) fn background_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        /// `CREATE_NO_WINDOW` from the Windows process creation flags.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
     let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
     let rgba = image.to_rgba8();
@@ -932,6 +952,37 @@ mod tests {
 
     #[path = "classic_h2.rs"]
     mod classic_h2;
+
+    /// Helper programs Baboon runs out of sight must go through
+    /// `background_command`, or a release build (a GUI-subsystem program)
+    /// flashes a console window for each one on Windows. `git` and `taskkill`
+    /// were launched with a bare `Command::new`. The flag cannot be observed
+    /// off Windows, so this checks the launches themselves.
+    #[test]
+    fn helper_programs_launch_through_background_command() {
+        let files = [
+            ("git_review.rs", include_str!("app/git_review.rs")),
+            ("ui/tag_compare.rs", include_str!("app/ui/tag_compare.rs")),
+            ("controller/terminal.rs", include_str!("app/controller/terminal.rs")),
+            ("controller/updates.rs", include_str!("app/controller/updates.rs")),
+        ];
+        let mut bare = Vec::new();
+        let mut routed = 0;
+        for (file, text) in files {
+            // Test code launches git to build fixtures; only what ships counts.
+            let shipped = text.split("#[cfg(test)]").next().unwrap_or(text);
+            for program in ["git", "taskkill", "powershell.exe", "cmd"] {
+                for call in ["Command::new", "process::Command::new"] {
+                    if shipped.contains(&format!("{call}(\"{program}\")")) {
+                        bare.push(format!("{file}: {program}"));
+                    }
+                }
+                routed += shipped.matches(&format!("background_command(\"{program}\")")).count();
+            }
+        }
+        assert!(bare.is_empty(), "launched without CREATE_NO_WINDOW: {bare:?}");
+        assert!(routed >= 10, "only {routed} launches found; the scan is not looking");
+    }
 
     #[test]
     fn strip_node_indices_drops_element_subscripts() {

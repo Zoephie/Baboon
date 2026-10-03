@@ -81,7 +81,7 @@ pub(in crate::app) struct GitReviewState {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
+    let output = background_command("git")
         .arg("-C")
         .arg(root)
         .args(args)
@@ -381,7 +381,7 @@ impl GitReviewView {
         let game = kit.game.as_deref();
         let load_revision = |revision: &str| -> Result<Option<TagFile>, String> {
             let object = format!("{revision}:{path}");
-            let exists = Command::new("git")
+            let exists = background_command("git")
                 .arg("-C")
                 .arg(repo)
                 .args(["cat-file", "-e", &object])

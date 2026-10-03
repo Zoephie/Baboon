@@ -70,7 +70,7 @@ fn stop_terminal_process_windows(process: &TerminalProcess) -> Result<TerminalSt
             None => child.id(),
         }
     };
-    let output = Command::new("taskkill")
+    let output = background_command("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .output()
         .map_err(|error| format!("could not launch taskkill: {error}"))?;
@@ -170,9 +170,7 @@ fn windows_shell_command_line(command: &str) -> String {
 #[cfg(target_os = "windows")]
 pub(super) fn windows_shell_command(command: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut c = std::process::Command::new("cmd");
-    c.creation_flags(CREATE_NO_WINDOW);
+    let mut c = background_command("cmd");
     c.raw_arg(windows_shell_command_line(command));
     c
 }
@@ -408,7 +406,7 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
 pub(in crate::app) fn open_terminal_log(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = std::process::Command::new("cmd");
+        let mut command = background_command("cmd");
         command.arg("/C").arg("start").arg("").arg(path);
         command
     };
