@@ -29,6 +29,9 @@ use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 
 use super::kit::KitId;
 
+mod waveform;
+pub(super) use waveform::{Waveform, channel_labels};
+
 use super::sound_extract::{ExtractRequest, ExtractSource, write_wav_pcm16};
 
 /// Decode a tag-inline classic stream (CE/H2) to interleaved PCM. Shared by the
@@ -228,7 +231,7 @@ impl<'a> SoundRequests<'a> {
 }
 
 /// What the player shows of the sound its tab owns.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub(in crate::app) struct PlaybackView {
     pub(in crate::app) label: String,
     /// The clip it was played as, if the player named one.
@@ -237,6 +240,22 @@ pub(in crate::app) struct PlaybackView {
     pub(in crate::app) duration: f64,
     pub(in crate::app) playing: bool,
     pub(in crate::app) looping: bool,
+    /// The sound as decoded — every channel, before any fold to stereo — and
+    /// its summaries, for the waveform.
+    pub(in crate::app) waveform: Arc<Waveform>,
+}
+
+impl std::fmt::Debug for PlaybackView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlaybackView")
+            .field("label", &self.label)
+            .field("clip", &self.clip)
+            .field("position", &self.position)
+            .field("duration", &self.duration)
+            .field("playing", &self.playing)
+            .field("looping", &self.looping)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Linear playback volume (amplitude multiplier). Wrapped so [`AudioState`] can
@@ -347,6 +366,8 @@ struct Voice {
     owner: Option<SoundOwner>,
     clip: Option<String>,
     label: String,
+    /// The sound as decoded, with its summaries.
+    waveform: Arc<Waveform>,
     /// The audio as played: at most stereo, so the output device takes it.
     pcm: Arc<DecodedPcm>,
     shared: Arc<PlaybackShared>,
@@ -355,26 +376,28 @@ struct Voice {
 
 impl Voice {
     fn new(
-        pcm: Arc<DecodedPcm>,
+        waveform: Arc<Waveform>,
         label: String,
         owner: Option<SoundOwner>,
         clip: Option<String>,
         looping: bool,
     ) -> Self {
         // Fold >2 channels down to stereo for the output device.
-        let pcm = if pcm.channels > 2 {
+        let decoded = waveform.pcm();
+        let pcm = if decoded.channels > 2 {
             Arc::new(DecodedPcm {
-                samples: downmix_to_stereo(&pcm.samples, pcm.channels as usize),
+                samples: downmix_to_stereo(&decoded.samples, decoded.channels as usize),
                 channels: 2,
-                sample_rate: pcm.sample_rate,
+                sample_rate: decoded.sample_rate,
             })
         } else {
-            pcm
+            decoded.clone()
         };
         Self {
             owner,
             clip,
             label,
+            waveform,
             pcm,
             shared: Arc::new(PlaybackShared {
                 frame: AtomicU64::new(0),
@@ -464,6 +487,7 @@ impl Voice {
             duration: self.frames() as f64 / rate,
             playing: self.is_playing(),
             looping: self.shared.looping.load(Ordering::Relaxed),
+            waveform: self.waveform.clone(),
         }
     }
 }
@@ -550,7 +574,7 @@ pub(super) struct AudioState {
 /// Decoded audio kept for replay, bounded by size. Once over the budget the
 /// least recently played entries go first.
 struct PcmCache<K> {
-    map: HashMap<K, Arc<DecodedPcm>>,
+    map: HashMap<K, Arc<Waveform>>,
     order: VecDeque<K>,
     bytes: usize,
     budget: usize,
@@ -570,12 +594,8 @@ impl<K> Default for PcmCache<K> {
     }
 }
 
-fn pcm_bytes(pcm: &DecodedPcm) -> usize {
-    pcm.samples.len() * std::mem::size_of::<i16>()
-}
-
 impl<K: Hash + Eq + Clone> PcmCache<K> {
-    fn get(&mut self, key: &K) -> Option<Arc<DecodedPcm>> {
+    fn get(&mut self, key: &K) -> Option<Arc<Waveform>> {
         let pcm = self.map.get(key)?.clone();
         if let Some(position) = self.order.iter().position(|entry| entry == key)
             && let Some(entry) = self.order.remove(position)
@@ -585,12 +605,12 @@ impl<K: Hash + Eq + Clone> PcmCache<K> {
         Some(pcm)
     }
 
-    fn insert(&mut self, key: K, pcm: Arc<DecodedPcm>) {
-        if let Some(old) = self.map.insert(key.clone(), pcm.clone()) {
-            self.bytes -= pcm_bytes(&old);
+    fn insert(&mut self, key: K, waveform: Arc<Waveform>) {
+        if let Some(old) = self.map.insert(key.clone(), waveform.clone()) {
+            self.bytes -= old.bytes();
             self.order.retain(|entry| entry != &key);
         }
-        self.bytes += pcm_bytes(&pcm);
+        self.bytes += waveform.bytes();
         self.order.push_back(key);
         // The newest entry stays even when it alone is over budget: it is
         // the one about to be replayed.
@@ -598,7 +618,7 @@ impl<K: Hash + Eq + Clone> PcmCache<K> {
             if let Some(evicted) = self.order.pop_front()
                 && let Some(old) = self.map.remove(&evicted)
             {
-                self.bytes -= pcm_bytes(&old);
+                self.bytes -= old.bytes();
             }
         }
     }
@@ -632,7 +652,7 @@ enum AudioDone {
         label: String,
         owner: Option<SoundOwner>,
         clip: Option<String>,
-        result: Result<Arc<DecodedPcm>, String>,
+        result: Result<Arc<Waveform>, String>,
     },
     Extracted(String),
 }
@@ -876,7 +896,8 @@ impl AudioState {
         self.spawn_job(ctx, move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(decode))
                 .unwrap_or_else(|panic| Err(super::state::panic_text(&panic)))
-                .map(Arc::new);
+                // Summarised here, off the UI thread, and cached with the audio.
+                .map(|pcm| Arc::new(Waveform::new(Arc::new(pcm))));
             AudioDone::Decoded {
                 request,
                 cache,
@@ -1347,12 +1368,12 @@ impl AudioState {
     /// last, whichever tab it was — and play it.
     fn play_decoded(
         &mut self,
-        pcm: Arc<DecodedPcm>,
+        waveform: Arc<Waveform>,
         label: &str,
         owner: Option<SoundOwner>,
         clip: Option<String>,
     ) {
-        let secs = pcm.duration_secs();
+        let secs = waveform.duration_secs();
         self.voice = None;
         self.decode_owner = None;
         let volume = self.volume.0;
@@ -1361,7 +1382,7 @@ impl AudioState {
             return;
         }
         let engine = self.engine.as_ref().expect("ensured");
-        let mut voice = Voice::new(pcm, label.to_owned(), owner, clip, self.looping);
+        let mut voice = Voice::new(waveform, label.to_owned(), owner, clip, self.looping);
         voice.play(engine, volume);
         self.voice = Some(voice);
         self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
@@ -1376,12 +1397,12 @@ mod tests {
         actions.into_iter().map(SoundRequest::from).collect()
     }
 
-    fn pcm(samples: usize) -> Arc<DecodedPcm> {
-        Arc::new(DecodedPcm {
+    fn pcm(samples: usize) -> Arc<Waveform> {
+        Arc::new(Waveform::new(Arc::new(DecodedPcm {
             samples: vec![0; samples],
             channels: 1,
             sample_rate: 48_000,
-        })
+        })))
     }
 
     /// Every audition used to stay decoded for the rest of the session.
@@ -1391,13 +1412,15 @@ mod tests {
             budget: 250,
             ..Default::default()
         };
-        cache.insert(1, pcm(50)); // 100 bytes each
+        let each = pcm(50).bytes(); // 100 bytes of samples and a summary
+        cache.budget = each * 2 + each / 2;
+        cache.insert(1, pcm(50));
         cache.insert(2, pcm(50));
         assert!(cache.get(&1).is_some(), "replaying 1 makes 2 the oldest");
         cache.insert(3, pcm(50));
         assert!(cache.get(&2).is_none(), "over budget: 2 went");
         assert!(cache.get(&1).is_some() && cache.get(&3).is_some());
-        assert_eq!(cache.bytes, 200);
+        assert_eq!(cache.bytes, each * 2);
     }
 
     fn decoded(request: u64, cache: Option<PcmKey>) -> AudioDone {
@@ -1647,6 +1670,10 @@ mod tests {
         })
     }
 
+    fn wave(frames: i16) -> Arc<Waveform> {
+        Arc::new(Waveform::new(numbered(frames)))
+    }
+
     fn pcm_source(pcm: &Arc<DecodedPcm>, looping: bool) -> (PcmSource, Arc<PlaybackShared>) {
         let shared = Arc::new(PlaybackShared {
             frame: AtomicU64::new(0),
@@ -1695,7 +1722,7 @@ mod tests {
     /// player can move and read.
     #[test]
     fn a_stopped_voice_keeps_a_playhead_the_player_can_move() {
-        let voice = Voice::new(numbered(1000), "x".to_owned(), None, None, false);
+        let voice = Voice::new(wave(1000), "x".to_owned(), None, None, false);
         voice.seek(250);
         let view = voice.view();
         assert_eq!(view.position, 0.25);
@@ -1716,7 +1743,7 @@ mod tests {
         let a = owner(1, "file:a.sound");
         let mut audio = AudioState {
             voice: Some(Voice::new(
-                numbered(10),
+                wave(10),
                 "a".to_owned(),
                 Some(a.clone()),
                 None,
@@ -1753,7 +1780,7 @@ mod tests {
         let b = owner(1, "file:b.sound");
         let mut audio = AudioState {
             voice: Some(Voice::new(
-                numbered(1000),
+                wave(1000),
                 "a".to_owned(),
                 Some(a.clone()),
                 None,
@@ -1792,7 +1819,7 @@ mod tests {
             return;
         }
         audio.volume = Volume(0.0);
-        audio.play_decoded(numbered(30_000), "a", Some(a.clone()), None);
+        audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
         assert!(audio.playback(Some(&a)).unwrap().playing);
 
         audio.follow_tabs(Some(&a), |_| true);

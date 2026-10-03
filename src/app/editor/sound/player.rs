@@ -21,8 +21,18 @@ pub(super) struct PlayerClip {
 
 /// Height of the time ruler above the timeline's track.
 const RULER_HEIGHT: f32 = 14.0;
-/// Height of the track, where phase 3's waveform lanes go.
-const TRACK_HEIGHT: f32 = 26.0;
+/// Height of the track for mono and stereo, and before a clip is loaded.
+const TRACK_HEIGHT: f32 = 64.0;
+/// Height of each lane past two channels.
+const SURROUND_LANE_HEIGHT: f32 = 16.0;
+
+/// The track's height for a sound of `channels` channels.
+fn track_height(channels: Option<u16>) -> f32 {
+    match channels {
+        Some(channels) if channels > 2 => SURROUND_LANE_HEIGHT * f32::from(channels),
+        _ => TRACK_HEIGHT,
+    }
+}
 
 /// Draw the player over `clips` and return the index of the selected one.
 ///
@@ -258,7 +268,11 @@ fn draw_timeline(
         .or(clips[selected].duration)
         .unwrap_or(0.0);
     let position = loaded.map_or(0.0, |playback| playback.position);
-    let size = Vec2::new(ui.available_width().max(120.0), RULER_HEIGHT + TRACK_HEIGHT);
+    let waveform = loaded.map(|playback| &playback.waveform);
+    let size = Vec2::new(
+        ui.available_width().max(120.0),
+        RULER_HEIGHT + track_height(waveform.map(|waveform| waveform.channels())),
+    );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let track =
@@ -302,14 +316,19 @@ fn draw_timeline(
         }
     }
 
-    // Played part, then the playhead.
+    // The waveform, then the playhead over it.
     let head = x_of(position);
-    if loaded.is_some() && head > track.left() {
-        painter.rect_filled(
-            egui::Rect::from_min_max(track.min, egui::pos2(head, track.bottom())),
-            3.0,
-            foundation_blue().gamma_multiply(0.35),
-        );
+    match waveform {
+        Some(waveform) => draw_lanes(ui, &painter, track, waveform, head),
+        None => {
+            painter.text(
+                track.center(),
+                egui::Align2::CENTER_CENTER,
+                "Play to see the waveform",
+                egui::FontId::proportional(11.0),
+                subtle_dark(),
+            );
+        }
     }
     let head_color = foundation_jump_cyan();
     painter.line_segment(
@@ -365,6 +384,102 @@ fn draw_timeline(
     } else {
         "Click to play"
     });
+}
+
+/// One lane per channel across `track`: for each physical pixel column, a
+/// bar from the column's lowest to highest sample and a brighter core of its
+/// RMS, played columns (left of `head`) in the accent and the rest muted.
+fn draw_lanes(
+    ui: &Ui,
+    painter: &egui::Painter,
+    track: egui::Rect,
+    waveform: &crate::app::audio::Waveform,
+    head: f32,
+) {
+    let channels = waveform.channels().max(1);
+    let lane_height = track.height() / f32::from(channels);
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let columns = (track.width() * pixels_per_point).floor().max(1.0) as usize;
+    let column_width = track.width() / columns as f32;
+    let frames = waveform.frames();
+    let frames_per_column = frames as f64 / columns as f64;
+    let labels = crate::app::audio::channel_labels(channels);
+    let played = foundation_blue();
+    let unplayed = subtle_dark().gamma_multiply(0.55);
+    let mut mesh = egui::Mesh::default();
+    for channel in 0..channels as usize {
+        let lane = egui::Rect::from_min_size(
+            egui::pos2(track.left(), track.top() + lane_height * channel as f32),
+            Vec2::new(track.width(), lane_height),
+        );
+        let middle = lane.center().y;
+        let half = lane_height * 0.45;
+        painter.line_segment(
+            [
+                egui::pos2(lane.left(), middle),
+                egui::pos2(lane.right(), middle),
+            ],
+            egui::Stroke::new(1.0, grid_line().gamma_multiply(0.6)),
+        );
+        if channel > 0 {
+            painter.line_segment(
+                [
+                    egui::pos2(lane.left(), lane.top()),
+                    egui::pos2(lane.right(), lane.top()),
+                ],
+                egui::Stroke::new(1.0, grid_line()),
+            );
+        }
+        for column in 0..columns {
+            let start = (column as f64 * frames_per_column) as u64;
+            let end = (((column + 1) as f64 * frames_per_column) as u64).max(start + 1);
+            let Some(peak) = waveform.peak(channel, start, end) else {
+                break;
+            };
+            let left = track.left() + column as f32 * column_width;
+            let y = |sample: f32| middle - sample / 32768.0 * half;
+            let color = if left < head { played } else { unplayed };
+            mesh.add_colored_rect(
+                egui::Rect::from_min_max(
+                    egui::pos2(left, y(f32::from(peak.max))),
+                    egui::pos2(
+                        left + column_width,
+                        y(f32::from(peak.min)).max(y(f32::from(peak.max)) + 1.0 / pixels_per_point),
+                    ),
+                ),
+                color.gamma_multiply(0.55),
+            );
+            let rms = peak.rms() * 32768.0;
+            if rms > 0.0 {
+                mesh.add_colored_rect(
+                    egui::Rect::from_min_max(
+                        egui::pos2(left, y(rms.min(f32::from(peak.max).max(0.0)))),
+                        egui::pos2(
+                            left + column_width,
+                            y(-rms.min(-f32::from(peak.min).max(0.0))),
+                        ),
+                    ),
+                    color,
+                );
+            }
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    // Labels last, over the waveform.
+    if channels > 1 {
+        for (channel, label) in labels.iter().enumerate() {
+            painter.text(
+                egui::pos2(
+                    track.left() + 4.0,
+                    track.top() + lane_height * channel as f32 + 1.0,
+                ),
+                egui::Align2::LEFT_TOP,
+                label,
+                egui::FontId::proportional(9.0),
+                subtle_dark(),
+            );
+        }
+    }
 }
 
 /// The ruler's tick spacing: the smallest of a set of round steps that
@@ -429,6 +544,8 @@ mod tests {
         queued: VecDeque<SoundRequest>,
         /// Painted text and where, from the last frame.
         texts: Vec<(String, egui::Rect)>,
+        /// The waveform's bars from the last frame: each rect and its colour.
+        bars: Vec<(egui::Rect, egui::Color32)>,
         timeline: egui::Rect,
     }
 
@@ -440,6 +557,7 @@ mod tests {
                 focused: true,
                 queued: VecDeque::new(),
                 texts: Vec::new(),
+                bars: Vec::new(),
                 timeline: egui::Rect::NOTHING,
             }
         }
@@ -479,6 +597,26 @@ mod tests {
                     });
                 },
             );
+            self.bars = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Mesh(mesh) => Some(mesh),
+                    _ => None,
+                })
+                .flat_map(|mesh| {
+                    // `add_colored_rect` adds four vertices per rect.
+                    mesh.vertices
+                        .chunks(4)
+                        .map(|quad| {
+                            let rect = egui::Rect::from_points(
+                                &quad.iter().map(|v| v.pos).collect::<Vec<_>>(),
+                            );
+                            (rect, quad[0].color)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
             self.texts = output
                 .shapes
                 .iter()
@@ -562,6 +700,25 @@ mod tests {
         }
     }
 
+    /// `channels` channels of `frames` frames at 1 kHz, channel `c` holding
+    /// `sample(c, frame)`.
+    fn sound(channels: u16, frames: usize, sample: impl Fn(usize, usize) -> i16) -> PlaybackView {
+        PlaybackView {
+            duration: frames as f64 / 1000.0,
+            waveform: std::sync::Arc::new(crate::app::audio::Waveform::new(std::sync::Arc::new(
+                blam_tags::audio::DecodedPcm {
+                    samples: (0..frames)
+                        .flat_map(|f| (0..channels as usize).map(move |c| (f, c)))
+                        .map(|(f, c)| sample(c, f))
+                        .collect(),
+                    channels,
+                    sample_rate: 1000,
+                },
+            ))),
+            ..loaded("id-a", false)
+        }
+    }
+
     fn loaded(clip: &str, playing: bool) -> PlaybackView {
         PlaybackView {
             label: clip.to_owned(),
@@ -570,6 +727,13 @@ mod tests {
             duration: 2.0,
             playing,
             looping: false,
+            waveform: std::sync::Arc::new(crate::app::audio::Waveform::new(std::sync::Arc::new(
+                blam_tags::audio::DecodedPcm {
+                    samples: vec![0; 2 * 1000],
+                    channels: 2,
+                    sample_rate: 1000,
+                },
+            ))),
         }
     }
 
@@ -668,5 +832,117 @@ mod tests {
         h.focused = true;
         h.key(egui::Key::Enter);
         assert_eq!(h.take(), [(None, "stop".to_owned())]);
+    }
+
+    fn lane_labels(h: &Harness) -> Vec<String> {
+        let mut labels: Vec<(f32, String)> = h
+            .texts
+            .iter()
+            .filter(|(text, _)| ["M", "L", "R", "C", "LFE", "Ls", "Rs"].contains(&text.as_str()))
+            .map(|(text, rect)| (rect.top(), text.clone()))
+            .collect();
+        labels.sort_by(|a, b| a.0.total_cmp(&b.0));
+        labels.into_iter().map(|(_, text)| text).collect()
+    }
+
+    /// One lane per channel, labelled in WAVE order; mono is one unlabelled
+    /// lane, and 5.1 gets six shorter ones.
+    #[test]
+    fn the_track_has_a_lane_per_channel() {
+        for (channels, labels) in [
+            (1, vec![]),
+            (2, vec!["L", "R"]),
+            (6, vec!["L", "R", "C", "LFE", "Ls", "Rs"]),
+        ] {
+            let mut h = Harness::new();
+            h.playback = Some(sound(channels, 2000, |_, _| 8000));
+            h.frame(Vec::new());
+            h.frame(Vec::new());
+            assert_eq!(lane_labels(&h), labels, "{channels} channel(s)");
+            let tallest = h
+                .bars
+                .iter()
+                .map(|(rect, _)| rect.bottom())
+                .fold(0.0, f32::max);
+            let shortest = h
+                .bars
+                .iter()
+                .map(|(rect, _)| rect.top())
+                .fold(f32::MAX, f32::min);
+            let expected = if channels > 2 {
+                16.0 * f32::from(channels)
+            } else {
+                64.0
+            };
+            assert!(
+                tallest - shortest <= expected,
+                "{channels}: bars span {}",
+                tallest - shortest
+            );
+        }
+    }
+
+    /// Each lane draws its own channel: silence stays flat while a full-scale
+    /// channel fills its lane, and the bars left of the playhead are drawn
+    /// played.
+    #[test]
+    fn each_lane_draws_its_channel_and_the_played_part() {
+        let mut h = Harness::new();
+        // Left silent, right a full-scale square wave.
+        let mut view = sound(2, 2000, |c, f| {
+            if c == 0 {
+                0
+            } else if f % 2 == 0 {
+                30000
+            } else {
+                -30000
+            }
+        });
+        view.position = 1.0; // halfway through the 2 s
+        h.playback = Some(view);
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        assert!(!h.bars.is_empty(), "no waveform drawn");
+        let labels: Vec<&(String, egui::Rect)> = h
+            .texts
+            .iter()
+            .filter(|(text, _)| text == "L" || text == "R")
+            .collect();
+        let lane_split = labels.iter().find(|(text, _)| text == "R").unwrap().1.top() - 1.0;
+        let height = |upper: bool| {
+            h.bars
+                .iter()
+                .filter(|(rect, _)| (rect.center().y < lane_split) == upper)
+                .map(|(rect, _)| rect.height())
+                .fold(0.0, f32::max)
+        };
+        assert!(
+            height(true) < 2.0,
+            "the silent left lane drew {}",
+            height(true)
+        );
+        assert!(
+            height(false) > 20.0,
+            "the loud right lane drew only {}",
+            height(false)
+        );
+
+        let middle =
+            h.bars.iter().map(|(rect, _)| rect.center().x).sum::<f32>() / h.bars.len() as f32;
+        let played = foundation_blue();
+        let is_played =
+            |color: &egui::Color32| *color == played || *color == played.gamma_multiply(0.55);
+        let left_played = h
+            .bars
+            .iter()
+            .filter(|(rect, _)| rect.right() < middle - 20.0)
+            .all(|(_, color)| is_played(color));
+        let right_unplayed = h
+            .bars
+            .iter()
+            .filter(|(rect, _)| rect.left() > middle + 20.0)
+            .all(|(_, color)| !is_played(color));
+        assert!(left_played, "bars before the playhead are not drawn played");
+        assert!(right_unplayed, "bars after the playhead are drawn played");
     }
 }
