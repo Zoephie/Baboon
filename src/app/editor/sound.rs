@@ -456,6 +456,9 @@ pub(super) fn draw_sound_output_controls(
         edit.sound_play_request
             .push_back(super::audio::SoundAction::SetVolume(volume));
     }
+    // A slider's label sits after its value, so each icon would otherwise
+    // read as the start of the control after it.
+    ui.separator();
     let mut speed = edit.sound_speed;
     let response = ui
         .add(
@@ -491,6 +494,7 @@ pub(super) fn draw_sound_output_controls(
     // extracted (to `data_<lang>\`). A language this source lacks shows as
     // the default, which is what plays.
     if !languages.is_empty() {
+        ui.separator();
         let current = edit.sound_language.map(str::to_owned);
         let shown = languages
             .iter()

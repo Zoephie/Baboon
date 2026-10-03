@@ -1262,6 +1262,8 @@ mod tests {
         fills: Vec<(egui::Rect, egui::Color32)>,
         /// Line segments painted in the last frame.
         segments: usize,
+        /// The vertical ones among them, as their x and y range.
+        verticals: Vec<(f32, f32, f32)>,
         /// The input clock: a 60th of a second a frame, so a hover tooltip
         /// waits its delay as it would for a real pointer.
         time: f64,
@@ -1285,6 +1287,7 @@ mod tests {
                 bars: Vec::new(),
                 fills: Vec::new(),
                 segments: 0,
+                verticals: Vec::new(),
                 time: 0.0,
                 previewed: Vec::new(),
                 preview: None,
@@ -1353,6 +1356,16 @@ mod tests {
                             (rect, quad[0].color)
                         })
                         .collect::<Vec<_>>()
+                })
+                .collect();
+            self.verticals = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match clipped.shape {
+                    egui::Shape::LineSegment { points: [a, b], .. } if a.x == b.x => {
+                        Some((a.x, a.y.min(b.y), a.y.max(b.y)))
+                    }
+                    _ => None,
                 })
                 .collect();
             self.segments = output
@@ -2314,6 +2327,47 @@ mod tests {
             speeds.last().map(String::as_str),
             Some("speed 1.00"),
             "{speeds:?}"
+        );
+    }
+
+    /// Volume and speed are parted by a divider, so each slider's icon (drawn
+    /// after its value) reads as its own; without languages there is no
+    /// second one.
+    #[test]
+    fn a_divider_parts_volume_from_speed() {
+        let mut h = Harness::new();
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let volume_icon = h.find("\u{1F50A}", 0);
+        let speed_icon = h.find(SPEED_ICON, 0);
+        let between: Vec<f32> = h
+            .verticals
+            .iter()
+            .filter(|(x, top, bottom)| {
+                *x > volume_icon.x
+                    && *x < speed_icon.x
+                    && *top <= volume_icon.y
+                    && *bottom >= volume_icon.y
+            })
+            .map(|(x, _, _)| *x)
+            .collect();
+        // The speed slider sits between them too; only its divider is a
+        // full-height vertical line in that row.
+        assert_eq!(
+            between.len(),
+            1,
+            "dividers between volume and speed: {between:?}"
+        );
+        let after_speed = h
+            .verticals
+            .iter()
+            .filter(|(x, top, bottom)| {
+                *x > speed_icon.x && *top <= speed_icon.y && *bottom >= speed_icon.y
+            })
+            .count();
+        assert_eq!(
+            after_speed, 0,
+            "a divider before a language picker that is not there"
         );
     }
 }
