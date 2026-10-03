@@ -76,8 +76,12 @@ pub(super) fn draw_clip_player(
 ) -> usize {
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
+    // Listed, stepped through and defaulted in display order: groups as the
+    // tag has them, names numerically within each (1, 2 … 10, not 1, 10, 2).
+    let order = display_order(clips);
     let mut selected = stored
         .and_then(|id| clips.iter().position(|clip| clip.id == id))
+        .or_else(|| order.first().copied())
         .unwrap_or(0);
     let Some(clip) = clips.get(selected) else {
         return 0;
@@ -91,6 +95,10 @@ pub(super) fn draw_clip_player(
     let mut choose: Option<usize> = None;
 
     // Clip choice: previous, the dropdown, next, random.
+    let rank = order
+        .iter()
+        .position(|&index| index == selected)
+        .unwrap_or(0);
     ui.horizontal(|ui| {
         let many = clips.len() > 1;
         if ui
@@ -98,7 +106,7 @@ pub(super) fn draw_clip_player(
             .on_hover_text("Previous")
             .clicked()
         {
-            choose = Some((selected + clips.len() - 1) % clips.len());
+            choose = Some(order[(rank + order.len() - 1) % order.len()]);
         }
         let width = (ui.available_width() - 90.0).clamp(160.0, 420.0);
         egui::ComboBox::from_id_salt(("clip_player_combo", id_salt))
@@ -106,7 +114,8 @@ pub(super) fn draw_clip_player(
             .selected_text(clip_title(clip))
             .show_ui(ui, |ui| {
                 let mut group: Option<&str> = None;
-                for (index, each) in clips.iter().enumerate() {
+                for &index in &order {
+                    let each = &clips[index];
                     if each.group.as_deref() != group {
                         group = each.group.as_deref();
                         if let Some(heading) = group {
@@ -127,7 +136,7 @@ pub(super) fn draw_clip_player(
             .on_hover_text("Next")
             .clicked()
         {
-            choose = Some((selected + 1) % clips.len());
+            choose = Some(order[(rank + 1) % order.len()]);
         }
         if ui
             .add_enabled(many, egui::Button::new(RANDOM_ICON))
@@ -240,6 +249,69 @@ pub(super) fn play_clip_now(
         data.insert_temp(clip_selection_id(id_salt, edit.tag_key), clip.id.clone())
     });
     queue_play(edit, clips, index, play);
+}
+
+/// The order clips are listed in: each group where it first appears, and
+/// within a group by [`natural_cmp`] on the name.
+fn display_order(clips: &[PlayerClip]) -> Vec<usize> {
+    let mut groups: Vec<Option<&str>> = Vec::new();
+    for clip in clips {
+        if !groups.contains(&clip.group.as_deref()) {
+            groups.push(clip.group.as_deref());
+        }
+    }
+    let mut order: Vec<usize> = (0..clips.len()).collect();
+    order.sort_by(|&a, &b| {
+        let group = |index: usize| {
+            groups
+                .iter()
+                .position(|g| *g == clips[index].group.as_deref())
+        };
+        group(a)
+            .cmp(&group(b))
+            .then_with(|| natural_cmp(&clips[a].name, &clips[b].name))
+    });
+    order
+}
+
+/// Compare names the way people count: runs of digits by their value, the
+/// rest case-insensitively, so `2` comes before `10` and `pain2` before
+/// `pain10`. Names that only differ in case or leading zeros fall back to
+/// plain order, so the result is total.
+pub(super) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut digits = String::new();
+                    while let Some(c) = it.peek().copied().filter(char::is_ascii_digit) {
+                        digits.push(c);
+                        it.next();
+                    }
+                    digits
+                };
+                let (m, n) = (take(&mut x), take(&mut y));
+                let (m, n) = (m.trim_start_matches('0'), n.trim_start_matches('0'));
+                let ordering = m.len().cmp(&n.len()).then_with(|| m.cmp(n));
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(c), Some(d)) => {
+                let ordering = c.to_lowercase().cmp(d.to_lowercase());
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
 }
 
 /// `group ▸ name`, or the name alone.
@@ -1016,5 +1088,43 @@ mod tests {
             })
             .collect();
         assert!(missing.is_empty(), "no glyph for {missing:?}");
+    }
+
+    #[test]
+    fn names_sort_the_way_people_count() {
+        let mut names = vec![
+            "10", "2", "1", "15", "11", "pain10", "pain2", "Pain3", "a", "01",
+        ];
+        names.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(
+            names,
+            [
+                "01", "1", "2", "10", "11", "15", "a", "pain2", "Pain3", "pain10"
+            ]
+        );
+    }
+
+    /// The dropdown lists 1, 2 … 10, and Previous/Next step through that
+    /// order; groups keep the order the tag gives them.
+    #[test]
+    fn the_dropdown_and_next_follow_natural_order() {
+        let clip = |name: &str, group: &str| PlayerClip {
+            id: format!("{group}/{name}"),
+            name: name.to_owned(),
+            group: Some(group.to_owned()),
+            duration: None,
+        };
+        let clips = [
+            clip("1", "b"),
+            clip("10", "b"),
+            clip("11", "b"),
+            clip("2", "b"),
+            clip("x", "a"),
+        ];
+        let names: Vec<&str> = display_order(&clips)
+            .into_iter()
+            .map(|index| clips[index].name.as_str())
+            .collect();
+        assert_eq!(names, ["1", "2", "10", "11", "x"]);
     }
 }
