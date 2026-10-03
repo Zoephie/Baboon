@@ -11098,7 +11098,7 @@ fn listing_map_ids(source: &TagSource, listed: &[TagEntry]) -> ListingRows {
     (entries, annotations, note)
 }
 
-/// Every `snd!` tag's `sound class` and `compression` enum names, as
+/// Every `snd!` tag's `class` and `compression` enum names, as
 /// `(class, compression, entry)`. Shared by both sound listings.
 fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, String, TagEntry)> {
     let mut rows = Vec::new();
@@ -11110,7 +11110,7 @@ fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, Stri
             continue;
         };
         let root = tag.root();
-        let class = find_full_field_name(&root, "sound class")
+        let class = find_full_field_name(&root, "class")
             .and_then(|full| root.read_enum_name(full))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "(none)".to_owned());

@@ -589,7 +589,7 @@ mod tests {
 
         apply_field_edit(
             &mut edited,
-            "maps/base map",
+            "base map",
             "weapons\\smg\\bitmaps\\smg.bitmap",
         )
         .expect("set base map");
@@ -597,7 +597,7 @@ mod tests {
 
         // Clearing a long-path reference to NONE round-trips (the regression).
         let mut cleared = load();
-        apply_field_edit(&mut cleared, "maps/base map", "none").expect("clear base map");
+        apply_field_edit(&mut cleared, "base map", "none").expect("clear base map");
         cleared
             .write_atomic(&out)
             .expect("save after clear-to-none must verify");
@@ -609,7 +609,7 @@ mod tests {
             .expect("reread cleared tag");
         let root = reread.root();
         let base = root
-            .field_path("maps/base map")
+            .field_path("base map")
             .and_then(|f| f.value())
             .expect("base map field present");
         match base {

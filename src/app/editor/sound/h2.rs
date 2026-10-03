@@ -92,8 +92,12 @@ pub(in crate::app) fn h2_codec_for(compression: &str) -> InlineCodec {
     let compression = compression.to_ascii_lowercase();
     if compression.contains("opus") {
         InlineCodec::Opus
+    } else if compression.contains("ogg") {
+        // Halo CE music.
+        InlineCodec::OggVorbis
     } else if compression.contains("none") {
-        // "none (big endian)" / "none (little endian)".
+        // "none (big endian)" / "none (little endian)"; CE's plain "none" is
+        // little-endian.
         InlineCodec::Pcm {
             big_endian: compression.contains("big"),
         }

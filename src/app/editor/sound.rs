@@ -232,51 +232,23 @@ fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
 
 /// Codec parameters for samples stored on the permutation itself.
 ///
-/// Halo CE names them `format` / `channel count` / `sample rate`, and uses Ogg
-/// for music but Xbox-ADPCM for most effects, so the format must be read (the
-/// Ogg decoder chokes on ADPCM bytes). Halo 2's older layout names them
-/// `compression` (on the permutation, else the tag) / `encoding` / `sample
-/// rate` — read through CE's names, its ADPCM decoded as PCM noise.
+/// Halo CE and Halo 2's older layout both name them `compression` (on the
+/// permutation, else the tag) / `encoding` / `sample rate`. CE uses Ogg for
+/// music but Xbox-ADPCM for most effects, so the compression must be read
+/// (the Ogg decoder chokes on ADPCM bytes).
 pub(super) fn permutation_inline_params(
     root: &TagStruct,
     perm: &TagStruct,
 ) -> (super::audio::InlineCodec, u16, u32) {
-    use super::audio::InlineCodec;
     let read = |element: &TagStruct, clean: &str| {
         find_full_field_name(element, clean).and_then(|full| element.read_enum_name(full))
     };
-    let Some(format) = read(root, "format") else {
-        let compression = read(perm, "compression")
-            .or_else(|| read(root, "compression"))
-            .unwrap_or_default();
-        let channels = read(root, "encoding").map_or(1, |name| h2_channels_for(&name));
-        let rate = read(root, "sample rate").map_or(22_050, |name| h2_rate_for(&name));
-        return (h2_codec_for(&compression), channels, rate);
-    };
-    let format = format.to_ascii_lowercase();
-    let codec = if format.contains("ogg") || format.contains("vorbis") {
-        InlineCodec::OggVorbis
-    } else if format.contains("xbox") || format.contains("ima") {
-        // "xbox adpcm" and "ima adpcm" are both IMA-family; the Xbox 0x0069
-        // decoder handles CE's 36-byte-block layout.
-        InlineCodec::XboxAdpcm
-    } else {
-        // "pcm" — uncompressed interleaved 16-bit PCM, little-endian on CE.
-        InlineCodec::Pcm { big_endian: false }
-    };
-    let channels = read(root, "channel count")
-        .map(|name| {
-            if name.to_ascii_lowercase().contains("mono") {
-                1
-            } else {
-                2
-            }
-        })
-        .unwrap_or(1);
-    let sample_rate = read(root, "sample rate")
-        .map(|name| if name.contains("44") { 44_100 } else { 22_050 })
-        .unwrap_or(22_050);
-    (codec, channels, sample_rate)
+    let compression = read(perm, "compression")
+        .or_else(|| read(root, "compression"))
+        .unwrap_or_default();
+    let channels = read(root, "encoding").map_or(1, |name| h2_channels_for(&name));
+    let rate = read(root, "sample rate").map_or(22_050, |name| h2_rate_for(&name));
+    (h2_codec_for(&compression), channels, rate)
 }
 
 /// Seconds of audio in `bytes` of a fixed-rate codec; `None` for Opus and Ogg,
@@ -907,9 +879,7 @@ fn row_extract_ext(kind: &RowKind, raw_ce: bool) -> &'static str {
 /// A compact `(sound class, codec)` readout for the player header.
 fn sound_class_and_compression(tag: &TagFile) -> (Option<String>, String) {
     let root = tag.root();
-    // CE names it `sound class`; H2 through Reach, `class`.
-    let class = find_full_field_name(&root, "sound class")
-        .or_else(|| find_full_field_name(&root, "class"))
+    let class = find_full_field_name(&root, "class")
         .and_then(|full| root.read_enum_name(full))
         .filter(|value| !value.is_empty());
     let compression = find_full_field_name(&root, "compression")
