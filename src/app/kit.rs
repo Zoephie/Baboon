@@ -557,8 +557,15 @@ impl Baboon {
         // before the load lands — must not snap it back to the default.
         let browser_mode = self.kits[index].browser_mode;
         let browser_sort = self.kits[index].browser_sort;
+        // Carried, then moved on, never reset: a job stamped by the source
+        // being replaced must not resolve against the new one. Rebuilding
+        // from `Kit::empty` reset it to 0, and the load handler's bump then
+        // gave every source in the kit generation 1, so a stale result from
+        // the previous source passed `resolve_stamp`.
+        let generation = self.kits[index].generation.wrapping_add(1);
         self.kits[index] = Kit {
             source: Some(source),
+            generation,
             names,
             requested_path,
             profile,
@@ -1010,6 +1017,48 @@ pub(super) struct IndexJobs {
 #[cfg(test)]
 mod document_cleanup_tests {
     use super::*;
+
+    /// Two sources loaded one after another into the same kit must not share a
+    /// generation, or a job stamped against the first resolves against the
+    /// second.
+    #[test]
+    fn a_second_source_in_a_kit_never_reuses_a_generation() {
+        let mut app = crate::app::Baboon::for_test();
+        let source = |label: &str| LoadedSourceData {
+            label: label.to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from(format!("/{label}")),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let mut seen = Vec::new();
+        let mut stamps = Vec::new();
+        for label in ["first", "second", "third"] {
+            app.install_loaded_source(source(label));
+            // The load handler moves the generation on once more after
+            // installing; mirror it so the test sees what jobs see.
+            app.kits[app.active].generation = app.kits[app.active].generation.wrapping_add(1);
+            seen.push(app.kits[app.active].generation);
+            stamps.push(app.kit_stamp());
+        }
+        let mut unique = seen.clone();
+        unique.dedup();
+        assert_eq!(unique, seen, "generations {seen:?} repeat");
+        assert!(app.resolve_stamp(stamps[0]).is_none(), "a stale stamp is refused");
+        assert!(app.resolve_stamp(stamps[2]).is_some());
+    }
 
     /// Closing tabs drops every cache kept for them, model previews included.
     /// Three of the four close paths kept the model preview (its geometry and
