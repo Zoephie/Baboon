@@ -725,20 +725,19 @@ pub(in crate::app) fn draw_tree(
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     let child_sort = if groups_mode {
         BrowserSort::Natural
@@ -747,46 +746,45 @@ pub(in crate::app) fn draw_tree(
     };
     for index in ordered_child_indices(&tree.children, child_sort) {
         let node = &tree.children[index];
-        clicked = clicked.or_else(|| {
-            draw_tree_node(
-                ui,
-                node,
-                entries,
-                selected,
-                filter,
-                expand_folders,
-                show_prefixes,
-                double_click_to_open,
-                groups_mode,
-                reveal,
-                sort,
-                folders_before_tags,
-                favorite_keys,
-                is_container,
-            )
-        });
+        let action = draw_tree_node(
+            ui,
+            node,
+            entries,
+            selected,
+            filter,
+            expand_folders,
+            show_prefixes,
+            double_click_to_open,
+            groups_mode,
+            reveal,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+            is_container,
+        );
+        clicked = clicked.or(action);
     }
     if folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     // Last, so it covers whatever the tree left over. Groups mode is excluded
     // for the same reason the folder menu is: a group node's path is a label,
     // not a folder, and there is no root to author into.
     if is_container && !groups_mode {
-        clicked = clicked.or_else(|| draw_container_root_target(ui));
+        let action = draw_container_root_target(ui);
+        clicked = clicked.or(action);
     }
     clicked
 }
@@ -815,58 +813,55 @@ pub(in crate::app) fn draw_tree_lazy(
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     for index in ordered_child_indices(&tree.children, sort) {
         let node = &mut tree.children[index];
-        clicked = clicked.or_else(|| {
-            draw_tree_node_lazy(
-                ui,
-                node,
-                entries,
-                group_tree.as_deref_mut(),
-                root,
-                names,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                status_update,
-                reveal,
-                sort,
-                folders_before_tags,
-                favorite_keys,
-            )
-        });
+        let action = draw_tree_node_lazy(
+            ui,
+            node,
+            entries,
+            group_tree.as_deref_mut(),
+            root,
+            names,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            status_update,
+            reveal,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     if folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     clicked
 }
@@ -1088,83 +1083,60 @@ fn draw_tree_node_lazy_block(
             }
             let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
             if !folders_before_tags {
+                let action = draw_entry_list(
+                    ui,
+                    &node.entries,
+                    entries,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    leaf_key,
+                    sort,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
-                } else {
-                    let _ = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
             for index in ordered_child_indices(&node.children, sort) {
                 let child = &mut node.children[index];
+                let action = draw_tree_node_lazy(
+                    ui,
+                    child,
+                    entries,
+                    group_tree.as_deref_mut(),
+                    root,
+                    names,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    status_update,
+                    inner_reveal,
+                    sort,
+                    folders_before_tags,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_tree_node_lazy(
-                        ui,
-                        child,
-                        entries,
-                        group_tree.as_deref_mut(),
-                        root,
-                        names,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        status_update,
-                        inner_reveal,
-                        sort,
-                        folders_before_tags,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
             if folders_before_tags {
+                let action = draw_entry_list(
+                    ui,
+                    &node.entries,
+                    entries,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    leaf_key,
+                    sort,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
-                } else {
-                    let _ = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
         },
@@ -1294,82 +1266,59 @@ fn draw_tree_node_block(
     let body = |ui: &mut Ui| {
         let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
         if !folders_before_tags {
+            let action = draw_entry_list(
+                ui,
+                &node.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                leaf_key,
+                sort,
+                favorite_keys,
+            );
             if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
+                clicked = action;
             }
         }
         for index in ordered_child_indices(&node.children, sort) {
             let child = &node.children[index];
+            let action = draw_tree_node(
+                ui,
+                child,
+                entries,
+                selected,
+                filter,
+                expand_folders,
+                show_prefixes,
+                double_click_to_open,
+                groups_mode,
+                inner_reveal,
+                sort,
+                folders_before_tags,
+                favorite_keys,
+                is_container,
+            );
             if clicked.is_none() {
-                clicked = draw_tree_node(
-                    ui,
-                    child,
-                    entries,
-                    selected,
-                    filter,
-                    expand_folders,
-                    show_prefixes,
-                    double_click_to_open,
-                    groups_mode,
-                    inner_reveal,
-                    sort,
-                    folders_before_tags,
-                    favorite_keys,
-                    is_container,
-                );
+                clicked = action;
             }
         }
         if folders_before_tags {
+            let action = draw_entry_list(
+                ui,
+                &node.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                leaf_key,
+                sort,
+                favorite_keys,
+            );
             if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
+                clicked = action;
             }
         }
     };
