@@ -698,22 +698,6 @@ pub(in crate::app) mod tests {
         assert_eq!(foundation_selected_width(2_000.0), 420.0);
     }
 
-    #[test]
-    fn semantic_short_index_target_names_cover_damage_sections() {
-        let cases = [
-            ("parent variant", Some("variants")),
-            ("variant", Some("variants")),
-            ("parent node", Some("nodes")),
-            ("damage section", Some("damage sections")),
-            ("indirect damage section", Some("damage sections")),
-            ("runtime region index", None),
-        ];
-
-        for (field_name, expected) in cases {
-            assert_eq!(semantic_short_index_target_key(field_name), expected);
-        }
-    }
-
     /// Expand/collapse-all is a direct instruction about the whole tag, so it
     /// has to win over the rules that otherwise decide a container's open
     /// state — the search filter's, and a reference jump forcing its target's
@@ -830,7 +814,6 @@ pub(in crate::app) mod tests {
                             "control points[0]/position",
                             edit,
                             None,
-                            None,
                             300.0,
                         );
                     });
@@ -854,7 +837,7 @@ pub(in crate::app) mod tests {
     fn color_channels_are_typed_into_directly() {
         // Float ARGB: the first cell is alpha.
         let mut light = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
-        let path = "color/color lower bound";
+        let path = "color lower bound";
         let pending = type_into_first_value_cell(&light, path, "0.25");
         assert_eq!(pending.len(), 1, "one committed edit for the whole color");
         assert_eq!(pending[0].path, path);
@@ -867,12 +850,13 @@ pub(in crate::app) mod tests {
         }
 
         // Packed ARGB: edited in the same 0-1 channels the row shows, stored as bytes.
-        let mut fog = TagFile::new(crate::app::test_definition_path("haloce_mcc/fog.json")).unwrap();
-        let path = "screen layers color";
-        let pending = type_into_first_value_cell(&fog, path, "1");
+        let mut hud =
+            TagFile::new(crate::app::test_definition_path("haloce_mcc/grenade_hud_interface.json")).unwrap();
+        let path = "override icon color";
+        let pending = type_into_first_value_cell(&hud, path, "1");
         assert_eq!(pending.len(), 1);
-        crate::app::apply_field_edit(&mut fog, path, &pending[0].input).unwrap();
-        match fog.root().field_path(path).unwrap().value() {
+        crate::app::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
+        match hud.root().field_path(path).unwrap().value() {
             Some(TagFieldData::ArgbColor(c)) => assert_eq!(c.0, 0xFF00_0000),
             other => panic!("expected a packed ARGB color, got {other:?}"),
         }
@@ -897,7 +881,7 @@ pub(in crate::app) mod tests {
                         let meta = field_display_meta(field.name());
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
-                            &TagNameIndex::default(), 0, path, edit, None, None, 300.0,
+                            &TagNameIndex::default(), 0, path, edit, None, 300.0,
                         );
                     });
                 });

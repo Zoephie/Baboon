@@ -654,7 +654,7 @@ fn list_model_animations(
 
 /// A Halo CE object's `model_animations`.
 fn load_object_animations(source: &TagSource, object: &TagFile) -> Result<TagFile, String> {
-    let reference = tag_ref_path(&object.root(), "animation graph")
+    let reference = halo1_object_reference(object, "animation graph")
         .ok_or("This object references no model_animations.")?;
     load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")
         .map_err(|error| error.to_string())
@@ -682,15 +682,10 @@ fn ce_rest_pose(skeleton: &Skeleton, gbxmodel: Option<&TagFile>) -> Vec<NodeTran
             let Some(name) = node.read_string("name") else {
                 continue;
             };
-            let translation = node.read_vec3("default translation");
             by_name.insert(
                 name,
                 NodeTransform {
-                    translation: blam_tags::math::RealPoint3d {
-                        x: translation.i,
-                        y: translation.j,
-                        z: translation.k,
-                    },
+                    translation: node.read_point3d("default translation"),
                     rotation: node.read_quat("default rotation"),
                     scale: 1.0,
                 },
@@ -796,7 +791,7 @@ fn decode_ce_animation(
         .get(animation_index)
         .ok_or("The graph no longer lists this animation.")?;
     let skeleton = Skeleton::from_tag(&antr);
-    let gbxmodel = tag_ref_path(&object.root(), "model").and_then(|reference| {
+    let gbxmodel = halo1_object_reference(object, "model").and_then(|reference| {
         load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2").ok()
     });
     let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());

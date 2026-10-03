@@ -859,11 +859,9 @@ fn collect_block_index_edits(
         .excluded_new_elements
         .as_ref()
         .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
-    // Per target, whether it resolves to the edited block: `None` when it does
-    // not resolve at all, which (as before) is what lets a plain short fall
-    // back to its semantic target.
+    // Per target, whether it resolves to the edited block; `None` when it does
+    // not resolve at all.
     let mut declared: HashMap<String, Option<bool>> = HashMap::new();
-    let mut semantic: HashMap<&'static str, Option<bool>> = HashMap::new();
     let is_target = |resolved: Option<String>| {
         resolved.map(|path| path_without_field_ordinals(&path) == target_path)
     };
@@ -885,31 +883,9 @@ fn collect_block_index_edits(
                     )
                 })
             });
-        let state = declared_state.or_else(|| {
-            (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
-                .then(|| semantic_short_index_target_key(field.name()))
-                .flatten()
-                .and_then(|key| {
-                    *semantic.entry(key).or_insert_with(|| {
-                        is_target(
-                            semantic_block_index_target(tag_struct, Some(root), struct_path, key)
-                                .map(|target| target.path),
-                        )
-                    })
-                })
-        });
-
-        if state == Some(true) {
+        if declared_state == Some(true) {
             let field_path = append_field_path_for(struct_path, &field);
-            let old = if field.field_type() == TagFieldType::ShortInteger {
-                match field.value() {
-                    Some(TagFieldData::ShortInteger(value)) => Some(value as i64),
-                    _ => None,
-                }
-            } else {
-                field.value().as_ref().and_then(block_index_value)
-            };
-            if let Some(old) = old
+            if let Some(old) = field.value().as_ref().and_then(block_index_value)
                 && let Some(mapped) = remap.map(old)
             {
                 let new = mapped.map(|index| index as i64).unwrap_or(-1);
@@ -993,25 +969,6 @@ pub(in crate::app) fn declared_block_index_target(
         field
             .as_block()
             .is_some_and(|block| block.definition().name() == target_definition)
-    })
-}
-
-/// The same for a plain short that older schemas use as an index, found by
-/// the block's cleaned field name (see `semantic_short_index_target_key`).
-///
-/// The dropdown used to search nested blocks here as well, inside whichever
-/// element was selected, and renumbering did not. Over every Halo 2, Halo 3
-/// and classic CE tag in the local kits (97,000) the nested search never chose
-/// a target: the only such shorts are classic CE's `nodes/parent node`, whose
-/// `nodes` block is the one directly above.
-pub(in crate::app) fn semantic_block_index_target(
-    tag_struct: &blam_tags::TagStruct<'_>,
-    root: Option<blam_tags::TagStruct<'_>>,
-    struct_path: &str,
-    target_key: &str,
-) -> Option<BlockIndexTarget> {
-    find_block_target(tag_struct, root, struct_path, |field| {
-        field.as_block().is_some() && clean_field_key(field.name()) == target_key
     })
 }
 
@@ -1222,11 +1179,11 @@ mod block_index_remap_tests {
     }
 
     #[test]
-    fn classic_semantic_parent_node_reference_is_remapped() {
+    fn classic_parent_node_reference_is_remapped() {
         let mut tag =
             TagFile::new(crate::app::test_definition_path("haloce_mcc/model.json")).unwrap();
         add_elements_at(&mut tag, "nodes", 3);
-        apply_field_edit(&mut tag, "nodes[0]/parent node", "2").unwrap();
+        apply_field_edit(&mut tag, "nodes[0]/parent node index", "2").unwrap();
 
         apply_one_block_op(
             &mut tag,
@@ -1239,7 +1196,7 @@ mod block_index_remap_tests {
         assert_eq!(
             tag.root()
                 .descend("nodes[0]")
-                .and_then(|node| node.read_int_any("parent node")),
+                .and_then(|node| node.read_int_any("parent node index")),
             Some(3)
         );
     }
