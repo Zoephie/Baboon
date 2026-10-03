@@ -159,6 +159,10 @@ pub(super) enum SoundAction {
     Seek(f64),
     /// Loop the sound (and every sound played after) or not.
     SetLooping(bool),
+    /// Play only `start..end` seconds of the requesting tab's clip, or all of
+    /// it. Remembered for the tab and clip, so it holds for a voice that
+    /// starts later.
+    SetRegion(Option<(f64, f64)>),
 }
 
 /// The tag tab a sound was started from. Playback follows its tab: it pauses
@@ -251,6 +255,17 @@ impl<'a> SoundRequests<'a> {
         });
     }
 
+    /// Queue an action about one of the tab's clips (its region) without
+    /// playing it.
+    pub(in crate::app) fn push_for_clip(&mut self, action: SoundAction, clip: String) {
+        self.queue.push_back(SoundRequest {
+            owner: self.owner.clone(),
+            clip: Some(clip),
+            preview: false,
+            action,
+        });
+    }
+
     /// Queue a decode of one of the tab's clips for its waveform alone.
     pub(in crate::app) fn preview_clip(&mut self, action: SoundAction, clip: String) {
         self.queue.push_back(SoundRequest {
@@ -312,6 +327,16 @@ fn action_label(action: &SoundAction) -> Option<String> {
     }
 }
 
+/// Where Play starts: the playhead while it is inside `region` (frames,
+/// `start..end`), else the region's start.
+fn play_from(position: u64, (start, end): (u64, u64)) -> u64 {
+    if (start..end).contains(&position) {
+        position
+    } else {
+        start
+    }
+}
+
 /// The rodio output device.
 struct Engine {
     handle: OutputStreamHandle,
@@ -339,6 +364,34 @@ struct PlaybackShared {
     /// A frame to jump to, or `NO_SEEK`.
     seek: AtomicU64,
     looping: AtomicBool,
+    /// The region played, `region_start..region_end` in frames; the whole
+    /// sound while `region_end` is `NO_REGION`.
+    region_start: AtomicU64,
+    region_end: AtomicU64,
+}
+
+const NO_REGION: u64 = u64::MAX;
+
+impl PlaybackShared {
+    fn new(looping: bool) -> Self {
+        Self {
+            frame: AtomicU64::new(0),
+            seek: AtomicU64::new(NO_SEEK),
+            looping: AtomicBool::new(looping),
+            region_start: AtomicU64::new(0),
+            region_end: AtomicU64::new(NO_REGION),
+        }
+    }
+
+    /// The frames played, `start..end`, within a sound of `frames` frames.
+    fn region(&self, frames: u64) -> (u64, u64) {
+        let end = self.region_end.load(Ordering::Relaxed);
+        if end == NO_REGION {
+            return (0, frames);
+        }
+        let end = end.min(frames);
+        (self.region_start.load(Ordering::Relaxed).min(end), end)
+    }
 }
 
 const NO_SEEK: u64 = u64::MAX;
@@ -364,12 +417,15 @@ impl Iterator for PcmSource {
             if seek != NO_SEEK {
                 self.frame = seek.min(self.frames);
             }
-            if self.frame >= self.frames {
-                if !self.shared.looping.load(Ordering::Relaxed) || self.frames == 0 {
-                    self.shared.frame.store(self.frames, Ordering::Relaxed);
+            // The end of the region (or of the sound): wrap to its start when
+            // looping, else stop there.
+            let (start, end) = self.shared.region(self.frames);
+            if self.frame >= end {
+                if !self.shared.looping.load(Ordering::Relaxed) || end <= start {
+                    self.shared.frame.store(end, Ordering::Relaxed);
                     return None;
                 }
-                self.frame = 0;
+                self.frame = start;
             }
         }
         let sample =
@@ -442,11 +498,7 @@ impl Voice {
             label,
             waveform,
             pcm,
-            shared: Arc::new(PlaybackShared {
-                frame: AtomicU64::new(0),
-                seek: AtomicU64::new(NO_SEEK),
-                looping: AtomicBool::new(looping),
-            }),
+            shared: Arc::new(PlaybackShared::new(looping)),
             sink: None,
         }
     }
@@ -468,16 +520,19 @@ impl Voice {
     /// Play from where the playhead is — from the start once it has reached
     /// the end — on a new sink if the last one has run dry.
     fn play(&mut self, engine: &Engine, volume: f32) {
+        // From the playhead while it is inside the region (the whole sound
+        // when there is none), else from the region's start.
+        let position = self.position();
+        let start = play_from(position, self.shared.region(self.frames()));
         if let Some(sink) = self.sink.as_ref().filter(|sink| !sink.empty()) {
+            if start != position {
+                self.seek(start);
+            }
             sink.play();
             return;
         }
         if self.pcm.channels == 0 || self.frames() == 0 {
             return;
-        }
-        let mut start = self.position();
-        if start >= self.frames() {
-            start = 0;
         }
         self.shared.seek.store(NO_SEEK, Ordering::Relaxed);
         self.shared.frame.store(start, Ordering::Relaxed);
@@ -521,6 +576,33 @@ impl Voice {
         self.shared.frame.store(0, Ordering::Relaxed);
     }
 
+    /// Play only `start..end` seconds (all of it for `None`).
+    fn set_region(&self, region: Option<(f64, f64)>) {
+        let rate = f64::from(self.pcm.sample_rate.max(1));
+        match region {
+            Some((start, end)) => {
+                let (start, end) = (start.min(end).max(0.0), start.max(end).max(0.0));
+                self.shared
+                    .region_start
+                    .store((start * rate) as u64, Ordering::Relaxed);
+                self.shared
+                    .region_end
+                    .store((end * rate).ceil() as u64, Ordering::Relaxed);
+            }
+            None => self.shared.region_end.store(NO_REGION, Ordering::Relaxed),
+        }
+    }
+
+    #[cfg(test)]
+    fn region(&self) -> Option<(f64, f64)> {
+        if self.shared.region_end.load(Ordering::Relaxed) == NO_REGION {
+            return None;
+        }
+        let rate = f64::from(self.pcm.sample_rate.max(1));
+        let (start, end) = self.shared.region(self.frames());
+        Some((start as f64 / rate, end as f64 / rate))
+    }
+
     fn view(&self) -> PlaybackView {
         let rate = self.pcm.sample_rate.max(1) as f64;
         PlaybackView {
@@ -559,6 +641,8 @@ pub(super) struct AudioState {
     preview_spawned: bool,
     /// Each tab's preview of its selected clip.
     previews: HashMap<SoundOwner, Preview>,
+    /// Each tab's region, in seconds, and the clip it is on.
+    regions: HashMap<SoundOwner, (String, (f64, f64))>,
     /// The tab the newest decode was started for, so closing it cancels the
     /// decode as well as the sound.
     decode_owner: Option<SoundOwner>,
@@ -1249,6 +1333,7 @@ impl AudioState {
             self.decode_owner = None;
         }
         self.previews.retain(|owner, _| is_open(owner));
+        self.regions.retain(|owner, _| is_open(owner));
         if closed(&self.status_owner) {
             self.status = None;
             self.status_owner = None;
@@ -1436,6 +1521,29 @@ impl AudioState {
                 }
                 return;
             }
+            SoundAction::SetRegion(region) => {
+                let (Some(owner), Some(clip)) =
+                    (self.request_owner.clone(), self.request_clip.clone())
+                else {
+                    return;
+                };
+                match region {
+                    Some(region) => {
+                        self.regions.insert(owner, (clip.clone(), region));
+                    }
+                    None => {
+                        self.regions.remove(&owner);
+                    }
+                }
+                if self.voice_is_requesters()
+                    && let Some(voice) = self.voice.as_ref()
+                    && voice.clip.as_deref() == Some(clip.as_str())
+                {
+                    voice.set_region(region);
+                }
+                ctx.request_repaint();
+                return;
+            }
             SoundAction::SetLooping(looping) => {
                 self.looping = looping;
                 if let Some(voice) = self.voice.as_ref() {
@@ -1591,6 +1699,13 @@ impl AudioState {
             clip,
             self.looping,
         );
+        // A region the tab set on this clip before it was loaded holds.
+        let region = owner
+            .as_ref()
+            .and_then(|owner| self.regions.get(owner))
+            .filter(|(region_clip, _)| voice.clip.as_deref() == Some(region_clip.as_str()))
+            .map(|(_, region)| *region);
+        voice.set_region(region);
         voice.play(engine, volume);
         self.voice = Some(voice);
         self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
@@ -1885,11 +2000,7 @@ mod tests {
     }
 
     fn pcm_source(pcm: &Arc<DecodedPcm>, looping: bool) -> (PcmSource, Arc<PlaybackShared>) {
-        let shared = Arc::new(PlaybackShared {
-            frame: AtomicU64::new(0),
-            seek: AtomicU64::new(NO_SEEK),
-            looping: AtomicBool::new(looping),
-        });
+        let shared = Arc::new(PlaybackShared::new(looping));
         let source = PcmSource {
             pcm: pcm.clone(),
             shared: shared.clone(),
@@ -2218,5 +2329,71 @@ mod tests {
         };
         assert_eq!(reason, "no source loaded");
         assert!(audio.status.is_none(), "a preview wrote the status line");
+    }
+
+    /// A region plays its frames and stops at its end, or wraps to its start
+    /// when looping.
+    #[test]
+    fn the_source_plays_a_region_and_loops_it() {
+        let pcm = numbered(10);
+        let (mut source, shared) = pcm_source(&pcm, false);
+        shared.region_start.store(3, Ordering::Relaxed);
+        shared.region_end.store(5, Ordering::Relaxed);
+        shared.seek.store(3, Ordering::Relaxed);
+        let played: Vec<i16> = source.by_ref().collect();
+        assert_eq!(played, [30, 31, 40, 41], "the region, then stop");
+        assert_eq!(shared.frame.load(Ordering::Relaxed), 5);
+
+        let (mut source, shared) = pcm_source(&pcm, true);
+        shared.region_start.store(3, Ordering::Relaxed);
+        shared.region_end.store(5, Ordering::Relaxed);
+        shared.seek.store(4, Ordering::Relaxed);
+        let played: Vec<i16> = source.by_ref().take(6).collect();
+        assert_eq!(played, [40, 41, 30, 31, 40, 41], "the region, looped");
+    }
+
+    #[test]
+    fn play_starts_at_the_playhead_inside_the_region_else_its_start() {
+        assert_eq!(play_from(4, (3, 8)), 4);
+        assert_eq!(play_from(1, (3, 8)), 3, "before the region");
+        assert_eq!(play_from(8, (3, 8)), 3, "at its end: again from the start");
+        assert_eq!(
+            play_from(10, (0, 10)),
+            0,
+            "no region, finished: from the top"
+        );
+    }
+
+    /// A region set on a clip before it is loaded holds when it plays; one
+    /// set on another clip does not. Needs an output device.
+    #[test]
+    fn a_region_set_before_loading_holds_for_its_clip() {
+        let a = owner(1, "file:a.sound");
+        let mut audio = AudioState::default();
+        if audio.ensure_engine().is_none() {
+            eprintln!("skipping: no audio output device");
+            return;
+        }
+        audio.volume = Volume(0.0);
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            clip: Some("c".to_owned()),
+            preview: false,
+            action: SoundAction::SetRegion(Some((0.25, 0.5))),
+        });
+        audio.process(None, &egui::Context::default());
+        audio.play_decoded(wave(1000), "c", Some(a.clone()), Some("c".to_owned()));
+        assert_eq!(audio.voice.as_ref().unwrap().region(), Some((0.25, 0.5)));
+        assert!(
+            audio.playback(Some(&a)).unwrap().position >= 0.25,
+            "play did not start at the region"
+        );
+
+        audio.play_decoded(wave(1000), "d", Some(a.clone()), Some("d".to_owned()));
+        assert_eq!(
+            audio.voice.as_ref().unwrap().region(),
+            None,
+            "another clip took the region"
+        );
     }
 }

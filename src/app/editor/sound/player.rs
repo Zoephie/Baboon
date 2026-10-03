@@ -152,6 +152,12 @@ pub(super) fn draw_clip_player(
 
     // Changing clip while this tab's sound plays carries on with the new one.
     if let Some(index) = choose.filter(|index| *index != selected) {
+        // A region belongs to the clip it was drawn on.
+        if stored_region(ui, edit.tag_key, &clips[selected].id).is_some() {
+            ui.data_mut(|data| data.remove::<(String, f64, f64)>(clip_region_id(edit.tag_key)));
+            edit.sound_play_request
+                .push_for_clip(SoundAction::SetRegion(None), clips[selected].id.clone());
+        }
         if playing && !queued_play_for(edit, clips, index) {
             queue_play(edit, clips, index, play);
         }
@@ -215,6 +221,21 @@ pub(super) fn draw_clip_player(
             .monospace()
             .color(text_dark()),
         );
+        if let Some((start, end)) = stored_region(ui, edit.tag_key, &clip.id) {
+            ui.label(
+                RichText::new(format!(
+                    "{} \u{2013} {} ({})",
+                    format_play_time(start),
+                    format_play_time(end),
+                    format_play_time(end - start)
+                ))
+                .monospace()
+                .color(foundation_blue()),
+            )
+            .on_hover_text(
+                "The region played; \u{27F2} loops it. Esc or a click outside clears it.",
+            );
+        }
         ui.add_space(8.0);
         draw_sound_output_controls(ui, edit, languages);
     });
@@ -512,6 +533,24 @@ fn draw_timeline(
             );
         }
     }
+    // The region: a band over the lanes, its edges marked.
+    let region_id = clip_region_id(edit.tag_key);
+    let clip_id = clips[selected].id.clone();
+    let mut region = stored_region(ui, edit.tag_key, &clip_id);
+    if let Some((start, end)) = region {
+        let band = egui::Rect::from_min_max(
+            egui::pos2(x_of(start), track.top()),
+            egui::pos2(x_of(end), track.bottom()),
+        );
+        painter.rect_filled(band, 0.0, foundation_blue().gamma_multiply(0.18));
+        for x in [band.left(), band.right()] {
+            painter.line_segment(
+                [egui::pos2(x, track.top()), egui::pos2(x, track.bottom())],
+                egui::Stroke::new(1.5, foundation_blue()),
+            );
+        }
+    }
+
     let head_color = foundation_jump_cyan();
     painter.line_segment(
         [
@@ -539,40 +578,140 @@ fn draw_timeline(
         );
     }
 
-    let pressed_at = |pointer: egui::Pos2| {
-        (((pointer.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64) * duration
-    };
-    // Seek when the button goes down and whenever the pointer moves while it
-    // is held — not again on release, which would pull a playing sound back
-    // by the time the click took.
-    let (pressed, moved) = ui.input(|input| {
+    let time_at = |x: f32| (((x - track.left()) / track.width()).clamp(0.0, 1.0) as f64) * duration;
+    let edge_grab = 5.0;
+    let near = |x: f32, seconds: f64| (x - x_of(seconds)).abs() <= edge_grab;
+    // The ruler (and the playhead's head) scrub; the lanes select.
+    let in_ruler = |pointer: egui::Pos2| pointer.y < track.top() || (pointer.x - head).abs() <= 4.0;
+    let (pressed, moved, origin) = ui.input(|input| {
         (
             input.pointer.any_pressed(),
             input.pointer.delta() != Vec2::ZERO,
+            input.pointer.press_origin(),
         )
     });
-    if let Some(pointer) = response.interact_pointer_pos() {
-        if loaded.is_some() {
-            if response.is_pointer_button_down_on() && (pressed || moved) {
-                edit.sound_play_request
-                    .push_back(SoundAction::Seek(pressed_at(pointer)));
+    let set_region = |edit: &mut FieldEditContext<'_>, region: Option<(f64, f64)>| {
+        match region {
+            Some((start, end)) => {
+                ui.data_mut(|data| data.insert_temp(region_id, (clip_id.clone(), start, end)))
             }
-        } else if response.clicked() {
+            None => ui.data_mut(|data| data.remove::<(String, f64, f64)>(region_id)),
+        }
+        edit.sound_play_request
+            .push_for_clip(SoundAction::SetRegion(region), clip_id.clone());
+    };
+
+    // Scrubbing: seek when the button goes down on the ruler and whenever the
+    // pointer moves while it is held — not again on release, which would pull
+    // a playing sound back by the time the click took.
+    let scrubbing = origin.is_some_and(in_ruler);
+    if let Some(pointer) = response.interact_pointer_pos()
+        && scrubbing
+        && loaded.is_some()
+        && response.is_pointer_button_down_on()
+        && (pressed || moved)
+    {
+        edit.sound_play_request
+            .push_back(SoundAction::Seek(time_at(pointer.x)));
+    }
+
+    // Selecting: a drag across the lanes draws a region from where it began,
+    // or moves the edge it began on.
+    let drag_id = egui::Id::new(("clip_player_drag_anchor", edit.tag_key));
+    if response.drag_started()
+        && let Some(origin) = origin.filter(|origin| !in_ruler(*origin))
+        && duration > 0.0
+    {
+        let anchor = match region {
+            Some((start, end)) if near(origin.x, start) => end,
+            Some((start, end)) if near(origin.x, end) => start,
+            _ => time_at(origin.x),
+        };
+        ui.data_mut(|data| data.insert_temp(drag_id, anchor));
+    }
+    if let Some(anchor) = ui.data(|data| data.get_temp::<f64>(drag_id)) {
+        if let Some(pointer) = response.interact_pointer_pos()
+            && response.dragged()
+        {
+            let other = time_at(pointer.x);
+            let drawn = (anchor.min(other), anchor.max(other));
+            if region != Some(drawn) {
+                region = Some(drawn);
+                set_region(edit, region);
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|data| data.remove::<f64>(drag_id));
+            // Too narrow to mean anything: a click, not a region.
+            if let Some((start, end)) = region
+                && x_of(end) - x_of(start) < 3.0
+            {
+                region = None;
+                set_region(edit, None);
+            }
+        }
+    }
+
+    // A click on the lanes: off the region clears it; then seek there, or
+    // play from there.
+    if response.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+        && !in_ruler(pointer)
+    {
+        let seconds = time_at(pointer.x);
+        if region.is_some_and(|(start, end)| seconds < start || seconds > end) {
+            region = None;
+            set_region(edit, None);
+        }
+        if loaded.is_some() {
+            edit.sound_play_request
+                .push_back(SoundAction::Seek(seconds));
+        } else {
             queue_play(edit, clips, selected, play);
             // A previewed clip plays at once, so it can start where clicked.
             if previewed.is_some() {
                 edit.sound_play_request
-                    .push_back(SoundAction::Seek(pressed_at(pointer)));
+                    .push_back(SoundAction::Seek(seconds));
             }
         }
+    } else if response.clicked() && loaded.is_none() {
+        queue_play(edit, clips, selected, play);
     }
-    response.on_hover_text(if loaded.is_some() {
-        "Click to jump, drag to scrub"
-    } else if previewed.is_some() {
-        "Click to play from there"
+
+    // Escape clears the region, in the focused tab.
+    if region.is_some()
+        && edit.sound_has_focus
+        && !ui.ctx().wants_keyboard_input()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        set_region(edit, None);
+    }
+
+    if let Some(pointer) = response.hover_pos()
+        && let Some((start, end)) = region
+        && !in_ruler(pointer)
+        && (near(pointer.x, start) || near(pointer.x, end))
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    response.on_hover_text(if loaded.is_some() || previewed.is_some() {
+        "Click to jump \u{00B7} drag to select a region \u{00B7} drag the ruler to scrub"
     } else {
         "Click to play"
     });
+}
+
+/// Where a tab's player keeps its region: the clip it is on, and its start
+/// and end in seconds.
+fn clip_region_id(tag_key: &str) -> egui::Id {
+    egui::Id::new(("clip_player_region", tag_key))
+}
+
+/// The region a tab's player has on `clip`, if any.
+fn stored_region(ui: &Ui, tag_key: &str, clip: &str) -> Option<(f64, f64)> {
+    ui.data(|data| data.get_temp::<(String, f64, f64)>(clip_region_id(tag_key)))
+        .filter(|(region_clip, _, _)| region_clip == clip)
+        .map(|(_, start, end)| (start, end))
 }
 
 /// One lane per channel across `track`: for each physical pixel column, a
@@ -735,6 +874,8 @@ mod tests {
         texts: Vec<(String, egui::Rect)>,
         /// The waveform's bars from the last frame: each rect and its colour.
         bars: Vec<(egui::Rect, egui::Color32)>,
+        /// Filled rects from the last frame, with their fill.
+        fills: Vec<(egui::Rect, egui::Color32)>,
         /// The clips previews were asked for, in order.
         previewed: Vec<String>,
         /// The tab's preview, as the audio state would hand it over.
@@ -751,6 +892,7 @@ mod tests {
                 queued: VecDeque::new(),
                 texts: Vec::new(),
                 bars: Vec::new(),
+                fills: Vec::new(),
                 previewed: Vec::new(),
                 preview: None,
                 timeline: egui::Rect::NOTHING,
@@ -814,6 +956,14 @@ mod tests {
                         .collect::<Vec<_>>()
                 })
                 .collect();
+            self.fills = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) => Some((rect.rect, rect.fill)),
+                    _ => None,
+                })
+                .collect();
             self.texts = output
                 .shapes
                 .iter()
@@ -869,6 +1019,38 @@ mod tests {
             self.frame(vec![button(false)]);
         }
 
+        /// Press at `from`, move to `to` over a few frames, release there.
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
+            for step in 1..=4 {
+                let pos = from + (to - from) * (step as f32 / 4.0);
+                self.frame(vec![egui::Event::PointerMoved(pos)]);
+            }
+            self.frame(vec![button(to, false)]);
+            self.frame(Vec::new());
+        }
+
+        /// A point `fraction` of the way along the track, on the lanes.
+        fn lanes_at(&self, fraction: f32) -> egui::Pos2 {
+            let track = self.timeline;
+            egui::pos2(track.left() + track.width() * fraction, track.center().y)
+        }
+
+        /// A point `fraction` of the way along the ruler.
+        fn ruler_at(&self, fraction: f32) -> egui::Pos2 {
+            let track = self.timeline;
+            egui::pos2(
+                track.left() + track.width() * fraction,
+                track.top() - RULER_HEIGHT / 2.0,
+            )
+        }
+
         fn key(&mut self, key: egui::Key) {
             let event = |pressed| egui::Event::Key {
                 key,
@@ -894,6 +1076,10 @@ mod tests {
                         SoundAction::TogglePause => "toggle".to_owned(),
                         SoundAction::Stop => "stop".to_owned(),
                         SoundAction::Seek(seconds) => format!("seek {seconds:.1}"),
+                        SoundAction::SetRegion(Some((start, end))) => {
+                            format!("region {start:.1}-{end:.1}")
+                        }
+                        SoundAction::SetRegion(None) => "region none".to_owned(),
                         _ => "other".to_owned(),
                     };
                     (request.clip, action)
@@ -989,34 +1175,114 @@ mod tests {
         );
     }
 
+    /// A click on the lanes seeks once; dragging the ruler scrubs, seeking
+    /// on every frame it moves.
     #[test]
-    fn the_timeline_seeks_on_a_click_and_scrubs_on_a_drag() {
+    fn the_lanes_seek_on_a_click_and_the_ruler_scrubs() {
         let mut h = Harness::new();
         h.playback = Some(loaded("id-a", true));
         h.frame(Vec::new());
         h.frame(Vec::new());
-        let track = h.timeline;
-        assert!(track.width() > 100.0, "timeline not found: {track:?}");
-        let at =
-            |fraction: f32| egui::pos2(track.left() + track.width() * fraction, track.center().y);
-        h.click(at(0.5));
+        assert!(
+            h.timeline.width() > 100.0,
+            "timeline not found: {:?}",
+            h.timeline
+        );
+        h.click(h.lanes_at(0.5));
         assert_eq!(h.take(), [(None, "seek 1.0".to_owned())]);
 
-        // A drag seeks on every frame it moves: the sound scrubs.
         let press = egui::Event::PointerButton {
-            pos: at(0.25),
+            pos: h.ruler_at(0.25),
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         };
-        h.frame(vec![egui::Event::PointerMoved(at(0.25)), press]);
+        h.frame(vec![egui::Event::PointerMoved(h.ruler_at(0.25)), press]);
         h.playback = Some(PlaybackView {
             position: 0.5,
             ..loaded("id-a", true)
         });
-        h.frame(vec![egui::Event::PointerMoved(at(0.75))]);
+        let to = h.ruler_at(0.75);
+        h.frame(vec![egui::Event::PointerMoved(to)]);
         let seeks: Vec<String> = h.take().into_iter().map(|(_, action)| action).collect();
         assert_eq!(seeks, ["seek 0.5", "seek 1.5"]);
+    }
+
+    /// A drag across the lanes selects a region of this clip, drawn and read
+    /// out; a drag too narrow to mean anything is a click.
+    #[test]
+    fn dragging_the_lanes_selects_a_region() {
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", false));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        let queued = h.take();
+        assert_eq!(
+            queued.last(),
+            Some(&(Some("id-a".to_owned()), "region 0.5-1.5".to_owned())),
+            "{queued:?}"
+        );
+        assert!(
+            h.texts
+                .iter()
+                .any(|(text, _)| text == "0:00.500 \u{2013} 0:01.500 (0:01.000)")
+        );
+        let band = foundation_blue().gamma_multiply(0.18);
+        let drawn = h
+            .fills
+            .iter()
+            .find(|(_, fill)| *fill == band)
+            .map(|(rect, _)| *rect)
+            .expect("no region band drawn");
+        assert!(
+            (drawn.left() - h.lanes_at(0.25).x).abs() < 2.0
+                && (drawn.right() - h.lanes_at(0.75).x).abs() < 2.0,
+            "the band does not cover the region: {drawn:?}"
+        );
+
+        // Grabbing an edge moves that edge.
+        h.drag(h.lanes_at(0.75), h.lanes_at(0.5));
+        assert_eq!(
+            h.take().last().map(|(_, action)| action.as_str()),
+            Some("region 0.5-1.0")
+        );
+
+        // A click outside clears it and seeks.
+        h.click(h.lanes_at(0.9));
+        assert_eq!(
+            h.take(),
+            [
+                (Some("id-a".to_owned()), "region none".to_owned()),
+                (None, "seek 1.8".to_owned()),
+            ]
+        );
+    }
+
+    /// Escape clears the region in the focused tab, and so does picking
+    /// another clip: a region belongs to the clip it was drawn on.
+    #[test]
+    fn escape_and_another_clip_clear_the_region() {
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", false));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        h.take();
+        h.key(egui::Key::Escape);
+        assert_eq!(
+            h.take(),
+            [(Some("id-a".to_owned()), "region none".to_owned())]
+        );
+
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        h.take();
+        let next = h.find("\u{25B6}", 0);
+        h.click(next);
+        assert_eq!(
+            h.take(),
+            [(Some("id-a".to_owned()), "region none".to_owned())]
+        );
     }
 
     #[test]
