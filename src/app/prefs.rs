@@ -74,12 +74,9 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
         if let Some(object) = migrated.as_object_mut() {
             object.remove("editing_kit_paths");
             object.remove("custom_editing_kit_profiles");
-            object.insert(
-                "editing_kit_profiles".to_owned(),
-                Value::Array(custom_editing_kit_profiles_value(
-                    &prefs.custom_editing_kit_profiles,
-                )),
-            );
+            let mut profiles = custom_editing_kit_profiles_value(&prefs.custom_editing_kit_profiles);
+            profiles.extend(prefs.unusable_kit_entries.profiles.iter().cloned());
+            object.insert("editing_kit_profiles".to_owned(), Value::Array(profiles));
             if let Ok(text) = serde_json::to_string_pretty(&migrated)
                 && let Err(error) = write_text_atomic(&prefs_path(), &text, "preferences")
             {
@@ -253,7 +250,41 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
+        unusable_kit_entries: UnusableKitEntries {
+            profiles: entries_for_unsupported_games(
+                value
+                    .get("editing_kit_profiles")
+                    .or_else(|| value.get("custom_editing_kit_profiles")),
+            ),
+            aliases: entries_for_unsupported_games(value.get("ek_folder_aliases")),
+        },
     }
+}
+
+/// The entries of a profile or alias array whose `game` this build does not
+/// support — missing, empty or unknown, such as one a newer Baboon added.
+///
+/// They used to be dropped while loading, so the next save deleted them for
+/// good. They are kept as written instead, never offered as kits, and written
+/// back after the usable ones. An entry naming a supported game is the
+/// loader's to accept or reject, never kept here, so no entry is both.
+fn entries_for_unsupported_games(entries: Option<&Value>) -> Vec<Value> {
+    entries
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .get("game")
+                        .and_then(Value::as_str)
+                        .and_then(|game| supported_ek_game_id(game.trim()))
+                        .is_none()
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn load_pos2(value: &Value, key: &str) -> Option<egui::Pos2> {
@@ -724,8 +755,11 @@ fn prefs_to_value(
                 "folder_name": alias.folder_name,
                 "game": alias.game,
             })
-        }).collect::<Vec<_>>(),
-        "editing_kit_profiles": custom_editing_kit_profiles_value(&profiles),
+        }).chain(prefs.unusable_kit_entries.aliases.iter().cloned()).collect::<Vec<_>>(),
+        "editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)
+            .into_iter()
+            .chain(prefs.unusable_kit_entries.profiles.iter().cloned())
+            .collect::<Vec<_>>(),
         "tool_commands_window_pos": prefs.tool_commands_window_pos.map(|pos| vec![pos.x, pos.y]),
         "tool_commands_window_size": prefs.tool_commands_window_size.map(|size| vec![size.x, size.y]),
         "tool_commands_left_width": prefs.tool_commands_left_width,
@@ -1455,6 +1489,59 @@ mod chimp_pref_tests {
             prefs_from_value(&legacy).custom_editing_kit_profiles,
             previous
         );
+    }
+
+    /// A profile or folder alias naming a game this build does not know (one
+    /// a newer Baboon supports, or none) used to be dropped on load, and so
+    /// deleted from the file by the next save of any preference.
+    #[test]
+    fn kits_for_unsupported_games_survive_a_save_but_are_not_offered() {
+        let usable = json!({
+            "id": "6f1c3f9e-1d1b-4c2a-9a55-0d6f1d1b2c3a",
+            "name": "Halo 3",
+            "game": "halo3_mcc",
+            "root": "/kits/h3",
+        });
+        let future = json!({
+            "id": "0b5e2a7c-3a43-4f37-8f2e-6a9d2c1b4e5f",
+            "name": "Halo Infinite",
+            "game": "haloinfinite",
+            "root": "/kits/hi",
+            "some_newer_setting": [1, 2, 3],
+        });
+        let gameless = json!({
+            "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+            "name": "No game",
+            "game": "",
+            "root": "/kits/none",
+        });
+        let future_alias = json!({ "folder_name": "HIEK", "game": "haloinfinite" });
+        let usable_alias = json!({ "folder_name": "H3EK", "game": "halo3_mcc" });
+        let stored = json!({
+            "editing_kit_profiles": [usable, future, gameless],
+            "ek_folder_aliases": [usable_alias, future_alias],
+        });
+
+        let prefs = prefs_from_value(&stored);
+        let offered: Vec<&str> = prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .map(|profile| profile.game.as_str())
+            .collect();
+        assert_eq!(offered, ["halo3_mcc"], "only a supported game is a kit");
+        assert_eq!(prefs.ek_folder_aliases.len(), 1);
+
+        let written = prefs_to_value(&prefs, &HashSet::new(), true);
+        let profiles = written["editing_kit_profiles"].as_array().unwrap();
+        assert!(profiles.contains(&future), "{profiles:#?}");
+        assert!(profiles.contains(&gameless), "{profiles:#?}");
+        assert_eq!(profiles.len(), 3);
+        let aliases = written["ek_folder_aliases"].as_array().unwrap();
+        assert!(aliases.contains(&future_alias), "{aliases:#?}");
+        assert_eq!(aliases.len(), 2);
+
+        // Written back and read again, nothing changes.
+        assert!(prefs_from_value(&written) == prefs);
     }
 
     #[test]

@@ -467,6 +467,17 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
     pub(in crate::app) custom_color_swatches: Vec<Option<ColorPaletteSwatch>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
+    /// Editing-kit profiles and folder aliases naming a game this build does
+    /// not support (a newer Baboon's, or none at all), kept as they were read
+    /// so saving preferences writes them back. They are never offered as kits.
+    pub(in crate::app) unusable_kit_entries: UnusableKitEntries,
+}
+
+/// See [`GuiPrefs::unusable_kit_entries`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::app) struct UnusableKitEntries {
+    pub(in crate::app) profiles: Vec<serde_json::Value>,
+    pub(in crate::app) aliases: Vec<serde_json::Value>,
 }
 
 impl Default for GuiPrefs {
@@ -509,6 +520,7 @@ impl Default for GuiPrefs {
             editing_kit_favorites: Vec::new(),
             custom_color_swatches: default_color_swatches(),
             palette_last_dir: None,
+            unusable_kit_entries: UnusableKitEntries::default(),
         }
     }
 }
