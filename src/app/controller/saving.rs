@@ -7,13 +7,34 @@ use std::time::Instant;
 
 impl Baboon {
     /// Applies `WorkerMessage::ExportFinished` to the application status.
+    ///
+    /// It leaves `chimp_level_job` alone: many exports share this message,
+    /// and one finishing while a level export runs used to clear the level's
+    /// progress and release the container-write guard while its worker was
+    /// still reading. Only the level export's own message ends it.
     pub(super) fn handle_export_finished(&mut self, result: Result<String, String>) -> bool {
-        self.chimp_level_job = None;
         self.status = match result {
             Ok(message) => message,
             Err(error) => error,
         };
         false
+    }
+
+    /// Applies `WorkerMessage::ChimpLevelExportFinished`: ends the level job
+    /// it names, if that is still the current one, and reports the result.
+    pub(super) fn handle_chimp_level_export_finished(
+        &mut self,
+        job: u64,
+        result: Result<String, String>,
+    ) -> bool {
+        if self
+            .chimp_level_job
+            .as_ref()
+            .is_some_and(|current| current.id == job)
+        {
+            self.chimp_level_job = None;
+        }
+        self.handle_export_finished(result)
     }
 
     /// Applies `WorkerMessage::ChimpLevelProgress`.
@@ -391,4 +412,30 @@ pub(super) fn lexical_normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+#[cfg(test)]
+mod level_export_job_tests {
+    use super::*;
+
+    /// Many exports share `ExportFinished`; one finishing while a level export
+    /// runs used to end the level's job, hiding its progress and releasing
+    /// the container-write guard while its worker was still reading.
+    #[test]
+    fn only_the_level_exports_own_completion_ends_its_job() {
+        let mut app = Baboon::for_test();
+        let kit = app.kits[0].id;
+        app.chimp_level_job = Some(ChimpLevelJob::for_test(7, kit));
+
+        app.handle_export_finished(Ok("Extracted a texture".to_owned()));
+        assert!(app.chimp_level_job.is_some(), "another export does not end it");
+        assert_eq!(app.status, "Extracted a texture");
+
+        app.handle_chimp_level_export_finished(6, Ok("an earlier level".to_owned()));
+        assert!(app.chimp_level_job.is_some(), "nor does an earlier level job");
+
+        app.handle_chimp_level_export_finished(7, Ok("Exported level".to_owned()));
+        assert!(app.chimp_level_job.is_none());
+        assert_eq!(app.status, "Exported level");
+    }
 }

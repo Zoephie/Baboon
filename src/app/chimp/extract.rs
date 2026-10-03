@@ -195,6 +195,9 @@ impl ChimpLevelPhase {
 
 /// A level export in flight, and how far along it is.
 pub(in crate::app) struct ChimpLevelJob {
+    /// Never reused, so a finished export can tell whether it is still the
+    /// current job. See [`next_chimp_level_job_id`].
+    pub(in crate::app) id: u64,
     pub(in crate::app) kit: KitId,
     pub(super) name: String,
     pub(in crate::app) phase: ChimpLevelPhase,
@@ -205,7 +208,26 @@ pub(in crate::app) struct ChimpLevelJob {
     pub(in crate::app) phase_started: Instant,
 }
 
+/// A fresh id for a [`ChimpLevelJob`].
+pub(in crate::app) fn next_chimp_level_job_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl ChimpLevelJob {
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(id: u64, kit: KitId) -> Self {
+        Self {
+            id,
+            kit,
+            name: "level".to_owned(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done: 0,
+            total: 1,
+            phase_started: Instant::now(),
+        }
+    }
+
     pub(super) fn fraction(&self) -> f32 {
         if self.total == 0 {
             return 0.0;
@@ -590,7 +612,9 @@ impl Baboon {
             MeshDetail::Fallback
         };
         let ChimpLevelExportPrompt { cells, format, .. } = prompt;
+        let job = next_chimp_level_job_id();
         self.chimp_level_job = Some(ChimpLevelJob {
+            id: job,
             kit,
             name: name.clone(),
             phase: ChimpLevelPhase::ReadingCells,
@@ -659,15 +683,17 @@ impl Baboon {
                         )
                     }),
                 };
-                WorkerMessage::ExportFinished(result.map(|message| match left_out {
-                    Some(left_out) => format!("{message}. {left_out}"),
-                    None => message,
-                }))
+                WorkerMessage::ChimpLevelExportFinished {
+                    job,
+                    result: result.map(|message| match left_out {
+                        Some(left_out) => format!("{message}. {left_out}"),
+                        None => message,
+                    }),
+                }
             },
-            move |error| {
-                WorkerMessage::ExportFinished(Err(format!(
-                    "Exporting {panic_name} failed: {error}"
-                )))
+            move |error| WorkerMessage::ChimpLevelExportFinished {
+                job,
+                result: Err(format!("Exporting {panic_name} failed: {error}")),
             },
         );
     }
@@ -1584,6 +1610,7 @@ mod tests {
 
     fn job_at(done: usize, total: usize, elapsed: Duration) -> ChimpLevelJob {
         ChimpLevelJob {
+            id: 0,
             kit: KitId(0),
             name: "C10".to_owned(),
             phase: ChimpLevelPhase::ReadingCells,

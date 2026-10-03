@@ -1201,6 +1201,9 @@ impl Baboon {
                     self.handle_container_dump_finished(stamp, result)
                 }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
+                WorkerMessage::ChimpLevelExportFinished { job, result } => {
+                    self.handle_chimp_level_export_finished(job, result)
+                }
                 WorkerMessage::PokePreflightFinished { kit, key, result } => {
                     self.handle_poke_preflight(kit, key, result);
                     false

@@ -286,6 +286,12 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<ContainerDumpReport, String>,
     },
     ExportFinished(Result<String, String>),
+    /// A Chimp level export finished. Separate from `ExportFinished` because
+    /// only this one may end `chimp_level_job`, and only the job it names.
+    ChimpLevelExportFinished {
+        job: u64,
+        result: Result<String, String>,
+    },
     PokePreflightFinished {
         kit: KitId,
         key: String,
