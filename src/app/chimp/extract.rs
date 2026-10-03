@@ -398,6 +398,30 @@ impl ChimpMeshFormat {
     }
 }
 
+/// The bytes of export `index` as the document holds it now.
+///
+/// `payloads` are the bytes the package was read with. An edit changes the
+/// decoded export, not its payload, so for a dirty document those bytes are
+/// stale; `serialize` writes the decoded export instead, as rebuilding the
+/// package does. An export that never decoded has only its payload. `None`
+/// when there is no such export.
+fn chimp_export_bytes(
+    document: &ChimpDocument,
+    index: usize,
+    serialize: impl FnOnce(&str, &Export) -> Result<Vec<u8>, String>,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(payload) = document.payloads.get(index) else {
+        return Ok(None);
+    };
+    if document.dirty
+        && let Some(export) = document.exports.get(index)
+        && let (Some(class), Ok(decoded)) = (export.class.as_deref(), &export.decoded)
+    {
+        return serialize(class, decoded).map(Some);
+    }
+    Ok(Some(payload.clone()))
+}
+
 impl Baboon {
     pub(super) fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
         let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
@@ -438,8 +462,24 @@ impl Baboon {
         let index = document
             .selected_export
             .min(document.payloads.len().saturating_sub(1));
-        let Some(payload) = document.payloads.get(index) else {
-            return;
+        let world = match &self.kits[kit_index].chimp.mount {
+            ChimpMount::Ready(world) => Some(world),
+            _ => None,
+        };
+        let payload = match chimp_export_bytes(document, index, |class, decoded| {
+            let world = world.ok_or("Chimp must be mounted to extract an edited export")?;
+            validate_chimp_header(document)?;
+            let names = document.header.name_map.copy_raw_names();
+            let resolver = world.resolver(&document.header, &document.original, &names);
+            write_export_in(class, decoded, world.usmap(), Some(&resolver))
+                .map_err(|error| format!("Could not serialize export {index}: {error:#}"))
+        }) {
+            Ok(Some(payload)) => payload,
+            Ok(None) => return,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
         };
         let name = document
             .exports
@@ -1500,6 +1540,29 @@ pub(super) fn chimp_level_export_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An edit changes the decoded export, not the payload it was read from,
+    /// so extracting a dirty document's export used to write the bytes from
+    /// before the edit.
+    #[test]
+    fn extracting_an_edited_export_writes_the_edit() {
+        let mut document = crate::app::chimp::test_support::rename_fixture();
+        document.payloads = vec![b"as read".to_vec()];
+        document.exports[0].class = Some("/Script/Engine.Material".to_owned());
+        let serialize = |_: &str, _: &Export| Ok(b"as edited".to_vec());
+
+        assert_eq!(
+            chimp_export_bytes(&document, 0, serialize).unwrap().as_deref(),
+            Some(&b"as read"[..]),
+            "an unedited export is its payload"
+        );
+        document.dirty = true;
+        assert_eq!(
+            chimp_export_bytes(&document, 0, serialize).unwrap().as_deref(),
+            Some(&b"as edited"[..])
+        );
+        assert_eq!(chimp_export_bytes(&document, 1, serialize).unwrap(), None);
+    }
 
     #[test]
     fn a_mesh_name_names_the_model_its_textures_belong_to() {
