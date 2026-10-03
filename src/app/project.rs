@@ -975,6 +975,77 @@ fn read_history(
     Ok(history)
 }
 
+/// Take the lock that keeps a project's writes in order.
+///
+/// It guards no data, only the order of writes, so a writer that panicked
+/// while holding it left nothing half-updated behind it: each write is its
+/// own transaction. Refusing a poisoned lock, as it used to be, turned one
+/// panicking autosave into every later checkpoint failing for the session.
+fn lock_campaign_project_writer(lock: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// One autosave of a project's recovery file, for
+/// [`write_campaign_project_in_background`].
+struct CampaignProjectWrite {
+    revision: u64,
+    path: PathBuf,
+    fingerprint: Vec<u8>,
+    snapshot: CampaignProjectSnapshot,
+    on_disk: Option<SavedProjectState>,
+    write_lock: Arc<Mutex<()>>,
+    latest_write_revision: Arc<AtomicU64>,
+}
+
+/// Write a project autosave off the UI thread and report it with
+/// `CampaignProjectSaved`, which clears the save in flight.
+///
+/// It goes through `spawn_worker` so that a write that panics still reports:
+/// on a bare thread it sent nothing, and the save in flight that refuses
+/// every later autosave was never cleared.
+fn write_campaign_project_in_background(
+    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    write: CampaignProjectWrite,
+) {
+    let CampaignProjectWrite {
+        revision,
+        path,
+        fingerprint,
+        snapshot,
+        on_disk,
+        write_lock,
+        latest_write_revision,
+    } = write;
+    let (panic_path, panic_fingerprint) = (path.clone(), fingerprint.clone());
+    spawn_worker(
+        tx,
+        ctx,
+        move || {
+            let result = {
+                let _guard = lock_campaign_project_writer(&write_lock);
+                if latest_write_revision.load(Ordering::SeqCst) != revision {
+                    Ok(())
+                } else {
+                    save_campaign_project(&path, &snapshot, on_disk.as_ref(), ProjectScope::Session)
+                }
+            };
+            WorkerMessage::CampaignProjectSaved {
+                revision,
+                path,
+                fingerprint,
+                result,
+            }
+        },
+        move |error| WorkerMessage::CampaignProjectSaved {
+            revision,
+            path: panic_path,
+            fingerprint: panic_fingerprint,
+            result: Err(format!("Saving the project failed: {error}")),
+        },
+    );
+}
+
 fn logical_path_from_display(display_path: &str) -> String {
     let normalized = display_path.replace('\\', "/");
     normalized
@@ -1678,9 +1749,7 @@ impl Baboon {
             .store(revision, Ordering::SeqCst);
         project.save_in_flight = None;
         let write_lock = project.write_lock.clone();
-        let _write_guard = write_lock
-            .lock()
-            .map_err(|_| "Campaign project writer lock was poisoned".to_owned())?;
+        let _write_guard = lock_campaign_project_writer(&write_lock);
         let on_disk = project.saved_digests.clone();
         save_campaign_project(
             &project.recovery_path,
@@ -1764,32 +1833,19 @@ impl Baboon {
                 // What this write will leave on disk, held until it succeeds.
                 let on_disk = project.saved_digests.clone();
                 project.pending_digests = Some(snapshot.digests());
-                let tx = self.tx.clone();
-                let repaint = ctx.clone();
-                thread::spawn(move || {
-                    let result = write_lock
-                        .lock()
-                        .map_err(|_| "Campaign project writer lock was poisoned".to_owned())
-                        .and_then(|_guard| {
-                            if latest_write_revision.load(Ordering::SeqCst) != revision {
-                                Ok(())
-                            } else {
-                                save_campaign_project(
-                                    &path,
-                                    &snapshot,
-                                    on_disk.as_ref(),
-                                    ProjectScope::Session,
-                                )
-                            }
-                        });
-                    let _ = tx.send(WorkerMessage::CampaignProjectSaved {
+                write_campaign_project_in_background(
+                    &self.tx,
+                    ctx,
+                    CampaignProjectWrite {
                         revision,
                         path,
                         fingerprint,
-                        result,
-                    });
-                    repaint.request_repaint();
-                });
+                        snapshot,
+                        on_disk,
+                        write_lock,
+                        latest_write_revision,
+                    },
+                );
             }
         }
         // Wake when the next check is due: an edit made in this frame must be
@@ -2620,6 +2676,70 @@ mod tests {
             "the stale row was replaced, not merged into"
         );
         let _ = fs::remove_file(&recovery);
+    }
+
+    fn autosave_of(project: &ActiveCampaignProject, revision: u64) -> CampaignProjectWrite {
+        let snapshot = snapshot_of(vec![overlay("a", b"one")]);
+        CampaignProjectWrite {
+            revision,
+            path: project.recovery_path.clone(),
+            fingerprint: snapshot.fingerprint(),
+            snapshot,
+            on_disk: None,
+            write_lock: project.write_lock.clone(),
+            latest_write_revision: project.latest_write_revision.clone(),
+        }
+    }
+
+    /// An autosave that panicked sent nothing, so its save stayed in flight and
+    /// every later autosave was skipped for the session.
+    #[test]
+    fn an_autosave_that_panics_is_no_longer_in_flight() {
+        let mut app = Baboon::for_test();
+        let recovery = temp_project("panicking-autosave");
+        let mut project = ActiveCampaignProject::adopted(recovery.clone(), &snapshot_of(Vec::new()), 0.0);
+        project.save_in_flight = Some(3);
+        project.latest_write_revision.store(3, Ordering::SeqCst);
+        let write = autosave_of(&project, 3);
+        app.kits[0].campaign_project = Some(project);
+
+        let ctx = egui::Context::default();
+        crate::app::with_panicking_workers(|| {
+            write_campaign_project_in_background(&app.tx, &ctx, write)
+        });
+        assert!(crate::app::apply_next_worker_message(&mut app), "the autosave answered");
+        let project = app.kits[0].campaign_project.as_ref().unwrap();
+        assert_eq!(project.save_in_flight, None);
+        assert!(app.status.contains("crashed"), "{}", app.status);
+        let _ = fs::remove_file(&recovery);
+    }
+
+    /// The writer lock guards only the order of writes. A writer that panicked
+    /// while holding it poisoned it, and every later checkpoint then failed.
+    #[test]
+    fn a_poisoned_writer_lock_does_not_stop_later_saves() {
+        let recovery = temp_project("poisoned-lock");
+        let project = ActiveCampaignProject::adopted(recovery.clone(), &snapshot_of(Vec::new()), 0.0);
+        project.latest_write_revision.store(1, Ordering::SeqCst);
+        let lock = project.write_lock.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = lock.lock().unwrap();
+            panic!("a writer fell over while holding the lock");
+        })
+        .join();
+        assert!(project.write_lock.is_poisoned());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        write_campaign_project_in_background(&tx, &egui::Context::default(), autosave_of(&project, 1));
+        let Ok(WorkerMessage::CampaignProjectSaved { result, .. }) =
+            rx.recv_timeout(std::time::Duration::from_secs(10))
+        else {
+            panic!("the autosave did not answer");
+        };
+        let identities = load_campaign_project(&recovery).map(|loaded| loaded.overlays.len());
+        let _ = fs::remove_file(&recovery);
+        assert_eq!(result, Ok(()));
+        assert_eq!(identities.ok(), Some(1), "the write reached the file");
     }
 
     /// The recovery file the workspace autosaves to is picked back up as-is, so
