@@ -119,6 +119,9 @@ impl Baboon {
                 .map(|_| FieldFilterAction::RestoreDefaults)
         };
 
+        // Where the sound player's keyboard shortcuts act: the focused tab.
+        let sound_has_focus = self.active == kit_index
+            && self.kits[kit_index].selected_key.as_deref() == Some(key.as_str());
         let kit = &mut self.kits[kit_index];
         let kit_id = kit.id;
         let bitmap_hover_requests =
@@ -192,6 +195,7 @@ impl Baboon {
             sound_volume,
             sound_playback,
             sound_looping,
+            sound_has_focus,
             sound_extract_request: &mut self.pending_sound_extract,
             sound_language: self.audio.language.as_deref(),
             ce_sound: ce_sound.as_deref(),

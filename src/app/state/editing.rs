@@ -468,6 +468,9 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) sound_playback: Option<super::audio::PlaybackView>,
     /// Whether sounds loop, for the transport's loop toggle.
     pub(in crate::app) sound_looping: bool,
+    /// Whether this pane is the focused tab, which is where the player's
+    /// keyboard shortcuts act.
+    pub(in crate::app) sound_has_focus: bool,
     /// Set when the user extracts sound audio to disk (per-perm or whole-tag);
     /// the app drains it to decode + write the files.
     pub(in crate::app) sound_extract_request: &'a mut Option<super::sound_extract::ExtractRequest>,
@@ -595,6 +598,7 @@ impl<'a> FieldEditContext<'a> {
             sound_volume: 1.0,
             sound_playback: None,
             sound_looping: false,
+            sound_has_focus: false,
             sound_extract_request: &mut sinks.sound_extract_request,
             sound_language: None,
             ce_sound: None,

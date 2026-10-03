@@ -5,6 +5,10 @@ use super::*;
 
 mod h2;
 pub(in crate::app) use h2::*;
+mod player;
+#[cfg(test)]
+pub(super) use player::clip_selection_id;
+use player::*;
 
 /// The `sound_classes` (`sncl`) tag group.
 pub(in crate::app) fn is_sound_classes_group(group_tag: u32) -> bool {
@@ -438,13 +442,168 @@ fn draw_sound_transport(
     edit: &mut FieldEditContext<'_>,
     languages: &[LanguageChoice],
 ) {
-    let error_status = edit.sound_status.filter(|status| {
+    ui.horizontal(|ui| {
+        draw_transport_buttons(ui, edit);
+        draw_sound_output_controls(ui, edit, languages);
+    });
+    draw_sound_errors(ui, edit);
+}
+
+/// Play/pause, stop, loop, the interim timeline slider and the time, for the
+/// players that do not have the clip player yet.
+fn draw_transport_buttons(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    let playback = edit.sound_playback.clone();
+    let playing = playback.as_ref().is_some_and(|p| p.playing);
+    let (icon, hover) = if playing {
+        ("\u{23F8}", "Pause")
+    } else {
+        ("\u{25B6}", "Play from the playhead")
+    };
+    if ui
+        .add_enabled(playback.is_some(), egui::Button::new(icon))
+        .on_hover_text(hover)
+        .on_disabled_hover_text("Play a permutation below first")
+        .clicked()
+    {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::TogglePause);
+    }
+    if ui
+        .button(RichText::new("\u{25A0}"))
+        .on_hover_text("Stop and rewind")
+        .clicked()
+    {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::Stop);
+    }
+    let mut looping = edit.sound_looping;
+    if ui
+        .toggle_value(&mut looping, "\u{27F2}")
+        .on_hover_text("Loop")
+        .changed()
+    {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::SetLooping(looping));
+    }
+    if let Some(playback) = &playback {
+        // The timeline until the waveform replaces it: dragging seeks as it
+        // goes, so the sound scrubs, and a click jumps straight there.
+        let mut position = playback.position;
+        ui.spacing_mut().slider_width = 220.0;
+        if ui
+            .add(
+                egui::Slider::new(&mut position, 0.0..=playback.duration.max(0.001))
+                    .show_value(false)
+                    .trailing_fill(true),
+            )
+            .on_hover_text("Drag to scrub, click to jump")
+            .changed()
+        {
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::Seek(position));
+        }
+        ui.label(
+            RichText::new(format!(
+                "{} / {}",
+                format_play_time(playback.position),
+                format_play_time(playback.duration)
+            ))
+            .monospace()
+            .color(text_dark()),
+        )
+        .on_hover_text(&playback.label);
+    }
+}
+
+/// Volume, the language choice and the status line, shared by every player.
+pub(super) fn draw_sound_output_controls(
+    ui: &mut Ui,
+    edit: &mut FieldEditContext<'_>,
+    languages: &[LanguageChoice],
+) {
+    let error_status = sound_error_status(edit);
+    let mut volume = edit.sound_volume;
+    ui.spacing_mut().slider_width = 90.0;
+    if ui
+        .add(
+            egui::Slider::new(&mut volume, 0.0..=1.0)
+                .text(RichText::new("\u{1F50A}").color(subtle_dark()))
+                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+        )
+        .on_hover_text("Playback volume")
+        .changed()
+    {
+        edit.sound_play_request
+            .push_back(super::audio::SoundAction::SetVolume(volume));
+    }
+    // Language selector — picks which localized audio plays and is
+    // extracted (to `data_<lang>\`). A language this source lacks shows as
+    // the default, which is what plays.
+    if !languages.is_empty() {
+        let current = edit.sound_language.map(str::to_owned);
+        let shown = languages
+            .iter()
+            .find(|choice| {
+                choice.available
+                    && choice.value.as_deref().map(str::to_ascii_lowercase)
+                        == current.as_deref().map(str::to_ascii_lowercase)
+            })
+            .or_else(|| languages.iter().find(|choice| choice.available))
+            .or(languages.first());
+        let mut selected = shown.and_then(|choice| choice.value.clone());
+        // The selection is shared between editing kits. Commit the visual
+        // fallback too: otherwise a language chosen in H2 but absent from
+        // H3 continues opening that missing bank while the combo says
+        // "default".
+        let before = current;
+        egui::ComboBox::from_id_salt("sound_language")
+            .selected_text(format!(
+                "\u{1F310} {}",
+                shown.map_or("default", |choice| choice.label.as_str())
+            ))
+            .show_ui(ui, |ui| {
+                for choice in languages {
+                    let response = ui
+                        .add_enabled_ui(choice.available, |ui| {
+                            ui.selectable_value(&mut selected, choice.value.clone(), &choice.label)
+                        })
+                        .inner;
+                    if let Some(reason) = &choice.unavailable_reason {
+                        response.on_hover_text(reason);
+                    }
+                }
+            })
+            .response
+            .on_hover_text(format!(
+                "Language to play and extract ({} of {} available)",
+                languages.iter().filter(|choice| choice.available).count(),
+                languages.len()
+            ));
+        if selected != before {
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::SetLanguage(selected));
+        }
+    }
+    if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
+        ui.label(RichText::new(status).color(subtle_dark()));
+    }
+}
+
+/// A status line that reports a failure, which [`draw_sound_errors`] shows on
+/// its own line rather than beside the controls.
+fn sound_error_status<'a>(edit: &FieldEditContext<'a>) -> Option<&'a str> {
+    edit.sound_status.filter(|status| {
         status.starts_with("FMOD audio unavailable:")
             || status.starts_with("decode failed:")
             || status.starts_with("resolve failed:")
             || status.starts_with("Extraction cancelled")
             || *status == "no audio output device"
-    });
+    })
+}
+
+/// The player's failure line, and the missing-language-bank warning.
+pub(super) fn draw_sound_errors(ui: &mut Ui, edit: &FieldEditContext<'_>) {
+    let error_status = sound_error_status(edit);
     let missing_fmod_languages = matches!(
         edit.game,
         Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
@@ -453,138 +612,6 @@ fn draw_sound_transport(
     .flatten()
     .filter(|root| blam_tags::audio::SoundBanks::available_languages(root).is_empty())
     .map(|root| root.parent().unwrap_or(root).join("fmod").join("pc"));
-    ui.horizontal(|ui| {
-        let playback = edit.sound_playback.clone();
-        let playing = playback.as_ref().is_some_and(|p| p.playing);
-        let (icon, hover) = if playing {
-            ("\u{23F8}", "Pause (Space)")
-        } else {
-            ("\u{25B6}", "Play from the playhead (Space)")
-        };
-        if ui
-            .add_enabled(playback.is_some(), egui::Button::new(icon))
-            .on_hover_text(hover)
-            .on_disabled_hover_text("Play a permutation below first")
-            .clicked()
-        {
-            edit.sound_play_request
-                .push_back(super::audio::SoundAction::TogglePause);
-        }
-        if ui
-            .button(RichText::new("\u{25A0}"))
-            .on_hover_text("Stop and rewind")
-            .clicked()
-        {
-            edit.sound_play_request
-                .push_back(super::audio::SoundAction::Stop);
-        }
-        let mut looping = edit.sound_looping;
-        if ui
-            .toggle_value(&mut looping, "\u{27F2}")
-            .on_hover_text("Loop")
-            .changed()
-        {
-            edit.sound_play_request
-                .push_back(super::audio::SoundAction::SetLooping(looping));
-        }
-        if let Some(playback) = &playback {
-            // The timeline until the waveform replaces it: dragging seeks as it
-            // goes, so the sound scrubs, and a click jumps straight there.
-            let mut position = playback.position;
-            ui.spacing_mut().slider_width = 220.0;
-            if ui
-                .add(
-                    egui::Slider::new(&mut position, 0.0..=playback.duration.max(0.001))
-                        .show_value(false)
-                        .trailing_fill(true),
-                )
-                .on_hover_text("Drag to scrub, click to jump")
-                .changed()
-            {
-                edit.sound_play_request
-                    .push_back(super::audio::SoundAction::Seek(position));
-            }
-            ui.label(
-                RichText::new(format!(
-                    "{} / {}",
-                    format_play_time(playback.position),
-                    format_play_time(playback.duration)
-                ))
-                .monospace()
-                .color(text_dark()),
-            )
-            .on_hover_text(&playback.label);
-        }
-        let mut volume = edit.sound_volume;
-        ui.spacing_mut().slider_width = 90.0;
-        if ui
-            .add(
-                egui::Slider::new(&mut volume, 0.0..=1.0)
-                    .text(RichText::new("\u{1F50A}").color(subtle_dark()))
-                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
-            )
-            .on_hover_text("Playback volume")
-            .changed()
-        {
-            edit.sound_play_request
-                .push_back(super::audio::SoundAction::SetVolume(volume));
-        }
-        // Language selector — picks which localized audio plays and is
-        // extracted (to `data_<lang>\`). A language this source lacks shows as
-        // the default, which is what plays.
-        if !languages.is_empty() {
-            let current = edit.sound_language.map(str::to_owned);
-            let shown = languages
-                .iter()
-                .find(|choice| {
-                    choice.available
-                        && choice.value.as_deref().map(str::to_ascii_lowercase)
-                            == current.as_deref().map(str::to_ascii_lowercase)
-                })
-                .or_else(|| languages.iter().find(|choice| choice.available))
-                .or(languages.first());
-            let mut selected = shown.and_then(|choice| choice.value.clone());
-            // The selection is shared between editing kits. Commit the visual
-            // fallback too: otherwise a language chosen in H2 but absent from
-            // H3 continues opening that missing bank while the combo says
-            // "default".
-            let before = current;
-            egui::ComboBox::from_id_salt("sound_language")
-                .selected_text(format!(
-                    "\u{1F310} {}",
-                    shown.map_or("default", |choice| choice.label.as_str())
-                ))
-                .show_ui(ui, |ui| {
-                    for choice in languages {
-                        let response = ui
-                            .add_enabled_ui(choice.available, |ui| {
-                                ui.selectable_value(
-                                    &mut selected,
-                                    choice.value.clone(),
-                                    &choice.label,
-                                )
-                            })
-                            .inner;
-                        if let Some(reason) = &choice.unavailable_reason {
-                            response.on_hover_text(reason);
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(format!(
-                    "Language to play and extract ({} of {} available)",
-                    languages.iter().filter(|choice| choice.available).count(),
-                    languages.len()
-                ));
-            if selected != before {
-                edit.sound_play_request
-                    .push_back(super::audio::SoundAction::SetLanguage(selected));
-            }
-        }
-        if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
-            ui.label(RichText::new(status).color(subtle_dark()));
-        }
-    });
     if let Some(error) = error_status {
         ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {error}"));
     }
@@ -1640,7 +1667,27 @@ pub(in crate::app) fn draw_sound_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit, &languages);
+        let clips: Vec<PlayerClip> = rows
+            .iter()
+            .map(|row| PlayerClip {
+                // The language is part of what plays, so a language change is a
+                // different clip rather than the loaded one.
+                id: format!(
+                    "{}:{}:{}",
+                    row.pr_index,
+                    row.perm_index,
+                    language.unwrap_or("")
+                ),
+                name: row.name.clone(),
+                group: show_pitch_ranges.then(|| format!("pitch range: {}", row.pitch_range)),
+                duration: row_duration(row, source).0,
+            })
+            .collect();
+        let tags_root = edit.tags_root;
+        let selected = draw_clip_player(ui, edit, "sound", &clips, &languages, &mut |index| {
+            row_play_action(tag, &rows[index], source, tags_root)
+        });
+        let row = &rows[selected];
         draw_sound_format_line(ui, tag, &rows, source);
         if let Some(missing) = &missing_language {
             ui.label(
@@ -1767,7 +1814,13 @@ pub(in crate::app) fn draw_sound_player(
                                 language: Some(each),
                                 ..source
                             };
-                            items.extend(build_extract_items(tag, &rows, each_source, &base, false));
+                            items.extend(build_extract_items(
+                                tag,
+                                &rows,
+                                each_source,
+                                &base,
+                                false,
+                            ));
                         }
                         *edit.sound_extract_request = Some(ExtractRequest {
                             items,
@@ -1786,113 +1839,48 @@ pub(in crate::app) fn draw_sound_player(
         });
         ui.data_mut(|d| d.insert_temp(raw_ce_id, raw_ce));
 
-        egui::ScrollArea::vertical()
-            .max_height(220.0)
-            .show(ui, |ui| {
-                egui::Grid::new("sound_permutations")
-                    .striped(true)
-                    .num_columns(5)
-                    .show(ui, |ui| {
-                        let mut last_pitch_range: Option<&str> = None;
-                        for row in &rows {
-                            if show_pitch_ranges && last_pitch_range != Some(row.pitch_range.as_str()) {
-                                last_pitch_range = Some(row.pitch_range.as_str());
-                                ui.label("");
-                                ui.label("");
-                                ui.label(
-                                    RichText::new(format!("pitch range: {}", row.pitch_range))
-                                        .strong()
-                                        .color(subtle_dark()),
-                                );
-                                ui.label("");
-                                ui.label("");
-                                ui.end_row();
-                            }
-                            let (duration, fallback) = row_duration(row, source);
-                            let play_hover = match row.kind {
-                                RowKind::Bank => {
-                                    "Play this permutation from the FMOD bank".to_owned()
-                                }
-                                RowKind::InlineH2 { .. } if localized && !fallback => {
-                                    format!("Play this permutation in {language_name}")
-                                }
-                                RowKind::InlineH2 { .. } if fallback => {
-                                    "Play this permutation in English".to_owned()
-                                }
-                                _ => "Play this permutation".to_owned(),
-                            };
-                            if ui.small_button("\u{25B6}").on_hover_text(play_hover).clicked() {
-                                if let Some(action) =
-                                    row_play_action(tag, row, source, edit.tags_root)
-                                {
-                                    edit.sound_play_request.push_back(action);
-                                }
-                            }
-                            if ui
-                                .small_button("\u{2B07}")
-                                .on_hover_text("Extract this permutation to a file")
-                                .clicked()
-                            {
-                                let ext = row_extract_ext(&row.kind, raw_ce);
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .set_title("Extract permutation")
-                                    .set_file_name(format!(
-                                        "{}.{ext}",
-                                        sanitize_component(&row.name)
-                                    ))
-                                    .save_file()
-                                    && let Some(item_source) =
-                                        row_extract_source(tag, row, source, raw_ce, false)
-                                {
-                                    *edit.sound_extract_request = Some(ExtractRequest {
-                                        items: vec![ExtractItem {
-                                            out_path: path,
-                                            source: item_source,
-                                        }],
-                                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
-                                        label: row.name.clone(),
-                                    });
-                                }
-                            }
-                            ui.label(RichText::new(&row.name).color(text_dark()))
-                                .on_hover_text(row_details(row, h2.as_ref()));
-                            ui.label(
-                                RichText::new(
-                                    duration
-                                        .map(|seconds| format!("{seconds:.2} s"))
-                                        .unwrap_or_default(),
-                                )
-                                .color(subtle_dark()),
-                            );
-                            ui.horizontal(|ui| {
-                                if fallback {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "no {language_name} \u{00B7} plays English"
-                                        ))
-                                        .color(ui.visuals().warn_fg_color),
-                                    );
-                                }
-                                if let Some(gain) = row.gain_db.filter(|gain| gain.abs() >= 0.05) {
-                                    ui.label(
-                                        RichText::new(format!("gain {gain:+.1} dB"))
-                                            .color(subtle_dark()),
-                                    );
-                                }
-                                if let Some(skip) = row.skip_fraction.filter(|skip| *skip > 0.0) {
-                                    ui.label(
-                                        RichText::new(format!("skip {:.0}%", skip * 100.0))
-                                            .color(subtle_dark()),
-                                    )
-                                    .on_hover_text(
-                                        "Fraction of requests for this permutation that are ignored",
-                                    );
-                                }
-                            });
-                            ui.end_row();
-                        }
+        // The selected permutation: what is particular to it, and its own
+        // extract.
+        let (_, fallback) = row_duration(row, source);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .small_button("\u{2B07}")
+                .on_hover_text("Extract this permutation to a file")
+                .clicked()
+            {
+                let ext = row_extract_ext(&row.kind, raw_ce);
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Extract permutation")
+                    .set_file_name(format!("{}.{ext}", sanitize_component(&row.name)))
+                    .save_file()
+                    && let Some(item_source) = row_extract_source(tag, row, source, raw_ce, false)
+                {
+                    *edit.sound_extract_request = Some(ExtractRequest {
+                        items: vec![ExtractItem {
+                            out_path: path,
+                            source: item_source,
+                        }],
+                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                        label: row.name.clone(),
                     });
-            });
+                }
+            }
+            ui.label(RichText::new(&row.name).color(text_dark()))
+                .on_hover_text(row_details(row, h2.as_ref()));
+            if fallback {
+                ui.label(
+                    RichText::new(format!("no {language_name} \u{00B7} plays English"))
+                        .color(ui.visuals().warn_fg_color),
+                );
+            }
+            if let Some(gain) = row.gain_db.filter(|gain| gain.abs() >= 0.05) {
+                ui.label(RichText::new(format!("gain {gain:+.1} dB")).color(subtle_dark()));
+            }
+            if let Some(skip) = row.skip_fraction.filter(|skip| *skip > 0.0) {
+                ui.label(RichText::new(format!("skip {:.0}%", skip * 100.0)).color(subtle_dark()))
+                    .on_hover_text("Fraction of requests for this permutation that are ignored");
+            }
+        });
     });
     ui.add_space(6.0);
 }

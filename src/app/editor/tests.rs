@@ -938,10 +938,19 @@ mod tests {
         assert_eq!(h2.duration_secs(english), Some(0.65));
     }
 
-    /// Render the sound player for `tag` with `language` chosen, returning
-    /// every piece of text it paints.
-    fn painted_sound_player(tag: &TagFile, language: Option<&str>) -> Vec<String> {
+    /// Render the sound player for `tag` with `language` chosen and the clip
+    /// `selected` (a clip id) picked, returning every piece of text it paints.
+    fn painted_sound_player(
+        tag: &TagFile,
+        language: Option<&str>,
+        selected: Option<&str>,
+    ) -> Vec<String> {
         let ctx = egui::Context::default();
+        if let Some(id) = selected {
+            ctx.data_mut(|data| {
+                data.insert_temp(clip_selection_id("sound", "test"), id.to_owned())
+            });
+        }
         let mut painted = Vec::new();
         for _ in 0..2 {
             let output = ctx.run(
@@ -974,9 +983,20 @@ mod tests {
         painted
     }
 
+    /// The clip id the player gives a permutation row.
+    fn clip_id(row: &SoundPermRow, language: Option<&str>) -> String {
+        format!(
+            "{}:{}:{}",
+            row.pr_index,
+            row.perm_index,
+            language.unwrap_or("")
+        )
+    }
+
     /// The player shows what each permutation is — its name and length in the
-    /// chosen language — instead of the pitch range `|default|` on every row,
-    /// offers the tag's languages, and describes what that language plays.
+    /// chosen language, one at a time as it is picked — instead of the pitch
+    /// range `|default|`, offers the tag's languages, and describes what that
+    /// language plays.
     #[test]
     fn h2_sound_player_shows_lengths_languages_and_the_chosen_format() {
         let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
@@ -984,9 +1004,19 @@ mod tests {
             return;
         };
         let has = |painted: &[String], text: &str| painted.iter().any(|shown| shown == text);
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "4", "5"]);
 
-        let english = painted_sound_player(&tag, None);
-        for text in ["class: unit_dialog", "1", "2", "4", "5", "0.65 s", "\u{1F310} English", "opus \u{00B7} mono \u{00B7} 48 kHz"] {
+        let english = painted_sound_player(&tag, None, None);
+        for text in [
+            "class: unit_dialog",
+            "1",
+            "0:00.000 / 0:00.650",
+            "\u{1F310} English",
+            "opus \u{00B7} mono \u{00B7} 48 kHz",
+        ] {
             assert!(has(&english, text), "missing {text:?} in {english:?}");
         }
         assert!(has(&english, "\u{2B07} Extract all (English)"));
@@ -995,16 +1025,51 @@ mod tests {
             !english.iter().any(|shown| shown.contains("|default|")),
             "a lone default pitch range isn't shown: {english:?}"
         );
+        // Picking each permutation shows it, with its own length.
+        for row in &rows {
+            let painted = painted_sound_player(&tag, None, Some(&clip_id(row, None)));
+            let (entry, _) = h2.entry_for(lpi_of(row), None).unwrap();
+            let length = format!(
+                "0:00.000 / {}",
+                format_play_time(h2.duration_secs(entry).unwrap())
+            );
+            assert!(
+                has(&painted, &row.name),
+                "{} not shown: {painted:?}",
+                row.name
+            );
+            assert!(
+                has(&painted, &length),
+                "{} lacks {length:?}: {painted:?}",
+                row.name
+            );
+        }
 
-        let portuguese = painted_sound_player(&tag, Some("portuguese"));
-        assert!(has(&portuguese, "xbox adpcm \u{00B7} mono \u{00B7} 22.05 kHz"), "{portuguese:?}");
+        let portuguese = painted_sound_player(&tag, Some("portuguese"), None);
+        assert!(
+            has(&portuguese, "xbox adpcm \u{00B7} mono \u{00B7} 22.05 kHz"),
+            "{portuguese:?}"
+        );
         assert!(has(&portuguese, "(rate inferred)"));
         assert!(has(&portuguese, "\u{2B07} Extract all (Portuguese)"));
 
         // Another game's language this tag never had: say so, play English.
-        let mexican = painted_sound_player(&tag, Some("mexican"));
-        assert!(has(&mexican, "Mexican isn't in this tag \u{2014} playing English."), "{mexican:?}");
+        let mexican = painted_sound_player(&tag, Some("mexican"), None);
+        assert!(
+            has(
+                &mexican,
+                "Mexican isn't in this tag \u{2014} playing English."
+            ),
+            "{mexican:?}"
+        );
         assert!(has(&mexican, "\u{1F310} English"));
+    }
+
+    fn lpi_of(row: &SoundPermRow) -> usize {
+        match row.kind {
+            RowKind::InlineH2 { lpi } => lpi,
+            _ => panic!("{} is not a Halo 2 language row", row.name),
+        }
     }
 
     /// A permutation missing the chosen language says so and plays English,
@@ -1019,12 +1084,20 @@ mod tests {
         let h2 = H2Sound::read(&tag).expect("H2 language entries");
         let rows = sound_permutation_rows(&tag, Some(&h2));
         assert_eq!(rows.len(), 3);
-        let painted = painted_sound_player(&tag, Some("japanese"));
-        let notes = painted
+        // Shown for the permutation that lacks it, when that one is picked.
+        let notes: Vec<bool> = rows
             .iter()
-            .filter(|shown| *shown == "no Japanese \u{00B7} plays English")
-            .count();
-        assert_eq!(notes, 1, "{painted:?}");
+            .map(|row| {
+                painted_sound_player(
+                    &tag,
+                    Some("japanese"),
+                    Some(&clip_id(row, Some("japanese"))),
+                )
+                .iter()
+                .any(|shown| shown == "no Japanese \u{00B7} plays English")
+            })
+            .collect();
+        assert_eq!(notes.iter().filter(|note| **note).count(), 1, "{notes:?}");
 
         let source = RowSource {
             h2: Some(&h2),

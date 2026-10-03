@@ -170,6 +170,9 @@ pub(super) struct SoundOwner {
 /// with no tab of its own, whose sound nothing pauses or disposes of).
 pub(super) struct SoundRequest {
     pub(super) owner: Option<SoundOwner>,
+    /// Which of the tab's clips a play is for (a permutation, an event), so
+    /// the player knows whether the clip it has selected is the one loaded.
+    pub(super) clip: Option<String>,
     pub(super) action: SoundAction,
 }
 
@@ -178,6 +181,7 @@ impl From<SoundAction> for SoundRequest {
     fn from(action: SoundAction) -> Self {
         Self {
             owner: None,
+            clip: None,
             action,
         }
     }
@@ -201,6 +205,23 @@ impl<'a> SoundRequests<'a> {
     pub(in crate::app) fn push_back(&mut self, action: SoundAction) {
         self.queue.push_back(SoundRequest {
             owner: self.owner.clone(),
+            clip: None,
+            action,
+        });
+    }
+
+    /// Whether a play for `clip` from this tab is already queued.
+    pub(in crate::app) fn queued_clip(&self, clip: &str) -> bool {
+        self.queue
+            .iter()
+            .any(|request| request.owner == self.owner && request.clip.as_deref() == Some(clip))
+    }
+
+    /// Queue a play for one of the tab's clips.
+    pub(in crate::app) fn play_clip(&mut self, action: SoundAction, clip: String) {
+        self.queue.push_back(SoundRequest {
+            owner: self.owner.clone(),
+            clip: Some(clip),
             action,
         });
     }
@@ -210,6 +231,8 @@ impl<'a> SoundRequests<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) struct PlaybackView {
     pub(in crate::app) label: String,
+    /// The clip it was played as, if the player named one.
+    pub(in crate::app) clip: Option<String>,
     pub(in crate::app) position: f64,
     pub(in crate::app) duration: f64,
     pub(in crate::app) playing: bool,
@@ -322,6 +345,7 @@ impl Source for PcmSource {
 /// that has finished can be played again or sought from where it stands.
 struct Voice {
     owner: Option<SoundOwner>,
+    clip: Option<String>,
     label: String,
     /// The audio as played: at most stereo, so the output device takes it.
     pcm: Arc<DecodedPcm>,
@@ -330,7 +354,13 @@ struct Voice {
 }
 
 impl Voice {
-    fn new(pcm: Arc<DecodedPcm>, label: String, owner: Option<SoundOwner>, looping: bool) -> Self {
+    fn new(
+        pcm: Arc<DecodedPcm>,
+        label: String,
+        owner: Option<SoundOwner>,
+        clip: Option<String>,
+        looping: bool,
+    ) -> Self {
         // Fold >2 channels down to stereo for the output device.
         let pcm = if pcm.channels > 2 {
             Arc::new(DecodedPcm {
@@ -343,6 +373,7 @@ impl Voice {
         };
         Self {
             owner,
+            clip,
             label,
             pcm,
             shared: Arc::new(PlaybackShared {
@@ -428,6 +459,7 @@ impl Voice {
         let rate = self.pcm.sample_rate.max(1) as f64;
         PlaybackView {
             label: self.label.clone(),
+            clip: self.clip.clone(),
             position: self.position() as f64 / rate,
             duration: self.frames() as f64 / rate,
             playing: self.is_playing(),
@@ -451,8 +483,9 @@ pub(super) struct AudioState {
     voice: Option<Voice>,
     /// Whether sounds loop; carried from one voice to the next.
     looping: bool,
-    /// The tab the action being processed came from.
+    /// The tab the action being processed came from, and the clip it names.
     request_owner: Option<SoundOwner>,
+    request_clip: Option<String>,
     /// The tab the newest decode was started for, so closing it cancels the
     /// decode as well as the sound.
     decode_owner: Option<SoundOwner>,
@@ -486,7 +519,7 @@ pub(super) struct AudioState {
     wwise_loading: Option<(PathBuf, Option<String>, Receiver<Option<WwiseBanks>>)>,
     /// An event queued to play as soon as the in-flight load finishes, and
     /// the tab it is for.
-    wwise_deferred: Option<(String, String, Option<SoundOwner>)>,
+    wwise_deferred: Option<(String, String, Option<SoundOwner>, Option<String>)>,
     event_cache: PcmCache<String>,
     /// Campaign Evolved's legacy `.pak` set, opened on first playback. CE media
     /// is not in IoStore, so this is a separate store from `wwise` above.
@@ -598,6 +631,7 @@ enum AudioDone {
         cache: Option<PcmKey>,
         label: String,
         owner: Option<SoundOwner>,
+        clip: Option<String>,
         result: Result<Arc<DecodedPcm>, String>,
     },
     Extracted(String),
@@ -836,6 +870,7 @@ impl AudioState {
         self.play_request += 1;
         let request = self.play_request;
         let owner = self.request_owner.clone();
+        let clip = self.request_clip.clone();
         self.decode_owner = owner.clone();
         self.status = Some(format!("decoding {label}\u{2026}"));
         self.spawn_job(ctx, move || {
@@ -847,6 +882,7 @@ impl AudioState {
                 cache,
                 label,
                 owner,
+                clip,
                 result,
             }
         });
@@ -878,6 +914,7 @@ impl AudioState {
                 cache,
                 label,
                 owner,
+                clip,
                 result,
             } => {
                 let pcm = match result {
@@ -905,7 +942,7 @@ impl AudioState {
                     _ => {}
                 }
                 if request == self.play_request {
-                    self.play_decoded(pcm, &label, owner);
+                    self.play_decoded(pcm, &label, owner, clip);
                 }
             }
         }
@@ -996,8 +1033,9 @@ impl AudioState {
         self.wwise_lang = lang;
         self.event_cache.clear();
         match self.wwise_deferred.take() {
-            Some((event_name, label, owner)) => {
+            Some((event_name, label, owner, clip)) => {
                 self.request_owner = owner;
+                self.request_clip = clip;
                 self.play_event(&event_name, &label, ctx);
             }
             None if !ok => self.status = Some("no Wwise .pck under <game>/sound/pc".to_owned()),
@@ -1010,7 +1048,12 @@ impl AudioState {
     fn play_event(&mut self, event_name: &str, label: &str, ctx: &egui::Context) {
         if let Some(pcm) = self.event_cache.get(&event_name.to_owned()) {
             self.play_request += 1;
-            self.play_decoded(pcm, label, self.request_owner.clone());
+            self.play_decoded(
+                pcm,
+                label,
+                self.request_owner.clone(),
+                self.request_clip.clone(),
+            );
             return;
         }
         let Some(banks) = self.wwise.clone() else {
@@ -1079,7 +1122,7 @@ impl AudioState {
         if self
             .wwise_deferred
             .as_ref()
-            .is_some_and(|(_, _, owner)| closed(owner))
+            .is_some_and(|(_, _, owner, _)| closed(owner))
         {
             self.wwise_deferred = None;
         }
@@ -1117,10 +1160,16 @@ impl AudioState {
         if self.is_playing() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
-        let Some(SoundRequest { owner, action }) = self.pending.pop_front() else {
+        let Some(SoundRequest {
+            owner,
+            clip,
+            action,
+        }) = self.pending.pop_front()
+        else {
             return;
         };
         self.request_owner = owner;
+        self.request_clip = clip;
         let (id, key, label, action_root) = match action {
             SoundAction::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
@@ -1220,7 +1269,12 @@ impl AudioState {
                     // First event for this source: build the index off-thread
                     // (it reads every bank) and play once it's ready.
                     self.start_wwise_load(tags_root, ctx);
-                    self.wwise_deferred = Some((event_name, label, self.request_owner.clone()));
+                    self.wwise_deferred = Some((
+                        event_name,
+                        label,
+                        self.request_owner.clone(),
+                        self.request_clip.clone(),
+                    ));
                     self.status = Some("loading sound banks\u{2026}".to_owned());
                 }
                 return;
@@ -1270,7 +1324,12 @@ impl AudioState {
         };
         if let Some(pcm) = self.cache.get(&(bank, sub)) {
             self.play_request += 1;
-            self.play_decoded(pcm, &label, self.request_owner.clone());
+            self.play_decoded(
+                pcm,
+                &label,
+                self.request_owner.clone(),
+                self.request_clip.clone(),
+            );
             return;
         }
         let banks = self.banks.clone().expect("opened above");
@@ -1286,7 +1345,13 @@ impl AudioState {
 
     /// Load an already-decoded sound as the one voice — disposing of the
     /// last, whichever tab it was — and play it.
-    fn play_decoded(&mut self, pcm: Arc<DecodedPcm>, label: &str, owner: Option<SoundOwner>) {
+    fn play_decoded(
+        &mut self,
+        pcm: Arc<DecodedPcm>,
+        label: &str,
+        owner: Option<SoundOwner>,
+        clip: Option<String>,
+    ) {
         let secs = pcm.duration_secs();
         self.voice = None;
         self.decode_owner = None;
@@ -1296,7 +1361,7 @@ impl AudioState {
             return;
         }
         let engine = self.engine.as_ref().expect("ensured");
-        let mut voice = Voice::new(pcm, label.to_owned(), owner, self.looping);
+        let mut voice = Voice::new(pcm, label.to_owned(), owner, clip, self.looping);
         voice.play(engine, volume);
         self.voice = Some(voice);
         self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
@@ -1341,6 +1406,7 @@ mod tests {
             cache,
             label: "rifle_fire".to_owned(),
             owner: None,
+            clip: None,
             result: Ok(pcm(8)),
         }
     }
@@ -1629,7 +1695,7 @@ mod tests {
     /// player can move and read.
     #[test]
     fn a_stopped_voice_keeps_a_playhead_the_player_can_move() {
-        let voice = Voice::new(numbered(1000), "x".to_owned(), None, false);
+        let voice = Voice::new(numbered(1000), "x".to_owned(), None, None, false);
         voice.seek(250);
         let view = voice.view();
         assert_eq!(view.position, 0.25);
@@ -1653,10 +1719,11 @@ mod tests {
                 numbered(10),
                 "a".to_owned(),
                 Some(a.clone()),
+                None,
                 false,
             )),
             decode_owner: Some(a.clone()),
-            wwise_deferred: Some(("event".to_owned(), "a".to_owned(), Some(a.clone()))),
+            wwise_deferred: Some(("event".to_owned(), "a".to_owned(), Some(a.clone()), None)),
             play_request: 7,
             ..Default::default()
         };
@@ -1689,6 +1756,7 @@ mod tests {
                 numbered(1000),
                 "a".to_owned(),
                 Some(a.clone()),
+                None,
                 false,
             )),
             ..Default::default()
@@ -1696,6 +1764,7 @@ mod tests {
         let ctx = egui::Context::default();
         audio.pending.push_back(SoundRequest {
             owner: Some(b.clone()),
+            clip: None,
             action: SoundAction::Seek(0.5),
         });
         audio.process(None, &ctx);
@@ -1704,6 +1773,7 @@ mod tests {
 
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
+            clip: None,
             action: SoundAction::Seek(0.5),
         });
         audio.process(None, &ctx);
@@ -1722,7 +1792,7 @@ mod tests {
             return;
         }
         audio.volume = Volume(0.0);
-        audio.play_decoded(numbered(30_000), "a", Some(a.clone()));
+        audio.play_decoded(numbered(30_000), "a", Some(a.clone()), None);
         assert!(audio.playback(Some(&a)).unwrap().playing);
 
         audio.follow_tabs(Some(&a), |_| true);
@@ -1745,6 +1815,7 @@ mod tests {
 
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
+            clip: None,
             action: SoundAction::TogglePause,
         });
         audio.process(None, &egui::Context::default());
