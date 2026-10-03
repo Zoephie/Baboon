@@ -35,3 +35,45 @@ fn a_source_load_that_panics_releases_its_kit() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+fn campaign_evolved_source(root: &Path) -> LoadedSourceData {
+    LoadedSourceData {
+        label: "Campaign Evolved".to_owned(),
+        source: TagSource::IoStoreContainerSet {
+            root: root.to_path_buf(),
+            containers: Vec::new(),
+            index: Default::default(),
+            packages: Default::default(),
+            shipped: Default::default(),
+        },
+        names: TagNameIndex::default(),
+        game: Some("haloce_evolved".to_owned()),
+        entries: Vec::new(),
+        tree: TagTree::default(),
+        group_tree: TagTree::default(),
+        all_entries: Vec::new(),
+        reverse_dependencies: None,
+        initial_tag: None,
+        key_hints: Default::default(),
+        complete_scan: false,
+        chosen_kit_layout: None,
+    }
+}
+
+/// A mount still `Loading` refuses every container write, so a mount that
+/// panicked locked the containers for the session.
+#[test]
+fn a_chimp_mount_that_panics_does_not_stay_loading() {
+    let mut app = Baboon::for_test();
+    app.prefs.enable_chimp = true;
+    app.install_loaded_source(campaign_evolved_source(Path::new("/no/such/Paks")));
+    let ctx = egui::Context::default();
+    with_panicking_workers(|| app.begin_chimp_mount(0, ctx.clone()));
+    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Loading));
+
+    assert!(apply_next_worker_message(&mut app), "the mount answered");
+    assert!(
+        matches!(app.kits[0].chimp.mount, ChimpMount::Failed(_)),
+        "the mount settled as failed"
+    );
+}

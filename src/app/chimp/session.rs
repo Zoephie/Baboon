@@ -136,24 +136,62 @@ impl Baboon {
         let usmap_path = self.prefs.chimp_usmap_path.clone();
         self.kits[kit_index].chimp.mount = ChimpMount::Loading;
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = (|| {
-                let usmap = load_chimp_usmap(usmap_path.as_deref())?;
-                // Keep startup to container discovery + the lightweight package
-                // index. Generated Blueprint schema recovery is intentionally
-                // lazy/future work; doing the whole corpus here would leave the
-                // workspace saying "loading" while reading every package.
-                let world = World::open(&root, usmap).map_err(|error| error.to_string())?;
-                Ok(Arc::new(world))
-            })();
-            let mounted = result.as_ref().ok().cloned();
-            let _ = tx.send(WorkerMessage::ChimpMounted { stamp, result });
-            if let Some(world) = mounted {
+        // A mount that panicked used to send nothing and stay `Loading`, which
+        // refuses every container write for the session. Through
+        // `spawn_worker` a panic answers whichever message is still owed: the
+        // mount's, or once that is sent, the type index's.
+        let mounted = Arc::new(AtomicBool::new(false));
+        let mounted_sent = Arc::clone(&mounted);
+        let wake = ctx.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = (|| {
+                    let usmap = load_chimp_usmap(usmap_path.as_deref())?;
+                    // Keep startup to container discovery + the lightweight package
+                    // index. Generated Blueprint schema recovery is intentionally
+                    // lazy/future work; doing the whole corpus here would leave the
+                    // workspace saying "loading" while reading every package.
+                    let world = World::open(&root, usmap).map_err(|error| error.to_string())?;
+                    Ok(Arc::new(world))
+                })();
+                let world = match result {
+                    Ok(world) => world,
+                    Err(error) => {
+                        return WorkerMessage::ChimpMounted {
+                            stamp,
+                            result: Err(error),
+                        };
+                    }
+                };
+                let _ = tx.send(WorkerMessage::ChimpMounted {
+                    stamp,
+                    result: Ok(world.clone()),
+                });
+                mounted_sent.store(true, Ordering::SeqCst);
+                wake.request_repaint();
                 let index = index_chimp_package_types(&world);
-                let _ = tx.send(WorkerMessage::ChimpTypesIndexed { stamp, index });
-            }
-            ctx.request_repaint();
-        });
+                WorkerMessage::ChimpTypesIndexed { stamp, index }
+            },
+            move |error| {
+                if mounted.load(Ordering::SeqCst) {
+                    WorkerMessage::ChimpTypesIndexed {
+                        stamp,
+                        index: ChimpTypeIndex {
+                            package_types: Vec::new(),
+                            type_counts: BTreeMap::new(),
+                            failures: 0,
+                        },
+                    }
+                } else {
+                    WorkerMessage::ChimpMounted {
+                        stamp,
+                        result: Err(format!("Mounting failed: {error}")),
+                    }
+                }
+            },
+        );
     }
 
     pub(in crate::app) fn handle_chimp_mounted(
@@ -687,29 +725,43 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let scan = scan_chimp_referrers(&world, &package);
-            let _ = tx.send(WorkerMessage::ChimpReferrersScanned {
+        // A scan that panicked used to leave the document `Scanning` for good,
+        // which also refuses a second scan.
+        let panic_package = package.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ChimpReferrersScanned {
                 stamp,
+                scan: Ok(scan_chimp_referrers(&world, &package)),
                 package,
-                scan,
-            });
-            ctx.request_repaint();
-        });
+            },
+            move |error| WorkerMessage::ChimpReferrersScanned {
+                stamp,
+                package: panic_package,
+                scan: Err(format!("Searching for referrers failed: {error}")),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_chimp_referrers_scanned(
         &mut self,
         stamp: KitStamp,
         package: String,
-        scan: ChimpReferrerScan,
+        scan: Result<ChimpReferrerScan, String>,
     ) -> bool {
         let Some(index) = self.resolve_stamp(stamp) else {
             return true;
         };
+        let state = match scan {
+            Ok(scan) => ChimpReferrerState::Done(scan),
+            Err(error) => {
+                self.status = error;
+                ChimpReferrerState::Idle
+            }
+        };
         if let Some(document) = self.kits[index].chimp.documents.get_mut(&package) {
-            document.referrers = ChimpReferrerState::Done(scan);
+            document.referrers = state;
         }
         false
     }

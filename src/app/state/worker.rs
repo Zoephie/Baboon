@@ -139,7 +139,7 @@ pub(in crate::app) enum WorkerMessage {
     ChimpReferrersScanned {
         stamp: KitStamp,
         package: String,
-        scan: ChimpReferrerScan,
+        scan: Result<ChimpReferrerScan, String>,
     },
     TagLoaded {
         kit: KitId,
