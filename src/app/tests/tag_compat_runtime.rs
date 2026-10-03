@@ -230,3 +230,40 @@ fn the_two_directions_disagree_about_what_is_dropped() {
         "Reach loses node flags going in; Campaign Evolved loses its own additions coming back",
     );
 }
+
+/// A verdict this build does not know, from a database a newer generator
+/// wrote, used to read as `Identical` and show as "transfers unchanged".
+/// It is `Unknown` now, counted as a loss, and kept by the losses filter.
+#[test]
+fn an_unknown_verdict_is_never_shown_as_transferring_unchanged() {
+    assert_eq!(CompatVerdict::parse("identical"), CompatVerdict::Identical);
+    let unknown = CompatVerdict::parse("lossy_in_some_new_way");
+    assert_eq!(unknown, CompatVerdict::Unknown);
+    assert!(unknown.is_loss());
+    assert_ne!(unknown.explain(), CompatVerdict::Identical.explain());
+
+    let connection = Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE groups (pair_id INTEGER, group_name TEXT, verdict TEXT,
+                 size_diff_structs INTEGER, source_only_fields INTEGER,
+                 target_only_fields INTEGER, blocked_reason TEXT);
+             INSERT INTO groups VALUES (1, 'biped', 'identical', 0, 0, 0, NULL);
+             INSERT INTO groups VALUES (1, 'weapon', 'lossy_in_some_new_way', 0, 0, 0, NULL);
+             INSERT INTO groups VALUES (1, 'vehicle', 'source_only', 0, 1, 0, NULL);",
+        )
+        .unwrap();
+    let losses: Vec<(String, CompatVerdict)> = query_groups(&connection, 1, true, "")
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.group, row.verdict))
+        .collect();
+    assert_eq!(
+        losses,
+        [
+            ("vehicle".to_owned(), CompatVerdict::SourceOnly),
+            ("weapon".to_owned(), CompatVerdict::Unknown),
+        ]
+    );
+    assert_eq!(query_groups(&connection, 1, false, "").unwrap().len(), 3);
+}

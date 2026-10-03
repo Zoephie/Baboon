@@ -16,6 +16,11 @@ const TAG_COMPAT_SCHEMA_VERSION: i64 = 1;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(in crate::app) enum CompatVerdict {
     HardBlocked,
+    /// A verdict this build does not know, from a database a newer generator
+    /// wrote. Reading it as `Identical` would claim the field "transfers
+    /// unchanged" when nothing is known about it, so it counts as a loss
+    /// until this build learns what it means.
+    Unknown,
     SourceOnly,
     OptionLoss,
     TypeChangedSafe,
@@ -33,13 +38,15 @@ impl CompatVerdict {
             "type_changed_safe" => Self::TypeChangedSafe,
             "renamed_provable" => Self::RenamedProvable,
             "target_only" => Self::TargetOnly,
-            _ => Self::Identical,
+            "identical" => Self::Identical,
+            _ => Self::Unknown,
         }
     }
 
     pub(in crate::app) fn label(self) -> &'static str {
         match self {
             Self::HardBlocked => "blocked",
+            Self::Unknown => "unknown",
             Self::SourceOnly => "dropped",
             Self::OptionLoss => "options lost",
             Self::TypeChangedSafe => "re-encoded",
@@ -52,6 +59,7 @@ impl CompatVerdict {
     pub(in crate::app) fn explain(self) -> &'static str {
         match self {
             Self::HardBlocked => "cannot be converted",
+            Self::Unknown => "not known to this version of Baboon; treat it as lost",
             Self::SourceOnly => "dropped — the target has no such field",
             Self::OptionLoss => "some options have no counterpart",
             Self::TypeChangedSafe => "the same value, re-encoded",
@@ -67,11 +75,12 @@ impl CompatVerdict {
     pub(in crate::app) fn is_loss(self) -> bool {
         matches!(
             self,
-            Self::HardBlocked | Self::SourceOnly | Self::OptionLoss
+            Self::HardBlocked | Self::Unknown | Self::SourceOnly | Self::OptionLoss
         )
     }
 
-    /// Every verdict, so callers can derive a set rather than restate one.
+    /// Every verdict the database spells, so callers can derive a set rather
+    /// than restate one. `Unknown` is every other spelling, so it has none.
     const ALL: [Self; 7] = [
         Self::HardBlocked,
         Self::SourceOnly,
@@ -85,6 +94,7 @@ impl CompatVerdict {
     fn as_str(self) -> &'static str {
         match self {
             Self::HardBlocked => "hard_blocked",
+            Self::Unknown => "unknown",
             Self::SourceOnly => "source_only",
             Self::OptionLoss => "option_loss",
             Self::TypeChangedSafe => "type_changed_safe",
@@ -97,23 +107,25 @@ impl CompatVerdict {
     pub(in crate::app) fn color(self) -> Color32 {
         match self {
             Self::HardBlocked => material_delete_text(),
-            Self::SourceOnly | Self::OptionLoss => Color32::from_rgb(242, 196, 48),
+            Self::Unknown | Self::SourceOnly | Self::OptionLoss => Color32::from_rgb(242, 196, 48),
             Self::Identical => disclosure_triangle_green(),
             _ => subtle_dark(),
         }
     }
 }
 
-/// The `IN (...)` list of loss verdicts, built from [`CompatVerdict::is_loss`]
-/// rather than written out.
+/// The `IN (...)` list of the verdicts that cost nothing, built from
+/// [`CompatVerdict::is_loss`] rather than written out. The loss filter keeps
+/// rows *not* in it, so a verdict this build cannot read stays in view as the
+/// loss it is treated as.
 ///
 /// Two queries filter on it, and a third would be easy to add. Spelling the set
 /// into SQL by hand is how one of them ends up disagreeing with the checkbox
 /// that claims to control it.
-fn loss_verdict_sql() -> String {
+fn lossless_verdict_sql() -> String {
     CompatVerdict::ALL
         .iter()
-        .filter(|verdict| verdict.is_loss())
+        .filter(|verdict| !verdict.is_loss())
         .map(|verdict| format!("'{}'", verdict.as_str()))
         .collect::<Vec<_>>()
         .join(",")
@@ -404,10 +416,10 @@ fn query_groups(
         "SELECT group_name,verdict,size_diff_structs,source_only_fields,target_only_fields,blocked_reason
          FROM groups
          WHERE pair_id=?1
-           AND (?2=0 OR verdict IN ({}))
+           AND (?2=0 OR verdict NOT IN ({}))
            AND (?3='' OR group_name LIKE '%'||?3||'%')
          ORDER BY group_name",
-        loss_verdict_sql(),
+        lossless_verdict_sql(),
     );
     let mut statement = connection
         .prepare(&sql)
@@ -442,9 +454,9 @@ fn query_fields(
          LEFT JOIN structs s
            ON s.pair_id=f.pair_id AND s.group_name=f.group_name AND s.struct_key=f.struct_key
          WHERE f.pair_id=?1 AND f.group_name=?2
-           AND (?3=0 OR f.verdict IN ({}))
+           AND (?3=0 OR f.verdict NOT IN ({}))
          ORDER BY s.first_path,f.ordinal",
-        loss_verdict_sql(),
+        lossless_verdict_sql(),
     );
     let mut statement = connection
         .prepare(&sql)
