@@ -2693,11 +2693,23 @@ impl Baboon {
             key: key.clone(),
             state: PokeDialogState::Scanning,
         });
-        thread::spawn(move || {
-            let result = platform::prepare(source, entries, entry, edited_bytes, prior);
-            let _ = tx.send(WorkerMessage::PokePreflightFinished { kit, key, result });
-            ctx.request_repaint();
-        });
+        // Every poke job goes through `spawn_worker`, so one that panics still
+        // answers and its dialog or running flag settles.
+        let panic_key = key.clone();
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || WorkerMessage::PokePreflightFinished {
+                kit,
+                key,
+                result: platform::prepare(source, entries, entry, edited_bytes, prior),
+            },
+            move |error| WorkerMessage::PokePreflightFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
     }
 
     pub(super) fn begin_poke_current_tag_direct(&mut self, ctx: egui::Context) {
@@ -2723,19 +2735,27 @@ impl Baboon {
         } = request;
         self.poke_direct_running = true;
         self.status = "Poking current tag…".to_owned();
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                platform::prepare(source, entries, entry, edited_bytes, prior).and_then(|plan| {
-                    if plan.patches.is_empty() {
-                        Ok(None)
-                    } else {
-                        platform::execute(plan).map(Some)
-                    }
-                });
-            let _ = tx.send(WorkerMessage::PokeDirectFinished { kit, key, result });
-            ctx.request_repaint();
-        });
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = platform::prepare(source, entries, entry, edited_bytes, prior)
+                    .and_then(|plan| {
+                        if plan.patches.is_empty() {
+                            Ok(None)
+                        } else {
+                            platform::execute(plan).map(Some)
+                        }
+                    });
+                WorkerMessage::PokeDirectFinished { kit, key, result }
+            },
+            move |error| WorkerMessage::PokeDirectFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
     }
 
     fn confirm_poke(&mut self, ctx: egui::Context) {
@@ -2750,12 +2770,21 @@ impl Baboon {
         let key = dialog.key.clone();
         dialog.state = PokeDialogState::Writing;
         self.status = "Poking current tag…".to_owned();
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = platform::execute(plan);
-            let _ = tx.send(WorkerMessage::PokeWriteFinished { kit, key, result });
-            ctx.request_repaint();
-        });
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::PokeWriteFinished {
+                kit,
+                key,
+                result: platform::execute(plan),
+            },
+            move |error| WorkerMessage::PokeWriteFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
     }
 
     pub(super) fn begin_undo_last_poke(&mut self, ctx: egui::Context) {
@@ -2768,12 +2797,23 @@ impl Baboon {
             return;
         };
         self.poke_undo_running = true;
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = platform::undo(last);
-            let _ = tx.send(WorkerMessage::PokeUndoFinished { result });
-            ctx.request_repaint();
-        });
+        // Kept for a panic: the record was taken to run the undo, and an undo
+        // that panicked used to lose it, leaving the game patched with no way
+        // back. Its writes restore the original bytes, so offering it again
+        // is safe.
+        let record = last.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::PokeUndoFinished {
+                result: platform::undo(last),
+                unapplied: None,
+            },
+            move |error| WorkerMessage::PokeUndoFinished {
+                result: Err(error),
+                unapplied: Some(record),
+            },
+        );
     }
 
     pub(super) fn handle_poke_preflight(
@@ -2872,7 +2912,11 @@ impl Baboon {
         }
     }
 
-    pub(super) fn handle_poke_undo(&mut self, result: Result<PokeReport, String>) {
+    pub(super) fn handle_poke_undo(
+        &mut self,
+        result: Result<PokeReport, String>,
+        unapplied: Option<LastPoke>,
+    ) {
         self.poke_undo_running = false;
         match result {
             Ok(report) => self.status = report.status(),
@@ -2880,6 +2924,14 @@ impl Baboon {
                 self.status = format!("Undo Last Poke failed: {error}");
                 // A failed undo is intentionally not offered again. Its
                 // process-bound state may now be only partially applicable.
+                // An undo that crashed is the exception: its record comes back
+                // so the game is not left patched with no way to undo it.
+                if let Some(record) = unapplied
+                    && self.last_poke.is_none()
+                {
+                    self.last_poke = Some(record);
+                    self.status.push_str("; it can be tried again");
+                }
             }
         }
     }

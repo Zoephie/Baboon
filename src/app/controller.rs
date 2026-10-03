@@ -1216,8 +1216,8 @@ impl Baboon {
                     self.handle_poke_direct(kit, key, result);
                     false
                 }
-                WorkerMessage::PokeUndoFinished { result } => {
-                    self.handle_poke_undo(result);
+                WorkerMessage::PokeUndoFinished { result, unapplied } => {
+                    self.handle_poke_undo(result, unapplied);
                     false
                 }
                 WorkerMessage::CampaignProjectSaved {

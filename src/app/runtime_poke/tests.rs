@@ -891,3 +891,54 @@ fn manual_cu2_pokes_and_undoes_loaded_string_id() {
     assert_eq!(undo.written_fields, 0);
     eprintln!("cold string-id preflight: {}ms", preflight.as_millis());
 }
+
+fn patch_for_test() -> PokePatch {
+    PokePatch {
+        address: 0,
+        expected: vec![1],
+        edited: vec![2],
+        field_path: "a".to_owned(),
+    }
+}
+
+/// The undo takes the record of the last poke to run. An undo that panicked
+/// used to lose it with the thread, leaving the game patched with nothing to
+/// undo it with, and left the undo marked running for good.
+#[test]
+fn an_undo_that_panics_keeps_the_record_and_settles() {
+    let mut app = Baboon::for_test();
+    app.last_poke = Some(last_poke_for_test(patch_for_test(), vec![1]));
+    let ctx = egui::Context::default();
+    crate::app::with_panicking_workers(|| app.begin_undo_last_poke(ctx.clone()));
+    assert!(app.poke_undo_running);
+    assert!(app.last_poke.is_none(), "taken to run the undo");
+
+    assert!(crate::app::apply_next_worker_message(&mut app), "the undo answered");
+    assert!(!app.poke_undo_running, "no longer running");
+    assert!(app.last_poke.is_some(), "the record came back");
+    assert!(app.status.contains("tried again"), "{}", app.status);
+}
+
+/// A confirmed poke that panicked left its dialog on "Writing" for good.
+#[test]
+fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
+    let mut app = Baboon::for_test();
+    let plan = last_poke_for_test(patch_for_test(), vec![1]).plan;
+    app.poke_dialog = Some(PokeDialog {
+        kit: app.kits[0].id,
+        key: "file:objects/test".to_owned(),
+        state: PokeDialogState::Ready(plan),
+    });
+    let ctx = egui::Context::default();
+    crate::app::with_panicking_workers(|| app.confirm_poke(ctx.clone()));
+    assert!(matches!(
+        app.poke_dialog.as_ref().map(|dialog| &dialog.state),
+        Some(PokeDialogState::Writing)
+    ));
+
+    assert!(crate::app::apply_next_worker_message(&mut app), "the write answered");
+    assert!(matches!(
+        app.poke_dialog.as_ref().map(|dialog| &dialog.state),
+        Some(PokeDialogState::Error(_))
+    ));
+}

@@ -309,6 +309,9 @@ pub(in crate::app) enum WorkerMessage {
     },
     PokeUndoFinished {
         result: Result<PokeReport, String>,
+        /// The record an undo that crashed was given, returned so the undo
+        /// can be offered again. `None` whenever the undo ran to an answer.
+        unapplied: Option<LastPoke>,
     },
     CampaignProjectSaved {
         revision: u64,
