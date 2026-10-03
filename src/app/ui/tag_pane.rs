@@ -146,6 +146,8 @@ impl Baboon {
             key: key.clone(),
         };
         let sound_playback = self.audio.playback(Some(&sound_owner));
+        // A status line from another tab's sound is that tab's business.
+        let sound_status_shown = self.audio.status_is_for(&sound_owner);
         let sound_looping = self.audio.looping();
         let expert_mode = self.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
@@ -191,7 +193,7 @@ impl Baboon {
                 &mut self.audio.pending,
                 Some(sound_owner),
             ),
-            sound_status: self.audio.status.as_deref(),
+            sound_status: self.audio.status.as_deref().filter(|_| sound_status_shown),
             sound_volume,
             sound_playback,
             sound_looping,

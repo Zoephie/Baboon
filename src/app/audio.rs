@@ -564,6 +564,10 @@ pub(super) struct AudioState {
     pub(super) pending: VecDeque<SoundRequest>,
     /// Last user-facing status line (bank/resolve/playback result).
     pub(super) status: Option<String>,
+    /// The tab whose action produced `status`; `None` for one no tab did.
+    /// Only that tab's player shows it, so a failure in one kit does not
+    /// read as another's.
+    status_owner: Option<SoundOwner>,
     /// Decodes and extraction batches running on workers report back here.
     jobs: AudioJobs,
     /// The playback most recently asked for. A decode finishing for an older
@@ -929,7 +933,10 @@ impl AudioState {
     fn apply_job(&mut self, done: AudioDone) {
         self.jobs.running = self.jobs.running.saturating_sub(1);
         match done {
-            AudioDone::Extracted(status) => self.status = Some(status),
+            AudioDone::Extracted(status) => {
+                self.status = Some(status);
+                self.status_owner = None;
+            }
             AudioDone::Decoded {
                 request,
                 cache,
@@ -943,6 +950,7 @@ impl AudioState {
                     Err(error) => {
                         if request == self.play_request {
                             self.status = Some(format!("decode failed: {error}"));
+                            self.status_owner = owner;
                         }
                         return;
                     }
@@ -993,6 +1001,7 @@ impl AudioState {
             ce_media: self.ce_media.clone(),
         };
         self.status = Some(format!("extracting {}\u{2026}", request.label));
+        self.status_owner = None;
         self.spawn_job(ctx, move || {
             AudioDone::Extracted(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1140,6 +1149,10 @@ impl AudioState {
             self.play_request += 1;
             self.decode_owner = None;
         }
+        if closed(&self.status_owner) {
+            self.status = None;
+            self.status_owner = None;
+        }
         if self
             .wwise_deferred
             .as_ref()
@@ -1153,7 +1166,6 @@ impl AudioState {
             .is_some_and(|voice| closed(&voice.owner))
         {
             self.voice = None;
-            self.status = None;
             return;
         }
         if let Some(voice) = self.voice.as_ref()
@@ -1177,7 +1189,9 @@ impl AudioState {
     pub(super) fn process(&mut self, tags_root: Option<&Path>, ctx: &egui::Context) {
         self.drain_jobs();
         // Pick up a finished background Wwise load (and play any deferred event).
+        let before = self.status.clone();
         self.poll_wwise_load(ctx);
+        self.claim_status(before);
         if self.is_playing() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -1191,6 +1205,28 @@ impl AudioState {
         };
         self.request_owner = owner;
         self.request_clip = clip;
+        let before = self.status.clone();
+        self.handle(action, tags_root, ctx);
+        self.claim_status(before);
+    }
+
+    /// A status line the work just done changed belongs to the tab it was
+    /// done for, whose player alone shows it.
+    fn claim_status(&mut self, before: Option<String>) {
+        if self.status != before {
+            self.status_owner = self.request_owner.clone();
+        }
+    }
+
+    /// Whether `owner`'s player shows the status line: one it caused, or one
+    /// no tab did (an extraction's).
+    pub(super) fn status_is_for(&self, owner: &SoundOwner) -> bool {
+        self.status_owner
+            .as_ref()
+            .is_none_or(|status_owner| status_owner == owner)
+    }
+
+    fn handle(&mut self, action: SoundAction, tags_root: Option<&Path>, ctx: &egui::Context) {
         let (id, key, label, action_root) = match action {
             SoundAction::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
@@ -1382,10 +1418,17 @@ impl AudioState {
             return;
         }
         let engine = self.engine.as_ref().expect("ensured");
-        let mut voice = Voice::new(waveform, label.to_owned(), owner, clip, self.looping);
+        let mut voice = Voice::new(
+            waveform,
+            label.to_owned(),
+            owner.clone(),
+            clip,
+            self.looping,
+        );
         voice.play(engine, volume);
         self.voice = Some(voice);
         self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
+        self.status_owner = owner;
     }
 }
 
@@ -1847,5 +1890,47 @@ mod tests {
         });
         audio.process(None, &egui::Context::default());
         assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
+    }
+
+    /// A status line belongs to the tab whose sound caused it: a failure in
+    /// one tab (or kit) does not show in another's player, a status no tab
+    /// caused shows in all of them, and closing the tab clears its own.
+    #[test]
+    fn a_status_line_shows_only_in_the_tab_that_caused_it() {
+        let a = owner(1, "file:a.sound");
+        let b = owner(2, "file:b.sound");
+        let mut audio = AudioState::default();
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            clip: None,
+            action: SoundAction::Play {
+                id: None,
+                key: "dth1".to_owned(),
+                label: "dth1".to_owned(),
+                tags_root: None,
+            },
+        });
+        audio.process(None, &egui::Context::default());
+        assert_eq!(audio.status.as_deref(), Some("no source loaded"));
+        assert!(audio.status_is_for(&a));
+        assert!(
+            !audio.status_is_for(&b),
+            "another kit's tab shows a's failure"
+        );
+
+        // Another tab's volume change leaves a's status a's.
+        audio.pending.push_back(SoundRequest {
+            owner: Some(b.clone()),
+            clip: None,
+            action: SoundAction::SetVolume(0.5),
+        });
+        audio.process(None, &egui::Context::default());
+        assert!(audio.status_is_for(&a) && !audio.status_is_for(&b));
+
+        audio.follow_tabs(None, |owner| owner != &a);
+        assert!(audio.status.is_none(), "closing a left its status behind");
+
+        audio.apply_job(AudioDone::Extracted("extracted 3 file(s)".to_owned()));
+        assert!(audio.status_is_for(&a) && audio.status_is_for(&b));
     }
 }
