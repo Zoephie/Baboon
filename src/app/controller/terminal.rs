@@ -154,6 +154,29 @@ fn terminal_process_already_exited(process: &TerminalProcess) -> Result<bool, St
     }
 }
 
+/// The `cmd /S /C "<command> 2>&1"` line a terminal command runs as on
+/// Windows. It is passed raw: `Command::arg` would escape the command's own
+/// quotes as `\"`, which cmd doesn't read but the tool's C runtime does, so a
+/// quoted path with a space (`-tags_dir "D:\tags resolved"`) reached the tool
+/// split in two with a literal `"` on each half. `/S` strips just the outer
+/// pair of quotes and leaves the command as typed.
+#[cfg(any(target_os = "windows", test))]
+fn windows_shell_command_line(command: &str) -> String {
+    format!("/S /C \"{command} 2>&1\"")
+}
+
+/// `cmd` running `command` as typed, with no console window; see
+/// [`windows_shell_command_line`].
+#[cfg(target_os = "windows")]
+pub(super) fn windows_shell_command(command: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut c = std::process::Command::new("cmd");
+    c.creation_flags(CREATE_NO_WINDOW);
+    c.raw_arg(windows_shell_command_line(command));
+    c
+}
+
 pub(super) fn run_terminal_command_for_reimport(
     command: &str,
     work_dir: &Path,
@@ -163,14 +186,7 @@ pub(super) fn run_terminal_command_for_reimport(
 ) -> Result<(), String> {
     let mut log_error_reported = false;
     #[cfg(target_os = "windows")]
-    let mut cmd = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let mut c = std::process::Command::new("cmd");
-        c.creation_flags(CREATE_NO_WINDOW);
-        c.args(["/C", &format!("{command} 2>&1")]);
-        c
-    };
+    let mut cmd = windows_shell_command(command);
     #[cfg(not(target_os = "windows"))]
     let mut cmd = {
         let mut c = std::process::Command::new("sh");
@@ -413,4 +429,60 @@ pub(in crate::app) fn open_terminal_log(path: &Path) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a tool's argv is after cmd runs `line`: `/S /C` drops the first
+    /// and last quote, then the C runtime splits the rest (`\"` is a literal
+    /// quote, `"` toggles quoting, backslashes elsewhere are literal).
+    fn tool_argv(line: &str) -> Vec<String> {
+        let body = line.strip_prefix("/S /C ").unwrap();
+        let body = body.strip_prefix('"').unwrap();
+        let body = &body[..body.rfind('"').unwrap()];
+        let body = body.strip_suffix(" 2>&1").unwrap();
+        let (mut args, mut current, mut quoted) = (Vec::new(), String::new(), false);
+        let mut chars = body.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' if chars.peek() == Some(&'"') => current.push(chars.next().unwrap()),
+                '"' => quoted = !quoted,
+                ' ' if !quoted => {
+                    if !current.is_empty() {
+                        args.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(c),
+            }
+        }
+        if !current.is_empty() {
+            args.push(current);
+        }
+        args
+    }
+
+    #[test]
+    fn quoted_folders_with_spaces_reach_the_tool_whole() {
+        let command = r#"tool -tags_dir "D:\Chelan_1\tags resolved" -data_dir "D:\Chelan_1\data vanilla" bitmaps "characters\x""#;
+        assert_eq!(
+            tool_argv(&windows_shell_command_line(command)),
+            [
+                "tool",
+                "-tags_dir",
+                r"D:\Chelan_1\tags resolved",
+                "-data_dir",
+                r"D:\Chelan_1\data vanilla",
+                "bitmaps",
+                r"characters\x",
+            ]
+        );
+        // The line `Command::arg` built, quoting the argument and escaping the
+        // command's quotes, is what split the folders in the reported failure.
+        let escaped = format!("/S /C \"{} 2>&1\"", command.replace('"', "\\\""));
+        let argv = tool_argv(&escaped);
+        assert_eq!(argv[3], "resolved\"");
+        assert_eq!(argv[6], "vanilla\"");
+    }
 }

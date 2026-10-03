@@ -909,6 +909,20 @@ impl Kit {
         self.sync_open_tabs();
     }
 
+    /// Keep folder pane IDs/layout and view preferences stable while their roots move.
+    pub(super) fn remap_folder_browser_paths(&mut self, old: &Path, new: &Path) {
+        for pane in self.folder_browsers.values_mut() {
+            if let Ok(suffix) = pane.rel_path.strip_prefix(old) {
+                pane.rel_path = new.join(suffix);
+                pane.label = pane
+                    .rel_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+            }
+        }
+    }
+
     /// Re-derive `open_tabs` from the tree. Called after anything that can
     /// change the layout: a frame of `tree.ui`, an open, or a close.
     pub(super) fn sync_open_tabs(&mut self) {

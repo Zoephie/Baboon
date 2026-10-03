@@ -338,62 +338,11 @@ impl Baboon {
             ui.close_menu();
         }
         ui.separator();
-        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
-            && self
-                .source()
-                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
-        if ui
-            .add_enabled(
-                can_fix_dependencies,
-                egui::Button::new("Fix Tag Dependencies"),
-            )
-            .clicked()
-        {
+        // Goes through the same close request as the window's own close
+        // button, so unsaved tags are still offered for saving first.
+        if ui.button("Exit").clicked() {
             ui.close_menu();
-            self.fix_current_tag_dependencies();
-        }
-        // Regenerate Index: force a fresh full scan and
-        // overwrite the cached index file.
-        let can_regen = self
-            .source()
-            .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
-            .unwrap_or(false);
-        if ui
-            .add_enabled(
-                can_regen && !self.kits[self.active].scanning_entries,
-                egui::Button::new("Regenerate Index"),
-            )
-            .clicked()
-        {
-            ui.close_menu();
-            // Clear cached entries so the scan runs fresh.
-            if let Some(s) = self.source_mut() {
-                s.all_entries.clear();
-                s.group_tree = crate::source::build_group_tree(&[]);
-                s.reverse_dependencies = None;
-            }
-            self.kits[self.active].field_index.invalidate();
-            self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
-        }
-        let can_refresh_browser = self.source().is_some_and(|source| {
-            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
-        });
-        if ui
-            .add_enabled(
-                can_refresh_browser
-                    && !self.kits[self.active].scanning_entries
-                    && !self.kits[self.active].index_jobs.refreshing,
-                egui::Button::new("Refresh Tag Browser"),
-            )
-            .clicked()
-        {
-            ui.close_menu();
-            self.refresh_tag_browser(ctx.clone());
-        }
-        ui.separator();
-        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
-            self.settings_open = true;
-            ui.close_menu();
+            self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
         }
     }
 
@@ -462,9 +411,17 @@ impl Baboon {
                 });
             }
         }
+
+        ui.separator();
+        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
+            self.settings_open = true;
+            ui.close_menu();
+        }
     }
 
-    /// The Tools menu: the tool runner, reference searches, and the tag listings.
+    /// The Tools menu, in four sections: the tool and asset launchers, actions
+    /// on the current tag, searches and listings across the workspace, and the
+    /// indexes those searches run on.
     fn draw_tools_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("Run Tool...").clicked() {
@@ -473,10 +430,12 @@ impl Baboon {
         }
         self.draw_monitor_tools_menu(ui);
         self.draw_assets_tools_menu(ui);
+
         ui.separator();
+        let has_current = self.kits[self.active].selected_key.is_some();
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some(),
+                has_current,
                 egui::Button::new("Find References to Current Tag"),
             )
             .clicked()
@@ -488,7 +447,7 @@ impl Baboon {
         }
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some(),
+                has_current,
                 egui::Button::new("Explore References to Current Tag..."),
             )
             .clicked()
@@ -498,10 +457,68 @@ impl Baboon {
                 self.open_content_explorer(&key);
             }
         }
+        if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
+            ui.close_menu();
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.tag_diff = Some(TagDiffState {
+                    kit: self.active_kit_id(),
+                    a_key: key,
+                    source: TagCompareSource::OpenTag,
+                    b_kit: None,
+                    b_key: None,
+                    b_path: None,
+                    comparison_kit_root: None,
+                    git_history: GitHistoryState::default(),
+                    error: None,
+                    filters: TagDiffFilters::default(),
+                    swapped: false,
+                    results: None,
+                    git_pending: None,
+                });
+            }
+        }
+        let can_fix_dependencies = has_current
+            && self
+                .source()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
+        if ui
+            .add_enabled(
+                can_fix_dependencies,
+                egui::Button::new("Fix Tag Dependencies"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.fix_current_tag_dependencies();
+        }
+
+        ui.separator();
+        if ui.button("Search Field Values...").clicked() {
+            ui.close_menu();
+            self.field_value_search_open = true;
+        }
+        if ui.button("Browse Keywords...").clicked() {
+            ui.close_menu();
+            self.keyword_chooser_open = true;
+        }
         if ui.button("Find Unreferenced Tags...").clicked() {
             ui.close_menu();
             self.show_unreferenced_tags();
         }
+        if ui.button("List Scenario Map IDs...").clicked() {
+            ui.close_menu();
+            self.show_map_ids(ctx);
+        }
+        if ui.button("List Sounds by Class...").clicked() {
+            ui.close_menu();
+            self.show_sounds_by_class(ctx);
+        }
+        if ui.button("List Uncompressed Sounds...").clicked() {
+            ui.close_menu();
+            self.show_uncompressed_sounds(ctx);
+        }
+
+        ui.separator();
         {
             // Loose folders and Campaign Evolved containers can
             // both be indexed; cache sources cannot.
@@ -526,59 +543,51 @@ impl Baboon {
                     indexable && !self.kits[self.active].index_jobs.building_references,
                     egui::Button::new(label),
                 )
+                .on_hover_text("Which tags reference which, for the reference searches above")
                 .clicked()
             {
                 ui.close_menu();
                 self.begin_build_reverse_dependencies(ctx.clone(), true);
             }
         }
-        if ui.button("List Scenario Map IDs...").clicked() {
-            ui.close_menu();
-            self.show_map_ids(ctx);
-        }
-        if ui.button("List Sounds by Class...").clicked() {
-            ui.close_menu();
-            self.show_sounds_by_class(ctx);
-        }
-        if ui.button("List Uncompressed Sounds...").clicked() {
-            ui.close_menu();
-            self.show_uncompressed_sounds(ctx);
-        }
-        if ui.button("Search Field Values...").clicked() {
-            ui.close_menu();
-            self.field_value_search_open = true;
-        }
-        if icon_text_button(
-            ui,
-            ButtonIcon::Compare,
-            "Compare Tags...",
-            self.kits[self.active].selected_key.is_some(),
-        )
-        .clicked()
+        // Regenerate the tag index: force a fresh full scan and overwrite the
+        // cached index file.
+        let can_regen = self
+            .source()
+            .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
+            .unwrap_or(false);
+        if ui
+            .add_enabled(
+                can_regen && !self.kits[self.active].scanning_entries,
+                egui::Button::new("Regenerate Tag Index"),
+            )
+            .on_hover_text("Rescan every tag in the folder from disk")
+            .clicked()
         {
             ui.close_menu();
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                self.tag_diff = Some(TagDiffState {
-                    kit: self.active_kit_id(),
-                    a_key: key,
-                    source: TagCompareSource::OpenTag,
-                    b_kit: None,
-                    b_key: None,
-                    b_path: None,
-                    comparison_kit_root: None,
-                    git_history: GitHistoryState::default(),
-                    error: None,
-                    filters: TagDiffFilters::default(),
-                    swapped: false,
-                    results: None,
-                    git_pending: None,
-                });
+            // Clear cached entries so the scan runs fresh.
+            if let Some(s) = self.source_mut() {
+                s.all_entries.clear();
+                s.group_tree = crate::source::build_group_tree(&[]);
+                s.reverse_dependencies = None;
             }
+            self.kits[self.active].field_index.invalidate();
+            self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
         }
-        ui.separator();
-        if ui.button("Browse Keywords...").clicked() {
+        let can_refresh_browser = self.source().is_some_and(|source| {
+            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
+        });
+        if ui
+            .add_enabled(
+                can_refresh_browser
+                    && !self.kits[self.active].scanning_entries
+                    && !self.kits[self.active].index_jobs.refreshing,
+                egui::Button::new("Refresh Tag Browser"),
+            )
+            .clicked()
+        {
             ui.close_menu();
-            self.keyword_chooser_open = true;
+            self.refresh_tag_browser(ctx.clone());
         }
     }
 
@@ -1421,6 +1430,17 @@ impl Baboon {
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);
         self.handle_app_close_request(ctx);
+        // A folder move or rename is rewriting tags on disk. Nothing may edit,
+        // save or open them until it lands, so no shortcut or dropped file is
+        // taken, and no text field keeps the keyboard.
+        if self.folder_refactor.is_some() {
+            ctx.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
+            return;
+        }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
             self.find.open = true;
             self.find.focus_query = true;
@@ -1496,7 +1516,52 @@ impl Baboon {
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);
+        self.draw_loose_folder_rename_window(ctx);
+        self.draw_folder_refactor_lock(ctx);
         end_wheel_gesture(ctx);
+    }
+
+    /// While a folder move or rename runs, cover the whole window with a layer
+    /// that takes every click, drag and scroll, and show its progress on it.
+    ///
+    /// The job rewrites tags on disk from a snapshot taken when it started; an
+    /// edit, save or second refactor in the meantime would be overwritten or
+    /// would race it. Drawn last and in the foreground so no window or panel
+    /// sits above it.
+    fn draw_folder_refactor_lock(&mut self, ctx: &egui::Context) {
+        let Some(progress) = &self.folder_refactor else {
+            return;
+        };
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("folder_refactor_lock"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+                ui.painter()
+                    .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+                let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(panel), |ui| {
+                    Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_width(panel.width());
+                        ui.label(RichText::new(&progress.label).strong().color(text_dark()));
+                        ui.add_space(4.0);
+                        let bar = match progress.progress {
+                            Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
+                            None => egui::ProgressBar::new(0.0).animate(true),
+                        };
+                        ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Baboon is locked until references are updated.")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    });
+                });
+            });
+        ctx.request_repaint_after(PROGRESS_REPAINT);
     }
 }
 
@@ -1710,3 +1775,7 @@ mod terminal_output_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/folder_refactor_lock.rs"]
+mod folder_refactor_lock_tests;

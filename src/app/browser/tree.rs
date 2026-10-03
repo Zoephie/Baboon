@@ -510,6 +510,15 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
             ui.close_menu();
         }
+        if is_bitmap_group(entry.group_tag)
+            && browser_game_keeps_bitmap_sources(ui)
+            && context_menu_button(ui, "Extract bitmap source...")
+                .on_hover_text(BITMAP_SOURCE_HOVER)
+                .clicked()
+        {
+            action = Some(BrowserAction::ExtractBitmapSource(entry.key.clone()));
+            ui.close_menu();
+        }
         if crate::app::editor::is_sound_group(entry.group_tag) {
             let language = browser_sound_language(ui);
             let localized = sound_key_may_have_languages(&entry.key);
@@ -1782,8 +1791,23 @@ fn folder_extract_menu_from_keys(
                 })
                 .inner;
             if bitmap_response.clicked() {
-                action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys));
+                action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
                 ui.close_menu();
+            }
+            if browser_game_keeps_bitmap_sources(ui) {
+                let source_response = ui
+                    .add_enabled_ui(bitmap_count > 0, |ui| {
+                        context_menu_button(
+                            ui,
+                            &format!("Extract {bitmap_qualifier}bitmap sources... ({bitmap_count})"),
+                        )
+                    })
+                    .inner
+                    .on_hover_text(BITMAP_SOURCE_HOVER);
+                if source_response.clicked() {
+                    action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
+                    ui.close_menu();
+                }
             }
 
             let sound_count = sound_keys.len();
@@ -1963,6 +1987,16 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     rel_path: &Path,
     label: &str,
 ) -> Option<BrowserAction> {
+    if context_menu_button(ui, "Rename...")
+        .on_hover_text("Rename this folder and update every reference to the tags inside it")
+        .clicked()
+    {
+        ui.close_menu();
+        return Some(BrowserAction::RenameLooseFolder {
+            rel_path: rel_path.to_path_buf(),
+            label: label.to_owned(),
+        });
+    }
     if context_menu_button(ui, "Move to...").clicked() {
         ui.close_menu();
         return Some(BrowserAction::MoveLooseFolder {
@@ -4207,6 +4241,10 @@ pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
     path.set_file_name(format!("{file_name}.json"));
     path
 }
+
+/// What "Extract bitmap source" does, where its menu items offer it.
+const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
+     .tif that tool bitmaps can import again. Existing files are left alone.";
 
 pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
     group_tag == u32::from_be_bytes(*b"bitm")

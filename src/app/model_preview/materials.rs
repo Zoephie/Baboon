@@ -306,13 +306,13 @@ fn resolve_one_material(
 ///
 /// - `shader_model` (1,633 of the 2,419 parts haloce_mcc's gbxmodels draw):
 ///   base, multipurpose and detail maps; the detail map tiles at
-///   `(detail map scale, detail map scale · detail map v scale)` over the base
-///   coordinates, which `map u/v scale` scales; its `detail function` and
+///   `(detail map scale, detail map scale · detail map v-scale)` over the base
+///   coordinates, which `map u/v-scale` scales; its `detail function` and
 ///   `detail mask` combine it; alpha test on the base map's alpha unless the
-///   shader is `not alpha tested` or an `alpha blended decal`.
+///   shader is `not alpha-tested` or an `alpha-blended decal`.
 /// - `shader_environment` on a model (148 parts) draws through the same
 ///   function with no mask: base map, primary detail map at its scale by the
-///   `detail map function`, and — only when `alpha tested` — the bump map bound
+///   `detail map function`, and — only when `alpha-tested` — the bump map bound
 ///   in the multipurpose slot, whose alpha is the test. Its bump is never
 ///   shaded on a model: bump is lightmap-only in CE.
 ///
@@ -326,15 +326,23 @@ fn resolve_ce_shader(
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
     let root = shader.root();
-    let section = |name: &str| root.field(name).and_then(|field| field.as_struct());
-    let flags = |name: &str| -> Vec<String> {
-        section(name)
-            .and_then(|properties| properties.read_flag_names("flags"))
-            .map(|flags| flags.into_iter().map(|(_, name)| name).collect())
-            .unwrap_or_default()
-    };
+    // The root carries several `flags` fields, one per section, whose option
+    // names don't repeat, so every set flag is read off all of them.
+    let flags: Vec<String> = root
+        .fields()
+        .filter(|field| field.clean_name() == "flags")
+        .filter_map(|field| match field.value()? {
+            TagFieldData::ByteFlags { names, .. }
+            | TagFieldData::WordFlags { names, .. }
+            | TagFieldData::LongFlags { names, .. } => Some(names),
+            _ => None,
+        })
+        .flatten()
+        .map(|(_, name)| name)
+        .collect();
+    let has = |flag: &str| flags.iter().any(|name| name == flag);
     // Both scale fields store 0 for "unset"; a 0 at runtime would collapse
-    // every texel to one (the cyborg ships `detail map v scale` 0), so it can
+    // every texel to one (the cyborg ships `detail map v-scale` 0), so it can
     // only mean 1.
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut bind = |path: Option<String>, scale: [f32; 2]| {
@@ -350,59 +358,49 @@ fn resolve_ce_shader(
     };
     let detail_function = |name: Option<String>| match name.as_deref() {
         Some("multiply") => DetailFunction::Multiply,
-        Some("double biased add") => DetailFunction::BiasedAdd,
+        Some("double/biased add") => DetailFunction::BiasedAdd,
         _ => DetailFunction::BiasedMultiply,
     };
 
     let mut textures = MaterialTextures::default();
     match &group {
         b"soso" => {
-            let Some(maps) = section("maps") else {
-                return MaterialTextures::failed("shader_model has no maps");
-            };
-            let map = [factor(maps.read_real("map u scale")), factor(maps.read_real("map v scale"))];
-            let detail = factor(maps.read_real("detail map scale"));
-            let detail_v = factor(maps.read_real("detail map v scale"));
-            let properties = flags("properties");
-            let has = |flag: &str| properties.iter().any(|name| name == flag);
-            textures.slots[TextureSlot::Base as usize] = bind(maps.read_tag_ref_path("base map"), map);
+            let map = [factor(root.read_real("map u-scale")), factor(root.read_real("map v-scale"))];
+            let detail = factor(root.read_real("detail map scale"));
+            let detail_v = factor(root.read_real("detail map v-scale"));
+            textures.slots[TextureSlot::Base as usize] = bind(root.read_tag_ref_path("base map"), map);
             textures.slots[TextureSlot::Multipurpose as usize] =
-                bind(maps.read_tag_ref_path("multipurpose map"), map);
+                bind(root.read_tag_ref_path("multipurpose map"), map);
             textures.slots[TextureSlot::Detail as usize] = bind(
-                maps.read_tag_ref_path("detail map"),
+                root.read_tag_ref_path("detail map"),
                 [map[0] * detail, map[1] * detail * detail_v],
             );
             textures.detail = DetailComposition {
-                function: detail_function(maps.read_enum_name("detail function")),
+                function: detail_function(root.read_enum_name("detail function")),
                 mask: CE_DETAIL_MASKS
                     .iter()
-                    .position(|name| maps.read_enum_name("detail mask").as_deref() == Some(*name))
+                    .position(|name| root.read_enum_name("detail mask").as_deref() == Some(*name))
                     .unwrap_or(0) as u8,
-                xbox_channel_order: has("use xbox multipurpose channel order"),
+                xbox_channel_order: has("multipurpose map uses OG Xbox channel order"),
             };
-            if !has("not alpha tested") && !has("alpha blended decal") {
+            if !has("not alpha-tested") && !has("alpha-blended decal") {
                 textures.slots[TextureSlot::AlphaTest as usize] =
                     textures.slots[TextureSlot::Base as usize].clone();
             }
         }
         b"senv" => {
-            let Some(diffuse) = section("diffuse") else {
-                return MaterialTextures::failed("shader_environment has no diffuse maps");
-            };
-            textures.slots[TextureSlot::Base as usize] = bind(diffuse.read_tag_ref_path("base map"), [1.0; 2]);
+            textures.slots[TextureSlot::Base as usize] = bind(root.read_tag_ref_path("base map"), [1.0; 2]);
             textures.slots[TextureSlot::Detail as usize] = bind(
-                diffuse.read_tag_ref_path("primary detail map"),
-                [factor(diffuse.read_real("primary detail map scale")); 2],
+                root.read_tag_ref_path("primary detail map"),
+                [factor(root.read_real("primary detail map scale")); 2],
             );
             textures.detail = DetailComposition {
-                function: detail_function(diffuse.read_enum_name("detail map function")),
+                function: detail_function(root.read_enum_name("detail map function")),
                 ..Default::default()
             };
-            if flags("properties").iter().any(|name| name == "alpha tested") {
-                textures.slots[TextureSlot::AlphaTest as usize] = bind(
-                    section("bump").and_then(|bump| bump.read_tag_ref_path("bump map")),
-                    [1.0; 2],
-                );
+            if has("alpha-tested") {
+                textures.slots[TextureSlot::AlphaTest as usize] =
+                    bind(root.read_tag_ref_path("bump map"), [1.0; 2]);
             }
         }
         _ => {
@@ -424,12 +422,12 @@ const CE_DETAIL_MASKS: [&str; 9] = [
     "none",
     "reflection mask inverse",
     "reflection mask",
-    "self illumination mask inverse",
-    "self illumination mask",
-    "change color mask inverse",
-    "change color mask",
-    "auxiliary mask inverse",
-    "auxiliary mask",
+    "self-illumination mask inverse",
+    "self-illumination mask",
+    "change-color mask inverse",
+    "change-color mask",
+    "multipurpose map alpha inverse",
+    "multipurpose map alpha",
 ];
 
 /// One Halo 2 template parameter's defaults: what a shader that does not

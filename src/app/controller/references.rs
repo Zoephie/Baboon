@@ -144,6 +144,23 @@ impl Baboon {
         if done.moved {
             self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys);
             self.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
+            for (old, new) in &done.old_to_new_keys {
+                self.kits[kit_index].keywords.rekey_tag(old, new);
+            }
+            self.kits[kit_index].keywords.save_if_dirty();
+            if let Some((old, new)) = &done.moved_folder {
+                self.kits[kit_index].remap_folder_browser_paths(old, new);
+                if let Some(root) = self.loaded_tags_root_for(kit_index)
+                    && let Some(index) = self.favorite_kit_index(&root)
+                {
+                    for path in &mut self.prefs.editing_kit_favorites[index].folders {
+                        if let Ok(suffix) = path.strip_prefix(old) {
+                            *path = new.join(suffix);
+                        }
+                    }
+                    self.refresh_favorite_entries_for(kit_index);
+                }
+            }
         }
         let kit = &mut self.kits[kit_index];
         kit.parsed_tags.clear();
@@ -153,6 +170,16 @@ impl Baboon {
         kit.edit_buffers.clear();
         kit.find_filter_applied.clear();
         kit.generation = kit.generation.wrapping_add(1);
+        kit.filter_cache = FilterCache::default();
+        for pane in kit.folder_browsers.values_mut() {
+            pane.cached_generation = u64::MAX;
+            pane.cached_source_len = usize::MAX;
+            pane.tree = TagTree::default();
+            pane.group_tree = TagTree::default();
+            pane.group_tree_for = None;
+            pane.filter_cache = FilterCache::default();
+            pane.date_cache = FolderDateCache::default();
+        }
         self.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));
@@ -303,6 +330,102 @@ pub(super) fn dependency_leaf_key(rel_path: &str) -> String {
 
 pub(super) fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
     resolve_tag_path(tags_root, rel_path, extension).is_file()
+}
+
+#[cfg(test)]
+mod folder_browser_integration_tests {
+    use super::*;
+
+    #[test]
+    fn folder_rename_preserves_views_and_keywords_in_the_originating_workspace() {
+        let mut app = Baboon::for_test();
+        let root = PathBuf::from("C:/test-tags");
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".into(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: locate_definitions_root(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: true,
+            chosen_kit_layout: None,
+        });
+        for path in [
+            "objects/brute",
+            "objects/brute/bitmaps",
+            "objects/brute_other",
+        ] {
+            app.handle_browser_action(
+                BrowserAction::OpenFolderBrowser {
+                    rel_path: path.into(),
+                    label: path.rsplit('/').next().unwrap().into(),
+                    open_in_new_tab: true,
+                },
+                egui::Context::default(),
+            );
+        }
+        let pane_key = folder_pane_key(Path::new("objects/brute"));
+        let pane = app.kits[0].folder_browsers.get_mut(&pane_key).unwrap();
+        pane.assets_view = true;
+        pane.asset_bitmaps = false;
+        pane.filter = "armor".into();
+        pane.search_scope = BrowserSearchScope {
+            tags: true,
+            folders: false,
+            keywords: true,
+        };
+        let old_key = format!("file:{}", root.join("objects/brute/armor.bitmap").display());
+        let new_key = format!("file:{}", root.join("objects/elite/armor.bitmap").display());
+        app.kits[0].keywords.add(&old_key, "wip");
+        app.kits[0].open_tag_pane(&old_key);
+        let stamp = app.kit_stamp();
+        app.add_kit();
+        app.kits[1].keywords.add(&old_key, "other kit");
+        app.handle_folder_refactor_finished(
+            stamp,
+            Ok(FolderRefactorFinished {
+                status: "Renamed".into(),
+                lines: Vec::new(),
+                tree: TagTree::default(),
+                all_entries: Vec::new(),
+                reverse_dependencies: None,
+                old_to_new_keys: HashMap::from([(old_key.clone(), new_key.clone())]),
+                moved: true,
+                moved_folder: Some(("objects/brute".into(), "objects/elite".into())),
+            }),
+        );
+        assert_eq!(app.active, 1);
+        let kit = &app.kits[0];
+        let pane = &kit.folder_browsers[&pane_key];
+        assert_eq!(pane.rel_path, Path::new("objects/elite"));
+        assert_eq!(pane.label, "elite");
+        assert!(pane.assets_view && !pane.asset_bitmaps);
+        assert_eq!(pane.filter, "armor");
+        assert!(pane.search_scope.keywords);
+        assert_eq!(pane.cached_generation, u64::MAX);
+        assert!(kit.open_tabs.contains(&pane_key));
+        assert!(kit.open_tabs.contains(&new_key));
+        assert_eq!(kit.keywords.keywords(&new_key), &["wip"]);
+        assert!(kit.keywords.keywords(&old_key).is_empty());
+        assert_eq!(
+            kit.folder_browsers[&folder_pane_key(Path::new("objects/brute/bitmaps"))].rel_path,
+            Path::new("objects/elite/bitmaps")
+        );
+        assert_eq!(
+            kit.folder_browsers[&folder_pane_key(Path::new("objects/brute_other"))].rel_path,
+            Path::new("objects/brute_other")
+        );
+        assert_eq!(app.kits[1].keywords.keywords(&old_key), &["other kit"]);
+    }
 }
 
 #[cfg(test)]

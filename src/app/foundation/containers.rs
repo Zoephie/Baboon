@@ -200,8 +200,6 @@ pub(in crate::app) fn draw_fields_with_docs(
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
         let block_index = block_index_target_options(tag_struct, &field, root, path_prefix);
-        let semantic_short_index =
-            semantic_short_index_target_options(tag_struct, &field, root, path_prefix);
         draw_field(
             ui,
             field,
@@ -213,7 +211,6 @@ pub(in crate::app) fn draw_fields_with_docs(
             edit,
             meta_override,
             block_index,
-            semantic_short_index,
             reference_value_width,
         );
     }
@@ -244,7 +241,6 @@ pub(in crate::app) fn draw_field(
     edit: &mut FieldEditContext<'_>,
     meta_override: Option<FieldDisplayMeta>,
     block_index: Option<BlockIndexTarget>,
-    semantic_short_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path_for(path_prefix, &field);
@@ -356,7 +352,6 @@ pub(in crate::app) fn draw_field(
                     &field_path,
                     edit,
                     block_index.as_ref(),
-                    semantic_short_index.as_ref(),
                     tag_reference_value_width,
                 );
             });
@@ -377,7 +372,6 @@ pub(in crate::app) fn draw_field(
                 &field_path,
                 edit,
                 block_index.as_ref(),
-                semantic_short_index.as_ref(),
                 tag_reference_value_width,
             );
         }
@@ -2642,31 +2636,6 @@ pub(in crate::app) fn block_index_target_options(
 ) -> Option<BlockIndexTarget> {
     let target = field.definition().block_index_target()?;
     crate::app::editor::declared_block_index_target(tag_struct, root, struct_path, target.name())
-}
-
-/// Some classic schemas expose parent links as plain signed shorts instead of
-/// first-class block-index fields. Render only well-known parent references as
-/// dropdowns so ordinary counters/indices remain numeric.
-pub(in crate::app) fn semantic_short_index_target_options(
-    tag_struct: &TagStruct<'_>,
-    field: &TagField<'_>,
-    root: Option<TagStruct<'_>>,
-    struct_path: &str,
-) -> Option<BlockIndexTarget> {
-    if field.field_type() != TagFieldType::ShortInteger {
-        return None;
-    }
-    let target_key = semantic_short_index_target_key(field.name())?;
-    crate::app::editor::semantic_block_index_target(tag_struct, root, struct_path, target_key)
-}
-
-pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
-    match clean_field_key(field_name).as_str() {
-        "parent variant" | "variant" => Some("variants"),
-        "parent node" => Some("nodes"),
-        "damage section" | "indirect damage section" => Some("damage sections"),
-        _ => None,
-    }
 }
 
 /// A block-index field rendered like Foundation: a dropdown of the target

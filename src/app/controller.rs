@@ -9,6 +9,8 @@ mod terminal;
 pub(super) use terminal::open_terminal_log;
 #[cfg(test)]
 use terminal::terminal_log_timestamp;
+#[cfg(target_os = "windows")]
+use terminal::windows_shell_command;
 use terminal::{
     TerminalStopResult, append_terminal_log_path, create_terminal_log_file,
     run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
@@ -55,8 +57,10 @@ mod container_folders;
 mod delete;
 mod duplicate;
 use duplicate::resolve_source_uasset;
+mod folder_rename;
 mod group_report;
 mod rename_in_place;
+use folder_rename::sibling_differing_in_case;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
@@ -3170,14 +3174,7 @@ impl Baboon {
         thread::spawn(move || {
             let mut log_error_reported = false;
             #[cfg(target_os = "windows")]
-            let mut cmd = {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                let mut c = std::process::Command::new("cmd");
-                c.creation_flags(CREATE_NO_WINDOW);
-                c.args(["/C", &format!("{command} 2>&1")]);
-                c
-            };
+            let mut cmd = windows_shell_command(&command);
             #[cfg(not(target_os = "windows"))]
             let mut cmd = {
                 #[cfg(unix)]
@@ -3619,6 +3616,12 @@ impl Baboon {
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        // Quitting would kill the worker partway through rewriting references,
+        // leaving some tags pointing at a path that no longer exists.
+        if self.folder_refactor.is_some() {
+            self.status = "Wait for the folder move/rename to finish before closing".to_owned();
+            return;
+        }
         if self.save_changes_prompt.visible
             || self.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
@@ -4189,6 +4192,9 @@ impl Baboon {
             BrowserAction::DumpLooseFolderJson { rel_path, label } => {
                 self.begin_export_loose_folder_json(rel_path, label, ctx)
             }
+            BrowserAction::RenameLooseFolder { rel_path, label } => {
+                self.open_loose_folder_rename(rel_path, label)
+            }
             BrowserAction::MoveLooseFolder { rel_path, label } => {
                 self.begin_refactor_loose_folder(rel_path, label, true)
             }
@@ -4210,6 +4216,12 @@ impl Baboon {
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
             BrowserAction::ExtractBitmapFolder(keys) => self.begin_extract_bitmap_folder(keys, ctx),
+            BrowserAction::ExtractBitmapSource(key) => {
+                self.begin_extract_bitmap_sources(vec![key], false, ctx)
+            }
+            BrowserAction::ExtractBitmapSourceFolder(keys) => {
+                self.begin_extract_bitmap_sources(keys, true, ctx)
+            }
             BrowserAction::ExtractSound {
                 keys,
                 all_languages,
@@ -4652,6 +4664,35 @@ impl Baboon {
         else {
             return;
         };
+        let job_label = if move_folder {
+            format!("Moving {label}")
+        } else {
+            format!("Copying {label}")
+        };
+        self.spawn_folder_refactor(
+            root,
+            rel_path,
+            destination_parent,
+            None,
+            move_folder,
+            job_label,
+        );
+    }
+
+    /// Run the folder move/copy job on a worker, with the progress state that
+    /// locks the app set before it starts.
+    ///
+    /// `new_name` replaces the folder's leaf at the destination; `None` keeps it.
+    /// A rename is a move into the folder's own parent with a new leaf.
+    fn spawn_folder_refactor(
+        &mut self,
+        root: PathBuf,
+        rel_path: PathBuf,
+        destination_parent: PathBuf,
+        new_name: Option<String>,
+        move_folder: bool,
+        job_label: String,
+    ) {
         let names = self.names().clone();
         let existing_all_entries = self
             .source()
@@ -4665,11 +4706,6 @@ impl Baboon {
         // whichever one is focused when it lands.
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
-        let job_label = if move_folder {
-            format!("Moving {label}")
-        } else {
-            format!("Copying {label}")
-        };
         self.folder_refactor = Some(FolderRefactorUiState {
             label: job_label.clone(),
             phase: "Preparing".to_owned(),
@@ -4682,6 +4718,7 @@ impl Baboon {
                     root,
                     rel_path,
                     destination_parent,
+                    new_name,
                     move_folder,
                     job_label,
                     names,
@@ -4734,6 +4771,51 @@ impl Baboon {
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = extract_bitmap_images(&source, &entry, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Recovers the color plates of `keys` into a folder the user picks,
+    /// starting from the active kit's data folder. A `folder` extract keeps
+    /// each tag's folder under it; a single tag lands in it directly.
+    pub(super) fn begin_extract_bitmap_sources(
+        &mut self,
+        keys: Vec<String>,
+        folder: bool,
+        ctx: egui::Context,
+    ) {
+        let Some(source_data) = self.source() else {
+            return;
+        };
+        let entries = keys
+            .iter()
+            .filter_map(|key| source_data.entries.iter().find(|entry| entry.key == *key))
+            .cloned()
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
+            self.status = "No bitmap tags found".to_owned();
+            return;
+        }
+        let source = source_data.source.clone();
+        let mut dialog = rfd::FileDialog::new().set_title("Extract Bitmap Source");
+        if let Some(layout) = self.kit_layout_for(self.active) {
+            dialog = dialog.set_directory(layout.data);
+        }
+        let Some(output) = dialog.pick_folder() else {
+            return;
+        };
+        self.status = match entries.as_slice() {
+            [entry] if !folder => format!("Extracting bitmap source for {}", entry.display_path),
+            entries => format!("Extracting {} bitmap source(s)", entries.len()),
+        };
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = match entries.as_slice() {
+                [entry] if !folder => extract_bitmap_source(&source, entry, &output),
+                entries => extract_bitmap_sources(&source, entries, &output),
+            }
+            .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -11059,7 +11141,7 @@ fn listing_map_ids(source: &TagSource, listed: &[TagEntry]) -> ListingRows {
     (entries, annotations, note)
 }
 
-/// Every `snd!` tag's `sound class` and `compression` enum names, as
+/// Every `snd!` tag's `class` and `compression` enum names, as
 /// `(class, compression, entry)`. Shared by both sound listings.
 fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, String, TagEntry)> {
     let mut rows = Vec::new();
@@ -11071,7 +11153,7 @@ fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, Stri
             continue;
         };
         let root = tag.root();
-        let class = find_full_field_name(&root, "sound class")
+        let class = find_full_field_name(&root, "class")
             .and_then(|full| root.read_enum_name(full))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "(none)".to_owned());
@@ -11263,6 +11345,27 @@ struct ReferenceRewriteResult {
     references_changed: usize,
     tags_changed: usize,
     changed_keys: Vec<String>,
+    /// Tags that hold a reference to rewrite but could not be read, parsed or
+    /// written, with why: `(display path, reason)`. They still point at the
+    /// old path.
+    failed: Vec<(String, String)>,
+}
+
+/// Terminal lines naming each tag a reference rewrite could not update.
+fn rewrite_failure_lines(failed: &[(String, String)]) -> Vec<String> {
+    if failed.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "Warning: {} tag(s) could not be updated and may still reference the old path:",
+        failed.len()
+    )];
+    lines.extend(
+        failed
+            .iter()
+            .map(|(path, reason)| format!("Warning: not updated: {path} ({reason})")),
+    );
+    lines
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -11441,15 +11544,22 @@ fn run_tag_rename_job(
     } else {
         "Renamed"
     };
-    let status =
+    let mut status =
         format!("{verb} tag, updated {references_changed} reference(s) in {tags_changed} tag(s)");
-    let lines = vec![
+    if !rewrite_result.failed.is_empty() {
+        status.push_str(&format!(
+            "; {} tag(s) could NOT be updated and may still reference the old path (see terminal)",
+            rewrite_result.failed.len()
+        ));
+    }
+    let mut lines = vec![
         format!(
             "{verb}: {} -> {}",
             entry.display_path, new_entry.display_path
         ),
         format!("Updated {references_changed} reference(s) in {tags_changed} tag(s)"),
     ];
+    lines.extend(rewrite_failure_lines(&rewrite_result.failed));
     Ok(FolderRefactorFinished {
         status,
         lines,
@@ -11458,6 +11568,7 @@ fn run_tag_rename_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: true,
+        moved_folder: None,
     })
 }
 
@@ -11465,6 +11576,7 @@ fn run_folder_refactor_job(
     root: PathBuf,
     rel_path: PathBuf,
     destination_parent: PathBuf,
+    new_name: Option<String>,
     move_folder: bool,
     label: String,
     names: TagNameIndex,
@@ -11487,6 +11599,10 @@ fn run_folder_refactor_job(
     let folder_name = source
         .file_name()
         .ok_or_else(|| "Cannot move/copy the tags root itself".to_owned())?;
+    let folder_name = match new_name.as_deref() {
+        Some(name) => std::ffi::OsStr::new(name),
+        None => folder_name,
+    };
     let destination = lexical_normalize_path(&destination_parent.join(folder_name));
     if destination == source {
         return Err("Source and destination are the same folder".to_owned());
@@ -11494,7 +11610,10 @@ fn run_folder_refactor_job(
     if destination.starts_with(&source) {
         return Err("Cannot move/copy a folder into itself".to_owned());
     }
-    if destination.exists() {
+    // A case-insensitive file system answers `exists` for a sibling that
+    // differs only in case, which is also a conflict as far as tag paths go:
+    // they ignore case, so both folders would claim the same references.
+    if destination.exists() || sibling_differing_in_case(&destination).is_some() {
         return Err(format!(
             "Destination already exists: {}",
             destination.display()
@@ -11611,6 +11730,7 @@ fn run_folder_refactor_job(
     };
     let references_changed = rewrite_result.references_changed;
     let tags_changed = rewrite_result.tags_changed;
+    let failed = rewrite_result.failed.clone();
 
     send_folder_refactor_progress(tx, &label, "Refreshing browser", None);
     let tree = crate::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
@@ -11648,13 +11768,23 @@ fn run_folder_refactor_job(
         );
     }
 
-    let action = if move_folder { "Moved" } else { "Copied" };
-    let status = format!(
+    let action = match (move_folder, new_name.is_some()) {
+        (true, true) => "Renamed",
+        (true, false) => "Moved",
+        (false, _) => "Copied",
+    };
+    let mut status = format!(
         "{action} {} tag(s), updated {} reference(s) in {} tag(s)",
         old_entries.len(),
         references_changed,
         tags_changed
     );
+    if !failed.is_empty() {
+        status.push_str(&format!(
+            "; {} tag(s) could NOT be updated and may still reference the old path (see terminal)",
+            failed.len()
+        ));
+    }
     let mut lines = vec![format!(
         "{action} folder: {} -> {}",
         source.strip_prefix(&root).unwrap_or(&source).display(),
@@ -11666,6 +11796,7 @@ fn run_folder_refactor_job(
     lines.push(format!(
         "Updated {references_changed} reference(s) in {tags_changed} tag(s)"
     ));
+    lines.extend(rewrite_failure_lines(&failed));
 
     Ok(FolderRefactorFinished {
         status,
@@ -11675,6 +11806,15 @@ fn run_folder_refactor_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: move_folder,
+        moved_folder: move_folder.then(|| {
+            (
+                source_rel,
+                destination
+                    .strip_prefix(&root)
+                    .expect("destination is inside tags root")
+                    .to_path_buf(),
+            )
+        }),
     })
 }
 
@@ -11926,8 +12066,20 @@ fn rewrite_references_in_entries(
                 progress,
             );
         }
-        let bytes = fs::read(path)
-            .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+        // A tag that cannot be read, parsed or written is recorded and the
+        // rest are still rewritten. The files have already moved by now, so
+        // stopping here would leave every later referrer broken too, and the
+        // error would name only the first.
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                result.failed.push((
+                    entry.display_path.clone(),
+                    format!("could not read: {error}"),
+                ));
+                continue;
+            }
+        };
         if !bytes_contain_any_ascii_case_insensitive(&bytes, &needles) {
             continue;
         }
@@ -11942,8 +12094,16 @@ fn rewrite_references_in_entries(
             ),
             None,
         );
-        let mut tag =
-            read_entry(source, entry).map_err(|error| format!("Could not parse tag: {error}"))?;
+        let mut tag = match read_entry(source, entry) {
+            Ok(tag) => tag,
+            Err(error) => {
+                result.failed.push((
+                    entry.display_path.clone(),
+                    format!("could not parse: {error}"),
+                ));
+                continue;
+            }
+        };
         let changed = rewrite_references_in_tag(&mut tag, rewrites);
         if changed == 0 {
             continue;
@@ -11957,8 +12117,13 @@ fn rewrite_references_in_entries(
                 entry.display_path
             )));
         }
-        tag.write_atomic(&path)
-            .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
+        if let Err(error) = tag.write_atomic(path) {
+            result.failed.push((
+                entry.display_path.clone(),
+                format!("could not write: {error}"),
+            ));
+            continue;
+        }
         result.references_changed += changed;
         result.tags_changed += 1;
         result.changed_keys.push(entry.key.clone());

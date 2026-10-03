@@ -143,3 +143,7 @@ mod batch_tests {
         assert_eq!(finish(batch(0, 0)).unwrap_err().to_string(), "none found");
     }
 }
+
+#[cfg(test)]
+#[path = "tests/bitmap_source_extract.rs"]
+mod bitmap_source_extract_tests;
