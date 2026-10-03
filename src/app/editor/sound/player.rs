@@ -266,7 +266,7 @@ pub(super) fn draw_clip_player(
                 zoomed = Some(View::fit(duration));
             }
             if let Some(view) = zoomed {
-                store_view(ui, edit.tag_key, &clip.id, view);
+                store_view(ui, edit.tag_key, &clip.id, view, duration);
             }
         }
         if let Some((start, end)) = stored_region(ui, edit.tag_key, &clip.id) {
@@ -801,7 +801,7 @@ fn draw_timeline(
             view = view.clamped(duration, min_span);
         }
     }
-    store_view(ui, edit.tag_key, &clip_id, view);
+    store_view(ui, edit.tag_key, &clip_id, view, duration);
     if let Some(waveform) = waveform.filter(|_| !view.whole(duration))
         && let Some(moved) = draw_overview(ui, waveform, duration, view)
     {
@@ -810,6 +810,7 @@ fn draw_timeline(
             edit.tag_key,
             &clip_id,
             moved.clamped(duration, min_span),
+            duration,
         );
     }
 
@@ -939,8 +940,18 @@ pub(super) fn load_view(ui: &Ui, tag_key: &str, clip: &str, duration: f64, min_s
         .unwrap_or_else(|| View::fit(duration))
 }
 
-fn store_view(ui: &Ui, tag_key: &str, clip: &str, view: View) {
-    ui.data_mut(|data| data.insert_temp(clip_view_id(tag_key), (clip.to_owned(), view)));
+/// Keep a zoomed or scrolled view. The whole clip is not kept: it is what a
+/// clip shows by default, and a length not known yet (a referenced sound
+/// before its preview decodes) would otherwise be kept as a zero-length view
+/// that the real length later clamps to the narrowest zoom.
+fn store_view(ui: &Ui, tag_key: &str, clip: &str, view: View, duration: f64) {
+    ui.data_mut(|data| {
+        if duration <= 0.0 || view.whole(duration) {
+            data.remove::<(String, View)>(clip_view_id(tag_key));
+        } else {
+            data.insert_temp(clip_view_id(tag_key), (clip.to_owned(), view));
+        }
+    });
 }
 
 /// The narrowest view: about eight points a sample, or a millisecond when
@@ -1229,14 +1240,14 @@ mod tests {
     use crate::app::audio::{SoundOwner, SoundRequest, SoundRequests};
     use std::collections::VecDeque;
 
-    fn clips() -> Vec<PlayerClip> {
+    fn clips_of(duration: Option<f64>) -> Vec<PlayerClip> {
         ["a", "b", "c"]
             .into_iter()
             .map(|name| PlayerClip {
                 id: format!("id-{name}"),
                 name: name.to_owned(),
                 group: None,
-                duration: Some(2.0),
+                duration,
             })
             .collect()
     }
@@ -1273,6 +1284,9 @@ mod tests {
         preview: Option<Preview>,
         /// Playback speed, as the audio state would hand it over.
         speed: f32,
+        /// Whether the clips' lengths are known before they decode (a
+        /// sound's permutations) or not (a dialogue's referenced sounds).
+        lengths_known: bool,
         timeline: egui::Rect,
     }
 
@@ -1292,6 +1306,7 @@ mod tests {
                 previewed: Vec::new(),
                 preview: None,
                 speed: 1.0,
+                lengths_known: true,
                 timeline: egui::Rect::NOTHING,
             }
         }
@@ -1299,7 +1314,7 @@ mod tests {
         fn frame(&mut self, events: Vec<egui::Event>) {
             self.time += 1.0 / 60.0;
             let time = self.time;
-            let clips = clips();
+            let clips = clips_of(self.lengths_known.then_some(2.0));
             let mut sinks = EditSinks::default();
             let playback = self.playback.clone();
             let preview = self.preview.clone();
@@ -2029,10 +2044,11 @@ mod tests {
             wheel(egui::vec2(0.0, -40.0), egui::Modifiers::NONE),
         ]);
         h.frame(Vec::new());
-        assert_eq!(
-            stored_view(&h).map(|view| view.span),
-            Some(2.0),
-            "a plain wheel zoomed"
+        // Nothing kept is the whole clip.
+        assert!(
+            stored_view(&h).is_none(),
+            "a plain wheel zoomed: {:?}",
+            stored_view(&h)
         );
 
         // Pinch-zoom by 4 around the middle: 0.75 s – 1.25 s.
@@ -2368,6 +2384,33 @@ mod tests {
         assert_eq!(
             after_speed, 0,
             "a divider before a language picker that is not there"
+        );
+    }
+
+    /// A clip whose length is unknown until its preview decodes (a dialogue's
+    /// referenced sound) opens showing all of it, not the narrowest zoom.
+    #[test]
+    fn a_clip_of_unknown_length_opens_unzoomed() {
+        let mut h = Harness::new();
+        h.lengths_known = false;
+        h.preview = Some(Preview {
+            clip: "id-a".to_owned(),
+            state: PreviewState::Pending,
+        });
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.preview = Some(ready_preview(sound(1, 2000, |_, f| (f % 100) as i16 * 100)));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        assert!(
+            stored_view(&h).is_none(),
+            "a view was kept: {:?}",
+            stored_view(&h)
+        );
+        assert!(
+            h.texts.iter().any(|(text, _)| text == "2.0"),
+            "the ruler does not reach the end: {:?}",
+            h.texts.iter().map(|(text, _)| text).collect::<Vec<_>>()
         );
     }
 }
