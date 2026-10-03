@@ -34,8 +34,15 @@ impl Baboon {
         self.persist_prefs_throttled(ctx.input(|input| input.time));
         // Every kit, not just the active one: a background kit's sidecar can be
         // dirty from edits made before the user switched away.
+        let mut keyword_notice = None;
         for kit in &mut self.kits {
             kit.keywords.save_if_dirty();
+            if let Some(notice) = kit.keywords.take_notice() {
+                keyword_notice = Some(notice);
+            }
+        }
+        if let Some(notice) = keyword_notice {
+            self.status = notice;
         }
         self.draw_and_apply_color_popup(ctx);
         self.draw_and_apply_function_popup(ctx);
