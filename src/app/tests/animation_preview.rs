@@ -479,3 +479,17 @@ fn a_halo_2_model_plays_its_idle() {
     };
     plays_a_classic_idle(source, entry, "halo2_mcc", "combat:rifle:idle");
 }
+
+/// Only Halo CE's objects stand in for a `.model`. Campaign Evolved's game id
+/// also starts with `haloce`, but its tags are Reach's.
+#[test]
+fn only_halo_ce_is_halo1_for_animation_lists() {
+    let folder = |game: &str| TagSource::LooseFolder {
+        root: std::path::PathBuf::from("/tags"),
+        game: Some(game.to_owned()),
+        definitions_root: std::path::PathBuf::new(),
+    };
+    assert!(source_is_halo1(&folder("haloce_mcc")));
+    assert!(!source_is_halo1(&folder("haloce_evolved")));
+    assert!(!source_is_halo1(&folder("halo2_mcc")));
+}
