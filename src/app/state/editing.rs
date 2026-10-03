@@ -277,6 +277,8 @@ pub(in crate::app) struct CeSoundRefRequest {
     pub(in crate::app) extract: bool,
     /// The player clip a play is for, carried to the play it becomes.
     pub(in crate::app) clip: Option<String>,
+    /// Decode it for the clip's waveform rather than play it.
+    pub(in crate::app) preview: bool,
 }
 
 /// Read-only tag catalog exposed to reference pickers for sources whose tags do
@@ -470,6 +472,9 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) sound_playback: Option<super::audio::PlaybackView>,
     /// Whether sounds loop, for the transport's loop toggle.
     pub(in crate::app) sound_looping: bool,
+    /// This tab's preview of its selected clip, for the waveform before it
+    /// plays.
+    pub(in crate::app) sound_preview: Option<super::audio::Preview>,
     /// Whether this pane is the focused tab, which is where the player's
     /// keyboard shortcuts act.
     pub(in crate::app) sound_has_focus: bool,
@@ -600,6 +605,7 @@ impl<'a> FieldEditContext<'a> {
             sound_volume: 1.0,
             sound_playback: None,
             sound_looping: false,
+            sound_preview: None,
             sound_has_focus: false,
             sound_extract_request: &mut sinks.sound_extract_request,
             sound_language: None,

@@ -163,7 +163,7 @@ pub(super) enum SoundAction {
 
 /// The tag tab a sound was started from. Playback follows its tab: it pauses
 /// when another tab takes focus and is disposed of when the tab closes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct SoundOwner {
     pub(super) kit: KitId,
     pub(super) key: String,
@@ -176,7 +176,26 @@ pub(super) struct SoundRequest {
     /// Which of the tab's clips a play is for (a permutation, an event), so
     /// the player knows whether the clip it has selected is the one loaded.
     pub(super) clip: Option<String>,
+    /// Decode the clip for its waveform without playing it.
+    pub(super) preview: bool,
     pub(super) action: SoundAction,
+}
+
+/// A tab's selected clip decoded ahead of playing, so its player can show
+/// the waveform before anything plays. Kept apart from the voice: previewing
+/// never unloads another tab's sound.
+#[derive(Clone)]
+pub(in crate::app) struct Preview {
+    pub(in crate::app) clip: String,
+    pub(in crate::app) state: PreviewState,
+}
+
+#[derive(Clone)]
+pub(in crate::app) enum PreviewState {
+    Pending,
+    Ready(Arc<Waveform>),
+    /// Why there is no waveform: the reason a play would have reported.
+    Failed(String),
 }
 
 impl From<SoundAction> for SoundRequest {
@@ -185,6 +204,7 @@ impl From<SoundAction> for SoundRequest {
         Self {
             owner: None,
             clip: None,
+            preview: false,
             action,
         }
     }
@@ -209,15 +229,16 @@ impl<'a> SoundRequests<'a> {
         self.queue.push_back(SoundRequest {
             owner: self.owner.clone(),
             clip: None,
+            preview: false,
             action,
         });
     }
 
     /// Whether a play for `clip` from this tab is already queued.
     pub(in crate::app) fn queued_clip(&self, clip: &str) -> bool {
-        self.queue
-            .iter()
-            .any(|request| request.owner == self.owner && request.clip.as_deref() == Some(clip))
+        self.queue.iter().any(|request| {
+            !request.preview && request.owner == self.owner && request.clip.as_deref() == Some(clip)
+        })
     }
 
     /// Queue a play for one of the tab's clips.
@@ -225,6 +246,17 @@ impl<'a> SoundRequests<'a> {
         self.queue.push_back(SoundRequest {
             owner: self.owner.clone(),
             clip: Some(clip),
+            preview: false,
+            action,
+        });
+    }
+
+    /// Queue a decode of one of the tab's clips for its waveform alone.
+    pub(in crate::app) fn preview_clip(&mut self, action: SoundAction, clip: String) {
+        self.queue.push_back(SoundRequest {
+            owner: self.owner.clone(),
+            clip: Some(clip),
+            preview: true,
             action,
         });
     }
@@ -266,6 +298,17 @@ pub(super) struct Volume(f32);
 impl Default for Volume {
     fn default() -> Self {
         Self(1.0)
+    }
+}
+
+/// The label a play action shows.
+fn action_label(action: &SoundAction) -> Option<String> {
+    match action {
+        SoundAction::Play { label, .. }
+        | SoundAction::PlayInline { label, .. }
+        | SoundAction::PlayEvent { label, .. }
+        | SoundAction::PlayCeMedia { label, .. } => Some(label.clone()),
+        _ => None,
     }
 }
 
@@ -510,6 +553,12 @@ pub(super) struct AudioState {
     /// The tab the action being processed came from, and the clip it names.
     request_owner: Option<SoundOwner>,
     request_clip: Option<String>,
+    /// Whether the action being processed is a preview.
+    request_preview: bool,
+    /// Whether processing a preview started a decode for it.
+    preview_spawned: bool,
+    /// Each tab's preview of its selected clip.
+    previews: HashMap<SoundOwner, Preview>,
     /// The tab the newest decode was started for, so closing it cancels the
     /// decode as well as the sound.
     decode_owner: Option<SoundOwner>,
@@ -656,6 +705,7 @@ enum AudioDone {
         label: String,
         owner: Option<SoundOwner>,
         clip: Option<String>,
+        preview: bool,
         result: Result<Arc<Waveform>, String>,
     },
     Extracted(String),
@@ -891,12 +941,18 @@ impl AudioState {
         ctx: &egui::Context,
         decode: impl FnOnce() -> Result<DecodedPcm, String> + Send + 'static,
     ) {
-        self.play_request += 1;
-        let request = self.play_request;
         let owner = self.request_owner.clone();
         let clip = self.request_clip.clone();
-        self.decode_owner = owner.clone();
-        self.status = Some(format!("decoding {label}\u{2026}"));
+        let preview = self.request_preview;
+        if preview {
+            // Not a play: it must not supersede one or say anything.
+            self.preview_spawned = true;
+        } else {
+            self.play_request += 1;
+            self.decode_owner = owner.clone();
+            self.status = Some(format!("decoding {label}\u{2026}"));
+        }
+        let request = self.play_request;
         self.spawn_job(ctx, move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(decode))
                 .unwrap_or_else(|panic| Err(super::state::panic_text(&panic)))
@@ -908,6 +964,7 @@ impl AudioState {
                 label,
                 owner,
                 clip,
+                preview,
                 result,
             }
         });
@@ -943,8 +1000,25 @@ impl AudioState {
                 label,
                 owner,
                 clip,
+                preview,
                 result,
             } => {
+                if let Ok(pcm) = &result {
+                    self.cache_decoded(cache, pcm);
+                }
+                if preview {
+                    if let (Some(owner), Some(clip)) = (owner, clip)
+                        && let Some(slot) = self.previews.get_mut(&owner)
+                        && slot.clip == clip
+                        && matches!(slot.state, PreviewState::Pending)
+                    {
+                        slot.state = match result {
+                            Ok(waveform) => PreviewState::Ready(waveform),
+                            Err(error) => PreviewState::Failed(format!("decode failed: {error}")),
+                        };
+                    }
+                    return;
+                }
                 let pcm = match result {
                     Ok(pcm) => pcm,
                     Err(error) => {
@@ -955,26 +1029,56 @@ impl AudioState {
                         return;
                     }
                 };
-                match cache {
-                    Some(PcmKey::Bank {
-                        generation,
-                        bank,
-                        sub,
-                    }) if generation == self.banks_generation => {
-                        self.cache.insert((bank, sub), pcm.clone());
-                    }
-                    Some(PcmKey::Event { generation, name })
-                        if generation == self.wwise_generation =>
-                    {
-                        self.event_cache.insert(name, pcm.clone());
-                    }
-                    _ => {}
-                }
                 if request == self.play_request {
                     self.play_decoded(pcm, &label, owner, clip);
                 }
             }
         }
+    }
+
+    /// Keep a finished decode for replay, if the banks it came from are still
+    /// the open ones.
+    fn cache_decoded(&mut self, cache: Option<PcmKey>, waveform: &Arc<Waveform>) {
+        match cache {
+            Some(PcmKey::Bank {
+                generation,
+                bank,
+                sub,
+            }) if generation == self.banks_generation => {
+                self.cache.insert((bank, sub), waveform.clone());
+            }
+            Some(PcmKey::Event { generation, name }) if generation == self.wwise_generation => {
+                self.event_cache.insert(name, waveform.clone());
+            }
+            _ => {}
+        }
+    }
+
+    /// Hand over an already-decoded sound: as the tab's preview when that is
+    /// what was asked for, else played.
+    fn deliver(&mut self, waveform: Arc<Waveform>, label: &str) {
+        if self.request_preview {
+            if let (Some(owner), Some(clip)) =
+                (self.request_owner.clone(), self.request_clip.clone())
+            {
+                self.previews.insert(
+                    owner,
+                    Preview {
+                        clip,
+                        state: PreviewState::Ready(waveform),
+                    },
+                );
+                self.preview_spawned = true;
+            }
+            return;
+        }
+        self.play_request += 1;
+        self.play_decoded(
+            waveform,
+            label,
+            self.request_owner.clone(),
+            self.request_clip.clone(),
+        );
     }
 
     /// Block until every running job has reported, applying each.
@@ -1066,6 +1170,7 @@ impl AudioState {
             Some((event_name, label, owner, clip)) => {
                 self.request_owner = owner;
                 self.request_clip = clip;
+                self.request_preview = false;
                 self.play_event(&event_name, &label, ctx);
             }
             None if !ok => self.status = Some("no Wwise .pck under <game>/sound/pc".to_owned()),
@@ -1077,13 +1182,7 @@ impl AudioState {
     /// the current source are already loaded (`wwise_root` set).
     fn play_event(&mut self, event_name: &str, label: &str, ctx: &egui::Context) {
         if let Some(pcm) = self.event_cache.get(&event_name.to_owned()) {
-            self.play_request += 1;
-            self.play_decoded(
-                pcm,
-                label,
-                self.request_owner.clone(),
-                self.request_clip.clone(),
-            );
+            self.deliver(pcm, label);
             return;
         }
         let Some(banks) = self.wwise.clone() else {
@@ -1149,6 +1248,7 @@ impl AudioState {
             self.play_request += 1;
             self.decode_owner = None;
         }
+        self.previews.retain(|owner, _| is_open(owner));
         if closed(&self.status_owner) {
             self.status = None;
             self.status_owner = None;
@@ -1198,6 +1298,7 @@ impl AudioState {
         let Some(SoundRequest {
             owner,
             clip,
+            preview,
             action,
         }) = self.pending.pop_front()
         else {
@@ -1205,9 +1306,80 @@ impl AudioState {
         };
         self.request_owner = owner;
         self.request_clip = clip;
+        self.request_preview = preview;
+        if preview {
+            self.preview(action, tags_root, ctx);
+            return;
+        }
         let before = self.status.clone();
-        self.handle(action, tags_root, ctx);
+        // A clip its tab has already previewed plays as it is, undecoded.
+        if let Some(waveform) = self.ready_preview()
+            && let Some(label) = action_label(&action)
+        {
+            self.deliver(waveform, &label);
+        } else {
+            self.handle(action, tags_root, ctx);
+        }
         self.claim_status(before);
+    }
+
+    /// The waveform the requesting tab has previewed for the requested clip.
+    fn ready_preview(&self) -> Option<Arc<Waveform>> {
+        let preview = self.previews.get(self.request_owner.as_ref()?)?;
+        match &preview.state {
+            PreviewState::Ready(waveform)
+                if Some(preview.clip.as_str()) == self.request_clip.as_deref() =>
+            {
+                Some(waveform.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve and decode a clip for the requesting tab's preview, the way a
+    /// play would but with none of its effects: the status line, a pending
+    /// play and a deferred Wwise play are all left as they were. A Wwise
+    /// event whose banks are still loading is dropped, to be asked for again;
+    /// anything else that went nowhere records why.
+    fn preview(&mut self, action: SoundAction, tags_root: Option<&Path>, ctx: &egui::Context) {
+        let (Some(owner), Some(clip)) = (self.request_owner.clone(), self.request_clip.clone())
+        else {
+            return;
+        };
+        self.previews.insert(
+            owner.clone(),
+            Preview {
+                clip,
+                state: PreviewState::Pending,
+            },
+        );
+        let status = self.status.clone();
+        let deferred = self.wwise_deferred.clone();
+        let play_request = self.play_request;
+        self.preview_spawned = false;
+        self.handle(action, tags_root, ctx);
+        let reason = (self.status != status)
+            .then(|| self.status.clone())
+            .flatten();
+        self.status = status;
+        self.wwise_deferred = deferred;
+        self.play_request = play_request;
+        self.request_preview = false;
+        if !self.preview_spawned {
+            if self.wwise_loading.is_some() {
+                self.previews.remove(&owner);
+            } else if let Some(slot) = self.previews.get_mut(&owner)
+                && matches!(slot.state, PreviewState::Pending)
+            {
+                slot.state =
+                    PreviewState::Failed(reason.unwrap_or_else(|| "no audio to show".to_owned()));
+            }
+        }
+    }
+
+    /// The requesting tab's preview, for its player.
+    pub(super) fn preview_for(&self, owner: &SoundOwner) -> Option<&Preview> {
+        self.previews.get(owner)
     }
 
     /// A status line the work just done changed belongs to the tab it was
@@ -1380,13 +1552,7 @@ impl AudioState {
             return;
         };
         if let Some(pcm) = self.cache.get(&(bank, sub)) {
-            self.play_request += 1;
-            self.play_decoded(
-                pcm,
-                &label,
-                self.request_owner.clone(),
-                self.request_clip.clone(),
-            );
+            self.deliver(pcm, &label);
             return;
         }
         let banks = self.banks.clone().expect("opened above");
@@ -1473,6 +1639,7 @@ mod tests {
             label: "rifle_fire".to_owned(),
             owner: None,
             clip: None,
+            preview: false,
             result: Ok(pcm(8)),
         }
     }
@@ -1835,6 +2002,7 @@ mod tests {
         audio.pending.push_back(SoundRequest {
             owner: Some(b.clone()),
             clip: None,
+            preview: false,
             action: SoundAction::Seek(0.5),
         });
         audio.process(None, &ctx);
@@ -1844,6 +2012,7 @@ mod tests {
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
             clip: None,
+            preview: false,
             action: SoundAction::Seek(0.5),
         });
         audio.process(None, &ctx);
@@ -1886,6 +2055,7 @@ mod tests {
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
             clip: None,
+            preview: false,
             action: SoundAction::TogglePause,
         });
         audio.process(None, &egui::Context::default());
@@ -1903,6 +2073,7 @@ mod tests {
         audio.pending.push_back(SoundRequest {
             owner: Some(a.clone()),
             clip: None,
+            preview: false,
             action: SoundAction::Play {
                 id: None,
                 key: "dth1".to_owned(),
@@ -1922,6 +2093,7 @@ mod tests {
         audio.pending.push_back(SoundRequest {
             owner: Some(b.clone()),
             clip: None,
+            preview: false,
             action: SoundAction::SetVolume(0.5),
         });
         audio.process(None, &egui::Context::default());
@@ -1932,5 +2104,119 @@ mod tests {
 
         audio.apply_job(AudioDone::Extracted("extracted 3 file(s)".to_owned()));
         assert!(audio.status_is_for(&a) && audio.status_is_for(&b));
+    }
+
+    fn inline_pcm(frames: usize) -> SoundAction {
+        SoundAction::PlayInline {
+            bytes: (0..frames * 2)
+                .flat_map(|i| ((i % 100) as i16 * 100).to_le_bytes())
+                .collect(),
+            codec: InlineCodec::Pcm { big_endian: false },
+            channels: 2,
+            sample_rate: 1000,
+            chunk_offsets: Vec::new(),
+            label: "pcm".to_owned(),
+        }
+    }
+
+    fn preview_of(owner: &SoundOwner, clip: &str, action: SoundAction) -> SoundRequest {
+        SoundRequest {
+            owner: Some(owner.clone()),
+            clip: Some(clip.to_owned()),
+            preview: true,
+            action,
+        }
+    }
+
+    /// A preview decodes its clip for the waveform without touching playback:
+    /// another tab's sound, the status line, a play still decoding and a
+    /// deferred Wwise play are all left alone. Playing the clip afterwards
+    /// starts no second decode.
+    #[test]
+    fn a_preview_decodes_without_disturbing_playback() {
+        let a = owner(1, "file:a.sound");
+        let b = owner(1, "file:b.sound");
+        let mut audio = AudioState {
+            voice: Some(Voice::new(
+                wave(100),
+                "a".to_owned(),
+                Some(a.clone()),
+                None,
+                false,
+            )),
+            status: Some("\u{25B6} a".to_owned()),
+            status_owner: Some(a.clone()),
+            wwise_deferred: Some(("event".to_owned(), "e".to_owned(), Some(a.clone()), None)),
+            play_request: 5,
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        audio
+            .pending
+            .push_back(preview_of(&b, "clip", inline_pcm(1500)));
+        audio.process(None, &ctx);
+        assert!(matches!(
+            audio.preview_for(&b).unwrap().state,
+            PreviewState::Pending
+        ));
+        audio.wait_for_audio_jobs();
+        let PreviewState::Ready(waveform) = &audio.preview_for(&b).unwrap().state else {
+            panic!("the preview did not land");
+        };
+        assert_eq!((waveform.channels(), waveform.frames()), (2, 1500));
+        assert_eq!(audio.status.as_deref(), Some("\u{25B6} a"));
+        assert!(audio.status_is_for(&a) && !audio.status_is_for(&b));
+        assert_eq!(audio.play_request, 5, "the preview superseded a play");
+        assert!(
+            audio.wwise_deferred.is_some(),
+            "the preview dropped a deferred play"
+        );
+        assert_eq!(
+            audio.voice.as_ref().and_then(|voice| voice.owner.clone()),
+            Some(a.clone())
+        );
+
+        // Playing the previewed clip uses the preview: no decode starts.
+        audio.pending.push_back(SoundRequest {
+            owner: Some(b.clone()),
+            clip: Some("clip".to_owned()),
+            preview: false,
+            action: inline_pcm(1500),
+        });
+        audio.process(None, &ctx);
+        assert_eq!(
+            audio.jobs.running, 0,
+            "the previewed clip was decoded again"
+        );
+
+        audio.follow_tabs(None, |owner| owner != &b);
+        assert!(
+            audio.preview_for(&b).is_none(),
+            "closing b kept its preview"
+        );
+    }
+
+    /// A preview with nothing to show says why, in the preview rather than
+    /// on the status line.
+    #[test]
+    fn a_preview_that_resolves_nothing_says_why() {
+        let b = owner(1, "file:b.sound");
+        let mut audio = AudioState::default();
+        audio.pending.push_back(preview_of(
+            &b,
+            "clip",
+            SoundAction::Play {
+                id: None,
+                key: "k".to_owned(),
+                label: "k".to_owned(),
+                tags_root: None,
+            },
+        ));
+        audio.process(None, &egui::Context::default());
+        let PreviewState::Failed(reason) = &audio.preview_for(&b).unwrap().state else {
+            panic!("no failure recorded");
+        };
+        assert_eq!(reason, "no source loaded");
+        assert!(audio.status.is_none(), "a preview wrote the status line");
     }
 }

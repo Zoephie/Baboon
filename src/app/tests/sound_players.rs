@@ -9,16 +9,18 @@ use crate::app::audio::{SoundOwner, SoundRequest, SoundRequests};
 use std::collections::VecDeque;
 
 /// The plays among queued requests. The language selector also commits
-/// the language it shows (`SetLanguage`) whenever it is drawn, which is not
-/// what these tests are about.
+/// the language it shows (`SetLanguage`) whenever it is drawn, and an idle
+/// player asks for its waveform preview; neither is what these tests are
+/// about.
 fn plays(queued: &VecDeque<SoundRequest>) -> Vec<&SoundRequest> {
     queued
         .iter()
         .filter(|request| {
-            !matches!(
-                request.action,
-                crate::app::audio::SoundAction::SetLanguage(_)
-            )
+            !request.preview
+                && !matches!(
+                    request.action,
+                    crate::app::audio::SoundAction::SetLanguage(_)
+                )
         })
         .collect()
 }
@@ -232,4 +234,42 @@ fn a_campaign_evolved_reference_carries_its_clip() {
     assert_eq!(request.clip.as_deref(), Some("ref:0:x"));
     assert_eq!(request.reference, path);
     assert!(!request.extract);
+}
+
+/// Opening a looping sound previews its selected component: the request the
+/// player makes resolves through the real FMOD banks to a decoded waveform,
+/// with nothing played.
+#[test]
+fn opening_a_sound_previews_its_waveform_from_the_banks() {
+    let rel = "sound/game_sfx/ui/main_menu_music/main_menu_music.sound_looping";
+    let Some((root, tag)) = h3_tag(rel) else {
+        return;
+    };
+    let draw =
+        |ui: &mut Ui, edit: &mut FieldEditContext<'_>| draw_sound_looping_player(ui, &tag, edit);
+    let (_, queued, _) = run(&root, &[], &draw);
+    let mut audio = crate::app::audio::AudioState::default();
+    let previews: Vec<SoundRequest> = queued
+        .into_iter()
+        .filter(|request| request.preview)
+        .collect();
+    assert!(!previews.is_empty(), "opening the player previewed nothing");
+    let owner = previews[0].owner.clone().unwrap();
+    audio.pending.extend(previews);
+    let ctx = egui::Context::default();
+    while !audio.pending.is_empty() {
+        audio.process(Some(&root), &ctx);
+    }
+    audio.wait_for_audio_jobs();
+    match &audio.preview_for(&owner).expect("no preview").state {
+        crate::app::audio::PreviewState::Ready(waveform) => {
+            assert!(waveform.frames() > 1000, "{} frames", waveform.frames());
+        }
+        crate::app::audio::PreviewState::Failed(reason) => panic!("preview failed: {reason}"),
+        crate::app::audio::PreviewState::Pending => panic!("preview never landed"),
+    }
+    assert!(
+        audio.playback(Some(&owner)).is_none(),
+        "previewing played the sound"
+    );
 }

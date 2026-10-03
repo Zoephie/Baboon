@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::app::audio::{PlaybackView, SoundAction};
+use crate::app::audio::{PlaybackView, Preview, PreviewState, SoundAction};
 
 /// One clip the player can choose: a permutation, an event, a media file.
 #[derive(Clone, Debug, PartialEq)]
@@ -161,7 +161,20 @@ pub(super) fn draw_clip_player(
     let clip = &clips[selected];
     let loaded = loaded.filter(|playback| playback.clip.as_deref() == Some(clip.id.as_str()));
 
-    draw_timeline(ui, edit, clips, selected, loaded, play);
+    // Decode the selected clip for its waveform before anything plays.
+    let preview = edit
+        .sound_preview
+        .clone()
+        .filter(|preview| preview.clip == clip.id);
+    if loaded.is_none() && preview.is_none() {
+        request_preview(ui, edit, clips, selected, play);
+    }
+    let preview_length = match preview.as_ref().map(|preview| &preview.state) {
+        Some(PreviewState::Ready(waveform)) => Some(waveform.duration_secs()),
+        _ => None,
+    };
+
+    draw_timeline(ui, edit, clips, selected, loaded, preview.as_ref(), play);
 
     // Transport.
     ui.horizontal(|ui| {
@@ -191,7 +204,7 @@ pub(super) fn draw_clip_player(
         }
         let (position, duration) = match loaded {
             Some(playback) => (playback.position, Some(playback.duration)),
-            None => (0.0, clip.duration),
+            None => (0.0, clip.duration.or(preview_length)),
         };
         ui.label(
             RichText::new(format!(
@@ -355,6 +368,34 @@ fn queue_play(
     }
 }
 
+/// Ask for clip `index` to be decoded for its preview. A clip with nothing to
+/// play is remembered, so it is not asked for again every frame.
+fn request_preview(
+    ui: &Ui,
+    edit: &mut FieldEditContext<'_>,
+    clips: &[PlayerClip],
+    index: usize,
+    play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
+) {
+    let id = clips[index].id.clone();
+    let nothing = egui::Id::new(("clip_player_nothing_to_preview", edit.tag_key, id.as_str()));
+    if ui.data(|data| data.get_temp::<bool>(nothing)).is_some() {
+        return;
+    }
+    match play(index) {
+        Some(ClipPlay::Action(action)) => edit.sound_play_request.preview_clip(action, id),
+        Some(ClipPlay::CeRef(mut request)) => {
+            // One reference request a frame; a click's play wins it.
+            if edit.ce_sound_ref_request.is_none() {
+                request.clip = Some(id);
+                request.preview = true;
+                *edit.ce_sound_ref_request = Some(request);
+            }
+        }
+        None => ui.data_mut(|data| data.insert_temp(nothing, true)),
+    }
+}
+
 /// Whether a play for `index` was already queued this frame (by Random).
 fn queued_play_for(edit: &FieldEditContext<'_>, clips: &[PlayerClip], index: usize) -> bool {
     let id = clips[index].id.as_str();
@@ -390,14 +431,21 @@ fn draw_timeline(
     clips: &[PlayerClip],
     selected: usize,
     loaded: Option<&PlaybackView>,
+    preview: Option<&Preview>,
     play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) {
+    let previewed = match preview.map(|preview| &preview.state) {
+        Some(PreviewState::Ready(waveform)) => Some(waveform),
+        _ => None,
+    };
     let duration = loaded
         .map(|playback| playback.duration)
         .or(clips[selected].duration)
+        .or(previewed.map(|waveform| waveform.duration_secs()))
         .unwrap_or(0.0);
     let position = loaded.map_or(0.0, |playback| playback.position);
-    let waveform = loaded.map(|playback| &playback.waveform);
+    // The loaded sound's, else the preview's: unplayed, the playhead at 0.
+    let waveform = loaded.map(|playback| &playback.waveform).or(previewed);
     let size = Vec2::new(
         ui.available_width().max(120.0),
         RULER_HEIGHT + track_height(waveform.map(|waveform| waveform.channels())),
@@ -450,10 +498,15 @@ fn draw_timeline(
     match waveform {
         Some(waveform) => draw_lanes(ui, &painter, track, waveform, head),
         None => {
+            let note = match preview.map(|preview| &preview.state) {
+                Some(PreviewState::Pending) => "Loading waveform\u{2026}".to_owned(),
+                Some(PreviewState::Failed(reason)) => reason.clone(),
+                _ => "Play to see the waveform".to_owned(),
+            };
             painter.text(
                 track.center(),
                 egui::Align2::CENTER_CENTER,
-                "Play to see the waveform",
+                note,
                 egui::FontId::proportional(11.0),
                 subtle_dark(),
             );
@@ -506,10 +559,17 @@ fn draw_timeline(
             }
         } else if response.clicked() {
             queue_play(edit, clips, selected, play);
+            // A previewed clip plays at once, so it can start where clicked.
+            if previewed.is_some() {
+                edit.sound_play_request
+                    .push_back(SoundAction::Seek(pressed_at(pointer)));
+            }
         }
     }
     response.on_hover_text(if loaded.is_some() {
         "Click to jump, drag to scrub"
+    } else if previewed.is_some() {
+        "Click to play from there"
     } else {
         "Click to play"
     });
@@ -675,6 +735,10 @@ mod tests {
         texts: Vec<(String, egui::Rect)>,
         /// The waveform's bars from the last frame: each rect and its colour.
         bars: Vec<(egui::Rect, egui::Color32)>,
+        /// The clips previews were asked for, in order.
+        previewed: Vec<String>,
+        /// The tab's preview, as the audio state would hand it over.
+        preview: Option<Preview>,
         timeline: egui::Rect,
     }
 
@@ -687,6 +751,8 @@ mod tests {
                 queued: VecDeque::new(),
                 texts: Vec::new(),
                 bars: Vec::new(),
+                previewed: Vec::new(),
+                preview: None,
                 timeline: egui::Rect::NOTHING,
             }
         }
@@ -695,6 +761,7 @@ mod tests {
             let clips = clips();
             let mut sinks = EditSinks::default();
             let playback = self.playback.clone();
+            let preview = self.preview.clone();
             let focused = self.focused;
             let queued = &mut self.queued;
             let timeline = &mut self.timeline;
@@ -712,6 +779,7 @@ mod tests {
                         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                         edit.sound_play_request = SoundRequests::new(queued, Some(owner()));
                         edit.sound_playback = playback.clone();
+                        edit.sound_preview = preview.clone();
                         edit.sound_has_focus = focused;
                         let top = ui.cursor().top();
                         draw_clip_player(ui, &mut edit, "test", &clips, &[], &mut |index| {
@@ -812,9 +880,14 @@ mod tests {
             self.frame(vec![event(true), event(false)]);
         }
 
+        /// The plays and transport actions queued since the last call;
+        /// previews are counted apart, by [`Self::previews`].
         fn take(&mut self) -> Vec<(Option<String>, String)> {
-            self.queued
-                .drain(..)
+            let (previews, rest): (Vec<_>, Vec<_>) =
+                self.queued.drain(..).partition(|request| request.preview);
+            self.previewed
+                .extend(previews.into_iter().filter_map(|request| request.clip));
+            rest.into_iter()
                 .map(|request| {
                     let action = match request.action {
                         SoundAction::PlayEvent { event_name, .. } => format!("play {event_name}"),
@@ -1126,5 +1199,93 @@ mod tests {
             .map(|index| clips[index].name.as_str())
             .collect();
         assert_eq!(names, ["1", "2", "10", "11", "x"]);
+    }
+
+    fn ready_preview(view: PlaybackView) -> Preview {
+        Preview {
+            clip: "id-a".to_owned(),
+            state: PreviewState::Ready(view.waveform),
+        }
+    }
+
+    /// An idle player asks for its selected clip's preview, and only until
+    /// one is on its way; a loaded clip needs none.
+    #[test]
+    fn an_idle_player_asks_for_its_selected_clip_s_preview_once() {
+        let mut h = Harness::new();
+        h.frame(Vec::new());
+        h.take();
+        assert_eq!(h.previewed, ["id-a"]);
+
+        h.preview = Some(Preview {
+            clip: "id-a".to_owned(),
+            state: PreviewState::Pending,
+        });
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.take();
+        assert_eq!(h.previewed, ["id-a"], "asked again while one was pending");
+
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", false));
+        h.frame(Vec::new());
+        h.take();
+        assert!(h.previewed.is_empty(), "a loaded clip was previewed");
+    }
+
+    /// The preview's waveform shows before anything plays, unplayed; while
+    /// it decodes, and if it cannot, the track says so.
+    #[test]
+    fn the_preview_s_waveform_shows_before_playing() {
+        let mut h = Harness::new();
+        h.preview = Some(ready_preview(sound(2, 2000, |_, f| {
+            if f % 2 == 0 { 20000 } else { -20000 }
+        })));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        assert!(!h.bars.is_empty(), "no waveform before playing");
+        assert!(
+            h.bars.iter().all(|(_, color)| *color != foundation_blue()
+                && *color != foundation_blue().gamma_multiply(0.55)),
+            "an unplayed preview is drawn as played"
+        );
+
+        h.preview = Some(Preview {
+            clip: "id-a".to_owned(),
+            state: PreviewState::Pending,
+        });
+        h.frame(Vec::new());
+        assert!(
+            h.texts
+                .iter()
+                .any(|(text, _)| text == "Loading waveform\u{2026}")
+        );
+
+        h.preview = Some(Preview {
+            clip: "id-a".to_owned(),
+            state: PreviewState::Failed("no source loaded".to_owned()),
+        });
+        h.frame(Vec::new());
+        assert!(h.texts.iter().any(|(text, _)| text == "no source loaded"));
+    }
+
+    /// A previewed clip plays from where its timeline is clicked.
+    #[test]
+    fn clicking_a_previewed_timeline_plays_from_there() {
+        let mut h = Harness::new();
+        h.preview = Some(ready_preview(sound(1, 2000, |_, _| 1000)));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.take();
+        let track = h.timeline;
+        let at = egui::pos2(track.left() + track.width() * 0.75, track.center().y);
+        h.click(at);
+        assert_eq!(
+            h.take(),
+            [
+                (Some("id-a".to_owned()), "play a".to_owned()),
+                (None, "seek 1.5".to_owned()),
+            ]
+        );
     }
 }

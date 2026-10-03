@@ -149,6 +149,7 @@ impl Baboon {
         // A status line from another tab's sound is that tab's business.
         let sound_status_shown = self.audio.status_is_for(&sound_owner);
         let sound_looping = self.audio.looping();
+        let sound_preview = self.audio.preview_for(&sound_owner).cloned();
         let expert_mode = self.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
         // `source()`: a method borrows all of `self`, and the context below
@@ -197,6 +198,7 @@ impl Baboon {
             sound_volume,
             sound_playback,
             sound_looping,
+            sound_preview,
             sound_has_focus,
             sound_extract_request: &mut self.pending_sound_extract,
             sound_language: self.audio.language.as_deref(),

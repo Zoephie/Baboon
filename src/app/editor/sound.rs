@@ -2080,6 +2080,7 @@ fn referenced_clip_play(
             label,
             extract: false,
             clip: None,
+            preview: false,
         }));
     }
     let (sound, _) = load_referenced_sound(game, tags_root, definitions_root, path, group)?;
@@ -2193,6 +2194,7 @@ fn draw_referenced_sound_cell(
                             label,
                             extract: true,
                             clip: None,
+                            preview: false,
                         });
                     } else if let Some((sound, abs)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
