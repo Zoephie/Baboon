@@ -1335,15 +1335,25 @@ impl Baboon {
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
         self.status = format!("Loading {}", path.display());
-        thread::spawn(move || {
-            let result = load_single_file(path, &names).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_single_file(path, &names).map_err(|e| e.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: None,
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
+                result: Err(format!("Loading failed: {error}")),
                 recent_path: None,
-            });
-            ctx.request_repaint();
-        });
+            },
+        );
     }
 
     pub(super) fn begin_load_folder(&mut self, ctx: egui::Context) {
@@ -1397,16 +1407,26 @@ impl Baboon {
             None => format!("Indexing {}", folder_info.scan_root.display()),
         };
         let recent_path = clean_recent_path(path.clone());
-        thread::spawn(move || {
-            let result = load_folder(path, &names, &definitions_root, &ek_folder_aliases)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_folder(path, &names, &definitions_root, &ek_folder_aliases)
+                    .map_err(|e| e.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: Some(recent_path),
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
-                recent_path: Some(recent_path),
-            });
-            ctx.request_repaint();
-        });
+                result: Err(format!("Loading failed: {error}")),
+                recent_path: None,
+            },
+        );
     }
 
     /// The profile that chose `path` as its tags folder, if any. Read from the
@@ -1448,15 +1468,25 @@ impl Baboon {
         let names = self.default_names.clone();
         self.status = format!("Opening {}", path.display());
         let recent_path = clean_recent_path(path.clone());
-        thread::spawn(move || {
-            let result = load_monolithic_blob_index(path, &names).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_monolithic_blob_index(path, &names).map_err(|e| e.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: Some(recent_path),
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
-                recent_path: Some(recent_path),
-            });
-            ctx.request_repaint();
-        });
+                result: Err(format!("Loading failed: {error}")),
+                recent_path: None,
+            },
+        );
     }
 
     pub(super) fn begin_load_iostore_container(&mut self, ctx: egui::Context) {
@@ -1507,16 +1537,26 @@ impl Baboon {
         let pak_root = self.campaign_evolved_pak_root();
         self.status = format!("Mounting {}", path.display());
         let recent_path = clean_recent_path(path.clone());
-        thread::spawn(move || {
-            let result = load_iostore_container(path, pak_root, &names, &definitions_root)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_iostore_container(path, pak_root, &names, &definitions_root)
+                    .map_err(|e| e.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: Some(recent_path),
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
-                recent_path: Some(recent_path),
-            });
-            ctx.request_repaint();
-        });
+                result: Err(format!("Loading failed: {error}")),
+                recent_path: None,
+            },
+        );
     }
 
     /// Mounts every container in a `Paks` directory as one merged set.
@@ -1540,16 +1580,26 @@ impl Baboon {
         let definitions_root = locate_definitions_root();
         self.status = format!("Mounting containers in {}", paks_dir.display());
         let recent_path = clean_recent_path(requested);
-        thread::spawn(move || {
-            let result = load_iostore_container_set(paks_dir, &names, &definitions_root)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_iostore_container_set(paks_dir, &names, &definitions_root)
+                    .map_err(|e| e.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: Some(recent_path),
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
-                recent_path: Some(recent_path),
-            });
-            ctx.request_repaint();
-        });
+                result: Err(format!("Loading failed: {error}")),
+                recent_path: None,
+            },
+        );
     }
 
     pub(super) fn load_recent_folder(&mut self, path: PathBuf, ctx: egui::Context) {
@@ -9015,20 +9065,30 @@ impl Baboon {
         let tags_root = layout.tags;
         let recent_path = identity_path;
         self.status = format!("Indexing {} as {game}", tags_root.display());
-        thread::spawn(move || {
-            let result = load_editing_kit_layout(tags_root, label, game, &names, &definitions_root)
-                .map(|mut source| {
-                    source.chosen_kit_layout = chosen_layout;
-                    source
-                })
-                .map_err(|error| error.to_string());
-            let _ = tx.send(WorkerMessage::SourceLoaded {
+        // Through `spawn_worker`: a loader that panicked used to send nothing,
+        // leaving the kit reserved for this load ("starting up") for good.
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let result = load_editing_kit_layout(tags_root, label, game, &names, &definitions_root)
+                    .map(|mut source| {
+                        source.chosen_kit_layout = chosen_layout;
+                        source
+                    })
+                    .map_err(|error| error.to_string());
+                WorkerMessage::SourceLoaded {
+                    kit,
+                    result,
+                    recent_path: Some(recent_path),
+                }
+            },
+            move |error| WorkerMessage::SourceLoaded {
                 kit,
-                result,
-                recent_path: Some(recent_path),
-            });
-            ctx.request_repaint();
-        });
+                result: Err(format!("Loading failed: {error}")),
+                recent_path: None,
+            },
+        );
     }
 
     pub(super) fn choose_editing_kit_path(&mut self, shortcut: EditingKitShortcut) {
@@ -9764,6 +9824,10 @@ mod container_folder_extract_tests;
 #[cfg(test)]
 #[path = "tests/chimp_surface_undo.rs"]
 mod chimp_surface_undo_tests;
+
+#[cfg(test)]
+#[path = "tests/worker_panics.rs"]
+mod worker_panic_tests;
 
 enum SaveChangesPromptAction {
     None,

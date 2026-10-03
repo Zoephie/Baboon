@@ -601,12 +601,48 @@ pub(in crate::app) fn spawn_worker<J, P>(
     P: FnOnce(String) -> WorkerMessage + Send + 'static,
 {
     let (tx, ctx) = (tx.clone(), ctx.clone());
+    #[cfg(test)]
+    let inject_panic = INJECT_WORKER_PANICS.with(std::cell::Cell::get);
     std::thread::spawn(move || {
-        let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
-            .unwrap_or_else(|panic| on_panic(panic_text(panic.as_ref())));
+        let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            #[cfg(test)]
+            if inject_panic {
+                panic!("injected by a test");
+            }
+            job()
+        }))
+        .unwrap_or_else(|panic| on_panic(panic_text(panic.as_ref())));
         let _ = tx.send(message);
         ctx.request_repaint();
     });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Set by [`with_panicking_workers`] on the thread that spawns the jobs.
+    static INJECT_WORKER_PANICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with every [`spawn_worker`] job it starts panicking before it does
+/// any work, to prove the panic still settles what the UI marked in flight.
+/// Scoped to the calling thread, so tests running alongside are unaffected.
+#[cfg(test)]
+pub(in crate::app) fn with_panicking_workers<T>(f: impl FnOnce() -> T) -> T {
+    INJECT_WORKER_PANICS.with(|inject| inject.set(true));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    INJECT_WORKER_PANICS.with(|inject| inject.set(false));
+    result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+/// Wait for the next worker message and apply it, as a frame would.
+#[cfg(test)]
+pub(in crate::app) fn apply_next_worker_message(app: &mut crate::app::Baboon) -> bool {
+    let Ok(message) = app.rx.recv_timeout(std::time::Duration::from_secs(10)) else {
+        return false;
+    };
+    app.tx.send(message).unwrap();
+    app.process_worker_messages(&egui::Context::default());
+    true
 }
 
 /// A panic payload as text, for a message saying the job crashed.
