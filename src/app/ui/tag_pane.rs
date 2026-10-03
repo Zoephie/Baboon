@@ -132,6 +132,13 @@ impl Baboon {
         let mut ops = DeferredOps::default();
         let mut color_request = None;
         let mut function_request = None;
+        // What the shader and material grids open. They write a popup
+        // directly rather than through `edit_context`, so they get their own
+        // sinks here instead of the shared popups: written straight into
+        // those, nothing recorded which kit they came from, and confirming
+        // one applied to whichever kit had last opened a popup.
+        let mut grid_color_popup = None;
+        let mut grid_function_popup = None;
         let mut block_clip_request = None;
         let mut tsv_paste_request = None;
         let mut ce_sound_ref_request = None;
@@ -241,7 +248,7 @@ impl Baboon {
                 &doc.tag,
                 entry,
                 names,
-                &mut self.color_popup,
+                &mut grid_color_popup,
                 preview,
                 self.prefs.expert_mode,
                 &mut edit_context,
@@ -274,8 +281,8 @@ impl Baboon {
                 &mut kit.rmdf_cache,
                 &mut kit.rmop_cache,
                 &mut kit.h2_templates,
-                &mut self.color_popup,
-                &mut self.function_popup,
+                &mut grid_color_popup,
+                &mut grid_function_popup,
                 model_preview,
                 &mut self.prefs.model_preview_size,
                 self.prefs.expert_mode,
@@ -301,14 +308,11 @@ impl Baboon {
         // A color swatch was clicked: open the shared picker. Each popup
         // records the kit it was opened from, so confirming it later edits
         // this document rather than whichever kit is active by then.
-        if let Some(popup) = color_request {
-            self.color_popup = Some(popup);
-            self.color_popup_kit = Some(kit_id);
-        }
-        if let Some(popup) = function_request {
-            self.function_popup = Some(popup);
-            self.function_popup_kit = Some(kit_id);
-        }
+        self.adopt_opened_popups(
+            kit_id,
+            grid_color_popup.or(color_request),
+            grid_function_popup.or(function_request),
+        );
         // A referenced sound was played/extracted from a container source. It
         // is stamped with this kit because resolving it needs that kit's
         // containers, not whichever one happens to be active by the drain.

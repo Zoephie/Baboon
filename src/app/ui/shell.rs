@@ -1228,12 +1228,6 @@ impl Baboon {
             &mut self.prefs.custom_color_swatches,
             &mut self.prefs.palette_last_dir,
         ) {
-            // Apply to the kit the picker was opened from. A closed kit drops
-            // the edit rather than letting it land somewhere else.
-            let kit = self
-                .color_popup_kit
-                .and_then(|kit| self.resolve_kit(kit))
-                .unwrap_or(self.active);
             let (tag_key, label, ops) = match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
                     let ops = DeferredOps {
@@ -1270,7 +1264,13 @@ impl Baboon {
                     return;
                 }
             };
-            self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
+            // Apply to the kit the picker was opened from.
+            if let Some(kit) = self.popup_target_kit(self.color_popup_kit) {
+                self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
+            }
+        }
+        if self.color_popup.is_none() {
+            self.color_popup_kit = None;
         }
     }
 
@@ -1280,16 +1280,55 @@ impl Baboon {
         if let Some(batch) =
             draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
         {
-            let kit = self
-                .function_popup_kit
-                .and_then(|kit| self.resolve_kit(kit))
-                .unwrap_or(self.active);
             let ops = DeferredOps {
                 pending: batch.edits,
                 function_data_ops: batch.data_ops,
                 ..DeferredOps::default()
             };
-            self.apply_doc_ops(kit, &batch.tag_key, "Edit function", ops, UndoStep::Own);
+            if let Some(kit) = self.popup_target_kit(self.function_popup_kit) {
+                self.apply_doc_ops(kit, &batch.tag_key, "Edit function", ops, UndoStep::Own);
+            }
+        }
+        if self.function_popup.is_none() {
+            self.function_popup_kit = None;
+        }
+    }
+
+    /// Show popups a tag pane opened this frame, recording the kit they were
+    /// opened from so confirming one later edits that kit's document rather
+    /// than whichever kit is active, or last opened a popup, by then.
+    pub(super) fn adopt_opened_popups(
+        &mut self,
+        kit: KitId,
+        color: Option<MaterialColorPopup>,
+        function: Option<FunctionPopup>,
+    ) {
+        if let Some(popup) = color {
+            self.color_popup = Some(popup);
+            self.color_popup_kit = Some(kit);
+        }
+        if let Some(popup) = function {
+            self.function_popup = Some(popup);
+            self.function_popup_kit = Some(kit);
+        }
+    }
+
+    /// The kit a confirmed popup applies to: the one it was opened from, or
+    /// none if that kit has closed since, so the edit is dropped rather than
+    /// landing in another kit's tag that happens to share its key. A popup
+    /// with no recorded kit applies to the active one.
+    pub(super) fn popup_target_kit(&mut self, opened_from: Option<KitId>) -> Option<usize> {
+        match opened_from {
+            Some(kit) => {
+                let index = self.resolve_kit(kit);
+                if index.is_none() {
+                    self.status =
+                        "The editing kit this was opened from has closed; the edit was dropped."
+                            .to_owned();
+                }
+                index
+            }
+            None => Some(self.active),
         }
     }
 
@@ -1808,3 +1847,7 @@ mod terminal_output_tests {
 #[cfg(test)]
 #[path = "../tests/folder_refactor_lock.rs"]
 mod folder_refactor_lock_tests;
+
+#[cfg(test)]
+#[path = "../tests/popup_kit_stamp.rs"]
+mod popup_kit_stamp_tests;
