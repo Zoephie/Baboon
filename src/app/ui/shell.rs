@@ -1517,6 +1517,7 @@ impl Baboon {
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);
         self.draw_loose_folder_rename_window(ctx);
+        self.draw_extract_target_window(ctx);
         self.draw_folder_refactor_lock(ctx);
         end_wheel_gesture(ctx);
     }

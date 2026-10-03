@@ -4222,9 +4222,13 @@ impl Baboon {
             BrowserAction::LoadFolderExtractables { rel_path, label } => {
                 self.begin_load_folder_extractables(rel_path, label, ctx)
             }
-            BrowserAction::ExtractGeometry(key) => self.begin_extract_geometry(key, ctx),
+            BrowserAction::ExtractGeometry(key) => {
+                self.prompt_extract_target(key, ExtractKind::Geometry)
+            }
             BrowserAction::ExtractImportInfo(key) => self.begin_extract_import_info(key, ctx),
-            BrowserAction::ExtractAnimation(key) => self.begin_extract_animation(key, ctx),
+            BrowserAction::ExtractAnimation(key) => {
+                self.prompt_extract_target(key, ExtractKind::Animation)
+            }
             BrowserAction::ExtractMaterialShaderSources(key) => {
                 self.begin_extract_material_shader_sources(key, ctx)
             }
@@ -5146,9 +5150,31 @@ impl Baboon {
         });
     }
 
+    /// Open the window that asks which game's tools a geometry or animation
+    /// extraction is for, defaulting to the active kit's game.
+    pub(super) fn prompt_extract_target(&mut self, key: String, kind: ExtractKind) {
+        let Some(entry) = self.entry_for_key(&key) else {
+            return;
+        };
+        let display_path = entry.display_path.clone();
+        let source = extract_generation_of(self.source().and_then(|s| s.game.as_deref()));
+        self.extract_target = Some(ExtractTargetPrompt {
+            key,
+            display_path,
+            kind,
+            source,
+            target: source,
+        });
+    }
+
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
-    pub(super) fn begin_extract_geometry(&mut self, key: String, ctx: egui::Context) {
+    pub(super) fn begin_extract_geometry(
+        &mut self,
+        key: String,
+        target: blam_tags::game::Game,
+        ctx: egui::Context,
+    ) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
         };
@@ -5162,7 +5188,8 @@ impl Baboon {
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result =
-                extract_geometry_for_entry(&source, &entry, &output).map_err(|e| e.to_string());
+                extract_geometry_for_entry(&source, &entry, &output, target)
+                    .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -5197,7 +5224,12 @@ impl Baboon {
 
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
-    pub(super) fn begin_extract_animation(&mut self, key: String, ctx: egui::Context) {
+    pub(super) fn begin_extract_animation(
+        &mut self,
+        key: String,
+        target: blam_tags::game::Game,
+        ctx: egui::Context,
+    ) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
         };
@@ -5211,7 +5243,8 @@ impl Baboon {
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result =
-                extract_animations_for_entry(&source, &entry, &output).map_err(|e| e.to_string());
+                extract_animations_for_entry(&source, &entry, &output, target)
+                    .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -13567,5 +13600,16 @@ mod in_place_overwrite_tests {
             .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
             .expect("the container is writable again");
         app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
+    }
+}
+
+/// The tag generation a kit's game id belongs to — the one its tools import.
+/// Halo CE and Halo 2 are their own; every later engine, Campaign Evolved
+/// included, shares Halo 3's formats.
+pub(super) fn extract_generation_of(game_id: Option<&str>) -> blam_tags::game::Game {
+    match game_id {
+        Some("haloce_mcc") => blam_tags::game::Game::Halo1,
+        Some("halo2_mcc") => blam_tags::game::Game::Halo2,
+        _ => blam_tags::game::Game::Halo3,
     }
 }

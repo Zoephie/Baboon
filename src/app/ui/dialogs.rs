@@ -11,6 +11,7 @@ mod container_duplicate_confirm;
 mod container_folder;
 mod delete_confirm;
 mod exported_mod;
+mod extract_target;
 mod import_tag;
 mod keyword_chooser;
 mod loose_folder_rename;

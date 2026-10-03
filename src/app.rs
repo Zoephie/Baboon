@@ -346,6 +346,8 @@ pub struct Baboon {
     rename_tag: Option<RenameTagState>,
     /// Rename Folder dialog for a loose tags folder, if one is open.
     loose_folder_rename: Option<LooseFolderRenameState>,
+    /// The Extract Geometry / Extract Animations target window, if open.
+    extract_target: Option<ExtractTargetPrompt>,
     /// New/Rename Folder dialog for a container source, if one is open.
     container_folder_dialog: Option<ContainerFolderDialog>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
@@ -639,6 +641,7 @@ impl Baboon {
             tsv_paste: None,
             rename_tag: None,
             loose_folder_rename: None,
+            extract_target: None,
             container_folder_dialog: None,
             kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
