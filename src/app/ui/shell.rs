@@ -1301,6 +1301,22 @@ impl Baboon {
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.
+        // Playback follows its tab: paused once another tab (or another kit)
+        // has focus, disposed of once its tab is closed, whichever way that
+        // happened. Checked against the open tabs rather than hooked into each
+        // close path, so a close confirmed after the save prompt counts and a
+        // cancelled one does not.
+        let focus = self.kits.get(self.active).and_then(|kit| {
+            kit.selected_key
+                .clone()
+                .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
+        });
+        let kits = &self.kits;
+        self.audio.follow_tabs(focus.as_ref(), |owner| {
+            kits.iter()
+                .find(|kit| kit.id == owner.kit)
+                .is_some_and(|kit| kit.open_tabs.contains(&owner.key))
+        });
         let sound_root = if !self.audio.pending.is_empty() {
             self.source_tags_root().map(std::path::Path::to_path_buf)
         } else {

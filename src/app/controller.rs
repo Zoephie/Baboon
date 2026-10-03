@@ -957,7 +957,7 @@ impl Baboon {
     /// the reference's own Wwise binding, then queue the same playback or
     /// extraction the primary sound player would.
     pub(super) fn process_ce_sound_ref(&mut self) {
-        let Some((kit_id, request)) = self.pending_ce_sound_ref.take() else {
+        let Some((kit_id, tab_key, request)) = self.pending_ce_sound_ref.take() else {
             return;
         };
         let Some(kit_index) = self.kit_index(kit_id) else {
@@ -989,13 +989,17 @@ impl Baboon {
             let Some(first) = media.into_iter().next() else {
                 return;
             };
-            self.audio
-                .pending
-                .push_back(crate::app::audio::SoundAction::PlayCeMedia {
+            self.audio.pending.push_back(crate::app::audio::SoundRequest {
+                owner: Some(crate::app::audio::SoundOwner {
+                    kit: kit_id,
+                    key: tab_key,
+                }),
+                action: crate::app::audio::SoundAction::PlayCeMedia {
                     paks_root,
                     label: format!("{} \u{00B7} {}", request.label, first.display_name()),
                     media: Box::new(first),
-                });
+                },
+            });
             return;
         }
         let Some(base) = rfd::FileDialog::new()

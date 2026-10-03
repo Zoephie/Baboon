@@ -18,13 +18,16 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use blam_tags::audio::{DecodedPcm, SoundBanks, WwiseBanks, decode_subsound, downmix_to_stereo};
 use eframe::egui;
-use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+
+use super::kit::KitId;
 
 use super::sound_extract::{ExtractRequest, ExtractSource, write_wav_pcm16};
 
@@ -143,8 +146,74 @@ pub(super) enum SoundAction {
     /// Select the localized language (`None` = default) for bank/pck resolution.
     /// Re-opens the banks on the next play/extract.
     SetLanguage(Option<String>),
-    /// Stop everything currently playing.
+    /// Stop and rewind the sound.
     Stop,
+    /// Pause the sound if it is playing, else play it from where it is (from
+    /// the start once it has ended).
+    TogglePause,
+    /// Move the playhead to this many seconds in. Playing continues from
+    /// there, which is what makes dragging the playhead scrub.
+    Seek(f64),
+    /// Loop the sound (and every sound played after) or not.
+    SetLooping(bool),
+}
+
+/// The tag tab a sound was started from. Playback follows its tab: it pauses
+/// when another tab takes focus and is disposed of when the tab closes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SoundOwner {
+    pub(super) kit: KitId,
+    pub(super) key: String,
+}
+
+/// A queued sound-player action and the tab that queued it (`None` for a view
+/// with no tab of its own, whose sound nothing pauses or disposes of).
+pub(super) struct SoundRequest {
+    pub(super) owner: Option<SoundOwner>,
+    pub(super) action: SoundAction,
+}
+
+impl From<SoundAction> for SoundRequest {
+    /// An action from no tab.
+    fn from(action: SoundAction) -> Self {
+        Self {
+            owner: None,
+            action,
+        }
+    }
+}
+
+/// Where a pane queues its sound-player actions: each one is stamped with the
+/// pane's tab, so the player never has to pass it along.
+pub(in crate::app) struct SoundRequests<'a> {
+    queue: &'a mut VecDeque<SoundRequest>,
+    owner: Option<SoundOwner>,
+}
+
+impl<'a> SoundRequests<'a> {
+    pub(in crate::app) fn new(
+        queue: &'a mut VecDeque<SoundRequest>,
+        owner: Option<SoundOwner>,
+    ) -> Self {
+        Self { queue, owner }
+    }
+
+    pub(in crate::app) fn push_back(&mut self, action: SoundAction) {
+        self.queue.push_back(SoundRequest {
+            owner: self.owner.clone(),
+            action,
+        });
+    }
+}
+
+/// What the player shows of the sound its tab owns.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) struct PlaybackView {
+    pub(in crate::app) label: String,
+    pub(in crate::app) position: f64,
+    pub(in crate::app) duration: f64,
+    pub(in crate::app) playing: bool,
+    pub(in crate::app) looping: bool,
 }
 
 /// Linear playback volume (amplitude multiplier). Wrapped so [`AudioState`] can
@@ -158,65 +227,218 @@ impl Default for Volume {
     }
 }
 
-/// The rodio output device + its live voices. Field order matters: the sinks
-/// must drop before the stream.
+/// The rodio output device.
 struct Engine {
-    voices: Vec<Sink>,
-    /// Applied to every new voice, so playback honours the current volume.
-    volume: f32,
     handle: OutputStreamHandle,
     _stream: OutputStream,
 }
 
 impl Engine {
-    fn new(volume: f32) -> Option<Self> {
+    fn new() -> Option<Self> {
         match OutputStream::try_default() {
             Ok((stream, handle)) => Some(Self {
-                voices: Vec::new(),
-                volume,
                 handle,
                 _stream: stream,
             }),
             Err(_) => None,
         }
     }
+}
 
-    /// Update the volume and apply it to everything currently playing.
-    fn set_volume(&mut self, volume: f32) {
-        self.volume = volume;
-        for voice in &self.voices {
-            voice.set_volume(volume);
+/// The play position a voice's source and the UI share. The source is the
+/// only writer of `frame` while it plays; a seek is handed to it through
+/// `seek` (and shown at once through `frame`).
+struct PlaybackShared {
+    /// The next frame the source will play.
+    frame: AtomicU64,
+    /// A frame to jump to, or `NO_SEEK`.
+    seek: AtomicU64,
+    looping: AtomicBool,
+}
+
+const NO_SEEK: u64 = u64::MAX;
+
+/// A decoded sound played straight out of the shared buffer — no copy per
+/// play — reading and advancing [`PlaybackShared`] so the UI sees where it is
+/// and can move it.
+struct PcmSource {
+    pcm: Arc<DecodedPcm>,
+    shared: Arc<PlaybackShared>,
+    channels: u16,
+    frames: u64,
+    frame: u64,
+    channel: u16,
+}
+
+impl Iterator for PcmSource {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<i16> {
+        if self.channel == 0 {
+            let seek = self.shared.seek.swap(NO_SEEK, Ordering::Relaxed);
+            if seek != NO_SEEK {
+                self.frame = seek.min(self.frames);
+            }
+            if self.frame >= self.frames {
+                if !self.shared.looping.load(Ordering::Relaxed) || self.frames == 0 {
+                    self.shared.frame.store(self.frames, Ordering::Relaxed);
+                    return None;
+                }
+                self.frame = 0;
+            }
         }
+        let sample =
+            self.pcm.samples[(self.frame * self.channels as u64 + self.channel as u64) as usize];
+        self.channel += 1;
+        if self.channel == self.channels {
+            self.channel = 0;
+            self.frame += 1;
+            self.shared.frame.store(self.frame, Ordering::Relaxed);
+        }
+        Some(sample)
+    }
+}
+
+impl Source for PcmSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
     }
 
-    fn play(&mut self, pcm: &DecodedPcm) {
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.pcm.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+/// The one sound loaded for playing: what it is, whose it is, and — while it
+/// plays or sits paused — its output sink. It outlives its sink, so a sound
+/// that has finished can be played again or sought from where it stands.
+struct Voice {
+    owner: Option<SoundOwner>,
+    label: String,
+    /// The audio as played: at most stereo, so the output device takes it.
+    pcm: Arc<DecodedPcm>,
+    shared: Arc<PlaybackShared>,
+    sink: Option<Sink>,
+}
+
+impl Voice {
+    fn new(pcm: Arc<DecodedPcm>, label: String, owner: Option<SoundOwner>, looping: bool) -> Self {
         // Fold >2 channels down to stereo for the output device.
-        let (samples, channels) = if pcm.channels > 2 {
-            (downmix_to_stereo(&pcm.samples, pcm.channels as usize), 2u16)
+        let pcm = if pcm.channels > 2 {
+            Arc::new(DecodedPcm {
+                samples: downmix_to_stereo(&pcm.samples, pcm.channels as usize),
+                channels: 2,
+                sample_rate: pcm.sample_rate,
+            })
         } else {
-            (pcm.samples.clone(), pcm.channels)
+            pcm
         };
-        if samples.is_empty() {
-            return;
-        }
-        let Ok(sink) = Sink::try_new(&self.handle) else {
-            return;
-        };
-        sink.set_volume(self.volume);
-        let source = SamplesBuffer::new(channels, pcm.sample_rate, samples);
-        sink.append(source.convert_samples::<f32>());
-        self.voices.push(sink);
-    }
-
-    fn stop_all(&mut self) {
-        for voice in self.voices.drain(..) {
-            voice.stop();
+        Self {
+            owner,
+            label,
+            pcm,
+            shared: Arc::new(PlaybackShared {
+                frame: AtomicU64::new(0),
+                seek: AtomicU64::new(NO_SEEK),
+                looping: AtomicBool::new(looping),
+            }),
+            sink: None,
         }
     }
 
-    /// Drop finished voices so the pool doesn't grow unbounded.
-    fn reap(&mut self) {
-        self.voices.retain(|voice| !voice.empty());
+    fn frames(&self) -> u64 {
+        self.pcm.frame_count() as u64
+    }
+
+    fn position(&self) -> u64 {
+        self.shared.frame.load(Ordering::Relaxed).min(self.frames())
+    }
+
+    fn is_playing(&self) -> bool {
+        self.sink
+            .as_ref()
+            .is_some_and(|sink| !sink.empty() && !sink.is_paused())
+    }
+
+    /// Play from where the playhead is — from the start once it has reached
+    /// the end — on a new sink if the last one has run dry.
+    fn play(&mut self, engine: &Engine, volume: f32) {
+        if let Some(sink) = self.sink.as_ref().filter(|sink| !sink.empty()) {
+            sink.play();
+            return;
+        }
+        if self.pcm.channels == 0 || self.frames() == 0 {
+            return;
+        }
+        let mut start = self.position();
+        if start >= self.frames() {
+            start = 0;
+        }
+        self.shared.seek.store(NO_SEEK, Ordering::Relaxed);
+        self.shared.frame.store(start, Ordering::Relaxed);
+        let Ok(sink) = Sink::try_new(&engine.handle) else {
+            return;
+        };
+        sink.set_volume(volume);
+        sink.append(PcmSource {
+            pcm: self.pcm.clone(),
+            shared: self.shared.clone(),
+            channels: self.pcm.channels,
+            frames: self.frames(),
+            frame: start,
+            channel: 0,
+        });
+        self.sink = Some(sink);
+    }
+
+    fn pause(&self) {
+        if let Some(sink) = &self.sink {
+            sink.pause();
+        }
+    }
+
+    /// Move the playhead. A playing sound carries on from there; a paused or
+    /// finished one waits there.
+    fn seek(&self, frame: u64) {
+        let frame = frame.min(self.frames());
+        self.shared.frame.store(frame, Ordering::Relaxed);
+        if self.sink.as_ref().is_some_and(|sink| !sink.empty()) {
+            self.shared.seek.store(frame, Ordering::Relaxed);
+        }
+    }
+
+    /// Stop and rewind.
+    fn stop(&mut self) {
+        if let Some(sink) = self.sink.take() {
+            sink.stop();
+        }
+        self.shared.seek.store(NO_SEEK, Ordering::Relaxed);
+        self.shared.frame.store(0, Ordering::Relaxed);
+    }
+
+    fn view(&self) -> PlaybackView {
+        let rate = self.pcm.sample_rate.max(1) as f64;
+        PlaybackView {
+            label: self.label.clone(),
+            position: self.position() as f64 / rate,
+            duration: self.frames() as f64 / rate,
+            playing: self.is_playing(),
+            looping: self.shared.looping.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Drop for Voice {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -224,6 +446,16 @@ impl Engine {
 /// first play, the banks open on the first resolve for a given source.
 #[derive(Default)]
 pub(super) struct AudioState {
+    /// The sound loaded for playing. Declared before `engine` so its sink is
+    /// dropped before the output stream.
+    voice: Option<Voice>,
+    /// Whether sounds loop; carried from one voice to the next.
+    looping: bool,
+    /// The tab the action being processed came from.
+    request_owner: Option<SoundOwner>,
+    /// The tab the newest decode was started for, so closing it cancels the
+    /// decode as well as the sound.
+    decode_owner: Option<SoundOwner>,
     engine: Option<Engine>,
     engine_tried: bool,
     banks: Option<Arc<SoundBanks>>,
@@ -252,8 +484,9 @@ pub(super) struct AudioState {
     /// In-flight background index build: the source root + language it's for, and
     /// the channel it will deliver the opened banks (or `None`) on.
     wwise_loading: Option<(PathBuf, Option<String>, Receiver<Option<WwiseBanks>>)>,
-    /// An event queued to play as soon as the in-flight load finishes.
-    wwise_deferred: Option<(String, String)>,
+    /// An event queued to play as soon as the in-flight load finishes, and
+    /// the tab it is for.
+    wwise_deferred: Option<(String, String, Option<SoundOwner>)>,
     event_cache: PcmCache<String>,
     /// Campaign Evolved's legacy `.pak` set, opened on first playback. CE media
     /// is not in IoStore, so this is a separate store from `wwise` above.
@@ -271,7 +504,7 @@ pub(super) struct AudioState {
     /// `pub(super)` for a field-disjoint borrow at `FieldEditContext` build sites.
     pub(super) language: Option<String>,
     /// Set by the sound-player UI; drained by [`AudioState::process`].
-    pub(super) pending: VecDeque<SoundAction>,
+    pub(super) pending: VecDeque<SoundRequest>,
     /// Last user-facing status line (bank/resolve/playback result).
     pub(super) status: Option<String>,
     /// Decodes and extraction batches running on workers report back here.
@@ -364,6 +597,7 @@ enum AudioDone {
         request: u64,
         cache: Option<PcmKey>,
         label: String,
+        owner: Option<SoundOwner>,
         result: Result<Arc<DecodedPcm>, String>,
     },
     Extracted(String),
@@ -601,6 +835,8 @@ impl AudioState {
     ) {
         self.play_request += 1;
         let request = self.play_request;
+        let owner = self.request_owner.clone();
+        self.decode_owner = owner.clone();
         self.status = Some(format!("decoding {label}\u{2026}"));
         self.spawn_job(ctx, move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(decode))
@@ -610,6 +846,7 @@ impl AudioState {
                 request,
                 cache,
                 label,
+                owner,
                 result,
             }
         });
@@ -640,6 +877,7 @@ impl AudioState {
                 request,
                 cache,
                 label,
+                owner,
                 result,
             } => {
                 let pcm = match result {
@@ -667,7 +905,7 @@ impl AudioState {
                     _ => {}
                 }
                 if request == self.play_request {
-                    self.play_decoded(&pcm, &label);
+                    self.play_decoded(pcm, &label, owner);
                 }
             }
         }
@@ -758,7 +996,10 @@ impl AudioState {
         self.wwise_lang = lang;
         self.event_cache.clear();
         match self.wwise_deferred.take() {
-            Some((event_name, label)) => self.play_event(&event_name, &label, ctx),
+            Some((event_name, label, owner)) => {
+                self.request_owner = owner;
+                self.play_event(&event_name, &label, ctx);
+            }
             None if !ok => self.status = Some("no Wwise .pck under <game>/sound/pc".to_owned()),
             None => {}
         }
@@ -769,7 +1010,7 @@ impl AudioState {
     fn play_event(&mut self, event_name: &str, label: &str, ctx: &egui::Context) {
         if let Some(pcm) = self.event_cache.get(&event_name.to_owned()) {
             self.play_request += 1;
-            self.play_decoded(&pcm, label);
+            self.play_decoded(pcm, label, self.request_owner.clone());
             return;
         }
         let Some(banks) = self.wwise.clone() else {
@@ -793,31 +1034,134 @@ impl AudioState {
         self.volume.0
     }
 
-    fn ensure_engine(&mut self) -> Option<&mut Engine> {
+    fn ensure_engine(&mut self) -> Option<&Engine> {
         if !self.engine_tried {
-            self.engine = Engine::new(self.volume.0);
+            self.engine = Engine::new();
             self.engine_tried = true;
         }
-        self.engine.as_mut()
+        self.engine.as_ref()
+    }
+
+    /// The sound `owner`'s tab has loaded, for its player.
+    pub(super) fn playback(&self, owner: Option<&SoundOwner>) -> Option<PlaybackView> {
+        self.voice
+            .as_ref()
+            .filter(|voice| voice.owner.as_ref() == owner)
+            .map(Voice::view)
+    }
+
+    /// Whether sounds loop.
+    pub(super) fn looping(&self) -> bool {
+        self.looping
+    }
+
+    /// Whether a sound is playing — the UI repaints every frame while one is,
+    /// to move its playhead.
+    pub(super) fn is_playing(&self) -> bool {
+        self.voice.as_ref().is_some_and(Voice::is_playing)
+    }
+
+    /// Keep playback with its tab: pause it once `focus` is another tab (or
+    /// none), and dispose of it — with any decode or Wwise load still on its
+    /// way for it — once `is_open` says its tab is gone. A sound with no tab is
+    /// left alone.
+    pub(super) fn follow_tabs(
+        &mut self,
+        focus: Option<&SoundOwner>,
+        is_open: impl Fn(&SoundOwner) -> bool,
+    ) {
+        let closed =
+            |owner: &Option<SoundOwner>| owner.as_ref().is_some_and(|owner| !is_open(owner));
+        if closed(&self.decode_owner) {
+            self.play_request += 1;
+            self.decode_owner = None;
+        }
+        if self
+            .wwise_deferred
+            .as_ref()
+            .is_some_and(|(_, _, owner)| closed(owner))
+        {
+            self.wwise_deferred = None;
+        }
+        if self
+            .voice
+            .as_ref()
+            .is_some_and(|voice| closed(&voice.owner))
+        {
+            self.voice = None;
+            self.status = None;
+            return;
+        }
+        if let Some(voice) = self.voice.as_ref()
+            && let Some(owner) = voice.owner.as_ref()
+            && Some(owner) != focus
+            && voice.is_playing()
+        {
+            voice.pause();
+        }
+    }
+
+    /// Whether the voice belongs to the tab this action came from: transport
+    /// controls in one tab do not reach another tab's sound.
+    fn voice_is_requesters(&self) -> bool {
+        self.voice
+            .as_ref()
+            .is_some_and(|voice| voice.owner == self.request_owner)
     }
 
     /// Drain the pending UI action: resolve the subsound, decode (cached), play.
     pub(super) fn process(&mut self, tags_root: Option<&Path>, ctx: &egui::Context) {
-        if let Some(engine) = self.engine.as_mut() {
-            engine.reap();
-        }
         self.drain_jobs();
         // Pick up a finished background Wwise load (and play any deferred event).
         self.poll_wwise_load(ctx);
-        let Some(action) = self.pending.pop_front() else {
+        if self.is_playing() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        let Some(SoundRequest { owner, action }) = self.pending.pop_front() else {
             return;
         };
+        self.request_owner = owner;
         let (id, key, label, action_root) = match action {
             SoundAction::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
                 self.volume = Volume(v);
-                if let Some(engine) = self.engine.as_mut() {
-                    engine.set_volume(v);
+                if let Some(sink) = self.voice.as_ref().and_then(|voice| voice.sink.as_ref()) {
+                    sink.set_volume(v);
+                }
+                return;
+            }
+            SoundAction::TogglePause => {
+                if !self.voice_is_requesters() {
+                    return;
+                }
+                if self.voice.as_ref().is_some_and(Voice::is_playing) {
+                    self.voice.as_ref().expect("checked").pause();
+                } else {
+                    let volume = self.volume.0;
+                    if self.ensure_engine().is_none() {
+                        self.status = Some("no audio output device".to_owned());
+                        return;
+                    }
+                    let engine = self.engine.as_ref().expect("ensured");
+                    self.voice.as_mut().expect("checked").play(engine, volume);
+                }
+                ctx.request_repaint();
+                return;
+            }
+            SoundAction::Seek(seconds) => {
+                if self.voice_is_requesters()
+                    && let Some(voice) = self.voice.as_ref()
+                {
+                    let frame = (seconds.max(0.0) * voice.pcm.sample_rate as f64) as u64;
+                    voice.seek(frame);
+                    ctx.request_repaint();
+                }
+                return;
+            }
+            SoundAction::SetLooping(looping) => {
+                self.looping = looping;
+                if let Some(voice) = self.voice.as_ref() {
+                    voice.shared.looping.store(looping, Ordering::Relaxed);
                 }
                 return;
             }
@@ -835,8 +1179,8 @@ impl AudioState {
                 return;
             }
             SoundAction::Stop => {
-                if let Some(engine) = self.engine.as_mut() {
-                    engine.stop_all();
+                if let Some(voice) = self.voice.as_mut() {
+                    voice.stop();
                 }
                 self.wwise_deferred = None; // cancel a play waiting on a load
                 self.play_request += 1; // and a decode still running
@@ -876,7 +1220,7 @@ impl AudioState {
                     // First event for this source: build the index off-thread
                     // (it reads every bank) and play once it's ready.
                     self.start_wwise_load(tags_root, ctx);
-                    self.wwise_deferred = Some((event_name, label));
+                    self.wwise_deferred = Some((event_name, label, self.request_owner.clone()));
                     self.status = Some("loading sound banks\u{2026}".to_owned());
                 }
                 return;
@@ -926,7 +1270,7 @@ impl AudioState {
         };
         if let Some(pcm) = self.cache.get(&(bank, sub)) {
             self.play_request += 1;
-            self.play_decoded(&pcm, &label);
+            self.play_decoded(pcm, &label, self.request_owner.clone());
             return;
         }
         let banks = self.banks.clone().expect("opened above");
@@ -940,23 +1284,32 @@ impl AudioState {
         });
     }
 
-    /// Play an already-decoded buffer on a fresh voice (stopping others).
-    fn play_decoded(&mut self, pcm: &DecodedPcm, label: &str) {
+    /// Load an already-decoded sound as the one voice — disposing of the
+    /// last, whichever tab it was — and play it.
+    fn play_decoded(&mut self, pcm: Arc<DecodedPcm>, label: &str, owner: Option<SoundOwner>) {
         let secs = pcm.duration_secs();
-        match self.ensure_engine() {
-            Some(engine) => {
-                engine.stop_all();
-                engine.play(pcm);
-                self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
-            }
-            None => self.status = Some("no audio output device".to_owned()),
+        self.voice = None;
+        self.decode_owner = None;
+        let volume = self.volume.0;
+        if self.ensure_engine().is_none() {
+            self.status = Some("no audio output device".to_owned());
+            return;
         }
+        let engine = self.engine.as_ref().expect("ensured");
+        let mut voice = Voice::new(pcm, label.to_owned(), owner, self.looping);
+        voice.play(engine, volume);
+        self.voice = Some(voice);
+        self.status = Some(format!("\u{25B6} {label}  ({secs:.2}s)"));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn queued<const N: usize>(actions: [SoundAction; N]) -> VecDeque<SoundRequest> {
+        actions.into_iter().map(SoundRequest::from).collect()
+    }
 
     fn pcm(samples: usize) -> Arc<DecodedPcm> {
         Arc::new(DecodedPcm {
@@ -987,6 +1340,7 @@ mod tests {
             request,
             cache,
             label: "rifle_fire".to_owned(),
+            owner: None,
             result: Ok(pcm(8)),
         }
     }
@@ -1089,7 +1443,7 @@ mod tests {
         let (root, request, _) = missing_bank_fixture("missing-player-bank");
         let tags = request.tags_root.unwrap();
         let mut audio = AudioState {
-            pending: VecDeque::from([SoundAction::Play {
+            pending: queued([SoundAction::Play {
                 id: Some(123),
                 key: "test".to_owned(),
                 label: "test".to_owned(),
@@ -1117,7 +1471,7 @@ mod tests {
         let other_tags = root.join("other-kit/tags");
         std::fs::create_dir_all(&other_tags).unwrap();
         let mut audio = AudioState {
-            pending: VecDeque::from([SoundAction::Play {
+            pending: queued([SoundAction::Play {
                 id: Some(123),
                 key: "test".to_owned(),
                 label: "test".to_owned(),
@@ -1159,7 +1513,7 @@ mod tests {
         };
         let mut audio = AudioState {
             language: Some("language-from-another-kit".to_owned()),
-            pending: VecDeque::from([SoundAction::SetLanguage(None), play]),
+            pending: queued([SoundAction::SetLanguage(None), play]),
             ..Default::default()
         };
 
@@ -1190,7 +1544,7 @@ mod tests {
             tags_root: None,
         };
         let mut audio = AudioState {
-            pending: VecDeque::from([play()]),
+            pending: queued([play()]),
             ..Default::default()
         };
         audio.process(Some(&tags), &egui::Context::default());
@@ -1199,12 +1553,201 @@ mod tests {
         let bank_dir = root.join("fmod").join("pc");
         std::fs::create_dir_all(&bank_dir).unwrap();
         std::fs::write(bank_dir.join("sfx.fsb"), b"new but invalid").unwrap();
-        audio.pending.push_back(play());
+        audio.pending.push_back(play().into());
         audio.process(Some(&tags), &egui::Context::default());
         let second = audio.status.clone().expect("retried bank error");
 
         assert_ne!(first, second, "the original missing-bank result was cached");
         assert!(second.contains("read header"), "{second}");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn owner(kit: u64, key: &str) -> SoundOwner {
+        SoundOwner {
+            kit: KitId(kit),
+            key: key.to_owned(),
+        }
+    }
+
+    /// Two-channel frames whose samples say where they came from:
+    /// frame `f` holds `(f * 10, f * 10 + 1)`.
+    fn numbered(frames: i16) -> Arc<DecodedPcm> {
+        Arc::new(DecodedPcm {
+            samples: (0..frames)
+                .flat_map(|f| [f.wrapping_mul(10), f.wrapping_mul(10).wrapping_add(1)])
+                .collect(),
+            channels: 2,
+            sample_rate: 1000,
+        })
+    }
+
+    fn pcm_source(pcm: &Arc<DecodedPcm>, looping: bool) -> (PcmSource, Arc<PlaybackShared>) {
+        let shared = Arc::new(PlaybackShared {
+            frame: AtomicU64::new(0),
+            seek: AtomicU64::new(NO_SEEK),
+            looping: AtomicBool::new(looping),
+        });
+        let source = PcmSource {
+            pcm: pcm.clone(),
+            shared: shared.clone(),
+            channels: 2,
+            frames: pcm.frame_count() as u64,
+            frame: 0,
+            channel: 0,
+        };
+        (source, shared)
+    }
+
+    /// The source plays the shared buffer in order, reports where it is a
+    /// whole frame at a time, takes a seek at the next frame boundary, and
+    /// either ends or wraps at the end.
+    #[test]
+    fn the_pcm_source_reports_position_seeks_and_loops() {
+        let pcm = numbered(4);
+        let (mut source, shared) = pcm_source(&pcm, false);
+        assert_eq!(source.next(), Some(0));
+        assert_eq!(
+            shared.frame.load(Ordering::Relaxed),
+            0,
+            "half a frame is not a frame"
+        );
+        assert_eq!(source.next(), Some(1));
+        assert_eq!(shared.frame.load(Ordering::Relaxed), 1);
+        shared.seek.store(3, Ordering::Relaxed);
+        assert_eq!(source.next(), Some(30), "the seek lands on the next frame");
+        assert_eq!(source.next(), Some(31));
+        assert_eq!(source.next(), None, "no loop: the sound ends");
+        assert_eq!(shared.frame.load(Ordering::Relaxed), 4);
+
+        let (mut source, shared) = pcm_source(&pcm, true);
+        shared.seek.store(3, Ordering::Relaxed);
+        let played: Vec<i16> = source.by_ref().take(4).collect();
+        assert_eq!(played, [30, 31, 0, 1], "looping wraps to the start");
+    }
+
+    /// A voice with no sink — nothing is playing — still keeps a playhead the
+    /// player can move and read.
+    #[test]
+    fn a_stopped_voice_keeps_a_playhead_the_player_can_move() {
+        let voice = Voice::new(numbered(1000), "x".to_owned(), None, false);
+        voice.seek(250);
+        let view = voice.view();
+        assert_eq!(view.position, 0.25);
+        assert_eq!(view.duration, 1.0);
+        assert!(!view.playing);
+        voice.seek(5000);
+        assert_eq!(
+            voice.view().position,
+            1.0,
+            "a seek past the end stops at the end"
+        );
+    }
+
+    /// Closing a tab disposes of its sound, and of a decode or Wwise load
+    /// still on its way for it. Another tab closing leaves it alone.
+    #[test]
+    fn closing_its_tab_disposes_of_the_sound_and_what_is_coming_for_it() {
+        let a = owner(1, "file:a.sound");
+        let mut audio = AudioState {
+            voice: Some(Voice::new(
+                numbered(10),
+                "a".to_owned(),
+                Some(a.clone()),
+                false,
+            )),
+            decode_owner: Some(a.clone()),
+            wwise_deferred: Some(("event".to_owned(), "a".to_owned(), Some(a.clone()))),
+            play_request: 7,
+            ..Default::default()
+        };
+
+        audio.follow_tabs(None, |owner| owner.key != "file:b.sound");
+        assert!(audio.voice.is_some() && audio.wwise_deferred.is_some());
+        assert_eq!(audio.play_request, 7, "another tab closing cancels nothing");
+
+        audio.follow_tabs(None, |owner| owner.key != "file:a.sound");
+        assert!(
+            audio.voice.is_none(),
+            "the closed tab's sound is disposed of"
+        );
+        assert!(audio.wwise_deferred.is_none(), "its Wwise play is dropped");
+        assert_eq!(
+            audio.play_request, 8,
+            "its decode will not play when it lands"
+        );
+        assert!(audio.playback(Some(&a)).is_none());
+    }
+
+    /// The transport in one tab does not reach another tab's sound, and each
+    /// tab sees only its own.
+    #[test]
+    fn transport_from_another_tab_does_not_move_this_tab_s_sound() {
+        let a = owner(1, "file:a.sound");
+        let b = owner(1, "file:b.sound");
+        let mut audio = AudioState {
+            voice: Some(Voice::new(
+                numbered(1000),
+                "a".to_owned(),
+                Some(a.clone()),
+                false,
+            )),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        audio.pending.push_back(SoundRequest {
+            owner: Some(b.clone()),
+            action: SoundAction::Seek(0.5),
+        });
+        audio.process(None, &ctx);
+        assert_eq!(audio.playback(Some(&a)).unwrap().position, 0.0);
+        assert!(audio.playback(Some(&b)).is_none());
+
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            action: SoundAction::Seek(0.5),
+        });
+        audio.process(None, &ctx);
+        assert_eq!(audio.playback(Some(&a)).unwrap().position, 0.5);
+    }
+
+    /// Focus moving to another tab pauses the sound; coming back does not
+    /// start it again. Needs an output device, so it skips without one.
+    #[test]
+    fn another_tab_taking_focus_pauses_the_sound() {
+        let a = owner(1, "file:a.sound");
+        let b = owner(1, "file:b.sound");
+        let mut audio = AudioState::default();
+        if audio.ensure_engine().is_none() {
+            eprintln!("skipping: no audio output device");
+            return;
+        }
+        audio.volume = Volume(0.0);
+        audio.play_decoded(numbered(30_000), "a", Some(a.clone()));
+        assert!(audio.playback(Some(&a)).unwrap().playing);
+
+        audio.follow_tabs(Some(&a), |_| true);
+        assert!(
+            audio.playback(Some(&a)).unwrap().playing,
+            "its own tab keeps it playing"
+        );
+
+        audio.follow_tabs(Some(&b), |_| true);
+        assert!(
+            !audio.playback(Some(&a)).unwrap().playing,
+            "another tab's focus pauses it"
+        );
+
+        audio.follow_tabs(Some(&a), |_| true);
+        assert!(
+            !audio.playback(Some(&a)).unwrap().playing,
+            "returning does not resume it"
+        );
+
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            action: SoundAction::TogglePause,
+        });
+        audio.process(None, &egui::Context::default());
+        assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
     }
 }

@@ -1271,7 +1271,7 @@ mod tests {
         assert!(peak > 64, "resolved H3 player row decoded to silence");
         let duration = pcm.duration_secs();
         let mut audio = super::audio::AudioState::default();
-        audio.pending.push_back(play);
+        audio.pending.push_back(play.into());
         audio.process(None, &egui::Context::default());
         audio.wait_for_audio_jobs();
         assert!(

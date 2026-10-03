@@ -138,6 +138,12 @@ impl Baboon {
         // what makes it stick.
         let expand_all = kit.pending_expand.remove(&key);
         let sound_volume = self.audio.volume();
+        let sound_owner = crate::app::audio::SoundOwner {
+            kit: kit_id,
+            key: key.clone(),
+        };
+        let sound_playback = self.audio.playback(Some(&sound_owner));
+        let sound_looping = self.audio.looping();
         let expert_mode = self.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
         // `source()`: a method borrows all of `self`, and the context below
@@ -178,9 +184,14 @@ impl Baboon {
             block_ops: &mut ops.block_ops,
             block_confirm: &mut self.block_confirm,
             open_request: &mut self.pending_open,
-            sound_play_request: &mut self.audio.pending,
+            sound_play_request: crate::app::audio::SoundRequests::new(
+                &mut self.audio.pending,
+                Some(sound_owner),
+            ),
             sound_status: self.audio.status.as_deref(),
             sound_volume,
+            sound_playback,
+            sound_looping,
             sound_extract_request: &mut self.pending_sound_extract,
             sound_language: self.audio.language.as_deref(),
             ce_sound: ce_sound.as_deref(),
@@ -292,7 +303,7 @@ impl Baboon {
         // is stamped with this kit because resolving it needs that kit's
         // containers, not whichever one happens to be active by the drain.
         if let Some(request) = ce_sound_ref_request {
-            self.pending_ce_sound_ref = Some((kit_id, request));
+            self.pending_ce_sound_ref = Some((kit_id, key.clone(), request));
         }
         // The reference picker is opened from inside the field renderer rather
         // than hoisted here, so it is stamped by noticing it appear.

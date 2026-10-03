@@ -385,7 +385,9 @@ pub struct Baboon {
     /// Pending play/extract of a `.sound` a container-source tag only refers to,
     /// stamped with the kit that raised it. Resolved after rendering, since the
     /// referenced tag's audio has to be walked out to Wwise first.
-    pending_ce_sound_ref: Option<(KitId, CeSoundRefRequest)>,
+    /// A referenced sound to resolve, with the kit whose containers resolve it
+    /// and the tab whose player asked (which owns the playback).
+    pending_ce_sound_ref: Option<(KitId, String, CeSoundRefRequest)>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
     /// Movable Campaign Evolved tag-reference picker, when one is open.

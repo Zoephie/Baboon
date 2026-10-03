@@ -371,11 +371,11 @@ pub(super) fn language_choices(
         languages
             .into_iter()
             .map(|language| LanguageChoice {
-            label: language.clone(),
-            value: Some(language),
-            available: true,
-            unavailable_reason: None,
-        })
+                label: language.clone(),
+                value: Some(language),
+                available: true,
+                unavailable_reason: None,
+            })
             .collect()
     };
     // Campaign Evolved has no `tags_root` (its tags live in containers) and its
@@ -454,13 +454,66 @@ fn draw_sound_transport(
     .filter(|root| blam_tags::audio::SoundBanks::available_languages(root).is_empty())
     .map(|root| root.parent().unwrap_or(root).join("fmod").join("pc"));
     ui.horizontal(|ui| {
+        let playback = edit.sound_playback.clone();
+        let playing = playback.as_ref().is_some_and(|p| p.playing);
+        let (icon, hover) = if playing {
+            ("\u{23F8}", "Pause (Space)")
+        } else {
+            ("\u{25B6}", "Play from the playhead (Space)")
+        };
         if ui
-            .button(RichText::new("\u{25A0} Stop"))
-            .on_hover_text("Stop playback")
+            .add_enabled(playback.is_some(), egui::Button::new(icon))
+            .on_hover_text(hover)
+            .on_disabled_hover_text("Play a permutation below first")
+            .clicked()
+        {
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::TogglePause);
+        }
+        if ui
+            .button(RichText::new("\u{25A0}"))
+            .on_hover_text("Stop and rewind")
             .clicked()
         {
             edit.sound_play_request
                 .push_back(super::audio::SoundAction::Stop);
+        }
+        let mut looping = edit.sound_looping;
+        if ui
+            .toggle_value(&mut looping, "\u{27F2}")
+            .on_hover_text("Loop")
+            .changed()
+        {
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::SetLooping(looping));
+        }
+        if let Some(playback) = &playback {
+            // The timeline until the waveform replaces it: dragging seeks as it
+            // goes, so the sound scrubs, and a click jumps straight there.
+            let mut position = playback.position;
+            ui.spacing_mut().slider_width = 220.0;
+            if ui
+                .add(
+                    egui::Slider::new(&mut position, 0.0..=playback.duration.max(0.001))
+                        .show_value(false)
+                        .trailing_fill(true),
+                )
+                .on_hover_text("Drag to scrub, click to jump")
+                .changed()
+            {
+                edit.sound_play_request
+                    .push_back(super::audio::SoundAction::Seek(position));
+            }
+            ui.label(
+                RichText::new(format!(
+                    "{} / {}",
+                    format_play_time(playback.position),
+                    format_play_time(playback.duration)
+                ))
+                .monospace()
+                .color(text_dark()),
+            )
+            .on_hover_text(&playback.label);
         }
         let mut volume = edit.sound_volume;
         ui.spacing_mut().slider_width = 90.0;
@@ -486,7 +539,7 @@ fn draw_sound_transport(
                 .find(|choice| {
                     choice.available
                         && choice.value.as_deref().map(str::to_ascii_lowercase)
-                        == current.as_deref().map(str::to_ascii_lowercase)
+                            == current.as_deref().map(str::to_ascii_lowercase)
                 })
                 .or_else(|| languages.iter().find(|choice| choice.available))
                 .or(languages.first());
@@ -544,6 +597,17 @@ fn draw_sound_transport(
             ),
         );
     }
+}
+
+/// `m:ss.mmm`, the time format the transport shows.
+pub(super) fn format_play_time(seconds: f64) -> String {
+    let millis = (seconds.max(0.0) * 1000.0).round() as u64;
+    format!(
+        "{}:{:02}.{:03}",
+        millis / 60_000,
+        millis / 1000 % 60,
+        millis % 1000
+    )
 }
 
 /// The block index a Halo 2 permutation keeps into `language permutation info`
@@ -662,10 +726,7 @@ fn h2_sound_for_game(tag: &TagFile, game: Option<&str>) -> Option<H2Sound> {
 /// A `.sound` tag's `<tags root>`-relative path without extension (e.g.
 /// `.../tags/sound/dialog/.../ambush.sound` → `sound\dialog\...\ambush`), for
 /// building the FMOD subsound id. Backslash-normalized; the hash lowercases.
-pub(super) fn sound_tag_rel(
-    abs: &std::path::Path,
-    tags_root: &std::path::Path,
-) -> Option<String> {
+pub(super) fn sound_tag_rel(abs: &std::path::Path, tags_root: &std::path::Path) -> Option<String> {
     let rel = abs.strip_prefix(tags_root).ok()?;
     Some(rel.with_extension("").to_string_lossy().replace('/', "\\"))
 }
@@ -715,9 +776,7 @@ fn rows_use_only_shared_fmod_bank(
             resolve_sound_bank(banks, id, &row.name).is_some_and(|(bank, _)| {
                 banks.bank_paths()[bank]
                     .file_name()
-                    .is_some_and(|name| {
-                        name.to_string_lossy().eq_ignore_ascii_case("sfx.fsb")
-                    })
+                    .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("sfx.fsb"))
             })
         })
         && found
@@ -1004,9 +1063,11 @@ pub(in crate::app) fn browser_sound_extract_items(
                 .collect()
         }
     } else {
-        vec![(!shared_fmod_audio)
-            .then(|| selected_language.map(str::to_owned))
-            .flatten()]
+        vec![
+            (!shared_fmod_audio)
+                .then(|| selected_language.map(str::to_owned))
+                .flatten(),
+        ]
     };
 
     let mut items = Vec::new();
