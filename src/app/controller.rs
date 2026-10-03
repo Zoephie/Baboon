@@ -8060,13 +8060,21 @@ impl Baboon {
             source.all_entries.clone()
         };
         let tag_source = source.source.clone();
-        let tx = self.tx.clone();
         self.kits[self.active].field_index.mark_building();
-        thread::spawn(move || {
-            let blobs = build_field_value_index(&tag_source, &entries);
-            let _ = tx.send(WorkerMessage::FieldIndexBuilt { stamp, blobs });
-            ctx.request_repaint();
-        });
+        // A build that panicked used to leave the index building forever, and
+        // a building index is never started again.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::FieldIndexBuilt {
+                stamp,
+                blobs: Ok(build_field_value_index(&tag_source, &entries)),
+            },
+            move |error| WorkerMessage::FieldIndexBuilt {
+                stamp,
+                blobs: Err(format!("Building the field search index failed: {error}")),
+            },
+        );
     }
 
     /// Build the reverse-dependency index in the background so the

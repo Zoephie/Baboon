@@ -562,30 +562,41 @@ impl Baboon {
             dialog.scanning = true;
             dialog.conflicts_stale = false;
         }
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let mut conflicts = Vec::new();
-            for entry in &entries {
-                let TagEntryLocation::Monolithic { name, group_tag } = &entry.location else {
-                    continue;
-                };
-                let extension = group_tag_to_extension(*group_tag)
-                    .map(str::to_owned)
-                    .or_else(|| entry.group_name.clone());
-                let Some(extension) = extension else { continue };
-                let mut relative = destination.place(name);
-                relative.set_extension(&extension);
-                if !tags_root.join(&relative).exists() {
-                    continue;
+        // A scan that panicked used to leave the dialog scanning for good,
+        // which also refuses the import itself.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let mut conflicts = Vec::new();
+                for entry in &entries {
+                    let TagEntryLocation::Monolithic { name, group_tag } = &entry.location else {
+                        continue;
+                    };
+                    let extension = group_tag_to_extension(*group_tag)
+                        .map(str::to_owned)
+                        .or_else(|| entry.group_name.clone());
+                    let Some(extension) = extension else { continue };
+                    let mut relative = destination.place(name);
+                    relative.set_extension(&extension);
+                    if !tags_root.join(&relative).exists() {
+                        continue;
+                    }
+                    conflicts.push(OutsideReference {
+                        key: entry.key.clone(),
+                        display_path: relative.to_string_lossy().replace('\\', "/"),
+                    });
                 }
-                conflicts.push(OutsideReference {
-                    key: entry.key.clone(),
-                    display_path: relative.to_string_lossy().replace('\\', "/"),
-                });
-            }
-            let _ = tx.send(WorkerMessage::CacheImportConflicts { stamp, conflicts });
-            ctx.request_repaint();
-        });
+                WorkerMessage::CacheImportConflicts {
+                    stamp,
+                    conflicts: Ok(conflicts),
+                }
+            },
+            move |error| WorkerMessage::CacheImportConflicts {
+                stamp,
+                conflicts: Err(format!("Checking for existing tags failed: {error}")),
+            },
+        );
     }
 
     /// Take the scan's answer, ticked, because replacing is what the importer
@@ -593,7 +604,7 @@ impl Baboon {
     pub(super) fn handle_cache_import_conflicts(
         &mut self,
         stamp: KitStamp,
-        conflicts: Vec<OutsideReference>,
+        conflicts: Result<Vec<OutsideReference>, String>,
     ) -> bool {
         let Some(dialog) = self.cache_import_dialog.as_mut() else {
             return false;
@@ -602,6 +613,15 @@ impl Baboon {
             return false;
         }
         dialog.scanning = false;
+        let conflicts = match conflicts {
+            Ok(conflicts) => conflicts,
+            Err(error) => {
+                // Left stale, so the scan runs again before an import.
+                dialog.conflicts_stale = true;
+                dialog.error = Some(error);
+                return true;
+            }
+        };
         dialog.conflict_picked = conflicts
             .iter()
             .map(|conflict| (conflict.key.clone(), true))

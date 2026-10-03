@@ -346,7 +346,7 @@ pub(in crate::app) enum WorkerMessage {
     /// the whole cache is a hundred thousand of them.
     CacheImportConflicts {
         stamp: KitStamp,
-        conflicts: Vec<OutsideReference>,
+        conflicts: Result<Vec<OutsideReference>, String>,
     },
     /// What an Import Tags source path turned out to be. Carries the input it
     /// was measured from, because the walk can outlast the user's typing and a
@@ -425,7 +425,7 @@ pub(in crate::app) enum WorkerMessage {
     // lowercased searchable text) pairs; the stamp guards against staleness.
     FieldIndexBuilt {
         stamp: KitStamp,
-        blobs: Vec<(String, String)>,
+        blobs: Result<Vec<(String, String)>, String>,
     },
     /// Progress from an exact all-tag Find scan.
     FindAllProgress {

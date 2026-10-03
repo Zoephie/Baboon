@@ -533,7 +533,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn choose_import_source_file(&mut self) {
+    pub(super) fn choose_import_source_file(&mut self, ctx: &egui::Context) {
         let start = self.import_picker_directory();
         let mut picker = rfd::FileDialog::new().set_title("Choose a tag to import");
         if let Some(start) = start {
@@ -542,10 +542,10 @@ impl Baboon {
         let Some(picked) = picker.pick_file() else {
             return;
         };
-        self.set_import_source(picked);
+        self.set_import_source(picked, ctx);
     }
 
-    pub(super) fn choose_import_source_folder(&mut self) {
+    pub(super) fn choose_import_source_folder(&mut self, ctx: &egui::Context) {
         let start = self.import_picker_directory();
         let mut picker = rfd::FileDialog::new().set_title("Choose a folder of tags to import");
         if let Some(start) = start {
@@ -554,7 +554,7 @@ impl Baboon {
         let Some(picked) = picker.pick_folder() else {
             return;
         };
-        self.set_import_source(picked);
+        self.set_import_source(picked, ctx);
     }
 
     /// Where a picker should open.
@@ -599,13 +599,13 @@ impl Baboon {
         others.into_iter().next().map(|(_, root)| root)
     }
 
-    fn set_import_source(&mut self, path: PathBuf) {
+    fn set_import_source(&mut self, path: PathBuf, ctx: &egui::Context) {
         if let Some(dialog) = self.tag_import_dialog.as_mut() {
             dialog.source_input = path.display().to_string();
             dialog.facts = None;
             dialog.invalidate_analysis();
         }
-        self.resolve_import_source();
+        self.resolve_import_source(ctx);
     }
 
     /// Work out what the source path is, on a worker.
@@ -613,7 +613,7 @@ impl Baboon {
     /// Off the UI thread because the path may be a whole kit's `tags` tree —
     /// counting what is in there means opening every file's header, and 97,000
     /// of those is not something to do between frames.
-    pub(super) fn resolve_import_source(&mut self) {
+    pub(super) fn resolve_import_source(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.tag_import_dialog.as_ref() else {
             return;
         };
@@ -640,15 +640,25 @@ impl Baboon {
             .source()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| TagNameIndex::load_from_definitions(&definitions_root));
-        let tx = self.tx.clone();
         if let Some(dialog) = self.tag_import_dialog.as_mut() {
             dialog.resolving = true;
             dialog.error = None;
         }
-        thread::spawn(move || {
-            let result = resolve_import_source_job(&input, &kit_roots, &names);
-            let _ = tx.send(WorkerMessage::ImportSourceResolved { input, result });
-        });
+        // A walk that panicked used to send nothing, leaving the dialog
+        // "Checking what is in there..." and repainting every frame for good.
+        let panic_input = input.clone();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ImportSourceResolved {
+                result: resolve_import_source_job(&input, &kit_roots, &names),
+                input,
+            },
+            move |error| WorkerMessage::ImportSourceResolved {
+                input: panic_input,
+                result: Err(format!("Checking the import source failed: {error}")),
+            },
+        );
     }
 
     pub(super) fn handle_import_source_resolved(

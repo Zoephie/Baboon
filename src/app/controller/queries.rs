@@ -43,12 +43,20 @@ impl Baboon {
     pub(super) fn handle_field_index_built(
         &mut self,
         stamp: KitStamp,
-        blobs: Vec<(String, String)>,
+        blobs: Result<Vec<(String, String)>, String>,
     ) -> bool {
         if let Some(kit_index) = self.resolve_stamp(stamp) {
-            self.kits[kit_index]
-                .field_index
-                .install(stamp.generation, blobs);
+            match blobs {
+                Ok(blobs) => self.kits[kit_index]
+                    .field_index
+                    .install(stamp.generation, blobs),
+                Err(error) => {
+                    // Not building and not ready, so the next search tries
+                    // again rather than waiting on a build that ended.
+                    self.kits[kit_index].field_index.invalidate();
+                    self.status = error;
+                }
+            }
         }
         false
     }

@@ -39,7 +39,7 @@ impl Baboon {
             self.end_kit_tool_hover(ctx);
             return;
         };
-        let plan = self.plan_kit_tool_drop(&target, &payload);
+        let plan = self.plan_kit_tool_drop(&target, &payload, ctx);
         // egui-winit drops a button event that arrives while it thinks the
         // pointer has left the window, so the button's own state is asked as
         // well: a drag over another program's window with no button held is
@@ -100,6 +100,7 @@ impl Baboon {
         &mut self,
         target: &KitToolDropTarget,
         payload: &DraggedTagRef,
+        ctx: &egui::Context,
     ) -> Result<KitToolDropPlan, String> {
         let tool = target.tool.label();
         let Some(file) = payload.file_path.clone() else {
@@ -148,7 +149,7 @@ impl Baboon {
                 palette: None,
             });
         };
-        let Some(palettes) = self.scenario_palettes_for_game(&game) else {
+        let Some(palettes) = self.scenario_palettes_for_game(&game, ctx) else {
             return Ok(KitToolDropPlan {
                 file,
                 palette: None,
@@ -184,17 +185,31 @@ impl Baboon {
     /// the definitions. The first ask starts that read and answers `None`, as
     /// does a definition that could not be read: the UI thread does not wait
     /// on disk, least of all with a drag in hand.
-    fn scenario_palettes_for_game(&mut self, game: &str) -> Option<&[ScenarioPalette]> {
+    pub(super) fn scenario_palettes_for_game(
+        &mut self,
+        game: &str,
+        ctx: &egui::Context,
+    ) -> Option<&[ScenarioPalette]> {
         if !self.kit_tool_drag.palettes.contains_key(game) {
             self.kit_tool_drag
                 .palettes
                 .insert(game.to_owned(), PaletteTable::Loading);
-            let tx = self.tx.clone();
             let game = game.to_owned();
-            thread::spawn(move || {
-                let palettes = scenario_palettes(&locate_definitions_root(), &game).ok();
-                let _ = tx.send(WorkerMessage::ScenarioPalettesRead { game, palettes });
-            });
+            let panic_game = game.clone();
+            // A read that panicked used to leave the table `Loading` for the
+            // session; it is unreadable instead, like any other failed read.
+            spawn_worker(
+                &self.tx,
+                ctx,
+                move || WorkerMessage::ScenarioPalettesRead {
+                    palettes: scenario_palettes(&locate_definitions_root(), &game).ok(),
+                    game,
+                },
+                move |_| WorkerMessage::ScenarioPalettesRead {
+                    game: panic_game,
+                    palettes: None,
+                },
+            );
         }
         match self.kit_tool_drag.palettes.get(game) {
             Some(PaletteTable::Ready(palettes)) => Some(palettes.as_slice()),

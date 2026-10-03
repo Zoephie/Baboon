@@ -77,3 +77,82 @@ fn a_chimp_mount_that_panics_does_not_stay_loading() {
         "the mount settled as failed"
     );
 }
+
+fn loose_kit(app: &mut Baboon, root: &Path) {
+    app.install_loaded_source(LoadedSourceData {
+        label: "kit".to_owned(),
+        source: TagSource::LooseFolder {
+            root: root.to_path_buf(),
+            game: Some("halo3_mcc".to_owned()),
+            definitions_root: PathBuf::new(),
+        },
+        names: TagNameIndex::default(),
+        game: Some("halo3_mcc".to_owned()),
+        entries: Vec::new(),
+        tree: TagTree::default(),
+        group_tree: TagTree::default(),
+        all_entries: Vec::new(),
+        reverse_dependencies: None,
+        initial_tag: None,
+        key_hints: Default::default(),
+        complete_scan: false,
+        chosen_kit_layout: None,
+    });
+}
+
+/// A building index is never started again, so a build that panicked left
+/// field-value search without its index for the session.
+#[test]
+fn a_field_index_build_that_panics_stops_building() {
+    let root = crate::test_kits::unique_temp_dir("panicking-field-index");
+    let mut app = Baboon::for_test();
+    loose_kit(&mut app, &root);
+    let ctx = egui::Context::default();
+    with_panicking_workers(|| app.begin_build_field_index(ctx.clone()));
+    assert!(app.kits[0].field_index.is_building());
+
+    assert!(apply_next_worker_message(&mut app), "the build answered");
+    assert!(!app.kits[0].field_index.is_building());
+    assert!(app.status.contains("crashed"), "{}", app.status);
+}
+
+/// While it resolves its source the import dialog spins and repaints every
+/// frame; a resolve that panicked left it doing so for good.
+#[test]
+fn an_import_source_check_that_panics_stops_spinning() {
+    let root = crate::test_kits::unique_temp_dir("panicking-import");
+    std::fs::create_dir_all(root.join("tags")).unwrap();
+    let mut app = Baboon::for_test();
+    loose_kit(&mut app, &root.join("tags"));
+    app.open_tag_import_dialog(None);
+    let dialog = app.tag_import_dialog.as_mut().expect("the dialog opened");
+    dialog.source_input = root.join("elsewhere").display().to_string();
+    let ctx = egui::Context::default();
+    with_panicking_workers(|| app.resolve_import_source(&ctx));
+    assert!(app.tag_import_dialog.as_ref().unwrap().resolving);
+
+    assert!(apply_next_worker_message(&mut app), "the check answered");
+    let dialog = app.tag_import_dialog.as_ref().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(!dialog.resolving, "no longer spinning");
+    assert!(dialog.error.as_deref().is_some_and(|error| error.contains("crashed")));
+}
+
+/// A palette table still `Loading` gates nothing and is never asked for
+/// again, so a read that panicked left Sapien drops ungated for the session.
+#[test]
+fn a_palette_read_that_panics_is_unreadable_not_loading() {
+    let mut app = Baboon::for_test();
+    let ctx = egui::Context::default();
+    with_panicking_workers(|| app.scenario_palettes_for_game("halo3_mcc", &ctx).is_none());
+    assert!(matches!(
+        app.kit_tool_drag.palettes.get("halo3_mcc"),
+        Some(PaletteTable::Loading)
+    ));
+
+    assert!(apply_next_worker_message(&mut app), "the read answered");
+    assert!(matches!(
+        app.kit_tool_drag.palettes.get("halo3_mcc"),
+        Some(PaletteTable::Unreadable)
+    ));
+}

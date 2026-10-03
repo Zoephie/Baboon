@@ -489,9 +489,9 @@ impl Baboon {
         }
 
         match action {
-            Some(ImportDialogAction::Resolve) => self.resolve_import_source(),
-            Some(ImportDialogAction::BrowseFile) => self.choose_import_source_file(),
-            Some(ImportDialogAction::BrowseFolder) => self.choose_import_source_folder(),
+            Some(ImportDialogAction::Resolve) => self.resolve_import_source(ctx),
+            Some(ImportDialogAction::BrowseFile) => self.choose_import_source_file(ctx),
+            Some(ImportDialogAction::BrowseFolder) => self.choose_import_source_folder(ctx),
             Some(ImportDialogAction::InvalidateAnalysis) => {
                 if let Some(dialog) = self.tag_import_dialog.as_mut() {
                     dialog.draft = None;
