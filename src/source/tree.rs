@@ -201,99 +201,14 @@ fn friendly_group_name(group_tag: u32, indexed_name: Option<&str>, fourcc: &str)
         .unwrap_or_else(|| fourcc.to_owned())
 }
 
+/// A group's name when the tag's own index has none: the engine's table,
+/// generated from every MCC title's definitions.
+///
+/// A hand-kept table used to follow it here, but every group in it is also
+/// in the engine's, so it could never answer; six of its names were wrong
+/// besides (`pman` as `particle_model`, `snde` as `sound_effect_template`).
 fn fallback_group_name(group_tag: u32) -> Option<&'static str> {
-    group_tag_to_extension(group_tag).or_else(|| {
-        let fourcc = group_tag.to_be_bytes();
-        Some(match &fourcc {
-            b"achi" => "achievements",
-            b"adlg" => "ai_dialogue_globals",
-            b"aigl" => "ai_globals",
-            b"mdlg" => "ai_mission_dialogue",
-            b"airs" => "airstrike",
-            b"ant!" => "antenna",
-            b"sefc" => "area_screen_effect",
-            b"armg" => "armormod_globals",
-            b"fogg" => "atmosphere_fog",
-            b"atgf" => "atmosphere_globals",
-            b"aulp" => "authored_light_probe",
-            b"avat" => "avatar_awards",
-            b"bink" => "bink",
-            b"bsdt" => "breakable_surface",
-            b"zone" => "cache_file_resource_gestalt",
-            b"play" => "cache_file_resource_layout_table",
-            b"$#!+" => "cache_file_sound",
-            b"csdt" => "camera_shake",
-            b"trak" => "camera_track",
-            b"cmoe" => "camo",
-            b"chdg" => "challenge_globals_definition",
-            b"char" => "character",
-            b"cine" => "cinematic",
-            b"cisd" => "cinematic_scene_data",
-            b"cisc" => "cinematic_scene",
-            b"clwd" => "cloth",
-            b"cddf" => "collision_damage",
-            b"colo" => "color_table",
-            b"cntl" => "contrail_system",
-            b"bloc" => "crate",
-            b"jpt!" => "damage_effect",
-            b"drdf" => "damage_response_definition",
-            b"decs" => "decal_system",
-            b"dctr" => "decorator_set",
-            b"ctrl" => "device_control",
-            b"mach" => "device_machine",
-            b"term" => "device_terminal",
-            b"udlg" => "dialogue",
-            b"effe" => "effect",
-            b"efsc" => "effect_scenery",
-            b"eqip" => "equipment",
-            b"forg" => "forge_globals",
-            b"fpch" => "fragment_program_control",
-            b"glps" => "global_pixel_shader",
-            b"matg" => "globals",
-            b"grup" => "gui_group_widget_definition",
-            b"gint" => "giant",
-            b"goof" => "gui_datasource_definition",
-            b"txt3" => "gui_text_widget_definition",
-            b"wigl" => "user_interface_globals_definition",
-            b"ugh!" => "sound_cache_file_gestalt",
-            b"ligh" => "light",
-            b"ltvl" => "light_volume_system",
-            b"unic" => "multilingual_unicode_string_list",
-            b"pman" => "particle_model",
-            b"pmov" => "particle_physics",
-            b"phmo" => "physics_model",
-            b"proj" => "projectile",
-            b"rasg" => "rasterizer_globals",
-            b"rm  " => "render_method",
-            b"rmb " => "shader_beam",
-            b"rmcs" => "shader_custom",
-            b"rmct" => "shader_cortana",
-            b"rmd " => "shader_decal",
-            b"rmfl" => "shader_foliage",
-            b"rmhg" => "shader_halogram",
-            b"rmp " => "shader_particle",
-            b"rmsk" => "shader_skin",
-            b"rmtr" => "shader_terrain",
-            b"rmw " => "shader_water",
-            b"rmsh" => "shader",
-            b"scnr" => "scenario",
-            b"sbsp" => "scenario_structure_bsp",
-            b"scen" => "scenery",
-            b"ssce" => "sound_scenery",
-            b"snd!" => "sound",
-            b"snde" => "sound_effect_template",
-            b"lsnd" => "sound_looping",
-            b"spk!" => "sound_mix",
-            b"stli" => "scenario_structure_lighting_info",
-            b"styl" => "style",
-            b"trac" => "tracer_system",
-            b"unit" => "unit",
-            b"vehi" => "vehicle",
-            b"weap" => "weapon",
-            b"wind" => "wind",
-            _ => return None,
-        })
-    })
+    group_tag_to_extension(group_tag)
 }
 
 /// Materializes one lazy folder node exactly once and appends its direct tags.
@@ -754,12 +669,11 @@ fn leaf_extension_dot(display: &str) -> Option<usize> {
 }
 
 /// Whether `suffix` is one of the names this group goes by: its friendly
-/// name, its four-character code, or a fallback table's name for it.
+/// name, its four-character code, or the engine table's name for it.
 fn suffix_names_group(suffix: &str, group_tag: u32, names: &TagNameIndex) -> bool {
     let fourcc = format_group_tag(group_tag);
     [
         names.name_for(group_tag),
-        gui_group_tag_to_extension(group_tag),
         group_tag_to_extension(group_tag),
         Some(fourcc.trim_end()),
     ]
@@ -768,50 +682,19 @@ fn suffix_names_group(suffix: &str, group_tag: u32, names: &TagNameIndex) -> boo
     .any(|name| name.eq_ignore_ascii_case(suffix))
 }
 
+/// The extension a group's tags display with: the game's own definitions,
+/// then the engine's cross-game table, which only runs before definitions
+/// have loaded.
+///
+/// A hand-kept table used to sit ahead of the engine's. It agreed with it
+/// everywhere but two rows: `bloc` as `device_control` (it is `crate` in every
+/// game that has it) and a `crat` group that no game has.
 fn friendly_extension(group_tag: u32, names: &TagNameIndex) -> String {
     names
         .name_for(group_tag)
-        .or_else(|| gui_group_tag_to_extension(group_tag))
         .or_else(|| group_tag_to_extension(group_tag))
         .map(str::to_owned)
         .unwrap_or_else(|| format_group_tag(group_tag))
-}
-
-fn gui_group_tag_to_extension(group_tag: u32) -> Option<&'static str> {
-    Some(match format_group_tag(group_tag).trim_end() {
-        "mat" => "material",
-        "mats" => "material_shader",
-        "mtsb" => "material_shader_bank",
-        "hlmt" => "model",
-        "mode" => "render_model",
-        "coll" => "collision_model",
-        "phmo" => "physics_model",
-        "jmad" => "model_animation_graph",
-        "bipd" => "biped",
-        "vehi" => "vehicle",
-        "weap" => "weapon",
-        "scen" => "scenery",
-        "crat" => "crate",
-        "mach" => "device_machine",
-        "bloc" => "device_control",
-        "bitm" => "bitmap",
-        "sbsp" => "scenario_structure_bsp",
-        "scnr" => "scenario",
-        "impo" => "imposter_model",
-        "frms" => "frame_event_list",
-        "effe" => "effect",
-        "snd!" => "sound",
-        "rmsh" => "shader",
-        "rmtr" => "shader_terrain",
-        "rmw" => "shader_water",
-        "rmfl" => "shader_foliage",
-        "rmd" => "shader_decal",
-        "rmhg" => "shader_halogram",
-        "rmsk" => "shader_skin",
-        "rmct" => "shader_cortana",
-        "rmcs" => "shader_custom",
-        _ => return None,
-    })
 }
 
 pub fn natural_key(value: &str) -> String {
@@ -1779,6 +1662,23 @@ mod tests {
         assert_eq!(
             display_path_with_friendly_extension(Path::new("a/piston_close2.l.sound"), snd, &names),
             "a/piston_close2.l.sound"
+        );
+    }
+
+    /// Before definitions load, `bloc` used to display as `device_control`;
+    /// it is `crate` in every game that has it, and the engine's table says so.
+    #[test]
+    fn a_crate_displays_as_a_crate_without_definitions() {
+        let names = TagNameIndex::default();
+        let bloc = u32::from_be_bytes(*b"bloc");
+        let ctrl = u32::from_be_bytes(*b"ctrl");
+        assert_eq!(
+            display_str_with_friendly_extension("objects/x/crate1", bloc, &names),
+            "objects/x/crate1.crate"
+        );
+        assert_eq!(
+            display_str_with_friendly_extension("objects/x/switch", ctrl, &names),
+            "objects/x/switch.device_control"
         );
     }
 

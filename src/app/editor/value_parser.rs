@@ -686,6 +686,11 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
     if let Some(group_tag) = crate::format::process_group_tag_for(extension) {
         return Some(group_tag);
     }
+    fallback_extension_to_group_tag(extension)
+}
+
+/// [`extension_to_group_tag`] before any definitions are loaded.
+fn fallback_extension_to_group_tag(extension: &str) -> Option<u32> {
     let fourcc = match extension {
         "material" => "mat",
         "material_shader" => "mats",
@@ -708,7 +713,7 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
         "giant" => "gint",
         "creature" => "crea",
         "scenery" => "scen",
-        "crate" => "crat",
+        "crate" => "bloc",
         "bitmap" => "bitm",
         "scenario_structure_bsp" => "sbsp",
         "structure_design" => "sddt",
@@ -750,6 +755,19 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
 #[cfg(test)]
 mod narrowing_tests {
     use super::*;
+
+    /// `crate` is `bloc` in every game that has it; there is no `crat` group.
+    #[test]
+    fn the_fallback_table_files_a_crate_under_bloc() {
+        assert_eq!(
+            fallback_extension_to_group_tag("crate"),
+            Some(u32::from_be_bytes(*b"bloc"))
+        );
+        assert_eq!(
+            fallback_extension_to_group_tag("device_control"),
+            Some(u32::from_be_bytes(*b"ctrl"))
+        );
+    }
 
     /// Run `check` on the first field of `wanted` type found in a fresh tag of
     /// any Halo 3 group, following inline structs (a fresh tag's blocks are
