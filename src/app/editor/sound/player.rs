@@ -27,6 +27,25 @@ pub(super) enum ClipPlay {
     CeRef(CeSoundRefRequest),
 }
 
+/// The random-pick button. A shuffle sign: `⤨`, the obvious choice, is in
+/// none of the app's fonts and drew as an empty box.
+const RANDOM_ICON: &str = "\u{1F500}";
+
+/// Every glyph the player draws, which the tests check the app's fonts have.
+#[cfg(test)]
+const PLAYER_GLYPHS: [&str; 10] = [
+    "\u{25C0}",
+    "\u{25B6}",
+    RANDOM_ICON,
+    "\u{23F8}",
+    "\u{25A0}",
+    "\u{27F2}",
+    "\u{2B07}",
+    "\u{25B8}",
+    "\u{1F310}",
+    "\u{1F50A}",
+];
+
 /// Height of the time ruler above the timeline's track.
 const RULER_HEIGHT: f32 = 14.0;
 /// Height of the track for mono and stereo, and before a clip is loaded.
@@ -111,7 +130,7 @@ pub(super) fn draw_clip_player(
             choose = Some((selected + 1) % clips.len());
         }
         if ui
-            .add_enabled(many, egui::Button::new("\u{2928}"))
+            .add_enabled(many, egui::Button::new(RANDOM_ICON))
             .on_hover_text("Play a random one, as the game picks")
             .clicked()
         {
@@ -814,7 +833,7 @@ mod tests {
         let mut h = Harness::new();
         h.frame(Vec::new());
         h.frame(Vec::new());
-        let random = h.find("\u{2928}", 0);
+        let random = h.find(RANDOM_ICON, 0);
         h.click(random);
         let queued = h.take();
         assert_eq!(queued.len(), 1, "{queued:?}");
@@ -982,5 +1001,20 @@ mod tests {
             .all(|(_, color)| !is_played(color));
         assert!(left_played, "bars before the playhead are not drawn played");
         assert!(right_unplayed, "bars after the playhead are drawn played");
+    }
+
+    /// A glyph the fonts lack draws as an empty box; ⤨ did.
+    #[test]
+    fn every_player_glyph_is_in_the_app_s_fonts() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let _ = ctx.run(Default::default(), |_| {});
+        let missing: Vec<&str> = PLAYER_GLYPHS
+            .into_iter()
+            .filter(|glyph| {
+                !ctx.fonts(|fonts| fonts.has_glyphs(&egui::FontId::proportional(14.0), glyph))
+            })
+            .collect();
+        assert!(missing.is_empty(), "no glyph for {missing:?}");
     }
 }
