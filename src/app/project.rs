@@ -985,6 +985,23 @@ fn logical_path_from_display(display_path: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// The identity an older build gave a container tag whose name has a dot in
+/// it, or `None` where it is the same as today's.
+///
+/// Container tags are named without an extension, and the display path used
+/// to be made by cutting at the name's last dot: `levels/v1.2/bitmaps/rock`
+/// displayed as `levels/v1.bitmap`, so its identity was `…:levels/v1`. Project
+/// files written then still hold that identity.
+fn legacy_campaign_identity(entry: &TagEntry) -> Option<String> {
+    if !matches!(entry.location, TagEntryLocation::Container { .. }) {
+        return None;
+    }
+    let (_, logical_path, _, _) = campaign_entry_project_parts(entry)?;
+    let (stem, _) = logical_path.rsplit_once('.')?;
+    let stem = stem.trim_matches('/');
+    (!stem.is_empty()).then(|| format!("{:08x}:{stem}", entry.group_tag))
+}
+
 pub(super) fn campaign_entry_project_parts(
     entry: &TagEntry,
 ) -> Option<(String, String, CampaignProjectTagKind, Option<String>)> {
@@ -1127,15 +1144,21 @@ impl Baboon {
         identity: &str,
     ) -> Option<TagEntry> {
         let source = self.kits[kit].source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .find(|entry| {
-                campaign_entry_project_parts(entry)
-                    .is_some_and(|(candidate, _, _, _)| candidate == identity)
-            })
-            .cloned()
+        let entries = || source.entries.iter().chain(source.all_entries.iter());
+        if let Some(entry) = entries().find(|entry| {
+            campaign_entry_project_parts(entry)
+                .is_some_and(|(candidate, _, _, _)| candidate == identity)
+        }) {
+            return Some(entry.clone());
+        }
+        // An identity recorded before dotted names were displayed whole. Taken
+        // only when exactly one tag had it, since the old form could collide.
+        let mut legacy = entries()
+            .filter(|entry| legacy_campaign_identity(entry).as_deref() == Some(identity));
+        let entry = legacy.next()?;
+        legacy
+            .all(|other| other.key == entry.key)
+            .then(|| entry.clone())
     }
 
     fn ensure_campaign_project(&mut self, kit: usize, now: f64) {
@@ -2160,6 +2183,66 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A container tag with a dot in its name has a new identity now that its
+    /// display path keeps the dot; a project written before still names it
+    /// by the old one, and that still finds it, unless it is ambiguous.
+    #[test]
+    fn a_dotted_container_tag_answers_to_its_old_identity_too() {
+        let bitm = u32::from_be_bytes(*b"bitm");
+        let entry = |logical: &str| TagEntry {
+            key: format!("ublock:pakchunk0:Meteorite/Content/Tags/{logical}-bitmap.ubulk"),
+            // What the container loader now displays it as.
+            display_path: format!("{logical}.bitmap"),
+            group_tag: bitm,
+            group_name: None,
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: format!("Meteorite/Content/Tags/{logical}-bitmap.ubulk"),
+            },
+        };
+        let mut app = Baboon::for_test();
+        let source = |entries: Vec<TagEntry>| LoadedSourceData {
+            label: "ce".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("/ce"),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        app.install_loaded_source(source(vec![entry("levels/v1.2/bitmaps/rock")]));
+        let found = |app: &Baboon, identity: &str| {
+            app.campaign_entry_for_identity(0, identity)
+                .map(|entry| entry.display_path)
+        };
+        assert_eq!(
+            found(&app, "6269746d:levels/v1.2/bitmaps/rock").as_deref(),
+            Some("levels/v1.2/bitmaps/rock.bitmap")
+        );
+        assert_eq!(
+            found(&app, "6269746d:levels/v1").as_deref(),
+            Some("levels/v1.2/bitmaps/rock.bitmap"),
+            "the identity an older build recorded"
+        );
+
+        // Two tags that both had that old identity: neither is guessed.
+        app.install_loaded_source(source(vec![
+            entry("levels/v1.2/bitmaps/rock"),
+            entry("levels/v1.3/bitmaps/rock"),
+        ]));
+        assert_eq!(found(&app, "6269746d:levels/v1"), None);
+    }
 
     /// The revision has to keep climbing across a save, or a cache that saw
     /// revision 1, watched the document be saved and then edited again, would

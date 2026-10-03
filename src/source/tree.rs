@@ -706,25 +706,66 @@ pub(super) fn path_to_display(path: &Path) -> String {
         .join("/")
 }
 
+/// A tag file's display path: its path with the file's own extension
+/// replaced by the group's friendly name. Only the file name's extension is
+/// replaced; a dot in a folder name is part of the folder.
 pub(super) fn display_path_with_friendly_extension(
     path: &Path,
     group_tag: u32,
     names: &TagNameIndex,
 ) -> String {
     let display = path_to_display(path);
-    display_str_with_friendly_extension(&display, group_tag, names)
+    let extension = friendly_extension(group_tag, names);
+    match leaf_extension_dot(&display) {
+        Some(dot) => format!("{}.{extension}", &display[..dot]),
+        None => format!("{display}.{extension}"),
+    }
 }
 
+/// A display path for a tag *name*, such as a monolithic cache's tag name or a
+/// container's logical path: names that carry no file extension.
+///
+/// A dot in such a name is part of the name (`piston_close2.l`, a folder
+/// called `v1.2`), so the friendly extension is appended. This used to cut at
+/// the last dot anywhere in the path and replace what followed, turning
+/// `piston_close2.l` into `piston_close2.sound` and `levels/v1.2/bitmaps/rock`
+/// into `levels/v1.bitmap`. Only a final suffix that already names this
+/// group (`.bipd`, `.biped`) is replaced instead of doubled.
 pub(super) fn display_str_with_friendly_extension(
     display: &str,
     group_tag: u32,
     names: &TagNameIndex,
 ) -> String {
     let extension = friendly_extension(group_tag, names);
-    match display.rsplit_once('.') {
-        Some((stem, _)) if !stem.is_empty() => format!("{stem}.{extension}"),
-        _ => format!("{display}.{extension}"),
+    if let Some(dot) = leaf_extension_dot(display)
+        && suffix_names_group(&display[dot + 1..], group_tag, names)
+    {
+        return format!("{}.{extension}", &display[..dot]);
     }
+    format!("{display}.{extension}")
+}
+
+/// Where the last dot of the final path component is, when it is not the
+/// first character of the path.
+fn leaf_extension_dot(display: &str) -> Option<usize> {
+    let leaf_start = display.rfind('/').map_or(0, |slash| slash + 1);
+    let dot = leaf_start + display[leaf_start..].rfind('.')?;
+    (dot > 0).then_some(dot)
+}
+
+/// Whether `suffix` is one of the names this group goes by: its friendly
+/// name, its four-character code, or a fallback table's name for it.
+fn suffix_names_group(suffix: &str, group_tag: u32, names: &TagNameIndex) -> bool {
+    let fourcc = format_group_tag(group_tag);
+    [
+        names.name_for(group_tag),
+        gui_group_tag_to_extension(group_tag),
+        group_tag_to_extension(group_tag),
+        Some(fourcc.trim_end()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|name| name.eq_ignore_ascii_case(suffix))
 }
 
 fn friendly_extension(group_tag: u32, names: &TagNameIndex) -> String {
@@ -1692,6 +1733,53 @@ mod tests {
         let detected = detect_ek_root_with_aliases(&path, &aliases).map(|(_, game)| game);
 
         assert_eq!(detected, Some("halo2_mcc"));
+    }
+
+    /// Monolithic cache names and container logical paths carry no extension,
+    /// so a dot in them is part of the name. Real tags with dots exist in
+    /// every game (sixteen in Halo 3 alone).
+    #[test]
+    fn a_dot_in_an_extensionless_name_is_kept() {
+        let names = TagNameIndex::default();
+        let snd = u32::from_be_bytes(*b"snd!");
+        let bitm = u32::from_be_bytes(*b"bitm");
+        assert_eq!(
+            display_str_with_friendly_extension(
+                "sound/levels/dlc/descent/scarab_factory/piston_close2.l",
+                snd,
+                &names,
+            ),
+            "sound/levels/dlc/descent/scarab_factory/piston_close2.l.sound"
+        );
+        assert_eq!(
+            display_str_with_friendly_extension("levels/v1.2/bitmaps/rock", bitm, &names),
+            "levels/v1.2/bitmaps/rock.bitmap"
+        );
+        // A name that already ends in this group's extension keeps it once.
+        assert_eq!(
+            display_str_with_friendly_extension("a/b/piston_close2.l.sound", snd, &names),
+            "a/b/piston_close2.l.sound"
+        );
+    }
+
+    /// A tag file's own extension is replaced, but a dot in a folder is not one.
+    #[test]
+    fn only_a_files_own_extension_is_replaced() {
+        let names = TagNameIndex::default();
+        let bitm = u32::from_be_bytes(*b"bitm");
+        let snd = u32::from_be_bytes(*b"snd!");
+        assert_eq!(
+            display_path_with_friendly_extension(
+                Path::new("levels/v1.2/bitmaps/rock.bitmap"),
+                bitm,
+                &names
+            ),
+            "levels/v1.2/bitmaps/rock.bitmap"
+        );
+        assert_eq!(
+            display_path_with_friendly_extension(Path::new("a/piston_close2.l.sound"), snd, &names),
+            "a/piston_close2.l.sound"
+        );
     }
 
     #[test]
