@@ -14,8 +14,8 @@ use terminal::{
     run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
     stream_terminal_output, trim_terminal_lines,
 };
-mod tools;
 mod kit_tool_options;
+mod tools;
 use kit_tool_options::*;
 pub(super) use tools::add_standard_editing_kit_profiles;
 use tools::*;
@@ -4164,6 +4164,13 @@ impl Baboon {
                         group_tree: TagTree::default(),
                         group_tree_for: None,
                         filter_cache: FilterCache::default(),
+                        date_cache: FolderDateCache::default(),
+                        table_layout: FolderTableLayout::default(),
+                        search_scope: self.prefs.browser_search_scope,
+                        assets_view: false,
+                        asset_bitmaps: true,
+                        asset_models: true,
+                        asset_cell_size: DEFAULT_CELL,
                     });
                 let selected = self.kits[self.active].selected_key.clone();
                 self.kits[self.active].open_tag_pane(&key);

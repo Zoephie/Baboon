@@ -537,6 +537,7 @@ impl Baboon {
             kits: vec![Kit {
                 browser_mode: prefs.browser_mode,
                 browser_sort: prefs.browser_sort,
+                search_scope: prefs.browser_search_scope,
                 ..Kit::empty(KitId(0), names.clone())
             }],
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),

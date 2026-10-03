@@ -149,6 +149,13 @@ pub(in crate::app) struct FolderBrowserState {
     /// The generation and entry count `group_tree` was built from.
     pub(in crate::app) group_tree_for: Option<(u64, usize)>,
     pub(in crate::app) filter_cache: FilterCache,
+    pub(in crate::app) date_cache: FolderDateCache,
+    pub(in crate::app) table_layout: FolderTableLayout,
+    pub(in crate::app) search_scope: BrowserSearchScope,
+    pub(in crate::app) assets_view: bool,
+    pub(in crate::app) asset_bitmaps: bool,
+    pub(in crate::app) asset_models: bool,
+    pub(in crate::app) asset_cell_size: f32,
 }
 
 pub(in crate::app) const FOLDER_PANE_PREFIX: &str = "\u{1f}folder:";
@@ -412,84 +419,430 @@ impl BrowserSort {
 
 #[derive(Default)]
 pub(in crate::app) struct FilterCache {
-    /// `source_generation` the cached tree was built for.
-    generation: u64,
-    /// The (trimmed) query string the tree was built for.
-    query: String,
-    /// Whether matches came from `all_entries` (true) or `entries` (false).
-    used_all: bool,
-    /// Whether the cached tree is grouped by tag group (true) or by folder.
-    groups: bool,
-    /// The matching entries (cloned subset of the source), referenced by index
-    /// from [`tree`]. Kept owned so rendering needs no borrow of the source.
+    scoped_signature: Option<u64>,
+    snapshot_for: Option<(u64, usize, usize)>,
+    snapshot: Arc<Vec<TagEntry>>,
+    folder_paths_for: Option<(u64, PathBuf)>,
+    folder_paths: Arc<Vec<String>>,
+    pending_since: Option<std::time::Instant>,
+    job_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    receiver: Option<std::sync::mpsc::Receiver<SearchResults>>,
     pub(in crate::app) entries: Vec<TagEntry>,
-    /// Pruned hierarchy over [`entries`] — folder tree or group tree per mode.
     pub(in crate::app) tree: TagTree,
 }
-
-impl FilterCache {
-    /// Rebuild the pruned match tree if anything it depends on changed;
-    /// otherwise reuse the cached tree.
-    pub(in crate::app) fn refresh(
-        &mut self,
-        generation: u64,
-        query: &str,
-        entries: &[TagEntry],
-        used_all: bool,
-        groups: bool,
-    ) {
-        if self.generation == generation
-            && self.query == query
-            && self.used_all == used_all
-            && self.groups == groups
-        {
-            return;
+struct SearchResults {
+    signature: u64,
+    entries: Vec<TagEntry>,
+    tree: TagTree,
+    folders: Option<Arc<Vec<String>>>,
+}
+struct SearchRequest {
+    signature: u64,
+    query: String,
+    groups: bool,
+    folder: PathBuf,
+    root: Option<PathBuf>,
+    scope: BrowserSearchScope,
+}
+impl Drop for FilterCache {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.job_cancel {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        self.generation = generation;
-        self.query = query.to_owned();
-        self.used_all = used_all;
-        self.groups = groups;
-        self.entries = compute_filter_matches(entries, query)
-            .into_iter()
-            .map(|index| entries[index].clone())
-            .collect();
-        self.tree = if groups {
-            crate::source::build_group_tree(&self.entries)
-        } else {
-            crate::source::build_tree(&self.entries)
-        };
+    }
+}
+impl FilterCache {
+    pub(in crate::app) fn is_searching(&self) -> bool {
+        self.pending_since.is_some() || self.receiver.is_some()
     }
 
-    /// Folder-pane variant: matching entries keep their full source paths, but
-    /// the hierarchy begins directly beneath `folder`.
-    pub(in crate::app) fn refresh_beneath(
+    /// Unchanged frames only check the request and reply. One source snapshot
+    /// is shared across queries; filtering, directory walking and tree building
+    /// happen on a cancellable worker after typing pauses.
+    pub(in crate::app) fn refresh_scoped_async(
         &mut self,
         generation: u64,
         query: &str,
         entries: &[TagEntry],
         groups: bool,
         folder: &Path,
+        root: Option<&Path>,
+        scope: BrowserSearchScope,
+        keywords: &Arc<std::collections::BTreeMap<String, Vec<String>>>,
+        ctx: &egui::Context,
     ) {
-        if self.generation == generation
-            && self.query == query
-            && self.used_all
-            && self.groups == groups
-        {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let snapshot_for = (generation, entries.len(), entries.as_ptr() as usize);
+        (
+            snapshot_for,
+            query,
+            groups,
+            folder,
+            root,
+            scope,
+            Arc::as_ptr(keywords) as usize,
+        )
+            .hash(&mut hasher);
+        let signature = hasher.finish();
+        if self.scoped_signature != Some(signature) {
+            if let Some(cancel) = self.job_cancel.take() {
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            self.receiver = None;
+            self.scoped_signature = Some(signature);
+            self.pending_since = Some(std::time::Instant::now());
+            self.entries.clear();
+            self.tree = TagTree::default();
+        }
+        if let Some(receiver) = &self.receiver {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    if result.signature == signature {
+                        self.entries = result.entries;
+                        self.tree = result.tree;
+                        if let Some(folders) = result.folders {
+                            self.folder_paths = folders;
+                            self.folder_paths_for = root.map(|root| (generation, root.to_owned()));
+                        }
+                    }
+                    self.receiver = None;
+                    self.job_cancel = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.receiver = None;
+                    self.job_cancel = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        let Some(since) = self.pending_since else {
+            return;
+        };
+        let debounce = if query.is_empty() {
+            std::time::Duration::ZERO
+        } else {
+            std::time::Duration::from_millis(120)
+        };
+        if since.elapsed() < debounce {
+            ctx.request_repaint_after(debounce - since.elapsed());
             return;
         }
-        self.generation = generation;
-        self.query = query.to_owned();
-        self.used_all = true;
-        self.groups = groups;
-        self.entries = compute_filter_matches(entries, query)
-            .into_iter()
-            .filter(|&index| crate::source::entry_is_beneath_folder(&entries[index], folder))
-            .map(|index| entries[index].clone())
-            .collect();
-        self.tree = if groups {
-            crate::source::build_group_tree(&self.entries)
-        } else {
-            crate::source::build_tree_beneath(&self.entries, folder)
+        self.pending_since = None;
+        // Clone the source once per revision, then share it across keystrokes.
+        if self.snapshot_for != Some(snapshot_for) {
+            self.snapshot = Arc::new(entries.to_vec());
+            self.snapshot_for = Some(snapshot_for);
+        }
+        let known_folders = root.and_then(|root| {
+            (self.folder_paths_for.as_ref() == Some(&(generation, root.to_owned())))
+                .then(|| Arc::clone(&self.folder_paths))
+        });
+        let request = SearchRequest {
+            signature,
+            query: query.to_owned(),
+            groups,
+            folder: folder.to_owned(),
+            root: root.map(Path::to_owned),
+            scope,
         };
+        let snapshot = Arc::clone(&self.snapshot);
+        let keywords = Arc::clone(keywords);
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.job_cancel = Some(Arc::clone(&cancel));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.receiver = Some(receiver);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            if let Some(result) =
+                run_browser_search(&request, &snapshot, &keywords, known_folders, &cancel)
+            {
+                if sender.send(result).is_ok() {
+                    ctx.request_repaint();
+                }
+            }
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn refresh_scoped(
+        &mut self,
+        generation: u64,
+        query: &str,
+        entries: &[TagEntry],
+        groups: bool,
+        folder: &Path,
+        root: Option<&Path>,
+        scope: BrowserSearchScope,
+        keywords: &std::collections::BTreeMap<String, Vec<String>>,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (
+            generation,
+            query,
+            entries.len(),
+            groups,
+            folder,
+            root,
+            scope,
+            keywords,
+        )
+            .hash(&mut hasher);
+        let signature = hasher.finish();
+        if self.scoped_signature == Some(signature) {
+            return;
+        }
+        let request = SearchRequest {
+            signature,
+            query: query.to_owned(),
+            groups,
+            folder: folder.to_owned(),
+            root: root.map(Path::to_owned),
+            scope,
+        };
+        let known = root.and_then(|root| {
+            (self.folder_paths_for.as_ref() == Some(&(generation, root.to_owned())))
+                .then(|| Arc::clone(&self.folder_paths))
+        });
+        let result = run_browser_search(
+            &request,
+            entries,
+            keywords,
+            known,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        self.scoped_signature = Some(signature);
+        self.entries = result.entries;
+        self.tree = result.tree;
+        if let Some(folders) = result.folders {
+            self.folder_paths = folders;
+            self.folder_paths_for = root.map(|root| (generation, root.to_owned()));
+        }
+    }
+}
+
+fn run_browser_search(
+    request: &SearchRequest,
+    source: &[TagEntry],
+    keywords: &std::collections::BTreeMap<String, Vec<String>>,
+    known_folders: Option<Arc<Vec<String>>>,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Option<SearchResults> {
+    let cancelled = || cancel.load(std::sync::atomic::Ordering::Relaxed);
+    let query = ScopedSearchQuery::new(&request.query);
+    let normalized = request.folder.to_string_lossy().replace('\\', "/");
+    let prefix = if normalized.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", normalized.trim_end_matches('/'))
+    };
+    let mut entries = Vec::new();
+    for (index, entry) in source.iter().enumerate() {
+        if index % 128 == 0 && cancelled() {
+            return None;
+        }
+        if search_entry_is_beneath(entry, &prefix)
+            && query.entry(
+                entry,
+                request.scope,
+                keywords
+                    .get(&entry.key)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            )
+        {
+            entries.push(entry.clone());
+        }
+    }
+    let mut folders = None;
+    let mut extra = Vec::new();
+    if request.scope.folders && !request.groups && !request.query.trim().is_empty() {
+        if let Some(root) = &request.root {
+            let paths = match known_folders {
+                Some(paths) => paths,
+                None => {
+                    let mut paths = Vec::new();
+                    for item in walkdir::WalkDir::new(root)
+                        .into_iter()
+                        .filter_map(Result::ok)
+                    {
+                        if cancelled() {
+                            return None;
+                        }
+                        if item.file_type().is_dir() {
+                            if let Ok(path) = item.path().strip_prefix(root) {
+                                paths.push(path.to_string_lossy().replace('\\', "/"));
+                            }
+                        }
+                    }
+                    Arc::new(paths)
+                }
+            };
+            for path in paths.iter() {
+                if cancelled() {
+                    return None;
+                }
+                if query.folder(path) {
+                    extra.push(path.clone());
+                }
+            }
+            folders = Some(paths);
+        }
+    }
+    if cancelled() {
+        return None;
+    }
+    let tree = if request.groups {
+        crate::source::build_group_tree(&entries)
+    } else if extra.is_empty() {
+        crate::source::build_tree_beneath(&entries, &request.folder)
+    } else {
+        let mut tree = crate::source::build_tree_with_folders(&entries, &extra);
+        if !request.folder.as_os_str().is_empty() {
+            fn take_beneath(nodes: &mut [TagTreeNode], folder: &Path) -> Option<TagTree> {
+                for node in nodes {
+                    if paths_match_case_insensitive(&node.rel_path, folder) {
+                        return Some(TagTree {
+                            children: std::mem::take(&mut node.children),
+                            entries: std::mem::take(&mut node.entries),
+                        });
+                    }
+                    if let Some(tree) = take_beneath(&mut node.children, folder) {
+                        return Some(tree);
+                    }
+                }
+                None
+            }
+            tree = take_beneath(&mut tree.children, &request.folder).unwrap_or_default();
+        }
+        tree
+    };
+    if cancelled() {
+        return None;
+    }
+    Some(SearchResults {
+        signature: request.signature,
+        entries,
+        tree,
+        folders,
+    })
+}
+
+#[cfg(test)]
+mod async_browser_search_tests {
+    use super::*;
+
+    #[test]
+    fn typing_is_debounced_and_only_the_latest_query_is_published() {
+        let entries: Vec<_> = (0..10_000)
+            .map(|index| TagEntry {
+                key: format!("tag{index}"),
+                display_path: format!("objects/tag{index}.bitmap"),
+                group_tag: u32::from_be_bytes(*b"bitm"),
+                group_name: None,
+                location: crate::source::TagEntryLocation::LooseFile(format!("tag{index}").into()),
+            })
+            .collect();
+        let keywords = Arc::new(std::collections::BTreeMap::new());
+        let ctx = egui::Context::default();
+        let mut cache = FilterCache::default();
+        for query in ["t", "ta", "tag"] {
+            cache.refresh_scoped_async(
+                1,
+                query,
+                &entries,
+                false,
+                Path::new(""),
+                None,
+                BrowserSearchScope::default(),
+                &keywords,
+                &ctx,
+            );
+            assert!(cache.is_searching());
+            assert!(
+                cache.receiver.is_none(),
+                "Typing alone must not start a worker on every keystroke"
+            );
+        }
+        cache.pending_since =
+            Some(std::time::Instant::now() - std::time::Duration::from_millis(200));
+        cache.refresh_scoped_async(
+            1,
+            "tag",
+            &entries,
+            false,
+            Path::new(""),
+            None,
+            BrowserSearchScope::default(),
+            &keywords,
+            &ctx,
+        );
+        let snapshot = Arc::clone(&cache.snapshot);
+        cache.refresh_scoped_async(
+            1,
+            "^tag9999.bitmap$",
+            &entries,
+            false,
+            Path::new(""),
+            None,
+            BrowserSearchScope::default(),
+            &keywords,
+            &ctx,
+        );
+        assert!(
+            cache.entries.is_empty(),
+            "A superseded query cannot publish its rows"
+        );
+        cache.pending_since =
+            Some(std::time::Instant::now() - std::time::Duration::from_millis(200));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            cache.refresh_scoped_async(
+                1,
+                "^tag9999.bitmap$",
+                &entries,
+                false,
+                Path::new(""),
+                None,
+                BrowserSearchScope::default(),
+                &keywords,
+                &ctx,
+            );
+            if !cache.is_searching() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Search did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.entries[0].key, "tag9999");
+        assert!(
+            Arc::ptr_eq(&snapshot, &cache.snapshot),
+            "Subsequent queries share the source snapshot"
+        );
+        let rows = cache.entries.as_ptr();
+        for _ in 0..100 {
+            cache.refresh_scoped_async(
+                1,
+                "^tag9999.bitmap$",
+                &entries,
+                false,
+                Path::new(""),
+                None,
+                BrowserSearchScope::default(),
+                &keywords,
+                &ctx,
+            );
+        }
+        assert_eq!(
+            rows,
+            cache.entries.as_ptr(),
+            "Unchanged frames must not rebuild results"
+        );
     }
 }

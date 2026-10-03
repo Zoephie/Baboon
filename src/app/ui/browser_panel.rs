@@ -42,10 +42,6 @@ fn folder_browser_search_stacks(available_width: f32) -> bool {
     available_width < FOLDER_BROWSER_SEARCH_STACK_BREAKPOINT
 }
 
-fn folder_browser_search_hint(folder_name: &str) -> String {
-    format!("search {folder_name} folder")
-}
-
 impl Baboon {
     /// Draw a folder as a first-class docked pane beside ordinary tag panes.
     pub(in crate::app) fn draw_folder_browser_pane(
@@ -60,6 +56,11 @@ impl Baboon {
             return None;
         };
 
+        let previous_search_scope = pane.search_scope;
+        if pane.assets_view {
+            self.refresh_thumbnail_library::<Bitmaps>(kit_index, ctx);
+            self.refresh_thumbnail_library::<Models>(kit_index, ctx);
+        }
         self.refresh_modified_tags(kit_index);
         self.refresh_deletable_keys(kit_index);
         // A loose pane owns a lazy subtree whose indices address the shared
@@ -153,12 +154,17 @@ impl Baboon {
         let mut show_browser_prefixes = self.prefs.show_browser_prefixes;
         let mut folders_before_tags = self.prefs.folders_before_tags;
         let double_click_to_open = self.prefs.double_click_to_open_tags;
-        let search_hint = folder_browser_search_hint(&pane.label);
+        let search_hint = pane.search_scope.hint();
         let mut action = None;
         let mut need_scan = false;
         let mut status_update = None;
         let scanning = self.kits[kit_index].scanning_entries;
-        let source = self.kits[kit_index].source.as_mut();
+        let table_keywords = self.kits[kit_index].keywords.snapshot();
+        let kit = &mut self.kits[kit_index];
+        let bitmap_library = &mut kit.bitmap_browser;
+        let model_library = &mut kit.model_browser;
+        let source = kit.source.as_mut();
+        let mut asset_requests = (Vec::new(), Vec::new());
 
         Frame::none()
             .inner_margin(egui::Margin {
@@ -204,8 +210,22 @@ impl Baboon {
                     is_container,
                     &mut action,
                 );
-                ui.add_space(14.0);
+                ui.add_space(8.0);
                 ui.separator();
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    if view_tab_button(ui, ButtonIcon::FolderOpen, "Folder View", !pane.assets_view)
+                        .clicked()
+                    {
+                        pane.assets_view = false;
+                    }
+                    if view_tab_button(ui, ButtonIcon::Group, "Asset Browser", pane.assets_view)
+                        .clicked()
+                    {
+                        pane.assets_view = true;
+                    }
+                });
                 ui.add_space(10.0);
 
                 let search_response = if folder_browser_search_stacks(ui.available_width()) {
@@ -246,124 +266,207 @@ impl Baboon {
                 }
                 ui.add_space(8.0);
 
-                let filter = pane.filter.trim();
-                let groups_mode = pane.mode == BrowserMode::Groups;
-                let needs_complete_index = is_loose && (groups_mode || !filter.is_empty());
-                if needs_complete_index && source.all_entries.is_empty() {
-                    need_scan = !scanning;
-                    ui.label(
-                        RichText::new(if scanning {
-                            "Indexing tags…"
-                        } else {
-                            "Preparing tag index…"
-                        })
-                        .color(subtle_dark())
-                        .small(),
-                    );
-                } else if is_loose && !groups_mode && filter.is_empty() {
-                    let TagSource::LooseFolder { root, .. } = &source.source else {
-                        unreachable!("is_loose is derived from this source")
-                    };
-                    let root = root.clone();
-                    let names = source.names.clone();
-                    ScrollArea::vertical()
-                        .id_salt(("folder_pane", pane_key))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let tree_action = draw_tree_lazy(
-                                ui,
-                                &mut pane.tree,
-                                &mut source.entries,
-                                // A pane's Groups view is rebuilt from the full
-                                // index each frame; nothing to keep in step.
-                                None,
-                                &root,
-                                &names,
-                                selected.as_deref(),
-                                "",
-                                show_browser_prefixes,
-                                double_click_to_open,
-                                &mut status_update,
-                                None,
-                                pane.sort,
-                                folders_before_tags,
-                                Some(&favorite_keys),
-                            );
-                            if action.is_none() {
-                                action = tree_action;
-                            }
-                        });
-                } else {
-                    let entries = source.full_entry_set();
-                    // Rebuilt when the entries change, not every frame: it walks
-                    // the whole index and allocates per entry. A loose folder's
-                    // full set only grows or is replaced, and either moves the
-                    // generation or the count.
-                    let built_for = (generation, entries.len());
-                    if groups_mode && pane.group_tree_for != Some(built_for) {
-                        pane.group_tree =
-                            crate::source::build_group_tree_beneath(entries, &pane.rel_path);
-                        pane.group_tree_for = Some(built_for);
-                    }
-                    let (tree, visible_entries) = if filter.is_empty() {
-                        (
-                            if groups_mode {
-                                &pane.group_tree
-                            } else {
-                                &pane.tree
-                            },
-                            entries,
-                        )
-                    } else {
-                        pane.filter_cache.refresh_beneath(
-                            pane.cached_generation,
-                            filter,
-                            entries,
-                            groups_mode,
-                            &pane.rel_path,
+                if pane.assets_view {
+                    if is_loose && !source.complete_scan {
+                        need_scan = !scanning;
+                        ui.label(
+                            RichText::new("Indexing assets in this folder…").color(subtle_dark()),
                         );
-                        (
-                            &pane.filter_cache.tree,
-                            pane.filter_cache.entries.as_slice(),
-                        )
-                    };
-                    ScrollArea::vertical()
-                        .id_salt(("folder_pane", pane_key))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            if visible_entries.is_empty() {
-                                ui.label(RichText::new("No matching tags").color(subtle_dark()));
-                                return;
-                            }
-                            // Already filtered by `filter_cache`: drawn with
-                            // folders open rather than matched a second time.
-                            let tree_action = draw_tree(
-                                ui,
-                                tree,
-                                visible_entries,
-                                selected.as_deref(),
-                                "",
-                                !filter.is_empty(),
-                                show_browser_prefixes,
-                                double_click_to_open,
-                                groups_mode,
-                                None,
-                                pane.sort,
-                                !groups_mode && folders_before_tags,
-                                is_loose.then_some(&favorite_keys),
-                                is_container,
-                            );
-                            if action.is_none() {
-                                action = tree_action;
-                            }
-                        });
+                    } else {
+                        pane.filter_cache.refresh_scoped_async(
+                            generation,
+                            &pane.filter,
+                            source.full_entry_set(),
+                            false,
+                            &pane.rel_path,
+                            None,
+                            pane.search_scope,
+                            &table_keywords,
+                            ui.ctx(),
+                        );
+                        if pane.filter_cache.is_searching() {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new("Searching assets…").color(subtle_dark()));
+                            });
+                            return;
+                        }
+                        asset_requests = draw_folder_asset_grid(
+                            ui,
+                            pane_key,
+                            &pane,
+                            &pane.filter_cache.entries,
+                            bitmap_library,
+                            model_library,
+                        );
+                    }
+                    return;
                 }
+
+                ScrollArea::horizontal()
+                    .id_salt(("folder_columns", pane_key))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_width(pane.table_layout.width());
+                        let table_root = match &source.source {
+                            TagSource::LooseFolder { root, .. } => Some(root.clone()),
+                            _ => None,
+                        };
+                        begin_folder_table(
+                            ui,
+                            table_root,
+                            Arc::clone(&table_keywords),
+                            pane.date_cache.clone(),
+                            &mut pane.table_layout,
+                        );
+
+                        let filter = pane.filter.trim();
+                        let groups_mode = pane.mode == BrowserMode::Groups;
+                        let needs_complete_index = is_loose && (groups_mode || !filter.is_empty());
+                        if needs_complete_index && !source.complete_scan {
+                            need_scan = !scanning;
+                            ui.label(
+                                RichText::new(if scanning {
+                                    "Indexing tags…"
+                                } else {
+                                    "Preparing tag index…"
+                                })
+                                .color(subtle_dark())
+                                .small(),
+                            );
+                        } else if is_loose && !groups_mode && filter.is_empty() {
+                            let TagSource::LooseFolder { root, .. } = &source.source else {
+                                unreachable!("is_loose is derived from this source")
+                            };
+                            let root = root.clone();
+                            let names = source.names.clone();
+                            ScrollArea::vertical()
+                                .id_salt(("folder_pane", pane_key))
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    let tree_action = draw_tree_lazy(
+                                        ui,
+                                        &mut pane.tree,
+                                        &mut source.entries,
+                                        // A pane's Groups view is rebuilt from the full
+                                        // index each frame; nothing to keep in step.
+                                        None,
+                                        &root,
+                                        &names,
+                                        selected.as_deref(),
+                                        "",
+                                        show_browser_prefixes,
+                                        double_click_to_open,
+                                        &mut status_update,
+                                        None,
+                                        pane.sort,
+                                        folders_before_tags,
+                                        Some(&favorite_keys),
+                                    );
+                                    if action.is_none() {
+                                        action = tree_action;
+                                    }
+                                });
+                        } else {
+                            let entries = source.full_entry_set();
+                            // Rebuilt when the entries change, not every frame: it walks
+                            // the whole index and allocates per entry. A loose folder's
+                            // full set only grows or is replaced, and either moves the
+                            // generation or the count.
+                            let built_for = (generation, entries.len());
+                            if groups_mode && pane.group_tree_for != Some(built_for) {
+                                pane.group_tree = crate::source::build_group_tree_beneath(
+                                    entries,
+                                    &pane.rel_path,
+                                );
+                                pane.group_tree_for = Some(built_for);
+                            }
+                            let (tree, visible_entries) = if filter.is_empty() {
+                                (
+                                    if groups_mode {
+                                        &pane.group_tree
+                                    } else {
+                                        &pane.tree
+                                    },
+                                    entries,
+                                )
+                            } else {
+                                pane.filter_cache.refresh_scoped_async(
+                                    pane.cached_generation,
+                                    filter,
+                                    entries,
+                                    groups_mode,
+                                    &pane.rel_path,
+                                    match &source.source {
+                                        TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                                        _ => None,
+                                    },
+                                    pane.search_scope,
+                                    &table_keywords,
+                                    ui.ctx(),
+                                );
+                                (
+                                    &pane.filter_cache.tree,
+                                    pane.filter_cache.entries.as_slice(),
+                                )
+                            };
+                            let searching = !filter.is_empty() && pane.filter_cache.is_searching();
+                            if searching {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(RichText::new("Searching…").color(subtle_dark()));
+                                });
+                            }
+                            ScrollArea::vertical()
+                                .id_salt(("folder_pane", pane_key))
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    if visible_entries.is_empty() && tree.children.is_empty() {
+                                        if !searching {
+                                            ui.label(
+                                                RichText::new("No matching results")
+                                                    .color(subtle_dark()),
+                                            );
+                                        }
+                                        return;
+                                    }
+                                    // Already filtered by `filter_cache`: drawn with
+                                    // folders open rather than matched a second time.
+                                    let tree_action = draw_tree(
+                                        ui,
+                                        tree,
+                                        visible_entries,
+                                        selected.as_deref(),
+                                        "",
+                                        !filter.is_empty(),
+                                        show_browser_prefixes,
+                                        double_click_to_open,
+                                        groups_mode,
+                                        None,
+                                        pane.sort,
+                                        !groups_mode && folders_before_tags,
+                                        is_loose.then_some(&favorite_keys),
+                                        is_container,
+                                    );
+                                    if action.is_none() {
+                                        action = tree_action;
+                                    }
+                                });
+                        }
+                        end_folder_table(ui);
+                    });
             });
 
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
+        let asset_edge = (pane.asset_cell_size * 2.0).round() as u32;
+        self.queue_thumbnails::<Bitmaps>(kit_index, asset_requests.0, asset_edge, ctx);
+        self.queue_thumbnails::<Models>(kit_index, asset_requests.1, asset_edge, ctx);
 
         self.prefs.show_browser_prefixes = show_browser_prefixes;
         self.prefs.folders_before_tags = folders_before_tags;
+        if pane.search_scope != previous_search_scope {
+            self.prefs.browser_search_scope = pane.search_scope;
+        }
 
         action = match action {
             Some(BrowserAction::OpenFolderBrowser {
@@ -518,13 +621,14 @@ impl Baboon {
         let mut open_git_review = false;
         let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
         let kit = &mut self.kits[kit_index];
+        let search_keywords = kit.keywords.snapshot();
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
             let scanning = kit.scanning_entries;
             // Collect deferred scan-trigger here; execute after borrow ends.
             let mut need_scan = false;
             let prev_filter_empty = kit.filter.is_empty();
-            browser_search_field(ui, &mut kit.filter, "search tags");
+            browser_search_field(ui, &mut kit.filter, &kit.search_scope.hint());
             if let Some(warning) = browser::browser_filter_warning(&kit.filter) {
                 ui.label(
                     RichText::new(warning)
@@ -538,6 +642,7 @@ impl Baboon {
             // unit, so grouped buttons could only wrap in blocks — and the
             // widest block became the sidebar's minimum width. Individually
             // wrapping buttons let the panel shrink to a single button.
+            let previous_search_scope = kit.search_scope;
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let groups_clicked = browser_toolbar_controls(
@@ -546,6 +651,9 @@ impl Baboon {
                     &mut kit.browser_sort,
                     &mut self.prefs.show_browser_prefixes,
                     &mut self.prefs.folders_before_tags,
+                    &mut kit.search_scope,
+                    None,
+                    true,
                 );
                 if groups_clicked
                     && matches!(source.source, TagSource::LooseFolder { .. })
@@ -555,6 +663,9 @@ impl Baboon {
                     need_scan = true;
                 }
             });
+            if kit.search_scope != previous_search_scope {
+                self.prefs.browser_search_scope = kit.search_scope;
+            }
             if prev_filter_empty
                 && !kit.filter.is_empty()
                 && matches!(source.source, TagSource::LooseFolder { .. })
@@ -617,6 +728,8 @@ impl Baboon {
                         show_prefixes,
                         double_click_to_open,
                         &favorite_keys,
+                        kit.search_scope,
+                        &search_keywords,
                     );
                     browser_favorites_divider(ui, favorites_visible);
 
@@ -641,16 +754,29 @@ impl Baboon {
                             ui.label(RichText::new("Indexing tags…").color(subtle_dark()).small());
                             None
                         } else {
-                            kit.filter_cache.refresh(
+                            kit.filter_cache.refresh_scoped_async(
                                 kit.generation,
                                 &filter,
                                 entries,
-                                has_all,
                                 groups_mode,
+                                Path::new(""),
+                                match &source.source {
+                                    TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                                    _ => None,
+                                },
+                                kit.search_scope,
+                                &search_keywords,
+                                ui.ctx(),
                             );
                             let cache = &kit.filter_cache;
-                            if cache.entries.is_empty() {
-                                ui.label(RichText::new("No matching tags").color(subtle_dark()));
+                            if cache.is_searching() {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(RichText::new("Searching…").color(subtle_dark()));
+                                });
+                                None
+                            } else if cache.entries.is_empty() && cache.tree.children.is_empty() {
+                                ui.label(RichText::new("No matching results").color(subtle_dark()));
                                 None
                             } else {
                                 // Empty filter → tree renders every (already
@@ -661,7 +787,7 @@ impl Baboon {
                                     &cache.entries,
                                     selected.as_deref(),
                                     "",
-                                    false,
+                                    true,
                                     show_prefixes,
                                     double_click_to_open,
                                     groups_mode,
@@ -794,39 +920,54 @@ fn browser_toolbar_controls(
     sort: &mut BrowserSort,
     show_prefixes: &mut bool,
     folders_before_tags: &mut bool,
+    search_scope: &mut BrowserSearchScope,
+    mut table_layout: Option<&mut FolderTableLayout>,
+    show_modes: bool,
 ) -> bool {
     ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
     ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
     ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
 
-    if selectable_icon_text_button(
-        ui,
-        ButtonIcon::FolderOpen,
-        "Folders",
-        *mode == BrowserMode::Folders,
-    )
-    .clicked()
-    {
-        *mode = BrowserMode::Folders;
-    }
-    let groups_clicked = selectable_icon_text_button(
-        ui,
-        ButtonIcon::Group,
-        "Groups",
-        *mode == BrowserMode::Groups,
-    )
-    .clicked();
-    if groups_clicked {
-        *mode = BrowserMode::Groups;
+    let mut groups_clicked = false;
+    if show_modes {
+        if selectable_icon_text_button(
+            ui,
+            ButtonIcon::FolderOpen,
+            "Folders",
+            *mode == BrowserMode::Folders,
+        )
+        .clicked()
+        {
+            *mode = BrowserMode::Folders;
+        }
+        groups_clicked = selectable_icon_text_button(
+            ui,
+            ButtonIcon::Group,
+            "Groups",
+            *mode == BrowserMode::Groups,
+        )
+        .clicked();
+        if groups_clicked {
+            *mode = BrowserMode::Groups;
+        }
     }
     icon_menu_button(ui, ButtonIcon::Sort, "Sort", |ui| {
         style_list_menu(ui);
         for option in BrowserSort::ALL {
             if ui
-                .selectable_label(*sort == option, option.label())
+                .selectable_label(
+                    *sort == option
+                        && !table_layout
+                            .as_ref()
+                            .is_some_and(|layout| layout.has_sort()),
+                    option.label(),
+                )
                 .clicked()
             {
                 *sort = option;
+                if let Some(layout) = table_layout.as_deref_mut() {
+                    layout.clear_sort();
+                }
                 ui.close_menu();
             }
         }
@@ -835,6 +976,7 @@ fn browser_toolbar_controls(
         style_list_menu(ui);
         ui.checkbox(show_prefixes, "Show prefixes");
         ui.checkbox(folders_before_tags, "Folders before tags");
+        search_scope_controls(ui, search_scope);
     });
     groups_clicked
 }
@@ -849,12 +991,30 @@ fn draw_folder_browser_controls(
     folders_before_tags: &mut bool,
 ) {
     ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
+    if pane.assets_view {
+        icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
+            style_list_menu(ui);
+            ui.label("Asset types");
+            ui.checkbox(&mut pane.asset_bitmaps, "Bitmaps");
+            ui.checkbox(&mut pane.asset_models, "Models");
+        });
+        icon_menu_button(ui, ButtonIcon::View, "Thumbnail size", |ui| {
+            ui.label("Thumbnail size");
+            ui.add(egui::Slider::new(
+                &mut pane.asset_cell_size,
+                MIN_CELL..=MAX_CELL,
+            ));
+        });
+    }
     browser_toolbar_controls(
         ui,
         &mut pane.mode,
         &mut pane.sort,
         show_prefixes,
         folders_before_tags,
+        &mut pane.search_scope,
+        Some(&mut pane.table_layout),
+        !pane.assets_view,
     );
 }
 
@@ -1095,14 +1255,54 @@ mod responsive_folder_toolbar_tests {
     use super::*;
 
     #[test]
+    fn asset_toolbar_hides_folder_and_group_modes() {
+        for show_modes in [false, true] {
+            let ctx = egui::Context::default();
+            let mut mode = BrowserMode::Folders;
+            let mut sort = BrowserSort::Natural;
+            let mut prefixes = false;
+            let mut folders_first = true;
+            let mut scope = BrowserSearchScope::default();
+            let output = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        browser_toolbar_controls(
+                            ui,
+                            &mut mode,
+                            &mut sort,
+                            &mut prefixes,
+                            &mut folders_first,
+                            &mut scope,
+                            None,
+                            show_modes,
+                        );
+                    });
+                });
+            });
+            for label in ["Folders", "Groups"] {
+                let visible = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == label));
+                assert_eq!(visible, show_modes);
+            }
+        }
+    }
+
+    #[test]
     fn search_stacks_before_the_toolbar_reaches_600_points() {
         assert!(!folder_browser_search_stacks(600.0));
         assert!(folder_browser_search_stacks(599.0));
     }
 
     #[test]
-    fn search_hint_names_the_current_folder() {
-        assert_eq!(folder_browser_search_hint("brute"), "search brute folder");
+    fn search_hint_names_the_selected_search_targets() {
+        assert_eq!(
+            BrowserSearchScope {
+                tags: true,
+                folders: false,
+                keywords: true
+            }
+            .hint(),
+            "search tags & keywords"
+        );
     }
 
     #[test]

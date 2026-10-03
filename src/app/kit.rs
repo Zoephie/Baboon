@@ -114,6 +114,7 @@ pub(super) struct Kit {
     pub(super) browser_sort: BrowserSort,
     pub(super) filter: String,
     pub(super) filter_cache: FilterCache,
+    pub(super) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
     pub(super) folder_browsers: HashMap<String, FolderBrowserState>,
     /// Which tags the browser should mark as modified, and the signature the
@@ -235,6 +236,7 @@ impl Kit {
             browser_sort: BrowserSort::default(),
             filter: String::new(),
             filter_cache: FilterCache::default(),
+            search_scope: BrowserSearchScope::default(),
             folder_browsers: HashMap::new(),
             modified_tags: std::sync::Arc::new(ModifiedTags::default()),
             modified_signature: Vec::new(),
@@ -443,6 +445,7 @@ impl Baboon {
         Kit {
             browser_mode: self.prefs.browser_mode,
             browser_sort: self.prefs.browser_sort,
+            search_scope: self.prefs.browser_search_scope,
             ..Kit::empty(id, self.default_names.clone())
         }
     }

@@ -419,6 +419,8 @@ impl UpdateChannel {
 pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) browser_mode: BrowserMode,
     pub(in crate::app) browser_sort: BrowserSort,
+    /// Last explicitly chosen search targets; seeds new browsers across sessions.
+    pub(in crate::app) browser_search_scope: BrowserSearchScope,
     pub(in crate::app) nested_default: NestedDefault,
     pub(in crate::app) show_browser_prefixes: bool,
     pub(in crate::app) folders_before_tags: bool,
@@ -474,6 +476,7 @@ impl Default for GuiPrefs {
         Self {
             browser_mode: BrowserMode::default(),
             browser_sort: BrowserSort::default(),
+            browser_search_scope: BrowserSearchScope::default(),
             nested_default: NestedDefault::default(),
             show_browser_prefixes: false,
             folders_before_tags: false,

@@ -583,11 +583,15 @@ fn entry_filename_lower(entry: &TagEntry) -> String {
 /// Reorder a node's entry indices for display. `Natural` borrows the input with
 /// no allocation; `Name`/`Type` clone-and-sort.
 fn ordered_indices<'a>(
+    ui: &Ui,
     indices: &'a [usize],
     entries: &[TagEntry],
     sort: BrowserSort,
 ) -> std::borrow::Cow<'a, [usize]> {
     use std::borrow::Cow;
+    if let Some(indices) = table_order_entries(ui, indices, entries) {
+        return Cow::Owned(indices);
+    }
     match sort {
         BrowserSort::Natural => Cow::Borrowed(indices),
         // `sort_by_cached_key`, not `sort_by`: the key is a freshly lowercased
@@ -612,7 +616,10 @@ fn ordered_indices<'a>(
     }
 }
 
-fn ordered_child_indices(children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
+fn ordered_child_indices(ui: &Ui, children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
+    if let Some(indices) = table_order_folders(ui, children) {
+        return indices;
+    }
     let mut indices: Vec<usize> = (0..children.len()).collect();
     if !matches!(sort, BrowserSort::Natural) {
         indices.sort_by_cached_key(|&index| children[index].label.to_ascii_lowercase());
@@ -736,7 +743,7 @@ pub(in crate::app) fn draw_tree(
     } else {
         sort
     };
-    for index in ordered_child_indices(&tree.children, child_sort) {
+    for index in ordered_child_indices(ui, &tree.children, child_sort) {
         let node = &tree.children[index];
         clicked = clicked.or_else(|| {
             draw_tree_node(
@@ -821,7 +828,7 @@ pub(in crate::app) fn draw_tree_lazy(
             )
         });
     }
-    for index in ordered_child_indices(&tree.children, sort) {
+    for index in ordered_child_indices(ui, &tree.children, sort) {
         let node = &mut tree.children[index];
         clicked = clicked.or_else(|| {
             draw_tree_node_lazy(
@@ -1107,7 +1114,7 @@ fn draw_tree_node_lazy_block(
                     );
                 }
             }
-            for index in ordered_child_indices(&node.children, sort) {
+            for index in ordered_child_indices(ui, &node.children, sort) {
                 let child = &mut node.children[index];
                 if clicked.is_none() {
                     clicked = draw_tree_node_lazy(
@@ -1160,6 +1167,7 @@ fn draw_tree_node_lazy_block(
             }
         },
     );
+    paint_folder_columns(ui, response.rect, None, Some(&node.rel_path));
     hover_tooltip_beside_pointer(
         ui,
         &response,
@@ -1313,7 +1321,7 @@ fn draw_tree_node_block(
                 );
             }
         }
-        for index in ordered_child_indices(&node.children, sort) {
+        for index in ordered_child_indices(ui, &node.children, sort) {
             let child = &node.children[index];
             if clicked.is_none() {
                 clicked = draw_tree_node(
@@ -1391,6 +1399,7 @@ fn draw_tree_node_block(
         )
     };
     if !groups_mode {
+        paint_folder_columns(ui, header_response.rect, None, Some(&node.rel_path));
         hover_tooltip_beside_pointer(
             ui,
             &header_response,
@@ -1513,7 +1522,7 @@ fn draw_tree_node_block(
     clicked
 }
 
-fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
+pub(in crate::app) fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
     a.to_string_lossy()
         .replace('\\', "/")
         .eq_ignore_ascii_case(&b.to_string_lossy().replace('\\', "/"))
@@ -2238,7 +2247,13 @@ fn show_folder_tree_header<R>(
                 (ButtonIcon::FolderClosed, disclosure_triangle_blue())
             };
             paint_button_icon_at(ui, icon, icon_rect, color);
-            let content = icon_response.union(ui.label(RichText::new(label).color(label_color)));
+            let name = egui::Label::new(RichText::new(label).color(label_color));
+            let name = if folder_table_active(ui) {
+                name.truncate()
+            } else {
+                name
+            };
+            let content = icon_response.union(ui.add(name));
             (
                 toggle.union(content),
                 (toggle_clicked, icon_rect.center().x),
@@ -2291,6 +2306,11 @@ fn show_full_width_browser_row<R>(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.set_min_height(ui.spacing().interact_size.y);
+            let clip = folder_name_clip(ui);
+            if clip != ui.clip_rect() {
+                ui.set_max_width((clip.right() - ui.cursor().left()).max(0.0));
+                ui.set_clip_rect(clip);
+            }
             add_content(ui)
         },
     );
@@ -2643,7 +2663,7 @@ pub(in crate::app) fn draw_entry_list(
     sort: BrowserSort,
     favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
-    let ordered = ordered_indices(entry_indices, entries, sort);
+    let ordered = ordered_indices(ui, entry_indices, entries, sort);
     let matching: std::borrow::Cow<'_, [usize]> = if filter.is_empty() {
         ordered
     } else {
@@ -2800,7 +2820,7 @@ pub(in crate::app) fn draw_entry(
         } else {
             leaf_label.to_owned()
         };
-        ui.painter().text(
+        ui.painter().with_clip_rect(folder_name_clip(ui)).text(
             row_rect.left_center() + Vec2::new(disclosure_offset + icon_size + 5.0, 0.0),
             Align2::LEFT_CENTER,
             label,
@@ -2812,6 +2832,7 @@ pub(in crate::app) fn draw_entry(
                 _ => text_dark(),
             },
         );
+        paint_folder_columns(ui, row_rect, Some(entry), None);
     }
     if response.dragged()
         && let Some(pointer_pos) = ui.ctx().pointer_interact_pos()
@@ -3041,19 +3062,26 @@ pub(in crate::app) fn draw_favorites(
     show_prefixes: bool,
     double_click_to_open: bool,
     favorite_keys: &HashSet<String>,
+    search_scope: BrowserSearchScope,
+    keywords: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> (Option<BrowserAction>, bool) {
     let favorite_folders = browser_favorite_folders(ui).unwrap_or_default();
     let folder_matches = |path: &Path| {
         filter.is_empty()
-            || path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.to_ascii_lowercase()
-                        .contains(&filter.to_ascii_lowercase())
-                })
+            || (search_scope.folders && scoped_folder_matches(&path.to_string_lossy(), filter))
     };
-    if !entries.iter().any(|entry| entry_matches(entry, filter))
+    let entry_matches = |entry: &TagEntry| {
+        scoped_entry_matches(
+            entry,
+            filter,
+            search_scope,
+            keywords
+                .get(&entry.key)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+    };
+    if !entries.iter().any(entry_matches)
         && !favorite_folders.iter().any(|path| folder_matches(path))
     {
         return (None, false);
@@ -3144,7 +3172,7 @@ pub(in crate::app) fn draw_favorites(
             });
         }
         for entry in entries {
-            if !entry_matches(entry, filter) {
+            if !entry_matches(entry) {
                 continue;
             }
             let row_action = draw_entry(
