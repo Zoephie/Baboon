@@ -77,6 +77,46 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
     }
 }
 
+/// Whether a painted hover popup may show this frame, timed as egui 0.29
+/// times its own tooltips (`Response::should_show_hover_ui`): not until the
+/// pointer has rested for `tooltip_delay`, not after a click until the
+/// pointer moves again, and at once while one was shown within
+/// `tooltip_grace_time`, so moving along the rows keeps the popup up.
+/// Call it only for a hovered response: showing is what starts the grace.
+pub(in crate::app) fn hover_popup_due(ui: &Ui) -> bool {
+    let ctx = ui.ctx();
+    let interaction = ctx.style().interaction.clone();
+    let (now, since_scroll, since_click, since_move) = ctx.input(|input| {
+        (
+            input.time,
+            input.time_since_last_scroll(),
+            input.pointer.time_since_last_click(),
+            input.pointer.time_since_last_movement(),
+        )
+    });
+    if since_scroll < interaction.tooltip_delay {
+        ctx.request_repaint_after_secs(interaction.tooltip_delay - since_scroll);
+        return false;
+    }
+    // Clicking a row and resting there should not raise its popup.
+    if since_click < since_move + 0.1 {
+        return false;
+    }
+    let shown_id = egui::Id::new("baboon_hover_popup_shown");
+    let recently_shown = ctx
+        .data(|data| data.get_temp::<f64>(shown_id))
+        .is_some_and(|shown| now - shown < f64::from(interaction.tooltip_grace_time));
+    if !recently_shown {
+        let still_for = since_scroll.min(since_move).min(since_click);
+        if still_for < interaction.tooltip_delay {
+            ctx.request_repaint_after_secs(interaction.tooltip_delay - still_for);
+            return false;
+        }
+    }
+    ctx.data_mut(|data| data.insert_temp(shown_id, now));
+    true
+}
+
 /// Hover text for a drag source, which egui's own tooltips cannot be.
 ///
 /// An egui 0.29 tooltip is an `Area`, and once one has shown, the next
@@ -88,7 +128,7 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
 /// instead: pure painting on a Tooltip-order layer. A painter registers no
 /// widgets and no area, so nothing exists for a press to land on.
 pub(in crate::app) fn hover_tooltip_beside_pointer(ui: &Ui, response: &egui::Response, text: &str) {
-    if !response.hovered() || response.dragged() {
+    if !response.hovered() || response.dragged() || !hover_popup_due(ui) {
         return;
     }
     let Some(pointer) = ui.ctx().pointer_latest_pos() else {
@@ -3585,6 +3625,95 @@ mod tests {
         assert!(
             open > closed + 5.0 * 16.0,
             "expanded {open} vs collapsed {closed}: the folders did not open"
+        );
+    }
+
+    /// The path popup waits for the pointer to rest, as egui's own tooltips
+    /// do, then follows the pointer from row to row without waiting again,
+    /// and a click hides it until the pointer moves.
+    #[test]
+    fn the_path_popup_waits_for_the_pointer_to_rest() {
+        let ctx = egui::Context::default();
+        let rows = std::cell::Cell::new([egui::Rect::NOTHING; 2]);
+        let mut time = 0.0;
+        let mut frame = |dt: f64, events: Vec<egui::Event>| -> Vec<String> {
+            time += dt;
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 400.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut rects = [egui::Rect::NOTHING; 2];
+                        for (index, rect) in rects.iter_mut().enumerate() {
+                            let (row, response) = ui.allocate_exact_size(
+                                Vec2::new(240.0, 20.0),
+                                Sense::click_and_drag(),
+                            );
+                            *rect = row;
+                            hover_tooltip_beside_pointer(ui, &response, &format!("path/{index}"));
+                        }
+                        rows.set(rects);
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("path/") => {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        frame(0.0, Vec::new());
+        let [first, second] = rows.get().map(|row| row.center());
+        let delay = f64::from(egui::Style::default().interaction.tooltip_delay);
+        // egui counts the pointer as moving only once it has a few positions
+        // behind it, as a real mouse does: slide in from the empty space to
+        // the right of the rows rather than jumping onto one.
+        for x in [500.0, 430.0, 360.0, 290.0] {
+            frame(
+                0.01,
+                vec![egui::Event::PointerMoved(egui::pos2(x, first.y))],
+            );
+        }
+        assert!(
+            frame(0.01, vec![egui::Event::PointerMoved(first)]).is_empty(),
+            "the popup showed the moment the pointer arrived"
+        );
+        assert!(
+            frame(delay * 0.5, Vec::new()).is_empty(),
+            "the popup showed before the pointer had rested"
+        );
+        assert_eq!(frame(delay * 0.6, Vec::new()), ["path/0"]);
+        assert_eq!(
+            frame(0.01, vec![egui::Event::PointerMoved(second)]),
+            ["path/1"],
+            "moving to the next row while a popup is up should not wait again"
+        );
+        let button = |pressed| egui::Event::PointerButton {
+            pos: second,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(0.01, vec![button(true)]);
+        assert!(
+            frame(0.01, vec![button(false)]).is_empty(),
+            "a click should hide the popup"
+        );
+        assert!(
+            frame(delay * 2.0, Vec::new()).is_empty(),
+            "resting after a click should not bring the popup back"
         );
     }
 
