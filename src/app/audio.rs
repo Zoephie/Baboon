@@ -143,8 +143,8 @@ pub(super) enum SoundAction {
         media: Box<crate::source::ce_audio::CeSoundMedia>,
         label: String,
     },
-    /// Set the playback volume (linear amplitude, 0.0..=1.0). Applies to every
-    /// live voice immediately and to all subsequent plays.
+    /// Set the playback volume (linear amplitude, `0..=VOLUME_LIMIT`). Applies
+    /// to every live voice immediately and to all subsequent plays.
     SetVolume(f32),
     /// Select the localized language (`None` = default) for bank/pck resolution.
     /// Re-opens the banks on the next play/extract.
@@ -159,7 +159,7 @@ pub(super) enum SoundAction {
     Seek(f64),
     /// Loop the sound (and every sound played after) or not.
     SetLooping(bool),
-    /// Play at this multiple of the recorded rate, `0..=MAX_SPEED`: the sound
+    /// Play at this multiple of the recorded rate, `0..=SPEED_LIMIT`: the sound
     /// playing now and every one after. Pitch moves with it.
     SetSpeed(f32),
     /// Play only `start..end` seconds of the requesting tab's clip, or all of
@@ -387,8 +387,16 @@ struct PlaybackShared {
     speed: AtomicU32,
 }
 
-/// The playback speed range, as a multiple of the recorded rate.
-pub(super) const MAX_SPEED: f32 = 5.0;
+/// The speed slider's range, as a multiple of the recorded rate. A value
+/// typed into its box may go past it, up to [`SPEED_LIMIT`].
+pub(super) const SPEED_SLIDER_MAX: f32 = 5.0;
+/// The fastest a sound plays, however it was asked for.
+pub(super) const SPEED_LIMIT: f32 = 10.0;
+/// The volume slider's range, as a linear amplitude; a typed value may go
+/// past it (amplifying, and clipping where it peaks) up to [`VOLUME_LIMIT`].
+pub(super) const VOLUME_SLIDER_MAX: f32 = 1.0;
+/// The loudest a sound plays, however it was asked for.
+pub(super) const VOLUME_LIMIT: f32 = 10.0;
 
 const NO_REGION: u64 = u64::MAX;
 
@@ -1557,7 +1565,7 @@ impl AudioState {
     fn handle(&mut self, action: SoundAction, tags_root: Option<&Path>, ctx: &egui::Context) {
         let (id, key, label, action_root) = match action {
             SoundAction::SetVolume(v) => {
-                let v = v.clamp(0.0, 1.0);
+                let v = v.clamp(0.0, VOLUME_LIMIT);
                 self.volume = Volume(v);
                 if let Some(sink) = self.voice.as_ref().and_then(|voice| voice.sink.as_ref()) {
                     sink.set_volume(v);
@@ -1616,7 +1624,7 @@ impl AudioState {
                 return;
             }
             SoundAction::SetSpeed(speed) => {
-                let speed = speed.clamp(0.0, MAX_SPEED);
+                let speed = speed.clamp(0.0, SPEED_LIMIT);
                 self.speed = Speed(speed);
                 if let Some(voice) = self.voice.as_ref() {
                     voice.shared.speed.store(speed.to_bits(), Ordering::Relaxed);
@@ -2524,8 +2532,11 @@ mod tests {
         assert_eq!(audio.speed(), 1.0, "speed starts at 1x");
         audio.pending.push_back(SoundAction::SetSpeed(7.0).into());
         audio.process(None, &egui::Context::default());
-        assert_eq!(audio.speed(), MAX_SPEED);
-        assert_eq!(audio.voice.as_ref().unwrap().shared.speed(), MAX_SPEED);
+        assert_eq!(audio.speed(), 7.0, "a typed speed past the slider stands");
+        assert_eq!(audio.voice.as_ref().unwrap().shared.speed(), 7.0);
+        audio.pending.push_back(SoundAction::SetSpeed(50.0).into());
+        audio.process(None, &egui::Context::default());
+        assert_eq!(audio.speed(), SPEED_LIMIT);
         audio.pending.push_back(SoundAction::SetSpeed(-1.0).into());
         audio.process(None, &egui::Context::default());
         assert_eq!(audio.speed(), 0.0);

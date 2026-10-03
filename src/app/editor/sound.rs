@@ -435,6 +435,24 @@ pub(super) fn language_choices(
     })
 }
 
+/// A slider over `0..=max` read out as a percentage, with `icon` after its
+/// value. Dragging stays in the range; a value typed into the box (`150`,
+/// `150%`) stands even past it, for the audio state to bound.
+fn percent_slider<'a>(value: &'a mut f32, max: f32, icon: &str) -> egui::Slider<'a> {
+    egui::Slider::new(value, 0.0..=max)
+        .clamping(egui::SliderClamping::Never)
+        .text(RichText::new(icon).color(subtle_dark()))
+        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+        .custom_parser(|text| {
+            text.trim()
+                .trim_end_matches('%')
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .map(|percent| percent / 100.0)
+        })
+}
+
 /// Volume, the language choice and the status line, shared by every player.
 pub(super) fn draw_sound_output_controls(
     ui: &mut Ui,
@@ -445,12 +463,12 @@ pub(super) fn draw_sound_output_controls(
     let mut volume = edit.sound_volume;
     ui.spacing_mut().slider_width = 90.0;
     if ui
-        .add(
-            egui::Slider::new(&mut volume, 0.0..=1.0)
-                .text(RichText::new("\u{1F50A}").color(subtle_dark()))
-                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
-        )
-        .on_hover_text("Playback volume")
+        .add(percent_slider(
+            &mut volume,
+            super::audio::VOLUME_SLIDER_MAX,
+            "\u{1F50A}",
+        ))
+        .on_hover_text("Playback volume; type a value for more than 100%.")
         .changed()
     {
         edit.sound_play_request
@@ -461,20 +479,15 @@ pub(super) fn draw_sound_output_controls(
     ui.separator();
     let mut speed = edit.sound_speed;
     let response = ui
-        .add(
-            egui::Slider::new(&mut speed, 0.0..=super::audio::MAX_SPEED)
-                .text(RichText::new(SPEED_ICON).color(subtle_dark()))
-                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                .custom_parser(|text| {
-                    text.trim()
-                        .trim_end_matches('%')
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .map(|percent| percent / 100.0)
-                }),
-        )
-        .on_hover_text("Playback speed; pitch moves with it. Double-click for 100%.");
+        .add(percent_slider(
+            &mut speed,
+            super::audio::SPEED_SLIDER_MAX,
+            SPEED_ICON,
+        ))
+        .on_hover_text(
+            "Playback speed; pitch moves with it. Type a value for more than 500%; \
+             double-click for 100%.",
+        );
     // A slider senses drags only, so its response never reports a click; a
     // double-click is read off the pointer while over it.
     let reset = response.hovered()

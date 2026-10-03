@@ -87,6 +87,10 @@ pub(super) fn draw_clip_player(
     play: &mut dyn FnMut(usize) -> Option<ClipPlay>,
 ) -> usize {
     register_player(ui.ctx(), id_salt, edit.tag_key);
+    // Whether a text field had the keyboard as the frame began. Asked after
+    // the transport row is drawn, the answer misses an Enter that confirmed a
+    // typed volume or speed: the box gives the keyboard up while handling it.
+    let keyboard_busy = ui.ctx().wants_keyboard_input();
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
     // Listed, stepped through and defaulted in display order: groups as the
@@ -291,7 +295,7 @@ pub(super) fn draw_clip_player(
 
     // Space plays or pauses and Enter stops, in the focused tab, when no text
     // field has the keyboard.
-    if edit.sound_has_focus && !ui.ctx().wants_keyboard_input() {
+    if edit.sound_has_focus && !keyboard_busy && !ui.ctx().wants_keyboard_input() {
         let (space, enter) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Space),
@@ -1492,6 +1496,23 @@ mod tests {
             )
         }
 
+        /// Click into the value box at `at`, replace its text with `text`
+        /// and press Enter.
+        fn type_into(&mut self, at: egui::Pos2, text: &str) {
+            self.click(at);
+            let key = |key, modifiers| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            };
+            self.frame(vec![key(egui::Key::A, egui::Modifiers::COMMAND)]);
+            self.frame(vec![egui::Event::Text(text.to_owned())]);
+            self.frame(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+            self.frame(Vec::new());
+        }
+
         fn key(&mut self, key: egui::Key) {
             let event = |pressed| egui::Event::Key {
                 key,
@@ -1522,6 +1543,7 @@ mod tests {
                         }
                         SoundAction::SetRegion(None) => "region none".to_owned(),
                         SoundAction::SetSpeed(speed) => format!("speed {speed:.2}"),
+                        SoundAction::SetVolume(volume) => format!("volume {volume:.2}"),
                         _ => "other".to_owned(),
                     };
                     (request.clip, action)
@@ -2412,5 +2434,76 @@ mod tests {
             "the ruler does not reach the end: {:?}",
             h.texts.iter().map(|(text, _)| text).collect::<Vec<_>>()
         );
+    }
+
+    /// A percentage typed into the volume or speed box is taken as a
+    /// percentage, may go past the slider's end, and Enter confirming it
+    /// does not reach the player's Enter (stop).
+    #[test]
+    fn typed_percentages_stand_and_enter_does_not_stop() {
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", true));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let volume = h.find("100%", 0);
+        let speed = h.find("100%", 1);
+        h.take();
+
+        h.type_into(volume, "50");
+        let queued = h.take();
+        assert_eq!(
+            queued.last().map(|(_, action)| action.as_str()),
+            Some("volume 0.50"),
+            "{queued:?}"
+        );
+        assert!(
+            !queued.iter().any(|(_, action)| action == "stop"),
+            "Enter stopped playback: {queued:?}"
+        );
+
+        h.type_into(volume, "250");
+        let queued = h.take();
+        assert_eq!(
+            queued.last().map(|(_, action)| action.as_str()),
+            Some("volume 2.50"),
+            "{queued:?}"
+        );
+
+        h.type_into(speed, "750%");
+        let queued = h.take();
+        assert_eq!(
+            queued.last().map(|(_, action)| action.as_str()),
+            Some("speed 7.50"),
+            "{queued:?}"
+        );
+        assert!(
+            !queued.iter().any(|(_, action)| action == "stop"),
+            "Enter stopped playback: {queued:?}"
+        );
+    }
+
+    /// Dragging the speed slider stays within its range, whatever was typed.
+    #[test]
+    fn dragging_the_speed_slider_stops_at_its_end() {
+        let mut h = Harness::new();
+        h.speed = 7.5;
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let value = h.find("750%", 0);
+        h.take();
+        // From the slider's track, left of the value box, far past its end.
+        let track = value - egui::vec2(60.0, 0.0);
+        h.drag(
+            track - egui::vec2(20.0, 0.0),
+            track + egui::vec2(300.0, 0.0),
+        );
+        let speeds: Vec<f32> = h
+            .take()
+            .into_iter()
+            .filter_map(|(_, action)| action.strip_prefix("speed ").map(|v| v.parse().unwrap()))
+            .collect();
+        assert!(!speeds.is_empty(), "the drag set no speed");
+        assert!(speeds.iter().all(|speed| *speed <= 5.0), "{speeds:?}");
+        assert_eq!(speeds.last(), Some(&5.0));
     }
 }
