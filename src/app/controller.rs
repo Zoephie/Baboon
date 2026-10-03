@@ -8337,7 +8337,20 @@ impl Baboon {
         // clear there.
     }
 
+    /// Whether the active kit is showing its Chimp surface rather than tags.
+    ///
+    /// Undo and redo act on the selected tag, which is hidden there, and Chimp
+    /// has no undo of its own yet; so on that surface they do nothing rather
+    /// than silently changing a tag the user cannot see.
+    fn chimp_surface_is_active(&self) -> bool {
+        self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
+    }
+
     pub(super) fn undo_current_tag(&mut self) {
+        if self.chimp_surface_is_active() {
+            self.status = "Chimp has no undo yet; undo applies to tags.".to_owned();
+            return;
+        }
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -8353,6 +8366,10 @@ impl Baboon {
     }
 
     pub(super) fn redo_current_tag(&mut self) {
+        if self.chimp_surface_is_active() {
+            self.status = "Chimp has no redo yet; redo applies to tags.".to_owned();
+            return;
+        }
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -8416,7 +8433,7 @@ impl Baboon {
     }
 
     pub(super) fn can_undo_current(&self) -> bool {
-        if self.editing_kit_is_read_only(self.active) {
+        if self.chimp_surface_is_active() || self.editing_kit_is_read_only(self.active) {
             return false;
         }
         self.kits[self.active]
@@ -8427,7 +8444,7 @@ impl Baboon {
     }
 
     pub(super) fn can_redo_current(&self) -> bool {
-        if self.editing_kit_is_read_only(self.active) {
+        if self.chimp_surface_is_active() || self.editing_kit_is_read_only(self.active) {
             return false;
         }
         self.kits[self.active]
@@ -9714,6 +9731,10 @@ mod campaign_import_gate_tests;
 #[cfg(test)]
 #[path = "tests/container_folder_extract.rs"]
 mod container_folder_extract_tests;
+
+#[cfg(test)]
+#[path = "tests/chimp_surface_undo.rs"]
+mod chimp_surface_undo_tests;
 
 enum SaveChangesPromptAction {
     None,
