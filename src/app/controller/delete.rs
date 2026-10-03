@@ -146,12 +146,23 @@ fn ledger_delete_verdict(
     rel_path: &str,
 ) -> Option<Result<ContainerDeleteTarget, String>> {
     let record = ledger.find(utoc_path, rel_path)?;
-    if record.origin == CreatedTagOrigin::RenamedFromShipped {
-        return Some(Err(
-            "This tag was renamed from one the game ships; deleting it would \
-                         remove the game's own content"
-                .to_owned(),
-        ));
+    match &record.origin {
+        CreatedTagOrigin::Authored => {}
+        CreatedTagOrigin::RenamedFromShipped => {
+            return Some(Err(
+                "This tag was renamed from one the game ships; deleting it would \
+                             remove the game's own content"
+                    .to_owned(),
+            ));
+        }
+        // Only `Authored` is Baboon's to delete; an origin a newer build
+        // wrote is refused rather than guessed at.
+        CreatedTagOrigin::Unrecognized(origin) => {
+            return Some(Err(format!(
+                "A newer version of Baboon recorded this tag as \"{origin}\"; \
+                 this version cannot tell whether deleting it is safe"
+            )));
+        }
     }
     Some(Ok(ContainerDeleteTarget {
         package_path: record.package_path.clone(),
@@ -803,6 +814,24 @@ mod tests {
             .expect("the rename is recorded, so the ledger has an answer");
         let error = verdict.expect_err("and the answer is no");
         assert!(error.contains("the game ships"), "{error}");
+    }
+
+    /// An origin a newer build wrote is not `Authored`, so it is not deletable.
+    #[test]
+    fn an_unrecognized_origin_is_refused() {
+        let utoc = Path::new("C:/Game/Paks/pakchunk240-WinGDK.utoc");
+        let ubulk = "Meteorite/Content/Tags/objects/copy-biped.ubulk";
+        let mut ledger = CreatedTagLedger::default();
+        ledger.record(CreatedTagRecord {
+            origin: CreatedTagOrigin::Unrecognized("ImportedFromMod".to_owned()),
+            ..record_at(utoc.to_str().unwrap(), ubulk)
+        });
+        let verdict = ledger_delete_verdict(&ledger, utoc, ubulk).expect("recorded");
+        let error = verdict.expect_err("not Baboon's to delete");
+        assert!(error.contains("ImportedFromMod"), "{error}");
+        // And the converse, so the check can disagree.
+        let authored = ledger_with(utoc.to_str().unwrap(), ubulk);
+        assert!(matches!(ledger_delete_verdict(&authored, utoc, ubulk), Some(Ok(_))));
     }
 
     /// The other half of the same call: a copy Baboon made stays deletable

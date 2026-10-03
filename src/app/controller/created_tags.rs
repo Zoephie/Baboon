@@ -32,7 +32,7 @@ const TOC_MAGIC: &[u8; 16] = b"-==--==--==--==-";
 /// like any other, and the chunk-index threshold that stands in for provenance
 /// cannot tell a copy Baboon made from a shipped tag Baboon moved. Both sit past
 /// the line. Only this field can separate them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) enum CreatedTagOrigin {
     /// Baboon put this content in the container — a duplicate, or a tag created
     /// from scratch. Deleting it removes only what Baboon added.
@@ -47,6 +47,40 @@ pub(in crate::app) enum CreatedTagOrigin {
     /// retired. There is no other copy of it, and deleting it would be
     /// destroying shipped content through a path built to protect it.
     RenamedFromShipped,
+    /// A value this build does not know, written by a newer one. Kept as it was
+    /// so saving the ledger writes it back unchanged, and treated as not
+    /// Baboon's to delete or rename: only `Authored` grants that.
+    ///
+    /// Without it, one such value failed the whole file's parse, the ledger
+    /// loaded empty, and the next save erased every record in it.
+    Unrecognized(String),
+}
+
+impl CreatedTagOrigin {
+    fn as_str(&self) -> &str {
+        match self {
+            CreatedTagOrigin::Authored => "Authored",
+            CreatedTagOrigin::RenamedFromShipped => "RenamedFromShipped",
+            CreatedTagOrigin::Unrecognized(value) => value,
+        }
+    }
+}
+
+impl Serialize for CreatedTagOrigin {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CreatedTagOrigin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "Authored" => CreatedTagOrigin::Authored,
+            "RenamedFromShipped" => CreatedTagOrigin::RenamedFromShipped,
+            _ => CreatedTagOrigin::Unrecognized(value),
+        })
+    }
 }
 
 /// One tag Baboon duplicated into a container, identified by everything needed
@@ -93,12 +127,29 @@ impl CreatedTagRecord {
 }
 
 /// Every duplicate this installation has made, across every game folder.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub(in crate::app) struct CreatedTagLedger {
-    #[serde(default)]
-    version: u32,
-    #[serde(default)]
     tags: Vec<CreatedTagRecord>,
+    /// Rows this build could not read as a record (a newer build's shape),
+    /// written back as they were so a save never drops them.
+    unparsed: Vec<serde_json::Value>,
+    /// Why the file on disk could not be read at all. While set, `save`
+    /// refuses: writing would replace every record in it with this session's.
+    load_error: Option<String>,
+}
+
+/// The file as stored. Rows are read one by one so one this build cannot
+/// read costs only that row, never the file.
+#[derive(Deserialize)]
+struct LedgerFileIn {
+    #[serde(default)]
+    tags: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct LedgerFileOut {
+    version: u32,
+    tags: Vec<serde_json::Value>,
 }
 
 impl CreatedTagLedger {
@@ -106,30 +157,82 @@ impl CreatedTagLedger {
         crate::storage::data_path(LEDGER_FILE)
     }
 
-    /// Read the ledger, treating an absent or unreadable file as empty.
+    /// Read the ledger, treating an absent file as empty.
     ///
     /// An empty ledger only ever costs the user a greyed-out Delete, whereas
-    /// refusing to start over a malformed sidecar would cost them the app.
+    /// refusing to start over a malformed sidecar would cost them the app. A
+    /// file that exists but cannot be read is still loaded as empty, but
+    /// remembered as such, so `save` leaves it alone.
     pub(in crate::app) fn load() -> Self {
-        let path = Self::path();
-        let Ok(bytes) = fs::read(&path) else {
-            return Self::default();
+        Self::load_from(&Self::path())
+    }
+
+    fn load_from(path: &Path) -> Self {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(error) => {
+                return Self {
+                    load_error: Some(format!("could not read it: {error}")),
+                    ..Self::default()
+                };
+            }
         };
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        Self::from_bytes(&bytes)
+    }
+
+    /// The ledger stored as `bytes`; a file that is not a ledger at all reads
+    /// as empty with `load_error` set.
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let file = match serde_json::from_slice::<LedgerFileIn>(bytes) {
+            Ok(file) => file,
+            Err(error) => {
+                return Self {
+                    load_error: Some(format!("could not parse it: {error}")),
+                    ..Self::default()
+                };
+            }
+        };
+        let mut ledger = Self::default();
+        for row in file.tags {
+            match serde_json::from_value::<CreatedTagRecord>(row.clone()) {
+                Ok(record) => ledger.tags.push(record),
+                Err(_) => ledger.unparsed.push(row),
+            }
+        }
+        ledger
     }
 
     pub(in crate::app) fn save(&self) -> Result<(), String> {
-        let path = Self::path();
+        self.save_to(&Self::path())
+    }
+
+    fn save_to(&self, path: &Path) -> Result<(), String> {
+        if let Some(error) = &self.load_error {
+            return Err(format!(
+                "The duplicate ledger {} was not updated: when Baboon started it {error}. \
+                 It was left as it is so the records in it are not lost.",
+                path.display()
+            ));
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
         }
-        let json = serde_json::to_vec_pretty(&Self {
+        let mut tags = Vec::with_capacity(self.tags.len() + self.unparsed.len());
+        for record in &self.tags {
+            tags.push(
+                serde_json::to_value(record)
+                    .map_err(|error| format!("Could not encode the duplicate ledger: {error}"))?,
+            );
+        }
+        tags.extend(self.unparsed.iter().cloned());
+        let json = serde_json::to_vec_pretty(&LedgerFileOut {
             version: LEDGER_VERSION,
-            tags: self.tags.clone(),
+            tags,
         })
         .map_err(|error| format!("Could not encode the duplicate ledger: {error}"))?;
-        let mut file = atomic_write_file::AtomicWriteFile::open(&path)
+        let mut file = atomic_write_file::AtomicWriteFile::open(path)
             .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
         file.write_all(&json)
             .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
@@ -172,7 +275,7 @@ impl CreatedTagLedger {
             origin: previous
                 .as_ref()
                 .map_or(CreatedTagOrigin::RenamedFromShipped, |previous| {
-                    previous.origin
+                    previous.origin.clone()
                 }),
             // Carried from the record being replaced rather than taken from the
             // caller: the renamed chunks were appended later still, so the line
@@ -421,8 +524,8 @@ mod tests {
                 "created_unix_secs": 1
             }]
         });
-        let ledger: CreatedTagLedger =
-            serde_json::from_value(legacy).expect("a pre-origin ledger still reads");
+        let ledger = CreatedTagLedger::from_bytes(&serde_json::to_vec(&legacy).unwrap());
+        assert!(ledger.load_error.is_none(), "a pre-origin ledger still reads");
         let record = ledger
             .find(
                 Path::new(UTOC),
@@ -512,10 +615,69 @@ mod tests {
 
     #[test]
     fn an_unreadable_ledger_reads_as_empty_rather_than_failing_startup() {
-        assert!(
-            serde_json::from_slice::<CreatedTagLedger>(b"{ not json")
-                .unwrap_or_default()
-                .is_empty()
+        let ledger = CreatedTagLedger::from_bytes(b"{ not json");
+        assert!(ledger.is_empty());
+        assert!(ledger.load_error.is_some(), "and is remembered as unread");
+    }
+
+    fn scratch_ledger(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "baboon-ledger-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(LEDGER_FILE)
+    }
+
+    /// A newer build may write an `origin` this one does not know. That used
+    /// to fail the whole file's parse, so the ledger loaded empty and the next
+    /// save (any duplicate, delete or rename) erased every record in it.
+    #[test]
+    fn an_unknown_origin_costs_nothing_and_survives_a_save() {
+        let path = scratch_ledger("future-origin");
+        let mut future = serde_json::to_value(record(UTOC, "future.ubulk")).unwrap();
+        future["origin"] = serde_json::json!("ImportedFromMod");
+        // A row whose shape this build cannot read at all is kept raw.
+        let alien = serde_json::json!({ "utoc_path": 7, "shape": "from the future" });
+        let file = serde_json::json!({
+            "version": 2,
+            "tags": [future, serde_json::to_value(record(UTOC, "known.ubulk")).unwrap(), alien],
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&file).unwrap()).unwrap();
+
+        let mut ledger = CreatedTagLedger::load_from(&path);
+        let found = ledger.find(Path::new(UTOC), "future.ubulk").cloned();
+        ledger.record(record(UTOC, "new.ubulk"));
+        ledger.save_to(&path).unwrap();
+        let reloaded: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        assert_eq!(
+            found.map(|record| record.origin),
+            Some(CreatedTagOrigin::Unrecognized("ImportedFromMod".to_owned()))
         );
+        let rows = reloaded["tags"].as_array().unwrap();
+        assert_eq!(rows.len(), 4, "{rows:#?}");
+        assert!(rows.iter().any(|row| row["origin"] == "ImportedFromMod"));
+        assert!(rows.contains(&alien));
+        assert!(rows.iter().any(|row| row["ubulk_path"] == "known.ubulk"));
+    }
+
+    /// A file that cannot be parsed at all is never written over.
+    #[test]
+    fn a_ledger_that_failed_to_load_is_not_saved_over() {
+        let path = scratch_ledger("truncated");
+        let original = b"{ \"version\": 1, \"tags\": [ { \"utoc_path\": \"C:/";
+        fs::write(&path, original).unwrap();
+
+        let mut ledger = CreatedTagLedger::load_from(&path);
+        ledger.record(record(UTOC, "new.ubulk"));
+        let saved = ledger.save_to(&path);
+        let on_disk = fs::read(&path).unwrap();
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        assert!(saved.is_err(), "the save is refused and says why");
+        assert_eq!(on_disk, original, "the file is left exactly as it was");
     }
 }
