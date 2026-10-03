@@ -203,10 +203,10 @@ pub(super) fn draw_clip_player(
         }
         if ui
             .button("\u{25A0}")
-            .on_hover_text("Stop and rewind (Enter)")
+            .on_hover_text("Stop, rewind and clear the region (Enter)")
             .clicked()
         {
-            edit.sound_play_request.push_back(SoundAction::Stop);
+            stop(ui, edit, &clip.id);
         }
         let mut looping = edit.sound_looping;
         if ui
@@ -298,7 +298,7 @@ pub(super) fn draw_clip_player(
             toggle_or_play(edit, clips, selected, loaded, play);
         }
         if enter {
-            edit.sound_play_request.push_back(SoundAction::Stop);
+            stop(ui, edit, &clips[selected].id);
         }
     }
     selected
@@ -398,6 +398,16 @@ fn clip_title(clip: &PlayerClip) -> String {
         Some(group) => format!("{group} \u{25B8} {}", clip.name),
         None => clip.name.clone(),
     }
+}
+
+/// Stop and rewind, clearing the region on `clip`: a stop starts over.
+fn stop(ui: &Ui, edit: &mut FieldEditContext<'_>, clip: &str) {
+    if stored_region(ui, edit.tag_key, clip).is_some() {
+        ui.data_mut(|data| data.remove::<(String, f64, f64)>(clip_region_id(edit.tag_key)));
+        edit.sound_play_request
+            .push_for_clip(SoundAction::SetRegion(None), clip.to_owned());
+    }
+    edit.sound_play_request.push_back(SoundAction::Stop);
 }
 
 /// Pause or resume the selected clip if it is the one loaded, else play it.
@@ -1248,6 +1258,9 @@ mod tests {
         fills: Vec<(egui::Rect, egui::Color32)>,
         /// Line segments painted in the last frame.
         segments: usize,
+        /// The input clock: a 60th of a second a frame, so a hover tooltip
+        /// waits its delay as it would for a real pointer.
+        time: f64,
         /// The clips previews were asked for, in order.
         previewed: Vec<String>,
         /// The tab's preview, as the audio state would hand it over.
@@ -1266,6 +1279,7 @@ mod tests {
                 bars: Vec::new(),
                 fills: Vec::new(),
                 segments: 0,
+                time: 0.0,
                 previewed: Vec::new(),
                 preview: None,
                 timeline: egui::Rect::NOTHING,
@@ -1273,6 +1287,8 @@ mod tests {
         }
 
         fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 1.0 / 60.0;
+            let time = self.time;
             let clips = clips();
             let mut sinks = EditSinks::default();
             let playback = self.playback.clone();
@@ -1286,6 +1302,7 @@ mod tests {
                         egui::Pos2::ZERO,
                         egui::vec2(800.0, 400.0),
                     )),
+                    time: Some(time),
                     events,
                     ..Default::default()
                 },
@@ -1393,7 +1410,16 @@ mod tests {
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             };
-            self.frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+            // Slide onto the target over a few frames, as a real pointer
+            // does: egui hit-tests a press against where the pointer was, and
+            // counts a single jump as no movement at all — which shows a
+            // widget's hover tooltip at once, and the press then lands on it.
+            for offset in [6.0, 3.0, 0.0] {
+                self.frame(vec![egui::Event::PointerMoved(
+                    pos - egui::vec2(offset, 0.0),
+                )]);
+            }
+            self.frame(vec![button(true)]);
             self.frame(vec![button(false)]);
         }
 
@@ -2196,5 +2222,44 @@ mod tests {
 
         forget_closed_players(&h.ctx, |_| false);
         assert_eq!(kept(&h), (false, false), "a closed tab's player was kept");
+    }
+
+    /// Stop clears the region as well as rewinding, from the button or Enter.
+    #[test]
+    fn stop_clears_the_region() {
+        let mut h = Harness::new();
+        h.playback = Some(loaded("id-a", true));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        h.take();
+        let stop = h.find("\u{25A0}", 0);
+        h.click(stop);
+        assert_eq!(
+            h.take(),
+            [
+                (Some("id-a".to_owned()), "region none".to_owned()),
+                (None, "stop".to_owned()),
+            ]
+        );
+        assert!(
+            !h.texts.iter().any(|(text, _)| text.contains('\u{2013}')),
+            "the region is still read out"
+        );
+
+        h.drag(h.lanes_at(0.25), h.lanes_at(0.75));
+        h.take();
+        h.key(egui::Key::Enter);
+        assert_eq!(
+            h.take(),
+            [
+                (Some("id-a".to_owned()), "region none".to_owned()),
+                (None, "stop".to_owned()),
+            ]
+        );
+
+        // With no region, Stop only stops.
+        h.click(stop);
+        assert_eq!(h.take(), [(None, "stop".to_owned())]);
     }
 }
