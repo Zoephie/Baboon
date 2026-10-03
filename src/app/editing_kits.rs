@@ -686,6 +686,19 @@ pub(super) fn safe_custom_icon_relative_path(path: &Path) -> bool {
             .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
 }
 
+/// Whether Windows reserves `name` for a device, so no file or folder can
+/// have it: `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9` and `LPT1`-`LPT9`, in
+/// any case. The reservation covers the part before the first dot, so
+/// `nul.wav` is the device too, and ignores trailing spaces there.
+pub(in crate::app) fn is_windows_reserved_name(name: &str) -> bool {
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let base = name.split('.').next().unwrap_or_default().trim_end_matches(' ');
+    RESERVED.iter().any(|reserved| reserved.eq_ignore_ascii_case(base))
+}
+
 pub(super) fn sanitise_project_name(name: &str) -> String {
     let mut output = String::new();
     let mut previous_separator = false;
@@ -711,15 +724,7 @@ pub(super) fn sanitise_project_name(name: &str) -> String {
         }
     }
     let output = output.trim_matches([' ', '.', '-']).to_owned();
-    let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if output.is_empty()
-        || reserved
-            .iter()
-            .any(|item| item.eq_ignore_ascii_case(&output))
-    {
+    if output.is_empty() || is_windows_reserved_name(&output) {
         "project".to_owned()
     } else {
         output

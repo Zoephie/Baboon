@@ -76,6 +76,10 @@ pub(super) struct ExtractRequest {
 
 /// Turn a filesystem-unsafe permutation/pitch-range string-id into a clean file
 /// stem (tool names permutations by filename, so keep it faithful but legal).
+///
+/// A name Windows reserves for a device (`con`, `nul`, `com1`, ...) gets a
+/// leading underscore: as a file stem it names the device, so writing
+/// `nul.wav` there writes nowhere and `con.wav` fails.
 pub(super) fn sanitize_component(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -87,6 +91,8 @@ pub(super) fn sanitize_component(name: &str) -> String {
     let trimmed = cleaned.trim().trim_matches('.');
     if trimmed.is_empty() {
         "sound".to_owned()
+    } else if crate::app::is_windows_reserved_name(trimmed) {
+        format!("_{trimmed}")
     } else {
         trimmed.to_owned()
     }
@@ -182,6 +188,13 @@ mod tests {
         assert_eq!(sanitize_component("ambient/expl:1"), "ambient_expl_1");
         assert_eq!(sanitize_component("  "), "sound");
         assert_eq!(sanitize_component("plain_name"), "plain_name");
+        // Device names Windows reserves, alone or before a dot, in any case.
+        assert_eq!(sanitize_component("con"), "_con");
+        assert_eq!(sanitize_component("NUL"), "_NUL");
+        assert_eq!(sanitize_component("com1"), "_com1");
+        assert_eq!(sanitize_component("lpt9.loop"), "_lpt9.loop");
+        assert_eq!(sanitize_component("console"), "console");
+        assert_eq!(sanitize_component("com10"), "com10");
     }
 
     #[test]

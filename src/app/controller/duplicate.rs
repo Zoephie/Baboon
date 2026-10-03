@@ -123,38 +123,10 @@ pub(super) fn validate_leaf_characters(
     {
         return Err(format!("{noun} contain a Windows-illegal character"));
     }
-    if is_windows_reserved_leaf(name) {
+    if is_windows_reserved_name(name) {
         return Err("That name is reserved by Windows".to_owned());
     }
     Ok(name.to_owned())
-}
-
-fn is_windows_reserved_leaf(name: &str) -> bool {
-    matches!(
-        name.to_ascii_uppercase().as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-    )
 }
 
 fn normalized_display_path(path: &str) -> String {
