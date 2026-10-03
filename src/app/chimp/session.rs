@@ -336,7 +336,9 @@ impl Baboon {
         }
         let mut restored = 0usize;
         let mut failures: Vec<String> = Vec::new();
-        for (package, filename) in manifest.packages {
+        for (package, filename) in
+            chimp_recovery_still_closed(&self.kits[kit_index].chimp, manifest.packages)
+        {
             let Some(provider) = world
                 .package(&package)
                 .and_then(|record| record.active_provider())
@@ -765,6 +767,25 @@ impl Baboon {
     }
 }
 
+/// The recovery manifest's packages that are not open in `chimp` already.
+///
+/// Recovery runs on every mount, and a kit remounts while documents are open:
+/// after a save over a mounted container, a USMAP change, a write lease. The
+/// open document is newer than its last checkpoint (it holds every edit since,
+/// its view and its place), so replacing it with the checkpoint lost the
+/// latest edits. Only a package nothing has open is restored.
+fn chimp_recovery_still_closed(
+    chimp: &ChimpState,
+    packages: HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut packages: Vec<(String, String)> = packages
+        .into_iter()
+        .filter(|(package, _)| !chimp.documents.contains_key(package))
+        .collect();
+    packages.sort();
+    packages
+}
+
 fn sorted_unique_dirty_chimp_keys<'a>(
     documents: impl IntoIterator<Item = (&'a str, bool)>,
 ) -> Vec<String> {
@@ -810,6 +831,38 @@ mod tests {
             "still editing: nothing yet"
         );
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
+    }
+
+    /// A remount re-runs recovery while documents are still open. The open
+    /// document is newer than its checkpoint, so it must be left alone; only a
+    /// package nothing has open is restored.
+    #[test]
+    fn recovery_on_remount_leaves_open_documents_alone() {
+        let mut app = Baboon::for_test();
+        let mut open = rename_fixture();
+        open.dirty = true;
+        open.edits = 7;
+        app.kits[0]
+            .chimp
+            .documents
+            .insert("/Game/Test/Thing".to_owned(), open);
+        let manifest = HashMap::from([
+            ("/Game/Test/Thing".to_owned(), "aaaa.uasset".to_owned()),
+            ("/Game/Test/Closed".to_owned(), "bbbb.uasset".to_owned()),
+        ]);
+
+        let restoring = chimp_recovery_still_closed(&app.kits[0].chimp, manifest.clone());
+        assert_eq!(
+            restoring,
+            [("/Game/Test/Closed".to_owned(), "bbbb.uasset".to_owned())]
+        );
+
+        // With nothing open, both come back.
+        app.kits[0].chimp.documents.clear();
+        assert_eq!(
+            chimp_recovery_still_closed(&app.kits[0].chimp, manifest).len(),
+            2
+        );
     }
 
     #[test]
