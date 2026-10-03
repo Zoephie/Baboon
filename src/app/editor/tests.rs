@@ -1021,6 +1021,8 @@ mod tests {
         }
         assert!(has(&english, "\u{2B07} Extract all (English)"));
         assert!(has(&english, "\u{2B07} All languages"));
+        // The third extract button is the selected permutation's own.
+        assert!(has(&english, "\u{2B07} 1"), "{english:?}");
         assert!(
             !english.iter().any(|shown| shown.contains("|default|")),
             "a lone default pitch range isn't shown: {english:?}"

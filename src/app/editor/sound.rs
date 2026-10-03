@@ -1200,7 +1200,7 @@ fn draw_wwise_event_player(
         let (label, name) = &events[selected];
         ui.horizontal(|ui| {
             if ui
-                .small_button("\u{2B07}")
+                .button(RichText::new(format!("\u{2B07} {name}")))
                 .on_hover_text("Extract this event to WAV")
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
@@ -1221,7 +1221,6 @@ fn draw_wwise_event_player(
                 });
             }
             ui.label(RichText::new(*label).color(subtle_dark()));
-            ui.label(RichText::new(name).color(text_dark()));
         });
     });
 }
@@ -1334,33 +1333,7 @@ fn draw_ce_wwise_player(
         // directly in the pak set, so unlike the Halo 4 event player this
         // needs no prior playback.
         let m = media[chosen];
-        ui.horizontal(|ui| {
-            if ui
-                .small_button("\u{2B07}")
-                .on_hover_text("Extract this permutation to WAV")
-                .clicked()
-                && let Some(root) = edit.ce_paks_root
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_title("Extract Wwise media")
-                    .set_file_name(format!("{}.wav", sanitize_component(&m.display_name())))
-                    .save_file()
-            {
-                *edit.sound_extract_request = Some(ExtractRequest {
-                    items: vec![ExtractItem {
-                        out_path: path,
-                        source: ExtractSource::CeMedia {
-                            paks_root: root.to_path_buf(),
-                            media: Box::new(m.clone()),
-                        },
-                    }],
-                    tags_root: None,
-                    label: m.display_name(),
-                });
-            }
-            ui.label(RichText::new(m.display_name()).color(text_dark()))
-                .on_hover_text(&m.source_name);
-            ui.label(RichText::new(&m.event_name).color(subtle_dark()));
-            ui.label(RichText::new(m.location_label()).color(subtle_dark()));
+        ui.horizontal_wrapped(|ui| {
             if let Some(root) = edit.ce_paks_root
                 && ui
                     .button(RichText::new("\u{2B07} Extract all"))
@@ -1390,6 +1363,34 @@ fn draw_ce_wwise_player(
                         .unwrap_or_else(|| "sound".to_owned()),
                 });
             }
+
+            if ui
+                .button(RichText::new(format!("\u{2B07} {}", m.display_name())))
+                .on_hover_text(format!(
+                    "Extract this permutation to WAV\n{}",
+                    m.source_name
+                ))
+                .clicked()
+                && let Some(root) = edit.ce_paks_root
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_title("Extract Wwise media")
+                    .set_file_name(format!("{}.wav", sanitize_component(&m.display_name())))
+                    .save_file()
+            {
+                *edit.sound_extract_request = Some(ExtractRequest {
+                    items: vec![ExtractItem {
+                        out_path: path,
+                        source: ExtractSource::CeMedia {
+                            paks_root: root.to_path_buf(),
+                            media: Box::new(m.clone()),
+                        },
+                    }],
+                    tags_root: None,
+                    label: m.display_name(),
+                });
+            }
+            ui.label(RichText::new(&m.event_name).color(subtle_dark()));
+            ui.label(RichText::new(m.location_label()).color(subtle_dark()));
         });
     });
 }
@@ -1732,7 +1733,8 @@ pub(in crate::app) fn draw_sound_player(
             .iter()
             .filter(|row| row_duration(row, source).1)
             .count();
-        ui.horizontal(|ui| {
+        let (_, fallback) = row_duration(row, source);
+        ui.horizontal_wrapped(|ui| {
             let mut extract_hover = match &extract_base {
                 Some(dir) => format!("Extract every permutation to {}", dir.display()),
                 None => "Choose a folder and extract every permutation".to_owned(),
@@ -1830,22 +1832,13 @@ pub(in crate::app) fn draw_sound_player(
                     }
                 }
             }
-            if has_inline_ogg {
-                ui.checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
-                    "Extract CE audio as the tag's original Ogg stream (lossless) \
-                     instead of decoding to WAV",
-                );
-            }
-        });
-        ui.data_mut(|d| d.insert_temp(raw_ce_id, raw_ce));
-
-        // The selected permutation: what is particular to it, and its own
-        // extract.
-        let (_, fallback) = row_duration(row, source);
-        ui.horizontal_wrapped(|ui| {
+            // Third: the selected permutation alone, then what is particular to it.
             if ui
-                .small_button("\u{2B07}")
-                .on_hover_text("Extract this permutation to a file")
+                .button(RichText::new(format!("\u{2B07} {}", row.name)))
+                .on_hover_text(format!(
+                    "Extract this permutation to a file\n{}",
+                    row_details(row, h2.as_ref())
+                ))
                 .clicked()
             {
                 let ext = row_extract_ext(&row.kind, raw_ce);
@@ -1865,8 +1858,6 @@ pub(in crate::app) fn draw_sound_player(
                     });
                 }
             }
-            ui.label(RichText::new(&row.name).color(text_dark()))
-                .on_hover_text(row_details(row, h2.as_ref()));
             if fallback {
                 ui.label(
                     RichText::new(format!("no {language_name} \u{00B7} plays English"))
@@ -1880,7 +1871,14 @@ pub(in crate::app) fn draw_sound_player(
                 ui.label(RichText::new(format!("skip {:.0}%", skip * 100.0)).color(subtle_dark()))
                     .on_hover_text("Fraction of requests for this permutation that are ignored");
             }
+            if has_inline_ogg {
+                ui.checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
+                    "Extract CE audio as the tag's original Ogg stream (lossless) \
+                     instead of decoding to WAV",
+                );
+            }
         });
+        ui.data_mut(|d| d.insert_temp(raw_ce_id, raw_ce));
     });
     ui.add_space(6.0);
 }
