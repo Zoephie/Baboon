@@ -577,10 +577,8 @@ impl Baboon {
         let world = world.clone();
         let tx = self.tx.clone();
         self.status = format!("Extracting {package}…");
-        thread::spawn(move || {
-            let result = write_chimp_texture(&world, &package, &path, export, export_index);
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            write_chimp_texture(&world, &package, &path, export, export_index)
         });
     }
 
@@ -796,11 +794,8 @@ impl Baboon {
         } = prompt;
         let tx = self.tx.clone();
         self.status = format!("Extracting {package} as {}…", format.label());
-        thread::spawn(move || {
-            let result =
-                write_chimp_mesh(&world, &package, &path, format, textures, texture_export);
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            write_chimp_mesh(&world, &package, &path, format, textures, texture_export)
         });
     }
 }

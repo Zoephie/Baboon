@@ -648,6 +648,25 @@ pub(in crate::app) fn apply_next_worker_message(app: &mut crate::app::Baboon) ->
     true
 }
 
+/// [`spawn_worker`] for the exports and extractions that report through
+/// `ExportFinished`. On bare threads, one that panicked sent nothing and
+/// left the status line on "Extracting ..." for good; a panic is now
+/// reported as the export failing.
+pub(in crate::app) fn spawn_export<J>(
+    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    job: J,
+) where
+    J: FnOnce() -> Result<String, String> + Send + 'static,
+{
+    spawn_worker(
+        tx,
+        ctx,
+        move || WorkerMessage::ExportFinished(job()),
+        |error| WorkerMessage::ExportFinished(Err(format!("The export failed: {error}"))),
+    );
+}
+
 /// A panic payload as text, for a message saying the job crashed.
 pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
     let detail = panic
@@ -662,6 +681,42 @@ pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
 mod spawn_worker_tests {
     use super::*;
     use std::time::Duration;
+
+    /// Every export and extraction reports through `ExportFinished`, and the
+    /// status line says "Extracting ..." until it does. Each ran on a bare
+    /// thread, so one that panicked left that status up for good.
+    #[test]
+    fn an_export_that_panics_still_reports_and_replaces_its_status() {
+        let mut app = crate::app::Baboon::for_test();
+        let ctx = egui::Context::default();
+        app.status = "Extracting bitmap objects/rock".to_owned();
+        with_panicking_workers(|| {
+            spawn_export(&app.tx, &ctx, || Ok("Extracted objects/rock".to_owned()))
+        });
+        assert!(apply_next_worker_message(&mut app), "the export answered");
+        assert!(app.status.starts_with("The export failed"), "{}", app.status);
+
+        // And one that runs reports its own result.
+        spawn_export(&app.tx, &ctx, || Ok("Extracted objects/rock".to_owned()));
+        assert!(apply_next_worker_message(&mut app));
+        assert_eq!(app.status, "Extracted objects/rock");
+    }
+
+    /// Every export reports through `spawn_export`, not a hand-rolled send
+    /// from a thread of its own, which is what let a panic skip the report.
+    #[test]
+    fn exports_report_only_through_spawn_export() {
+        for (file, text) in [
+            ("controller.rs", include_str!("../controller.rs")),
+            ("chimp/extract.rs", include_str!("../chimp/extract.rs")),
+        ] {
+            assert!(
+                !text.contains("send(WorkerMessage::ExportFinished("),
+                "{file} sends ExportFinished itself"
+            );
+            assert!(text.contains("spawn_export("), "{file}: the scan is not looking");
+        }
+    }
 
     /// A worker that panics still answers, so whatever the UI marked as in
     /// flight is settled. A plain `thread::spawn` sent nothing.

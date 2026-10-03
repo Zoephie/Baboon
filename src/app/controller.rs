@@ -4617,10 +4617,8 @@ impl Baboon {
         };
         self.status = format!("Dumping JSON for {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = export_tag_json(&source, &entry, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            export_tag_json(&source, &entry, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -4652,11 +4650,8 @@ impl Baboon {
         };
         self.status = format!("Dumping {} loaded tag(s) to JSON", entries.len());
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                export_tag_json_entries(&source, &entries, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            export_tag_json_entries(&source, &entries, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -4684,11 +4679,9 @@ impl Baboon {
         };
         self.status = format!("Dumping JSON for folder {label}");
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = export_loose_folder_json(&root, &rel_path, &names, &output)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            export_loose_folder_json(&root, &rel_path, &names, &output)
+                .map_err(|e| e.to_string())
         });
     }
 
@@ -4812,10 +4805,8 @@ impl Baboon {
         };
         self.status = format!("Extracting raw tag {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = extract_raw_tag(&source, &entry, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_raw_tag(&source, &entry, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -4833,10 +4824,8 @@ impl Baboon {
         };
         self.status = format!("Extracting bitmap {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = extract_bitmap_images(&source, &entry, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_bitmap_images(&source, &entry, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -4874,14 +4863,12 @@ impl Baboon {
             entries => format!("Extracting {} bitmap source(s)", entries.len()),
         };
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = match entries.as_slice() {
+        spawn_export(&tx, &ctx, move || {
+            match entries.as_slice() {
                 [entry] if !folder => extract_bitmap_source(&source, entry, &output),
                 entries => extract_bitmap_sources(&source, entries, &output),
             }
-            .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+            .map_err(|e| e.to_string())
         });
     }
 
@@ -4909,11 +4896,8 @@ impl Baboon {
         };
         self.status = format!("Extracting {} bitmap tag(s)", entries.len());
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_bitmap_entries(&source, &entries, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_bitmap_entries(&source, &entries, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -5253,12 +5237,9 @@ impl Baboon {
         };
         self.status = format!("Extracting geometry from {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_geometry_for_entry(&source, &entry, &output, target)
-                    .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_geometry_for_entry(&source, &entry, &output, target)
+                .map_err(|e| e.to_string())
         });
     }
 
@@ -5277,15 +5258,13 @@ impl Baboon {
         self.status = format!("Extracting import info from {}", entry.display_path);
         let tx = self.tx.clone();
         let is_model = entry.group_tag == u32::from_be_bytes(*b"hlmt");
-        thread::spawn(move || {
-            let result = if is_model {
+        spawn_export(&tx, &ctx, move || {
+            if is_model {
                 extract_import_info_for_model_entry(&source, &entry, &output)
             } else {
                 extract_import_info_for_entry(&source, &entry, &output)
             }
-            .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+            .map_err(|e| e.to_string())
         });
     }
 
@@ -5308,12 +5287,9 @@ impl Baboon {
         };
         self.status = format!("Extracting animations from {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_animations_for_entry(&source, &entry, &output, target)
-                    .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_animations_for_entry(&source, &entry, &output, target)
+                .map_err(|e| e.to_string())
         });
     }
 
@@ -5335,11 +5311,9 @@ impl Baboon {
         };
         self.status = format!("Extracting source shaders from {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = extract_material_shader_sources(&source, &entry, &output)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_material_shader_sources(&source, &entry, &output)
+                .map_err(|e| e.to_string())
         });
     }
 
@@ -5370,11 +5344,9 @@ impl Baboon {
             entries.len()
         );
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = extract_material_shader_source_entries(&source, &entries, &output)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_material_shader_source_entries(&source, &entries, &output)
+                .map_err(|e| e.to_string())
         });
     }
 
@@ -5396,11 +5368,8 @@ impl Baboon {
         };
         self.status = format!("Extracting scripts from {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_scenario_scripts(&source, &entry, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_scenario_scripts(&source, &entry, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -5490,11 +5459,8 @@ impl Baboon {
         };
         self.status = format!("Extracting HLSL include from {}", entry.display_path);
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_hlsl_include_source(&source, &entry, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_hlsl_include_source(&source, &entry, &output).map_err(|e| e.to_string())
         });
     }
 
@@ -5522,11 +5488,8 @@ impl Baboon {
         };
         self.status = format!("Extracting {} HLSL include(s)", entries.len());
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result =
-                extract_hlsl_include_entries(&source, &entries, &output).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        spawn_export(&tx, &ctx, move || {
+            extract_hlsl_include_entries(&source, &entries, &output).map_err(|e| e.to_string())
         });
     }
 
