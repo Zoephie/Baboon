@@ -422,9 +422,9 @@ pub(in crate::app) mod tests {
             group_tag_and_name: Some((collision_model, r"objects\foo\foo".to_owned())),
         };
 
-        assert!(tag_reference_group_allowed(&empty, render_model));
-        assert!(tag_reference_group_allowed(&matching, render_model));
-        assert!(!tag_reference_group_allowed(&mismatched, render_model));
+        assert!(tag_reference_group_allowed(&empty, &[render_model]));
+        assert!(tag_reference_group_allowed(&matching, &[render_model]));
+        assert!(!tag_reference_group_allowed(&mismatched, &[render_model]));
     }
 
     #[test]
@@ -441,9 +441,138 @@ pub(in crate::app) mod tests {
         };
 
         assert_eq!(
-            tag_reference_required_group(&meta, None),
-            Some(structure_design)
+            tag_reference_accepted_groups(&meta, None, &GroupHierarchy::default()),
+            Some(vec![structure_design])
         );
+    }
+
+    /// What the schema allows decides, not the group the field happens to
+    /// point at; with no schema list the current group does, and with
+    /// neither anything goes.
+    #[test]
+    fn the_schema_not_the_current_target_decides_the_accepted_groups() {
+        let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some("haloreach_mcc"));
+        let object = parse_group_tag("obje").unwrap();
+        let scenery = parse_group_tag("scen").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let meta = |allowed| FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let pointing_at_scenery = (scenery, r"objects\levels\crate\crate".to_owned());
+        let accepted = tag_reference_accepted_groups(
+            &meta(vec![object]),
+            Some(&pointing_at_scenery),
+            &hierarchy,
+        )
+        .unwrap();
+        assert!(
+            accepted.contains(&weapon),
+            "a field pointing at scenery refused a weapon"
+        );
+        assert_eq!(
+            tag_reference_accepted_groups(
+                &meta(Vec::new()),
+                Some(&pointing_at_scenery),
+                &hierarchy
+            ),
+            Some(vec![scenery])
+        );
+        assert_eq!(
+            tag_reference_accepted_groups(&meta(Vec::new()), None, &hierarchy),
+            None
+        );
+    }
+
+    /// Issue #46: Reach's multiplayer object type list `object` field allows
+    /// `object`, and must take every object type — a `.weapon` picked in the
+    /// browse dialog, a typed `weap:` reference — while still refusing what
+    /// is not an object.
+    #[test]
+    fn an_object_reference_takes_every_object_type() {
+        let definitions_root = locate_definitions_root();
+        let names = TagNameIndex::load_game(&definitions_root, "haloreach_mcc").unwrap();
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some("haloreach_mcc"));
+        let docs = crate::app::field_docs::build_def_docs(
+            &definitions_root,
+            "haloreach_mcc",
+            "multiplayer_object_type_list",
+        );
+        let allowed: Vec<u32> = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Field {
+                    clean_name,
+                    tag_reference_allowed,
+                    ..
+                } if clean_name == "object" => Some(tag_reference_allowed.clone()),
+                _ => None,
+            })
+            .expect("no object field in the multiplayer object type list");
+        assert_eq!(allowed, [parse_group_tag("obje").unwrap()]);
+        let meta = FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta, None, &hierarchy).unwrap();
+        for (extension, group) in [
+            ("biped", "bipd"),
+            ("weapon", "weap"),
+            ("scenery", "scen"),
+            ("vehicle", "vehi"),
+        ] {
+            assert_eq!(
+                tag_reference_group_for_extension(extension, Some(&accepted), Some(&names)),
+                Ok(parse_group_tag(group).unwrap()),
+                "{extension}"
+            );
+        }
+        // The browse dialog filters on all of them, under the schema's name.
+        let (filter_name, extensions) =
+            tag_reference_dialog_filter(Some(&accepted), Some(&names)).unwrap();
+        assert_eq!(filter_name, "object");
+        for extension in [
+            "biped",
+            "weapon",
+            "scenery",
+            "vehicle",
+            "equipment",
+            "crate",
+        ] {
+            assert!(
+                extensions.iter().any(|e| e == extension),
+                "the dialog hides .{extension}"
+            );
+        }
+        assert!(!extensions.iter().any(|e| e == "bitmap"));
+        let refused = tag_reference_group_for_extension("bitmap", Some(&accepted), Some(&names));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|message| message.starts_with("Selected tag must be a object (")),
+            "{refused:?}"
+        );
+
+        let mut pending = Vec::new();
+        commit_tag_reference_input(
+            &mut pending,
+            None,
+            "object types[0]/object",
+            "weap:objects\\weapons\\rifle\\assault_rifle\\assault_rifle".to_owned(),
+            Some(&accepted),
+            Some(&names),
+        );
+        assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
     }
 
     #[test]
@@ -620,7 +749,7 @@ pub(in crate::app) mod tests {
             assert_eq!(
                 tag_reference_group_for_extension(
                     "structure_design",
-                    Some(structure_design),
+                    Some(&[structure_design]),
                     Some(&names),
                 )
                 .unwrap(),
