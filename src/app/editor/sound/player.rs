@@ -31,9 +31,13 @@ pub(super) enum ClipPlay {
 /// none of the app's fonts and drew as an empty box.
 const RANDOM_ICON: &str = "\u{1F500}";
 
+/// The zoom-out button: a minus sign, matching the plus beside it.
+const ZOOM_OUT_ICON: &str = "\u{2212}";
+
 /// Every glyph the player draws, which the tests check the app's fonts have.
 #[cfg(test)]
-const PLAYER_GLYPHS: [&str; 10] = [
+const PLAYER_GLYPHS: [&str; 11] = [
+    ZOOM_OUT_ICON,
     "\u{25C0}",
     "\u{25B6}",
     RANDOM_ICON,
@@ -50,6 +54,8 @@ const PLAYER_GLYPHS: [&str; 10] = [
 const RULER_HEIGHT: f32 = 14.0;
 /// Height of the track for mono and stereo, and before a clip is loaded.
 const TRACK_HEIGHT: f32 = 64.0;
+/// Height of the overview strip shown under the lanes while zoomed in.
+const OVERVIEW_HEIGHT: f32 = 14.0;
 /// Height of each lane past two channels.
 const SURROUND_LANE_HEIGHT: f32 = 16.0;
 
@@ -221,6 +227,41 @@ pub(super) fn draw_clip_player(
             .monospace()
             .color(text_dark()),
         );
+        // Zoom: around the playhead when the clip is loaded, else the middle
+        // of what is shown.
+        let waveform = loaded.map(|playback| playback.waveform.clone()).or(
+            match preview.as_ref().map(|preview| &preview.state) {
+                Some(PreviewState::Ready(waveform)) => Some(waveform.clone()),
+                _ => None,
+            },
+        );
+        if let (Some(waveform), Some(duration)) = (waveform, duration) {
+            let width = ui.available_width().max(1.0);
+            let min_span = min_view_span(Some(waveform.pcm().sample_rate), width);
+            let view = load_view(ui, edit.tag_key, &clip.id, duration, min_span);
+            let around = loaded.map_or(view.start + view.span / 2.0, |playback| playback.position);
+            let mut zoomed = None;
+            if ui.button(ZOOM_OUT_ICON).on_hover_text("Zoom out").clicked() {
+                zoomed = Some(view.zoomed(0.5, around, duration, min_span));
+            }
+            if ui
+                .button("+")
+                .on_hover_text("Zoom in (Ctrl/Cmd + wheel)")
+                .clicked()
+            {
+                zoomed = Some(view.zoomed(2.0, around, duration, min_span));
+            }
+            if ui
+                .add_enabled(!view.whole(duration), egui::Button::new("Fit"))
+                .on_hover_text("Show the whole sound")
+                .clicked()
+            {
+                zoomed = Some(View::fit(duration));
+            }
+            if let Some(view) = zoomed {
+                store_view(ui, edit.tag_key, &clip.id, view);
+            }
+        }
         if let Some((start, end)) = stored_region(ui, edit.tag_key, &clip.id) {
             ui.label(
                 RichText::new(format!(
@@ -482,19 +523,46 @@ fn draw_timeline(
         egui::Stroke::new(1.0, foundation_input_edge()),
     );
 
+    // The part of the clip shown: all of it until zoomed. While playing it
+    // pages along with the playhead, unless panned or zoomed by hand.
+    let clip_id = clips[selected].id.clone();
+    let min_span = min_view_span(
+        waveform.map(|waveform| waveform.pcm().sample_rate),
+        track.width(),
+    );
+    let mut view = load_view(ui, edit.tag_key, &clip_id, duration, min_span);
+    let playing = loaded.is_some_and(|playback| playback.playing);
+    let was_playing_id = egui::Id::new(("clip_player_was_playing", edit.tag_key));
+    if playing
+        && !ui
+            .data(|data| data.get_temp::<bool>(was_playing_id))
+            .unwrap_or(false)
+    {
+        view.follow = true;
+    }
+    ui.data_mut(|data| data.insert_temp(was_playing_id, playing));
+    if playing
+        && view.follow
+        && !view.whole(duration)
+        && (position < view.start || position > view.start + view.span)
+    {
+        view.start = position - view.span * 0.05;
+        view = view.clamped(duration, min_span);
+    }
+
     let x_of = |seconds: f64| {
-        if duration > 0.0 {
-            track.left() + (seconds / duration).clamp(0.0, 1.0) as f32 * track.width()
+        if view.span > 0.0 {
+            track.left() + ((seconds - view.start) / view.span) as f32 * track.width()
         } else {
             track.left()
         }
     };
 
     // Ruler: a tick every "nice" step that leaves room for its label.
-    if duration > 0.0 {
-        let step = ruler_step(duration, track.width());
-        let mut tick = 0.0;
-        while tick <= duration + 1e-9 {
+    if duration > 0.0 && view.span > 0.0 {
+        let step = ruler_step(view.span, track.width());
+        let mut tick = (view.start / step).ceil() * step;
+        while tick <= view.start + view.span + 1e-9 {
             let x = x_of(tick);
             painter.line_segment(
                 [
@@ -517,7 +585,7 @@ fn draw_timeline(
     // The waveform, then the playhead over it.
     let head = x_of(position);
     match waveform {
-        Some(waveform) => draw_lanes(ui, &painter, track, waveform, head),
+        Some(waveform) => draw_lanes(ui, &painter, track, waveform, head, view),
         None => {
             let note = match preview.map(|preview| &preview.state) {
                 Some(PreviewState::Pending) => "Loading waveform\u{2026}".to_owned(),
@@ -535,7 +603,6 @@ fn draw_timeline(
     }
     // The region: a band over the lanes, its edges marked.
     let region_id = clip_region_id(edit.tag_key);
-    let clip_id = clips[selected].id.clone();
     let mut region = stored_region(ui, edit.tag_key, &clip_id);
     if let Some((start, end)) = region {
         let band = egui::Rect::from_min_max(
@@ -578,7 +645,9 @@ fn draw_timeline(
         );
     }
 
-    let time_at = |x: f32| (((x - track.left()) / track.width()).clamp(0.0, 1.0) as f64) * duration;
+    let time_at = |x: f32| {
+        view.start + (((x - track.left()) / track.width()).clamp(0.0, 1.0) as f64) * view.span
+    };
     let edge_grab = 5.0;
     let near = |x: f32, seconds: f64| (x - x_of(seconds)).abs() <= edge_grab;
     // The ruler (and the playhead's head) scrub; the lanes select.
@@ -694,11 +763,113 @@ fn draw_timeline(
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
+    // Ctrl/Cmd + wheel (or a pinch) zooms around the pointer; a sideways
+    // scroll (Shift + wheel) pans. A plain wheel is left to the page.
+    if let Some(pointer) = response.hover_pos()
+        && duration > 0.0
+    {
+        let (zoom, pan) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta.x));
+        if zoom != 1.0 {
+            view = view.zoomed(f64::from(zoom), time_at(pointer.x), duration, min_span);
+        }
+        if pan != 0.0 && !view.whole(duration) {
+            view.start -= f64::from(pan / track.width()) * view.span;
+            view.follow = false;
+            view = view.clamped(duration, min_span);
+        }
+    }
+    store_view(ui, edit.tag_key, &clip_id, view);
+    if let Some(waveform) = waveform.filter(|_| !view.whole(duration))
+        && let Some(moved) = draw_overview(ui, waveform, duration, view)
+    {
+        store_view(
+            ui,
+            edit.tag_key,
+            &clip_id,
+            moved.clamped(duration, min_span),
+        );
+    }
+
     response.on_hover_text(if loaded.is_some() || previewed.is_some() {
-        "Click to jump \u{00B7} drag to select a region \u{00B7} drag the ruler to scrub"
+        "Click to jump \u{00B7} drag to select a region \u{00B7} drag the ruler to scrub \u{00B7} \
+         Ctrl/Cmd + wheel zooms, Shift + wheel scrolls"
     } else {
         "Click to play"
     });
+}
+
+/// The part of a clip the timeline shows, in seconds. `follow` pages it
+/// along with the playhead while playing; panning or zooming by hand turns
+/// it off until playing starts again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct View {
+    pub(super) start: f64,
+    pub(super) span: f64,
+    pub(super) follow: bool,
+}
+
+impl View {
+    fn fit(duration: f64) -> Self {
+        Self {
+            start: 0.0,
+            span: duration.max(0.0),
+            follow: true,
+        }
+    }
+
+    /// Kept within the clip and between `min_span` and the whole of it.
+    fn clamped(self, duration: f64, min_span: f64) -> Self {
+        let span = self.span.clamp(min_span.min(duration), duration.max(0.0));
+        Self {
+            start: self.start.clamp(0.0, (duration - span).max(0.0)),
+            span,
+            follow: self.follow,
+        }
+    }
+
+    fn zoomed(self, factor: f64, around: f64, duration: f64, min_span: f64) -> Self {
+        let fraction = if self.span > 0.0 {
+            ((around - self.start) / self.span).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let span = (self.span / factor).clamp(min_span.min(duration), duration);
+        Self {
+            start: around - fraction * span,
+            span,
+            follow: false,
+        }
+        .clamped(duration, min_span)
+    }
+
+    fn whole(&self, duration: f64) -> bool {
+        self.span >= duration - 1e-9
+    }
+}
+
+fn clip_view_id(tag_key: &str) -> egui::Id {
+    egui::Id::new(("clip_player_view", tag_key))
+}
+
+/// The view a tab's player has on `clip`: the whole clip until zoomed.
+pub(super) fn load_view(ui: &Ui, tag_key: &str, clip: &str, duration: f64, min_span: f64) -> View {
+    ui.data(|data| data.get_temp::<(String, View)>(clip_view_id(tag_key)))
+        .filter(|(view_clip, _)| view_clip == clip)
+        .map(|(_, view)| view.clamped(duration, min_span))
+        .unwrap_or_else(|| View::fit(duration))
+}
+
+fn store_view(ui: &Ui, tag_key: &str, clip: &str, view: View) {
+    ui.data_mut(|data| data.insert_temp(clip_view_id(tag_key), (clip.to_owned(), view)));
+}
+
+/// The narrowest view: about eight points a sample, or a millisecond when
+/// the rate is not known yet.
+fn min_view_span(sample_rate: Option<u32>, width: f32) -> f64 {
+    match sample_rate {
+        Some(rate) if rate > 0 => f64::from(width.max(1.0) / 8.0) / f64::from(rate),
+        _ => 0.001,
+    }
 }
 
 /// Where a tab's player keeps its region: the clip it is on, and its start
@@ -723,14 +894,17 @@ fn draw_lanes(
     track: egui::Rect,
     waveform: &crate::app::audio::Waveform,
     head: f32,
+    view: View,
 ) {
     let channels = waveform.channels().max(1);
     let lane_height = track.height() / f32::from(channels);
     let pixels_per_point = ui.ctx().pixels_per_point();
     let columns = (track.width() * pixels_per_point).floor().max(1.0) as usize;
     let column_width = track.width() / columns as f32;
-    let frames = waveform.frames();
-    let frames_per_column = frames as f64 / columns as f64;
+    let rate = f64::from(waveform.pcm().sample_rate.max(1));
+    let first = view.start * rate;
+    let last = ((view.start + view.span) * rate).min(waveform.frames() as f64);
+    let frames_per_column = (last - first).max(0.0) / columns as f64;
     let labels = crate::app::audio::channel_labels(channels);
     let played = foundation_blue();
     let unplayed = subtle_dark().gamma_multiply(0.55);
@@ -758,9 +932,15 @@ fn draw_lanes(
                 egui::Stroke::new(1.0, grid_line()),
             );
         }
+        if frames_per_column < 1.0 {
+            // Closer than a sample a pixel: a line through the samples, and
+            // a dot on each once they are far enough apart to tell.
+            draw_samples(painter, waveform, channel, track, lane, first, last, head);
+            continue;
+        }
         for column in 0..columns {
-            let start = (column as f64 * frames_per_column) as u64;
-            let end = (((column + 1) as f64 * frames_per_column) as u64).max(start + 1);
+            let start = (first + column as f64 * frames_per_column) as u64;
+            let end = ((first + (column + 1) as f64 * frames_per_column) as u64).max(start + 1);
             let Some(peak) = waveform.peak(channel, start, end) else {
                 break;
             };
@@ -810,11 +990,133 @@ fn draw_lanes(
     }
 }
 
+/// One channel's samples from frame `first` to `last` as a line across
+/// `track`, in `lane`; past six points a sample, with a dot on each.
+#[allow(clippy::too_many_arguments)]
+fn draw_samples(
+    painter: &egui::Painter,
+    waveform: &crate::app::audio::Waveform,
+    channel: usize,
+    track: egui::Rect,
+    lane: egui::Rect,
+    first: f64,
+    last: f64,
+    head: f32,
+) {
+    let pcm = waveform.pcm();
+    let channels = pcm.channels as usize;
+    let span = (last - first).max(1e-9);
+    let middle = lane.center().y;
+    let half = lane.height() * 0.45;
+    let point = |frame: u64| {
+        let sample = pcm.samples[frame as usize * channels + channel];
+        egui::pos2(
+            track.left() + ((frame as f64 - first) / span) as f32 * track.width(),
+            middle - f32::from(sample) / 32768.0 * half,
+        )
+    };
+    let from = first.floor().max(0.0) as u64;
+    let to = (last.ceil() as u64 + 1).min(waveform.frames());
+    let color = |x: f32| {
+        if x < head {
+            foundation_blue()
+        } else {
+            subtle_dark()
+        }
+    };
+    let dots = track.width() as f64 / span >= 6.0;
+    let mut previous: Option<egui::Pos2> = None;
+    for frame in from..to {
+        let here = point(frame);
+        if let Some(previous) = previous {
+            painter.line_segment([previous, here], egui::Stroke::new(1.5, color(here.x)));
+        }
+        if dots {
+            painter.circle_filled(here, 2.0, color(here.x));
+        }
+        previous = Some(here);
+    }
+}
+
+/// The whole clip in a strip under the lanes, with the part shown boxed:
+/// drag the box to scroll, click elsewhere to centre the view there. The
+/// view the strip moved to, if it did.
+fn draw_overview(
+    ui: &mut Ui,
+    waveform: &crate::app::audio::Waveform,
+    duration: f64,
+    view: View,
+) -> Option<View> {
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width().max(120.0), OVERVIEW_HEIGHT),
+        Sense::click_and_drag(),
+    );
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, foundation_input());
+    let columns = rect.width().max(1.0) as usize;
+    let frames_per_column = waveform.frames() as f64 / columns as f64;
+    let mut mesh = egui::Mesh::default();
+    for column in 0..columns {
+        let start = (column as f64 * frames_per_column) as u64;
+        let end = (((column + 1) as f64 * frames_per_column) as u64).max(start + 1);
+        let loudest = (0..waveform.channels() as usize)
+            .filter_map(|channel| waveform.peak(channel, start, end))
+            .map(|peak| f32::from(peak.max).max(-f32::from(peak.min)) / 32768.0)
+            .fold(0.0, f32::max);
+        let x = rect.left() + column as f32;
+        let half = rect.height() * 0.45 * loudest;
+        mesh.add_colored_rect(
+            egui::Rect::from_min_max(
+                egui::pos2(x, rect.center().y - half),
+                egui::pos2(x + 1.0, rect.center().y + half.max(0.5)),
+            ),
+            subtle_dark().gamma_multiply(0.55),
+        );
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    let x_of = |seconds: f64| rect.left() + (seconds / duration) as f32 * rect.width();
+    let shown = egui::Rect::from_min_max(
+        egui::pos2(x_of(view.start), rect.top()),
+        egui::pos2(
+            x_of(view.start + view.span).max(x_of(view.start) + 3.0),
+            rect.bottom(),
+        ),
+    );
+    painter.rect(
+        shown,
+        2.0,
+        foundation_blue().gamma_multiply(0.2),
+        egui::Stroke::new(1.0, foundation_blue()),
+    );
+    let response =
+        response.on_hover_text("The whole sound: drag the box to scroll, click to centre");
+    let mut moved = None;
+    if response.dragged() {
+        let shift = f64::from(response.drag_delta().x / rect.width()) * duration;
+        moved = Some(View {
+            start: view.start + shift,
+            follow: false,
+            ..view
+        });
+    } else if response.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let at = f64::from((pointer.x - rect.left()) / rect.width()) * duration;
+        moved = Some(View {
+            start: at - view.span / 2.0,
+            follow: false,
+            ..view
+        });
+    }
+    moved
+}
+
 /// The ruler's tick spacing: the smallest of a set of round steps that
 /// keeps ticks at least ~70 points apart.
 pub(super) fn ruler_step(duration: f64, width: f32) -> f64 {
-    const STEPS: [f64; 14] = [
-        0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0,
+    const STEPS: [f64; 17] = [
+        0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0,
+        30.0, 60.0,
     ];
     let ticks = (width / 70.0).max(1.0) as f64;
     STEPS
@@ -833,8 +1135,10 @@ fn format_ruler_time(seconds: f64, step: f64) -> String {
         0
     } else if step >= 0.1 {
         1
-    } else {
+    } else if step >= 0.01 {
         2
+    } else {
+        3
     };
     format!("{seconds:.decimals$}")
 }
@@ -876,6 +1180,8 @@ mod tests {
         bars: Vec<(egui::Rect, egui::Color32)>,
         /// Filled rects from the last frame, with their fill.
         fills: Vec<(egui::Rect, egui::Color32)>,
+        /// Line segments painted in the last frame.
+        segments: usize,
         /// The clips previews were asked for, in order.
         previewed: Vec<String>,
         /// The tab's preview, as the audio state would hand it over.
@@ -893,6 +1199,7 @@ mod tests {
                 texts: Vec::new(),
                 bars: Vec::new(),
                 fills: Vec::new(),
+                segments: 0,
                 previewed: Vec::new(),
                 preview: None,
                 timeline: egui::Rect::NOTHING,
@@ -956,6 +1263,11 @@ mod tests {
                         .collect::<Vec<_>>()
                 })
                 .collect();
+            self.segments = output
+                .shapes
+                .iter()
+                .filter(|clipped| matches!(clipped.shape, egui::Shape::LineSegment { .. }))
+                .count();
             self.fills = output
                 .shapes
                 .iter()
@@ -1553,5 +1865,240 @@ mod tests {
                 (None, "seek 1.5".to_owned()),
             ]
         );
+    }
+
+    fn stored_view(h: &Harness) -> Option<View> {
+        h.ctx
+            .data(|data| data.get_temp::<(String, View)>(clip_view_id("test")))
+            .map(|(_, view)| view)
+    }
+
+    #[test]
+    fn zooming_keeps_the_time_under_the_pointer() {
+        let whole = View::fit(10.0);
+        let zoomed = whole.zoomed(4.0, 5.0, 10.0, 0.01);
+        assert!((zoomed.span - 2.5).abs() < 1e-9);
+        // 5 s was halfway across, and still is.
+        assert!(((5.0 - zoomed.start) / zoomed.span - 0.5).abs() < 1e-9);
+        assert!(!zoomed.follow, "a zoom by hand stops following");
+        // Near the end, the view stays inside the clip.
+        let end = whole.zoomed(4.0, 9.9, 10.0, 0.01);
+        assert!(end.start + end.span <= 10.0 + 1e-9);
+        // Never narrower than the narrowest, never wider than the clip.
+        assert!((whole.zoomed(1e9, 5.0, 10.0, 0.01).span - 0.01).abs() < 1e-9);
+        assert!((zoomed.zoomed(1e-9, 5.0, 10.0, 0.01).span - 10.0).abs() < 1e-9);
+    }
+
+    fn wheel(delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers,
+        }
+    }
+
+    /// A pinch zooms around the pointer, and the ruler and clicks follow the
+    /// view; a plain wheel is left to the page; Shift + wheel pans; the
+    /// overview strip shows only while zoomed in.
+    #[test]
+    fn the_timeline_zooms_and_pans() {
+        let mut h = Harness::new();
+        h.playback = Some(sound(1, 2000, |_, f| (f % 100) as i16 * 100));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let middle = h.lanes_at(0.5);
+
+        // A plain wheel scrolls the page, not the view.
+        h.frame(vec![
+            egui::Event::PointerMoved(middle),
+            wheel(egui::vec2(0.0, -40.0), egui::Modifiers::NONE),
+        ]);
+        h.frame(Vec::new());
+        assert_eq!(
+            stored_view(&h).map(|view| view.span),
+            Some(2.0),
+            "a plain wheel zoomed"
+        );
+
+        // Pinch-zoom by 4 around the middle: 0.75 s – 1.25 s.
+        h.frame(vec![
+            egui::Event::PointerMoved(middle),
+            egui::Event::Zoom(4.0),
+        ]);
+        h.frame(Vec::new());
+        let view = stored_view(&h).expect("no view stored");
+        assert!(
+            (view.span - 0.5).abs() < 1e-6 && (view.start - 0.75).abs() < 1e-6,
+            "{view:?}"
+        );
+        assert!(
+            h.texts.iter().any(|(text, _)| text == "0.80"),
+            "the ruler did not follow: {:?}",
+            h.texts
+        );
+
+        // A click at the track's quarter point is a quarter of the way into the view.
+        h.take();
+        h.click(h.lanes_at(0.25));
+        let seeks: Vec<String> = h.take().into_iter().map(|(_, action)| action).collect();
+        assert_eq!(seeks, ["seek 0.9"]);
+
+        // Shift + wheel pans later in the clip.
+        for _ in 0..8 {
+            h.frame(vec![
+                egui::Event::PointerMoved(middle),
+                wheel(egui::vec2(0.0, -40.0), egui::Modifiers::SHIFT),
+            ]);
+        }
+        for _ in 0..30 {
+            h.frame(Vec::new());
+        }
+        let panned = stored_view(&h).unwrap();
+        assert!(
+            panned.start != view.start,
+            "Shift + wheel did not pan: {panned:?}"
+        );
+        assert!(
+            (panned.span - view.span).abs() < 1e-9,
+            "panning changed the zoom"
+        );
+    }
+
+    /// The overview strip appears once zoomed in, and dragging its box
+    /// scrolls the view.
+    #[test]
+    fn the_overview_strip_scrolls_a_zoomed_view() {
+        let mut h = Harness::new();
+        h.playback = Some(sound(1, 2000, |_, f| (f % 100) as i16 * 100));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let strip = |h: &Harness| {
+            h.fills
+                .iter()
+                .find(|(rect, fill)| {
+                    rect.height() == OVERVIEW_HEIGHT && *fill == foundation_input()
+                })
+                .map(|(rect, _)| *rect)
+        };
+        assert!(strip(&h).is_none(), "an overview strip on an unzoomed view");
+        h.ctx.data_mut(|data| {
+            data.insert_temp(
+                clip_view_id("test"),
+                (
+                    "id-a".to_owned(),
+                    View {
+                        start: 0.0,
+                        span: 0.5,
+                        follow: false,
+                    },
+                ),
+            )
+        });
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let strip = strip(&h).expect("no overview strip while zoomed");
+        // The box covers the first quarter; drag it right by a quarter.
+        let from = egui::pos2(strip.left() + strip.width() * 0.125, strip.center().y);
+        let to = egui::pos2(strip.left() + strip.width() * 0.375, strip.center().y);
+        h.drag(from, to);
+        let view = stored_view(&h).unwrap();
+        assert!((view.start - 0.5).abs() < 0.05, "{view:?}");
+    }
+
+    /// While playing, the view pages along with the playhead; once panned by
+    /// hand it stays put.
+    #[test]
+    fn a_zoomed_view_follows_the_playhead_until_panned() {
+        let mut h = Harness::new();
+        let mut view = sound(1, 2000, |_, _| 1000);
+        view.playing = true;
+        view.position = 1.6;
+        h.playback = Some(view.clone());
+        h.ctx.data_mut(|data| {
+            data.insert_temp(
+                clip_view_id("test"),
+                (
+                    "id-a".to_owned(),
+                    View {
+                        start: 0.0,
+                        span: 0.5,
+                        follow: true,
+                    },
+                ),
+            )
+        });
+        h.frame(Vec::new());
+        let followed = stored_view(&h).unwrap();
+        assert!(
+            followed.start <= 1.6 && 1.6 <= followed.start + followed.span,
+            "{followed:?}"
+        );
+
+        h.ctx.data_mut(|data| {
+            data.insert_temp(
+                clip_view_id("test"),
+                (
+                    "id-a".to_owned(),
+                    View {
+                        start: 0.0,
+                        span: 0.5,
+                        follow: false,
+                    },
+                ),
+            )
+        });
+        h.frame(Vec::new());
+        assert_eq!(
+            stored_view(&h).unwrap().start,
+            0.0,
+            "a panned view followed"
+        );
+    }
+
+    /// Closer than a sample a pixel, the lanes draw the samples as a line.
+    #[test]
+    fn a_close_zoom_draws_the_samples() {
+        let mut h = Harness::new();
+        h.playback = Some(sound(1, 2000, |_, f| if f % 2 == 0 { 8000 } else { -8000 }));
+        h.ctx.data_mut(|data| {
+            data.insert_temp(
+                clip_view_id("test"),
+                (
+                    "id-a".to_owned(),
+                    View {
+                        start: 1.0,
+                        span: 0.02,
+                        follow: false,
+                    },
+                ),
+            )
+        });
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        // (The overview strip under the track still draws its own bars.)
+        let track = h.timeline;
+        assert!(
+            !h.bars.iter().any(|(rect, _)| track.contains(rect.center())),
+            "bars in the track at a close zoom"
+        );
+        assert!(h.segments >= 19, "only {} sample segments", h.segments);
+    }
+
+    /// Ctrl/Cmd + wheel zooms (egui turns it into a zoom, as it does a pinch).
+    #[test]
+    fn command_wheel_zooms() {
+        let mut h = Harness::new();
+        h.playback = Some(sound(1, 2000, |_, f| (f % 100) as i16 * 100));
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        let middle = h.lanes_at(0.5);
+        for _ in 0..3 {
+            h.frame(vec![
+                egui::Event::PointerMoved(middle),
+                wheel(egui::vec2(0.0, 40.0), egui::Modifiers::COMMAND),
+            ]);
+        }
+        let view = stored_view(&h).expect("no view stored");
+        assert!(view.span < 2.0, "Ctrl/Cmd + wheel did not zoom: {view:?}");
     }
 }
