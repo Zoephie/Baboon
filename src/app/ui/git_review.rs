@@ -883,24 +883,7 @@ impl Baboon {
         match action {
             Some(GitReviewAction::OpenRepositoryFolder) => {
                 if let Some(repo) = repo {
-                    #[cfg(target_os = "windows")]
                     self.open_folder_in_explorer(repo, "Repository");
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        if !repo.is_dir() {
-                            self.status =
-                                format!("Repository folder not found: {}", repo.display());
-                        } else {
-                            #[cfg(target_os = "macos")]
-                            let opener = "open";
-                            #[cfg(not(target_os = "macos"))]
-                            let opener = "xdg-open";
-                            self.status = match Command::new(opener).arg(&repo).spawn() {
-                                Ok(_) => format!("Opened repository folder: {}", repo.display()),
-                                Err(error) => format!("Could not open repository folder: {error}"),
-                            };
-                        }
-                    }
                 }
             }
             Some(GitReviewAction::OpenGitHubDesktop) => {

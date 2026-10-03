@@ -4382,24 +4382,32 @@ impl Baboon {
         self.open_folder_in_explorer(path, "Tag");
     }
 
+    /// Show `path` in the system's file manager: File Explorer, Finder, or
+    /// whatever `xdg-open` picks.
+    ///
+    /// Only Windows used to do anything here; everywhere else the user was
+    /// told the action was Windows-only, though the git review panel already
+    /// opened folders on macOS and Linux its own way.
     pub(super) fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
+        self.open_folder_with(path, label, |mut command| command.spawn().map(drop));
+    }
+
+    /// [`Self::open_folder_in_explorer`] with the launch passed in, so the
+    /// command can be checked without opening a window.
+    fn open_folder_with(
+        &mut self,
+        path: PathBuf,
+        label: &str,
+        spawn: impl FnOnce(Command) -> std::io::Result<()>,
+    ) {
         if !path.is_dir() {
             self.status = format!("{label} folder not found: {}", path.display());
             return;
         }
-
-        #[cfg(windows)]
-        {
-            match Command::new("explorer").arg(&path).spawn() {
-                Ok(_) => self.status = format!("Opened {} folder: {}", label, path.display()),
-                Err(error) => self.status = format!("Could not open File Explorer: {error}"),
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = path;
-            self.status = "Open folder is only available on Windows".to_owned();
-        }
+        self.status = match spawn(folder_opener(&path)) {
+            Ok(()) => format!("Opened {} folder: {}", label, path.display()),
+            Err(error) => format!("Could not open the {label} folder: {error}"),
+        };
     }
 
     /// Start resolving a loaded model's materials to textures, if it needs it.
@@ -9702,6 +9710,19 @@ fn close_action_includes_chimp(action: &PendingCloseAction) -> bool {
     )
 }
 
+/// The command that opens `folder` in the platform's file manager.
+fn folder_opener(folder: &Path) -> Command {
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let program = "xdg-open";
+    let mut command = Command::new(program);
+    command.arg(folder);
+    command
+}
+
 fn reset_lazy_folder_browser(
     root: &Path,
     tree: &mut TagTree,
@@ -13607,6 +13628,48 @@ mod saved_tag_index_tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(model, (false, false), "saving another group leaves them");
         assert_eq!(option, (true, true), "saving an option drops them");
+    }
+}
+
+#[cfg(test)]
+mod folder_opener_tests {
+    use super::*;
+
+    /// Open Folder did nothing but say "only available on Windows" on macOS
+    /// and Linux. Every platform now launches its file manager on the folder.
+    #[test]
+    fn open_folder_launches_the_platform_file_manager() {
+        let folder = std::env::temp_dir();
+        let mut app = Baboon::for_test();
+        let mut launched = None;
+        app.open_folder_with(folder.clone(), "Tag", |command| {
+            launched = Some((
+                command.get_program().to_owned(),
+                command.get_args().map(ToOwned::to_owned).collect::<Vec<_>>(),
+            ));
+            Ok(())
+        });
+        let expected = if cfg!(windows) {
+            "explorer"
+        } else if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        assert_eq!(
+            launched,
+            Some((expected.into(), vec![folder.clone().into_os_string()]))
+        );
+        assert!(app.status.starts_with("Opened Tag folder"), "{}", app.status);
+
+        // A folder that is not there launches nothing.
+        let mut launched = false;
+        app.open_folder_with(folder.join("baboon-no-such-folder"), "Tag", |_| {
+            launched = true;
+            Ok(())
+        });
+        assert!(!launched);
+        assert!(app.status.contains("not found"), "{}", app.status);
     }
 }
 
