@@ -338,62 +338,11 @@ impl Baboon {
             ui.close_menu();
         }
         ui.separator();
-        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
-            && self
-                .source()
-                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
-        if ui
-            .add_enabled(
-                can_fix_dependencies,
-                egui::Button::new("Fix Tag Dependencies"),
-            )
-            .clicked()
-        {
+        // Goes through the same close request as the window's own close
+        // button, so unsaved tags are still offered for saving first.
+        if ui.button("Exit").clicked() {
             ui.close_menu();
-            self.fix_current_tag_dependencies();
-        }
-        // Regenerate Index: force a fresh full scan and
-        // overwrite the cached index file.
-        let can_regen = self
-            .source()
-            .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
-            .unwrap_or(false);
-        if ui
-            .add_enabled(
-                can_regen && !self.kits[self.active].scanning_entries,
-                egui::Button::new("Regenerate Index"),
-            )
-            .clicked()
-        {
-            ui.close_menu();
-            // Clear cached entries so the scan runs fresh.
-            if let Some(s) = self.source_mut() {
-                s.all_entries.clear();
-                s.group_tree = crate::source::build_group_tree(&[]);
-                s.reverse_dependencies = None;
-            }
-            self.kits[self.active].field_index.invalidate();
-            self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
-        }
-        let can_refresh_browser = self.source().is_some_and(|source| {
-            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
-        });
-        if ui
-            .add_enabled(
-                can_refresh_browser
-                    && !self.kits[self.active].scanning_entries
-                    && !self.kits[self.active].index_jobs.refreshing,
-                egui::Button::new("Refresh Tag Browser"),
-            )
-            .clicked()
-        {
-            ui.close_menu();
-            self.refresh_tag_browser(ctx.clone());
-        }
-        ui.separator();
-        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
-            self.settings_open = true;
-            ui.close_menu();
+            self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
         }
     }
 
@@ -462,9 +411,17 @@ impl Baboon {
                 });
             }
         }
+
+        ui.separator();
+        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
+            self.settings_open = true;
+            ui.close_menu();
+        }
     }
 
-    /// The Tools menu: the tool runner, reference searches, and the tag listings.
+    /// The Tools menu, in four sections: the tool and asset launchers, actions
+    /// on the current tag, searches and listings across the workspace, and the
+    /// indexes those searches run on.
     fn draw_tools_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("Run Tool...").clicked() {
@@ -473,10 +430,12 @@ impl Baboon {
         }
         self.draw_monitor_tools_menu(ui);
         self.draw_assets_tools_menu(ui);
+
         ui.separator();
+        let has_current = self.kits[self.active].selected_key.is_some();
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some(),
+                has_current,
                 egui::Button::new("Find References to Current Tag"),
             )
             .clicked()
@@ -488,7 +447,7 @@ impl Baboon {
         }
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some(),
+                has_current,
                 egui::Button::new("Explore References to Current Tag..."),
             )
             .clicked()
@@ -498,10 +457,68 @@ impl Baboon {
                 self.open_content_explorer(&key);
             }
         }
+        if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
+            ui.close_menu();
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.tag_diff = Some(TagDiffState {
+                    kit: self.active_kit_id(),
+                    a_key: key,
+                    source: TagCompareSource::OpenTag,
+                    b_kit: None,
+                    b_key: None,
+                    b_path: None,
+                    comparison_kit_root: None,
+                    git_history: GitHistoryState::default(),
+                    error: None,
+                    filters: TagDiffFilters::default(),
+                    swapped: false,
+                    results: None,
+                    git_pending: None,
+                });
+            }
+        }
+        let can_fix_dependencies = has_current
+            && self
+                .source()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
+        if ui
+            .add_enabled(
+                can_fix_dependencies,
+                egui::Button::new("Fix Tag Dependencies"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.fix_current_tag_dependencies();
+        }
+
+        ui.separator();
+        if ui.button("Search Field Values...").clicked() {
+            ui.close_menu();
+            self.field_value_search_open = true;
+        }
+        if ui.button("Browse Keywords...").clicked() {
+            ui.close_menu();
+            self.keyword_chooser_open = true;
+        }
         if ui.button("Find Unreferenced Tags...").clicked() {
             ui.close_menu();
             self.show_unreferenced_tags();
         }
+        if ui.button("List Scenario Map IDs...").clicked() {
+            ui.close_menu();
+            self.show_map_ids(ctx);
+        }
+        if ui.button("List Sounds by Class...").clicked() {
+            ui.close_menu();
+            self.show_sounds_by_class(ctx);
+        }
+        if ui.button("List Uncompressed Sounds...").clicked() {
+            ui.close_menu();
+            self.show_uncompressed_sounds(ctx);
+        }
+
+        ui.separator();
         {
             // Loose folders and Campaign Evolved containers can
             // both be indexed; cache sources cannot.
@@ -526,59 +543,51 @@ impl Baboon {
                     indexable && !self.kits[self.active].index_jobs.building_references,
                     egui::Button::new(label),
                 )
+                .on_hover_text("Which tags reference which, for the reference searches above")
                 .clicked()
             {
                 ui.close_menu();
                 self.begin_build_reverse_dependencies(ctx.clone(), true);
             }
         }
-        if ui.button("List Scenario Map IDs...").clicked() {
-            ui.close_menu();
-            self.show_map_ids(ctx);
-        }
-        if ui.button("List Sounds by Class...").clicked() {
-            ui.close_menu();
-            self.show_sounds_by_class(ctx);
-        }
-        if ui.button("List Uncompressed Sounds...").clicked() {
-            ui.close_menu();
-            self.show_uncompressed_sounds(ctx);
-        }
-        if ui.button("Search Field Values...").clicked() {
-            ui.close_menu();
-            self.field_value_search_open = true;
-        }
-        if icon_text_button(
-            ui,
-            ButtonIcon::Compare,
-            "Compare Tags...",
-            self.kits[self.active].selected_key.is_some(),
-        )
-        .clicked()
+        // Regenerate the tag index: force a fresh full scan and overwrite the
+        // cached index file.
+        let can_regen = self
+            .source()
+            .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
+            .unwrap_or(false);
+        if ui
+            .add_enabled(
+                can_regen && !self.kits[self.active].scanning_entries,
+                egui::Button::new("Regenerate Tag Index"),
+            )
+            .on_hover_text("Rescan every tag in the folder from disk")
+            .clicked()
         {
             ui.close_menu();
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                self.tag_diff = Some(TagDiffState {
-                    kit: self.active_kit_id(),
-                    a_key: key,
-                    source: TagCompareSource::OpenTag,
-                    b_kit: None,
-                    b_key: None,
-                    b_path: None,
-                    comparison_kit_root: None,
-                    git_history: GitHistoryState::default(),
-                    error: None,
-                    filters: TagDiffFilters::default(),
-                    swapped: false,
-                    results: None,
-                    git_pending: None,
-                });
+            // Clear cached entries so the scan runs fresh.
+            if let Some(s) = self.source_mut() {
+                s.all_entries.clear();
+                s.group_tree = crate::source::build_group_tree(&[]);
+                s.reverse_dependencies = None;
             }
+            self.kits[self.active].field_index.invalidate();
+            self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
         }
-        ui.separator();
-        if ui.button("Browse Keywords...").clicked() {
+        let can_refresh_browser = self.source().is_some_and(|source| {
+            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
+        });
+        if ui
+            .add_enabled(
+                can_refresh_browser
+                    && !self.kits[self.active].scanning_entries
+                    && !self.kits[self.active].index_jobs.refreshing,
+                egui::Button::new("Refresh Tag Browser"),
+            )
+            .clicked()
+        {
             ui.close_menu();
-            self.keyword_chooser_open = true;
+            self.refresh_tag_browser(ctx.clone());
         }
     }
 
