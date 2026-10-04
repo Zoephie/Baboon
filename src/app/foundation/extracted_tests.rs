@@ -22,7 +22,7 @@ pub(in crate::app) mod tests {
     /// in radians, and the editor edits degrees like every other Halo tool.
     #[test]
     fn euler_angles_use_editable_named_components() {
-        let _units = crate::format::AngleUnitGuard::set(true);
+        let _units = crate::core::format::AngleUnitGuard::set(true);
         let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
             blam_tags::math::RealEulerAngles2d {
                 yaw: 45f32.to_radians(),
@@ -699,9 +699,9 @@ pub(in crate::app) mod tests {
             source: TagSource::IoStoreContainerSet {
                 root: PathBuf::from("C:/CampaignEvolved/Content/Paks"),
                 containers: Vec::new(),
-                index: std::sync::Arc::new(crate::source::ContainerTagIndex::default()),
-                packages: std::sync::Arc::new(crate::source::ContainerPackageIndex::default()),
-                shipped: std::sync::Arc::new(crate::source::ShippedTagIndex::default()),
+                index: std::sync::Arc::new(crate::core::source::ContainerTagIndex::default()),
+                packages: std::sync::Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: std::sync::Arc::new(crate::core::source::ShippedTagIndex::default()),
             },
             names: TagNameIndex::default(),
             game: Some("haloce_evolved".to_owned()),

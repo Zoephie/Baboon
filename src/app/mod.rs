@@ -36,8 +36,12 @@ use eframe::egui::{
 };
 use serde_json::{Value, json};
 
-use crate::format::{TagNameIndex, format_value, group_label};
-use crate::source::{
+use crate::core::bundled::{
+    definitions_missing_message, locate_definitions_root, locate_help_docs_root,
+};
+use crate::core::format::{TagNameIndex, format_value, group_label};
+use crate::core::process::background_command;
+use crate::core::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, KitLayout, LoadedSourceData,
     NewContainerTemplate, ReverseDependencyIndex, SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation,
     TagSource, TagTree, TagTreeNode, load_editing_kit_layout, load_folder,
@@ -464,7 +468,7 @@ impl Baboon {
         window_state: crate::window_state::WindowStateTracker,
         startup_arguments: StartupArguments,
     ) -> Self {
-        let storage = crate::storage::initialize();
+        let storage = crate::core::storage::initialize();
         Self::configure_context(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
@@ -874,62 +878,6 @@ impl Baboon {
     }
 }
 
-/// Locate the runtime definitions root. The primary runtime contract is:
-/// `definitions/` sits next to `Baboon.exe`.
-pub(super) fn locate_definitions_root() -> PathBuf {
-    let mut expected = None;
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let beside_exe = exe_dir.join("definitions");
-            if beside_exe.is_dir() {
-                return beside_exe;
-            }
-            expected = Some(beside_exe);
-        }
-    }
-    // The repo's own submodule first, as build.rs copies it: a sibling
-    // checkout beside the repo can be at any other commit, and tests (which run
-    // from target/*/deps, with no copy beside them) read whatever they find.
-    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    if dev_at_manifest.is_dir() {
-        return dev_at_manifest;
-    }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("definitions");
-    if dev.is_dir() {
-        return dev;
-    }
-    expected.unwrap_or(dev_at_manifest)
-}
-
-pub(crate) fn definitions_missing_message(path: &Path) -> String {
-    format!(
-        "Could not find definitions folder. Expected it at {} — ensure the definitions submodule is initialised with 'git submodule update --init'.",
-        path.display()
-    )
-}
-
-/// Locate the runtime help docs root. Release builds copy `docs/` next to
-/// `Baboon.exe`, matching the editable-on-disk contract used by `definitions/`.
-pub(super) fn locate_help_docs_root() -> PathBuf {
-    let mut expected = None;
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let beside_exe = exe_dir.join("docs");
-            if beside_exe.is_dir() {
-                return beside_exe;
-            }
-            expected = Some(beside_exe);
-        }
-    }
-    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs");
-    if dev_at_manifest.is_dir() {
-        return dev_at_manifest;
-    }
-    expected.unwrap_or(dev_at_manifest)
-}
-
 /// Decode an embedded `.ico` into an egui texture for a toolbar button.
 fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
     let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Ico).ok()?;
@@ -937,26 +885,6 @@ fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
-}
-
-/// A command for a helper program Baboon runs out of sight: `git`,
-/// `taskkill`, PowerShell, `cmd`.
-///
-/// On Windows it starts with `CREATE_NO_WINDOW`. A release build is a
-/// GUI-subsystem program with no console of its own, so Windows gives every
-/// console program it starts a new console window, which flashes up over
-/// Baboon. Elsewhere this is `Command::new` exactly.
-pub(crate) fn background_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut command = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        /// `CREATE_NO_WINDOW` from the Windows process creation flags.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
 }
 
 fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {

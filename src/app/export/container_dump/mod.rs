@@ -152,7 +152,7 @@ fn write_shipped_entry(
     entry: &TagEntry,
     output: &Path,
 ) -> anyhow::Result<Option<u64>> {
-    let Some(bytes) = crate::source::read_shipped_entry_bytes(source, entry)? else {
+    let Some(bytes) = crate::core::source::read_shipped_entry_bytes(source, entry)? else {
         return Ok(None);
     };
     let relative = safe_relative_path(&entry.display_path)

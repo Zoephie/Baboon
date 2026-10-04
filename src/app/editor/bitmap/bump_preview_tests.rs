@@ -106,12 +106,12 @@ fn the_bitmap_editor_decodes_off_the_ui_thread() {
         return;
     }
     let tag = TagFile::read(&path).expect("read bump bitmap tag");
-    let entry = crate::source::TagEntry {
+    let entry = crate::core::source::TagEntry {
         key: "file:bump".to_owned(),
         display_path: BUMP_TAG.to_owned(),
         group_tag: u32::from_be_bytes(*b"bitm"),
         group_name: None,
-        location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+        location: crate::core::source::TagEntryLocation::LooseFile(path.clone()),
     };
     let mut preview = crate::app::BitmapPreviewState::default();
     let ctx = egui::Context::default();

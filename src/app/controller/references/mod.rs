@@ -51,7 +51,7 @@ impl Baboon {
                 let to_save = index.clone();
                 thread::spawn(move || {
                     if let Err(e) =
-                        crate::source::save_reverse_dependency_index(&game, &root, &to_save)
+                        crate::core::source::save_reverse_dependency_index(&game, &root, &to_save)
                     {
                         eprintln!("reverse-dependency index save failed: {e}");
                     }
@@ -139,18 +139,18 @@ impl Baboon {
             source.entries.clear();
             source.all_entries = done.all_entries;
             source.tree = done.tree;
-            source.group_tree = crate::source::build_group_tree(&source.all_entries);
+            source.group_tree = crate::core::source::build_group_tree(&source.all_entries);
             source.reverse_dependencies = done.reverse_dependencies;
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 if !source.all_entries.is_empty()
                     && let Some(game) = source.game.as_deref()
                 {
-                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+                    let _ = crate::core::source::save_entry_index(game, root, &source.all_entries);
                 }
                 if let (Some(game), Some(reverse_dependencies)) =
                     (source.game.as_deref(), source.reverse_dependencies.as_ref())
                 {
-                    let _ = crate::source::save_reverse_dependency_index(
+                    let _ = crate::core::source::save_reverse_dependency_index(
                         game,
                         root,
                         reverse_dependencies,
@@ -185,7 +185,7 @@ impl Baboon {
 }
 
 pub(super) fn normalize_ref(rel_path: &str) -> String {
-    crate::source::normalize_dependency_path(rel_path)
+    crate::core::source::normalize_dependency_path(rel_path)
 }
 
 pub(super) fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {

@@ -186,7 +186,7 @@ impl LooseKit {
     }
 
     pub(super) fn entries(&self) -> Vec<TagEntry> {
-        crate::source::scan_folder_subtree_entries(&self.root, Path::new(""), &self.names())
+        crate::core::source::scan_folder_subtree_entries(&self.root, Path::new(""), &self.names())
             .expect("scan the fixture")
     }
 
@@ -211,8 +211,8 @@ impl LooseKit {
             names: self.names(),
             game: Some(self.game.to_owned()),
             entries: entries.clone(),
-            tree: crate::source::build_folder_directory_tree(&self.root).unwrap(),
-            group_tree: crate::source::build_group_tree(&entries),
+            tree: crate::core::source::build_folder_directory_tree(&self.root).unwrap(),
+            group_tree: crate::core::source::build_group_tree(&entries),
             all_entries: entries,
             reverse_dependencies: None,
             initial_tag: None,

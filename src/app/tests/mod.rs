@@ -2108,7 +2108,7 @@ fn a_classic_snapshot_restores_through_the_classic_reader() {
     bytes.extend_from_slice(&1u32.to_le_bytes());
     bytes.extend_from_slice(&(size as u32).to_le_bytes());
     bytes.resize(bytes.len() + size, 0);
-    let mut tag = crate::source::read_tag_from_bytes(
+    let mut tag = crate::core::source::read_tag_from_bytes(
         &bytes,
         Some("halo2_mcc"),
         Some(&definitions),
@@ -2123,10 +2123,10 @@ fn a_classic_snapshot_restores_through_the_classic_reader() {
         "the MCC reader cannot parse a classic snapshot"
     );
     assert!(
-        crate::source::read_tag_from_bytes(&snapshot, None, None, group).is_err(),
+        crate::core::source::read_tag_from_bytes(&snapshot, None, None, group).is_err(),
         "a classic snapshot needs the game to find its layout"
     );
-    let restored = crate::source::read_tag_from_bytes(
+    let restored = crate::core::source::read_tag_from_bytes(
         &snapshot,
         Some("halo2_mcc"),
         Some(&locate_definitions_root()),

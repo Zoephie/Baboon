@@ -760,7 +760,7 @@ impl Baboon {
         thread::spawn(move || {
             let stamp = source_stamp(&path);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let tag = crate::source::read_tag_at_path(
+                let tag = crate::core::source::read_tag_at_path(
                     &path,
                     Some(&source_game),
                     Some(&definitions_root),

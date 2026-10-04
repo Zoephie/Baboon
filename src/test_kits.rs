@@ -67,7 +67,7 @@ pub(crate) fn tag_path(game: &str, rel: &str) -> &'static str {
 
 /// This repository's own definitions, which tests read tags against.
 pub(crate) fn definitions() -> &'static std::path::Path {
-    std::path::Path::new(leak(crate::app::locate_definitions_root()))
+    std::path::Path::new(leak(crate::core::bundled::locate_definitions_root()))
 }
 
 pub(crate) fn leak(path: PathBuf) -> &'static str {

@@ -39,7 +39,7 @@ fn kit_with_state() -> Kit {
             .insert(key.to_owned(), ModelPreviewState::default());
         kit.ce_sound_bindings.insert(
             key.to_owned(),
-            std::sync::Arc::new(crate::source::ce_audio::CeSoundBinding::default()),
+            std::sync::Arc::new(crate::core::source::ce_audio::CeSoundBinding::default()),
         );
         kit.pending_expand.insert(key.to_owned(), true);
         kit.find_filter_applied.insert(

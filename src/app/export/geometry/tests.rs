@@ -196,7 +196,7 @@ fn standalone_collision_and_physics_export_is_posed_by_the_owning_model() {
     let source = TagSource::LooseFolder {
         root: root.clone(),
         game: Some("halo3_mcc".to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     // A rigged character: its collision hulls and physics shapes are stored
     // per-bone, so an unposed export piles all of them on the origin.
@@ -333,7 +333,7 @@ fn animation_graph_without_its_own_rest_pose_borrows_the_owning_models() {
     let source = TagSource::LooseFolder {
         root: root.clone(),
         game: Some("haloreach_mcc".to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     // The magnum's own graph: five gun bones, and not one `additional node
     // data` entry to place them with.
@@ -423,13 +423,13 @@ fn ce_structure_bsp_and_scenario_export_geometry() {
         return;
     };
     let root = PathBuf::from(root);
-    let paks = crate::source::find_paks_dir(&root)
+    let paks = crate::core::source::find_paks_dir(&root)
         .unwrap_or_else(|| panic!("no Paks dir under {}", root.display()));
 
-    let definitions = crate::app::locate_definitions_root();
-    let names = crate::format::TagNameIndex::load_game(&definitions, "haloce_evolved")
+    let definitions = crate::core::bundled::locate_definitions_root();
+    let names = crate::core::format::TagNameIndex::load_game(&definitions, "haloce_evolved")
         .expect("load haloce_evolved tag-name index");
-    let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+    let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
         .expect("mount CE container set");
 
     let find = |suffix: &str, group: &[u8; 4]| {

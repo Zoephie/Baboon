@@ -3,7 +3,7 @@
 //! normalization, and file output belong to the controller.
 
 use super::*;
-use crate::source::{DependencyRef, ReverseDependencyIndex, dependency_key};
+use crate::core::source::{DependencyRef, ReverseDependencyIndex, dependency_key};
 use std::collections::HashSet;
 use std::fmt::Write as _;
 

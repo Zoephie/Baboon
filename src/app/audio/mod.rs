@@ -135,12 +135,12 @@ pub(super) enum SoundAction {
     },
     /// Play one Campaign Evolved Wwise media file. Unlike Halo 4 the tag names
     /// no event, so the media is resolved up front by walking package imports
-    /// (see [`crate::source::ce_audio`]) and the already-resolved entry is
+    /// (see [`crate::core::source::ce_audio`]) and the already-resolved entry is
     /// handed here. `paks_root` is the source's `Paks` directory, which holds
     /// the legacy `.pak` containers the media is staged in.
     PlayCeMedia {
         paks_root: std::path::PathBuf,
-        media: Box<crate::source::ce_audio::CeSoundMedia>,
+        media: Box<crate::core::source::ce_audio::CeSoundMedia>,
         label: String,
     },
     /// Set the playback volume (linear amplitude, `0..=VOLUME_LIMIT`). Applies
@@ -759,7 +759,7 @@ pub(super) struct AudioState {
     ///
     /// Shared with the decode workers, which hold the lock only to fetch a
     /// media file's bytes and decode after releasing it.
-    pub(super) ce_media: Arc<Mutex<crate::source::ce_audio::CeMediaStore>>,
+    pub(super) ce_media: Arc<Mutex<crate::core::source::ce_audio::CeMediaStore>>,
     /// Current playback volume (linear, 0.0..=1.0). Held here so it survives
     /// before the engine is lazily created and seeds it on first play.
     volume: Volume,
@@ -885,16 +885,16 @@ impl Default for AudioJobs {
 /// Fetch a Campaign Evolved media file under the store's lock, then decode it
 /// without holding it.
 fn decode_ce_media(
-    store: &Mutex<crate::source::ce_audio::CeMediaStore>,
+    store: &Mutex<crate::core::source::ce_audio::CeMediaStore>,
     paks_root: &Path,
-    media: &crate::source::ce_audio::CeSoundMedia,
+    media: &crate::core::source::ce_audio::CeSoundMedia,
 ) -> Result<DecodedPcm, String> {
     let bytes = store
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .fetch(paks_root, media)
         .map_err(|error| format!("{error:#}"))?;
-    crate::source::ce_audio::decode_media_bytes(media, &bytes).map_err(|error| format!("{error:#}"))
+    crate::core::source::ce_audio::decode_media_bytes(media, &bytes).map_err(|error| format!("{error:#}"))
 }
 
 fn decode_bank_subsound(
@@ -911,7 +911,7 @@ fn decode_bank_subsound(
 /// What an extraction batch reads from, captured on the UI thread.
 struct ExtractSources {
     tags_root: Option<PathBuf>,
-    ce_media: Arc<Mutex<crate::source::ce_audio::CeMediaStore>>,
+    ce_media: Arc<Mutex<crate::core::source::ce_audio::CeMediaStore>>,
 }
 
 /// Open every FMOD bank set a request needs and prove that each requested

@@ -153,7 +153,7 @@ fn a_filed_tag_is_keyed_like_the_folder_scan() {
     let tag = TagFile::new(schema_path(&schema_dir, "render_model").unwrap()).unwrap();
 
     let (entry, _) = file_tag(&job, tag, "test", "render_model").unwrap();
-    let scanned = crate::source::scan_folder_subtree_entries(
+    let scanned = crate::core::source::scan_folder_subtree_entries(
         &tags_root,
         Path::new(""),
         &TagNameIndex::default(),

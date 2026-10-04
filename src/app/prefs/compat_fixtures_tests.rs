@@ -294,7 +294,7 @@ fn compat_projects() {
 #[test]
 fn compat_campaign_identities() {
     let container = |logical: &str, group: &[u8; 4], extension: &str| TagEntry {
-        key: crate::source::container_entry_key(
+        key: crate::core::source::container_entry_key(
             "pakchunk0-WinGDK",
             &format!("Meteorite/Content/Tags/{logical}-{extension}.ubulk"),
         ),
@@ -330,7 +330,7 @@ fn compat_campaign_identities() {
         group_tag: u32::from_be_bytes(*b"trak"),
         group_name: Some("camera_track".to_owned()),
         location: TagEntryLocation::NewContainer {
-            template: crate::source::NewContainerTemplate::Derived {
+            template: crate::core::source::NewContainerTemplate::Derived {
                 group: "camera_track".to_owned(),
             },
             package: package.to_owned(),

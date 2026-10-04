@@ -481,7 +481,7 @@ impl Baboon {
             let Some(source) = self.kits[kit_index].source.as_ref() else {
                 continue;
             };
-            let targets = crate::source::mounted_containers_at(&source.source, &target_utoc);
+            let targets = crate::core::source::mounted_containers_at(&source.source, &target_utoc);
             if targets.is_empty() {
                 continue;
             }
@@ -681,7 +681,7 @@ impl Baboon {
             };
             (root.clone(), containers.clone())
         };
-        let reopened = crate::source::reopen_container_archive(&root, &containers, index);
+        let reopened = crate::core::source::reopen_container_archive(&root, &containers, index);
         let source = self.kits.get_mut(kit_index)?.source.as_mut()?;
         let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
             return None;
@@ -795,7 +795,7 @@ impl Baboon {
             .filter(|&kit_index| kit_index != writing)
             .filter(|&kit_index| {
                 self.kits[kit_index].source.as_ref().is_some_and(|source| {
-                    !crate::source::mounted_containers_at(&source.source, target_utoc).is_empty()
+                    !crate::core::source::mounted_containers_at(&source.source, target_utoc).is_empty()
                 })
             })
             .map(|kit_index| ContainerHolder::OtherWorkspaceMount {

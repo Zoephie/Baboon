@@ -484,7 +484,7 @@ pub fn mount_additional_container(
             layer_entry(&mut source.all_entries, &entry);
         }
     }
-    crate::source::rebuild_folder_tree(source, pending_folders);
+    crate::core::source::rebuild_folder_tree(source, pending_folders);
     source.group_tree = build_group_tree(if source.all_entries.is_empty() {
         &source.entries
     } else {
@@ -1078,7 +1078,7 @@ fn read_loose_tag(
             if !definitions_root.is_dir() {
                 anyhow::bail!(
                     "{}",
-                    crate::app::definitions_missing_message(definitions_root)
+                    crate::core::bundled::definitions_missing_message(definitions_root)
                 );
             }
             anyhow::bail!(

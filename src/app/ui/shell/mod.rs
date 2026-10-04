@@ -577,7 +577,7 @@ impl Baboon {
             // Clear cached entries so the scan runs fresh.
             if let Some(s) = self.source_mut() {
                 s.all_entries.clear();
-                s.group_tree = crate::source::build_group_tree(&[]);
+                s.group_tree = crate::core::source::build_group_tree(&[]);
                 s.reverse_dependencies = None;
             }
             self.kits[self.active].field_index.invalidate();
@@ -1493,7 +1493,7 @@ impl Baboon {
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
         // of the frame, and neither can reach `Baboon`.
-        crate::format::set_angles_in_degrees(self.prefs.angles_in_degrees);
+        crate::core::format::set_angles_in_degrees(self.prefs.angles_in_degrees);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.prefs.scroll_to_cycle_dropdowns);
         apply_scroll_speed(ctx, self.prefs.scroll_speed);

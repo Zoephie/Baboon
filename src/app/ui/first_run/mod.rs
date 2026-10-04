@@ -57,7 +57,7 @@ impl Baboon {
         ui.add_enabled_ui(!locked, |ui| {
             ui.radio_value(
                 &mut state.selected_storage,
-                Some(crate::storage::StorageMode::Installed),
+                Some(crate::core::storage::StorageMode::Installed),
                 "Installed mode (recommended)",
             );
             ui.indent("installed_description", |ui| {
@@ -66,7 +66,7 @@ impl Baboon {
             ui.add_space(6.0);
             ui.radio_value(
                 &mut state.selected_storage,
-                Some(crate::storage::StorageMode::Portable),
+                Some(crate::core::storage::StorageMode::Portable),
                 "Portable mode",
             );
             ui.indent("portable_description", |ui| {
@@ -89,7 +89,7 @@ impl Baboon {
                 .clicked()
             {
                 let mode = selected.expect("enabled only with a selection");
-                crate::storage::activate(mode);
+                crate::core::storage::activate(mode);
                 match self.save_first_run_checkpoint(false) {
                     Ok(()) => {
                         let state = self.first_run_wizard.as_mut().expect("wizard exists");

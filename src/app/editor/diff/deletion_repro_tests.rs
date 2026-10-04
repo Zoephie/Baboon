@@ -8,8 +8,8 @@ fn read_a15() -> Option<TagFile> {
         return None;
     }
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    let names = crate::format::TagNameIndex::load_from_definitions(&defs);
-    let loaded = crate::source::load_iostore_container_set(
+    let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
+    let loaded = crate::core::source::load_iostore_container_set(
         std::path::PathBuf::from(*PAKS),
         &names,
         &defs,
@@ -20,7 +20,7 @@ fn read_a15() -> Option<TagFile> {
         .iter()
         .find(|entry| entry.display_path.ends_with("a15.scenario"))?
         .clone();
-    crate::source::read_entry(&loaded.source, &entry).ok()
+    crate::core::source::read_entry(&loaded.source, &entry).ok()
 }
 
 /// Deleting one `zone set pvs` element reported a screen of changes through
@@ -37,7 +37,7 @@ fn deleting_a_zone_set_reports_only_that_deletion() {
         eprintln!("skipping: Campaign Evolved not present");
         return;
     };
-    let names = crate::format::TagNameIndex::default();
+    let names = crate::core::format::TagNameIndex::default();
     let before = base
         .root()
         .fields_all()
@@ -100,7 +100,7 @@ fn editing_an_element_that_also_shifts_is_still_the_same_element() {
         eprintln!("skipping: Campaign Evolved not present");
         return;
     };
-    let names = crate::format::TagNameIndex::default();
+    let names = crate::core::format::TagNameIndex::default();
     let mut dirty = Dirty::default();
     crate::app::apply_block_ops(
         &mut edited,
@@ -149,7 +149,7 @@ fn a_deletion_and_an_addition_change_no_values() {
         eprintln!("skipping: Campaign Evolved not present");
         return;
     };
-    let names = crate::format::TagNameIndex::default();
+    let names = crate::core::format::TagNameIndex::default();
     let mut dirty = Dirty::default();
     crate::app::apply_block_ops(
         &mut edited,

@@ -581,7 +581,7 @@ fn a_classic_tag_round_trips_through_undo_and_save() {
     let bytes = fs::read(kit.root.join("physics/pebble.point_physics")).unwrap();
     assert!(blam_tags::classic::ClassicHeader::parse(&bytes).is_some());
     assert!(TagFile::read_from_bytes(&bytes).is_err(), "not an MCC tag");
-    let saved = crate::source::read_tag_from_bytes(
+    let saved = crate::core::source::read_tag_from_bytes(
         &bytes,
         Some("haloce_mcc"),
         Some(&locate_definitions_root()),

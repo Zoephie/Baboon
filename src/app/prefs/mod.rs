@@ -5,19 +5,19 @@ use super::controller::add_standard_editing_kit_profiles;
 use super::*;
 
 pub(super) fn prefs_path() -> PathBuf {
-    crate::storage::data_path("prefs.json")
+    crate::core::storage::data_path("prefs.json")
 }
 
 pub(super) fn last_session_path() -> PathBuf {
-    crate::storage::data_path("last_session.json")
+    crate::core::storage::data_path("last_session.json")
 }
 
 pub(super) fn terminal_logs_dir() -> PathBuf {
-    crate::storage::data_path("terminal-logs")
+    crate::core::storage::data_path("terminal-logs")
 }
 
 fn legacy_prefs_path() -> PathBuf {
-    crate::storage::legacy_installed_path("prefs.json")
+    crate::core::storage::legacy_installed_path("prefs.json")
 }
 
 fn read_prefs_text() -> Option<String> {
@@ -783,7 +783,7 @@ fn prefs_to_value(
             })
         }).collect::<Vec<_>>(),
         "palette_last_dir": prefs.palette_last_dir.as_ref().map(|path| path.display().to_string()),
-        "storage_mode": crate::storage::active_mode().map(crate::storage::StorageMode::as_str),
+        "storage_mode": crate::core::storage::active_mode().map(crate::core::storage::StorageMode::as_str),
         "first_run_complete": first_run_complete,
         "terminal_open_games": games,
     })

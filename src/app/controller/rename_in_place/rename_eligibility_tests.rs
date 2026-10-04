@@ -47,7 +47,7 @@ fn record(origin: CreatedTagOrigin) -> CreatedTagRecord {
 /// build — so the container list is empty and the tests that need one assert on
 /// the refusal that produces. Everything the tier decision actually turns on is
 /// reachable without it.
-fn no_containers() -> Vec<crate::source::MountedContainer> {
+fn no_containers() -> Vec<crate::core::source::MountedContainer> {
     Vec::new()
 }
 

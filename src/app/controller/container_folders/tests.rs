@@ -71,7 +71,7 @@ fn a_container_folder_is_seeded_in_display_path_casing() {
     // The seeded path must reach the same node an entry would build.
     let entries = vec![entry("objects/vehicles/warthog.model")];
     let seeded = container_folder_rel(Some("objects"), "Vehicles");
-    let tree = crate::source::build_tree_with_folders(&entries, &[seeded]);
+    let tree = crate::core::source::build_tree_with_folders(&entries, &[seeded]);
     let objects = tree
         .children
         .iter()

@@ -354,7 +354,7 @@ impl Baboon {
             TagSource::IoStoreContainerSet { root, .. } => root,
             _ => return None,
         };
-        Some(crate::storage::data_path(&chimp_recovery_dir_name(root)))
+        Some(crate::core::storage::data_path(&chimp_recovery_dir_name(root)))
     }
 
     fn load_chimp_recovery_manifest(

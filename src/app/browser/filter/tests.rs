@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::{TagEntry, TagEntryLocation};
+use crate::core::source::{TagEntry, TagEntryLocation};
 use std::path::PathBuf;
 
 fn entry(display_path: &str, group: &[u8; 4]) -> TagEntry {
@@ -85,7 +85,7 @@ fn folder_hlsl_include_collector_finds_nested_include_entries() {
         entry("rasterizer/hlsl/post/tonemap.hlsl_include", b"hlsl"),
         entry("rasterizer/bitmaps/noise.bitmap", b"bitm"),
     ];
-    let tree = crate::source::build_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
     let rasterizer = tree
         .children
         .iter()
@@ -114,7 +114,7 @@ fn folder_material_shader_collector_finds_nested_material_shader_entries() {
         ),
         entry("shaders/material_shaders/decals/noise.bitmap", b"bitm"),
     ];
-    let tree = crate::source::build_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
     let shaders = tree
         .children
         .iter()

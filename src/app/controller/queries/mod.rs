@@ -73,7 +73,7 @@ pub(super) fn run_field_value_search(
         if matches.len() >= MATCH_CAP {
             break;
         }
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
+        let Ok(tag) = crate::core::source::read_entry(source, entry) else {
             continue;
         };
         if let Some((field_path, value)) = first_field_value_match(&tag.root(), query_lower, "") {
@@ -108,7 +108,7 @@ pub(super) fn build_field_value_index(
 ) -> Vec<(String, String)> {
     let mut blobs = Vec::new();
     for entry in entries {
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
+        let Ok(tag) = crate::core::source::read_entry(source, entry) else {
             continue;
         };
         let mut blob = String::new();

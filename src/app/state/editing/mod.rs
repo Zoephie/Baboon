@@ -489,7 +489,7 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// Campaign Evolved only: the Wwise media this `sound` tag resolves to,
     /// already walked out through its package imports. `None` for every other
     /// game; `Some` but empty for a tag that binds to no event.
-    pub(in crate::app) ce_sound: Option<&'a crate::source::ce_audio::CeSoundBinding>,
+    pub(in crate::app) ce_sound: Option<&'a crate::core::source::ce_audio::CeSoundBinding>,
     /// The container source's `Paks` directory, where the legacy `.pak`
     /// containers holding Campaign Evolved's Wwise media live.
     pub(in crate::app) ce_paks_root: Option<&'a Path>,

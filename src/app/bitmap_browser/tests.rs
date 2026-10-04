@@ -423,7 +423,7 @@ fn real_kit_bitmaps_decode_at_thumbnail_size() {
     let mut decoded = 0;
     for path in &bitmaps {
         let group = u32::from_be_bytes(*b"bitm");
-        let Ok(tag) = crate::source::read_tag_at_path(path, None, None, group) else {
+        let Ok(tag) = crate::core::source::read_tag_at_path(path, None, None, group) else {
             continue;
         };
         // Some shipped bitmaps genuinely hold no images; that is a `None`

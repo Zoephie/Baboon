@@ -282,7 +282,7 @@ fn real_kit_render_models_rasterize_at_thumbnail_size() {
     let mut rendered = 0;
     for path in &models {
         let group = u32::from_be_bytes(*b"mode");
-        let Ok(tag) = crate::source::read_tag_at_path(path, None, None, group) else {
+        let Ok(tag) = crate::core::source::read_tag_at_path(path, None, None, group) else {
             continue;
         };
         let Ok(preview) = build_render_preview(&tag) else {

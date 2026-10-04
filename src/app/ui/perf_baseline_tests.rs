@@ -289,7 +289,7 @@ fn ping_pong_wheel(frame: usize) -> f32 {
 
 pub(super) mod fixture {
     use super::*;
-    use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
+    use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
     use blam_tags::render_method::{
         BitmapAddressMode, BitmapComparisonFunction, BitmapFilterMode, RenderMethod,
         RenderMethodDefinition, RenderMethodDefinitionCategory,
@@ -363,8 +363,8 @@ pub(super) mod fixture {
             },
             names: app.default_names.clone(),
             game: Some(game.to_owned()),
-            tree: crate::source::build_tree(&entries),
-            group_tree: crate::source::build_group_tree(&entries),
+            tree: crate::core::source::build_tree(&entries),
+            group_tree: crate::core::source::build_group_tree(&entries),
             all_entries: entries.clone(),
             entries,
             reverse_dependencies: None,

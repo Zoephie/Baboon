@@ -1,7 +1,7 @@
 //! Folder authoring for container sources: create, rename and retire folders a
 //! Campaign Evolved pak does not yet hold a tag in.
 //! It owns the pending-folder workflow and its naming contract; the tree seeding
-//! itself belongs to `crate::source`, and drawing belongs to the browser UI.
+//! itself belongs to `crate::core::source`, and drawing belongs to the browser UI.
 
 use super::*;
 use crate::app::controller::duplicate::validate_leaf_characters;
@@ -287,7 +287,7 @@ impl Baboon {
     fn refresh_container_folder_tree(&mut self, kit_index: usize) {
         let seeds = self.kits[kit_index].folder_seeds();
         if let Some(source) = self.kits[kit_index].source.as_mut() {
-            crate::source::rebuild_folder_tree(source, &seeds);
+            crate::core::source::rebuild_folder_tree(source, &seeds);
         }
         // The browser memoises its filtered tree on the generation, so without
         // this a folder created while a filter is active would not appear.

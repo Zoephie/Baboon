@@ -8,12 +8,12 @@ fn restored_loose_tag_uses_the_current_sources_key() {
     std::fs::create_dir_all(path.parent().expect("tag has parent")).expect("create tag path");
     std::fs::write(&path, b"tag").expect("create tag");
     let canonical = std::fs::canonicalize(&path).expect("canonical tag path");
-    let entry = crate::source::TagEntry {
+    let entry = crate::core::source::TagEntry {
         key: format!("file:{}", canonical.display()),
         display_path: "objects/characters/brute.model".to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),
-        location: crate::source::TagEntryLocation::LooseFile(canonical.clone()),
+        location: crate::core::source::TagEntryLocation::LooseFile(canonical.clone()),
     };
 
     assert_eq!(
@@ -132,7 +132,7 @@ fn the_close_prompt_saves_container_tags_through_the_containers() {
     let route = |location: TagEntryLocation| close_prompt_save_route(Some(&location));
     assert_eq!(
         route(TagEntryLocation::NewContainer {
-            template: crate::source::NewContainerTemplate::Derived {
+            template: crate::core::source::NewContainerTemplate::Derived {
                 group: "camera_track".to_owned(),
             },
             package: "/Game/Tags/objects/foo/bar-camera_track".to_owned(),
@@ -407,8 +407,8 @@ fn save_as_registers_classic_ce_copy_in_loaded_folder() {
         names,
         game: None,
         entries: entries.clone(),
-        tree: crate::source::build_folder_directory_tree(&root).unwrap(),
-        group_tree: crate::source::build_group_tree(&entries),
+        tree: crate::core::source::build_folder_directory_tree(&root).unwrap(),
+        group_tree: crate::core::source::build_group_tree(&entries),
         all_entries: entries,
         reverse_dependencies: None,
         initial_tag: None,

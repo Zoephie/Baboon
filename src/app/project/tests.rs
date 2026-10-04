@@ -745,8 +745,8 @@ fn container_tag_identities_are_unique() {
         return;
     }
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    let names = crate::format::TagNameIndex::load_from_definitions(&defs);
-    let loaded = crate::source::load_iostore_container_set(
+    let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
+    let loaded = crate::core::source::load_iostore_container_set(
         std::path::PathBuf::from(*PAKS),
         &names,
         &defs,

@@ -10,10 +10,10 @@ fn fresh_wizard_requires_storage_first() {
 
 #[test]
 fn interrupted_wizard_resumes_after_storage_selection() {
-    let state = FirstRunWizardState::new(Some(crate::storage::StorageMode::Portable));
+    let state = FirstRunWizardState::new(Some(crate::core::storage::StorageMode::Portable));
     assert_eq!(state.page, FirstRunPage::Interface);
     assert_eq!(
         state.committed_storage,
-        Some(crate::storage::StorageMode::Portable)
+        Some(crate::core::storage::StorageMode::Portable)
     );
 }

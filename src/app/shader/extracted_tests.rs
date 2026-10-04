@@ -233,10 +233,10 @@ fn structural_shader_references_resolve_to_editable_reference_fields() {
         return;
     };
     let root = std::path::PathBuf::from(root);
-    let source = crate::source::TagSource::LooseFolder {
+    let source = crate::core::source::TagSource::LooseFolder {
         root: root.clone(),
         game: Some("halo3_mcc".to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     };
 
     // Any shader that resolves its render-method chain will do; walk until one
@@ -354,10 +354,10 @@ fn committing_a_structural_reference_rewrites_the_tag() {
         return;
     };
     let root = std::path::PathBuf::from(root);
-    let source = crate::source::TagSource::LooseFolder {
+    let source = crate::core::source::TagSource::LooseFolder {
         root: root.clone(),
         game: Some("halo3_mcc".to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let mut rmdf_cache = std::collections::HashMap::new();
     let mut rmop_cache = std::collections::HashMap::new();
@@ -434,7 +434,7 @@ fn committing_a_structural_reference_rewrites_the_tag() {
 #[test]
 fn reference_extensions_resolve_from_the_games_own_metadata() {
     let names =
-        crate::format::TagNameIndex::load_from_definitions(&crate::app::locate_definitions_root());
+        crate::core::format::TagNameIndex::load_from_definitions(&crate::core::bundled::locate_definitions_root());
     names.publish_as_process_group_names();
     for (extension, fourcc) in [
         ("render_method_definition", b"rmdf"),
@@ -442,7 +442,7 @@ fn reference_extensions_resolve_from_the_games_own_metadata() {
         ("shader_template", b"stem"),
     ] {
         assert_eq!(
-            crate::format::process_group_tag_for(extension),
+            crate::core::format::process_group_tag_for(extension),
             Some(u32::from_be_bytes(*fourcc)),
             "{extension} is not in any game's tag_index"
         );

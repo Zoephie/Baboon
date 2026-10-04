@@ -18,14 +18,11 @@ macro_rules! include_root_bytes {
 }
 
 mod app;
-mod format;
+mod core;
 pub mod script_docs_import;
-mod source;
-mod storage;
 pub mod tag_compat_build;
 #[cfg(test)]
 mod test_kits;
-mod tool_commands;
 mod window_state;
 
 use anyhow::Result;

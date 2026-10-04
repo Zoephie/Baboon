@@ -25,7 +25,7 @@ fn loose_source(tags_root: PathBuf, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: tags_root,
         game: Some(game.to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }
 

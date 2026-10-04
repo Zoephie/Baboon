@@ -12,7 +12,7 @@ fn browser_refresh_discards_lazy_entries_and_relists_folders() {
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("objects/old")).unwrap();
-    let mut tree = crate::source::build_folder_directory_tree(&root).unwrap();
+    let mut tree = crate::core::source::build_folder_directory_tree(&root).unwrap();
     let mut entries = vec![TagEntry {
         key: "stale".to_owned(),
         display_path: "objects/old/stale.weapon".to_owned(),

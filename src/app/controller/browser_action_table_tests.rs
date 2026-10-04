@@ -227,7 +227,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::CopyTagName(kit.key(MODEL)),
             setup: no_setup,
             check: |app, _, outcome| {
-                let native = crate::format::to_native_path_string(MODEL);
+                let native = crate::core::format::to_native_path_string(MODEL);
                 ensure(outcome.copied_text == native, format!("copied {:?}", outcome.copied_text))?;
                 status_is(app, &format!("Copied {native}"))
             },
@@ -237,7 +237,7 @@ fn cases() -> Vec<Case> {
             action: |_| A::CopyFolderPath(PathBuf::from(FOLDER)),
             setup: no_setup,
             check: |app, _, outcome| {
-                let native = crate::format::to_native_path_string(FOLDER);
+                let native = crate::core::format::to_native_path_string(FOLDER);
                 ensure(outcome.copied_text == native, format!("copied {:?}", outcome.copied_text))?;
                 status_is(app, &format!("Copied {native}"))
             },

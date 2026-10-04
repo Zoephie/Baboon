@@ -612,7 +612,7 @@ fn list_model_animations(
     source: &TagSource,
     entry: &TagEntry,
 ) -> Result<Vec<PreviewAnimationEntry>, String> {
-    let model = crate::source::read_entry(source, entry).map_err(|error| error.to_string())?;
+    let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     // A Halo CE object names its `model_animations`; Halo 2 and the Halo 3
     // family name a `model_animation_graph` from the `.model`.
     match blam_tags::game::Game::of(&model) {
@@ -708,7 +708,7 @@ fn decode_model_animation(
     entry: &TagEntry,
     animation_index: usize,
 ) -> Result<DecodedAnimationPose, String> {
-    let model = crate::source::read_entry(source, entry).map_err(|error| error.to_string())?;
+    let model = crate::core::source::read_entry(source, entry).map_err(|error| error.to_string())?;
     if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
         return decode_ce_animation(source, &model, animation_index);
     }

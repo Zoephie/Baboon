@@ -154,7 +154,7 @@ struct LedgerFileOut {
 
 impl CreatedTagLedger {
     pub(in crate::app) fn path() -> PathBuf {
-        crate::storage::data_path(LEDGER_FILE)
+        crate::core::storage::data_path(LEDGER_FILE)
     }
 
     /// Read the ledger, treating an absent file as empty.

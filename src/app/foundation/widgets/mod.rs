@@ -743,7 +743,7 @@ const ANGLE_SIGNIFICANT_DIGITS: i32 = 6;
 /// `0.01 degrees` field read as `0` (0.000175 rad, below the old two-decimal
 /// display) and, worse, made a `0.15` typed into a box labelled degrees mean
 /// 0.15 *radians* — 8.59°, fifty-seven times what was asked for. So degrees are
-/// the default, and [`crate::format::angles_in_degrees`] turns them off for
+/// the default, and [`crate::core::format::angles_in_degrees`] turns them off for
 /// anyone who wants to see what is actually stored.
 ///
 /// Degrees are rounded to six significant digits rather than round-tripped
@@ -754,7 +754,7 @@ const ANGLE_SIGNIFICANT_DIGITS: i32 = 6;
 /// exact and stable, and rounding 0.15 rad to six digits of *radians* would be
 /// a precision loss with nothing to buy it.
 pub(in crate::app) fn fmt_angle(radians: f32) -> String {
-    if !crate::format::angles_in_degrees() {
+    if !crate::core::format::angles_in_degrees() {
         return fmt_real(radians);
     }
     let degrees = radians.to_degrees();

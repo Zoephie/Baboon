@@ -33,15 +33,15 @@ fn entry(key: &str, logical: &str, rel_path: &str) -> TagEntry {
 /// A mounted container source holding one tag, indexed exactly as the mount
 /// would have indexed it.
 fn source_with_one_tag() -> LoadedSourceData {
-    let mut index = crate::source::ContainerTagIndex::default();
+    let mut index = crate::core::source::ContainerTagIndex::default();
     index.insert(
-        crate::source::container_ref_key(GROUP, "objects/vehicles/warthog"),
+        crate::core::source::container_ref_key(GROUP, "objects/vehicles/warthog"),
         0,
         OLD_UBULK.to_owned(),
     );
-    let mut packages = crate::source::ContainerPackageIndex::default();
+    let mut packages = crate::core::source::ContainerPackageIndex::default();
     packages.insert(OLD_PACKAGE.to_ascii_lowercase(), 0, OLD_UASSET.to_owned());
-    let mut shipped = crate::source::ShippedTagIndex::default();
+    let mut shipped = crate::core::source::ShippedTagIndex::default();
     shipped.insert(OLD_UBULK, 0);
 
     let entries = vec![
@@ -93,9 +93,9 @@ fn move_request(redirect: bool) -> ContainerRenameMove<'static> {
 fn indices(
     source: &LoadedSourceData,
 ) -> (
-    &crate::source::ContainerTagIndex,
-    &crate::source::ContainerPackageIndex,
-    &crate::source::ShippedTagIndex,
+    &crate::core::source::ContainerTagIndex,
+    &crate::core::source::ContainerPackageIndex,
+    &crate::core::source::ShippedTagIndex,
 ) {
     let TagSource::IoStoreContainerSet {
         index,
@@ -212,7 +212,7 @@ fn the_renamed_entry_is_filed_in_order_rather_than_appended() {
 #[test]
 fn the_reference_graph_is_dropped_rather_than_half_moved() {
     let mut source = source_with_one_tag();
-    source.reverse_dependencies = Some(crate::source::ReverseDependencyIndex::default());
+    source.reverse_dependencies = Some(crate::core::source::ReverseDependencyIndex::default());
     apply(&mut source, false);
     assert!(source.reverse_dependencies.is_none());
 }

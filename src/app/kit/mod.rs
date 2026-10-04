@@ -95,7 +95,7 @@ pub(super) struct Kit {
     pub(super) render_method_epoch: u64,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
     /// one walks several packages.
-    pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
+    pub(super) ce_sound_bindings: HashMap<String, Arc<crate::core::source::ce_audio::CeSoundBinding>>,
 
     /// Pending expand/collapse-all requests, keyed by tag. Raised from the tag
     /// tab's menu and consumed by the next draw of that tag's pane.

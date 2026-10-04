@@ -13,7 +13,7 @@ use blam_tags::JmsFile;
 use blam_tags::game::Game;
 
 use crate::app::export::{extract_animations_for_entry, extract_geometry_for_entry};
-use crate::source::{TagEntry, TagEntryLocation, TagSource};
+use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
 
 fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
     if root.join(rel).is_file() {
@@ -28,7 +28,7 @@ fn loose_source(root: &Path, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: root.to_path_buf(),
         game: Some(game.to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }
 

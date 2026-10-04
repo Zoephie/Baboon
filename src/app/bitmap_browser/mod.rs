@@ -240,7 +240,7 @@ impl ThumbnailSource for Bitmaps {
         // source a kit can be, and this is the one reader that knows how each
         // stores its tags — including the JSON layout classic Halo CE and
         // Halo 2 bitmaps need to parse at all.
-        crate::source::read_entry(source, entry)
+        crate::core::source::read_entry(source, entry)
             .and_then(|tag| decode_thumbnail(&tag, 0, max_edge))
             .map_err(|error| error.to_string())
     }

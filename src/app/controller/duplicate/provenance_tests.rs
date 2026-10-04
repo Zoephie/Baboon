@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::ContainerPackageIndex;
+use crate::core::source::ContainerPackageIndex;
 
 /// A stand-in for the mount's directory indexes: one `Vec` of paths per
 /// container, matched exactly the way `IoStoreArchive` matches them.

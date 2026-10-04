@@ -162,7 +162,7 @@ pub(super) fn validate_builtin_editing_kit(
         return EditingKitPathStatus::Unconfigured;
     };
     if shortcut.game == "haloce_evolved" {
-        return match crate::source::find_paks_dir(path) {
+        return match crate::core::source::find_paks_dir(path) {
             Some(paks) => EditingKitPathStatus::Ready(EditingKitLayout {
                 root: path.to_path_buf(),
                 tags: paks,
@@ -497,7 +497,7 @@ pub(super) fn executable_directory() -> Result<PathBuf, String> {
 
 pub(super) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, String> {
     let legacy = legacy_custom_icon_base();
-    resolve_custom_icon_path_in_roots(&crate::storage::data_path(""), legacy.as_deref(), relative)
+    resolve_custom_icon_path_in_roots(&crate::core::storage::data_path(""), legacy.as_deref(), relative)
 }
 
 #[cfg(test)]
@@ -506,7 +506,7 @@ fn resolve_custom_icon_path_at(base: &Path, relative: &Path) -> Result<PathBuf, 
 }
 
 fn legacy_custom_icon_base() -> Option<PathBuf> {
-    if crate::storage::active_mode() == Some(crate::storage::StorageMode::Portable) {
+    if crate::core::storage::active_mode() == Some(crate::core::storage::StorageMode::Portable) {
         None
     } else {
         executable_directory().ok()
@@ -565,7 +565,7 @@ pub(super) fn copy_custom_icon(
     existing_icon: Option<&Path>,
 ) -> Result<PathBuf, String> {
     copy_custom_icon_at(
-        &crate::storage::data_path(""),
+        &crate::core::storage::data_path(""),
         source,
         project_name,
         profile_id,
@@ -627,7 +627,7 @@ pub(super) fn remove_unreferenced_custom_icon(
 ) -> Result<(), String> {
     let legacy = legacy_custom_icon_base();
     remove_unreferenced_custom_icon_in_roots(
-        &crate::storage::data_path(""),
+        &crate::core::storage::data_path(""),
         legacy.as_deref(),
         relative,
         profiles,

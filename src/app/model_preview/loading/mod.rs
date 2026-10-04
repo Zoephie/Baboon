@@ -2,7 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
-use crate::source::MountedContainer;
+use crate::core::source::MountedContainer;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
@@ -128,7 +128,7 @@ impl Baboon {
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let model_tag = match edited_model_bytes {
-                    Some(Ok(bytes)) => crate::source::read_tag_from_bytes(
+                    Some(Ok(bytes)) => crate::core::source::read_tag_from_bytes(
                         &bytes,
                         game.as_deref(),
                         definitions_root.as_deref(),

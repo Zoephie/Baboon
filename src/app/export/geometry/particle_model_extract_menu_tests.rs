@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::browser::supports_tag_extract_menu;
 use crate::app::export::extract_geometry_for_entry;
-use crate::source::{TagEntry, TagEntryLocation, TagSource};
+use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
 
 /// The tag `rel` under a kit root, or `None` (saying why) when it is absent.
 fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
@@ -35,7 +35,7 @@ fn loose_source(root: &Path, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: root.to_path_buf(),
         game: Some(game.to_owned()),
-        definitions_root: crate::app::locate_definitions_root(),
+        definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }
 

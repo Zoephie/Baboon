@@ -43,7 +43,7 @@ pub(super) struct ToolCommandsUiState {
 }
 
 pub(super) fn load_tool_commands(game: &str) -> Result<Vec<ToolCommand>, String> {
-    let text = crate::tool_commands::get_tool_commands_json(game)
+    let text = crate::core::tool_commands::get_tool_commands_json(game)
         .ok_or_else(|| format!("No tool command catalog is embedded for {game}"))?;
     parse_tool_commands_json(text).map_err(|error| {
         format!("Could not parse embedded tool command catalog for {game}: {error}")

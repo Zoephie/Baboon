@@ -1106,7 +1106,7 @@ fn draw_tree_node_lazy_block(
                 match load_folder_node_entries(root, node, entries, names) {
                     Ok(()) => {
                         if let Some(group_tree) = group_tree.as_deref_mut() {
-                            *group_tree = crate::source::build_group_tree(entries);
+                            *group_tree = crate::core::source::build_group_tree(entries);
                         }
                         *status_update = Some(format!(
                             "Loaded {} tag(s) from {}",
@@ -1671,7 +1671,7 @@ fn collect_loaded_extractable_keys(
     let mut hlsl_include_keys = Vec::new();
     for entry in entries
         .iter()
-        .filter(|entry| crate::source::entry_is_beneath_folder(entry, folder))
+        .filter(|entry| crate::core::source::entry_is_beneath_folder(entry, folder))
     {
         if include_container_tags && matches!(entry.location, TagEntryLocation::Container { .. }) {
             container_keys.push(entry.key.clone());
@@ -3026,7 +3026,7 @@ pub(in crate::app) fn draw_favorites(
                 // Rebuild only their loaded subtree while the menu is open so
                 // the shared extraction menu can collect the same keys as a
                 // manually navigated folder without doing I/O on right-click.
-                let subtree = crate::source::build_tree_beneath(folder_entries, folder);
+                let subtree = crate::core::source::build_tree_beneath(folder_entries, folder);
                 let folder_node = TagTreeNode {
                     label: label.clone(),
                     rel_path: folder.clone(),

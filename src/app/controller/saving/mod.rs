@@ -220,7 +220,7 @@ pub(super) fn register_saved_copy_in_loaded_source(
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Ok(false);
     };
-    let Some(path) = crate::source::path_on_root(root, path)
+    let Some(path) = crate::core::source::path_on_root(root, path)
         .map_err(|error| format!("Could not resolve saved tag path: {error}"))?
     else {
         return Ok(false);

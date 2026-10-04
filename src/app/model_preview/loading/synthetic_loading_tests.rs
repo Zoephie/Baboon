@@ -9,13 +9,13 @@
 use super::*;
 use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
 use crate::app::state::ModelTagPanelTab;
-use crate::source::TagTree;
+use crate::core::source::TagTree;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 fn new_tag_for(game: &str, group: &str) -> TagFile {
     TagFile::new(
-        crate::app::locate_definitions_root()
+        crate::core::bundled::locate_definitions_root()
             .join(game)
             .join(format!("{group}.json")),
     )
@@ -29,7 +29,7 @@ fn new_tag_for(game: &str, group: &str) -> TagFile {
 /// classic file there is — the 64-byte header and an all-zero root struct —
 /// and reads it back the way a loose CE kit reads its tags.
 fn classic_ce_tag(group: &str) -> TagFile {
-    let definitions = crate::app::locate_definitions_root();
+    let definitions = crate::core::bundled::locate_definitions_root();
     let path = definitions.join("haloce_mcc").join(format!("{group}.json"));
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).expect("read the definition")).unwrap();
@@ -44,7 +44,7 @@ fn classic_ce_tag(group: &str) -> TagFile {
     bytes[56..58].copy_from_slice(&version.to_be_bytes());
     bytes[60..64].copy_from_slice(b"blam");
     bytes.resize(64 + size, 0);
-    let tag = crate::source::read_tag_from_bytes(
+    let tag = crate::core::source::read_tag_from_bytes(
         &bytes,
         Some("haloce_mcc"),
         Some(&definitions),
@@ -135,7 +135,7 @@ fn entry(display_path: &str, tag: &TagFile, location: TagEntryLocation) -> TagEn
 }
 
 fn names() -> TagNameIndex {
-    TagNameIndex::load_from_definitions(&crate::app::locate_definitions_root())
+    TagNameIndex::load_from_definitions(&crate::core::bundled::locate_definitions_root())
 }
 
 fn load(tag: &TagFile, display_path: &str, source: Option<&TagSource>) -> Result<ModelPreviewData, String> {
@@ -177,7 +177,7 @@ impl LooseKit {
         TagSource::LooseFolder {
             root: self.root.clone(),
             game: Some(self.game.to_owned()),
-            definitions_root: crate::app::locate_definitions_root(),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
         }
     }
 }

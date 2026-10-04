@@ -510,9 +510,9 @@ impl FilterCache {
             .map(|index| entries[index].clone())
             .collect();
         self.tree = if groups {
-            crate::source::build_group_tree(&self.entries)
+            crate::core::source::build_group_tree(&self.entries)
         } else {
-            crate::source::build_tree(&self.entries)
+            crate::core::source::build_tree(&self.entries)
         };
     }
 
@@ -539,13 +539,13 @@ impl FilterCache {
         self.groups = groups;
         self.entries = compute_filter_matches(entries, query)
             .into_iter()
-            .filter(|&index| crate::source::entry_is_beneath_folder(&entries[index], folder))
+            .filter(|&index| crate::core::source::entry_is_beneath_folder(&entries[index], folder))
             .map(|index| entries[index].clone())
             .collect();
         self.tree = if groups {
-            crate::source::build_group_tree(&self.entries)
+            crate::core::source::build_group_tree(&self.entries)
         } else {
-            crate::source::build_tree_beneath(&self.entries, folder)
+            crate::core::source::build_tree_beneath(&self.entries, folder)
         };
     }
 }

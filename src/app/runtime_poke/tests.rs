@@ -738,7 +738,7 @@ fn manual_cu2_pokes_and_undoes_assault_rifle_projectile_reference() {
         .expect("set CE_PAKS to Meteorite/Content/Paks");
     let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let names = TagNameIndex::load_from_definitions(&definitions);
-    let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+    let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
         .expect("mount Campaign Evolved containers");
     let weapon_group = u32::from_be_bytes(*b"weap");
     let entry = loaded
@@ -833,7 +833,7 @@ fn manual_cu2_pokes_and_undoes_loaded_string_id() {
         .expect("set CE_PAKS to Meteorite/Content/Paks");
     let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let names = TagNameIndex::load_from_definitions(&definitions);
-    let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+    let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
         .expect("mount Campaign Evolved containers");
     let vehicle_group = u32::from_be_bytes(*b"vehi");
     let entry = loaded

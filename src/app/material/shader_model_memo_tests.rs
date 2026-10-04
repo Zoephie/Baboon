@@ -9,7 +9,7 @@ fn the_shader_grid_is_built_once_per_revision() {
         eprintln!("skipping: {} not present", root.display());
         return;
     }
-    let definitions_root = crate::app::locate_definitions_root();
+    let definitions_root = crate::core::bundled::locate_definitions_root();
     let source = TagSource::LooseFolder {
         root: root.clone(),
         game: Some("halo3_mcc".to_owned()),
@@ -26,8 +26,8 @@ fn the_shader_grid_is_built_once_per_revision() {
         .filter_map(Result::ok)
         .filter(|item| item.path().extension().is_some_and(|ext| ext == "shader"))
         .find_map(|item| {
-            let entry = crate::source::loose_file_entry(&root, item.path(), &names).ok()??;
-            let tag = crate::source::read_tag_at_path(
+            let entry = crate::core::source::loose_file_entry(&root, item.path(), &names).ok()??;
+            let tag = crate::core::source::read_tag_at_path(
                 item.path(),
                 Some("halo3_mcc"),
                 Some(&definitions_root),

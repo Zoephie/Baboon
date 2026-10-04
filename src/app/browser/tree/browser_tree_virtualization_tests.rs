@@ -14,7 +14,7 @@ use super::{
     Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
 };
 use crate::app::BrowserSort;
-use crate::source::{TagEntry, TagEntryLocation, TagTree};
+use crate::core::source::{TagEntry, TagEntryLocation, TagTree};
 
 /// 40 top folders × 10 subfolders × 150 tags: 60,000 tags, 440 folders.
 fn synthetic_entries() -> Vec<TagEntry> {
@@ -70,7 +70,7 @@ impl Browser {
         ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
         Self {
             ctx,
-            tree: crate::source::build_tree(&entries),
+            tree: crate::core::source::build_tree(&entries),
             entries,
             lazy_root: None,
             skips,
@@ -111,7 +111,7 @@ impl Browser {
         let mut content_height = 0.0;
         let mut shown_offset = 0.0;
         let (tree, entries, lazy_root) = (&mut self.tree, &mut self.entries, &self.lazy_root);
-        let names = crate::format::TagNameIndex::default();
+        let names = crate::core::format::TagNameIndex::default();
         let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut area = egui::ScrollArea::vertical();
@@ -183,7 +183,7 @@ impl Browser {
     fn lazy(root: &std::path::Path, skips: bool) -> Self {
         let mut browser = Self::new(skips);
         browser.entries.clear();
-        browser.tree = crate::source::build_folder_directory_tree(root).unwrap();
+        browser.tree = crate::core::source::build_folder_directory_tree(root).unwrap();
         browser.lazy_root = Some(root.to_path_buf());
         browser
     }
@@ -478,7 +478,7 @@ fn a_rebuilt_tree_does_not_reuse_heights_from_the_old_one() {
         browser
             .entries
             .retain(|entry| !entry.display_path.starts_with("folder_02/sub_03/tag_1"));
-        browser.tree = crate::source::build_tree(&browser.entries);
+        browser.tree = crate::core::source::build_tree(&browser.entries);
     }
     for offset in [500_000.0, END] {
         for pass in 0..2 {

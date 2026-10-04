@@ -296,7 +296,7 @@ impl ThumbnailSource for Models {
         entry: &TagEntry,
         max_edge: u32,
     ) -> Result<ThumbnailImage, String> {
-        crate::source::read_entry(source, entry)
+        crate::core::source::read_entry(source, entry)
             .map_err(|error| error.to_string())
             .and_then(|tag| build_render_preview(&tag))
             .and_then(|preview| rasterize_model_thumbnail(&preview, max_edge))

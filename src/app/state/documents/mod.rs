@@ -357,7 +357,7 @@ impl LastOpenedWindowsKit {
                 }
             }
             LastSessionSourceKind::IoStoreContainerSet => {
-                crate::source::find_paks_dir(availability_path).is_some()
+                crate::core::source::find_paks_dir(availability_path).is_some()
             }
         };
         let entries = saved

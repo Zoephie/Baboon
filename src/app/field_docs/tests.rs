@@ -186,7 +186,7 @@ fn halo2_structs_get_only_their_own_explanations() {
         eprintln!("skipping: H2 biped/definition not present");
         return;
     }
-    let docs = build_def_docs(&crate::app::locate_definitions_root(), "halo2_mcc", "biped");
+    let docs = build_def_docs(&crate::core::bundled::locate_definitions_root(), "halo2_mcc", "biped");
     let bytes = std::fs::read(tag_path).unwrap();
     let tag = blam_tags::classic::read_classic_tag_file(
         &bytes,
@@ -260,7 +260,7 @@ fn halo2_structs_get_only_their_own_explanations() {
 #[test]
 fn the_group_hierarchy_expands_a_parent_to_its_descendants() {
     let hierarchy =
-        GroupHierarchy::load(&crate::app::locate_definitions_root(), "haloreach_mcc");
+        GroupHierarchy::load(&crate::core::bundled::locate_definitions_root(), "haloreach_mcc");
     let tag = |s: &str| blam_tags::parse_group_tag(s).unwrap();
     assert!(hierarchy.is_a(tag("bipd"), tag("unit")));
     assert!(hierarchy.is_a(tag("bipd"), tag("obje")), "two levels up");

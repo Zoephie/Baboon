@@ -52,8 +52,8 @@ fn loads_generated_h3_tool_commands() {
 
 #[test]
 fn h3odst_reuses_h3_tool_commands() {
-    let h3 = crate::tool_commands::get_tool_commands_json("halo3_mcc").unwrap();
-    let odst = crate::tool_commands::get_tool_commands_json("halo3odst_mcc").unwrap();
+    let h3 = crate::core::tool_commands::get_tool_commands_json("halo3_mcc").unwrap();
+    let odst = crate::core::tool_commands::get_tool_commands_json("halo3odst_mcc").unwrap();
 
     assert_eq!(h3, odst);
 }

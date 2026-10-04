@@ -1,4 +1,4 @@
-use crate::source::{load_iostore_container_set, read_entry};
+use crate::core::source::{load_iostore_container_set, read_entry};
 use std::path::{Path, PathBuf};
 
 static PAKS: std::sync::LazyLock<&'static str> =
@@ -43,7 +43,7 @@ fn every_ui_field_path_resolves_on_campaign_evolved_vehicles() {
         return;
     }
     let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    let names = crate::format::TagNameIndex::load_from_definitions(&defs);
+    let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
     let loaded =
         load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
     let vehicles: Vec<_> = loaded

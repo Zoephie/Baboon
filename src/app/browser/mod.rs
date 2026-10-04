@@ -43,7 +43,7 @@ impl ModifiedTags {
             self.folders.insert(parent.to_owned());
             folder = parent;
         }
-        self.groups.insert(crate::source::group_tree_label(entry));
+        self.groups.insert(crate::core::source::group_tree_label(entry));
     }
 
     /// Whether anything under this folder (or Groups-view node) is modified.

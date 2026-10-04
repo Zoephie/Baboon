@@ -458,7 +458,7 @@ fn a_lossy_tag_is_held_back_with_its_losses_rather_than_failed() {
     let mut clean = 0usize;
     let mut example: Option<Vec<String>> = None;
     for path in lights.into_iter().take(200) {
-        let Ok(tag) = crate::source::read_tag_at_path(
+        let Ok(tag) = crate::core::source::read_tag_at_path(
             &path,
             Some("halo3_mcc"),
             Some(&definitions),

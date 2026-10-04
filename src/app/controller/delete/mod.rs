@@ -37,7 +37,7 @@ fn loose_trash_destination(
     if relative.split('/').any(|part| part == "..") {
         return Err("This tag's path is not safe to move".to_owned());
     }
-    let mut destination = crate::storage::data_path(DELETED_TAGS_DIR);
+    let mut destination = crate::core::storage::data_path(DELETED_TAGS_DIR);
     destination.push(game.unwrap_or("unknown-game"));
     destination.push(now_unix_secs.to_string());
     for part in relative.split('/') {
@@ -117,7 +117,7 @@ pub(in crate::app) struct ContainerDeleteTarget {
 /// The chunk index above which each mounted container's contents were appended
 /// by Baboon, resolved once per container because it reads the directory.
 pub(in crate::app) fn container_appended_thresholds(
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
 ) -> Vec<Option<u32>> {
     containers
         .iter()
@@ -180,7 +180,7 @@ fn ledger_delete_verdict(
 /// derived from the container itself, because a copy in a pak is
 /// indistinguishable from a tag the game shipped.
 pub(in crate::app) fn resolve_container_delete_target(
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
     thresholds: &[Option<u32>],
     container: usize,
     rel_path: &str,
@@ -223,7 +223,7 @@ pub(in crate::app) fn resolve_container_delete_target(
 /// Whether an entry can be deleted at all, and why not when it cannot.
 pub(in crate::app) fn delete_eligibility(
     entry: &TagEntry,
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
     thresholds: &[Option<u32>],
     ledger: &CreatedTagLedger,
 ) -> Result<(), String> {
@@ -281,7 +281,7 @@ pub(in crate::app) fn deletable_container_keys(
 
 struct ContainerDeleteWorkerInput {
     root: PathBuf,
-    containers: Vec<crate::source::MountedContainer>,
+    containers: Vec<crate::core::source::MountedContainer>,
     target_container: usize,
     key: String,
     display_path: String,
@@ -377,7 +377,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn mounted_containers(&self) -> Option<Vec<crate::source::MountedContainer>> {
+    pub(super) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
         match &self.source()?.source {
             TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
             _ => None,
@@ -711,7 +711,7 @@ fn run_container_delete(
             backup_paths_text(&backup)
         ));
     }
-    let reopened = crate::source::reopen_container_archive(
+    let reopened = crate::core::source::reopen_container_archive(
         &input.root,
         &input.containers,
         input.target_container,

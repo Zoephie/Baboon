@@ -33,7 +33,7 @@ struct ContainerDuplicatePaths {
 #[derive(Clone)]
 struct ContainerDuplicateWorkerInput {
     root: PathBuf,
-    containers: Vec<crate::source::MountedContainer>,
+    containers: Vec<crate::core::source::MountedContainer>,
     target_container: usize,
     /// The paired `.uasset`, read on the UI thread through the path the mount
     /// recorded rather than one reassembled from the payload's name.
@@ -244,8 +244,8 @@ pub(super) struct ResolvedUasset {
 /// assembling one. Nothing assembled is ever handed to a read: each step
 /// returns a string taken from an entry that exists.
 pub(super) fn resolve_source_uasset(
-    containers: &[crate::source::MountedContainer],
-    packages: &crate::source::ContainerPackageIndex,
+    containers: &[crate::core::source::MountedContainer],
+    packages: &crate::core::source::ContainerPackageIndex,
     target: usize,
     ubulk_rel_path: &str,
 ) -> Result<ResolvedUasset, String> {
@@ -266,7 +266,7 @@ pub(super) trait ContainerPaths {
     fn find_ignoring_case(&self, container: usize, path: &str) -> Option<String>;
 }
 
-struct MountedPaths<'a>(&'a [crate::source::MountedContainer]);
+struct MountedPaths<'a>(&'a [crate::core::source::MountedContainer]);
 
 impl ContainerPaths for MountedPaths<'_> {
     fn count(&self) -> usize {
@@ -292,7 +292,7 @@ impl ContainerPaths for MountedPaths<'_> {
 
 pub(super) fn resolve_source_uasset_in(
     containers: &dyn ContainerPaths,
-    packages: &crate::source::ContainerPackageIndex,
+    packages: &crate::core::source::ContainerPackageIndex,
     target: usize,
     ubulk_rel_path: &str,
 ) -> Result<ResolvedUasset, String> {
@@ -304,7 +304,7 @@ pub(super) fn resolve_source_uasset_in(
     // 1. What indexing recorded. `ContainerPackageIndex` is keyed by the
     //    lowercased `/game/...` package name and stores the original-case
     //    container path, which is exactly the provenance this needs.
-    if let Some(package) = crate::source::container_package_name(&assembled)
+    if let Some(package) = crate::core::source::container_package_name(&assembled)
         && let Some((container, rel_path)) = packages.lookup(&package)
         && containers.contains(container, rel_path)
     {
@@ -462,7 +462,7 @@ fn container_logical_path(rel_path: &str) -> Option<String> {
 
 pub(super) fn container_duplicate_index_key(group_tag: u32, rel_path: &str) -> Option<String> {
     container_logical_path(rel_path)
-        .map(|logical| crate::source::container_ref_key(group_tag, &logical))
+        .map(|logical| crate::core::source::container_ref_key(group_tag, &logical))
 }
 
 fn select_duplicate_bytes(
@@ -500,7 +500,7 @@ fn loose_duplicate_entry(
 ) -> Result<TagEntry, String> {
     match source {
         TagSource::LooseFolder { root, .. } => {
-            crate::source::loose_file_entry(root, destination, source_names)
+            crate::core::source::loose_file_entry(root, destination, source_names)
                 .map_err(|error| format!("Could not register duplicate: {error:#}"))?
                 .ok_or_else(|| "The copied file is not a recognized tag".to_owned())
         }
@@ -644,7 +644,7 @@ fn lower_priority_container_indices(target: usize, count: usize) -> impl Iterato
 /// indexes rather than assembling one — so the read is against a path that
 /// exists, in the case the container spells it.
 fn read_effective_wrapper(
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
     resolved: &ResolvedUasset,
 ) -> Result<Vec<u8>, String> {
     containers
@@ -802,14 +802,14 @@ fn parse_duplicate_body(
             game,
             definitions_root,
             ..
-        } => crate::source::read_tag_from_bytes(
+        } => crate::core::source::read_tag_from_bytes(
             bytes,
             game.as_deref(),
             Some(definitions_root),
             entry.group_tag,
         )
         .map_err(|error| format!("Could not parse duplicate bytes: {error:#}")),
-        _ => crate::source::read_tag_from_bytes(bytes, None, None, entry.group_tag)
+        _ => crate::core::source::read_tag_from_bytes(bytes, None, None, entry.group_tag)
             .map_err(|error| format!("Could not parse duplicate bytes: {error:#}")),
     }
 }
@@ -1064,7 +1064,7 @@ impl Baboon {
                     .map(|mounted| mounted.chunk_label.clone())
                     .unwrap_or_else(|| "unknown".to_owned()),
                 source_uasset_how: resolved.how,
-                source_package: crate::source::container_package_name(&resolved.rel_path)
+                source_package: crate::core::source::container_package_name(&resolved.rel_path)
                     .unwrap_or_else(|| "unknown".to_owned()),
                 package_basename: resolved
                     .rel_path
@@ -1343,7 +1343,7 @@ fn run_container_duplicate(
             input.diagnostics
         ));
     }
-    let reopened = crate::source::reopen_container_archive(
+    let reopened = crate::core::source::reopen_container_archive(
         &input.root,
         &input.containers,
         input.target_container,
@@ -1371,7 +1371,7 @@ fn run_container_duplicate(
     })?;
     let chunk_label = target.chunk_label.clone();
     let entry = TagEntry {
-        key: crate::source::container_entry_key(&chunk_label, &input.paths.ubulk),
+        key: crate::core::source::container_entry_key(&chunk_label, &input.paths.ubulk),
         display_path: input.paths.display.clone(),
         group_tag: input.group_tag,
         group_name: Some(input.group_name.clone()),

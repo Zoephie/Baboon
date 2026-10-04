@@ -4,7 +4,7 @@ static CE_PAKS: std::sync::LazyLock<&'static str> =
     std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
 fn find_entry<'a>(
-    loaded: &'a crate::source::LoadedSourceData,
+    loaded: &'a crate::core::source::LoadedSourceData,
     group: &[u8; 4],
     path: &str,
 ) -> &'a TagEntry {
@@ -35,7 +35,7 @@ fn campaign_evolved_container_tags_report_their_dependencies() {
     }
     let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let loaded =
-        crate::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
+        crate::core::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
             .expect("mount CE container set");
     let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
         .expect("load Campaign Evolved tag names");
@@ -86,7 +86,7 @@ fn campaign_evolved_full_reference_index_resolves_referrers() {
     }
     let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let loaded =
-        crate::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
+        crate::core::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
             .expect("mount CE container set");
     let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
         .expect("load Campaign Evolved tag names");

@@ -142,7 +142,7 @@ pub(in crate::app) fn is_text_editable_value(value: &TagFieldData) -> bool {
 /// switched by the same flag: a display that showed degrees while the parser
 /// read radians would divide every angle the user retyped by 57.3.
 fn angle_to_radians(typed: f32) -> f32 {
-    if crate::format::angles_in_degrees() {
+    if crate::core::format::angles_in_degrees() {
         typed.to_radians()
     } else {
         typed
@@ -683,7 +683,7 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
     // The games' own `_meta.json` first — it covers every group Baboon can
     // open, and does not have to be kept in step by hand. The table below
     // remains for the cases that run before any definitions are loaded.
-    if let Some(group_tag) = crate::format::process_group_tag_for(extension) {
+    if let Some(group_tag) = crate::core::format::process_group_tag_for(extension) {
         return Some(group_tag);
     }
     fallback_extension_to_group_tag(extension)

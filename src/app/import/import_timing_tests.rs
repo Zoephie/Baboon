@@ -48,7 +48,7 @@ fn report_where_a_single_bitmap_conversion_spends_its_time() {
     );
 
     let clock = Instant::now();
-    let source = crate::source::read_tag_at_path(
+    let source = crate::core::source::read_tag_at_path(
         &source_path,
         Some("halo3_mcc"),
         Some(&definitions),

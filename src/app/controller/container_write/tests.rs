@@ -227,13 +227,13 @@ fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
     // so the set is assembled here rather than discovered.
     let archive = blam_tags::iostore::IoStoreArchive::open(&utoc).expect("open");
     let mut app = Baboon::for_test();
-    app.install_loaded_source(crate::source::LoadedSourceData {
+    app.install_loaded_source(crate::core::source::LoadedSourceData {
         label: "Paks".to_owned(),
         source: TagSource::IoStoreContainerSet {
             root: scratch.clone(),
-            containers: vec![crate::source::MountedContainer {
+            containers: vec![crate::core::source::MountedContainer {
                 utoc_path: utoc.clone(),
-                chunk_label: crate::source::container_chunk_label(&utoc),
+                chunk_label: crate::core::source::container_chunk_label(&utoc),
                 is_mod: true,
                 archive: std::sync::Arc::new(archive),
             }],

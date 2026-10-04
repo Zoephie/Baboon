@@ -89,8 +89,8 @@ mod tests {
     fn ce_extract_writes_a_valid_wav() {
         use crate::app::audio::AudioState;
         use crate::app::sound_extract::{ExtractItem, ExtractRequest, ExtractSource};
-        use crate::source::ce_audio::{CeSoundMedia, resolve_sound_binding};
-        use crate::source::{ContainerPackageIndex, MountedContainer, container_package_name};
+        use crate::core::source::ce_audio::{CeSoundMedia, resolve_sound_binding};
+        use crate::core::source::{ContainerPackageIndex, MountedContainer, container_package_name};
         use blam_tags::iostore::{IoStoreArchive, usmap::Usmap};
         use std::path::PathBuf;
         use std::sync::Arc;
@@ -488,7 +488,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
 
-        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
             .expect("read H2 sound tag");
         let mut out = Vec::new();
         walk(&tag.root(), "", &mut out, 0);
@@ -575,7 +575,7 @@ mod tests {
         let group = u32::from_be_bytes(*b"soso");
         let out = std::env::temp_dir().join("baboon_ce_clear_ref.shader_model");
         let load = || {
-            crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+            crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
                 .expect("read CE shader_model tag")
         };
 
@@ -605,7 +605,7 @@ mod tests {
         // The cleared reference reads back as a null reference — an empty path,
         // the same shape a genuine stock null (e.g. the detail map) decodes to,
         // which Baboon renders as NONE.
-        let reread = crate::source::read_tag_at_path(&out, Some("haloce_mcc"), Some(defs), group)
+        let reread = crate::core::source::read_tag_at_path(&out, Some("haloce_mcc"), Some(defs), group)
             .expect("reread cleared tag");
         let root = reread.root();
         let base = root
@@ -642,7 +642,7 @@ mod tests {
             return;
         }
         let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
             .expect("read CE sound tag");
         let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
         assert!(
@@ -680,7 +680,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
 
-        let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
             .expect("read CE sound tag");
 
         // The tag reports Xbox-ADPCM, mono, 22050 Hz — and carries no Ogg stream.
@@ -738,7 +738,7 @@ mod tests {
             return;
         }
         let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
             .expect("read CE sound tag");
         let rows = sound_permutation_rows(&tag, None);
         assert!(!rows.is_empty(), "CE tag should have permutations");
@@ -800,7 +800,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
         Some(
-            crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+            crate::core::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
                 .expect("read H2 sound tag"),
         )
     }
@@ -1736,7 +1736,7 @@ mod tests {
     #[test]
     fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
         use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
-        let _units = crate::format::AngleUnitGuard::set(true);
+        let _units = crate::core::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
@@ -1793,7 +1793,7 @@ mod tests {
     #[test]
     fn angles_are_shown_and_typed_as_radians_when_degrees_are_off() {
         use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
-        let _units = crate::format::AngleUnitGuard::set(false);
+        let _units = crate::core::format::AngleUnitGuard::set(false);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
@@ -1833,7 +1833,7 @@ mod tests {
     #[test]
     fn radians_round_trip_exactly_rather_than_to_six_digits() {
         use crate::app::foundation::format_foundation_scalar_value;
-        let _units = crate::format::AngleUnitGuard::set(false);
+        let _units = crate::core::format::AngleUnitGuard::set(false);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let angle = tag.root().field("angle").unwrap();
         let names = TagNameIndex::default();
@@ -1867,7 +1867,7 @@ mod tests {
         });
 
         {
-            let _units = crate::format::AngleUnitGuard::set(true);
+            let _units = crate::core::format::AngleUnitGuard::set(true);
             let editable = foundation_editable_component_parts(&euler).unwrap();
             let read_only = foundation_value_parts(&euler).unwrap();
             assert_eq!(editable[0].1, "90", "half pi is 90 degrees");
@@ -1877,7 +1877,7 @@ mod tests {
             );
         }
 
-        let _units = crate::format::AngleUnitGuard::set(false);
+        let _units = crate::core::format::AngleUnitGuard::set(false);
         let editable = foundation_editable_component_parts(&euler).unwrap();
         let read_only = foundation_value_parts(&euler).unwrap();
         assert!(editable[0].1.starts_with("1.57"), "{editable:?}");
@@ -1890,7 +1890,7 @@ mod tests {
     #[test]
     fn angle_display_survives_repeated_edits() {
         use crate::app::foundation::format_foundation_scalar_value;
-        let _units = crate::format::AngleUnitGuard::set(true);
+        let _units = crate::core::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let field = tag.root().field("angle").unwrap();
         let names = TagNameIndex::default();
@@ -1971,7 +1971,7 @@ mod tests {
 
     #[test]
     fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
-        let _units = crate::format::AngleUnitGuard::set(true);
+        let _units = crate::core::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let euler2d = root.field("real euler angles 2d").unwrap();
@@ -2005,7 +2005,7 @@ mod tests {
 
     #[test]
     fn euler_angle_edit_round_trips_through_tag_serialization() {
-        let _units = crate::format::AngleUnitGuard::set(true);
+        let _units = crate::core::format::AngleUnitGuard::set(true);
         let mut tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let mut dirty = Dirty::default();
 
@@ -2504,7 +2504,7 @@ mod tag_diff_tests {
             .and_then(|count| count.parse::<usize>().ok())
             .unwrap_or(usize::MAX);
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
-        let loaded = crate::source::load_monolithic_blob_index(blob_index, &names)
+        let loaded = crate::core::source::load_monolithic_blob_index(blob_index, &names)
             .expect("open the monolithic build");
 
         let total = loaded.entries.len().min(limit);
@@ -2524,7 +2524,7 @@ mod tag_diff_tests {
 
         for entry in loaded.entries.iter().take(limit) {
             let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::source::read_entry(&loaded.source, entry)
+                crate::core::source::read_entry(&loaded.source, entry)
             }));
             let mut tag = match read {
                 Ok(Ok(tag)) => tag,

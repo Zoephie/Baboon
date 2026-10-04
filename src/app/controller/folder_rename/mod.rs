@@ -157,7 +157,7 @@ impl Baboon {
                 .filter(|entry| keys.contains(&entry.key))
                 .map(|entry| entry.display_path.replace('\\', "/"))
                 .collect::<Vec<_>>();
-            paths.sort_by_cached_key(|path| crate::source::natural_key(path));
+            paths.sort_by_cached_key(|path| crate::core::source::natural_key(path));
             Some(paths)
         });
         let parent_display = rel_path

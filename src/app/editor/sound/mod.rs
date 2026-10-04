@@ -1235,7 +1235,7 @@ fn draw_ce_unbound_note(ui: &mut Ui) {
 /// imports out to its Wwise event(s); each row is one `.wem` permutation.
 fn draw_ce_wwise_player(
     ui: &mut Ui,
-    binding: &crate::source::ce_audio::CeSoundBinding,
+    binding: &crate::core::source::ce_audio::CeSoundBinding,
     edit: &mut FieldEditContext<'_>,
 ) {
     let languages = binding.languages();
@@ -1953,7 +1953,7 @@ fn load_referenced_sound(
 ) -> Option<(TagFile, std::path::PathBuf)> {
     let tags_root = tags_root?;
     let abs = blam_tags::paths::resolve_tag_path(tags_root, rel_path, "sound");
-    let tag = crate::source::read_tag_at_path(&abs, game, definitions_root, group).ok()?;
+    let tag = crate::core::source::read_tag_at_path(&abs, game, definitions_root, group).ok()?;
     Some((tag, abs))
 }
 

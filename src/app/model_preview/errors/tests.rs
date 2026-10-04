@@ -45,7 +45,7 @@ fn read_h2_tag(path: &Path, definition: &str) -> TagFile {
 }
 
 fn read_h2r_tag(path: &Path, group_tag: &[u8; 4]) -> TagFile {
-    crate::source::read_tag_at_path(
+    crate::core::source::read_tag_at_path(
         path,
         Some(H2_GAME),
         Some(&definitions_root()),

@@ -971,7 +971,7 @@ fn decode_shader_bitmap_thumbnail(
     // Use the source-aware loader so classic (Halo CE / Halo 2) bitmaps decode
     // too — they need a JSON layout, not the plain `TagFile::read`.
     let tag =
-        crate::source::read_tag_at_path(&path, edit.game, edit.definitions_root, group_tag).ok()?;
+        crate::core::source::read_tag_at_path(&path, edit.game, edit.definitions_root, group_tag).ok()?;
     let data = build_bitmap_preview(&tag, 0, 0).ok()?;
     // Cap at 256px: drawn small inline (GPU downscales) and at native size in the
     // hover preview popup, matching Foundation's 256px help-popup image.

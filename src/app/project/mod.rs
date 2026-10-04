@@ -458,7 +458,7 @@ pub(super) struct PendingCampaignProject {
 /// name for a kit with no source path to key on.
 pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     let Some(root) = source_root else {
-        return crate::storage::data_path("campaign_evolved_recovery.baboon");
+        return crate::core::storage::data_path("campaign_evolved_recovery.baboon");
     };
     let mut hasher = Sha256::new();
     hasher.update(root.to_string_lossy().as_bytes());
@@ -467,7 +467,7 @@ pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
-    crate::storage::data_path(&format!("{CAMPAIGN_RECOVERY_STEM}-{tag}.baboon"))
+    crate::core::storage::data_path(&format!("{CAMPAIGN_RECOVERY_STEM}-{tag}.baboon"))
 }
 
 pub(super) const CAMPAIGN_RECOVERY_STEM: &str = "campaign_evolved_recovery";
@@ -2032,10 +2032,10 @@ impl Baboon {
                 return;
             }
         };
-        let source_path = if crate::source::find_paks_dir(&snapshot.source_path).is_some() {
+        let source_path = if crate::core::source::find_paks_dir(&snapshot.source_path).is_some() {
             snapshot.source_path.clone()
         } else if let Some(configured) = self.prefs.editing_kit_paths.get("haloce_evolved")
-            && crate::source::find_paks_dir(configured).is_some()
+            && crate::core::source::find_paks_dir(configured).is_some()
         {
             configured.clone()
         } else {

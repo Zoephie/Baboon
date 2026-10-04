@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::TagSource;
+use crate::core::source::TagSource;
 use blam_tags::TagOptions;
 // Both the editor and the engine define this, identically, and two globs make
 // the bare name ambiguous. Name the engine's explicitly: this scaffolding is a
@@ -536,7 +536,7 @@ fn a_cache_folder_import_converts_the_folder_and_reports_what_it_reaches() {
         return;
     };
     let names = TagNameIndex::load_from_definitions(&definitions);
-    let loaded = match crate::source::load_monolithic_blob_index(
+    let loaded = match crate::core::source::load_monolithic_blob_index(
         cache_root.join("blob_index.dat"),
         &names,
     ) {

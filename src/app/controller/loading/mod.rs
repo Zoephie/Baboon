@@ -176,9 +176,9 @@ impl Baboon {
                             kit: kit.id,
                             generation: kit.generation,
                         };
-                        let path = crate::source::index_db_path();
+                        let path = crate::core::source::index_db_path();
                         thread::spawn(move || {
-                            let result = crate::source::save_entry_index(&game, &root, &entries)
+                            let result = crate::core::source::save_entry_index(&game, &root, &entries)
                                 .map_err(|error| error.to_string());
                             let _ = tx.send(WorkerMessage::EntryIndexSaved {
                                 stamp,

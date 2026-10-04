@@ -74,7 +74,7 @@ where
     for common_root in common_roots {
         let campaign_evolved = common_root.join(CAMPAIGN_EVOLVED_INSTALL_FOLDER);
         if !detected.contains_key(CAMPAIGN_EVOLVED_GAME)
-            && crate::source::find_paks_dir(&campaign_evolved).is_some()
+            && crate::core::source::find_paks_dir(&campaign_evolved).is_some()
         {
             detected.insert(CAMPAIGN_EVOLVED_GAME.to_owned(), campaign_evolved);
         }

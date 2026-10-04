@@ -63,7 +63,7 @@ fn container_rename_destination(
 #[derive(Clone)]
 struct ContainerRenameWorkerInput {
     root: PathBuf,
-    containers: Vec<crate::source::MountedContainer>,
+    containers: Vec<crate::core::source::MountedContainer>,
     target_container: usize,
     key: String,
     group_tag: u32,
@@ -118,7 +118,7 @@ fn run_container_rename(
         ));
     }
 
-    let reopened = crate::source::reopen_container_archive(
+    let reopened = crate::core::source::reopen_container_archive(
         &input.root,
         &input.containers,
         input.target_container,
@@ -141,7 +141,7 @@ fn run_container_rename(
         .entries()
         .iter()
         .find(|entry| {
-            crate::source::container_package_name(&entry.path).as_deref() == Some(wanted.as_str())
+            crate::core::source::container_package_name(&entry.path).as_deref() == Some(wanted.as_str())
         })
         .map(|entry| entry.path.clone())
         .ok_or_else(|| {
@@ -161,7 +161,7 @@ fn run_container_rename(
 
     let chunk_label = target.chunk_label.clone();
     let entry = TagEntry {
-        key: crate::source::container_entry_key(&chunk_label, &new_ubulk),
+        key: crate::core::source::container_entry_key(&chunk_label, &new_ubulk),
         display_path: input.new_display.clone(),
         group_tag: input.group_tag,
         group_name: Some(input.group_name.clone()),
@@ -349,7 +349,7 @@ pub(in crate::app) struct AuthoredRename {
 /// Baboon's records, and `blam-tags` refuses them where it can prove them.
 pub(in crate::app) fn container_rename_eligibility(
     entry: &TagEntry,
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
     ledger: &CreatedTagLedger,
 ) -> Result<AuthoredRename, String> {
     let (container, rel_path) = match &entry.location {

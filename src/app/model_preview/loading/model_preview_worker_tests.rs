@@ -17,8 +17,8 @@ use eframe::egui;
 
 use crate::app::state::ModelTagPanelTab;
 use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
-use crate::format::TagNameIndex;
-use crate::source::{TagEntry, TagEntryLocation, TagSource, TagTree};
+use crate::core::format::TagNameIndex;
+use crate::core::source::{TagEntry, TagEntryLocation, TagSource, TagTree};
 
 struct Fixture {
     app: Baboon,
@@ -102,7 +102,7 @@ impl Fixture {
     fn open_edited(&mut self) {
         let entry = self.app.kits[0].entry_for_key(&self.key).unwrap().clone();
         let source = self.app.kits[0].source.as_ref().unwrap().source.clone();
-        let tag = crate::source::read_entry(&source, &entry).expect("read render_model");
+        let tag = crate::core::source::read_entry(&source, &entry).expect("read render_model");
         let mut document = TagDocument::clean(tag);
         document.dirty.touch();
         self.app.kits[0]

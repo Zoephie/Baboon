@@ -83,7 +83,7 @@ impl Baboon {
                 if let TagSource::LooseFolder { root, .. } = &source.source {
                     let root = root.clone();
                     let names = source.names.clone();
-                    match crate::source::build_lazy_folder_tree_beneath(
+                    match crate::core::source::build_lazy_folder_tree_beneath(
                         &root,
                         &pane.rel_path,
                         &mut source.entries,
@@ -98,9 +98,9 @@ impl Baboon {
                     pane.group_tree = TagTree::default();
                 } else {
                     let entries = source.full_entry_set();
-                    pane.tree = crate::source::build_tree_beneath(entries, &pane.rel_path);
+                    pane.tree = crate::core::source::build_tree_beneath(entries, &pane.rel_path);
                     pane.group_tree =
-                        crate::source::build_group_tree_beneath(entries, &pane.rel_path);
+                        crate::core::source::build_group_tree_beneath(entries, &pane.rel_path);
                 }
             } else {
                 pane.tree = TagTree::default();
@@ -302,7 +302,7 @@ impl Baboon {
                     let built_for = (generation, entries.len());
                     if groups_mode && pane.group_tree_for != Some(built_for) {
                         pane.group_tree =
-                            crate::source::build_group_tree_beneath(entries, &pane.rel_path);
+                            crate::core::source::build_group_tree_beneath(entries, &pane.rel_path);
                         pane.group_tree_for = Some(built_for);
                     }
                     let (tree, visible_entries) = if filter.is_empty() {

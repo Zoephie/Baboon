@@ -31,12 +31,12 @@ fn paks() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-fn mount() -> Option<crate::source::LoadedSourceData> {
+fn mount() -> Option<crate::core::source::LoadedSourceData> {
     let paks = paks()?;
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    let names = crate::format::TagNameIndex::load_from_definitions(&defs);
+    let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
     Some(
-        crate::source::load_iostore_container_set(paks, &names, &defs)
+        crate::core::source::load_iostore_container_set(paks, &names, &defs)
             .expect("mount container set"),
     )
 }
@@ -121,10 +121,10 @@ fn a_modded_tag_still_resolves_to_the_shipped_copy() {
         checked += 1;
         // The mod is what the mount resolved the tag to -- that part is correct,
         // it is what the game loads.
-        let mounted = crate::source::read_entry(&loaded.source, entry)
+        let mounted = crate::core::source::read_entry(&loaded.source, entry)
             .unwrap_or_else(|error| panic!("read {} as mounted: {error}", entry.display_path));
         // ...and the game's own copy has to remain reachable beside it.
-        let base = crate::source::read_shipped_entry(&loaded.source, entry)
+        let base = crate::core::source::read_shipped_entry(&loaded.source, entry)
             .unwrap_or_else(|error| panic!("read {} as shipped: {error}", entry.display_path));
         let Some(base) = base else {
             eprintln!(
@@ -222,7 +222,7 @@ fn extracting_container_tags_mirrors_the_tree_with_shipped_bytes() {
 
     for entry in &sample {
         let path = output.join(&entry.display_path);
-        let shipped = match crate::source::read_shipped_entry_bytes(&loaded.source, entry) {
+        let shipped = match crate::core::source::read_shipped_entry_bytes(&loaded.source, entry) {
             Ok(shipped) => shipped,
             // Unreadable here means unreadable for the extraction too, and it is
             // already counted in `failed`.
@@ -316,15 +316,15 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
     }
 
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    let names = crate::format::TagNameIndex::load_from_definitions(&defs);
+    let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
     // Mounted against the real Paks, as the app does: an override container ships
     // no directory index, so only the containers it overrides can name its chunks.
     let mut loaded =
-        crate::source::load_iostore_container(target.clone(), Some(paks.clone()), &names, &defs)
+        crate::core::source::load_iostore_container(target.clone(), Some(paks.clone()), &names, &defs)
             .expect("mount the copied mod");
 
     assert_eq!(
-        crate::source::mounted_containers_at(&loaded.source, &target),
+        crate::core::source::mounted_containers_at(&loaded.source, &target),
         vec![0],
         "the export target is recognised as a mounted container"
     );
@@ -333,7 +333,7 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
         .first()
         .cloned()
         .expect("the mod carries a tag");
-    crate::source::read_entry(&loaded.source, &entry).expect("read while mapped");
+    crate::core::source::read_entry(&loaded.source, &entry).expect("read while mapped");
 
     let root = match &loaded.source {
         TagSource::IoStoreContainerSet { root, .. } => root.clone(),
@@ -354,7 +354,7 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
         assert!(!containers[0].archive.is_partition_mapped());
     }
     assert!(
-        crate::source::read_entry(&loaded.source, &entry).is_err(),
+        crate::core::source::read_entry(&loaded.source, &entry).is_err(),
         "a read through a released partition is refused rather than served stale"
     );
 
@@ -372,7 +372,7 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
         TagSource::IoStoreContainerSet { containers, .. } => containers.clone(),
         _ => panic!("not a container set"),
     };
-    let reopened = crate::source::reopen_container_archive(&root, &containers_snapshot, 0)
+    let reopened = crate::core::source::reopen_container_archive(&root, &containers_snapshot, 0)
         .expect("reopen the replaced container");
     assert!(
         reopened.is_partition_mapped(),
@@ -483,7 +483,7 @@ fn a_freshly_written_mod_can_be_mounted_without_reloading() {
         .map(|entry| entry.key.clone())
         .collect();
 
-    let contributed = crate::source::mount_additional_container(&mut loaded, &target, &[])
+    let contributed = crate::core::source::mount_additional_container(&mut loaded, &target, &[])
         .expect("mount the freshly written mod");
 
     // Mounting a mod over a tag changes where it is read from, never what it
@@ -522,19 +522,19 @@ fn a_freshly_written_mod_can_be_mounted_without_reloading() {
             ))
             .cloned()
             .expect("the new container's tags are in the entry list");
-        crate::source::read_entry(&loaded.source, &entry).expect("read through the new mount");
+        crate::core::source::read_entry(&loaded.source, &entry).expect("read through the new mount");
         assert!(
             loaded
                 .entries
                 .windows(2)
-                .all(|pair| crate::source::natural_key(&pair[0].display_path)
-                    <= crate::source::natural_key(&pair[1].display_path)),
+                .all(|pair| crate::core::source::natural_key(&pair[0].display_path)
+                    <= crate::core::source::natural_key(&pair[1].display_path)),
             "entries stay in the order the browser draws"
         );
     }
     // Mounting the same file twice is a no-op rather than a second container.
     assert_eq!(
-        crate::source::mount_additional_container(&mut loaded, &target, &[]).expect("idempotent"),
+        crate::core::source::mount_additional_container(&mut loaded, &target, &[]).expect("idempotent"),
         0
     );
 
@@ -555,13 +555,13 @@ fn an_export_over_a_mounted_container_is_detected() {
         .utoc_path
         .clone();
     assert_eq!(
-        crate::source::mounted_containers_at(&loaded.source, &target),
+        crate::core::source::mounted_containers_at(&loaded.source, &target),
         vec![0],
         "exporting over a mounted container is detected"
     );
     let free = target.with_file_name("a-name-nothing-has-taken_P.utoc");
     assert!(
-        crate::source::mounted_containers_at(&loaded.source, &free).is_empty(),
+        crate::core::source::mounted_containers_at(&loaded.source, &free).is_empty(),
         "an unused name is free to write"
     );
 }

@@ -29,9 +29,9 @@ fn expanding_a_lazy_folder_leaves_a_full_index_group_tree_alone() {
     let ancestors = vec!["empty_folder".to_owned()];
 
     let expand = |hand_over: bool| -> usize {
-        let mut tree = crate::source::build_folder_directory_tree(&root).unwrap();
+        let mut tree = crate::core::source::build_folder_directory_tree(&root).unwrap();
         let mut entries = Vec::new();
-        let mut group_tree = crate::source::build_group_tree(&full_index);
+        let mut group_tree = crate::core::source::build_group_tree(&full_index);
         assert_eq!(group_tree.children.len(), 1);
         let ctx = egui::Context::default();
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
@@ -145,7 +145,7 @@ fn only_a_hovered_bitmap_row_requests_its_thumbnail() {
             location: TagEntryLocation::LooseFile(PathBuf::from(format!("b{index:02}.bitmap"))),
         })
         .collect();
-    let tree = crate::source::build_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
     let ctx = egui::Context::default();
     let requests_with_pointer_at = |pointer: Option<egui::Pos2>| {
         let mut requested = 0;
@@ -241,7 +241,7 @@ fn unused_height_after_tree(is_container: bool, groups_mode: bool) -> f32 {
         container: 0,
         rel_path: "Tags/objects/example-hlmt.ubulk".to_owned(),
     })];
-    let tree = crate::source::build_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
     let ctx = egui::Context::default();
     let mut left = 0.0;
     let _ = crate::app::run_ui_test(
@@ -311,7 +311,7 @@ fn a_prefiltered_tree_opens_its_folders_when_asked() {
             ))),
         })
         .collect();
-    let tree = crate::source::build_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
     let height = |expand_folders: bool| {
         let ctx = egui::Context::default();
         let mut height = 0.0;
@@ -848,7 +848,7 @@ fn a_folder_counts_only_the_cache_tags_beneath_it() {
             "D:/HREK/tags/objects/weapons/rifle/assault_rifle.weapon",
         ))),
     ];
-    let node = |rel: &str, entries: Vec<usize>| crate::source::TagTreeNode {
+    let node = |rel: &str, entries: Vec<usize>| crate::core::source::TagTreeNode {
         label: rel.rsplit('/').next().unwrap_or(rel).to_owned(),
         rel_path: PathBuf::from(rel),
         children: Vec::new(),
@@ -890,7 +890,7 @@ fn sound_tags_are_extractable_and_collected_recursively() {
         ))),
         sound("sound/sub/b"),
     ];
-    let node = |rel: &str, indices: Vec<usize>| crate::source::TagTreeNode {
+    let node = |rel: &str, indices: Vec<usize>| crate::core::source::TagTreeNode {
         label: rel.rsplit('/').next().unwrap_or(rel).to_owned(),
         rel_path: PathBuf::from(rel),
         children: Vec::new(),

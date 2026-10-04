@@ -473,7 +473,7 @@ impl SyntheticInstall {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        crate::storage::data_path(&format!("chimp-recovery-{key}"))
+        crate::core::storage::data_path(&format!("chimp-recovery-{key}"))
     }
 
     /// `package`, decoded as opening it does.

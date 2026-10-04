@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 
 use super::audio::InlineCodec;
-use crate::source::KitLayout;
+use crate::core::source::KitLayout;
 
 /// One file to write during an extraction.
 pub(super) struct ExtractItem {
@@ -60,7 +60,7 @@ pub(super) enum ExtractSource {
     /// `paks_root`, so nothing has to be indexed first.
     CeMedia {
         paks_root: PathBuf,
-        media: Box<crate::source::ce_audio::CeSoundMedia>,
+        media: Box<crate::core::source::ce_audio::CeSoundMedia>,
     },
 }
 

@@ -391,7 +391,7 @@ impl GitReviewView {
                 return Ok(None);
             }
             let bytes = git_output(repo, &["show", &object])?;
-            crate::source::read_tag_from_bytes(&bytes, game, Some(definitions_root), file.group_tag)
+            crate::core::source::read_tag_from_bytes(&bytes, game, Some(definitions_root), file.group_tag)
                 .map(Some)
                 .map_err(|error| format!("Could not parse {path} at {revision}: {error}"))
         };
@@ -400,7 +400,7 @@ impl GitReviewView {
             if !absolute.is_file() {
                 return Ok(None);
             }
-            crate::source::read_tag_at_path(&absolute, game, Some(definitions_root), file.group_tag)
+            crate::core::source::read_tag_at_path(&absolute, game, Some(definitions_root), file.group_tag)
                 .map(Some)
                 .map_err(|error| format!("Could not parse working tag {path}: {error}"))
         };

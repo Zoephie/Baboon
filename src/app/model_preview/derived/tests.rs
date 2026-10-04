@@ -708,7 +708,7 @@ fn real_kit_collision_physics_and_bsp_tags_build_previews() {
 
     for path in collect("collision_model", b"coll", 10) {
         let Ok(tag) =
-            crate::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"coll"))
+            crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"coll"))
         else {
             continue;
         };
@@ -719,7 +719,7 @@ fn real_kit_collision_physics_and_bsp_tags_build_previews() {
     }
     for path in collect("physics_model", b"phmo", 10) {
         let Ok(tag) =
-            crate::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"phmo"))
+            crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"phmo"))
         else {
             continue;
         };
@@ -730,7 +730,7 @@ fn real_kit_collision_physics_and_bsp_tags_build_previews() {
     }
     for path in collect("scenario_structure_bsp", b"sbsp", 2) {
         let Ok(tag) =
-            crate::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"sbsp"))
+            crate::core::source::read_tag_at_path(&path, None, None, u32::from_be_bytes(*b"sbsp"))
         else {
             continue;
         };

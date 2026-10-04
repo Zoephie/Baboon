@@ -133,7 +133,7 @@ pub(super) fn resolve_launch_tag_entries(
     for canonical in resolved.paths {
         // Spelled on the root the source holds, so the key is the one the
         // folder scan makes; the canonical form is for the containment check.
-        let path = match crate::source::path_on_root(tags_root, &canonical) {
+        let path = match crate::core::source::path_on_root(tags_root, &canonical) {
             Ok(Some(path)) => path,
             Ok(None) => {
                 errors.push(format!(

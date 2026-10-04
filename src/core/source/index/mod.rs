@@ -51,11 +51,11 @@ fn cache_root_str_key(root: &str) -> String {
 
 fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
     if windows_folder == "Baboon" && unix_folder == "baboon" {
-        return crate::storage::data_path(filename);
+        return crate::core::storage::data_path(filename);
     }
     // The same root as installed-mode state (see `user_data_root`); this is
     // only reached for the legacy Genesis files, which are read, not written.
-    crate::storage::user_data_root(windows_folder, unix_folder).join(filename)
+    crate::core::storage::user_data_root(windows_folder, unix_folder).join(filename)
 }
 
 /// Persist `entries` to the shared SQLite index DB. Called from the background
@@ -424,7 +424,7 @@ fn refresh_entry_index_from_cache(
     // more often, did them one at a time.
     let mut paths = Vec::new();
     for item in WalkDir::new(root).follow_links(false) {
-        let Some(item) = crate::source::walk_item(item)? else {
+        let Some(item) = crate::core::source::walk_item(item)? else {
             continue;
         };
         if !item.file_type().is_file() {
@@ -460,7 +460,7 @@ fn refresh_entry_index_from_cache(
                     // counts it as removed, which is what it now is.
                     let fingerprint = match file_fingerprint(path) {
                         Ok(fingerprint) => fingerprint,
-                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) if crate::core::source::skippable_file_error(&error) => continue,
                         Err(error) => return Err(error),
                     };
                     if let (Some(cached), Some(current)) =
@@ -475,7 +475,7 @@ fn refresh_entry_index_from_cache(
                     let known = cached_by_rel.contains_key(&rel_key);
                     let probed = match loose_file_entry(root, path, names) {
                         Ok(probed) => probed,
-                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) if crate::core::source::skippable_file_error(&error) => continue,
                         Err(error) => return Err(error),
                     };
                     match probed {
@@ -989,7 +989,7 @@ pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) ->
     let mut rows = Vec::new();
     for field in tag.root().fields().take(limit) {
         let kind = if let Some(value) = field.value() {
-            crate::format::format_value(names, &value, false)
+            crate::core::format::format_value(names, &value, false)
         } else if let Some(block) = field.as_block() {
             format!("block [{} elements]", block.len())
         } else if let Some(array) = field.as_array() {

@@ -12,14 +12,14 @@ pub(in crate::app) enum FirstRunPage {
 
 pub(in crate::app) struct FirstRunWizardState {
     pub(in crate::app) page: FirstRunPage,
-    pub(in crate::app) selected_storage: Option<crate::storage::StorageMode>,
-    pub(in crate::app) committed_storage: Option<crate::storage::StorageMode>,
+    pub(in crate::app) selected_storage: Option<crate::core::storage::StorageMode>,
+    pub(in crate::app) committed_storage: Option<crate::core::storage::StorageMode>,
     pub(in crate::app) editing_kit_detection_ran: bool,
     pub(in crate::app) validation_error: Option<String>,
 }
 
 impl FirstRunWizardState {
-    pub(in crate::app) fn new(existing_mode: Option<crate::storage::StorageMode>) -> Self {
+    pub(in crate::app) fn new(existing_mode: Option<crate::core::storage::StorageMode>) -> Self {
         Self {
             page: if existing_mode.is_some() {
                 FirstRunPage::Interface

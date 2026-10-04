@@ -43,9 +43,9 @@ fn kit_tags(kit: &str) -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
-fn names() -> crate::format::TagNameIndex {
+fn names() -> crate::core::format::TagNameIndex {
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    crate::format::TagNameIndex::load_from_definitions(&defs)
+    crate::core::format::TagNameIndex::load_from_definitions(&defs)
 }
 
 /// Read a tag, routing Halo 2's classic format through its JSON
@@ -297,13 +297,13 @@ fn load_model_preview_derives_object_names_from_the_entry() {
     }
     let tag = read(&path, "haloreach_mcc");
     let names = names();
-    let entry = crate::source::TagEntry {
+    let entry = crate::core::source::TagEntry {
         key: format!("file:{}", path.display()),
         display_path: "fx/particles/models/debris/falling_leaves/falling_leaves.particle_model"
             .to_owned(),
         group_tag: tag.header.group_tag,
         group_name: Some("particle_model".to_owned()),
-        location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+        location: crate::core::source::TagEntryLocation::LooseFile(path.clone()),
     };
 
     let data = crate::app::model_preview::loading::load_model_preview(
@@ -357,12 +357,12 @@ fn a_shipped_render_model_previews_on_its_own() {
         is_previewable_geometry_group(tag.header.group_tag, &names),
         "`mode` must open the Model Preview tab",
     );
-    let entry = crate::source::TagEntry {
+    let entry = crate::core::source::TagEntry {
         key: format!("file:{}", path.display()),
         display_path: rel.to_owned(),
         group_tag: tag.header.group_tag,
         group_name: Some("render_model".to_owned()),
-        location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+        location: crate::core::source::TagEntryLocation::LooseFile(path.clone()),
     };
     let data = crate::app::model_preview::loading::load_model_preview(
         &tag,
@@ -416,12 +416,12 @@ fn every_shipped_particle_model_previews() {
                 let tag = read(&path, game);
                 let rel = path.strip_prefix(&root).unwrap_or(&path);
                 let display = rel.to_string_lossy().replace('\\', "/");
-                let tag_entry = crate::source::TagEntry {
+                let tag_entry = crate::core::source::TagEntry {
                     key: format!("file:{}", path.display()),
                     display_path: display.clone(),
                     group_tag: tag.header.group_tag,
                     group_name: Some("particle_model".to_owned()),
-                    location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+                    location: crate::core::source::TagEntryLocation::LooseFile(path.clone()),
                 };
                 checked += 1;
                 match crate::app::model_preview::loading::load_model_preview(

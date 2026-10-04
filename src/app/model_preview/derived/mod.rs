@@ -1589,7 +1589,7 @@ impl Baboon {
             // a panicking tag must still send its message or the pending flag
             // sticks and the overlays never arrive.
             let overlays = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let model = crate::source::read_entry(&source, &entry).ok()?;
+                let model = crate::core::source::read_entry(&source, &entry).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                     && is_object_family_group(model.header.group_tag)
                 {

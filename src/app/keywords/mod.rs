@@ -25,7 +25,7 @@ pub(super) struct KeywordStore {
 impl KeywordStore {
     /// Load the sidecar for `game` (clears state for `None` / non-folder sources).
     pub(super) fn load_for_game(&mut self, game: Option<&str>) {
-        self.load_at(game.map(crate::source::keywords_path));
+        self.load_at(game.map(crate::core::source::keywords_path));
     }
 
     /// Load the sidecar at `path`; `None` leaves the store empty.

@@ -248,7 +248,7 @@ fn git_revision_comparison(
     let load_tag = |revision: &str| -> Result<Option<TagFile>, String> {
         git_tag_bytes_if_present(tags_root, path, revision)?
             .map(|bytes| {
-                let tag = crate::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
+                let tag = crate::core::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
                     .map_err(|error| {
                         format!("Could not load tag from commit {revision}: {error}")
                     })?;
@@ -1692,7 +1692,7 @@ impl Baboon {
                     run_tag_compare_git(&self.tx, &mut state, ctx, move || {
                         TagCompareGitUpdate::Head(
                             git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
-                                crate::source::read_tag_from_bytes(
+                                crate::core::source::read_tag_from_bytes(
                                     &bytes,
                                     game.as_deref(),
                                     definitions_root.as_deref(),
@@ -1726,7 +1726,7 @@ impl Baboon {
                     });
                 }
             } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
-                match crate::source::read_tag_at_path(&path, game, definitions_root, group) {
+                match crate::core::source::read_tag_at_path(&path, game, definitions_root, group) {
                     Ok(b) if b.group().tag == group => {
                         state.results = Some(comparison_results(&a.tag, &b));
                         state.error = None;

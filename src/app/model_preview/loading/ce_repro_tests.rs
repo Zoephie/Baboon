@@ -92,7 +92,7 @@ fn indexed_package_lookups_match_a_linear_scan() {
         );
         return;
     }
-    let loaded = crate::source::load_iostore_container_set(
+    let loaded = crate::core::source::load_iostore_container_set(
         paks,
         &TagNameIndex::default(),
         crate::test_kits::definitions(),
@@ -154,7 +154,7 @@ fn ce_model_real_path() {
     }
     let defs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let loaded =
-        crate::source::load_iostore_container_set(paks, &TagNameIndex::default(), &defs)
+        crate::core::source::load_iostore_container_set(paks, &TagNameIndex::default(), &defs)
             .expect("mount CE container set");
     let source = &loaded.source;
     let hlmt = u32::from_be_bytes(*b"hlmt");

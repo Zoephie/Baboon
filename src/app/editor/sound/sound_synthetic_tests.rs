@@ -14,7 +14,7 @@ const SAMPLE_RATE: usize = 22_050;
 
 fn new_tag_for(game: &str, group: &str) -> TagFile {
     TagFile::new(
-        crate::app::locate_definitions_root()
+        crate::core::bundled::locate_definitions_root()
             .join(game)
             .join(format!("{group}.json")),
     )

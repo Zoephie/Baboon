@@ -19,8 +19,8 @@ fn a_saved_tag_updates_its_index_row_and_references() {
     tag.write_atomic(&path).unwrap();
     let names = TagNameIndex::default();
     let entries =
-        crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
-    crate::source::save_entry_index(&game, &root, &entries).unwrap();
+        crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+    crate::core::source::save_entry_index(&game, &root, &entries).unwrap();
     let entry = entries[0].clone();
 
     let mut app = Baboon::for_test();
@@ -49,7 +49,7 @@ fn a_saved_tag_updates_its_index_row_and_references() {
         .insert(entry.key.clone(), TagDocument::modified(tag));
 
     let saved = app.save_tag_by_key(&entry.key);
-    let refresh = crate::source::refresh_entry_index(&game, &root, &names);
+    let refresh = crate::core::source::refresh_entry_index(&game, &root, &names);
     let referrers = app.kits[0]
         .source
         .as_ref()
@@ -60,7 +60,7 @@ fn a_saved_tag_updates_its_index_row_and_references() {
                 .to_vec()
         });
 
-    crate::source::remove_test_index_rows(&game);
+    crate::core::source::remove_test_index_rows(&game);
     std::fs::remove_dir_all(&root).unwrap();
     assert!(saved.is_ok(), "{saved:?}");
     assert!(
@@ -91,8 +91,8 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
     tag.write_atomic(&path).unwrap();
     let names = TagNameIndex::default();
     let entries =
-        crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
-    crate::source::save_entry_index(&game, &root, &entries).unwrap();
+        crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+    crate::core::source::save_entry_index(&game, &root, &entries).unwrap();
     let entry = entries[0].clone();
 
     let mut app = Baboon::for_test();
@@ -138,7 +138,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
                 .dependents_for(u32::from_be_bytes(*b"mode"), "objects\\crate")
                 .to_vec()
         });
-    crate::source::remove_test_index_rows(&game);
+    crate::core::source::remove_test_index_rows(&game);
     std::fs::remove_dir_all(&root).unwrap();
     assert!(saved.is_ok(), "{saved:?}");
     assert_eq!(referrers, Some(vec![entry.key.clone()]));
@@ -193,7 +193,7 @@ fn a_refresh_reports_a_tag_whose_references_cannot_be_read() {
     };
     let game = format!("refresh_errors_{}", std::process::id());
     let refresh = persist_entry_index_changes(&game, &root, &source, refresh);
-    crate::source::remove_test_index_rows(&game);
+    crate::core::source::remove_test_index_rows(&game);
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(refresh.touched_dependencies.len(), 1, "the good tag is read");
     assert_eq!(refresh.errors.len(), 1, "{:?}", refresh.errors);
@@ -226,7 +226,7 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
     }
     let names = TagNameIndex::default();
     let entries =
-        crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
     let mut app = Baboon::for_test();
     app.install_loaded_source(LoadedSourceData {
         label: "test".to_owned(),

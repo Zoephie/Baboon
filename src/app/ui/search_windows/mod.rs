@@ -325,7 +325,7 @@ impl Baboon {
                                 .entries
                                 .iter()
                                 .map(|entry| {
-                                    crate::format::to_native_path_string(&entry.display_path)
+                                    crate::core::format::to_native_path_string(&entry.display_path)
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n");

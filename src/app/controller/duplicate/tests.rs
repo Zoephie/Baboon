@@ -32,16 +32,16 @@ fn test_entry(key: &str, display_path: &str, group_tag: u32) -> TagEntry {
 }
 
 fn container_source(entries: Vec<TagEntry>) -> LoadedSourceData {
-    let tree = crate::source::build_tree(&entries);
-    let group_tree = crate::source::build_group_tree(&entries);
+    let tree = crate::core::source::build_tree(&entries);
+    let group_tree = crate::core::source::build_group_tree(&entries);
     LoadedSourceData {
         label: "duplicate test containers".to_owned(),
         source: TagSource::IoStoreContainerSet {
             root: PathBuf::from("C:/duplicate-test/Paks"),
             containers: Vec::new(),
-            index: Arc::new(crate::source::ContainerTagIndex::default()),
-            packages: Arc::new(crate::source::ContainerPackageIndex::default()),
-            shipped: Arc::new(crate::source::ShippedTagIndex::default()),
+            index: Arc::new(crate::core::source::ContainerTagIndex::default()),
+            packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+            shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
         },
         names: TagNameIndex::default(),
         game: None,
@@ -214,7 +214,7 @@ fn container_duplicate_index_strips_group_suffix_and_keeps_original_rel_path() {
     assert_eq!(logical, "objects/new_copy");
     assert_ne!(logical, "objects/new_copy-biped");
 
-    let mut index = crate::source::ContainerTagIndex::default();
+    let mut index = crate::core::source::ContainerTagIndex::default();
     let key = container_duplicate_index_key(group_tag, rel_path).unwrap();
     index.insert(key, 7, rel_path.to_owned());
     assert_eq!(
@@ -434,8 +434,8 @@ fn single_file_registration_updates_browser_source_and_preserves_group() {
         },
         names: TagNameIndex::default(),
         game: None,
-        tree: crate::source::build_tree(&entries),
-        group_tree: crate::source::build_group_tree(&entries),
+        tree: crate::core::source::build_tree(&entries),
+        group_tree: crate::core::source::build_group_tree(&entries),
         entries,
         all_entries: Vec::new(),
         reverse_dependencies: None,

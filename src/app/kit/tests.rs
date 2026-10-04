@@ -1,7 +1,7 @@
 use super::EditingKitProfileIdentity;
 use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
 use crate::app::test_definition_path;
-use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
+use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
 use blam_tags::TagFile;
 use std::collections::HashMap;
 use std::path::Path;

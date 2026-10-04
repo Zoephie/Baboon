@@ -231,7 +231,7 @@ pub(in crate::app) enum WorkerMessage {
     BlamImportFinished {
         stamp: KitStamp,
         outcomes: Vec<(String, Result<String, String>)>,
-        created: Vec<(crate::source::TagEntry, TagFile)>,
+        created: Vec<(crate::core::source::TagEntry, TagFile)>,
     },
     ContainerDuplicateFinished {
         stamp: KitStamp,

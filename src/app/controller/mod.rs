@@ -322,7 +322,7 @@ pub(super) fn meteorite_usmap()
 /// different kits: Save uses the active one, Export Mod the one being exported.
 pub(super) fn new_container_template_bytes(
     template: &NewContainerTemplate,
-    containers: &[crate::source::MountedContainer],
+    containers: &[crate::core::source::MountedContainer],
     package: &str,
     tag_len: u64,
     reresolve: impl FnOnce() -> Option<(usize, String)>,
@@ -483,7 +483,7 @@ pub(in crate::app) struct InPlaceOverwriteJob {
     /// The document's dirty revision when it was serialized.
     dirty_revision: u64,
     root: PathBuf,
-    containers: Vec<crate::source::MountedContainer>,
+    containers: Vec<crate::core::source::MountedContainer>,
     container_idx: usize,
     utoc_path: PathBuf,
     rel_path: String,
@@ -526,7 +526,7 @@ fn run_in_place_overwrite(job: &InPlaceOverwriteJob) -> InPlaceOverwrite {
     .map_err(|error| error.to_string());
     let touched = write.is_ok();
     let reopened = touched.then(|| {
-        crate::source::reopen_container_archive(&job.root, &job.containers, job.container_idx)
+        crate::core::source::reopen_container_archive(&job.root, &job.containers, job.container_idx)
             .map_err(|error| error.to_string())
     });
     InPlaceOverwrite {
@@ -779,10 +779,10 @@ fn replace_loaded_tree_scope(
     let root_key = extraction_scope_key(tree_root);
     let scope_key = extraction_scope_key(loaded_scope);
     if scope_contains(&scope_key, &root_key) {
-        *tree = crate::source::build_tree_beneath(entries, tree_root);
+        *tree = crate::core::source::build_tree_beneath(entries, tree_root);
         mark_tree_loaded(tree);
     } else if scope_contains(&root_key, &scope_key) {
-        let mut replacement = crate::source::build_tree_beneath(entries, loaded_scope);
+        let mut replacement = crate::core::source::build_tree_beneath(entries, loaded_scope);
         mark_tree_loaded(&mut replacement);
         if let Some(node) = find_tree_node_mut(&mut tree.children, &scope_key) {
             node.children = replacement.children;
@@ -808,8 +808,8 @@ impl Baboon {
         kit_index: usize,
         tag_key: &str,
         entry: &TagEntry,
-    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
-        use crate::source::ce_audio;
+    ) -> Option<std::sync::Arc<crate::core::source::ce_audio::CeSoundBinding>> {
+        use crate::core::source::ce_audio;
 
         if !crate::app::editor::is_sound_group(entry.group_tag) {
             return None;
@@ -834,8 +834,8 @@ impl Baboon {
         kit_index: usize,
         group_tag: u32,
         reference: &str,
-    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
-        use crate::source::ce_audio;
+    ) -> Option<std::sync::Arc<crate::core::source::ce_audio::CeSoundBinding>> {
+        use crate::core::source::ce_audio;
 
         let Some(TagSource::IoStoreContainerSet { index, .. }) =
             self.kits[kit_index].source.as_ref().map(|s| &s.source)
@@ -855,8 +855,8 @@ impl Baboon {
         kit_index: usize,
         cache_key: &str,
         package: &str,
-    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
-        use crate::source::ce_audio;
+    ) -> Option<std::sync::Arc<crate::core::source::ce_audio::CeSoundBinding>> {
+        use crate::core::source::ce_audio;
 
         if let Some(hit) = self.kits[kit_index].ce_sound_bindings.get(cache_key) {
             return Some(hit.clone());
@@ -939,7 +939,7 @@ impl Baboon {
         }
 
         let language = binding.language_to_show(self.audio.language.as_deref());
-        let media: Vec<crate::source::ce_audio::CeSoundMedia> = binding
+        let media: Vec<crate::core::source::ce_audio::CeSoundMedia> = binding
             .media_for_language(&language)
             .into_iter()
             .cloned()
@@ -1336,7 +1336,7 @@ impl Baboon {
     pub(super) fn begin_load_folder_path(&mut self, path: PathBuf, ctx: egui::Context) {
         // A UE5 `Paks` directory (Halo: Campaign Evolved) is mounted as a
         // container set rather than walked as loose files.
-        if let Some(paks) = crate::source::find_paks_dir(&path) {
+        if let Some(paks) = crate::core::source::find_paks_dir(&path) {
             // Remember the folder the user picked, not the container directory
             // found inside it — the same way a loose kit remembers its root
             // rather than the `tags/` subfolder it actually scans.
@@ -1481,7 +1481,7 @@ impl Baboon {
                 .custom_editing_kit_profiles
                 .iter()
                 .filter(|profile| profile.game == "haloce_evolved")
-                .find_map(|profile| crate::source::find_paks_dir(&profile.root))
+                .find_map(|profile| crate::core::source::find_paks_dir(&profile.root))
         })
     }
 
@@ -2840,7 +2840,7 @@ impl Baboon {
             let entries = source
                 .all_entries
                 .iter()
-                .filter(|entry| crate::source::entry_is_beneath_folder(entry, &rel_path))
+                .filter(|entry| crate::core::source::entry_is_beneath_folder(entry, &rel_path))
                 .cloned()
                 .collect();
             self.install_folder_extractables(kit_index, &rel_path, entries);
@@ -2927,7 +2927,7 @@ impl Baboon {
                 .filter(|entry| known.insert(entry.key.clone())),
         );
         replace_loaded_tree_scope(&mut source.tree, Path::new(""), rel_path, &source.entries);
-        source.group_tree = crate::source::build_group_tree(&source.entries);
+        source.group_tree = crate::core::source::build_group_tree(&source.entries);
         let new_generation = kit.generation.wrapping_add(1);
         for pane in kit.folder_browsers.values_mut() {
             replace_loaded_tree_scope(&mut pane.tree, &pane.rel_path, rel_path, &source.entries);
@@ -2988,7 +2988,7 @@ impl Baboon {
             &ctx,
             move || WorkerMessage::EntryIndexRefreshed {
                 stamp,
-                result: crate::source::refresh_entry_index(&game, &root, &names)
+                result: crate::core::source::refresh_entry_index(&game, &root, &names)
                     .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
                     .map_err(|e| e.to_string()),
             },
@@ -3085,7 +3085,7 @@ impl Baboon {
     ) -> Option<String> {
         let kit = &mut self.kits[kit_index];
         let source = kit.source.as_mut()?;
-        source.group_tree = crate::source::build_group_tree(&entries);
+        source.group_tree = crate::core::source::build_group_tree(&entries);
         source.all_entries = entries;
         source.complete_scan = true;
         let error = if let TagSource::LooseFolder { root, .. } = &source.source {
@@ -4300,13 +4300,13 @@ impl Baboon {
             self.status = "Tag is no longer in the browser".to_owned();
             return;
         };
-        let copied_path = crate::format::to_native_path_string(&entry.display_path);
+        let copied_path = crate::core::format::to_native_path_string(&entry.display_path);
         ctx.copy_text(copied_path.clone());
         self.status = format!("Copied {copied_path}");
     }
 
     pub(super) fn copy_folder_path(&mut self, path: &Path, ctx: &egui::Context) {
-        let copied_path = crate::format::to_native_path_string(&path.to_string_lossy());
+        let copied_path = crate::core::format::to_native_path_string(&path.to_string_lossy());
         ctx.copy_text(copied_path.clone());
         self.status = format!("Copied {copied_path}");
     }
@@ -4546,7 +4546,7 @@ impl Baboon {
         for entry in source.full_entry_set() {
             if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
                 by_dependency_key
-                    .entry(crate::source::dependency_key(entry.group_tag, &rel))
+                    .entry(crate::core::source::dependency_key(entry.group_tag, &rel))
                     .or_insert_with(|| entry.clone());
             }
         }
@@ -4910,7 +4910,7 @@ impl Baboon {
                         TagEntryLocation::LooseFile(path) => path.clone(),
                         _ => continue,
                     };
-                    match crate::source::read_entry(
+                    match crate::core::source::read_entry(
                         self.source()
                             .map(|source| &source.source)
                             .expect("source exists"),
@@ -5580,7 +5580,7 @@ impl Baboon {
         if let (TagSource::LooseFolder { root, .. }, Some(game)) =
             (&source.source, source.game.as_deref())
             && !source.all_entries.is_empty()
-            && let Err(error) = crate::source::upsert_entry_with_dependencies(
+            && let Err(error) = crate::core::source::upsert_entry_with_dependencies(
                 game,
                 root,
                 entry,
@@ -6171,7 +6171,7 @@ impl Baboon {
             return false;
         };
         matches!(
-            crate::source::read_shipped_entry_bytes(&source.source, &entry),
+            crate::core::source::read_shipped_entry_bytes(&source.source, &entry),
             Ok(Some(bytes)) if bytes == *overlay.bytes
         )
     }
@@ -6226,7 +6226,7 @@ impl Baboon {
         if overlay.kind == CampaignProjectTagKind::New {
             return describe_whole(edited_tag, &self.kits[kit].names);
         }
-        let base = match crate::source::read_shipped_entry(&source.source, &entry) {
+        let base = match crate::core::source::read_shipped_entry(&source.source, &entry) {
             Ok(Some(base)) => base,
             // Only a mod carries this tag, so there is no shipped version to
             // difference against — describing it whole is the honest answer, and
@@ -6399,7 +6399,7 @@ impl Baboon {
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
             return Vec::new();
         };
-        crate::source::mounted_containers_at(&source.source, output)
+        crate::core::source::mounted_containers_at(&source.source, output)
             .into_iter()
             .filter_map(|index| containers.get(index))
             .map(|container| container.chunk_label.clone())
@@ -6702,7 +6702,7 @@ impl Baboon {
                 if in_place && !replaced_a_mount {
                     let folder_seeds = self.kits[exporting].folder_seeds();
                     let mounted = self.kits[exporting].source.as_mut().map(|source| {
-                        crate::source::mount_additional_container(source, &output, &folder_seeds)
+                        crate::core::source::mount_additional_container(source, &output, &folder_seeds)
                     });
                     match mounted {
                         Some(Ok(count)) if count > 0 => {
@@ -7308,7 +7308,7 @@ impl Baboon {
             .filter(|entry| referrer_keys.contains(entry.key.as_str()))
             .cloned()
             .collect();
-        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
+        out.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -7327,7 +7327,7 @@ impl Baboon {
             })
             .cloned()
             .collect();
-        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
+        out.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -7345,7 +7345,7 @@ impl Baboon {
         for entry in source.full_entry_set() {
             if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
                 by_key
-                    .entry(crate::source::dependency_key(entry.group_tag, &rel))
+                    .entry(crate::core::source::dependency_key(entry.group_tag, &rel))
                     .or_insert(entry);
             }
         }
@@ -7353,11 +7353,11 @@ impl Baboon {
             .iter()
             .filter_map(|dep| {
                 by_key
-                    .get(&crate::source::dependency_key(dep.group_tag, &dep.rel_path))
+                    .get(&crate::core::source::dependency_key(dep.group_tag, &dep.rel_path))
                     .map(|entry| (*entry).clone())
             })
             .collect();
-        children.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
+        children.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
         children.dedup_by(|a, b| a.key == b.key);
         (children, false)
     }
@@ -8421,7 +8421,7 @@ impl Baboon {
                 match group_tag
                     .context("no open tag to restore")
                     .and_then(|group_tag| {
-                        crate::source::read_tag_from_bytes(
+                        crate::core::source::read_tag_from_bytes(
                             &bytes,
                             game.as_deref(),
                             definitions_root.as_deref(),
@@ -9740,7 +9740,7 @@ fn reset_lazy_folder_browser(
     tree: &mut TagTree,
     entries: &mut Vec<TagEntry>,
 ) -> Result<(), String> {
-    *tree = crate::source::build_folder_directory_tree(root).map_err(|error| error.to_string())?;
+    *tree = crate::core::source::build_folder_directory_tree(root).map_err(|error| error.to_string())?;
     entries.clear();
     Ok(())
 }
@@ -10440,7 +10440,7 @@ fn listing_map_ids(source: &TagSource, listed: &[TagEntry]) -> ListingRows {
         if &entry.group_tag.to_be_bytes() != b"scnr" {
             continue;
         }
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
+        let Ok(tag) = crate::core::source::read_entry(source, entry) else {
             continue;
         };
         let root = tag.root();
@@ -10473,7 +10473,7 @@ fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, Stri
         if &entry.group_tag.to_be_bytes() != b"snd!" {
             continue;
         }
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
+        let Ok(tag) = crate::core::source::read_entry(source, entry) else {
             continue;
         };
         let root = tag.root();
@@ -10774,7 +10774,7 @@ fn run_tag_rename_job(
     // Ensure a reverse-dependency index so we only rewrite actual referrers.
     let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
         game.as_deref()
-            .and_then(|game| crate::source::load_reverse_dependency_index(game, &root))
+            .and_then(|game| crate::core::source::load_reverse_dependency_index(game, &root))
     });
     if let Some(index) = reverse_dependencies.as_ref()
         && index.len() != all_entries_before.len()
@@ -10860,7 +10860,7 @@ fn run_tag_rename_job(
 
     // Rebuild browser tree + entry set + key map.
     send_folder_refactor_progress(tx, &label, "Refreshing browser", None);
-    let tree = crate::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
+    let tree = crate::core::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
     let all_entries =
         merge_refactored_entries(all_entries_before, &old_entries, &new_entries, true);
     let mut old_to_new_keys = HashMap::new();
@@ -10974,7 +10974,7 @@ fn run_folder_refactor_job(
     };
     let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
         game.as_deref()
-            .and_then(|game| crate::source::load_reverse_dependency_index(game, &root))
+            .and_then(|game| crate::core::source::load_reverse_dependency_index(game, &root))
     });
     if move_folder
         && let Some(index) = reverse_dependencies.as_ref()
@@ -11071,7 +11071,7 @@ fn run_folder_refactor_job(
     let failed = rewrite_result.failed.clone();
 
     send_folder_refactor_progress(tx, &label, "Refreshing browser", None);
-    let tree = crate::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
+    let tree = crate::core::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
     let all_entries = if move_folder {
         merge_refactored_entries(all_entries_before, &old_entries, &new_entries, true)
     } else if existing_all_entries.is_empty() {
@@ -11369,7 +11369,7 @@ fn affected_move_rewrite_entries(
         .into_iter()
         .filter_map(|key| entries_by_key.get(&key).cloned())
         .collect::<Vec<_>>();
-    entries.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
+    entries.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
     entries
 }
 
@@ -11559,7 +11559,7 @@ fn persist_entry_index_changes(
     mut refresh: EntryIndexRefresh,
 ) -> EntryIndexRefresh {
     for key in &refresh.removed_keys {
-        if let Err(error) = crate::source::delete_entry_with_dependencies(game, root, key) {
+        if let Err(error) = crate::core::source::delete_entry_with_dependencies(game, root, key) {
             refresh.errors.push(format!("{key}: {error:#}"));
         }
     }
@@ -11569,7 +11569,7 @@ fn persist_entry_index_changes(
     // refresh would look at that tag again.
     for entry in &refresh.touched {
         let references = read_entry_dependencies(tag_source, entry);
-        let written = crate::source::upsert_entry_with_dependencies(
+        let written = crate::core::source::upsert_entry_with_dependencies(
             game,
             root,
             entry,

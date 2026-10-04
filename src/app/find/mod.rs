@@ -683,7 +683,7 @@ impl Baboon {
                                     .or_insert_with(|| build_def_docs(root, game, group)),
                             )
                         });
-                        match crate::source::read_entry(&tag_source, &entry) {
+                        match crate::core::source::read_entry(&tag_source, &entry) {
                             Ok(tag) => occurrences.extend(collect_find_occurrences(
                                 &tag,
                                 &entry.key,

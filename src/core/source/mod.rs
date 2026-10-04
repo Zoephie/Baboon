@@ -21,7 +21,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json;
 use walkdir::WalkDir;
 
-use crate::format::TagNameIndex;
+use crate::core::format::TagNameIndex;
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Snapshot reported while a background loose-folder index scan is running.
@@ -686,7 +686,7 @@ pub struct EntryIndexRefresh {
     /// Keys the cached index had that are gone, or no longer tags.
     pub removed_keys: Vec<String>,
     /// References of each touched tag, read by whoever applies the refresh.
-    /// Empty from [`crate::source::refresh_entry_index`] itself.
+    /// Empty from [`crate::core::source::refresh_entry_index`] itself.
     pub touched_dependencies: Vec<(String, Vec<DependencyRef>)>,
     /// What could not be read or written while applying the refresh to the
     /// on-disk indexes, for the status line. Empty from the refresh itself.

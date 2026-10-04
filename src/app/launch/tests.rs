@@ -25,7 +25,7 @@ fn a_launched_tag_is_keyed_like_the_folder_scan() {
     let launched =
         resolve_launch_tag_entries(&root, &[PathBuf::from("objects/a.model")], &names).unwrap();
     let scanned =
-        crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
 
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(launched.entries.len(), 1, "{:?}", launched.errors);

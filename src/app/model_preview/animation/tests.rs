@@ -233,7 +233,7 @@ fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
             continue;
         }
         let entry = entry_for(rel);
-        let model = crate::source::read_entry(&source, &entry).expect("model reads");
+        let model = crate::core::source::read_entry(&source, &entry).expect("model reads");
         let (_, render_rel) = model
             .root()
             .read_tag_ref_with_group("render model")
@@ -361,7 +361,7 @@ fn rotation_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
 /// rotation convention the decode picked than in the opposite one. That last
 /// check is the one a wrong conjugation fails.
 fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
-    let tag = crate::source::read_entry(&source, &entry).expect("tag reads");
+    let tag = crate::core::source::read_entry(&source, &entry).expect("tag reads");
     let names = TagNameIndex::load_game(crate::test_kits::definitions(), game).expect("tag names");
     let data = crate::app::model_preview::loading::load_model_preview(
         &tag,

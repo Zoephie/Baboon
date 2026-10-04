@@ -36,7 +36,7 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
-use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
+use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
 
 /// Frames each case runs after its setup. A window's first frame only
 /// measures it; the second is the first that paints; the rest let anything
@@ -116,7 +116,7 @@ fn loose_kit(h: &mut Harness) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         fixture::new_tag(group).write(&path).unwrap();
     }
-    let source = crate::source::load_editing_kit_layout(
+    let source = crate::core::source::load_editing_kit_layout(
         root,
         "Smoke Kit".to_owned(),
         fixture::GAME.to_owned(),
@@ -163,8 +163,8 @@ fn container_kit(h: &mut Harness) {
         },
         names: h.app.default_names.clone(),
         game: Some("haloce_evolved".to_owned()),
-        tree: crate::source::build_tree(&entries),
-        group_tree: crate::source::build_group_tree(&entries),
+        tree: crate::core::source::build_tree(&entries),
+        group_tree: crate::core::source::build_group_tree(&entries),
         all_entries: entries.clone(),
         entries,
         reverse_dependencies: None,

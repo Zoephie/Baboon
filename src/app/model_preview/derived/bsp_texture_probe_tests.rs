@@ -45,7 +45,7 @@ fn a_real_bsps_render_layer_keeps_uvs_tangents_and_shader_paths() {
     };
     for path in &candidates {
         let Ok(tag) =
-            crate::source::read_tag_at_path(path, None, None, u32::from_be_bytes(*b"sbsp"))
+            crate::core::source::read_tag_at_path(path, None, None, u32::from_be_bytes(*b"sbsp"))
         else {
             continue;
         };
