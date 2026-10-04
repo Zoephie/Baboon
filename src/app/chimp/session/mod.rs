@@ -49,7 +49,7 @@ impl Baboon {
         }
 
         self.prefs.chimp_usmap_path = path;
-        self.chimp_usmap_path_input = self
+        self.chimp.chimp_usmap_path_input = self
             .prefs
             .chimp_usmap_path
             .as_ref()
@@ -84,7 +84,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn commit_chimp_usmap_path_input(&mut self, ctx: egui::Context) {
-        let trimmed = self.chimp_usmap_path_input.trim();
+        let trimmed = self.chimp.chimp_usmap_path_input.trim();
         let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
         self.apply_chimp_usmap_path(path, ctx);
     }
@@ -124,7 +124,7 @@ impl Baboon {
         if !kit.chimp.loading_packages.is_empty() {
             return "loading a package".to_owned();
         }
-        if self.chimp_level_job.is_some() {
+        if self.chimp.chimp_level_job.is_some() {
             return "exporting a level".to_owned();
         }
         "mounted".to_owned()
@@ -609,7 +609,7 @@ impl Baboon {
             self.status = "Chimp has no modified packages".to_owned();
             return;
         }
-        self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+        self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
             kit: self.kits[kit_index].id,
             packages,
             pending_action,
@@ -622,7 +622,7 @@ impl Baboon {
         kit_index: usize,
         packages: &[String],
     ) -> Result<usize, String> {
-        if self.chimp_writes.contains_key(&self.kits[kit_index].id) {
+        if self.chimp.chimp_writes.contains_key(&self.kits[kit_index].id) {
             return Err("A Chimp save is still running; discard once it finishes".to_owned());
         }
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {

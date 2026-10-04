@@ -42,12 +42,12 @@ fn a_package_edited_during_a_save_stays_dirty() {
 fn a_close_during_a_chimp_save_waits_for_it() {
     let mut app = Baboon::for_test();
     let kit = app.kits[0].id;
-    app.chimp_writes.insert(kit, None);
+    app.chimp.chimp_writes.insert(kit, None);
     let ctx = egui::Context::default();
     app.request_close_action(PendingCloseAction::CloseKit(kit), &ctx);
     assert!(app.kit_index(kit).is_some(), "the close waits for the save");
     assert!(matches!(
-        app.chimp_writes.get(&kit),
+        app.chimp.chimp_writes.get(&kit),
         Some(Some(PendingCloseAction::CloseKit(_)))
     ));
 
@@ -60,7 +60,7 @@ fn a_close_during_a_chimp_save_waits_for_it() {
         Err("stopped".to_owned()),
         &ctx,
     );
-    assert!(app.chimp_writes.is_empty());
+    assert!(app.chimp.chimp_writes.is_empty());
     assert!(app.kit_index(kit).is_none(), "and runs once it lands");
 }
 
@@ -75,7 +75,7 @@ fn a_failed_source_overwrite_releases_its_leases() {
         .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
         .unwrap();
     let id = app.park_container_write_lease(lease);
-    app.chimp_writes.insert(kit, None);
+    app.chimp.chimp_writes.insert(kit, None);
     app.handle_chimp_sources_overwritten(
         kit,
         vec![id],
@@ -86,7 +86,7 @@ fn a_failed_source_overwrite_releases_its_leases() {
         &egui::Context::default(),
     );
     assert_eq!(app.status, "could not overwrite");
-    assert!(app.chimp_writes.is_empty());
+    assert!(app.chimp.chimp_writes.is_empty());
     let again = app
         .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
         .expect("the container is writable again");
@@ -185,7 +185,7 @@ fn exporting_a_mod_installs_a_container_that_overrides_the_package() {
     let output = staging.join("ChimpMod_P.utoc");
     assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.prefs.chimp_output_dir.as_deref(), Some(staging.as_path()));
-    assert!(app.chimp_writes.contains_key(&app.kits[0].id));
+    assert!(app.chimp.chimp_writes.contains_key(&app.kits[0].id));
     assert_eq!(app.status, format!("Building {}…", output.display()));
     let rebuilt = rebuild_chimp_document(&install.world, &app.kits[0].chimp.documents[THING])
         .unwrap()
@@ -196,7 +196,7 @@ fn exporting_a_mod_installs_a_container_that_overrides_the_package() {
         app.status,
         format!("Built 1 modified Unreal package(s) into {}", output.display())
     );
-    assert!(app.chimp_writes.is_empty());
+    assert!(app.chimp.chimp_writes.is_empty());
     let document = &app.kits[0].chimp.documents[THING];
     assert!(!document.dirty);
     assert_eq!(count(document), 42);
@@ -288,7 +288,7 @@ fn the_save_dialog_refuses_a_bad_name_and_an_unacknowledged_replace() {
 
     frames.click("Cancel", &mut draw_save(&mut app));
     assert!(!app.has_chimp_save_dialog());
-    assert!(app.chimp_writes.is_empty());
+    assert!(app.chimp.chimp_writes.is_empty());
     assert!(app.kits[0].chimp.documents[THING].dirty);
     assert_eq!(fs::read(staging.join("ChimpMod_P.utoc")).unwrap(), b"old");
     app.clear_chimp_recovery_packages(0, &[THING.to_owned()])
@@ -363,14 +363,14 @@ fn overwriting_sources_rewrites_the_container_and_remounts() {
     frames.click_nth("Overwrite source PAKs", 1, &mut draw_save(&mut app));
     assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.status, "Overwriting 1 source container(s)…");
-    assert!(app.chimp_writes.contains_key(&app.kits[0].id));
+    assert!(app.chimp.chimp_writes.contains_key(&app.kits[0].id));
 
     assert!(apply_next_worker_message(&mut app), "the overwrite answered");
     assert_eq!(
         app.status,
         "Overwrote 1 modified Unreal package(s) across 1 source container(s)"
     );
-    assert!(app.chimp_writes.is_empty());
+    assert!(app.chimp.chimp_writes.is_empty());
     assert!(app.mods.container_write_leases.is_empty(), "the lease is released");
     let document = &app.kits[0].chimp.documents[THING];
     assert!(!document.dirty);
@@ -403,7 +403,7 @@ fn closing_a_workspace_with_modified_packages_saves_then_closes() {
     let kit = app.kits[0].id;
     let ctx = egui::Context::default();
     app.request_close_action(PendingCloseAction::CloseKit(kit), &ctx);
-    let prompt = app.chimp_discard_prompt.as_ref().expect("the prompt opened");
+    let prompt = app.chimp.chimp_discard_prompt.as_ref().expect("the prompt opened");
     assert_eq!(prompt.packages, [THING]);
     assert!(matches!(prompt.pending_action, Some(PendingCloseAction::CloseKit(_))));
 
@@ -415,7 +415,7 @@ fn closing_a_workspace_with_modified_packages_saves_then_closes() {
     ));
     assert!(frames.shows(THING));
     frames.click("Save Chimp Changes", &mut draw_discard(&mut app));
-    assert!(app.chimp_discard_prompt.is_none());
+    assert!(app.chimp.chimp_discard_prompt.is_none());
     let dialog = app.kits[0].chimp.save_dialog.as_mut().expect("the save dialog");
     assert!(matches!(
         dialog.pending_close_action,
@@ -441,7 +441,7 @@ fn closing_a_workspace_can_discard_its_modified_packages() {
     app.request_close_action(PendingCloseAction::CloseKit(kit), &egui::Context::default());
     let mut frames = Frames::new();
     frames.click("Discard Changes", &mut draw_discard(&mut app));
-    assert!(app.chimp_discard_prompt.is_none());
+    assert!(app.chimp.chimp_discard_prompt.is_none());
     assert!(app.kit_index(kit).is_none(), "the workspace closed");
     assert!(!recovery.exists(), "the recovery copy went with the edit");
 }
@@ -459,14 +459,14 @@ fn the_discard_prompt_restores_cancels_and_reports_a_refusal() {
     assert!(frames.shows("Every listed Chimp package will return to its original source data."));
     assert!(!frames.shows("Save Chimp Changes"), "nothing to save it for");
     frames.click("Cancel", &mut draw_discard(&mut app));
-    assert!(app.chimp_discard_prompt.is_none());
+    assert!(app.chimp.chimp_discard_prompt.is_none());
     assert!(app.kits[0].chimp.documents[THING].dirty);
 
     let kit = app.kits[0].id;
-    app.chimp_writes.insert(kit, None);
+    app.chimp.chimp_writes.insert(kit, None);
     app.open_chimp_discard_prompt(0, vec![THING.to_owned()], None, None);
     frames.click("Discard Changes", &mut draw_discard(&mut app));
-    let prompt = app.chimp_discard_prompt.as_ref().expect("reopened");
+    let prompt = app.chimp.chimp_discard_prompt.as_ref().expect("reopened");
     assert_eq!(
         prompt.error.as_deref(),
         Some("A Chimp save is still running; discard once it finishes")
@@ -474,9 +474,9 @@ fn the_discard_prompt_restores_cancels_and_reports_a_refusal() {
     frames.frame(Vec::new(), &mut draw_discard(&mut app));
     assert!(frames.shows("A Chimp save is still running"));
 
-    app.chimp_writes.clear();
+    app.chimp.chimp_writes.clear();
     frames.click("Discard Changes", &mut draw_discard(&mut app));
-    assert!(app.chimp_discard_prompt.is_none());
+    assert!(app.chimp.chimp_discard_prompt.is_none());
     assert_eq!(app.status, "Discarded 1 modified Chimp package(s)");
     let document = &app.kits[0].chimp.documents[THING];
     assert!(!document.dirty);

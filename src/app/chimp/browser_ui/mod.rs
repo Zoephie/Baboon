@@ -51,7 +51,7 @@ impl Baboon {
                 .on_disabled_hover_text("This workspace has no modified Chimp packages")
                 .clicked()
             {
-                self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
                     kit: self.kits[kit_index].id,
                     packages,
                     pending_action: None,
@@ -116,7 +116,7 @@ impl Baboon {
     /// screen is the difference between working and stuck.
     fn draw_chimp_level_progress(&mut self, ui: &mut Ui, kit_index: usize) {
         let kit = self.kits[kit_index].id;
-        let Some(job) = self.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
+        let Some(job) = self.chimp.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
             return;
         };
         let phase = job.phase;

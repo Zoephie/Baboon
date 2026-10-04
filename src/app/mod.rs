@@ -192,7 +192,6 @@ pub struct Baboon {
     /// The most recent successful check, update or not, so Settings can report
     /// the outcome after the status line has expired.
     last_update_check: Option<UpdateCheckResult>,
-    chimp_usmap_path_input: String,
     pending_ui_scale: f32,
     editing_kit_validation: EditingKitValidationCache,
     custom_editing_kit_draft: Option<CustomEditingKitDraft>,
@@ -209,17 +208,6 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
-    /// A Chimp mesh export waiting on the choice to export its textures too.
-    chimp_mesh_texture_prompt: Option<ChimpMeshTexturePrompt>,
-    /// A Chimp texture export waiting on the choice of image format.
-    chimp_texture_export_prompt: Option<ChimpTextureExportPrompt>,
-    chimp_level_export_prompt: Option<ChimpLevelExportPrompt>,
-    chimp_level_job: Option<ChimpLevelJob>,
-    /// Kits with a Chimp save running, and the close to run once it lands.
-    chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
-    /// Pending workspace-wide Chimp discard, optionally continuing a close
-    /// transaction after the packages have been restored.
-    chimp_discard_prompt: Option<ChimpDiscardPrompt>,
     tool_commands: ToolCommandsUiState,
     blender_path_input: String,
     editing_kit_path_inputs: HashMap<String, String>,
@@ -343,6 +331,10 @@ pub struct Baboon {
     /// Export: the container dump and its confirmation, the extract target
     /// window, and a sound extraction waiting to start.
     pub(in crate::app) export: ExportFeature,
+    /// Chimp's app-wide prompts and jobs: mesh texture, texture export and
+    /// level export prompts, the level job, writes in flight, the discard
+    /// prompt and the usmap path being typed.
+    pub(in crate::app) chimp: ChimpFeature,
 }
 
 impl Baboon {
@@ -480,11 +472,6 @@ impl Baboon {
             next_kit_id: 1,
             available_update: None,
             last_update_check: None,
-            chimp_usmap_path_input: prefs
-                .chimp_usmap_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
             pending_ui_scale: prefs.ui_scale,
             editing_kit_validation,
             custom_editing_kit_draft: None,
@@ -495,12 +482,6 @@ impl Baboon {
             settings_open: false,
             settings_tab: SettingsTab::Startup,
             operation_notice: None,
-            chimp_mesh_texture_prompt: None,
-            chimp_texture_export_prompt: None,
-            chimp_level_export_prompt: None,
-            chimp_level_job: None,
-            chimp_writes: HashMap::new(),
-            chimp_discard_prompt: None,
             tool_commands: ToolCommandsUiState::default(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
             editing_kit_path_attention: None,
@@ -642,6 +623,19 @@ impl Baboon {
                 container_dump_job: None,
                 extract_target: None,
                 pending_sound_extract: None,
+            },
+            chimp: ChimpFeature {
+                chimp_usmap_path_input: prefs
+                    .chimp_usmap_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                chimp_mesh_texture_prompt: None,
+                chimp_texture_export_prompt: None,
+                chimp_level_export_prompt: None,
+                chimp_level_job: None,
+                chimp_writes: HashMap::new(),
+                chimp_discard_prompt: None,
             },
         }
     }

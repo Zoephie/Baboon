@@ -91,3 +91,21 @@ impl Baboon {
     }
 }
 pub(in crate::app) mod prompts_window;
+
+/// Chimp's app-wide prompts and jobs: mesh texture, texture export and level
+/// export prompts, the level job, writes in flight, the discard prompt and the
+/// usmap path being typed.
+pub(in crate::app) struct ChimpFeature {
+    /// A Chimp mesh export waiting on the choice to export its textures too.
+    pub(in crate::app) chimp_mesh_texture_prompt: Option<ChimpMeshTexturePrompt>,
+    /// A Chimp texture export waiting on the choice of image format.
+    pub(in crate::app) chimp_texture_export_prompt: Option<ChimpTextureExportPrompt>,
+    pub(in crate::app) chimp_level_export_prompt: Option<ChimpLevelExportPrompt>,
+    pub(in crate::app) chimp_level_job: Option<ChimpLevelJob>,
+    /// Kits with a Chimp save running, and the close to run once it lands.
+    pub(in crate::app) chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
+    /// Pending workspace-wide Chimp discard, optionally continuing a close
+    /// transaction after the packages have been restored.
+    pub(in crate::app) chimp_discard_prompt: Option<ChimpDiscardPrompt>,
+    pub(in crate::app) chimp_usmap_path_input: String,
+}

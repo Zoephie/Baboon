@@ -1468,7 +1468,7 @@ impl Baboon {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Path").color(subtle_dark()));
             let path_response = ui.add(
-                egui::TextEdit::singleline(&mut self.chimp_usmap_path_input)
+                egui::TextEdit::singleline(&mut self.chimp.chimp_usmap_path_input)
                     .desired_width(360.0)
                     .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
             );

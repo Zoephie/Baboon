@@ -757,8 +757,8 @@ impl Baboon {
                 "a tag delete",
                 self.tag_ops.container_delete_running.contains(&kit_id),
             ),
-            ("a level export", self.chimp_level_job.is_some()),
-            ("a Chimp save", self.chimp_writes.contains_key(&kit_id)),
+            ("a level export", self.chimp.chimp_level_job.is_some()),
+            ("a Chimp save", self.chimp.chimp_writes.contains_key(&kit_id)),
             ("a runtime poke", self.poke.poke_direct_running),
             (
                 "the field-value index build",

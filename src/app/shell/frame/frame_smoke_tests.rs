@@ -1288,11 +1288,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_discard",
-            &["chimp_discard_prompt"],
+            &["chimp.chimp_discard_prompt"],
             &["chimp/save/mod.rs"],
             container_kit,
             |h| {
-                h.app.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                h.app.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
                     kit: active_id(h),
                     packages: vec!["/Game/Smoke/SM_Smoke".to_owned()],
                     pending_action: None,
@@ -1314,11 +1314,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_mesh_texture_prompt",
-            &["chimp_mesh_texture_prompt"],
+            &["chimp.chimp_mesh_texture_prompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt::for_test(
+                h.app.chimp.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/SM_Smoke",
                 ));
@@ -1327,11 +1327,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_texture_export_prompt",
-            &["chimp_texture_export_prompt"],
+            &["chimp.chimp_texture_export_prompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt::for_test(
+                h.app.chimp.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/T_Smoke",
                 ));
@@ -1340,11 +1340,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_level_export_prompt",
-            &["chimp_level_export_prompt"],
+            &["chimp.chimp_level_export_prompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp_level_export_prompt = Some(ChimpLevelExportPrompt::for_test(
+                h.app.chimp.chimp_level_export_prompt = Some(ChimpLevelExportPrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/L_Smoke",
                 ));
@@ -1395,9 +1395,9 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("available_update", "data shown in Settings and the status bar"),
     ("last_update_check", "data shown in Settings"),
     ("export.container_dump_job", "a running job; its progress is in the status bar"),
-    ("chimp_level_job", "a running job; its progress is in the status bar"),
+    ("chimp.chimp_level_job", "a running job; its progress is in the status bar"),
     ("mods.last_mod_export_name", "remembered text"),
-    ("chimp_writes", "running saves"),
+    ("chimp.chimp_writes", "running saves"),
     ("game_banner_textures", "texture cache keyed by game"),
     ("poke.last_poke", "undo record"),
     ("poke.poke_direct_running", "running flag"),

@@ -96,7 +96,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn draw_chimp_discard_window(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.chimp_discard_prompt.as_ref() else {
+        let Some(prompt) = self.chimp.chimp_discard_prompt.as_ref() else {
             return;
         };
         let kit = prompt.kit;
@@ -160,12 +160,12 @@ impl Baboon {
             });
 
         if !open || cancel {
-            self.chimp_discard_prompt = None;
+            self.chimp.chimp_discard_prompt = None;
             return;
         }
 
         let Some(index) = self.resolve_kit(kit) else {
-            self.chimp_discard_prompt = None;
+            self.chimp.chimp_discard_prompt = None;
             return;
         };
 
@@ -173,9 +173,9 @@ impl Baboon {
             let Some(action) = pending_action else {
                 return;
             };
-            self.chimp_discard_prompt = None;
+            self.chimp.chimp_discard_prompt = None;
             if !self.open_chimp_save_dialog_for_close(index, action.clone()) {
-                self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
                     kit,
                     packages,
                     pending_action: Some(action),
@@ -183,7 +183,7 @@ impl Baboon {
                 });
             }
         } else if discard {
-            self.chimp_discard_prompt = None;
+            self.chimp.chimp_discard_prompt = None;
             match self.discard_chimp_packages(index, &packages) {
                 Ok(count) => {
                     self.active = index;
@@ -193,7 +193,7 @@ impl Baboon {
                     }
                 }
                 Err(error) => {
-                    self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                    self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
                         kit,
                         packages,
                         pending_action,
@@ -470,7 +470,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) -> bool {
         let kit = self.kits[kit_index].id;
-        if self.chimp_writes.contains_key(&kit) {
+        if self.chimp.chimp_writes.contains_key(&kit) {
             self.status = "A Chimp save is already running".to_owned();
             return false;
         }
@@ -589,7 +589,7 @@ impl Baboon {
                 );
             }
         }
-        self.chimp_writes.insert(kit, pending_close);
+        self.chimp.chimp_writes.insert(kit, pending_close);
         true
     }
 
@@ -632,7 +632,7 @@ impl Baboon {
 
     /// Run the close a save was started for, now that the save has settled.
     fn finish_chimp_write(&mut self, kit: KitId, ctx: &egui::Context) {
-        let pending = self.chimp_writes.remove(&kit).flatten();
+        let pending = self.chimp.chimp_writes.remove(&kit).flatten();
         if let (Some(action), Some(kit_index)) = (pending, self.kit_index(kit)) {
             self.finish_chimp_close_after_save(kit_index, action, ctx);
         }

@@ -566,12 +566,12 @@ fn a_discard_is_refused_while_saving_or_unmounted() {
     let mut app = install.app_with_open(&[THING]);
     edit_count(&mut app, THING, 42);
     let kit = app.kits[0].id;
-    app.chimp_writes.insert(kit, None);
+    app.chimp.chimp_writes.insert(kit, None);
     assert_eq!(
         app.discard_chimp_packages(0, &[THING.to_owned()]),
         Err("A Chimp save is still running; discard once it finishes".to_owned())
     );
-    app.chimp_writes.clear();
+    app.chimp.chimp_writes.clear();
     app.kits[0].chimp.mount = ChimpMount::Idle;
     assert_eq!(
         app.discard_chimp_packages(0, &[THING.to_owned()]),
@@ -603,10 +603,10 @@ fn the_discard_prompt_opens_only_for_modified_packages() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
     app.open_chimp_discard_prompt(0, Vec::new(), None, None);
-    assert!(app.chimp_discard_prompt.is_none());
+    assert!(app.chimp.chimp_discard_prompt.is_none());
     assert_eq!(app.status, "Chimp has no modified packages");
     app.open_chimp_discard_prompt(0, vec![THING.to_owned()], None, None);
-    let prompt = app.chimp_discard_prompt.as_ref().unwrap();
+    let prompt = app.chimp.chimp_discard_prompt.as_ref().unwrap();
     assert_eq!(prompt.kit, app.kits[0].id);
     assert_eq!(prompt.packages, [THING]);
 }

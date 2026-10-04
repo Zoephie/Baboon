@@ -30,11 +30,11 @@ impl Baboon {
         result: Result<String, String>,
     ) -> bool {
         if self
-            .chimp_level_job
+            .chimp.chimp_level_job
             .as_ref()
             .is_some_and(|current| current.id == job)
         {
-            self.chimp_level_job = None;
+            self.chimp.chimp_level_job = None;
         }
         self.handle_export_finished(result)
     }
@@ -52,10 +52,10 @@ impl Baboon {
         total: usize,
     ) -> bool {
         if !self.kits.iter().any(|existing| existing.id == kit) {
-            self.chimp_level_job = None;
+            self.chimp.chimp_level_job = None;
             return true;
         }
-        let Some(job) = self.chimp_level_job.as_mut() else {
+        let Some(job) = self.chimp.chimp_level_job.as_mut() else {
             return false;
         };
         if job.kit != kit {

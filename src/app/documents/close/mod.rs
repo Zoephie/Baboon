@@ -116,7 +116,7 @@ impl Baboon {
         // waiting when the app or a workspace closes would be lost.
         self.flush_all_chimp_checkpoints();
         if self.save_changes_prompt.visible
-            || self.chimp_discard_prompt.is_some()
+            || self.chimp.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
             return;
@@ -125,12 +125,12 @@ impl Baboon {
         // for it and runs from its completion, like a close the save dialog
         // was opened for.
         let writing = match &action {
-            PendingCloseAction::CloseApp => self.chimp_writes.keys().next().copied(),
-            PendingCloseAction::CloseKit(id) => self.chimp_writes.contains_key(id).then_some(*id),
+            PendingCloseAction::CloseApp => self.chimp.chimp_writes.keys().next().copied(),
+            PendingCloseAction::CloseKit(id) => self.chimp.chimp_writes.contains_key(id).then_some(*id),
             _ => None,
         };
         if let Some(kit) = writing {
-            self.chimp_writes.insert(kit, Some(action));
+            self.chimp.chimp_writes.insert(kit, Some(action));
             self.status = "Closing once the Chimp save finishes…".to_owned();
             return;
         }
@@ -216,7 +216,7 @@ impl Baboon {
             return;
         }
         if self.save_changes_prompt.visible
-            || self.chimp_discard_prompt.is_some()
+            || self.chimp.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
             return;

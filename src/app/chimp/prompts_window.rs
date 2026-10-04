@@ -5,7 +5,7 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_chimp_mesh_texture_prompt(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.chimp_mesh_texture_prompt.as_ref() else {
+        let Some(prompt) = self.chimp.chimp_mesh_texture_prompt.as_ref() else {
             return;
         };
         let package = prompt.package.clone();
@@ -127,15 +127,15 @@ impl Baboon {
                     }
                 });
             });
-        if let Some(prompt) = self.chimp_mesh_texture_prompt.as_mut() {
+        if let Some(prompt) = self.chimp.chimp_mesh_texture_prompt.as_mut() {
             prompt.texture_export = texture_export;
         }
         if let Some(with_textures) = with_textures {
-            if let Some(prompt) = self.chimp_mesh_texture_prompt.take() {
+            if let Some(prompt) = self.chimp.chimp_mesh_texture_prompt.take() {
                 self.start_chimp_mesh_export(prompt, with_textures, ctx.clone());
             }
         } else if cancel || !open {
-            self.chimp_mesh_texture_prompt = None;
+            self.chimp.chimp_mesh_texture_prompt = None;
         }
     }
 
@@ -147,7 +147,7 @@ impl Baboon {
     /// shared library has to travel with the segments — is invisible from the
     /// files alone.
     pub(in crate::app) fn draw_chimp_texture_export_prompt(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.chimp_texture_export_prompt.as_ref() else {
+        let Some(prompt) = self.chimp.chimp_texture_export_prompt.as_ref() else {
             return;
         };
         let name = prompt.name().to_owned();
@@ -206,20 +206,20 @@ impl Baboon {
                 });
             });
 
-        if let Some(prompt) = self.chimp_texture_export_prompt.as_mut() {
+        if let Some(prompt) = self.chimp.chimp_texture_export_prompt.as_mut() {
             prompt.export = export;
         }
         if go {
-            if let Some(prompt) = self.chimp_texture_export_prompt.take() {
+            if let Some(prompt) = self.chimp.chimp_texture_export_prompt.take() {
                 self.start_chimp_texture_export(prompt, ctx.clone());
             }
         } else if cancel || !open {
-            self.chimp_texture_export_prompt = None;
+            self.chimp.chimp_texture_export_prompt = None;
         }
     }
 
     pub(in crate::app) fn draw_chimp_level_export_prompt(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.chimp_level_export_prompt.as_ref() else {
+        let Some(prompt) = self.chimp.chimp_level_export_prompt.as_ref() else {
             return;
         };
         let package = prompt.package.clone();
@@ -361,18 +361,18 @@ impl Baboon {
                 });
             });
 
-        if let Some(prompt) = self.chimp_level_export_prompt.as_mut() {
+        if let Some(prompt) = self.chimp.chimp_level_export_prompt.as_mut() {
             prompt.nanite = nanite;
             prompt.split = split;
             prompt.triangles = triangles;
             prompt.placements = placements;
         }
         if go {
-            if let Some(prompt) = self.chimp_level_export_prompt.take() {
+            if let Some(prompt) = self.chimp.chimp_level_export_prompt.take() {
                 self.start_chimp_level_export(prompt, ctx.clone());
             }
         } else if cancel || !open {
-            self.chimp_level_export_prompt = None;
+            self.chimp.chimp_level_export_prompt = None;
         }
         let _ = name;
     }

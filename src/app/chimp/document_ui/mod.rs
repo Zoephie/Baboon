@@ -273,7 +273,7 @@ impl Baboon {
         let mut extract_json = false;
         let mut extract_export = false;
         {
-            let writing = self.chimp_writes.contains_key(&self.kits[kit_index].id);
+            let writing = self.chimp.chimp_writes.contains_key(&self.kits[kit_index].id);
             let document = self.kits[kit_index]
                 .chimp
                 .documents
