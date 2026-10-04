@@ -15,7 +15,9 @@ pub(super) mod scripts;
 pub(super) mod shader_source;
 pub(in crate::app) mod sound_extract;
 pub(in crate::app) mod extract_target_window;
+pub(in crate::app) use extract_target_window::draw_extract_target_window;
 pub(in crate::app) mod container_dump_confirm;
+pub(in crate::app) use container_dump_confirm::draw_container_dump_confirm_window;
 pub(in crate::app) mod extract;
 
 pub(super) use bitmap::*;
@@ -132,4 +134,40 @@ pub(in crate::app) struct ExportFeature {
     pub(in crate::app) extract_target: Option<ExtractTargetPrompt>,
     /// Pending sound-extraction batch (decode + write), drained by the audio layer.
     pub(in crate::app) pending_sound_extract: Option<ExtractRequest>,
+}
+
+/// What export can be asked to do.
+pub(in crate::app) enum ExportCommand {
+    /// Extract `scope` of the containers of `kit` into `output`. The
+    /// extraction reads the active kit's source, so the handler returns to
+    /// that workspace first and drops the run if it has closed.
+    StartContainerDump {
+        kit: KitId,
+        output: PathBuf,
+        scope: ContainerDumpScope,
+    },
+    /// Extract the geometry or animations of the tag at `key` for `target`'s
+    /// tools, starting with the folder picker.
+    Extract {
+        kind: ExtractKind,
+        key: String,
+        target: blam_tags::game::Game,
+    },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_export_command(&mut self, command: ExportCommand) {
+        let ctx = self.egui_ctx.clone();
+        match command {
+            ExportCommand::StartContainerDump { kit, output, scope } => {
+                if self.focus_navigation_kit(kit) {
+                    self.start_container_dump(kit, output, scope, ctx);
+                }
+            }
+            ExportCommand::Extract { kind, key, target } => match kind {
+                ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx),
+                ExtractKind::Animation => self.begin_extract_animation(key, target, ctx),
+            },
+        }
+    }
 }

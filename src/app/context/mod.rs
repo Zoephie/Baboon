@@ -86,6 +86,13 @@ impl CommandQueue {
         self.queued.borrow_mut().push(command.into());
     }
 
+    /// How many commands are waiting, for tests whose command cannot be
+    /// applied without a person (one that opens a file picker).
+    #[cfg(test)]
+    pub(in crate::app) fn len(&self) -> usize {
+        self.queued.borrow().len()
+    }
+
     fn take(&self) -> Vec<Command> {
         std::mem::take(&mut *self.queued.borrow_mut())
     }
@@ -101,6 +108,7 @@ pub(in crate::app) enum Command {
     Compare(CompareCommand),
     Search(SearchCommand),
     References(ReferencesCommand),
+    Export(ExportCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -124,6 +132,12 @@ impl From<SearchCommand> for Command {
 impl From<ReferencesCommand> for Command {
     fn from(command: ReferencesCommand) -> Self {
         Command::References(command)
+    }
+}
+
+impl From<ExportCommand> for Command {
+    fn from(command: ExportCommand) -> Self {
+        Command::Export(command)
     }
 }
 
@@ -158,6 +172,7 @@ impl Baboon {
             Command::Compare(command) => self.apply_compare_command(command),
             Command::Search(command) => self.apply_search_command(command),
             Command::References(command) => self.apply_references_command(command),
+            Command::Export(command) => self.apply_export_command(command),
         }
     }
 }

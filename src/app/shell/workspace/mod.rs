@@ -1573,7 +1573,7 @@ impl Baboon {
         self.draw_chimp_save_window(ctx);
         self.draw_clear_stash_confirm_window(ctx);
         self.draw_container_duplicate_confirm_window(ctx);
-        self.draw_container_dump_confirm_window(ctx);
+        draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);
         self.draw_delete_confirm_window(ctx);
         self.draw_chimp_mesh_texture_prompt(ctx);
         self.draw_chimp_texture_export_prompt(ctx);
@@ -1602,7 +1602,7 @@ impl Baboon {
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);
         self.draw_loose_folder_rename_window(ctx);
-        self.draw_extract_target_window(ctx);
+        draw_extract_target_window(&cx!(self, ctx), &mut self.export);
         self.draw_folder_refactor_lock(ctx);
         end_wheel_gesture(ctx);
     }

@@ -43,7 +43,7 @@ fn frame(
             events,
             ..Default::default()
         },
-        |_| app.draw_extract_target_window(ctx),
+        |_| draw_extract_target_window(&cx!(app, ctx), &mut app.export),
     );
     output
         .shapes
@@ -128,4 +128,21 @@ fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
 
     click(&mut app, &ctx, &labels, "Cancel");
     assert!(app.export.extract_target.is_none());
+}
+
+/// Choosing a folder hands the extraction on as a command and closes the
+/// window; the folder picker opens when the frame applies it.
+#[test]
+fn choose_folder_sends_the_extraction_and_closes_the_window() {
+    let ctx = egui::Context::default();
+    let mut app = Baboon::for_test();
+    app.export.extract_target = Some(prompt(Game::Halo3));
+    let mut labels = frame(&mut app, &ctx, Vec::new());
+    for _ in 0..3 {
+        labels = frame(&mut app, &ctx, Vec::new());
+    }
+    assert_eq!(app.commands.len(), 0);
+    click(&mut app, &ctx, &labels, "Choose Folder…");
+    assert!(app.export.extract_target.is_none());
+    assert_eq!(app.commands.len(), 1);
 }

@@ -1,5 +1,6 @@
 //! The Extract Geometry / Extract Animations target window.
-//! It owns presentation and the game chosen; the extraction belongs to the controller.
+//! It owns presentation and the game chosen; the extraction is
+//! [`ExportCommand::Extract`].
 
 use super::*;
 
@@ -16,85 +17,81 @@ const TARGETS: [(Game, &str, &str); 3] = [
     (Game::Halo3, "Halo 3", "JMS 8213 · ASS 7 · JMA 16394"),
 ];
 
-impl Baboon {
-    /// Which game's tools a geometry or animation extraction is for. Choosing
-    /// one goes on to the folder picker.
-    pub(in crate::app) fn draw_extract_target_window(&mut self, ctx: &egui::Context) {
-        let Some(state) = self.export.extract_target.as_mut() else {
-            return;
-        };
-        let title = match state.kind {
-            ExtractKind::Geometry => "Extract Geometry",
-            ExtractKind::Animation => "Extract Animations",
-        };
-        let mut open = true;
-        let mut extract = false;
-        let mut cancel = false;
-        egui::Window::new(title)
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("extract_target"))
-            .open(&mut open)
-            .default_width(window_width(ctx, 520.0))
-            .resizable(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(native_display_path(&state.display_path))
-                        .color(text_dark())
-                        .monospace(),
+/// Which game's tools a geometry or animation extraction is for. Choosing
+/// one goes on to the folder picker.
+pub(in crate::app) fn draw_extract_target_window(cx: &Ctx, export: &mut ExportFeature) {
+    let ctx = cx.egui;
+    let Some(state) = export.extract_target.as_mut() else {
+        return;
+    };
+    let title = match state.kind {
+        ExtractKind::Geometry => "Extract Geometry",
+        ExtractKind::Animation => "Extract Animations",
+    };
+    let mut open = true;
+    let mut extract = false;
+    let mut cancel = false;
+    egui::Window::new(title)
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("extract_target"))
+        .open(&mut open)
+        .default_width(window_width(ctx, 520.0))
+        .resizable(false)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            ui.label(
+                RichText::new(native_display_path(&state.display_path))
+                    .color(text_dark())
+                    .monospace(),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Import with the tools for")
+                    .color(subtle_dark())
+                    .small(),
+            );
+            for (game, name, formats) in TARGETS {
+                let label = if game == state.source {
+                    format!("{name} (current)")
+                } else {
+                    name.to_owned()
+                };
+                ui.radio_value(
+                    &mut state.target,
+                    game,
+                    RichText::new(label).color(text_dark()),
                 );
-                ui.add_space(8.0);
+                ui.indent(("extract_target_formats", name), |ui| {
+                    ui.label(RichText::new(formats).color(subtle_dark()).small());
+                });
+            }
+            if state.kind == ExtractKind::Geometry && state.target != state.source {
+                ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Import with the tools for")
+                    RichText::new(extract_target_geometry_note(state.source, state.target))
                         .color(subtle_dark())
                         .small(),
                 );
-                for (game, name, formats) in TARGETS {
-                    let label = if game == state.source {
-                        format!("{name} (current)")
-                    } else {
-                        name.to_owned()
-                    };
-                    ui.radio_value(
-                        &mut state.target,
-                        game,
-                        RichText::new(label).color(text_dark()),
-                    );
-                    ui.indent(("extract_target_formats", name), |ui| {
-                        ui.label(RichText::new(formats).color(subtle_dark()).small());
-                    });
-                }
-                if state.kind == ExtractKind::Geometry && state.target != state.source {
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(extract_target_geometry_note(state.source, state.target))
-                            .color(subtle_dark())
-                            .small(),
-                    );
-                }
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Choose Folder…").clicked() {
-                        extract = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                });
-            });
-        if extract {
-            let state = self.export.extract_target.take().expect("checked above");
-            match state.kind {
-                ExtractKind::Geometry => {
-                    self.begin_extract_geometry(state.key, state.target, ctx.clone())
-                }
-                ExtractKind::Animation => {
-                    self.begin_extract_animation(state.key, state.target, ctx.clone())
-                }
             }
-        } else if cancel || !open {
-            self.export.extract_target = None;
-        }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Choose Folder…").clicked() {
+                    extract = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+    if extract {
+        let state = export.extract_target.take().expect("checked above");
+        cx.send(ExportCommand::Extract {
+            kind: state.kind,
+            key: state.key,
+            target: state.target,
+        });
+    } else if cancel || !open {
+        export.extract_target = None;
     }
 }
 
