@@ -343,6 +343,7 @@ pub struct Baboon {
     /// JSON, keyed by definition file path. Built lazily during render.
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
+    block_table: Option<BlockTableState>,
     rename_tag: Option<RenameTagState>,
     /// Rename Folder dialog for a loose tags folder, if one is open.
     loose_folder_rename: Option<LooseFolderRenameState>,
@@ -642,6 +643,7 @@ impl Baboon {
             field_value_searching: false,
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
+            block_table: None,
             rename_tag: None,
             loose_folder_rename: None,
             extract_target: None,

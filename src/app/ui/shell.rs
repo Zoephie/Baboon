@@ -1535,6 +1535,7 @@ impl Baboon {
         self.draw_field_value_search_window(ctx);
         self.draw_find_window(ctx);
         self.draw_tsv_paste_window(ctx);
+        self.draw_block_table_window(ctx);
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);
         self.draw_loose_folder_rename_window(ctx);

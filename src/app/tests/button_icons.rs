@@ -68,6 +68,7 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::Sort,
         ButtonIcon::Stop,
         ButtonIcon::Tag,
+        ButtonIcon::TableView,
         ButtonIcon::View,
         ButtonIcon::WindowMode,
     ];

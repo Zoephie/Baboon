@@ -1009,6 +1009,14 @@ pub(in crate::app) fn draw_foundation_block(
     );
 
     handle_block_actions(ui, edit, path_prefix, sel, count, expert_mode, &actions);
+    if actions.reorganize {
+        *edit.block_table_request = Some(BlockTableRequest {
+            path: path_prefix.to_owned(),
+            label: clean_field_name(name),
+            view_scope: edit.view_scope.to_owned(),
+            selected: sel,
+        });
+    }
 
     // Copy the selected element, or the whole block, onto the clipboard.
     let copy_indices: Option<Vec<usize>> = if actions.copy {
@@ -1800,81 +1808,11 @@ pub(in crate::app) fn draw_foundation_block_control(
         // fixed-size arrays); the size/content-changing paste & replace
         // actions are gated behind `allow_structural`.
         name_label
-            .on_hover_text("Right-click for copy / paste options")
+            .on_hover_text("Right-click for block options")
             .context_menu(|ui| {
-                // Copy + in-place replace are valid for blocks AND fixed-size
-                // arrays (no element-count change). The size-changing actions
-                // (paste/insert, replace-all, add/delete) are blocks only.
-                if ui
-                    .add_enabled(count > 0, egui::Button::new("Copy element"))
-                    .clicked()
-                {
-                    actions.copy = true;
-                    ui.close_menu();
-                }
-                if ui
-                    .add_enabled(count > 0, egui::Button::new("Copy entire block"))
-                    .clicked()
-                {
-                    actions.copy_block = true;
-                    ui.close_menu();
-                }
-                if ui
-                    .add_enabled(count > 0, egui::Button::new("Copy block as TSV"))
-                    .on_hover_text("Copy all elements as tab-separated rows (Excel)")
-                    .clicked()
-                {
-                    actions.copy_block_tsv = true;
-                    ui.close_menu();
-                }
-                // In-place replace of the selected element — never changes
-                // the count, so it works for arrays too.
-                if matches!(paste_gate, PasteGate::Ready(_))
-                    && ui
-                        .add_enabled(count > 0, egui::Button::new("Replace selected element"))
-                        .on_hover_text("Overwrite the selected element with the clipboard")
-                        .clicked()
-                {
-                    actions.replace_element = true;
-                    ui.close_menu();
-                }
-                if allow_structural {
-                    if ui
-                        .add_enabled(count > 0, egui::Button::new("Paste TSV…"))
-                        .on_hover_text("Paste tab-separated rows back onto this block's elements")
-                        .clicked()
-                    {
-                        actions.paste_tsv = true;
-
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    match paste_gate {
-                        PasteGate::Ready(n) => {
-                            let noun = if n == 1 { "element" } else { "elements" };
-                            if ui.button(format!("Paste {n} {noun}")).clicked() {
-                                actions.paste = true;
-                                ui.close_menu();
-                            }
-                            if ui.button("Replace entire block").clicked() {
-                                actions.replace_block = true;
-                                ui.close_menu();
-                            }
-                        }
-                        PasteGate::VersionMismatch => {
-                            ui.add_enabled(false, egui::Button::new("Paste"))
-                                .on_disabled_hover_text(
-                                    "Clipboard element is a different struct version \
-                                             (different on-disk size) — pasting across versions \
-                                             would corrupt the tag. Upgrade/downgrade between \
-                                             versions isn't supported yet.",
-                                );
-                        }
-                        PasteGate::Empty => {
-                            ui.add_enabled(false, egui::Button::new("Paste"));
-                        }
-                    }
-                }
+                draw_block_header_menu(
+                    ui, count, allow_structural, editable, paste_gate, &mut actions,
+                );
             });
         if show_search_jump
             && icon_button(
@@ -1948,6 +1886,9 @@ pub(in crate::app) fn draw_foundation_block_control(
             .on_hover_text("Block memory usage: elements × element byte size");
         }
 
+        // Double the normal gap between entry navigation and block actions.
+        ui.add_space(ui.spacing().item_spacing.x);
+
         // Structural edit buttons — only for variable-count blocks. Arrays
         // are fixed-size, so the count-changing actions don't apply and the
         // buttons are omitted entirely. The grow actions (Add / Insert /
@@ -1980,6 +1921,11 @@ pub(in crate::app) fn draw_foundation_block_control(
                 actions.delete_all = true;
             }
         }
+        icon_menu_button(ui, ButtonIcon::Other, "Other block options", |ui| {
+            draw_block_header_menu(
+                ui, count, allow_structural, editable, paste_gate, &mut actions,
+            );
+        });
     });
 
     if has_sel && selector_active {
@@ -2045,6 +1991,103 @@ pub(in crate::app) fn draw_foundation_block_control(
     );
 
     actions
+}
+
+/// Shared by the block title's context menu and its visible Other button.
+fn draw_block_header_menu(
+    ui: &mut Ui,
+    count: usize,
+    allow_structural: bool,
+    editable: bool,
+    paste_gate: PasteGate,
+    actions: &mut BlockHeaderActions,
+) {
+    if allow_structural {
+        if icon_text_button(
+            ui,
+            ButtonIcon::TableView,
+            "Reorganize Block Entries",
+            editable,
+        )
+        .clicked() {
+            actions.reorganize = true;
+            ui.close_menu();
+        }
+        ui.separator();
+    }
+    // Copy + in-place replace are valid for blocks AND fixed-size
+    // arrays (no element-count change). The size-changing actions
+    // (paste/insert, replace-all, add/delete) are blocks only.
+    if ui
+        .add_enabled(count > 0, egui::Button::new("Copy element"))
+        .clicked()
+    {
+        actions.copy = true;
+        ui.close_menu();
+    }
+    if ui
+        .add_enabled(count > 0, egui::Button::new("Copy entire block"))
+        .clicked()
+    {
+        actions.copy_block = true;
+        ui.close_menu();
+    }
+    if ui
+        .add_enabled(count > 0, egui::Button::new("Copy block as TSV"))
+        .on_hover_text("Copy all elements as tab-separated rows (Excel)")
+        .clicked()
+    {
+        actions.copy_block_tsv = true;
+        ui.close_menu();
+    }
+    // In-place replace of the selected element — never changes
+    // the count, so it works for arrays too.
+    if matches!(paste_gate, PasteGate::Ready(_))
+        && ui
+            .add_enabled(count > 0, egui::Button::new("Replace selected element"))
+            .on_hover_text("Overwrite the selected element with the clipboard")
+            .clicked()
+    {
+        actions.replace_element = true;
+        ui.close_menu();
+    }
+    if allow_structural {
+        if ui
+            .add_enabled(count > 0, egui::Button::new("Paste TSV…"))
+            .on_hover_text("Paste tab-separated rows back onto this block's elements")
+            .clicked()
+        {
+            actions.paste_tsv = true;
+
+            ui.close_menu();
+        }
+        ui.separator();
+        match paste_gate {
+            PasteGate::Ready(n) => {
+                let noun = if n == 1 { "element" } else { "elements" };
+                if ui.button(format!("Paste {n} {noun}")).clicked() {
+                    actions.paste = true;
+                    ui.close_menu();
+                }
+                if ui.button("Replace entire block").clicked() {
+                    actions.replace_block = true;
+                    ui.close_menu();
+                }
+            }
+            PasteGate::VersionMismatch => {
+                ui.add_enabled(false, egui::Button::new("Paste"))
+                    .on_disabled_hover_text(
+                        "Clipboard element is a different struct version \
+                                 (different on-disk size) — pasting across versions \
+                                 would corrupt the tag. Upgrade/downgrade between \
+                                 versions isn't supported yet.",
+                    );
+            }
+            PasteGate::Empty => {
+                ui.add_enabled(false, egui::Button::new("Paste"));
+            }
+        }
+    }
 }
 
 fn prepare_block_control_availability(
@@ -2804,7 +2847,7 @@ pub(in crate::app) fn foundation_header_toggle_cell(
 }
 
 pub(in crate::app) fn foundation_selected_width(row_width: f32) -> f32 {
-    (row_width - 190.0 - 24.0 * 3.0 - 54.0 * 5.0 - 92.0).clamp(120.0, 420.0)
+    (row_width - 190.0 - 24.0 * 3.0 - 54.0 * 5.0 - 92.0 - 32.0).clamp(120.0, 420.0)
 }
 
 /// Interactive variant that reports whether the button was clicked.

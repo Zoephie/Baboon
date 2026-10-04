@@ -7,6 +7,7 @@ mod sound;
 pub(super) use sound::*;
 mod mutations;
 pub(super) use mutations::*;
+mod block_table;
 mod value_parser;
 pub(super) use value_parser::*;
 mod bitmap;
