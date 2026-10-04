@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-use crate::app::state::ModelTagPanelTab;
+use crate::app::model_preview::state::ModelTagPanelTab;
 use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
 use crate::core::format::TagNameIndex;
 use crate::core::source::{TagEntry, TagEntryLocation, TagSource, TagTree};

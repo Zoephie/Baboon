@@ -1223,3 +1223,5 @@ impl Baboon {
 
 #[cfg(test)]
 mod prefs_throttle_tests;
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;

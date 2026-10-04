@@ -56,3 +56,16 @@ impl Baboon {
         }
     }
 }
+
+/// The outcome of a container write, kept on screen until dismissed.
+///
+/// These operations rewrite the game's own pak and take long enough that the
+/// user has looked away, so their result cannot live in the status bar: it is
+/// gone before it can be read, and a failure that scrolls past is a failure that
+/// gets reported as "nothing happened". The message is selectable and copyable
+/// because the useful ones are too long to retype.
+pub(in crate::app) struct OperationNotice {
+    pub(in crate::app) title: String,
+    pub(in crate::app) message: String,
+    pub(in crate::app) failed: bool,
+}

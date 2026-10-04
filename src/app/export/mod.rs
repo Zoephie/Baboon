@@ -118,3 +118,5 @@ mod batch_tests;
 
 #[cfg(test)]
 mod bitmap_source_extract_tests;
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;

@@ -2,6 +2,9 @@
 //! start through the Last Opened Windows prompt.
 
 use super::*;
+
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;
 use crate::app::kits::loading::loose_entry_key_for_canonical_path;
 
 impl Baboon {

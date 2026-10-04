@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
-use crate::app::state::ModelTagPanelTab;
+use crate::app::model_preview::state::ModelTagPanelTab;
 use crate::core::source::TagTree;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

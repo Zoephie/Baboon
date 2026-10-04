@@ -75,8 +75,6 @@ use launch::{CommandLineLaunch, resolve_launch_tag_entries};
 pub(crate) use launch::{StartupArguments, parse_startup_arguments};
 mod style;
 use style::*;
-mod state;
-use state::*;
 use crate::core::document::journal::*;
 use crate::core::document::ops::*;
 use crate::core::document::TagDocument;
@@ -89,7 +87,7 @@ pub(in crate::app) mod browser;
 use browser::*;
 mod export;
 use export::*;
-mod model_preview;
+pub(in crate::app) mod model_preview;
 use model_preview::*;
 mod tag_icons;
 use tag_icons::*;
@@ -125,6 +123,7 @@ use kits::*;
 pub(in crate::app) mod documents;
 use documents::*;
 pub(in crate::app) mod shell;
+use shell::*;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

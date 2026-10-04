@@ -1113,7 +1113,7 @@ impl AudioState {
         let request = self.play_request;
         self.spawn_job(ctx, move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(decode))
-                .unwrap_or_else(|panic| Err(super::state::panic_text(&panic)))
+                .unwrap_or_else(|panic| Err(crate::app::shell::worker::panic_text(&panic)))
                 // Summarised here, off the UI thread, and cached with the audio.
                 .map(|pcm| Arc::new(Waveform::new(Arc::new(pcm))));
             AudioDone::Decoded {
@@ -1270,7 +1270,7 @@ impl AudioState {
                     extract_batch(request, &sources)
                 }))
                 .unwrap_or_else(|panic| {
-                    format!("extraction failed: {}", super::state::panic_text(&panic))
+                    format!("extraction failed: {}", crate::app::shell::worker::panic_text(&panic))
                 }),
             )
         });

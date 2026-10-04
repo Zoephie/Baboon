@@ -198,3 +198,20 @@ pub(in crate::app) struct ExportedMod {
 
 #[cfg(test)]
 mod mod_export_tests;
+
+pub(in crate::app) struct ClearStashConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) stashed: Vec<String>,
+    pub(in crate::app) unsaved: usize,
+}
+
+/// Pending "Save will overwrite the game's paks in place" confirmation.
+///
+/// Carries its workspace for the same reason [`PendingImport`] does: the
+/// confirm is modeless, and an in-place container overwrite is the last thing
+/// that should land on whichever game happens to be focused when it is
+/// answered.
+pub(in crate::app) struct OverwriteConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) key: String,
+}

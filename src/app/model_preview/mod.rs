@@ -1603,3 +1603,5 @@ mod playback_clock_tests;
 
 #[cfg(test)]
 mod texture_note_tests;
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;
