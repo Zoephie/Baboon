@@ -42,7 +42,7 @@ pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
         ui.add(
             egui::Image::from_bytes(
                 "bytes://baboon_branding/empty-state.svg",
-                include_bytes!("../../assets/branding/empty-state.svg").as_slice(),
+                include_root_bytes!("assets/branding/empty-state.svg").as_slice(),
             )
             .fit_to_exact_size(Vec2::splat(IMAGE_SIZE)),
         );
@@ -819,7 +819,7 @@ impl Baboon {
             if scenario_launcher_button(
                 ui,
                 "bytes://baboon_app_icons/tag-test.png",
-                include_bytes!("../../assets/App Icons/Tag Test.png"),
+                include_root_bytes!("assets/App Icons/Tag Test.png"),
                 "TagTest",
                 tag_test_ready,
             )
@@ -834,7 +834,7 @@ impl Baboon {
                 if scenario_launcher_button(
                     ui,
                     "bytes://baboon_app_icons/sapien.png",
-                    include_bytes!("../../assets/App Icons/Sapien.png"),
+                    include_root_bytes!("assets/App Icons/Sapien.png"),
                     "Sapien",
                     sapien_ready,
                 )

@@ -730,8 +730,8 @@ mod spawn_worker_tests {
     #[test]
     fn exports_report_only_through_spawn_export() {
         for (file, text) in [
-            ("controller.rs", include_str!("../controller.rs")),
-            ("chimp/extract.rs", include_str!("../chimp/extract.rs")),
+            ("controller.rs", include_root_str!("src/app/controller.rs")),
+            ("chimp/extract.rs", include_root_str!("src/app/chimp/extract.rs")),
         ] {
             assert!(
                 !text.contains("send(WorkerMessage::ExportFinished("),

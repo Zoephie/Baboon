@@ -37,7 +37,7 @@ const PLACEMENT_SIZE: usize = 4 + 4 + 16 * 8;
 
 /// The script that turns the sidecar into `.blend` files, emitted beside it so
 /// the two are always the pair that were written together.
-const BUILD_SCRIPT: &str = include_str!("level_blend.py");
+const BUILD_SCRIPT: &str = include_root_str!("src/app/chimp/level_blend.py");
 
 /// What a Blender export produced.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

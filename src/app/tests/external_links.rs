@@ -30,7 +30,7 @@ fn idle(h: &mut Harness) {
 /// into an open browser tab, and nothing fails without it but the user's click.
 #[test]
 fn eframe_is_built_with_its_links_feature() {
-    let manifest = include_str!("../../../Cargo.toml");
+    let manifest = include_root_str!("Cargo.toml");
     let eframe = manifest
         .lines()
         .find(|line| line.starts_with("eframe = "))

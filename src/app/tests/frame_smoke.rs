@@ -1546,7 +1546,7 @@ smoke_shards!(
 
 /// The `Baboon` struct's fields and their types, read from `src/app.rs`.
 fn baboon_fields() -> Vec<(String, String)> {
-    let source = include_str!("../../app.rs");
+    let source = include_root_str!("src/app.rs");
     let body = source
         .split_once("pub struct Baboon {")
         .expect("src/app.rs declares `pub struct Baboon`")

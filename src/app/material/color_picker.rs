@@ -1305,7 +1305,7 @@ pub(in crate::app) fn encode_halo3_color_preferences(
 }
 
 pub(in crate::app) fn default_color_swatches() -> Vec<Option<ColorPaletteSwatch>> {
-    decode_baboon_palette(include_str!("../../../assets/default.baboon_palette"))
+    decode_baboon_palette(include_root_str!("assets/default.baboon_palette"))
         .expect("the bundled Baboon palette must be valid")
 }
 

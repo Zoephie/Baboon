@@ -217,7 +217,7 @@ impl Baboon {
                             let banner = ui.add(
                                 egui::Image::from_bytes(
                                     "bytes://baboon_branding/welcome-banner.png",
-                                    include_bytes!("../../../assets/branding/welcome-banner.png")
+                                    include_root_bytes!("assets/branding/welcome-banner.png")
                                         .as_slice(),
                                 )
                                 .fit_to_exact_size(Vec2::new(

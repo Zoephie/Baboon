@@ -2,6 +2,21 @@
 //! binary and the build tools in `src/bin`.
 //! It owns process startup and the module tree; `main.rs` only calls [`run`].
 
+/// `include_str!` with a path from the package root, so a file can move
+/// without its includes changing.
+macro_rules! include_root_str {
+    ($path:literal) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", $path))
+    };
+}
+
+/// `include_bytes!` with a path from the package root; see `include_root_str!`.
+macro_rules! include_root_bytes {
+    ($path:literal) => {
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/", $path))
+    };
+}
+
 mod app;
 mod format;
 pub mod script_docs_import;
@@ -80,7 +95,7 @@ fn set_windows_app_user_model_id() {}
 
 fn app_icon() -> Option<eframe::egui::IconData> {
     let image = image::load_from_memory_with_format(
-        include_bytes!("../icon/baboon.ico"),
+        include_root_bytes!("icon/baboon.ico"),
         image::ImageFormat::Ico,
     )
     .ok()?

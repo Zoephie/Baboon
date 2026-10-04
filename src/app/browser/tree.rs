@@ -450,11 +450,11 @@ fn context_menu_app_icon(label: &str) -> Option<egui::Image<'static>> {
     let (uri, bytes): (&'static str, &'static [u8]) = match label {
         "Open in Sapien" => (
             "bytes://baboon_app_icons/sapien.png",
-            include_bytes!("../../../assets/App Icons/Sapien.png"),
+            include_root_bytes!("assets/App Icons/Sapien.png"),
         ),
         "Open in Tag Test" => (
             "bytes://baboon_app_icons/tag-test.png",
-            include_bytes!("../../../assets/App Icons/Tag Test.png"),
+            include_root_bytes!("assets/App Icons/Tag Test.png"),
         ),
         _ => return None,
     };

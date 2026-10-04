@@ -723,17 +723,17 @@ impl Baboon {
             blender_icon: load_ico_texture(
                 &ctx,
                 "blender_icon",
-                include_bytes!("../assets/Quick access/blender.ico"),
+                include_root_bytes!("assets/Quick access/blender.ico"),
             ),
             sapien_icon: load_ico_texture(
                 &ctx,
                 "sapien_icon",
-                include_bytes!("../assets/Quick access/sapien.ico"),
+                include_root_bytes!("assets/Quick access/sapien.ico"),
             ),
             tag_test_icon: load_ico_texture(
                 &ctx,
                 "tag_test_icon",
-                include_bytes!("../assets/Quick access/tag_test.ico"),
+                include_root_bytes!("assets/Quick access/tag_test.ico"),
             ),
             game_banner_textures: HashMap::new(),
             game_emblem_textures: HashMap::new(),
@@ -854,17 +854,17 @@ impl Baboon {
         self.blender_icon = load_ico_texture(
             ctx,
             "blender_icon",
-            include_bytes!("../assets/Quick access/blender.ico"),
+            include_root_bytes!("assets/Quick access/blender.ico"),
         );
         self.sapien_icon = load_ico_texture(
             ctx,
             "sapien_icon",
-            include_bytes!("../assets/Quick access/sapien.ico"),
+            include_root_bytes!("assets/Quick access/sapien.ico"),
         );
         self.tag_test_icon = load_ico_texture(
             ctx,
             "tag_test_icon",
-            include_bytes!("../assets/Quick access/tag_test.ico"),
+            include_root_bytes!("assets/Quick access/tag_test.ico"),
         );
         self.game_banner_textures.clear();
         self.game_emblem_textures.clear();
@@ -1003,10 +1003,10 @@ mod tests {
     #[test]
     fn helper_programs_launch_through_background_command() {
         let files = [
-            ("git_review.rs", include_str!("app/git_review.rs")),
-            ("ui/tag_compare.rs", include_str!("app/ui/tag_compare.rs")),
-            ("controller/terminal.rs", include_str!("app/controller/terminal.rs")),
-            ("controller/updates.rs", include_str!("app/controller/updates.rs")),
+            ("git_review.rs", include_root_str!("src/app/git_review.rs")),
+            ("ui/tag_compare.rs", include_root_str!("src/app/ui/tag_compare.rs")),
+            ("controller/terminal.rs", include_root_str!("src/app/controller/terminal.rs")),
+            ("controller/updates.rs", include_root_str!("src/app/controller/updates.rs")),
         ];
         let mut bare = Vec::new();
         let mut routed = 0;

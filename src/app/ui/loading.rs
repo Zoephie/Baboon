@@ -32,9 +32,9 @@ const LIGHT_LOADING_PALETTE: LoadingPalette = LoadingPalette {
     lines: "#999999",
 };
 
-const LOADING_BACKGROUND_SVG: &str = include_str!("../../../assets/loading/loading-background.svg");
-const LOADING_INNER_SVG: &str = include_str!("../../../assets/loading/loading-inner.svg");
-const LOADING_OUTER_SVG: &str = include_str!("../../../assets/loading/loading-outer.svg");
+const LOADING_BACKGROUND_SVG: &str = include_root_str!("assets/loading/loading-background.svg");
+const LOADING_INNER_SVG: &str = include_root_str!("assets/loading/loading-inner.svg");
+const LOADING_OUTER_SVG: &str = include_root_str!("assets/loading/loading-outer.svg");
 
 static LIGHT_BACKGROUND_SVG: OnceLock<String> = OnceLock::new();
 static LIGHT_INNER_SVG: OnceLock<String> = OnceLock::new();
