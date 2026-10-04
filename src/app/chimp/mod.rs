@@ -57,8 +57,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::app::mods::container_write::{
-    ContainerWriteMode, ContainerWriteOutcome, container_triplet as triplet,
-    remove_container_triplet,
+    ContainerWriteMode, ContainerWriteOutcome, container_triplet as triplet, discard_staging,
+    staging_utoc_for,
 };
 
 mod browser_ui;

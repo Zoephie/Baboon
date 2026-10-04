@@ -241,13 +241,20 @@ impl Baboon {
                     return false;
                 }
                 self.model.status = format!("Building {}…", output.display());
+                // Staged under the output's own file name: the writer stamps
+                // CityHash64 of the file stem into the container as its id.
+                let temporary = staging_utoc_for(&output);
                 let panic_output = output.clone();
+                let panic_temporary = temporary.clone();
                 spawn_worker(
                     &self.tx,
                     ctx,
                     move || {
-                        let temporary = chimp_staging_utoc(&output);
-                        let result = build_chimp_mod(&world, &rebuilt, &temporary);
+                        let result = temporary
+                            .parent()
+                            .map_or(Ok(()), fs::create_dir_all)
+                            .map_err(|error| error.to_string())
+                            .and_then(|()| build_chimp_mod(&world, &rebuilt, &temporary));
                         WorkerMessage::ChimpModBuilt {
                             kit,
                             output,
@@ -258,7 +265,7 @@ impl Baboon {
                     },
                     move |error| WorkerMessage::ChimpModBuilt {
                         kit,
-                        temporary: chimp_staging_utoc(&panic_output),
+                        temporary: panic_temporary,
                         output: panic_output,
                         written: Vec::new(),
                         result: Err(error),
@@ -407,12 +414,12 @@ impl Baboon {
         ctx: &egui::Context,
     ) {
         if let Err(error) = result {
-            remove_chimp_triplet(temporary);
+            discard_staging(temporary);
             self.model.status = format!("Could not build {}: {error}", output.display());
             return;
         }
         let Some(kit_index) = self.model.kit_index(kit) else {
-            remove_chimp_triplet(temporary);
+            discard_staging(temporary);
             return;
         };
         // The active Chimp World (and possibly Baboon's tag mount, and possibly
@@ -425,18 +432,19 @@ impl Baboon {
             match self.acquire_container_write_lease(output, ContainerWriteMode::Replace) {
                 Ok(lease) => lease,
                 Err(failure) => {
-                    remove_chimp_triplet(temporary);
+                    discard_staging(temporary);
                     self.model.status = failure.to_string();
                     return;
                 }
             };
         if let Err(failure) = self.unmap_leased_containers(&mut lease) {
-            remove_chimp_triplet(temporary);
+            discard_staging(temporary);
             self.model.status = failure.to_string();
             self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
             return;
         }
         let replaced = replace_chimp_triplet(temporary, output);
+        discard_staging(temporary);
         // Remounting is the lease's job — it knows which workspaces it idled,
         // which is not necessarily this one: an output outside the game's
         // `Paks` was never mapped and never needed idling.
@@ -574,17 +582,6 @@ impl From<ChimpRebuilt> for ChimpWritten {
     }
 }
 
-/// Where a mod container is built before it replaces `output`.
-fn chimp_staging_utoc(output: &Path) -> PathBuf {
-    output.with_file_name(format!(
-        "{}.building.utoc",
-        output
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Chimp_P")
-    ))
-}
-
 /// Build the rebuilt packages into a mod container at `temporary` and read
 /// every one back to check it survived exactly. Runs on a worker.
 fn build_chimp_mod(
@@ -689,10 +686,6 @@ fn overwrite_chimp_sources(
         ));
     }
     (true, Err(error))
-}
-
-fn remove_chimp_triplet(path: &Path) {
-    remove_container_triplet(path);
 }
 
 fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> {
@@ -1016,13 +1009,47 @@ mod tests {
         app.handle_chimp_mod_built(
             kit,
             output.clone(),
-            chimp_staging_utoc(&output),
+            staging_utoc_for(&output),
             Vec::new(),
             Err("stopped".to_owned()),
             &ctx,
         );
         assert!(app.chimp.chimp_writes.is_empty());
         assert!(app.model.kit_index(kit).is_none(), "and runs once it lands");
+    }
+
+    /// A Chimp mod is staged under its own file name, in a folder of its own
+    /// beside the output: the container id the writer stamps is CityHash64 of
+    /// the file stem, and a `Mod_P.building` stem shipped a container that
+    /// declared itself under a name nothing else uses. A failed build leaves
+    /// neither the staged files nor the folder behind.
+    #[test]
+    fn a_chimp_mod_is_staged_under_its_own_name_and_cleaned_up() {
+        let mut app = Baboon::for_test();
+        let kit = app.model.kits[0].id;
+        let ctx = egui::Context::default();
+        let root = crate::test_kits::unique_temp_dir("chimp-staging");
+        let output = root.join("Mod_P.utoc");
+        let staging = staging_utoc_for(&output);
+        assert_eq!(staging.file_name(), output.file_name());
+        assert_eq!(staging.parent().and_then(Path::parent), Some(root.as_path()));
+
+        let folder = staging.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&folder).unwrap();
+        for file in triplet(&staging) {
+            std::fs::write(file, b"partial").unwrap();
+        }
+        app.chimp.chimp_writes.insert(kit, None);
+        app.handle_chimp_mod_built(
+            kit,
+            output,
+            staging,
+            Vec::new(),
+            Err("stopped".to_owned()),
+            &ctx,
+        );
+        assert!(!folder.exists(), "the staging folder is removed with its files");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The overwrite's leases are parked for the worker. A failed write has
