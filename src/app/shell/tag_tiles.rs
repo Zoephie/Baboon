@@ -148,17 +148,30 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                     .id_salt(("tag_tile", tile_id.0))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let action = self.app.draw_tag_pane(
+                        let app = &mut *self.app;
+                        // Both fill caches, so they are resolved before the
+                        // draw rather than inside it.
+                        let def_docs = app.def_docs_for_entry(self.kit_index, &entry);
+                        let ce_sound = app.ce_sound_binding(self.kit_index, &entry.key, &entry);
+                        let kit = app.model.kits[self.kit_index].id;
+                        let inputs = PaneInputs {
+                            find: &app.search.find,
+                            field_nav: app.references.field_nav.as_ref(),
+                            audio: &app.audio,
+                            def_docs,
+                            ce_sound,
+                        };
+                        draw_tag_pane(
+                            &cx!(app, &self.ctx),
                             ui,
-                            &self.ctx,
                             self.kit_index,
                             &entry,
                             &scope,
                             true,
+                            inputs,
+                            &mut app.views[kit],
+                            &mut app.editor,
                         );
-                        if self.pending_browser_action.is_none() {
-                            self.pending_browser_action = action;
-                        }
                     });
             });
         egui_tiles::UiResponse::None

@@ -1807,3 +1807,17 @@ impl AudioState {
 
 #[cfg(test)]
 mod tests;
+
+/// What the sound player can be asked to do.
+pub(in crate::app) enum AudioCommand {
+    /// Queue what a pane's sound controls asked for, in order.
+    Queue(VecDeque<SoundRequest>),
+}
+
+impl super::Baboon {
+    pub(in crate::app) fn apply_audio_command(&mut self, command: AudioCommand) {
+        match command {
+            AudioCommand::Queue(requests) => self.audio.pending.extend(requests),
+        }
+    }
+}

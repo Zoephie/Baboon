@@ -58,3 +58,40 @@ pub(in crate::app) struct KitsFeature {
     /// Pending "import geometry via tool" request from an Import button.
     pub(in crate::app) pending_tool_import: Option<ToolImportRequest>,
 }
+
+/// Which tool a scenario opens in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ScenarioTool {
+    TagTest,
+    Sapien,
+}
+
+/// What the editing kits can be asked to do.
+pub(in crate::app) enum KitsCommand {
+    /// Save the scenario at `key` in `kit` if needed and open it in `tool`.
+    LaunchScenario {
+        kit: KitId,
+        key: String,
+        tool: ScenarioTool,
+    },
+    /// Run a tool import a field asked for, once it can start.
+    QueueToolImport(ToolImportRequest),
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_kits_command(&mut self, command: KitsCommand) {
+        match command {
+            KitsCommand::LaunchScenario { kit, key, tool } => {
+                let Some(index) = self.model.kit_index(kit) else {
+                    return;
+                };
+                self.model.active = index;
+                match tool {
+                    ScenarioTool::TagTest => self.launch_scenario_in_tag_test(&key),
+                    ScenarioTool::Sapien => self.launch_scenario_in_sapien(&key),
+                }
+            }
+            KitsCommand::QueueToolImport(request) => self.kit_tools.pending_tool_import = Some(request),
+        }
+    }
+}

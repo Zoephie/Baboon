@@ -300,6 +300,7 @@ pub(in crate::app) use function_editor::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod pane;
+pub(in crate::app) use pane::{PaneDrawn, PaneInputs, draw_tag_pane};
 pub(in crate::app) mod tsv_paste_window;
 pub(in crate::app) use tsv_paste_window::draw_tsv_paste_window;
 pub(in crate::app) mod dialogs;
@@ -379,5 +380,26 @@ impl EditorCaches {
         self.rmdf_cache.clear();
         self.rmop_cache.clear();
         self.render_method_epoch = self.render_method_epoch.wrapping_add(1);
+    }
+}
+
+impl EditorFeature {
+    /// Show popups a tag pane opened this frame, recording the kit they were
+    /// opened from so confirming one later edits that kit's document rather
+    /// than whichever kit is active, or last opened a popup, by then.
+    pub(in crate::app) fn adopt_opened_popups(
+        &mut self,
+        kit: KitId,
+        color: Option<MaterialColorPopup>,
+        function: Option<FunctionPopup>,
+    ) {
+        if let Some(popup) = color {
+            self.color_popup = Some(popup);
+            self.color_popup_kit = Some(kit);
+        }
+        if let Some(popup) = function {
+            self.function_popup = Some(popup);
+            self.function_popup_kit = Some(kit);
+        }
     }
 }

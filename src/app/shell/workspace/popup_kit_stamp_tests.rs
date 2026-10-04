@@ -23,12 +23,12 @@ fn popup() -> Option<MaterialColorPopup> {
 fn a_grid_popup_opened_after_another_kits_popup_edits_its_own_kit() {
     let (mut app, a, b) = two_kits();
     // A normal swatch in B opens the picker; it is stamped with B.
-    app.adopt_opened_popups(b, popup(), None);
+    app.editor.adopt_opened_popups(b, popup(), None);
     assert_eq!(app.popup_target_kit(app.editor.color_popup_kit), Some(1));
 
     // Then the shader grid in A opens one, B still active.
     app.model.active = 1;
-    app.adopt_opened_popups(a, popup(), None);
+    app.editor.adopt_opened_popups(a, popup(), None);
     assert_eq!(
         app.popup_target_kit(app.editor.color_popup_kit),
         Some(0),
@@ -39,7 +39,7 @@ fn a_grid_popup_opened_after_another_kits_popup_edits_its_own_kit() {
 #[test]
 fn a_popup_from_a_closed_kit_is_dropped_not_redirected() {
     let (mut app, _, b) = two_kits();
-    app.adopt_opened_popups(b, popup(), None);
+    app.editor.adopt_opened_popups(b, popup(), None);
     app.model.kits.pop();
     assert_eq!(app.popup_target_kit(app.editor.color_popup_kit), None);
     // A popup with no recorded kit still applies to the active one.

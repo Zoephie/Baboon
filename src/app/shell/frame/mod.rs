@@ -665,6 +665,8 @@ mod external_links_tests;
 mod menu_close_tests;
 #[cfg(test)]
 mod help_menu_tests;
+#[cfg(test)]
+mod pane_undo_window_tests;
 
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
@@ -720,56 +722,6 @@ impl Baboon {
     /// resolved against that workspace's editing kit rather than the focused
     /// one, and a launch makes it active first: it saves the tag and starts an
     /// external editor, neither of which should follow the wrong game.
-    pub(in crate::app) fn draw_scenario_launcher_buttons(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        entry: &TagEntry,
-    ) {
-        if entry.group_tag != u32::from_be_bytes(*b"scnr") {
-            return;
-        }
-        let key = entry.key.clone();
-        // Halo Combat Evolved's Sapien cannot be handed a scenario, and
-        // Campaign Evolved has no Sapien at all. Neither is a button worth
-        // greying out — a control that can never work reads as something the
-        // user has misconfigured.
-        let offers_sapien = self.model.kit_offers_scenario_sapien(kit_index);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let tag_test_ready = self.model.can_launch_scenario_in_tag_test(kit_index, entry);
-            if scenario_launcher_button(
-                ui,
-                "bytes://baboon_app_icons/tag-test.png",
-                include_root_bytes!("assets/App Icons/Tag Test.png"),
-                "TagTest",
-                tag_test_ready,
-            )
-            .on_hover_text("Save if needed, then launch this scenario in tag_test")
-            .clicked()
-            {
-                self.model.active = kit_index;
-                self.launch_scenario_in_tag_test(&key);
-            }
-            if offers_sapien {
-                let sapien_ready = self.model.can_launch_scenario_in_sapien(kit_index, entry);
-                if scenario_launcher_button(
-                    ui,
-                    "bytes://baboon_app_icons/sapien.png",
-                    include_root_bytes!("assets/App Icons/Sapien.png"),
-                    "Sapien",
-                    sapien_ready,
-                )
-                .on_hover_text("Save if needed, then launch this scenario in Sapien")
-                .clicked()
-                {
-                    self.model.active = kit_index;
-                    self.launch_scenario_in_sapien(&key);
-                }
-            }
-            ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
-        });
-    }
 
     pub(in crate::app) fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -906,83 +858,6 @@ impl Baboon {
         if !enabled {
             response.on_disabled_hover_text("Load an editing kit to browse its assets");
         }
-    }
-
-    /// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
-    /// Keywords live in an external sidecar, not the tag binary.
-    pub(in crate::app) fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(RichText::new("Keywords:").color(subtle_dark()));
-            let existing = self.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
-            let mut remove: Option<String> = None;
-            for keyword in &existing {
-                if keyword_pill(ui, tag_key, keyword) {
-                    remove = Some(keyword.clone());
-                }
-            }
-            if let Some(keyword) = remove {
-                self.model.kits[kit_index].keywords.remove(tag_key, &keyword);
-            }
-            // The draft is this pane's own. It used to be one field on the app,
-            // so text typed into one pane's box showed in every other pane.
-            let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
-            let mut draft = ui
-                .data_mut(|data| data.get_temp::<String>(draft_id))
-                .unwrap_or_default();
-            let keyword_field = Frame::NONE
-                .fill(foundation_input())
-                .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
-                .inner_margin(egui::Margin::same(2))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.spacing_mut().interact_size.y = 20.0;
-                    ui.set_height(20.0);
-                    ui.horizontal(|ui| {
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut draft)
-                                .hint_text(placeholder_text("add keyword"))
-                                .desired_width(120.0)
-                                .frame(egui::Frame::NONE),
-                        );
-                        let add_response = ui
-                            .scope(|ui| {
-                                ui.spacing_mut().interact_size = Vec2::splat(20.0);
-                                ui.add(
-                                    egui::Button::new("")
-                                        .min_size(Vec2::splat(20.0))
-                                        .corner_radius(egui::CornerRadius::same(10)),
-                                )
-                            })
-                            .inner;
-                        let add_icon_rect = egui::Rect::from_center_size(
-                            add_response.rect.center(),
-                            Vec2::splat(BUTTON_ICON_SIZE),
-                        );
-                        paint_button_icon_at(ui, ButtonIcon::Add, add_icon_rect, text_dark());
-                        let add_clicked = add_response.on_hover_text("Add keyword").clicked();
-                        (resp, add_clicked)
-                    })
-                    .inner
-                });
-            let (resp, add_clicked) = keyword_field.inner;
-            ui.painter().rect_stroke(
-                keyword_field.response.rect,
-                egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8),
-                pane_header_input_stroke(
-                    ui,
-                    keyword_field.response.hovered() || resp.hovered(),
-                    resp.has_focus(),
-                ),
-                egui::StrokeKind::Middle,
-            );
-            let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (add_clicked || submitted) && !draft.trim().is_empty() {
-                self.model.kits[kit_index].keywords.add(tag_key, &draft);
-                draft.clear();
-            }
-            ui.data_mut(|data| data.insert_temp(draft_id, draft));
-        });
     }
 }
 
@@ -1132,3 +1007,148 @@ impl Baboon {
 
 #[cfg(test)]
 mod keyword_draft_tests;
+
+/// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
+/// Keywords live in an external sidecar, not the tag binary. Adding and
+/// removing are commands; the draft being typed is this pane's own.
+pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, tag_key: &str) {
+    let kit = cx.model.kits[kit_index].id;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(RichText::new("Keywords:").color(subtle_dark()));
+        let existing = cx.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
+        let mut remove: Option<String> = None;
+        for keyword in &existing {
+            if keyword_pill(ui, tag_key, keyword) {
+                remove = Some(keyword.clone());
+            }
+        }
+        if let Some(keyword) = remove {
+            cx.send(BrowserCommand::RemoveKeyword {
+                kit,
+                key: tag_key.to_owned(),
+                keyword,
+            });
+        }
+        // The draft is this pane's own. It used to be one field on the app,
+        // so text typed into one pane's box showed in every other pane.
+        let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
+        let mut draft = ui
+            .data_mut(|data| data.get_temp::<String>(draft_id))
+            .unwrap_or_default();
+        let keyword_field = Frame::NONE
+            .fill(foundation_input())
+            .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
+            .inner_margin(egui::Margin::same(2))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.spacing_mut().interact_size.y = 20.0;
+                ui.set_height(20.0);
+                ui.horizontal(|ui| {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut draft)
+                            .hint_text(placeholder_text("add keyword"))
+                            .desired_width(120.0)
+                            .frame(egui::Frame::NONE),
+                    );
+                    let add_response = ui
+                        .scope(|ui| {
+                            ui.spacing_mut().interact_size = Vec2::splat(20.0);
+                            ui.add(
+                                egui::Button::new("")
+                                    .min_size(Vec2::splat(20.0))
+                                    .corner_radius(egui::CornerRadius::same(10)),
+                            )
+                        })
+                        .inner;
+                    let add_icon_rect = egui::Rect::from_center_size(
+                        add_response.rect.center(),
+                        Vec2::splat(BUTTON_ICON_SIZE),
+                    );
+                    paint_button_icon_at(ui, ButtonIcon::Add, add_icon_rect, text_dark());
+                    let add_clicked = add_response.on_hover_text("Add keyword").clicked();
+                    (resp, add_clicked)
+                })
+                .inner
+            });
+        let (resp, add_clicked) = keyword_field.inner;
+        ui.painter().rect_stroke(
+            keyword_field.response.rect,
+            egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8),
+            pane_header_input_stroke(
+                ui,
+                keyword_field.response.hovered() || resp.hovered(),
+                resp.has_focus(),
+            ),
+            egui::StrokeKind::Middle,
+        );
+        let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (add_clicked || submitted) && !draft.trim().is_empty() {
+            cx.send(BrowserCommand::AddKeyword {
+                kit,
+                key: tag_key.to_owned(),
+                keyword: draft.clone(),
+            });
+            draft.clear();
+        }
+        ui.data_mut(|data| data.insert_temp(draft_id, draft));
+    });
+}
+
+pub(in crate::app) fn draw_scenario_launcher_buttons(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    entry: &TagEntry,
+) {
+    let kit = cx.model.kits[kit_index].id;
+    if entry.group_tag != u32::from_be_bytes(*b"scnr") {
+        return;
+    }
+    let key = entry.key.clone();
+    // Halo Combat Evolved's Sapien cannot be handed a scenario, and
+    // Campaign Evolved has no Sapien at all. Neither is a button worth
+    // greying out — a control that can never work reads as something the
+    // user has misconfigured.
+    let offers_sapien = cx.model.kit_offers_scenario_sapien(kit_index);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let tag_test_ready = cx.model.can_launch_scenario_in_tag_test(kit_index, entry);
+        if scenario_launcher_button(
+            ui,
+            "bytes://baboon_app_icons/tag-test.png",
+            include_root_bytes!("assets/App Icons/Tag Test.png"),
+            "TagTest",
+            tag_test_ready,
+        )
+        .on_hover_text("Save if needed, then launch this scenario in tag_test")
+        .clicked()
+        {
+            cx.send(KitsCommand::LaunchScenario {
+                kit,
+                key: key.clone(),
+                tool: ScenarioTool::TagTest,
+            });
+        }
+        if offers_sapien {
+            let sapien_ready = cx.model.can_launch_scenario_in_sapien(kit_index, entry);
+            if scenario_launcher_button(
+                ui,
+                "bytes://baboon_app_icons/sapien.png",
+                include_root_bytes!("assets/App Icons/Sapien.png"),
+                "Sapien",
+                sapien_ready,
+            )
+            .on_hover_text("Save if needed, then launch this scenario in Sapien")
+            .clicked()
+            {
+                cx.send(KitsCommand::LaunchScenario {
+                    kit,
+                    key: key.clone(),
+                    tool: ScenarioTool::Sapien,
+                });
+            }
+        }
+        ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
+    });
+}

@@ -175,6 +175,10 @@ pub(in crate::app) enum EditorCommand {
         label: &'static str,
         ops: DeferredOps,
     },
+    /// Apply what a tag pane collected while it drew.
+    PaneDrawn(Box<PaneDrawn>),
+    /// Run tool bitmaps for the bitmap at `key` in `kit`, then reload it.
+    ReimportBitmap { kit: KitId, key: String },
     /// Set the reference field at `field_path` of the tag at `tag_key` in
     /// `kit` to the picked `input`.
     PickTagReference {
@@ -186,8 +190,15 @@ pub(in crate::app) enum EditorCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand) {
+    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) {
         match command {
+            EditorCommand::PaneDrawn(drawn) => self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::ReimportBitmap { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.begin_reimport_bitmap(key, ctx.clone());
+                }
+            }
             EditorCommand::ApplyTsvPaste => self.apply_tsv_paste(),
             EditorCommand::ApplyBlockConfirm => self.apply_block_confirm(),
             EditorCommand::ApplyPopupOps {

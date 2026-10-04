@@ -1230,25 +1230,6 @@ impl Baboon {
         }
     }
 
-    /// Show popups a tag pane opened this frame, recording the kit they were
-    /// opened from so confirming one later edits that kit's document rather
-    /// than whichever kit is active, or last opened a popup, by then.
-    pub(in crate::app) fn adopt_opened_popups(
-        &mut self,
-        kit: KitId,
-        color: Option<MaterialColorPopup>,
-        function: Option<FunctionPopup>,
-    ) {
-        if let Some(popup) = color {
-            self.editor.color_popup = Some(popup);
-            self.editor.color_popup_kit = Some(kit);
-        }
-        if let Some(popup) = function {
-            self.editor.function_popup = Some(popup);
-            self.editor.function_popup_kit = Some(kit);
-        }
-    }
-
     /// The kit a confirmed popup applies to: the one it was opened from, or
     /// none if that kit has closed since, so the edit is dropped rather than
     /// landing in another kit's tag that happens to share its key. A popup

@@ -153,6 +153,8 @@ pub(in crate::app) enum ExportCommand {
         key: String,
         target: blam_tags::game::Game,
     },
+    /// Extract a sound a field asked for, once it can start.
+    QueueSoundExtract(ExtractRequest),
 }
 
 impl Baboon {
@@ -167,6 +169,7 @@ impl Baboon {
                 ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx.clone()),
                 ExtractKind::Animation => self.begin_extract_animation(key, target, ctx.clone()),
             },
+            ExportCommand::QueueSoundExtract(request) => self.export.pending_sound_extract = Some(request),
         }
     }
 }

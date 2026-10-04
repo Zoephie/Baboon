@@ -368,3 +368,45 @@ impl KitBrowser {
         }
     }
 }
+
+/// What the browser can be asked to do.
+pub(in crate::app) enum BrowserCommand {
+    /// A browser action raised in `kit`'s workspace, which becomes active
+    /// first: the action addresses the active kit.
+    Action { kit: KitId, action: BrowserAction },
+    /// Give the tag at `key` in `kit` a keyword.
+    AddKeyword {
+        kit: KitId,
+        key: String,
+        keyword: String,
+    },
+    /// Take a keyword off the tag at `key` in `kit`.
+    RemoveKeyword {
+        kit: KitId,
+        key: String,
+        keyword: String,
+    },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_browser_command(&mut self, command: BrowserCommand, ctx: &egui::Context) {
+        match command {
+            BrowserCommand::Action { kit, action } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.handle_browser_action(action, ctx.clone());
+                }
+            }
+            BrowserCommand::AddKeyword { kit, key, keyword } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.kits[index].keywords.add(&key, &keyword);
+                }
+            }
+            BrowserCommand::RemoveKeyword { kit, key, keyword } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.kits[index].keywords.remove(&key, &keyword);
+                }
+            }
+        }
+    }
+}

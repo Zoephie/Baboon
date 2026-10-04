@@ -40,12 +40,15 @@ pub(in crate::app) struct ReferencesFeature {
 pub(in crate::app) enum ReferencesCommand {
     /// Carry out what the Content Explorer over `kit` asked for.
     Explorer { kit: KitId, act: ExplorerAct },
+    /// Open the tag a field refers to, once the frame's drawing is over.
+    Open(OpenTagRequest),
 }
 
 impl Baboon {
     pub(in crate::app) fn apply_references_command(&mut self, command: ReferencesCommand, ctx: &egui::Context) {
         match command {
             ReferencesCommand::Explorer { kit, act } => self.apply_explorer_act(kit, act, ctx),
+            ReferencesCommand::Open(request) => self.references.pending_open = Some(request),
         }
     }
 }

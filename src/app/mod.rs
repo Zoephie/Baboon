@@ -84,6 +84,7 @@ use model_preview::*;
 mod editor;
 use editor::*;
 mod audio;
+use audio::AudioCommand;
 mod runtime_poke;
 use runtime_poke::*;
 mod chimp;

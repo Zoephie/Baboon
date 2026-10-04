@@ -49,6 +49,9 @@ pub(in crate::app) enum SearchCommand {
     RunFieldValueSearch,
     /// Build the active kit's field-value index.
     BuildFieldIndex,
+    /// Open Find on the tag at `key` in `kit`, which becomes the active and
+    /// selected tag.
+    FindInTag { kit: KitId, key: String },
 }
 
 impl Baboon {
@@ -66,6 +69,15 @@ impl Baboon {
             SearchCommand::QueryResult { kit, action } => self.apply_query_result_action(kit, action, ctx),
             SearchCommand::RunFieldValueSearch => self.begin_field_value_search(ctx.clone()),
             SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx.clone()),
+            SearchCommand::FindInTag { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.model.kits[index].selected_key = Some(key);
+                    self.search.find.within = FindWithin::CurrentTag;
+                    self.search.find.open = true;
+                    self.search.find.focus_query = true;
+                }
+            }
         }
     }
 }

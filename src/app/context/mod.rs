@@ -135,6 +135,9 @@ pub(in crate::app) enum Command {
     Import(ImportCommand),
     Documents(DocumentsCommand),
     Editor(EditorCommand),
+    Browser(BrowserCommand),
+    Kits(KitsCommand),
+    Audio(AudioCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -197,6 +200,24 @@ impl From<EditorCommand> for Command {
     }
 }
 
+impl From<BrowserCommand> for Command {
+    fn from(command: BrowserCommand) -> Self {
+        Command::Browser(command)
+    }
+}
+
+impl From<KitsCommand> for Command {
+    fn from(command: KitsCommand) -> Self {
+        Command::Kits(command)
+    }
+}
+
+impl From<AudioCommand> for Command {
+    fn from(command: AudioCommand) -> Self {
+        Command::Audio(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -235,7 +256,10 @@ impl Baboon {
             Command::TagOps(command) => self.apply_tag_ops_command(command, ctx),
             Command::Import(command) => self.apply_import_command(command, ctx),
             Command::Documents(command) => self.apply_documents_command(command, ctx),
-            Command::Editor(command) => self.apply_editor_command(command),
+            Command::Editor(command) => self.apply_editor_command(command, ctx),
+            Command::Browser(command) => self.apply_browser_command(command, ctx),
+            Command::Kits(command) => self.apply_kits_command(command),
+            Command::Audio(command) => self.apply_audio_command(command),
         }
     }
 }

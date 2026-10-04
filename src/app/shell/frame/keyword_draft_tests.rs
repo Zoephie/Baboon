@@ -14,7 +14,8 @@ fn each_pane_keeps_its_own_keyword_draft() {
                 draft_ids.clear();
                 for pane in ["pane a", "pane b"] {
                     ui.push_id(pane, |ui| {
-                        app.draw_keyword_bar(ui, 0, "file:crate.model");
+                        let egui = ui.ctx().clone();
+                        draw_keyword_bar(&cx!(app, &egui), ui, 0, "file:crate.model");
                         draft_ids
                             .push(ui.make_persistent_id(("keyword_input", "file:crate.model")));
                     });
