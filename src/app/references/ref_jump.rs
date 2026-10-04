@@ -3,6 +3,21 @@
 
 use super::*;
 
+/// `rel` without a trailing `.ext`, in any case: a reference that already
+/// carries its extension would otherwise get a second one appended.
+fn without_extension<'a>(rel: &'a str, ext: &str) -> &'a str {
+    if ext.is_empty() {
+        return rel;
+    }
+    let Some(dot) = rel.len().checked_sub(ext.len() + 1) else {
+        return rel;
+    };
+    match rel.get(dot..) {
+        Some(tail) if tail.starts_with('.') && tail[1..].eq_ignore_ascii_case(ext) => &rel[..dot],
+        _ => rel,
+    }
+}
+
 impl Baboon {
     /// Once-per-frame driver for reference-jumps. Expires a finished glow, and —
     /// when a pending jump's referrer tag has become the focused, parsed tab —
@@ -260,15 +275,7 @@ impl Baboon {
             .unwrap_or("");
         // Normalize: tolerate forward slashes and a path that already carries
         // its extension (e.g. a shader bitmap ref), so we don't double-append.
-        let mut rel = req.rel_path.replace('/', "\\");
-        if !ext.is_empty() {
-            if let Some(stripped) = rel
-                .strip_suffix(&format!(".{ext}"))
-                .or_else(|| rel.strip_suffix(&format!(".{}", ext.to_ascii_uppercase())))
-            {
-                rel = stripped.to_owned();
-            }
-        }
+        let rel = without_extension(&req.rel_path.replace('/', "\\"), ext).to_owned();
         let abs = blam_tags::paths::resolve_tag_path(&root, &rel, ext);
         if !abs.exists() {
             self.model.status = format!(
@@ -327,6 +334,17 @@ mod ref_jump_tests {
 
     use super::*;
     use std::time::Duration;
+
+    /// A reference that carries its own extension is stripped of it in any
+    /// case; a mixed-case `.Bitmap` was left on and a second one appended.
+    #[test]
+    fn a_carried_extension_is_stripped_in_any_case() {
+        for rel in [r"a\b.bitmap", r"a\b.BITMAP", r"a\b.Bitmap", r"a\b"] {
+            assert_eq!(without_extension(rel, "bitmap"), r"a\b", "{rel}");
+        }
+        assert_eq!(without_extension(r"a\bbitmap", "bitmap"), r"a\bbitmap");
+        assert_eq!(without_extension("map", "bitmap"), "map");
+    }
 
     fn scratch_root(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
