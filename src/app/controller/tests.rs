@@ -72,16 +72,16 @@ fn last_opened_workspace_heading_prefers_the_custom_editing_kit_profile() {
 
 #[test]
 fn only_workspace_close_actions_wait_for_chimp_documents() {
-    assert!(super::close_action_includes_chimp(
+    assert!(crate::app::documents::close::close_action_includes_chimp(
         &super::PendingCloseAction::CloseApp
     ));
-    assert!(super::close_action_includes_chimp(
+    assert!(crate::app::documents::close::close_action_includes_chimp(
         &super::PendingCloseAction::CloseKit(super::KitId(1))
     ));
-    assert!(!super::close_action_includes_chimp(
+    assert!(!crate::app::documents::close::close_action_includes_chimp(
         &super::PendingCloseAction::CloseAllTabs
     ));
-    assert!(!super::close_action_includes_chimp(
+    assert!(!crate::app::documents::close::close_action_includes_chimp(
         &super::PendingCloseAction::CloseTab("tag".to_owned())
     ));
 }
@@ -91,7 +91,7 @@ fn only_workspace_close_actions_wait_for_chimp_documents() {
 /// keys exactly. A typed path or key has to answer every row the same.
 #[test]
 fn path_and_key_equality_follows_the_platform() {
-    use super::same_entry_key;
+    use crate::core::tag_key::same_entry_key;
     use crate::app::kits::detect::same_path_text;
     use crate::app::prefs::same_recent_path;
     // (a, b, equal on Windows, equal elsewhere)
@@ -128,7 +128,8 @@ fn path_and_key_equality_follows_the_platform() {
 /// and only file tags to the file save.
 #[test]
 fn the_close_prompt_saves_container_tags_through_the_containers() {
-    use super::{ClosePromptSave, TagEntryLocation, close_prompt_save_route};
+    use super::TagEntryLocation;
+    use crate::app::documents::close::{ClosePromptSave, close_prompt_save_route};
     let route = |location: TagEntryLocation| close_prompt_save_route(Some(&location));
     assert_eq!(
         route(TagEntryLocation::NewContainer {
@@ -224,7 +225,7 @@ use crate::app::kits::terminal::terminal_log_timestamp;
 use crate::app::kits::terminal::stream_terminal_output;
 use crate::app::kits::terminal::TERMINAL_VISIBLE_LINE_TRIM_TARGET;
 use crate::app::kits::terminal::TERMINAL_VISIBLE_LINE_LIMIT;
-use crate::app::controller::saving::register_saved_copy_in_loaded_source;
+use crate::app::documents::saving::register_saved_copy_in_loaded_source;
 
 #[test]
 fn normalize_container_tag_rel_cleans_path() {

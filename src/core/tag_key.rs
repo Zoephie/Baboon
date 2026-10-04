@@ -44,3 +44,16 @@ pub(crate) fn file_key_path(key: &str) -> Option<&Path> {
 pub(crate) fn key_label(key: &str) -> &str {
     key.strip_prefix("file:").unwrap_or(key)
 }
+
+/// Whether two keys name the same tag: `file:` keys hold paths, which
+/// Windows compares without case.
+pub(crate) fn same_entry_key(a: &str, b: &str) -> bool {
+    #[cfg(windows)]
+    {
+        a.eq_ignore_ascii_case(b)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}

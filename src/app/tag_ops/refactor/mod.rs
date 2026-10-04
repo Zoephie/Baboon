@@ -2,7 +2,7 @@
 //! rewrite every reference to what moved.
 
 use super::*;
-use crate::app::controller::saving::lexical_normalize_path;
+use crate::app::documents::saving::lexical_normalize_path;
 
 impl Baboon {
     /// Starts a filesystem refactoring transaction from a captured source snapshot.

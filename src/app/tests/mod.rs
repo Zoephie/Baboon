@@ -1,4 +1,4 @@
-use crate::app::controller::saving::new_tag_output_path_from_dialog;
+use crate::app::documents::saving::new_tag_output_path_from_dialog;
 
 use super::*;
 

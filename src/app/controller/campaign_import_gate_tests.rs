@@ -28,7 +28,7 @@
 //! struct graph. These tests pin the hole and that it is now closed.
 
 use super::*;
-use crate::app::controller::saving::load_new_tag_groups;
+use crate::app::documents::saving::load_new_tag_groups;
 use crate::app::import::single_tag::classify_import_source_for;
 
 fn definitions() -> std::path::PathBuf {

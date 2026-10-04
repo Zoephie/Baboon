@@ -45,7 +45,7 @@ impl Baboon {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Game").color(subtle_dark()));
                         let before = self.new_tag_dialog.game.clone();
-                        let games = crate::app::controller::available_definition_games();
+                        let games = crate::app::documents::saving::available_definition_games();
                         let (_, wheel_delta) = combo_box_with_scroll(
                             ui,
                             egui::ComboBox::from_id_salt("new_tag_game")

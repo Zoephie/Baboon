@@ -4,7 +4,7 @@
 //! them.
 
 use super::*;
-use crate::app::controller::saving::entries_for_keys;
+use crate::app::documents::saving::entries_for_keys;
 
 impl Baboon {
     /// Write the whole tree of tags this one pulls in to a text file.

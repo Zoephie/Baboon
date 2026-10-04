@@ -797,7 +797,7 @@ fn cases() -> Vec<Case> {
         case(
             "save_changes_prompt",
             &["save_changes_prompt"],
-            &["controller/mod.rs"],
+            &["documents/close/mod.rs"],
             memory_kit,
             |h| {
                 h.app.save_changes_prompt = SaveChangesPrompt {

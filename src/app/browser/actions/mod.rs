@@ -3,7 +3,7 @@
 //! a tag, and refreshing the tree.
 
 use super::*;
-use crate::app::controller::same_entry_key;
+use crate::core::tag_key::same_entry_key;
 
 impl Baboon {
     pub(in crate::app) fn favorite_kit_index(&self, root: &Path) -> Option<usize> {

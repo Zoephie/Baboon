@@ -2,9 +2,9 @@
 //! in Campaign Evolved, as a new container tag from a shipped template.
 
 use super::*;
-use crate::app::controller::saving::register_saved_copy_in_loaded_source;
-use crate::app::controller::saving::new_tag_output_path_from_dialog;
-use crate::app::controller::saving::load_new_tag_groups;
+use crate::app::documents::saving::register_saved_copy_in_loaded_source;
+use crate::app::documents::saving::new_tag_output_path_from_dialog;
+use crate::app::documents::saving::load_new_tag_groups;
 
 impl Baboon {
     pub(in crate::app) fn open_new_tag_dialog(&mut self) {

@@ -2,6 +2,8 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
+use crate::app::mods::in_place::ContainerSaveRoute;
+use crate::app::mods::in_place::container_save_route;
 
 use std::time::Instant;
 
@@ -12,7 +14,7 @@ impl Baboon {
     /// and one finishing while a level export runs used to clear the level's
     /// progress and release the container-write guard while its worker was
     /// still reading. Only the level export's own message ends it.
-    pub(super) fn handle_export_finished(&mut self, result: Result<String, String>) -> bool {
+    pub(in crate::app) fn handle_export_finished(&mut self, result: Result<String, String>) -> bool {
         self.status = match result {
             Ok(message) => message,
             Err(error) => error,
@@ -22,7 +24,7 @@ impl Baboon {
 
     /// Applies `WorkerMessage::ChimpLevelExportFinished`: ends the level job
     /// it names, if that is still the current one, and reports the result.
-    pub(super) fn handle_chimp_level_export_finished(
+    pub(in crate::app) fn handle_chimp_level_export_finished(
         &mut self,
         job: u64,
         result: Result<String, String>,
@@ -42,7 +44,7 @@ impl Baboon {
     /// Dropped when the kit it belongs to has closed: the export outlives the
     /// workspace that started it, and a level read that is no longer wanted
     /// should not keep writing over the status of whatever replaced it.
-    pub(super) fn handle_chimp_level_progress(
+    pub(in crate::app) fn handle_chimp_level_progress(
         &mut self,
         kit: KitId,
         phase: ChimpLevelPhase,
@@ -71,7 +73,7 @@ impl Baboon {
     }
 
     /// Applies `WorkerMessage::ContainerDumpProgress`.
-    pub(super) fn handle_container_dump_progress(
+    pub(in crate::app) fn handle_container_dump_progress(
         &mut self,
         stamp: KitStamp,
         done: usize,
@@ -99,7 +101,7 @@ impl Baboon {
     /// timer is a tally nobody reads. The job is cleared either way — including
     /// for a workspace that closed mid-run, which would otherwise leave a
     /// progress bar on screen with nothing behind it.
-    pub(super) fn handle_container_dump_finished(
+    pub(in crate::app) fn handle_container_dump_finished(
         &mut self,
         stamp: KitStamp,
         result: Result<ContainerDumpReport, String>,
@@ -170,7 +172,7 @@ impl Baboon {
     }
 
     /// Applies `WorkerMessage::EntryIndexSaved`, rejecting stale source generations.
-    pub(super) fn handle_entry_index_saved(
+    pub(in crate::app) fn handle_entry_index_saved(
         &mut self,
         stamp: KitStamp,
         path: PathBuf,
@@ -194,7 +196,7 @@ impl Baboon {
     }
 }
 
-pub(super) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<String> {
+pub(in crate::app) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut ordered = Vec::new();
     for key in keys {
@@ -205,7 +207,7 @@ pub(super) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) ->
     ordered
 }
 
-pub(super) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
+pub(in crate::app) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
     app.names()
         .name_for(entry.group_tag)
         .or_else(|| group_tag_to_extension(entry.group_tag))
@@ -236,7 +238,7 @@ pub(in crate::app) fn register_saved_copy_in_loaded_source(
     Ok(true)
 }
 
-pub(super) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {
+pub(in crate::app) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {
     let path = match &entry.location {
         TagEntryLocation::LooseFile(path) => path,
         TagEntryLocation::Monolithic { .. }
@@ -263,7 +265,7 @@ pub(super) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> St
     file_name
 }
 
-pub(super) fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
+pub(in crate::app) fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
     match &entry.location {
         TagEntryLocation::LooseFile(path) => path.parent().map(Path::to_path_buf),
         TagEntryLocation::Monolithic { .. }
@@ -416,3 +418,198 @@ pub(in crate::app) fn lexical_normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod level_export_job_tests;
+
+impl Baboon {
+    pub(in crate::app) fn save_current_tag(&mut self, ctx: &egui::Context) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
+        let Some(key) = self.kits[self.active].selected_key.clone() else {
+            self.status = "No tag selected".to_owned();
+            return;
+        };
+        // A brand-new (in-memory) container tag has no baseline to overwrite —
+        // "Save" writes it as a new `_P` override container instead.
+        if matches!(
+            self.entry_for_key(&key).map(|entry| &entry.location),
+            Some(TagEntryLocation::NewContainer { .. })
+        ) {
+            self.save_new_container_tag(&key);
+            return;
+        }
+        // For a container tag, "Save" overwrites the tag inside the game's pak
+        // in place, which is destructive and is not how anyone should be
+        // shipping a change — so it is an expert-mode route now. Everyone else
+        // gets the export, which is the supported one.
+        if self.current_source_is_container() {
+            match container_save_route(
+                self.prefs.expert_mode,
+                self.prefs.confirm_container_overwrite,
+            ) {
+                ContainerSaveRoute::ExportReview => {
+                    self.status = "Your change is kept in this workspace — export it as a mod to \
+                                   put it in the game"
+                        .to_owned();
+                    self.export_mod();
+                }
+                ContainerSaveRoute::ConfirmOverwriteInPlace => {
+                    self.overwrite_confirm = Some(OverwriteConfirm {
+                        kit: self.active_kit_id(),
+                        key,
+                    });
+                }
+                ContainerSaveRoute::OverwriteInPlace => {
+                    self.begin_overwrite_current_tag_in_place(&key, ctx)
+                }
+            }
+            return;
+        }
+        match self.save_tag_by_key(&key) {
+            Ok(path) => self.status = format!("Saved {}", path.display()),
+            Err(error) => self.status = format!("Save failed: {error}"),
+        }
+    }
+
+    pub(in crate::app) fn save_tag_by_key(&mut self, key: &str) -> Result<PathBuf, String> {
+        if self.refuse_read_only_edit(self.active) {
+            return Err(self.status.clone());
+        }
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            return Err("Selected tag is no longer in the source".to_owned());
+        };
+        let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
+            return Err("Load the selected tag before saving".to_owned());
+        };
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            return Err(reason.to_owned());
+        }
+        let TagEntryLocation::LooseFile(path) = &entry.location else {
+            // Container tags are writable, just not through the loose-file
+            // path — reaching here means a caller skipped the container
+            // routing, so say that rather than blaming a monolithic cache.
+            return Err(match &entry.location {
+                TagEntryLocation::Container { .. } | TagEntryLocation::NewContainer { .. } => {
+                    "Container tags cannot be saved as loose files".to_owned()
+                }
+                _ => "Monolithic cache tags are read-only".to_owned(),
+            });
+        };
+        let output = path.clone();
+        doc.tag
+            .write_atomic(&output)
+            .map_err(|error| error.to_string())?;
+        // What the tag now points at, from the document just written.
+        let dependencies = {
+            let mut refs = Vec::new();
+            collect_tag_dependency_refs(doc.tag.root(), &mut refs);
+            refs
+        };
+        if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
+            doc.dirty.clear();
+        }
+        // The save also writes the index row, so the periodic refresh will
+        // not see this file change; the shader grid has to hear it here.
+        if is_render_method_layout_group(entry.group_tag) {
+            self.kits[self.active].forget_render_methods();
+        }
+        self.record_saved_tag_in_indexes(&entry, dependencies);
+        Ok(output)
+    }
+
+    /// Bring the on-disk indexes and the reference index up to date with a tag
+    /// the user just saved.
+    ///
+    /// A plain Save touched neither. The next periodic refresh then saw the
+    /// file's new modified time as a change, and (before refreshes were
+    /// patched in) dropped the whole reference index for it. Writing the row
+    /// here means the refresh sees nothing to do, and the references are the
+    /// ones the saved document holds.
+    ///
+    /// The row and the references are written in one transaction, so a
+    /// failure leaves both as they were and the refresh picks the change up;
+    /// the failure goes to the terminal, with the other index warnings.
+    pub(in crate::app) fn record_saved_tag_in_indexes(&mut self, entry: &TagEntry, dependencies: Vec<DependencyRef>) {
+        let Some(source) = self.source_mut() else {
+            return;
+        };
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) =
+            (&source.source, source.game.map(GameId::as_str))
+            && !source.all_entries.is_empty()
+            && let Err(error) = crate::core::source::upsert_entry_with_dependencies(
+                game,
+                root,
+                entry,
+                Some(&dependencies),
+            )
+        {
+            let _ = self.tx.send(WorkerMessage::TerminalLine(format!(
+                "Warning: could not record {} in the tag index: {error:#}",
+                entry.display_path
+            )));
+        }
+        self.kits[self.active].set_tag_references(&entry.key, Some(dependencies));
+    }
+
+    pub(in crate::app) fn save_current_tag_as(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
+        let Some(key) = self.kits[self.active].selected_key.clone() else {
+            self.status = "No tag selected".to_owned();
+            return;
+        };
+        // For a container tag, "Save As" opens the rename dialog in duplicate
+        // mode (new name, no reference redirect) and writes an override.
+        if self.current_source_is_container() {
+            self.open_container_duplicate(&key);
+            return;
+        }
+        let Some(entry) = self.entry_for_key(&key).cloned() else {
+            self.status = "Selected tag is no longer in the source".to_owned();
+            return;
+        };
+        let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
+            self.status = "Load the selected tag before saving".to_owned();
+            return;
+        };
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            self.status = reason.to_owned();
+            return;
+        }
+
+        let extension = save_as_extension(self, &entry);
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save Current Tag As")
+            .set_file_name(save_as_file_name(&entry, extension.as_deref()));
+        if let Some(parent) = save_as_start_dir(&entry) {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(extension) = extension.as_deref() {
+            dialog = dialog.add_filter("Tag file", &[extension]);
+        }
+        let Some(mut output) = dialog.save_file() else {
+            return;
+        };
+        if output.extension().is_none() {
+            if let Some(extension) = extension.as_deref() {
+                output.set_extension(extension);
+            }
+        }
+
+        match doc.tag.write_atomic(&output) {
+            Ok(()) => {
+                self.status = match self.register_saved_copy_if_in_loaded_folder(&output) {
+                    Ok(_) => format!("Saved copy to {}", output.display()),
+                    Err(error) => format!(
+                        "Saved copy to {}, but did not update browser: {error}",
+                        output.display()
+                    ),
+                };
+            }
+            Err(error) => self.status = format!("Save As failed: {error}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod saved_tag_index_tests;

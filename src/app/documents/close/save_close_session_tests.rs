@@ -11,7 +11,7 @@
 //! mounted install; those branches are not reached here. The stash half of the
 //! prompt is covered in `campaign_project_round_trip_tests.rs`.
 
-use super::loose_fixture::*;
+use crate::app::controller::loose_fixture::*;
 use super::*;
 
 const MODEL: &str = "objects/props/crate.model";

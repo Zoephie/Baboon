@@ -2,7 +2,7 @@
 //! writing it in or over an existing tag.
 
 use super::*;
-use crate::app::controller::saving::load_new_tag_groups;
+use crate::app::documents::saving::load_new_tag_groups;
 use crate::app::tag_ops::new_tag::normalize_container_tag_rel;
 
 impl Baboon {
