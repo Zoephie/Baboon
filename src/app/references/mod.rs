@@ -9,6 +9,7 @@ pub(in crate::app) mod dependencies;
 pub(in crate::app) use dependencies::*;
 pub(in crate::app) mod ref_jump;
 pub(in crate::app) mod explorer;
+pub(in crate::app) use explorer::{ExplorerAct, draw_content_explorer_window};
 
 /// References: the content explorer, reference jumps waiting or loading, field
 /// navigation, and a referenced tag waiting to open.
@@ -33,4 +34,18 @@ pub(in crate::app) struct ReferencesFeature {
     pub(in crate::app) ref_jump_loading: HashSet<usize>,
     /// Pending "open referenced tag in a new tab" request.
     pub(in crate::app) pending_open: Option<OpenTagRequest>,
+}
+
+/// What references can be asked to do.
+pub(in crate::app) enum ReferencesCommand {
+    /// Carry out what the Content Explorer over `kit` asked for.
+    Explorer { kit: KitId, act: ExplorerAct },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_references_command(&mut self, command: ReferencesCommand) {
+        match command {
+            ReferencesCommand::Explorer { kit, act } => self.apply_explorer_act(kit, act),
+        }
+    }
 }

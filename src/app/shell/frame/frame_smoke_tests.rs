@@ -699,7 +699,7 @@ fn cases() -> Vec<Case> {
         case(
             "content_explorer",
             &["references.content_explorer"],
-            &["search/result_windows/mod.rs"],
+            &["references/explorer/window.rs"],
             memory_kit,
             |h| {
                 let focus = h.app.model.kits[h.app.model.active]

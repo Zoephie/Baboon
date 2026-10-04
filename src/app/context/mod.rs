@@ -99,6 +99,8 @@ pub(in crate::app) enum Command {
     Help(HelpCommand),
     Poke(PokeCommand),
     Compare(CompareCommand),
+    Search(SearchCommand),
+    References(ReferencesCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -110,6 +112,18 @@ impl From<HelpCommand> for Command {
 impl From<CompareCommand> for Command {
     fn from(command: CompareCommand) -> Self {
         Command::Compare(command)
+    }
+}
+
+impl From<SearchCommand> for Command {
+    fn from(command: SearchCommand) -> Self {
+        Command::Search(command)
+    }
+}
+
+impl From<ReferencesCommand> for Command {
+    fn from(command: ReferencesCommand) -> Self {
+        Command::References(command)
     }
 }
 
@@ -142,6 +156,8 @@ impl Baboon {
             Command::Help(command) => self.apply_help_command(command),
             Command::Poke(command) => self.apply_poke_command(command),
             Command::Compare(command) => self.apply_compare_command(command),
+            Command::Search(command) => self.apply_search_command(command),
+            Command::References(command) => self.apply_references_command(command),
         }
     }
 }

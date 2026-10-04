@@ -33,8 +33,10 @@ fn frame(
             let mut text = String::from("12");
             ui.add(egui::TextEdit::singleline(&mut text).id(egui::Id::new("a_field")));
         });
-        app.draw_find_window(ctx);
+        draw_find_window(&cx!(app, ctx), &mut app.search);
     });
+    // What the window asked for runs once drawing is over, as in a frame.
+    app.apply_commands(ctx);
 }
 
 fn key(key: egui::Key) -> egui::Event {

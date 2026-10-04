@@ -3,6 +3,9 @@
 
 use super::*;
 
+pub(in crate::app) mod window;
+pub(in crate::app) use window::{ExplorerAct, draw_content_explorer_window};
+
 impl Baboon {
 
 

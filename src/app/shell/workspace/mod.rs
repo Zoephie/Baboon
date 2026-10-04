@@ -1585,16 +1585,19 @@ impl Baboon {
         self.draw_tag_import_window(ctx);
         self.draw_cache_import_window(ctx);
         draw_help_window(&cx!(self, ctx), &mut self.help);
-        self.draw_query_results_window(ctx);
+        // Walk any expanded rows whose fields are not known yet before the
+        // window reads them.
+        self.refresh_ref_jump_occurrences(ctx);
+        draw_query_results_window(&cx!(self, ctx), &mut self.search, &mut self.references);
         draw_tag_diff_window(
             &cx!(self, ctx),
             &mut self.compare,
             &self.kit_tools.editing_kit_validation,
         );
-        self.draw_content_explorer_window(ctx);
+        draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
         self.draw_keyword_chooser_window(ctx);
-        self.draw_field_value_search_window(ctx);
-        self.draw_find_window(ctx);
+        draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
+        draw_find_window(&cx!(self, ctx), &mut self.search);
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
         self.draw_container_folder_window(ctx);

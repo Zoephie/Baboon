@@ -70,7 +70,7 @@ fn the_query_results_window_draws_only_rows_in_view() {
                 )),
                 ..Default::default()
             },
-            |_| app.draw_query_results_window(&ctx),
+            |_| draw_query_results_window(&cx!(app, &ctx), &mut app.search, &mut app.references),
         );
         painted = output
             .shapes
