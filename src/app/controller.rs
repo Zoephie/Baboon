@@ -9810,6 +9810,10 @@ mod browser_action_table_tests;
 #[path = "tests/loose_refactor_jobs.rs"]
 mod loose_refactor_jobs_tests;
 
+#[cfg(test)]
+#[path = "tests/campaign_project_round_trips.rs"]
+mod campaign_project_round_trip_tests;
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),

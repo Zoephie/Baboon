@@ -104,7 +104,7 @@ pub(super) fn classic_ce_bytes(group: &str) -> Vec<u8> {
     bytes
 }
 
-/// Make the next pump's frames see a later clock than the last.
+/// A fresh context, for calls that only need one to hand.
 pub(super) fn ctx() -> egui::Context {
     egui::Context::default()
 }
@@ -281,4 +281,107 @@ impl LooseKit {
         source.reverse_dependencies = Some(self.index());
         app.install_loaded_source(source);
     }
+}
+
+/// Input for one frame on a 1000x800 screen at `time`.
+pub(super) fn screen(events: Vec<egui::Event>, time: f64) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1000.0, 800.0),
+        )),
+        time: Some(time),
+        events,
+        ..Default::default()
+    }
+}
+
+/// Draws the save prompt frame after frame, with an advancing clock.
+pub(super) struct PromptDriver {
+    pub(super) ctx: egui::Context,
+    pub(super) time: f64,
+    /// Every command the frames sent the root viewport.
+    pub(super) commands: Vec<egui::ViewportCommand>,
+}
+
+impl PromptDriver {
+    pub(super) fn new() -> Self {
+        Self::on(egui::Context::default(), 1.0)
+    }
+
+    pub(super) fn on(ctx: egui::Context, time: f64) -> Self {
+        Self {
+            ctx,
+            time,
+            commands: Vec::new(),
+        }
+    }
+
+    pub(super) fn frame(
+        &mut self,
+        app: &mut Baboon,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        self.time += 0.1;
+        let output = self.ctx.run(screen(events, self.time), |ctx| {
+            app.handle_save_changes_prompt(ctx)
+        });
+        self.commands.extend(root_commands(&output));
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Where the button labelled exactly `label` is drawn now.
+    pub(super) fn find(
+        &mut self,
+        app: &mut Baboon,
+        label: &str,
+        events: Vec<egui::Event>,
+    ) -> egui::Pos2 {
+        let labels = self.frame(app, events);
+        labels
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("no `{label}` button drawn; drew {labels:?}"))
+            .1
+            .center()
+    }
+
+    /// Click the prompt button labelled exactly `label`: slide onto it over a
+    /// few frames, press, release.
+    pub(super) fn click(&mut self, app: &mut Baboon, label: &str) {
+        // A window lays itself out unseen on its first frame.
+        self.frame(app, Vec::new());
+        let mut pos = self.find(app, label, Vec::new());
+        for step in [3.0, 2.0, 1.0, 0.0] {
+            let at = pos + egui::vec2(step, 0.0);
+            pos = self.find(app, label, vec![egui::Event::PointerMoved(at)]);
+        }
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frame(app, vec![button(true)]);
+        self.frame(app, vec![button(false)]);
+    }
+}
+
+/// The commands a frame sent the root viewport.
+pub(super) fn root_commands(output: &egui::FullOutput) -> Vec<egui::ViewportCommand> {
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map(|viewport| viewport.commands.clone())
+        .unwrap_or_default()
 }
