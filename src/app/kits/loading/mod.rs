@@ -1235,3 +1235,6 @@ pub(in crate::app) fn persist_entry_index_changes(
     }
     refresh
 }
+
+#[cfg(test)]
+mod folder_extractable_tree_tests;

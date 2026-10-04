@@ -501,3 +501,6 @@ mod mod_output_tests;
 
 #[cfg(test)]
 mod mod_override_tests;
+
+#[cfg(test)]
+mod priority_suffix_tests;

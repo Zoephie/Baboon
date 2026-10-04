@@ -815,7 +815,7 @@ fn cases() -> Vec<Case> {
         case(
             "last_opened_windows",
             &["last_opened_windows"],
-            &["controller/mod.rs"],
+            &["shell/session/mod.rs"],
             welcome,
             |h| {
                 h.app.last_opened_windows = Some(LastOpenedWindowsPrompt {

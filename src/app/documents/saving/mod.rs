@@ -613,3 +613,6 @@ impl Baboon {
 
 #[cfg(test)]
 mod saved_tag_index_tests;
+
+#[cfg(test)]
+mod save_as_tests;

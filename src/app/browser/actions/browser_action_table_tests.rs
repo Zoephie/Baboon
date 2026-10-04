@@ -12,7 +12,7 @@
 //! fails to compile here until it is given an index, and the table test then
 //! fails until it is given a case.
 
-use crate::app::controller::loose_fixture::*;
+use crate::app::loose_fixture::*;
 use super::*;
 use std::collections::BTreeSet;
 use std::time::Duration;

@@ -711,3 +711,6 @@ impl Baboon {
         }
     }
 }
+
+#[cfg(test)]
+mod terminal_output_tests;

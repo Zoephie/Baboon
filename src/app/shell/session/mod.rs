@@ -1,337 +1,19 @@
-//! Application actions and asynchronous workflow coordination for [`Baboon`].
-//! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
+//! The session: what is open is saved on exit and offered back on the next
+//! start through the Last Opened Windows prompt.
 
 use super::*;
 use crate::app::kits::loading::loose_entry_key_for_canonical_path;
 
-mod updates;
-use updates::*;
-// Re-exported: the browser's row menus gate on this, and its drawing functions
-// reach it through egui memory rather than through `Baboon`.
-pub(super) use crate::core::created_tags::{CreatedTagLedger, CreatedTagRecord};
-
-#[cfg(test)]
-mod folder_extractable_tree_tests;
-
 impl Baboon {
-    pub(super) fn process_worker_messages(&mut self, ctx: &egui::Context) {
-        while let Ok(message) = self.rx.try_recv() {
-            self.apply_worker_message(message, ctx);
-        }
-    }
-
-    /// Apply one worker result. Handlers drop a result whose source is stale
-    /// themselves; what they return about it is not used here.
-    pub(super) fn apply_worker_message(&mut self, message: WorkerMessage, ctx: &egui::Context) {
-        {
-            let _stale = match message {
-                WorkerMessage::TerminalLine(line) => self.handle_terminal_line(line),
-                WorkerMessage::TerminalLogError(error) => self.handle_terminal_log_error(error),
-                WorkerMessage::TerminalDone { run_id } => self.handle_terminal_done(run_id),
-                WorkerMessage::UpdateCheckFinished { silent, result } => {
-                    self.handle_update_check_finished(silent, result)
-                }
-                WorkerMessage::FieldValueSearchFinished {
-                    stamp,
-                    query,
-                    result,
-                } => self.handle_field_value_search_finished(stamp, query, result),
-                WorkerMessage::ScenarioPalettesRead { game, palettes } => {
-                    let table = palettes.map_or(PaletteTable::Unreadable, PaletteTable::Ready);
-                    self.kit_tool_drag.palettes.insert(game, table);
-                    // A drag hovering Sapien with the mouse held still gets
-                    // no event of its own to redraw the palette name with.
-                    ctx.request_repaint();
-                    false
-                }
-                WorkerMessage::FieldIndexBuilt { stamp, blobs } => {
-                    self.handle_field_index_built(stamp, blobs)
-                }
-                WorkerMessage::FindAllProgress {
-                    stamp,
-                    request_id,
-                    processed,
-                    total,
-                } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.find.all_request_id
-                    {
-                        self.find.progress = Some((processed, total));
-                    }
-                    false
-                }
-                WorkerMessage::FindAllFinished {
-                    stamp,
-                    request_id,
-                    occurrences,
-                    unreadable,
-                } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.find.all_request_id
-                    {
-                        self.find.all_closed_occurrences = occurrences;
-                        self.find.unreadable = unreadable;
-                        self.find.searching = false;
-                        self.find.progress = None;
-                    }
-                    false
-                }
-                WorkerMessage::SourceListingReady { stamp, results } => {
-                    self.handle_source_listing_ready(stamp, results)
-                }
-                WorkerMessage::ReverseDependenciesBuilt {
-                    stamp,
-                    index,
-                    missing,
-                } => self.handle_reverse_dependencies_built(stamp, index, missing),
-                WorkerMessage::ReferenceIndexProgress {
-                    stamp,
-                    processed,
-                    total,
-                } => self.handle_reference_index_progress(stamp, processed, total, ctx),
-                WorkerMessage::SourceLoaded {
-                    kit,
-                    result,
-                    recent_path,
-                } => self.handle_source_loaded(kit, result, recent_path, ctx),
-                WorkerMessage::ChimpMounted { stamp, result } => {
-                    self.handle_chimp_mounted(stamp, result, ctx.clone())
-                }
-                WorkerMessage::ChimpTypesIndexed { stamp, index } => {
-                    self.handle_chimp_types_indexed(stamp, index)
-                }
-                WorkerMessage::ChimpReferrersScanned {
-                    stamp,
-                    package,
-                    scan,
-                } => self.handle_chimp_referrers_scanned(stamp, package, scan),
-                WorkerMessage::ChimpModBuilt {
-                    kit,
-                    output,
-                    temporary,
-                    written,
-                    result,
-                } => self.handle_chimp_mod_built(kit, output, temporary, written, result, ctx),
-                WorkerMessage::ChimpSourcesOverwritten {
-                    kit,
-                    leases,
-                    containers,
-                    touched,
-                    written,
-                    result,
-                } => self.handle_chimp_sources_overwritten(
-                    kit, leases, containers, touched, written, result, ctx,
-                ),
-                WorkerMessage::TagCompareGit { request, update } => {
-                    self.handle_tag_compare_git(request, update)
-                }
-                WorkerMessage::GitReviewUpdated { kit, request, view } => {
-                    self.handle_git_review_updated(kit, request, view)
-                }
-                WorkerMessage::ChimpPackageLoaded {
-                    stamp,
-                    package,
-                    result,
-                } => self.handle_chimp_package_loaded(stamp, package, result),
-                WorkerMessage::TagLoaded { kit, key, result } => {
-                    self.handle_tag_loaded(kit, key, result)
-                }
-                WorkerMessage::RefJumpOccurrences {
-                    kit,
-                    index,
-                    key,
-                    target,
-                    result,
-                } => self.handle_ref_jump_occurrences(kit, index, key, target, result),
-                WorkerMessage::BitmapReimportFinished { kit, key, result } => {
-                    self.handle_bitmap_reimport_finished(kit, key, result)
-                }
-                WorkerMessage::BlamImportProgress {
-                    stamp,
-                    kind,
-                    message,
-                } => self.handle_blam_import_progress(stamp, kind, message),
-                WorkerMessage::BlamImportFinished {
-                    stamp,
-                    outcomes,
-                    created,
-                } => self.handle_blam_import_finished(stamp, outcomes, created),
-                WorkerMessage::ContainerDuplicateFinished {
-                    stamp,
-                    lease,
-                    result,
-                } => self.handle_container_duplicate_finished(stamp, lease, result, ctx),
-                WorkerMessage::ContainerRenameFinished {
-                    stamp,
-                    lease,
-                    result,
-                } => self.handle_container_rename_finished(stamp, lease, result, ctx),
-                WorkerMessage::InPlaceOverwriteFinished {
-                    job,
-                    lease,
-                    written,
-                } => self.handle_in_place_overwrite_finished(*job, lease, written),
-                WorkerMessage::ContainerDeleteFinished {
-                    stamp,
-                    lease,
-                    result,
-                } => self.handle_container_delete_finished(stamp, lease, result),
-                WorkerMessage::ChimpLevelProgress {
-                    kit,
-                    phase,
-                    done,
-                    total,
-                } => self.handle_chimp_level_progress(kit, phase, done, total),
-                WorkerMessage::ContainerDumpProgress { stamp, done, total } => {
-                    self.handle_container_dump_progress(stamp, done, total)
-                }
-                WorkerMessage::ContainerDumpFinished { stamp, result } => {
-                    self.handle_container_dump_finished(stamp, result)
-                }
-                WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
-                WorkerMessage::ChimpLevelExportFinished { job, result } => {
-                    self.handle_chimp_level_export_finished(job, result)
-                }
-                WorkerMessage::PokePreflightFinished { kit, key, result } => {
-                    self.handle_poke_preflight(kit, key, result);
-                    false
-                }
-                WorkerMessage::PokeWriteFinished { kit, key, result } => {
-                    self.handle_poke_write(kit, key, result);
-                    false
-                }
-                WorkerMessage::PokeDirectFinished { kit, key, result } => {
-                    self.handle_poke_direct(kit, key, result);
-                    false
-                }
-                WorkerMessage::PokeUndoFinished { result, unapplied } => {
-                    self.handle_poke_undo(result, unapplied);
-                    false
-                }
-                WorkerMessage::CampaignProjectSaved {
-                    revision,
-                    path,
-                    fingerprint,
-                    result,
-                } => self.handle_campaign_project_saved(revision, path, fingerprint, result),
-                WorkerMessage::FolderRefactorProgress(progress) => {
-                    self.handle_folder_refactor_progress(progress)
-                }
-                WorkerMessage::FolderRefactorFinished { stamp, result } => {
-                    self.handle_folder_refactor_finished(stamp, result)
-                }
-                WorkerMessage::FolderConversionProgress(progress) => {
-                    self.handle_folder_conversion_progress(progress)
-                }
-                WorkerMessage::FolderConversionFinished(report) => {
-                    self.handle_folder_conversion_finished(report, ctx)
-                }
-                WorkerMessage::CacheImportProgress(progress) => {
-                    self.handle_cache_import_progress(progress)
-                }
-                WorkerMessage::CacheImportFinished { stamp, result } => {
-                    self.handle_cache_import_finished(stamp, result, ctx)
-                }
-                WorkerMessage::CacheImportConflicts { stamp, conflicts } => {
-                    self.handle_cache_import_conflicts(stamp, conflicts)
-                }
-                WorkerMessage::ImportSourceResolved { input, result } => {
-                    self.handle_import_source_resolved(input, result)
-                }
-                WorkerMessage::ImportAnalysisFinished { result, templates } => {
-                    self.handle_import_analysis_finished(result, templates, ctx)
-                }
-                WorkerMessage::ModelTexturesResolved {
-                    stamp,
-                    key,
-                    textures_id,
-                    textures,
-                } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
-                WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
-                    self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
-                }
-                WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
-                    self.handle_thumbnail_ready::<Models>(stamp, key, result, ctx)
-                }
-                WorkerMessage::ModelPreviewLoaded {
-                    stamp,
-                    key,
-                    request_id,
-                    result,
-                } => self.handle_model_preview_loaded(stamp, key, request_id, result),
-                WorkerMessage::ModelOverlaysBuilt {
-                    stamp,
-                    key,
-                    geometry_id,
-                    collision,
-                    physics,
-                } => self.handle_model_overlays_built(stamp, key, geometry_id, collision, physics),
-                WorkerMessage::ModelAnimationsListed { stamp, key, result } => {
-                    self.handle_model_animations_listed(stamp, key, result)
-                }
-                WorkerMessage::ModelAnimationDecoded {
-                    stamp,
-                    key,
-                    animation_index,
-                    result,
-                } => self.handle_model_animation_decoded(stamp, key, animation_index, result),
-                WorkerMessage::AllEntriesScanned { stamp, result } => {
-                    self.handle_all_entries_scanned(stamp, result, ctx)
-                }
-                WorkerMessage::FolderExtractablesLoaded {
-                    stamp,
-                    rel_path,
-                    label,
-                    result,
-                } => self.handle_folder_extractables_loaded(stamp, rel_path, label, result),
-                WorkerMessage::EntryIndexScanProgress {
-                    stamp,
-                    processed,
-                    total,
-                    matched,
-                } => self.handle_entry_index_scan_progress(stamp, processed, total, matched, ctx),
-                WorkerMessage::EntryIndexRefreshed { stamp, result } => {
-                    self.handle_entry_index_refreshed(stamp, result, ctx)
-                }
-                WorkerMessage::EntryIndexSaved {
-                    stamp,
-                    path,
-                    result,
-                } => self.handle_entry_index_saved(stamp, path, result),
-            };
-        }
-    }
-
-    /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
-    ///
-    /// A `silent` check announces neither its start nor an uneventful result —
-    /// that is the automatic startup check, which must not spend the status
-    /// line on "up to date" or on a failure the user never asked about.
-    pub(super) fn begin_check_for_updates(&mut self, ctx: egui::Context, silent: bool) {
-        if !silent {
-            self.status = "Checking for updates...".to_owned();
-        }
-        let channel = self.prefs.update_channel;
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = fetch_latest_release(channel);
-            let _ = tx.send(WorkerMessage::UpdateCheckFinished { silent, result });
-            ctx.request_repaint();
-        });
-    }
-
-    /// Whether the automatic startup check should run.
-    pub(super) fn should_check_updates_on_startup(&self) -> bool {
-        self.prefs.check_updates_on_startup
-    }
-
     /// Snapshot every kit's source and open tag/folder panes for the restore prompt.
-    pub(super) fn current_session_state(&self) -> Option<LastSessionState> {
+    pub(in crate::app) fn current_session_state(&self) -> Option<LastSessionState> {
         let kits = (0..self.kits.len())
             .filter_map(|index| self.session_kit_state(index))
             .collect::<Vec<_>>();
         (!kits.is_empty()).then_some(LastSessionState { kits })
     }
 
-    fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
+    pub(in crate::app) fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
         let kit = &self.kits[kit_index];
         let was_active = kit_index == self.active;
         let source = kit.source.as_ref()?;
@@ -427,7 +109,7 @@ impl Baboon {
     /// Reopen each saved kit. Every kit gets its own load, and its panes are
     /// staged on the kit itself rather than in one shared slot, so the loads
     /// can finish in any order without stealing each other's restore state.
-    pub(super) fn begin_last_session_restore(&mut self, kits: Vec<RestoreKit>, ctx: egui::Context) {
+    pub(in crate::app) fn begin_last_session_restore(&mut self, kits: Vec<RestoreKit>, ctx: egui::Context) {
         for RestoreKit {
             source_kind,
             source_path,
@@ -536,7 +218,7 @@ impl Baboon {
     /// saved a moment earlier — the write is the same document either way. It
     /// cannot prompt: the loop is already exiting and `LoopExiting` cannot be
     /// vetoed, so unsaved tag edits still go unremarked on a Cmd+Q.
-    pub(super) fn persist_session_on_exit(&mut self) {
+    pub(in crate::app) fn persist_session_on_exit(&mut self) {
         match self.current_session_state() {
             Some(session) => {
                 let _ = save_last_session(&session);
@@ -554,7 +236,7 @@ impl Baboon {
     /// winner. The saved kit is only honoured while it is still open and it
     /// still loaded; a kit the user unchecked in the restore prompt, or whose
     /// source has since moved, leaves the focus wherever the loads put it.
-    pub(super) fn settle_restored_kit(&mut self, kit: KitId) {
+    pub(in crate::app) fn settle_restored_kit(&mut self, kit: KitId) {
         let Some(active) =
             focus_after_restore(&mut self.restoring_kits, &mut self.restored_active_kit, kit)
         else {
@@ -620,7 +302,7 @@ impl Baboon {
     /// newly scanned entry. Rediscovering the file was not enough: restore then
     /// opened the stale saved key and reported that the tag had disappeared.
     /// Return the source's current key so existing sessions recover in place.
-    fn restored_tag_entry_key(&mut self, tag: &LastSessionTag) -> Option<String> {
+    pub(in crate::app) fn restored_tag_entry_key(&mut self, tag: &LastSessionTag) -> Option<String> {
         if let Some(entry) = self.entry_for_key(&tag.key) {
             return Some(entry.key.clone());
         }
@@ -656,30 +338,7 @@ impl Baboon {
         Some(current_key)
     }
 
-    pub(super) fn active_game_is_campaign_evolved(&self) -> bool {
-        self.source_game().is_some_and(GameId::is_campaign_evolved)
-    }
-
-    /// Whether the active kit is showing its Chimp surface rather than tags.
-    ///
-    /// Undo and redo act on the selected tag, which is hidden there, and Chimp
-    /// has no undo of its own yet; so on that surface they do nothing rather
-    /// than silently changing a tag the user cannot see.
-    pub(in crate::app) fn chimp_surface_is_active(&self) -> bool {
-        self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
-    }
-
-    pub(super) fn current_prefs(&self) -> GuiPrefs {
-        GuiPrefs {
-            // The focused workspace's view is what a new one is seeded with,
-            // so a single-workspace session remembers its choice as before.
-            browser_mode: self.kits[self.active].browser_mode,
-            browser_sort: self.kits[self.active].browser_sort,
-            ..self.prefs.clone()
-        }
-    }
-
-    pub(super) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
         let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
         match action {
             LastOpenedWindowsAction::None => {}
@@ -702,64 +361,9 @@ impl Baboon {
             }
         }
     }
-
-    pub(super) fn persist_prefs_if_changed(&mut self) {
-        let _ = self.try_persist_prefs();
-    }
-
-    /// Write prefs if they changed; whether a write failed.
-    fn try_persist_prefs(&mut self) -> bool {
-        let prefs = self.current_prefs();
-        if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
-            return false;
-        }
-        match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
-            Ok(()) => {
-                self.saved_prefs = prefs;
-                self.saved_terminal_open_games = self.terminal_open_games.clone();
-                false
-            }
-            Err(error) => {
-                self.status = error;
-                true
-            }
-        }
-    }
-
-    /// The per-frame prefs check, at most once a second.
-    ///
-    /// It ran every frame: a full GuiPrefs rebuilt (recents, favorites, kit
-    /// profiles and swatches cloned) just to compare, and while a window, the
-    /// UI-scale slider or a splitter was being dragged the value changed every
-    /// frame, so prefs.json was rewritten at the frame rate. A failed write was
-    /// retried, and reported, every frame too. Explicit calls (settings, runtime
-    /// poke) still write at once, and exit flushes whatever is pending.
-    pub(super) fn persist_prefs_throttled(&mut self, now: f64) {
-        const CHECK_INTERVAL: f64 = 1.0;
-        const RETRY_AFTER_FAILURE: f64 = 10.0;
-        if now < self.prefs_next_check_at {
-            return;
-        }
-        let failed = self.try_persist_prefs();
-        self.prefs_next_check_at = now
-            + if failed {
-                RETRY_AFTER_FAILURE
-            } else {
-                CHECK_INTERVAL
-            };
-    }
 }
 
-#[cfg(test)]
-mod campaign_import_gate_tests;
-
-#[cfg(test)]
-mod worker_panic_tests;
-
-#[cfg(test)]
-pub(in crate::app) mod loose_fixture;
-
-enum LastOpenedWindowsAction {
+pub(in crate::app) enum LastOpenedWindowsAction {
     None,
     OpenSettings,
     Restore {
@@ -774,7 +378,7 @@ enum LastOpenedWindowsAction {
     },
 }
 
-fn last_opened_workspace_heading(
+pub(in crate::app) fn last_opened_workspace_heading(
     profile: Option<(&str, &Path)>,
     game: Option<&str>,
     source_path: &Path,
@@ -801,7 +405,7 @@ fn last_opened_workspace_heading(
     (heading, None)
 }
 
-fn render_last_opened_windows_prompt(
+pub(in crate::app) fn render_last_opened_windows_prompt(
     ctx: &egui::Context,
     prompt: Option<&mut LastOpenedWindowsPrompt>,
 ) -> LastOpenedWindowsAction {
@@ -972,24 +576,13 @@ fn render_last_opened_windows_prompt(
     action
 }
 
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod listing_entries_tests;
-
-
-#[cfg(test)]
-mod container_dependency_tests;
-
-
 /// Retire one restored kit's load and report the kit that should take the focus
 /// — `None` while any restore is still outstanding, or when the session named
 /// no kit and there is nothing to honour.
 ///
 /// Split out from [`Baboon::settle_restored_kit`] because it is the whole
 /// decision: the app half only turns the answer into an index.
-fn focus_after_restore(
+pub(in crate::app) fn focus_after_restore(
     restoring: &mut HashSet<KitId>,
     restored_active: &mut Option<KitId>,
     settled: KitId,
@@ -1006,8 +599,4 @@ fn focus_after_restore(
 mod restore_focus_tests;
 
 #[cfg(test)]
-mod field_search_tests;
-
-#[cfg(test)]
-mod prefs_throttle_tests;
-
+mod session_tests;

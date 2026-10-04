@@ -679,3 +679,6 @@ mod favorite_folder_tests;
 
 #[cfg(test)]
 mod folder_opener_tests;
+
+#[cfg(test)]
+mod explorer_path_tests;

@@ -11,7 +11,7 @@ impl Baboon {
     /// still has to clear the "Checking for updates..." it put there. Only news
     /// that has nowhere else to go, like "up to date" or a failure, is written
     /// here, and a `silent` startup check does not write even that.
-    pub(super) fn handle_update_check_finished(
+    pub(in crate::app) fn handle_update_check_finished(
         &mut self,
         silent: bool,
         result: Result<UpdateCheckResult, String>,
@@ -61,7 +61,7 @@ fn running_build_description() -> String {
     }
 }
 
-pub(super) fn fetch_latest_release(channel: UpdateChannel) -> Result<UpdateCheckResult, String> {
+pub(in crate::app) fn fetch_latest_release(channel: UpdateChannel) -> Result<UpdateCheckResult, String> {
     let api_url = match channel {
         UpdateChannel::Stable => BABOON_STABLE_RELEASE_API,
         UpdateChannel::Development => BABOON_DEV_RELEASE_API,
@@ -78,7 +78,7 @@ pub(super) fn fetch_latest_release(channel: UpdateChannel) -> Result<UpdateCheck
 
 /// Sentinel returned by the fetchers when the channel's release does not exist
 /// (HTTP 404). The handler turns it into channel-specific wording.
-pub(super) const NO_PUBLIC_RELEASE_MESSAGE: &str = "__baboon_no_release__";
+pub(in crate::app) const NO_PUBLIC_RELEASE_MESSAGE: &str = "__baboon_no_release__";
 
 #[cfg(target_os = "windows")]
 fn fetch_latest_release_powershell(
@@ -234,7 +234,7 @@ fn command_error(stderr: &[u8]) -> String {
 /// identity is its commit — anything other than an exact match with the commit
 /// this binary was built from means a different build is on offer, including
 /// the case where our own commit is unknown.
-pub(super) fn is_update_available(result: &UpdateCheckResult) -> bool {
+pub(in crate::app) fn is_update_available(result: &UpdateCheckResult) -> bool {
     match result.channel {
         UpdateChannel::Stable => is_newer_release(&result.latest_tag, env!("CARGO_PKG_VERSION")),
         UpdateChannel::Development => !is_same_commit(BABOON_BUILD_COMMIT, &result.commit),
@@ -262,7 +262,7 @@ fn base_commit(commit: &str) -> &str {
 ///
 /// No release URL: wherever an available update is shown, it is shown as a
 /// link, and a bare URL in a sentence would only duplicate it.
-pub(super) fn update_check_status(result: &UpdateCheckResult) -> String {
+pub(in crate::app) fn update_check_status(result: &UpdateCheckResult) -> String {
     let current = env!("CARGO_PKG_VERSION");
     match result.channel {
         UpdateChannel::Stable => {
@@ -292,7 +292,7 @@ pub(super) fn update_check_status(result: &UpdateCheckResult) -> String {
 
 /// Turns a fetch failure into a sentence, giving the "no such release" sentinel
 /// wording that names the channel it came from.
-pub(super) fn update_check_error_status(channel: UpdateChannel, error: &str) -> String {
+pub(in crate::app) fn update_check_error_status(channel: UpdateChannel, error: &str) -> String {
     if error != NO_PUBLIC_RELEASE_MESSAGE {
         return format!("Update check failed: {error}");
     }
@@ -328,3 +328,28 @@ fn version_numbers(version: &str) -> Vec<u64> {
 
 #[cfg(test)]
 mod tests;
+
+impl Baboon {
+    /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
+    ///
+    /// A `silent` check announces neither its start nor an uneventful result —
+    /// that is the automatic startup check, which must not spend the status
+    /// line on "up to date" or on a failure the user never asked about.
+    pub(in crate::app) fn begin_check_for_updates(&mut self, ctx: egui::Context, silent: bool) {
+        if !silent {
+            self.status = "Checking for updates...".to_owned();
+        }
+        let channel = self.prefs.update_channel;
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = fetch_latest_release(channel);
+            let _ = tx.send(WorkerMessage::UpdateCheckFinished { silent, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Whether the automatic startup check should run.
+    pub(in crate::app) fn should_check_updates_on_startup(&self) -> bool {
+        self.prefs.check_updates_on_startup
+    }
+}

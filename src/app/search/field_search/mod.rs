@@ -402,3 +402,6 @@ impl Baboon {
         });
     }
 }
+
+#[cfg(test)]
+mod field_search_tests;

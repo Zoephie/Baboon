@@ -760,3 +760,6 @@ pub(in crate::app) fn register_created_tag_in_source(
 
 #[cfg(test)]
 mod campaign_new_tag_tests;
+
+#[cfg(test)]
+mod container_path_tests;

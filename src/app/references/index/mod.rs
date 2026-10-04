@@ -329,3 +329,6 @@ pub(in crate::app) fn dependency_target_exists(tags_root: &Path, rel_path: &str,
 
 #[cfg(test)]
 mod incomplete_index_tests;
+
+#[cfg(test)]
+mod reference_path_tests;

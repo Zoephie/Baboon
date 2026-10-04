@@ -206,3 +206,6 @@ pub(in crate::app) fn same_path_text(a: &Path, b: &Path) -> bool {
         a == b
     }
 }
+
+#[cfg(test)]
+mod kit_path_tests;

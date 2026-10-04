@@ -644,3 +644,6 @@ mod dependency_database_tests;
 
 #[cfg(test)]
 mod refresh_reference_tests;
+
+#[cfg(test)]
+mod container_dependency_tests;

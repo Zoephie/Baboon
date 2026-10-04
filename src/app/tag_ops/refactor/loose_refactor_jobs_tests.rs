@@ -8,7 +8,7 @@
 //! back off disk (files moved, references rewritten in the referrers' bytes)
 //! and out of the app (tabs, favorites and keys remapped, failures reported).
 
-use crate::app::controller::loose_fixture::*;
+use crate::app::loose_fixture::*;
 use super::*;
 
 const RENDER: &str = "objects/props/crate.render_model";

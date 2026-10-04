@@ -79,3 +79,14 @@ use session::*;
 pub(in crate::app) use state::*;
 #[cfg(test)]
 use test_support::*;
+
+impl Baboon {
+    /// Whether the active kit is showing its Chimp surface rather than tags.
+    ///
+    /// Undo and redo act on the selected tag, which is hidden there, and Chimp
+    /// has no undo of its own yet; so on that surface they do nothing rather
+    /// than silently changing a tag the user cannot see.
+    pub(in crate::app) fn chimp_surface_is_active(&self) -> bool {
+        self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
+    }
+}

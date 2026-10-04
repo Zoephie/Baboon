@@ -102,8 +102,9 @@ mod runtime_poke;
 use runtime_poke::*;
 mod chimp;
 use chimp::*;
-pub(in crate::app) mod controller;
-use controller::{CreatedTagLedger, CreatedTagRecord};
+#[cfg(test)]
+mod loose_fixture;
+use crate::core::created_tags::{CreatedTagLedger, CreatedTagRecord};
 use mods::container_write::{ContainerLeaseId, ContainerWriteLease};
 mod help;
 use help::*;
@@ -123,7 +124,8 @@ pub(in crate::app) mod kits;
 use kits::*;
 pub(in crate::app) mod documents;
 use documents::*;
-pub(in crate::app) mod ui;
+pub(in crate::app) mod shell;
+mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

@@ -18,3 +18,6 @@ pub(in crate::app) mod import_tag_dialog;
 pub(in crate::app) mod tags_window;
 pub(in crate::app) mod cache_window;
 pub(in crate::app) mod single_tag;
+
+#[cfg(test)]
+mod campaign_import_gate_tests;

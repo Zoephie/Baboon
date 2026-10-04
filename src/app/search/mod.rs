@@ -15,3 +15,6 @@ pub(in crate::app) mod field_search;
 pub(in crate::app) use field_search::*;
 pub(in crate::app) mod result_windows;
 pub(in crate::app) mod listings;
+
+#[cfg(test)]
+mod listing_entries_tests;

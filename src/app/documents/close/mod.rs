@@ -730,3 +730,6 @@ mod save_changes_prompt_tests;
 
 #[cfg(test)]
 mod save_close_session_tests;
+
+#[cfg(test)]
+mod close_tests;

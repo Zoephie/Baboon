@@ -276,3 +276,9 @@ impl Baboon {
         });
     }
 }
+
+impl Baboon {
+    pub(in crate::app) fn active_game_is_campaign_evolved(&self) -> bool {
+        self.source_game().is_some_and(GameId::is_campaign_evolved)
+    }
+}

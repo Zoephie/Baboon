@@ -1162,3 +1162,64 @@ mod session_tests;
 
 #[cfg(test)]
 mod prefs_round_trip_tests;
+
+impl Baboon {
+    pub(in crate::app) fn current_prefs(&self) -> GuiPrefs {
+        GuiPrefs {
+            // The focused workspace's view is what a new one is seeded with,
+            // so a single-workspace session remembers its choice as before.
+            browser_mode: self.kits[self.active].browser_mode,
+            browser_sort: self.kits[self.active].browser_sort,
+            ..self.prefs.clone()
+        }
+    }
+
+    pub(in crate::app) fn persist_prefs_if_changed(&mut self) {
+        let _ = self.try_persist_prefs();
+    }
+
+    /// Write prefs if they changed; whether a write failed.
+    pub(in crate::app) fn try_persist_prefs(&mut self) -> bool {
+        let prefs = self.current_prefs();
+        if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
+            return false;
+        }
+        match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
+            Ok(()) => {
+                self.saved_prefs = prefs;
+                self.saved_terminal_open_games = self.terminal_open_games.clone();
+                false
+            }
+            Err(error) => {
+                self.status = error;
+                true
+            }
+        }
+    }
+
+    /// The per-frame prefs check, at most once a second.
+    ///
+    /// It ran every frame: a full GuiPrefs rebuilt (recents, favorites, kit
+    /// profiles and swatches cloned) just to compare, and while a window, the
+    /// UI-scale slider or a splitter was being dragged the value changed every
+    /// frame, so prefs.json was rewritten at the frame rate. A failed write was
+    /// retried, and reported, every frame too. Explicit calls (settings, runtime
+    /// poke) still write at once, and exit flushes whatever is pending.
+    pub(in crate::app) fn persist_prefs_throttled(&mut self, now: f64) {
+        const CHECK_INTERVAL: f64 = 1.0;
+        const RETRY_AFTER_FAILURE: f64 = 10.0;
+        if now < self.prefs_next_check_at {
+            return;
+        }
+        let failed = self.try_persist_prefs();
+        self.prefs_next_check_at = now
+            + if failed {
+                RETRY_AFTER_FAILURE
+            } else {
+                CHECK_INTERVAL
+            };
+    }
+}
+
+#[cfg(test)]
+mod prefs_throttle_tests;
