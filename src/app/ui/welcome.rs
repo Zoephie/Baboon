@@ -76,6 +76,62 @@ mod welcome_column_tests {
             assert_eq!(background.bottom(), bottom);
         }
     }
+
+    /// egui 0.36 aligns a button's icon and label by the enclosing layout,
+    /// and a horizontal row centres them; welcome rows keep them at the left.
+    #[test]
+    fn welcome_rows_keep_their_icon_and_label_at_the_left() {
+        for horizontal in [false, true] {
+            let ctx = egui::Context::default();
+            let mut button = egui::Rect::NOTHING;
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(400.0, 200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let row = |ui: &mut Ui| {
+                            ui.set_width(300.0);
+                            button = welcome_icon_button(
+                                ui,
+                                ButtonIcon::FolderClosed,
+                                "halo3_mcc",
+                                text_dark(),
+                            )
+                            .rect;
+                        };
+                        if horizontal {
+                            ui.horizontal(row);
+                        } else {
+                            ui.vertical(row);
+                        }
+                    });
+                },
+            );
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "halo3_mcc" => {
+                        Some(text.visual_bounding_rect())
+                    }
+                    _ => None,
+                })
+                .expect("missing row label");
+            assert!(
+                label.left() - button.left() < 48.0,
+                "label starts {} px into a {} px row (horizontal: {horizontal})",
+                label.left() - button.left(),
+                button.width(),
+            );
+            assert!(button.y_range().contains(label.center().y));
+        }
+    }
 }
 
 /// What the welcome screen asks the app to do once the frame is drawn.
@@ -608,7 +664,15 @@ fn welcome_image_button(
     color: Color32,
     enabled: bool,
 ) -> egui::Response {
-    ui.scope(|ui| {
+    // A button aligns its contents by the enclosing layout, and a horizontal
+    // row centres them; keep the icon and label at the left in any parent.
+    let mut layout = *ui.layout();
+    if layout.is_horizontal() {
+        layout.main_align = egui::Align::Min;
+    } else {
+        layout.cross_align = egui::Align::Min;
+    }
+    ui.with_layout(layout, |ui| {
         ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
