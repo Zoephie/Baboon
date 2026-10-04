@@ -4,6 +4,23 @@
 use super::*;
 
 #[test]
+fn snapshots_are_shared_and_edits_do_not_change_an_in_flight_search() {
+    let mut store = KeywordStore::default();
+    store.add("file:a", "hero");
+    let before = store.snapshot();
+    assert!(Arc::ptr_eq(&before, &store.snapshot()));
+    store.add("file:a", "hero");
+    assert!(
+        Arc::ptr_eq(&before, &store.snapshot()),
+        "No-op edits must not invalidate search"
+    );
+    store.add("file:a", "wip");
+    assert_eq!(before.get("file:a").unwrap(), &["hero"]);
+    assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
+    assert!(!Arc::ptr_eq(&before, &store.snapshot()));
+}
+
+#[test]
 fn add_dedupes_and_remove_clears() {
     let mut store = KeywordStore::default();
     store.add("file:a", "Hero");

@@ -16,8 +16,8 @@ use terminal::{
     run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
     stream_terminal_output, trim_terminal_lines,
 };
-mod tools;
 mod kit_tool_options;
+mod tools;
 use kit_tool_options::*;
 pub(super) use tools::add_standard_editing_kit_profiles;
 use tools::*;
@@ -4173,6 +4173,13 @@ impl Baboon {
                         group_tree: TagTree::default(),
                         group_tree_for: None,
                         filter_cache: FilterCache::default(),
+                        date_cache: FolderDateCache::default(),
+                        table_layout: FolderTableLayout::default(),
+                        search_scope: self.prefs.browser_search_scope,
+                        assets_view: false,
+                        asset_bitmaps: true,
+                        asset_models: true,
+                        asset_cell_size: DEFAULT_CELL,
                     });
                 let selected = self.kits[self.active].selected_key.clone();
                 self.kits[self.active].open_tag_pane(&key);
@@ -11600,6 +11607,7 @@ fn run_tag_rename_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: true,
+        moved_folder: None,
     })
 }
 
@@ -11837,6 +11845,15 @@ fn run_folder_refactor_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: move_folder,
+        moved_folder: move_folder.then(|| {
+            (
+                source_rel,
+                destination
+                    .strip_prefix(&root)
+                    .expect("destination is inside tags root")
+                    .to_path_buf(),
+            )
+        }),
     })
 }
 

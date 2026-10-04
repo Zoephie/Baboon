@@ -262,6 +262,110 @@ enum CellAction {
     MenuAction(String),
 }
 
+/// A mixed folder grid using the same cells, caches, workers and deferred
+/// actions as the standalone bitmap and model libraries.
+pub(in crate::app) fn draw_folder_asset_grid(
+    ui: &mut Ui,
+    pane_key: &str,
+    pane: &FolderBrowserState,
+    entries: &[TagEntry],
+    bitmaps: &mut ThumbnailLibrary<Bitmaps>,
+    models: &mut ThumbnailLibrary<Models>,
+) -> (Vec<TagEntry>, Vec<TagEntry>) {
+    let mut visible: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            crate::source::entry_is_beneath_folder(entry, &pane.rel_path)
+                && ((pane.asset_bitmaps && Bitmaps::lists(entry))
+                    || (pane.asset_models && Models::lists(entry)))
+        })
+        .collect();
+    match pane.sort {
+        BrowserSort::Natural => {}
+        BrowserSort::Name => visible
+            .sort_by_cached_key(|entry| tag_leaf_name(&entry.display_path).to_ascii_lowercase()),
+        BrowserSort::Type => visible.sort_by_cached_key(|entry| {
+            (
+                format_group_tag(entry.group_tag),
+                tag_leaf_name(&entry.display_path).to_ascii_lowercase(),
+            )
+        }),
+    }
+    let mut wanted_bitmaps = Vec::new();
+    let mut wanted_models = Vec::new();
+    if visible.is_empty() {
+        ui.label(RichText::new("No matching assets in this folder").color(subtle_dark()));
+        return (Vec::new(), Vec::new());
+    }
+    let cell = pane.asset_cell_size.clamp(MIN_CELL, MAX_CELL);
+    let columns = grid_columns(
+        (ui.available_width() - ui.spacing().scroll.allocated_width()).max(cell),
+        cell,
+    );
+    let height = cell + CELL_CAPTION + CELL_GAP;
+    ScrollArea::vertical()
+        .id_salt(("folder_assets", pane_key))
+        .auto_shrink([false, false])
+        .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
+            ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
+            for row in rows {
+                ui.horizontal(|ui| {
+                    for entry in visible.iter().skip(row * columns).take(columns) {
+                        let (action, bitmap) = if Bitmaps::lists(entry) {
+                            (
+                                Baboon::draw_thumbnail_entry::<Bitmaps>(
+                                    ui,
+                                    bitmaps,
+                                    entry,
+                                    cell,
+                                    &mut wanted_bitmaps,
+                                    true,
+                                ),
+                                true,
+                            )
+                        } else {
+                            (
+                                Baboon::draw_thumbnail_entry::<Models>(
+                                    ui,
+                                    models,
+                                    entry,
+                                    cell,
+                                    &mut wanted_models,
+                                    true,
+                                ),
+                                false,
+                            )
+                        };
+                        // Use the libraries' existing post-tree action handling.
+                        match (action, bitmap) {
+                            (Some(CellAction::Open(key)), true) => bitmaps.pending_open = Some(key),
+                            (Some(CellAction::Open(key)), false) => models.pending_open = Some(key),
+                            (Some(CellAction::MenuAction(key)), true) => {
+                                bitmaps.pending_menu_action = Some(key)
+                            }
+                            (Some(CellAction::MenuAction(key)), false) => {
+                                models.pending_menu_action = Some(key)
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+                ui.add_space(CELL_GAP);
+            }
+        });
+    let collect = |keys: Vec<String>| {
+        keys.into_iter()
+            .filter_map(|key| {
+                visible
+                    .iter()
+                    .find(|entry| entry.key == key)
+                    .map(|entry| (*entry).clone())
+            })
+            .collect()
+    };
+    (collect(wanted_bitmaps), collect(wanted_models))
+}
+
 impl Baboon {
     /// Draw one kit's library pane.
     pub(super) fn draw_thumbnail_library<S: ThumbnailSource>(
@@ -462,7 +566,18 @@ impl Baboon {
     ) -> Option<CellAction> {
         let library = S::library_mut(&mut self.kits[kit_index]);
         let entry_index = *library.matches.get(index)?;
-        let entry = library.entries.get(entry_index)?;
+        let entry = library.entries.get(entry_index)?.clone();
+        Self::draw_thumbnail_entry::<S>(ui, library, &entry, cell, wanted, false)
+    }
+
+    fn draw_thumbnail_entry<S: ThumbnailSource>(
+        ui: &mut Ui,
+        library: &mut ThumbnailLibrary<S>,
+        entry: &TagEntry,
+        cell: f32,
+        wanted: &mut Vec<String>,
+        type_badge: bool,
+    ) -> Option<CellAction> {
         let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
 
         let cached = library
@@ -507,8 +622,11 @@ impl Baboon {
             ui.painter()
                 .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_blue()));
         } else {
-            ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+            ui.painter().rect_stroke(
+                image_rect,
+                0.0,
+                Stroke::new(1.0_f32, foundation_input_edge()),
+            );
         }
 
         match texture {
@@ -531,6 +649,14 @@ impl Baboon {
             }
         }
 
+        if type_badge {
+            let badge = egui::Rect::from_min_size(
+                image_rect.right_bottom() - Vec2::splat(22.0),
+                Vec2::splat(20.0),
+            );
+            ui.painter().rect_filled(badge, 2.0, foundation_input());
+            paint_tag_icon_at(ui, Some(entry.group_tag), badge.shrink(2.0));
+        }
         let name = tag_leaf_name(&display_path);
         ui.painter().text(
             egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
@@ -756,3 +882,125 @@ impl Baboon {
 #[cfg(test)]
 #[path = "tests/thumbnail_library.rs"]
 mod tests;
+
+#[cfg(test)]
+mod folder_asset_browser_tests {
+    use super::*;
+
+    fn folder_pane() -> FolderBrowserState {
+        FolderBrowserState {
+            rel_path: "objects/brute".into(),
+            label: "brute".into(),
+            filter: String::new(),
+            focus_search: false,
+            mode: BrowserMode::Folders,
+            sort: BrowserSort::Name,
+            cached_generation: 0,
+            cached_source_len: 0,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            group_tree_for: None,
+            filter_cache: FilterCache::default(),
+            date_cache: FolderDateCache::default(),
+            table_layout: FolderTableLayout::default(),
+            search_scope: BrowserSearchScope::default(),
+            assets_view: true,
+            asset_bitmaps: true,
+            asset_models: true,
+            asset_cell_size: DEFAULT_CELL,
+        }
+    }
+
+    fn entry(path: &str, group: &[u8; 4]) -> TagEntry {
+        TagEntry {
+            key: path.into(),
+            display_path: path.into(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(path.into()),
+        }
+    }
+
+    #[test]
+    fn mixed_grid_is_folder_scoped_and_type_filters_work() {
+        let entries = vec![
+            entry("objects/brute/grass.bitmap", b"bitm"),
+            entry("objects/brute/nested/brute.render_model", b"mode"),
+            entry("objects/brute/brute.biped", b"bipd"),
+            entry("objects/brute_other/other.bitmap", b"bitm"),
+        ];
+        for (bitmap, model, expected_bitmaps, expected_models) in [
+            (true, true, 1, 1),
+            (true, false, 1, 0),
+            (false, true, 0, 1),
+            (false, false, 0, 0),
+        ] {
+            let ctx = egui::Context::default();
+            let mut pane = folder_pane();
+            pane.asset_bitmaps = bitmap;
+            pane.asset_models = model;
+            let mut bitmaps = ThumbnailLibrary::<Bitmaps>::default();
+            let mut models = ThumbnailLibrary::<Models>::default();
+            let mut requested = (Vec::new(), Vec::new());
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(900.0, 500.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        requested = draw_folder_asset_grid(
+                            ui,
+                            "test",
+                            &pane,
+                            &entries,
+                            &mut bitmaps,
+                            &mut models,
+                        );
+                    });
+                },
+            );
+            assert_eq!(requested.0.len(), expected_bitmaps);
+            assert_eq!(requested.1.len(), expected_models);
+            assert!(
+                requested
+                    .0
+                    .iter()
+                    .chain(&requested.1)
+                    .all(|entry| crate::source::entry_is_beneath_folder(entry, &pane.rel_path))
+            );
+        }
+    }
+
+    #[test]
+    fn folder_grid_search_uses_the_same_scoped_cache_as_the_tree() {
+        let mut pane = folder_pane();
+        let entries = vec![
+            entry("objects/brute/grass.bitmap", b"bitm"),
+            entry("objects/brute/brute.render_model", b"mode"),
+            entry("objects/elite/grass.bitmap", b"bitm"),
+        ];
+        let keywords =
+            std::collections::BTreeMap::from([(entries[0].key.clone(), vec!["wip".into()])]);
+        pane.search_scope = BrowserSearchScope {
+            tags: false,
+            folders: false,
+            keywords: true,
+        };
+        pane.filter_cache.refresh_scoped(
+            1,
+            "wip",
+            &entries,
+            false,
+            &pane.rel_path,
+            None,
+            pane.search_scope,
+            &keywords,
+        );
+        assert_eq!(pane.filter_cache.entries.len(), 1);
+        assert_eq!(pane.filter_cache.entries[0].key, entries[0].key);
+    }
+}

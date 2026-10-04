@@ -4,9 +4,11 @@
 use super::*;
 
 mod filter;
+mod folder_table;
 mod tree;
 
 pub(super) use filter::*;
+pub(super) use folder_table::*;
 pub(super) use tree::*;
 
 /// Which tags in a workspace carry edits that are not written into the game.

@@ -23,6 +23,11 @@ fn app_with(prefs: GuiPrefs) -> Baboon {
 fn loaded_prefs_are_written_back_unchanged() {
     let prefs = GuiPrefs {
         browser_mode: BrowserMode::Groups,
+        browser_search_scope: BrowserSearchScope {
+            tags: false,
+            folders: true,
+            keywords: true,
+        },
         show_browser_prefixes: true,
         folders_before_tags: true,
         double_click_to_open_tags: true,
@@ -88,12 +93,51 @@ fn out_of_range_prefs_are_corrected_when_loaded() {
 fn a_changed_pref_is_what_gets_written() {
     let mut app = app_with(GuiPrefs::default());
     app.prefs.expert_mode = true;
+    app.prefs.browser_search_scope = BrowserSearchScope {
+        tags: false,
+        folders: false,
+        keywords: true,
+    };
     app.kits[0].browser_mode = BrowserMode::Groups;
     let written = app.current_prefs();
     assert!(written.expert_mode);
+    assert_eq!(written.browser_search_scope, app.prefs.browser_search_scope);
     assert_eq!(
         written.browser_mode,
         BrowserMode::Groups,
         "the focused kit's view"
+    );
+}
+
+#[test]
+fn saved_search_scope_seeds_startup_and_new_workspaces() {
+    let scope = BrowserSearchScope {
+        tags: true,
+        folders: false,
+        keywords: true,
+    };
+    let mut app = app_with(GuiPrefs {
+        browser_search_scope: scope,
+        ..GuiPrefs::default()
+    });
+    assert_eq!(app.kits[0].search_scope, scope);
+    app.add_kit();
+    assert_eq!(app.kits[app.active].search_scope, scope);
+    app.handle_browser_action(
+        BrowserAction::OpenFolderBrowser {
+            rel_path: PathBuf::from("objects"),
+            label: "objects".into(),
+            open_in_new_tab: true,
+        },
+        egui::Context::default(),
+    );
+    assert_eq!(
+        app.kits[app.active]
+            .folder_browsers
+            .values()
+            .next()
+            .unwrap()
+            .search_scope,
+        scope
     );
 }
