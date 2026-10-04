@@ -91,10 +91,10 @@ impl Baboon {
             // The `.baboon` this workspace has open, if any — not its recovery
             // file, which the next session finds from the source root anyway.
             project_path: kit
-                .campaign_project
+                .project.active
                 .as_ref()
                 .and_then(|project| project.project_path.clone()),
-            has_project: kit.campaign_project.is_some(),
+            has_project: kit.project.active.is_some(),
             browser_mode: Some(kit.browser_mode),
             browser_sort: Some(kit.browser_sort),
             tags,

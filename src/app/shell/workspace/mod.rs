@@ -162,7 +162,7 @@ impl Baboon {
         // `.baboon` out of Baboon was to export a mod.
         let can_save_project = self.current_source_is_campaign_project_capable(self.active);
         let project_target = self.kits[self.active]
-            .campaign_project
+            .project.active
             .as_ref()
             .and_then(|project| project.project_path.clone());
         if ui
@@ -269,7 +269,7 @@ impl Baboon {
                 .add_enabled(
                     self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
                         || self.kits[self.active]
-                            .campaign_project
+                            .project.active
                             .as_ref()
                             .is_some_and(|project| !project.overlays.is_empty()),
                     egui::Button::new("Export Mod..."),
@@ -932,7 +932,7 @@ impl Baboon {
                     // anywhere before.
                     let project = self
                         .current_source_is_campaign_project_capable(self.active)
-                        .then(|| self.kits[self.active].campaign_project.as_ref())
+                        .then(|| self.kits[self.active].project.active.as_ref())
                         .flatten()
                         // A workspace with neither a project file nor a stash has
                         // nothing to say here, and saying it anyway on every

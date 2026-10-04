@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::kits::terminal::KitTerminal;
+use crate::app::mods::project::KitProject;
 use crate::app::shell::session::RestorePlan;
 
 /// Stable, never-reused identity for a loaded kit.
@@ -155,13 +156,6 @@ pub(in crate::app) struct Kit {
     /// First-class custom profile associated with this workspace, if any.
     pub(in crate::app) profile: Option<EditingKitProfileIdentity>,
 
-    /// This kit's Campaign Evolved recovery/project database, if its source
-    /// has one. Per kit because a project belongs to a source — two Campaign
-    /// Evolved kits are two projects, and one application-wide slot would let
-    /// either checkpoint over the other's tags.
-    pub(in crate::app) campaign_project: Option<ActiveCampaignProject>,
-    /// Project contents staged until this kit's source finishes mounting.
-    pub(in crate::app) pending_campaign_project: Option<PendingCampaignProject>,
 
     /// Folders the user made in a container source that no tag has landed in
     /// yet, as `/`-separated `display_path`-cased paths.
@@ -188,6 +182,9 @@ pub(in crate::app) struct Kit {
     /// Where this kit's terminal is: whether its panel is open and the
     /// directory its commands run in.
     pub(in crate::app) terminal: KitTerminal,
+    /// This kit's Campaign Evolved recovery/project database, and project
+    /// contents staged until its source finishes mounting.
+    pub(in crate::app) project: KitProject,
 }
 
 impl Kit {
@@ -233,8 +230,6 @@ impl Kit {
             scanning_entries: false,
             requested_path: None,
             profile: None,
-            campaign_project: None,
-            pending_campaign_project: None,
             pending_container_folders: std::collections::BTreeSet::new(),
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
@@ -250,6 +245,7 @@ impl Kit {
                 pending_launch_tags: None,
             },
             terminal: KitTerminal::default(),
+            project: KitProject::default(),
         }
     }
 
@@ -270,7 +266,7 @@ impl Kit {
             .any(|document| document.dirty.is_set())
             || self.chimp.documents.values().any(|document| document.dirty)
             || self
-                .campaign_project
+                .project.active
                 .as_ref()
                 .is_some_and(|project| !project.overlays.is_empty())
     }
@@ -308,7 +304,7 @@ impl Kit {
         self.restore.pending_restore_model_library = false;
         self.restore.pending_restore_active_chimp_package = None;
         self.restore.pending_launch_tags = None;
-        self.pending_campaign_project = None;
+        self.project.pending = None;
         // Folders belong to the source that was being loaded, so a reused kit
         // must not seed them into whatever mounts here next.
         self.pending_container_folders.clear();
@@ -527,8 +523,9 @@ impl Baboon {
         let profile = self.kits[index].profile.clone();
         // The whole restore plan, staged before the load, carries over.
         let restore = std::mem::take(&mut self.kits[index].restore);
-        let pending_campaign_project =
-            std::mem::take(&mut self.kits[index].pending_campaign_project);
+        // A project staged for this source is still waiting for it; the
+        // previous source's open project is not carried.
+        let pending_project = std::mem::take(&mut self.kits[index].project.pending);
         // The browser view belongs to the workspace, not to the source in it:
         // reloading a kit — or restoring one, which stages the saved view
         // before the load lands — must not snap it back to the default.
@@ -549,7 +546,10 @@ impl Baboon {
             browser_mode,
             browser_sort,
             restore,
-            pending_campaign_project,
+            project: KitProject {
+                active: None,
+                pending: pending_project,
+            },
             ..Kit::empty(id, self.default_names.clone())
         };
     }

@@ -261,8 +261,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         terminal: _,
         requested_path: _,
         profile: _,
-        campaign_project: _,
-        pending_campaign_project: _,
+        project: _,
         pending_container_folders: _,
         // Staged session-restore state, classified field by field below.
         restore: _,

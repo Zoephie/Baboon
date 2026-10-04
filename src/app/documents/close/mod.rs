@@ -169,7 +169,7 @@ impl Baboon {
                 .filter(|entry| self.tag_has_stashed_overlay(self.active, &entry.tag_id))
                 .count();
             let stash_file = self.kits[self.active]
-                .campaign_project
+                .project.active
                 .as_ref()
                 .map(|project| project.recovery_path.clone());
             self.documents.save_changes_prompt = SaveChangesPrompt {
@@ -391,7 +391,7 @@ impl Baboon {
                         self.documents.save_changes_prompt.error = None;
                         self.documents.save_changes_prompt.confirm_discard = false;
                         self.status = match self.kits[self.active]
-                            .campaign_project
+                            .project.active
                             .as_ref()
                             .and_then(|project| project.project_path.clone())
                         {

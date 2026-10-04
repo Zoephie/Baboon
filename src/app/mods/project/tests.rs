@@ -461,14 +461,14 @@ fn an_autosave_that_panics_is_no_longer_in_flight() {
     project.save_in_flight = Some(3);
     project.latest_write_revision.store(3, Ordering::SeqCst);
     let write = autosave_of(&project, 3);
-    app.kits[0].campaign_project = Some(project);
+    app.kits[0].project.active = Some(project);
 
     let ctx = egui::Context::default();
     crate::app::with_panicking_workers(|| {
         write_campaign_project_in_background(&app.tx, &ctx, write)
     });
     assert!(crate::app::apply_next_worker_message(&mut app), "the autosave answered");
-    let project = app.kits[0].campaign_project.as_ref().unwrap();
+    let project = app.kits[0].project.active.as_ref().unwrap();
     assert_eq!(project.save_in_flight, None);
     assert!(app.status.contains("crashed"), "{}", app.status);
     let _ = fs::remove_file(&recovery);

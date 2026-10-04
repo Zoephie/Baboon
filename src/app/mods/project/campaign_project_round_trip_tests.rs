@@ -114,7 +114,7 @@ fn autosave_at(app: &mut Baboon, ctx: &egui::Context, time: f64) {
 }
 
 fn project(app: &Baboon) -> &ActiveCampaignProject {
-    app.kits[0].campaign_project.as_ref().expect("a project")
+    app.kits[0].project.active.as_ref().expect("a project")
 }
 
 fn step(id: u64, label: &str, bytes: &[u8]) -> HistoryStep {
@@ -328,7 +328,7 @@ fn a_capture_holds_the_workspace_and_a_checkpoint_writes_it() {
     let mut app = Baboon::for_test();
     loose.install(&mut app);
     assert!(matches!(app.capture_campaign_project(0, 1.0), Ok(None)));
-    assert!(app.kits[0].campaign_project.is_none());
+    assert!(app.kits[0].project.active.is_none());
 }
 
 /// When the autosave writes: not before it is due, once something changed,
@@ -378,7 +378,7 @@ fn autosave_writes_only_when_due_and_changed() {
 
     // While a write is in flight a due tick only pushes the next one back.
     edit_field(&mut app, &key("objects/rock"), FRICTION, "1");
-    app.kits[0].campaign_project.as_mut().unwrap().save_in_flight = Some(99);
+    app.kits[0].project.active.as_mut().unwrap().save_in_flight = Some(99);
     autosave_at(&mut app, &ctx, 14.0);
     assert_eq!(project(&app).revision, 2);
     assert_eq!(project(&app).next_autosave_at, 14.0 + CAMPAIGN_PROJECT_AUTOSAVE_SECS);
@@ -394,7 +394,7 @@ fn autosave_writes_only_when_due_and_changed() {
     let mut app = Baboon::for_test();
     loose.install(&mut app);
     autosave_at(&mut app, &ctx, 20.0);
-    assert!(app.kits[0].campaign_project.is_none());
+    assert!(app.kits[0].project.active.is_none());
 }
 
 /// A recovery file left by an earlier session is adopted, not overwritten:
@@ -454,7 +454,7 @@ fn clearing_the_stash_forgets_every_overlay_and_document() {
 fn save_user_project(app: &mut Baboon, path: &Path) {
     // The project exists from the first autosave on.
     app.capture_campaign_project(0, 1.0).unwrap();
-    app.kits[0].campaign_project.as_mut().unwrap().project_path = Some(path.to_path_buf());
+    app.kits[0].project.active.as_mut().unwrap().project_path = Some(path.to_path_buf());
     app.save_campaign_project_file(0, 2.0);
     assert_eq!(
         app.status,
@@ -574,7 +574,7 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
     app.capture_campaign_project(0, 1.0).unwrap();
     let orphan = "70706879:objects/gone";
     app.kits[0]
-        .campaign_project
+        .project.active
         .as_mut()
         .unwrap()
         .overlays

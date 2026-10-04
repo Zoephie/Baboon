@@ -33,12 +33,12 @@ fn an_overlay_that_cannot_be_placed_is_not_retried_every_frame() {
         bytes: Arc::new(Vec::new()),
         digest: [0; 32],
     });
-    app.kits[0].campaign_project = Some(project);
+    app.kits[0].project.active = Some(project);
 
     app.adopt_pending_new_overlays(0);
 
     let queue = &app.kits[0]
-        .campaign_project
+        .project.active
         .as_ref()
         .unwrap()
         .pending_new_overlays;
