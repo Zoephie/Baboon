@@ -45,9 +45,7 @@ impl Baboon {
             .map(str::to_owned)
             .or_else(|| group_tag_to_extension(group_tag).map(str::to_owned))
             .unwrap_or_else(|| format_group_tag(group_tag));
-        let extension = group_tag_to_extension(group_tag)
-            .unwrap_or(group_name.as_str())
-            .to_owned();
+        let extension = group_name.clone();
         let (profile_verdicts, mode) = self.model.classify_import_source(group_tag, &tag);
         let name = picked
             .file_stem()

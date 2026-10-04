@@ -1037,8 +1037,10 @@ fn target_destination_for_entry(
         ) => destination.place(name),
         _ => return Err("Folder conversion cannot place this tag".to_owned()),
     };
-    let (target_group, target_group_name) = landed.as_ref().map_err(String::clone)?;
-    let extension = group_tag_to_extension(*target_group).unwrap_or(target_group_name);
+    // The target game's own name for the group, which is its file extension.
+    // The cross-game table answers for one game per FOURCC: Halo CE's `smet`
+    // is a shader_transparent_meter, the table's a structure_meta.
+    let (_, extension) = landed.as_ref().map_err(String::clone)?;
     let mut output = normalize_conversion_path(&destination_root.join(relative));
     output.set_extension(extension);
     if !output.starts_with(destination_root) {
@@ -1056,6 +1058,38 @@ mod tests {
     // the bare name ambiguous. Name the engine's explicitly: this scaffolding is a
     // copy of the engine's own, so it should key fields the way the engine does.
     use blam_tags::convert::clean_field_key;
+
+    /// A converted tag takes its extension from the target game's name for the
+    /// group, not the cross-game table, which named a Halo CE `smet` (a
+    /// shader_transparent_meter) after Reach's structure_meta.
+    #[test]
+    fn a_converted_tag_takes_the_target_games_extension() {
+        let entry = TagEntry {
+            key: r"cache:smet:ui\meter".to_owned(),
+            display_path: r"ui\meter.shader_transparent_meter".to_owned(),
+            group_tag: u32::from_be_bytes(*b"smet"),
+            group_name: Some("shader_transparent_meter".to_owned()),
+            location: TagEntryLocation::Monolithic {
+                name: r"ui\meter".to_owned(),
+                group_tag: u32::from_be_bytes(*b"smet"),
+            },
+        };
+        let landed = Ok((u32::from_be_bytes(*b"smet"), "shader_transparent_meter".to_owned()));
+        let destination_root = PathBuf::from("D:/HCEEK/tags");
+        let scope = FolderConversionScope::CacheSubtree {
+            prefix: String::new(),
+            entries: Vec::new(),
+            seed: CacheSeed::Folder,
+            destination: CacheDestination::OwnPath,
+        };
+        let placed =
+            target_destination_for_entry(&entry, &scope, Path::new(""), &destination_root, &landed)
+                .expect("placed");
+        assert_eq!(
+            normalize_conversion_path(&placed),
+            normalize_conversion_path(&destination_root.join("ui/meter.shader_transparent_meter")),
+        );
+    }
 
     /// A cache tag lands at its own path, unless the user picked one.
     ///

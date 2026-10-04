@@ -550,9 +550,10 @@ impl Baboon {
                     let TagEntryLocation::Monolithic { name, group_tag } = &entry.location else {
                         continue;
                     };
-                    let extension = group_tag_to_extension(*group_tag)
-                        .map(str::to_owned)
-                        .or_else(|| entry.group_name.clone());
+                    let extension = entry
+                        .group_name
+                        .clone()
+                        .or_else(|| group_tag_to_extension(*group_tag).map(str::to_owned));
                     let Some(extension) = extension else { continue };
                     let mut relative = destination.place(name);
                     relative.set_extension(&extension);

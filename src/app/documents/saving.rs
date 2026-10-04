@@ -358,10 +358,7 @@ pub(in crate::app) fn load_new_tag_groups(game: &str) -> Result<Vec<NewTagGroup>
             group_tag,
             name: name.to_owned(),
             schema_path: disk_schema_path,
-            extension: group_tag_to_extension(group_tag)
-                .unwrap_or(name)
-                .trim()
-                .to_owned(),
+            extension: name.trim().to_owned(),
         });
     }
     groups.sort_by(|a, b| {
@@ -1013,5 +1010,27 @@ mod save_as_tests {
                 .iter()
                 .any(|&index| source.all_entries[index].display_path == "saved/cyborg.gbxmodel")
         }));
+    }
+}
+
+#[cfg(test)]
+mod new_tag_group_tests {
+    use super::*;
+
+    /// A new tag's extension is its game's name for the group. The cross-game
+    /// table names Halo 4's `ldsc` load_screen_globals and its `hsc*`
+    /// scenario_hs_source_file, after the game that defines them that way.
+    #[test]
+    fn new_tags_take_their_games_own_extension() {
+        let groups = load_new_tag_groups(GameId::Halo4.as_str()).expect("halo4 groups");
+        let extension = |fourcc: &[u8; 4]| {
+            let tag = u32::from_be_bytes(*fourcc);
+            groups
+                .iter()
+                .find(|group| group.group_tag == tag)
+                .map(|group| group.extension.clone())
+        };
+        assert_eq!(extension(b"ldsc").as_deref(), Some("load_screen"));
+        assert_eq!(extension(b"hsc*").as_deref(), Some("hsc"));
     }
 }
