@@ -3,246 +3,247 @@
 
 use super::*;
 
-impl Baboon {
-    pub(in crate::app) fn draw_about_window(&mut self, ctx: &egui::Context) {
-        if !self.help.about_open {
-            return;
-        }
+/// The Help window, while it is open.
+pub(in crate::app) fn draw_help_window(cx: &Ctx, help: &mut HelpFeature) {
+    if !help.about_open {
+        return;
+    }
+    let ctx = cx.egui;
 
-        let mut open = self.help.about_open;
-        egui::Window::new("Baboon Help")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("baboon_help"))
-            .collapsible(false)
-            .resizable(true)
-            .constrain(true)
-            .open(&mut open)
-            .default_size(window_size(ctx, Vec2::new(780.0, 560.0), true))
-            .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
-            .show(ctx, |ui| {
+    let mut open = help.about_open;
+    egui::Window::new("Baboon Help")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("baboon_help"))
+        .collapsible(false)
+        .resizable(true)
+        .constrain(true)
+        .open(&mut open)
+        .default_size(window_size(ctx, Vec2::new(780.0, 560.0), true))
+        .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut help.help_panel_tab, HelpPanelTab::About, "About");
+                ui.selectable_value(&mut help.help_panel_tab, HelpPanelTab::Doc, "Doc");
+                ui.selectable_value(
+                    &mut help.help_panel_tab,
+                    HelpPanelTab::Tutorials,
+                    "Tutorials",
+                );
+                ui.selectable_value(
+                    &mut help.help_panel_tab,
+                    HelpPanelTab::ScriptDoc,
+                    "Script Doc",
+                );
+                ui.selectable_value(
+                    &mut help.help_panel_tab,
+                    HelpPanelTab::TagCompat,
+                    "Tag Compatibility",
+                );
+                ui.selectable_value(
+                    &mut help.help_panel_tab,
+                    HelpPanelTab::MapNames,
+                    "Map Names",
+                );
+            });
+            ui.separator();
+            ui.add_space(8.0);
+            match help.help_panel_tab {
+                HelpPanelTab::About => draw_about_tab(ui),
+                HelpPanelTab::Doc => draw_doc_tab(ui, &help.help_docs),
+                HelpPanelTab::Tutorials => draw_tutorials_tab(
+                    ui,
+                    &help.tutorials,
+                    &mut help.tutorials_game,
+                    &mut help.tutorials_category,
+                ),
+                HelpPanelTab::ScriptDoc => draw_script_doc_tab(ui, &mut help.script_docs),
+                HelpPanelTab::TagCompat => draw_tag_compat_tab(cx, ui, &mut help.tag_compat),
+                HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut help.map_names_game_tab),
+            }
+        });
+    help.about_open = open;
+}
+
+fn draw_script_doc_tab(ui: &mut Ui, docs: &mut ScriptDocsUiState) {
+    docs.ensure_loaded(&locate_help_docs_root());
+    if let Some(error) = docs.error() {
+        doc_load_error(ui, &format!("Script documentation failed to load: {error}"));
+        return;
+    }
+
+    let old_game = docs.game.clone();
+    let old_category = docs.category;
+    let old_network_filter = docs.network_filter;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Game").color(subtle_dark()));
+        egui::ComboBox::from_id_salt("script_docs_game")
+            .selected_text(
+                script_doc_games()
+                    .find(|game| game.as_str() == docs.game)
+                    .map_or("Unknown game", GameFacts::display_name),
+            )
+            .show_ui(ui, |ui| {
+                for game in script_doc_games() {
+                    ui.selectable_value(
+                        &mut docs.game,
+                        game.as_str().to_owned(),
+                        game.display_name(),
+                    );
+                }
+            });
+        ui.separator();
+        ui.selectable_value(
+            &mut docs.category,
+            ScriptDocCategory::Functions,
+            "Functions",
+        );
+        ui.selectable_value(
+            &mut docs.category,
+            ScriptDocCategory::Globals,
+            "Globals",
+        );
+        ui.selectable_value(
+            &mut docs.category,
+            ScriptDocCategory::Types,
+            "Types",
+        );
+        if docs.category == ScriptDocCategory::Functions {
+            ui.separator();
+            ui.label(RichText::new("Network safe").color(subtle_dark()));
+            egui::ComboBox::from_id_salt("script_docs_network_safe")
+                .selected_text(match docs.network_filter {
+                    ScriptDocNetworkFilter::All => "All",
+                    ScriptDocNetworkFilter::Yes => "Yes",
+                    ScriptDocNetworkFilter::Unknown => "Unknown",
+                    ScriptDocNetworkFilter::No => "No",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut docs.network_filter,
+                        ScriptDocNetworkFilter::All,
+                        "All",
+                    );
+                    ui.selectable_value(
+                        &mut docs.network_filter,
+                        ScriptDocNetworkFilter::Yes,
+                        "Yes",
+                    );
+                    ui.selectable_value(
+                        &mut docs.network_filter,
+                        ScriptDocNetworkFilter::Unknown,
+                        "Unknown",
+                    );
+                    ui.selectable_value(
+                        &mut docs.network_filter,
+                        ScriptDocNetworkFilter::No,
+                        "No",
+                    );
+                });
+        }
+    });
+    let search_changed = ui
+        .add(
+            egui::TextEdit::singleline(&mut docs.search)
+                .hint_text(placeholder_text(
+                    "Search names, signatures, descriptions, types, or examples...",
+                ))
+                .desired_width(f32::INFINITY),
+        )
+        .changed();
+    if old_game != docs.game
+        || old_category != docs.category
+        || old_network_filter != docs.network_filter
+        || search_changed
+    {
+        docs.invalidate();
+    }
+    docs.refresh();
+    ui.add_space(6.0);
+    ui.separator();
+
+    let available = ui.available_size();
+    let list_width = (available.x * 0.42).clamp(280.0, 390.0);
+    let mut clicked = None;
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(list_width, available.y),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.help.help_panel_tab, HelpPanelTab::About, "About");
-                    ui.selectable_value(&mut self.help.help_panel_tab, HelpPanelTab::Doc, "Doc");
-                    ui.selectable_value(
-                        &mut self.help.help_panel_tab,
-                        HelpPanelTab::Tutorials,
-                        "Tutorials",
-                    );
-                    ui.selectable_value(
-                        &mut self.help.help_panel_tab,
-                        HelpPanelTab::ScriptDoc,
-                        "Script Doc",
-                    );
-                    ui.selectable_value(
-                        &mut self.help.help_panel_tab,
-                        HelpPanelTab::TagCompat,
-                        "Tag Compatibility",
-                    );
-                    ui.selectable_value(
-                        &mut self.help.help_panel_tab,
-                        HelpPanelTab::MapNames,
-                        "Map Names",
+                    ui.label(
+                        RichText::new(format!("{} results", docs.rows.len()))
+                            .color(subtle_dark()),
                     );
                 });
                 ui.separator();
-                ui.add_space(8.0);
-                match self.help.help_panel_tab {
-                    HelpPanelTab::About => draw_about_tab(ui),
-                    HelpPanelTab::Doc => draw_doc_tab(ui, &self.help.help_docs),
-                    HelpPanelTab::Tutorials => draw_tutorials_tab(
-                        ui,
-                        &self.help.tutorials,
-                        &mut self.help.tutorials_game,
-                        &mut self.help.tutorials_category,
-                    ),
-                    HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
-                    HelpPanelTab::TagCompat => self.draw_tag_compat_tab(ui),
-                    HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.help.map_names_game_tab),
-                }
-            });
-        self.help.about_open = open;
+                let selected = docs.selected.as_deref();
+                ScrollArea::vertical()
+                    .id_salt("script_docs_results")
+                    .auto_shrink([false, false])
+                    .show_rows(ui, 42.0, docs.rows.len(), |ui, range| {
+                        for index in range {
+                            let row = &docs.rows[index];
+                            let response = ui
+                                .allocate_ui(Vec2::new(ui.available_width(), 42.0), |ui| {
+                                    let response = ui.selectable_label(
+                                        selected == Some(row.key.as_str()),
+                                        RichText::new(format!("{}  : {}", row.name, row.kind))
+                                            .color(text_dark()),
+                                    );
+                                    let summary =
+                                        row.summary.chars().take(48).collect::<String>();
+                                    ui.label(
+                                        RichText::new(summary).color(subtle_dark()).small(),
+                                    );
+                                    response
+                                })
+                                .inner;
+                            response.clone().on_hover_text(&row.summary);
+                            if response.clicked() {
+                                clicked = Some(row.key.clone());
+                            }
+                        }
+                    });
+            },
+        );
+        ui.separator();
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), available.y),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ScrollArea::vertical()
+                    .id_salt("script_docs_detail")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match &docs.detail {
+                        Some(detail) => draw_script_doc_detail(ui, detail),
+                        None => {
+                            ui.label(
+                                RichText::new("Select a result to view its documentation.")
+                                    .color(subtle_dark()),
+                            );
+                        }
+                    });
+            },
+        );
+    });
+    if let Some(key) = clicked {
+        docs.select(key);
+    }
+}
+
+/// What a tag loses crossing between two games, read out of the generated
+/// compatibility database.
+fn draw_tag_compat_tab(cx: &Ctx, ui: &mut Ui, state: &mut TagCompatUiState) {
+    state.ensure_loaded(&locate_help_docs_root());
+    match draw_tag_compat_body(ui, state) {
+        Some(TagCompatRequest::ExportSheet) => cx.send(HelpCommand::ExportTagCompatSheet),
+        None => {}
     }
 }
 
 impl Baboon {
-    fn draw_script_doc_tab(&mut self, ui: &mut Ui) {
-        self.help.script_docs.ensure_loaded(&locate_help_docs_root());
-        if let Some(error) = self.help.script_docs.error() {
-            doc_load_error(ui, &format!("Script documentation failed to load: {error}"));
-            return;
-        }
-
-        let old_game = self.help.script_docs.game.clone();
-        let old_category = self.help.script_docs.category;
-        let old_network_filter = self.help.script_docs.network_filter;
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Game").color(subtle_dark()));
-            egui::ComboBox::from_id_salt("script_docs_game")
-                .selected_text(
-                    script_doc_games()
-                        .find(|game| game.as_str() == self.help.script_docs.game)
-                        .map_or("Unknown game", GameFacts::display_name),
-                )
-                .show_ui(ui, |ui| {
-                    for game in script_doc_games() {
-                        ui.selectable_value(
-                            &mut self.help.script_docs.game,
-                            game.as_str().to_owned(),
-                            game.display_name(),
-                        );
-                    }
-                });
-            ui.separator();
-            ui.selectable_value(
-                &mut self.help.script_docs.category,
-                ScriptDocCategory::Functions,
-                "Functions",
-            );
-            ui.selectable_value(
-                &mut self.help.script_docs.category,
-                ScriptDocCategory::Globals,
-                "Globals",
-            );
-            ui.selectable_value(
-                &mut self.help.script_docs.category,
-                ScriptDocCategory::Types,
-                "Types",
-            );
-            if self.help.script_docs.category == ScriptDocCategory::Functions {
-                ui.separator();
-                ui.label(RichText::new("Network safe").color(subtle_dark()));
-                egui::ComboBox::from_id_salt("script_docs_network_safe")
-                    .selected_text(match self.help.script_docs.network_filter {
-                        ScriptDocNetworkFilter::All => "All",
-                        ScriptDocNetworkFilter::Yes => "Yes",
-                        ScriptDocNetworkFilter::Unknown => "Unknown",
-                        ScriptDocNetworkFilter::No => "No",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.help.script_docs.network_filter,
-                            ScriptDocNetworkFilter::All,
-                            "All",
-                        );
-                        ui.selectable_value(
-                            &mut self.help.script_docs.network_filter,
-                            ScriptDocNetworkFilter::Yes,
-                            "Yes",
-                        );
-                        ui.selectable_value(
-                            &mut self.help.script_docs.network_filter,
-                            ScriptDocNetworkFilter::Unknown,
-                            "Unknown",
-                        );
-                        ui.selectable_value(
-                            &mut self.help.script_docs.network_filter,
-                            ScriptDocNetworkFilter::No,
-                            "No",
-                        );
-                    });
-            }
-        });
-        let search_changed = ui
-            .add(
-                egui::TextEdit::singleline(&mut self.help.script_docs.search)
-                    .hint_text(placeholder_text(
-                        "Search names, signatures, descriptions, types, or examples...",
-                    ))
-                    .desired_width(f32::INFINITY),
-            )
-            .changed();
-        if old_game != self.help.script_docs.game
-            || old_category != self.help.script_docs.category
-            || old_network_filter != self.help.script_docs.network_filter
-            || search_changed
-        {
-            self.help.script_docs.invalidate();
-        }
-        self.help.script_docs.refresh();
-        ui.add_space(6.0);
-        ui.separator();
-
-        let available = ui.available_size();
-        let list_width = (available.x * 0.42).clamp(280.0, 390.0);
-        let mut clicked = None;
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(
-                Vec2::new(list_width, available.y),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("{} results", self.help.script_docs.rows.len()))
-                                .color(subtle_dark()),
-                        );
-                    });
-                    ui.separator();
-                    let selected = self.help.script_docs.selected.as_deref();
-                    ScrollArea::vertical()
-                        .id_salt("script_docs_results")
-                        .auto_shrink([false, false])
-                        .show_rows(ui, 42.0, self.help.script_docs.rows.len(), |ui, range| {
-                            for index in range {
-                                let row = &self.help.script_docs.rows[index];
-                                let response = ui
-                                    .allocate_ui(Vec2::new(ui.available_width(), 42.0), |ui| {
-                                        let response = ui.selectable_label(
-                                            selected == Some(row.key.as_str()),
-                                            RichText::new(format!("{}  : {}", row.name, row.kind))
-                                                .color(text_dark()),
-                                        );
-                                        let summary =
-                                            row.summary.chars().take(48).collect::<String>();
-                                        ui.label(
-                                            RichText::new(summary).color(subtle_dark()).small(),
-                                        );
-                                        response
-                                    })
-                                    .inner;
-                                response.clone().on_hover_text(&row.summary);
-                                if response.clicked() {
-                                    clicked = Some(row.key.clone());
-                                }
-                            }
-                        });
-                },
-            );
-            ui.separator();
-            ui.allocate_ui_with_layout(
-                Vec2::new(ui.available_width(), available.y),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ScrollArea::vertical()
-                        .id_salt("script_docs_detail")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| match &self.help.script_docs.detail {
-                            Some(detail) => draw_script_doc_detail(ui, detail),
-                            None => {
-                                ui.label(
-                                    RichText::new("Select a result to view its documentation.")
-                                        .color(subtle_dark()),
-                                );
-                            }
-                        });
-                },
-            );
-        });
-        if let Some(key) = clicked {
-            self.help.script_docs.select(key);
-        }
-    }
-
-    /// What a tag loses crossing between two games, read out of the generated
-    /// compatibility database.
-    fn draw_tag_compat_tab(&mut self, ui: &mut Ui) {
-        self.help.tag_compat.ensure_loaded(&locate_help_docs_root());
-        match draw_tag_compat_body(ui, &mut self.help.tag_compat) {
-            Some(TagCompatRequest::ExportSheet) => self.export_tag_compat_sheet(),
-            None => {}
-        }
-    }
-
-    fn export_tag_compat_sheet(&mut self) {
+    /// Ask where to write the compatibility rows on show, and write them.
+    pub(in crate::app) fn export_tag_compat_sheet(&mut self) {
         let pair = self.help.tag_compat.pairs.get(self.help.tag_compat.pair);
         let stem = pair
             .map(|pair| format!("{}-to-{}", pair.source_game, pair.target_game))
@@ -264,8 +265,8 @@ impl Baboon {
 }
 
 /// What the compatibility tab wants done. The tab itself only collects the
-/// request — picking a path and writing the file is the controller's job, per
-/// this module's contract.
+/// request — picking a path and writing the file is
+/// [`HelpCommand::ExportTagCompatSheet`]'s job, per this module's contract.
 enum TagCompatRequest {
     ExportSheet,
 }

@@ -25,6 +25,7 @@ impl Baboon {
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
             self.draw_first_run_wizard(ctx);
+            self.apply_commands(ctx);
             return;
         }
         self.prepare_root_frame(ctx);
@@ -57,6 +58,7 @@ impl Baboon {
         self.draw_and_apply_color_popup(ctx);
         self.draw_and_apply_function_popup(ctx);
         self.process_frame_requests(ctx);
+        self.apply_commands(ctx);
     }
 
     /// The top menu bar: the File, Edit, Tools, View, Help and Editing Kits
@@ -688,28 +690,23 @@ impl Baboon {
     fn draw_help_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("About...").clicked() {
-            self.help.help_panel_tab = HelpPanelTab::About;
-            self.help.about_open = true;
+            self.commands.send(HelpCommand::Open(HelpPanelTab::About));
             close_menu(ui);
         }
         if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
-            self.help.help_panel_tab = HelpPanelTab::Doc;
-            self.help.about_open = true;
+            self.commands.send(HelpCommand::Open(HelpPanelTab::Doc));
             close_menu(ui);
         }
         if ui.button("Tutorials...").clicked() {
-            self.help.help_panel_tab = HelpPanelTab::Tutorials;
-            self.help.about_open = true;
+            self.commands.send(HelpCommand::Open(HelpPanelTab::Tutorials));
             close_menu(ui);
         }
         if ui.button("Tag Compatibility...").clicked() {
-            self.help.help_panel_tab = HelpPanelTab::TagCompat;
-            self.help.about_open = true;
+            self.commands.send(HelpCommand::Open(HelpPanelTab::TagCompat));
             close_menu(ui);
         }
         if ui.button("Map Names...").clicked() {
-            self.help.help_panel_tab = HelpPanelTab::MapNames;
-            self.help.about_open = true;
+            self.commands.send(HelpCommand::Open(HelpPanelTab::MapNames));
             close_menu(ui);
         }
         if ui.button("Check for updates").clicked() {
@@ -1583,10 +1580,10 @@ impl Baboon {
         self.draw_operation_notice_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);
-        self.draw_poke_window(ctx);
+        draw_poke_window(&Ctx::new(&self.model, ctx, &self.commands), &mut self.poke);
         self.draw_tag_import_window(ctx);
         self.draw_cache_import_window(ctx);
-        self.draw_about_window(ctx);
+        draw_help_window(&Ctx::new(&self.model, ctx, &self.commands), &mut self.help);
         self.draw_query_results_window(ctx);
         self.draw_tag_diff_window(ctx);
         self.draw_content_explorer_window(ctx);

@@ -2,7 +2,8 @@
 //!
 //! Open kits and which one is active, the live preferences, the default tag
 //! names and the status line. Held apart from the features' own state so a
-//! draw can read all of it while holding its feature's state mutably.
+//! draw can read all of it, through [`super::Ctx`], while holding its
+//! feature's state mutably.
 
 use super::*;
 

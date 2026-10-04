@@ -663,6 +663,8 @@ mod external_links_tests;
 
 #[cfg(test)]
 mod menu_close_tests;
+#[cfg(test)]
+mod help_menu_tests;
 
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {

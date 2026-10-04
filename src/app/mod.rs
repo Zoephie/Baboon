@@ -116,6 +116,8 @@ mod ui_kit;
 use ui_kit::*;
 mod model;
 use model::Model;
+mod context;
+use context::{CommandQueue, Ctx};
 pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
@@ -239,6 +241,8 @@ pub struct Baboon {
     /// The application model: open kits and the active one, the live
     /// preferences, the default tag names and the status line.
     pub(in crate::app) model: Model,
+    /// What this frame's draws have asked for, applied once drawing is over.
+    commands: CommandQueue,
 }
 
 impl Baboon {
@@ -543,6 +547,7 @@ impl Baboon {
                 custom_editing_kit_texture_failures: HashSet::new(),
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
+            commands: CommandQueue::default(),
             model: Model {
                 default_names: names.clone(),
                 // The startup workspace is seeded like any other new kit; every

@@ -2935,109 +2935,129 @@ impl Baboon {
             }
         }
     }
+}
 
-    pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
-        let mut dont_ask = !self.model.prefs.confirm_runtime_poke;
-        let Some(dialog) = self.poke.poke_dialog.as_ref() else {
-            return;
-        };
-        // A poke that never ran reports as cancelled; an error already put its
-        // own message on the status line, so closing that must not erase it.
-        let cancellable = matches!(
-            dialog.state,
-            PokeDialogState::Scanning | PokeDialogState::Ready(_)
-        );
-        let mut open = true;
-        let mut confirm = false;
-        let mut close = false;
-        egui::Window::new("Poke Current Tag")
-            .constrain_to(window_work_area(ctx))
-            .collapsible(false)
-            .resizable(true)
-            .default_width(window_width(ctx, 620.0))
-            .open(&mut open)
-            .show(ctx, |ui| match &dialog.state {
-                PokeDialogState::Scanning => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(
-                            "Resolving the live tag, validating the game build, and building a read-only plan…",
-                        );
+/// The poke window, while a poke is being planned, confirmed or written.
+pub(in crate::app) fn draw_poke_window(cx: &Ctx, poke: &mut PokeFeature) {
+    let Some(dialog) = poke.poke_dialog.as_ref() else {
+        return;
+    };
+    let ctx = cx.egui;
+    let mut dont_ask = !cx.model.prefs.confirm_runtime_poke;
+    // A poke that never ran reports as cancelled; an error already put its
+    // own message on the status line, so closing that must not erase it.
+    let cancellable = matches!(
+        dialog.state,
+        PokeDialogState::Scanning | PokeDialogState::Ready(_)
+    );
+    let mut open = true;
+    let mut confirm = false;
+    let mut close = false;
+    egui::Window::new("Poke Current Tag")
+        .constrain_to(window_work_area(ctx))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(window_width(ctx, 620.0))
+        .open(&mut open)
+        .show(ctx, |ui| match &dialog.state {
+            PokeDialogState::Scanning => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(
+                        "Resolving the live tag, validating the game build, and building a read-only plan…",
+                    );
+                });
+            }
+            PokeDialogState::Writing => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Writing and verifying runtime memory…");
+                });
+            }
+            PokeDialogState::Error(error) => {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                ui.add_space(8.0);
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            }
+            PokeDialogState::Ready(plan) => {
+                ui.label(format!(
+                    "Process: {} (PID {})",
+                    PROCESS_NAME, plan.identity.process_id
+                ));
+                ui.label(format!("Build: {}", plan.profile.label));
+                ui.label(format!(
+                    "Live tag: {}.{}",
+                    plan.tag_path,
+                    format_group_tag(plan.group_tag)
+                ));
+                ui.label(format!(
+                    "{} supported field change(s), {} byte(s)",
+                    plan.patches.len(),
+                    plan.byte_count()
+                ));
+                ui.separator();
+                if plan.patches.is_empty() {
+                    ui.label("The current tag already matches the shipped runtime values.");
+                } else {
+                    ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        for patch in &plan.patches {
+                            ui.label(format!(
+                                "{} — {} byte(s) at 0x{:X}",
+                                patch.field_path,
+                                patch.edited.len(),
+                                patch.address
+                            ));
+                        }
                     });
                 }
-                PokeDialogState::Writing => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Writing and verifying runtime memory…");
-                    });
-                }
-                PokeDialogState::Error(error) => {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                    ui.add_space(8.0);
-                    if ui.button("Close").clicked() {
+                ui.separator();
+                ui.checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!plan.patches.is_empty(), egui::Button::new("Poke"))
+                        .clicked()
+                    {
+                        confirm = true;
+                    }
+                    if ui.button("Cancel").clicked() {
                         close = true;
                     }
-                }
-                PokeDialogState::Ready(plan) => {
-                    ui.label(format!(
-                        "Process: {} (PID {})",
-                        PROCESS_NAME, plan.identity.process_id
-                    ));
-                    ui.label(format!("Build: {}", plan.profile.label));
-                    ui.label(format!(
-                        "Live tag: {}.{}",
-                        plan.tag_path,
-                        format_group_tag(plan.group_tag)
-                    ));
-                    ui.label(format!(
-                        "{} supported field change(s), {} byte(s)",
-                        plan.patches.len(),
-                        plan.byte_count()
-                    ));
-                    ui.separator();
-                    if plan.patches.is_empty() {
-                        ui.label("The current tag already matches the shipped runtime values.");
-                    } else {
-                        ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                            for patch in &plan.patches {
-                                ui.label(format!(
-                                    "{} — {} byte(s) at 0x{:X}",
-                                    patch.field_path,
-                                    patch.edited.len(),
-                                    patch.address
-                                ));
-                            }
-                        });
-                    }
-                    ui.separator();
-                    ui.checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!plan.patches.is_empty(), egui::Button::new("Poke"))
-                            .clicked()
-                        {
-                            confirm = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
-                }
-            });
-        if !open || close {
-            self.poke.poke_dialog = None;
-            if cancellable {
-                self.model.status = "Runtime poke cancelled".to_owned();
+                });
             }
-        } else if confirm {
-            // Apply the opt-out only when the user commits to the poke, so
-            // cancelling out of the dialog never disarms the next one.
-            if dont_ask && self.model.prefs.confirm_runtime_poke {
-                self.model.prefs.confirm_runtime_poke = false;
-                self.persist_prefs_if_changed();
+        });
+    if !open || close {
+        poke.poke_dialog = None;
+        if cancellable {
+            cx.set_status("Runtime poke cancelled");
+        }
+    } else if confirm {
+        cx.send(PokeCommand::Confirm {
+            stop_asking: dont_ask,
+        });
+    }
+}
+
+/// What the poke window can ask for.
+pub(in crate::app) enum PokeCommand {
+    /// Write the plan on show. With `stop_asking`, also turn the confirmation
+    /// off for later pokes — applied only here, when the user commits, so
+    /// cancelling out of the dialog never disarms the next one.
+    Confirm { stop_asking: bool },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_poke_command(&mut self, command: PokeCommand) {
+        match command {
+            PokeCommand::Confirm { stop_asking } => {
+                if stop_asking && self.model.prefs.confirm_runtime_poke {
+                    self.model.prefs.confirm_runtime_poke = false;
+                    self.persist_prefs_if_changed();
+                }
+                self.confirm_poke(self.egui_ctx.clone());
             }
-            self.confirm_poke(ctx.clone());
         }
     }
 }
