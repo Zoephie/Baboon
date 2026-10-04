@@ -6,7 +6,7 @@ use super::*;
 impl Baboon {
     /// Rename Folder for a loose folder: the new name, and what it will change
     /// counted before anything is touched.
-    pub(in crate::app::ui) fn draw_loose_folder_rename_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_loose_folder_rename_window(&mut self, ctx: &egui::Context) {
         if self.loose_folder_rename.is_none() {
             return;
         }

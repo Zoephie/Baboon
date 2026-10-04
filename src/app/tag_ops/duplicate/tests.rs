@@ -445,7 +445,7 @@ fn single_file_registration_updates_browser_source_and_preserves_group() {
         chosen_kit_layout: None,
     };
 
-    crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);
+    crate::app::tag_ops::new_tag::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);
 
     assert_eq!(source.entries.len(), 2);
     assert!(

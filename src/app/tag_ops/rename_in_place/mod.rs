@@ -5,6 +5,7 @@
 //! modules; what lives here is the bookkeeping in between.
 
 use super::*;
+use crate::core::created_tags::{CreatedTagOrigin, package_id_for};
 
 use super::container_folders::normalize_folder_rel;
 use super::duplicate::{
@@ -173,7 +174,7 @@ fn run_container_rename(
     let record = CreatedTagRecord {
         utoc_path: target.utoc_path.display().to_string(),
         chunk_label,
-        package_id: super::package_id_for(&input.new_package),
+        package_id: package_id_for(&input.new_package),
         package_path: input.new_package.clone(),
         uasset_path: new_uasset.clone(),
         ubulk_path: new_ubulk.clone(),

@@ -4,6 +4,7 @@
 //! mounted IoStore container in place.
 
 use super::*;
+use crate::core::created_tags::{CreatedTagOrigin, package_id_for};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -66,7 +67,7 @@ struct DuplicateBackupManifest {
 ///
 /// The same helper is used by loose and Campaign Evolved duplicate dialogs so
 /// all writes share the same Windows-safe, case-insensitive naming contract.
-pub(super) fn validate_duplicate_leaf_name(
+pub(in crate::app) fn validate_duplicate_leaf_name(
     raw: &str,
     destination_display: &str,
     existing_display_paths: &[String],
@@ -93,7 +94,7 @@ pub(super) fn validate_duplicate_leaf_name(
 /// `noun` heads the messages (`"Tag names"`); `empty_message` is used verbatim,
 /// because "enter a new tag name" and "enter a folder name" are the one place
 /// the two callers genuinely differ.
-pub(super) fn validate_leaf_characters(
+pub(in crate::app) fn validate_leaf_characters(
     raw: &str,
     noun: &str,
     empty_message: &str,
@@ -155,13 +156,13 @@ fn duplicate_display_path(source_display: &str, leaf: &str) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum NameOperationRoute {
+pub(in crate::app) enum NameOperationRoute {
     Rename,
     SaveAsOverlay,
     InPlaceDuplicateConfirmation,
 }
 
-pub(super) fn name_operation_route(operation: TagNameOperation) -> NameOperationRoute {
+pub(in crate::app) fn name_operation_route(operation: TagNameOperation) -> NameOperationRoute {
     match operation {
         TagNameOperation::Rename => NameOperationRoute::Rename,
         TagNameOperation::SaveAsOverlay => NameOperationRoute::SaveAsOverlay,
@@ -170,13 +171,13 @@ pub(super) fn name_operation_route(operation: TagNameOperation) -> NameOperation
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct DuplicateDialogParts {
-    pub(super) prefill: String,
-    pub(super) fixed_parent: String,
-    pub(super) extension: String,
+pub(in crate::app) struct DuplicateDialogParts {
+    pub(in crate::app) prefill: String,
+    pub(in crate::app) fixed_parent: String,
+    pub(in crate::app) extension: String,
 }
 
-pub(super) fn duplicate_dialog_parts(display: &str) -> DuplicateDialogParts {
+pub(in crate::app) fn duplicate_dialog_parts(display: &str) -> DuplicateDialogParts {
     let (stem, extension) = match display.rsplit_once('.') {
         Some((stem, extension)) => (stem, extension.to_owned()),
         None => (display, String::new()),
@@ -258,7 +259,7 @@ pub(in crate::app) fn resolve_source_uasset(
 /// `.uasset` and `.ubulk` entries deliberately disagree on case — which is the
 /// whole bug, and which no container Baboon can synthesise reproduces, since
 /// the only writer available emits no directory index at all.
-pub(super) trait ContainerPaths {
+pub(in crate::app) trait ContainerPaths {
     fn count(&self) -> usize;
     /// Whether `path` is in this container's directory index, matched exactly.
     fn contains(&self, container: usize, path: &str) -> bool;
@@ -290,7 +291,7 @@ impl ContainerPaths for MountedPaths<'_> {
     }
 }
 
-pub(super) fn resolve_source_uasset_in(
+pub(in crate::app) fn resolve_source_uasset_in(
     containers: &dyn ContainerPaths,
     packages: &crate::core::source::ContainerPackageIndex,
     target: usize,
@@ -352,20 +353,20 @@ pub(super) fn resolve_source_uasset_in(
 /// Everything a duplicate resolved before it wrote anything, so a failure
 /// report names what was actually used rather than what was displayed.
 #[derive(Clone, Debug)]
-pub(super) struct DuplicateDiagnostics {
-    pub(super) display_path: String,
-    pub(super) source_container: usize,
-    pub(super) source_container_label: String,
-    pub(super) source_utoc: PathBuf,
-    pub(super) source_ubulk: String,
-    pub(super) source_uasset: String,
-    pub(super) source_uasset_container: String,
-    pub(super) source_uasset_how: &'static str,
-    pub(super) source_package: String,
-    pub(super) package_basename: String,
-    pub(super) destination_package: String,
-    pub(super) destination_uasset: String,
-    pub(super) destination_ubulk: String,
+pub(in crate::app) struct DuplicateDiagnostics {
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) source_container: usize,
+    pub(in crate::app) source_container_label: String,
+    pub(in crate::app) source_utoc: PathBuf,
+    pub(in crate::app) source_ubulk: String,
+    pub(in crate::app) source_uasset: String,
+    pub(in crate::app) source_uasset_container: String,
+    pub(in crate::app) source_uasset_how: &'static str,
+    pub(in crate::app) source_package: String,
+    pub(in crate::app) package_basename: String,
+    pub(in crate::app) destination_package: String,
+    pub(in crate::app) destination_uasset: String,
+    pub(in crate::app) destination_ubulk: String,
 }
 
 impl std::fmt::Display for DuplicateDiagnostics {
@@ -460,7 +461,7 @@ fn container_logical_path(rel_path: &str) -> Option<String> {
     })
 }
 
-pub(super) fn container_duplicate_index_key(group_tag: u32, rel_path: &str) -> Option<String> {
+pub(in crate::app) fn container_duplicate_index_key(group_tag: u32, rel_path: &str) -> Option<String> {
     container_logical_path(rel_path)
         .map(|logical| crate::core::source::container_ref_key(group_tag, &logical))
 }
@@ -555,7 +556,7 @@ fn classify_container_duplicate_completion(
 /// register a copy that is already in the pak does not undo anything — it just
 /// hides the tag until the whole source is reloaded — so the question worth
 /// asking is "where is that container now", not "has anything changed".
-pub(super) fn container_index_for_utoc(
+pub(in crate::app) fn container_index_for_utoc(
     source: Option<&LoadedSourceData>,
     recorded_index: usize,
     target_utoc: &Path,
@@ -729,7 +730,7 @@ fn next_free_backup_slot(utoc: &Path) -> Result<(PathBuf, PathBuf), String> {
 
 /// Create the immutable sibling backup immediately before in-place mutation.
 /// Existing backups are never removed or overwritten.
-pub(super) fn create_duplicate_backup(utoc: &Path) -> Result<DuplicateBackupPaths, String> {
+pub(in crate::app) fn create_duplicate_backup(utoc: &Path) -> Result<DuplicateBackupPaths, String> {
     let original_utoc = fs::read(utoc)
         .map_err(|error| format!("Could not read original UTOC {}: {error}", utoc.display()))?;
     let ucas = utoc.with_extension("ucas");
@@ -784,7 +785,7 @@ pub(super) fn create_duplicate_backup(utoc: &Path) -> Result<DuplicateBackupPath
     result
 }
 
-pub(super) fn backup_paths_text(backup: &DuplicateBackupPaths) -> String {
+pub(in crate::app) fn backup_paths_text(backup: &DuplicateBackupPaths) -> String {
     format!(
         "{} (manifest {})",
         backup.utoc.display(),
@@ -815,7 +816,7 @@ fn parse_duplicate_body(
 }
 
 impl Baboon {
-    pub(super) fn begin_duplicate_tag(&mut self) {
+    pub(in crate::app) fn begin_duplicate_tag(&mut self) {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -1383,7 +1384,7 @@ fn run_container_duplicate(
     let record = CreatedTagRecord {
         utoc_path: target.utoc_path.display().to_string(),
         chunk_label: chunk_label.clone(),
-        package_id: super::package_id_for(&input.paths.package),
+        package_id: package_id_for(&input.paths.package),
         package_path: input.paths.package.clone(),
         uasset_path: input.paths.uasset.clone(),
         ubulk_path: input.paths.ubulk.clone(),

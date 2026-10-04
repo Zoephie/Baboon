@@ -4,14 +4,8 @@
 use super::*;
 
 mod chimp_prompts;
-mod container_duplicate_confirm;
-mod container_folder;
-mod delete_confirm;
 mod keyword_chooser;
-mod loose_folder_rename;
-mod new_tag;
 mod operation_notice;
-mod rename_tag;
 mod tsv_paste;
 
 

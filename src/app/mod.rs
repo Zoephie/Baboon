@@ -142,6 +142,8 @@ pub(in crate::app) mod import;
 use import::*;
 pub(in crate::app) mod mods;
 use mods::*;
+pub(in crate::app) mod tag_ops;
+use tag_ops::*;
 mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a

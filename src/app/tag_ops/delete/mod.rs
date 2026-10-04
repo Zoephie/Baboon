@@ -12,6 +12,7 @@
 //! pak is indistinguishable from a tag the game shipped.
 
 use super::*;
+use crate::core::created_tags::CreatedTagOrigin;
 
 use super::duplicate::{backup_paths_text, create_duplicate_backup};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -310,7 +311,7 @@ impl Baboon {
 
     /// Open the delete confirmation for `key`, resolving everything the dialog
     /// needs to describe exactly what will happen.
-    pub(super) fn open_delete_tag(&mut self, key: &str) {
+    pub(in crate::app) fn open_delete_tag(&mut self, key: &str) {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -377,7 +378,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
+    pub(in crate::app) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
         match &self.source()?.source {
             TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
             _ => None,

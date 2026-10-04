@@ -6,7 +6,7 @@ use super::*;
 impl Baboon {
     /// Reference-graph navigator: parents (referenced by) on the left, children
     /// (references) on the right, with the focused tag and back/forward history.
-    pub(in crate::app::ui) fn draw_new_tag_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_new_tag_window(&mut self, ctx: &egui::Context) {
         if !self.new_tag_open {
             return;
         }

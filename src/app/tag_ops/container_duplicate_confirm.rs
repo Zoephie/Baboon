@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_container_duplicate_confirm_window(
+    pub(in crate::app) fn draw_container_duplicate_confirm_window(
         &mut self,
         ctx: &egui::Context,
     ) {

@@ -2,8 +2,8 @@
 //! folder, named to load after what it overrides.
 
 use super::*;
-use crate::app::controller::new_container_template_bytes;
-use crate::app::controller::duplicate::resolve_source_uasset;
+use crate::app::tag_ops::new_tag::new_container_template_bytes;
+use crate::app::tag_ops::duplicate::resolve_source_uasset;
 
 impl Baboon {
     /// Bundle every modified Campaign Evolved project tag into one portable `_P`

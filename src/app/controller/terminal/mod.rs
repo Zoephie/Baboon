@@ -2,6 +2,8 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
+use crate::app::tag_ops::TERMINAL_VISIBLE_LINE_TRIM_TARGET;
+use crate::app::tag_ops::TERMINAL_VISIBLE_LINE_LIMIT;
 
 impl Baboon {
     /// Applies `WorkerMessage::TerminalLine` without changing receive-loop ordering.

@@ -398,7 +398,7 @@ fn compat_campaign_identities() {
 
 #[test]
 fn compat_duplicate_ledger() {
-    use crate::app::controller::{CreatedTagLedger, CreatedTagOrigin};
+    use crate::core::created_tags::{CreatedTagLedger, CreatedTagOrigin};
     let ledger_dir = samples().join("ledger");
     let utoc = Path::new(
         r"D:\XboxGames\Halo Campaign Evolved\Content\Meteorite\Content\Paks\~mods\mymod_P.utoc",

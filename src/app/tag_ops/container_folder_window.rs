@@ -9,7 +9,7 @@ impl Baboon {
     /// Deliberately says so: nothing here touches a pak. A folder becomes real
     /// in the container's directory index only once a tag is created, imported
     /// or moved into it, and until then it lives in the workspace.
-    pub(in crate::app::ui) fn draw_container_folder_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_container_folder_window(&mut self, ctx: &egui::Context) {
         if self.container_folder_dialog.is_none() {
             return;
         }

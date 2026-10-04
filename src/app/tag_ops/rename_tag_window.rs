@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
         if self.rename_tag.is_none() {
             return;
         }

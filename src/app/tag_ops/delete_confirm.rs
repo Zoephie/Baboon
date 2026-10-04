@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_delete_confirm_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_delete_confirm_window(&mut self, ctx: &egui::Context) {
         let Some(confirm) = self.delete_confirm.as_ref() else {
             return;
         };

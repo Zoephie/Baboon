@@ -1313,7 +1313,7 @@ impl Baboon {
         // A stashed tag of a group the game ships none of has no donor to point
         // back at, and recovering it must not depend on finding one — otherwise
         // the tag survives the save and vanishes on reopen.
-        let template = match super::controller::new_container_template_for(
+        let template = match crate::app::tag_ops::new_tag::new_container_template_for(
             self.find_container_template_in(kit, overlay.group_tag),
             &group_name,
         ) {

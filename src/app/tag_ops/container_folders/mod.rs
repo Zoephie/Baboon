@@ -4,7 +4,7 @@
 //! itself belongs to `crate::core::source`, and drawing belongs to the browser UI.
 
 use super::*;
-use crate::app::controller::duplicate::validate_leaf_characters;
+use crate::app::tag_ops::duplicate::validate_leaf_characters;
 
 /// Normalise a folder path to the form the pending set and the tree agree on:
 /// forward slashes, no empty segments, no leading or trailing separator.
@@ -137,7 +137,7 @@ impl Baboon {
     }
 
     /// Raise the New Folder dialog for `parent_rel` (`None` = container root).
-    pub(super) fn open_new_container_folder(&mut self, parent_rel: Option<String>) {
+    pub(in crate::app) fn open_new_container_folder(&mut self, parent_rel: Option<String>) {
         let kit = self.kits[self.active].id;
         self.container_folder_dialog = Some(ContainerFolderDialog {
             kit,
@@ -150,7 +150,7 @@ impl Baboon {
     }
 
     /// Raise the Rename Folder dialog for a pending folder.
-    pub(super) fn open_rename_container_folder(&mut self, rel: String) {
+    pub(in crate::app) fn open_rename_container_folder(&mut self, rel: String) {
         let rel = normalize_folder_rel(&rel);
         let (parent_rel, leaf) = match rel.rsplit_once('/') {
             Some((parent, leaf)) => (Some(parent.to_owned()), leaf.to_owned()),
@@ -242,7 +242,7 @@ impl Baboon {
 
     /// Retire a pending folder. Only ever called for one the browser drew as
     /// empty, so nothing beneath it can be stranded.
-    pub(super) fn delete_container_folder(&mut self, rel: String) {
+    pub(in crate::app) fn delete_container_folder(&mut self, rel: String) {
         let rel = normalize_folder_rel(&rel);
         let kit_index = self.active;
         let key = folder_key(&rel);

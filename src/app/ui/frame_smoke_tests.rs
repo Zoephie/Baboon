@@ -903,7 +903,7 @@ fn cases() -> Vec<Case> {
         case(
             "new_tag",
             &["new_tag_open", "new_tag_dialog"],
-            &["ui/dialogs/new_tag.rs"],
+            &["tag_ops/new_tag_window.rs"],
             loose_kit,
             |h| h.app.open_new_tag_dialog(),
             &["New Tag"],
@@ -911,7 +911,7 @@ fn cases() -> Vec<Case> {
         case(
             "delete_confirm_loose",
             &["delete_confirm"],
-            &["ui/dialogs/delete_confirm.rs"],
+            &["tag_ops/delete_confirm.rs"],
             loose_kit,
             |h| {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
@@ -930,7 +930,7 @@ fn cases() -> Vec<Case> {
         case(
             "delete_confirm_container",
             &["delete_confirm"],
-            &["ui/dialogs/delete_confirm.rs"],
+            &["tag_ops/delete_confirm.rs"],
             container_kit,
             |h| {
                 h.app.delete_confirm = Some(DeleteConfirm {
@@ -950,7 +950,7 @@ fn cases() -> Vec<Case> {
         case(
             "rename_tag",
             &["rename_tag"],
-            &["ui/dialogs/rename_tag.rs"],
+            &["tag_ops/rename_tag_window.rs"],
             loose_kit,
             |h| {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
@@ -976,7 +976,7 @@ fn cases() -> Vec<Case> {
         case(
             "duplicate_tag",
             &["rename_tag"],
-            &["ui/dialogs/rename_tag.rs"],
+            &["tag_ops/rename_tag_window.rs"],
             container_kit,
             |h| {
                 h.app.rename_tag = Some(RenameTagState {
@@ -1126,7 +1126,7 @@ fn cases() -> Vec<Case> {
         case(
             "container_duplicate_confirm",
             &["container_duplicate_confirm"],
-            &["ui/dialogs/container_duplicate_confirm.rs"],
+            &["tag_ops/container_duplicate_confirm.rs"],
             container_kit,
             |h| {
                 h.app.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
@@ -1140,7 +1140,7 @@ fn cases() -> Vec<Case> {
         case(
             "container_folder",
             &["container_folder_dialog"],
-            &["ui/dialogs/container_folder.rs"],
+            &["tag_ops/container_folder_window.rs"],
             container_kit,
             |h| {
                 h.app.container_folder_dialog = Some(ContainerFolderDialog {
@@ -1157,7 +1157,7 @@ fn cases() -> Vec<Case> {
         case(
             "loose_folder_rename",
             &["loose_folder_rename"],
-            &["ui/dialogs/loose_folder_rename.rs"],
+            &["tag_ops/loose_folder_rename_window.rs"],
             loose_kit,
             |h| {
                 h.app.loose_folder_rename = Some(LooseFolderRenameState {
@@ -1685,7 +1685,7 @@ fn every_window_has_a_smoke_case() {
     );
     let sources = window_sources();
     assert!(
-        sources.iter().any(|s| s == "ui/dialogs/delete_confirm.rs")
+        sources.iter().any(|s| s == "tag_ops/delete_confirm.rs")
             && sources.iter().any(|s| s == "ui/settings/mod.rs"),
         "the source scan found {sources:?}; it no longer finds windows"
     );

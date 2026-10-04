@@ -1,12 +1,12 @@
 use super::*;
 use crate::app::controller::loading::loaded_source_status;
-use crate::app::controller::affected_move_rewrite_entries;
-use crate::app::controller::bytes_contain_any_ascii_case_insensitive;
-use crate::app::controller::rewrite_reference_needles;
-use crate::app::controller::build_folder_reference_rewrites;
-use crate::app::controller::normalize_container_tag_rel;
-use crate::app::controller::new_container_template_for;
-use crate::app::controller::new_container_package;
+use crate::app::tag_ops::refactor::affected_move_rewrite_entries;
+use crate::app::tag_ops::refactor::bytes_contain_any_ascii_case_insensitive;
+use crate::app::tag_ops::refactor::rewrite_reference_needles;
+use crate::app::tag_ops::refactor::build_folder_reference_rewrites;
+use crate::app::tag_ops::new_tag::normalize_container_tag_rel;
+use crate::app::tag_ops::new_tag::new_container_template_for;
+use crate::app::tag_ops::new_tag::new_container_package;
 
 fn entry(display_path: &str, group_tag: u32) -> TagEntry {
     TagEntry {

@@ -4,7 +4,7 @@
 //! folder move job, run into the folder's own parent with a new leaf.
 
 use super::*;
-use crate::app::controller::duplicate::validate_leaf_characters;
+use crate::app::tag_ops::duplicate::validate_leaf_characters;
 use std::collections::BTreeSet;
 
 /// Validate a new name for a loose folder against its current name and the
@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 /// Tag paths ignore case, so a sibling that differs only in case is a
 /// conflict, and a change of case alone is refused: no reference would change,
 /// and on a case-insensitive file system the folder would collide with itself.
-pub(super) fn validate_loose_folder_rename(
+pub(in crate::app) fn validate_loose_folder_rename(
     raw: &str,
     old_name: &str,
     siblings: &[String],
@@ -53,7 +53,7 @@ fn directory_names(dir: &Path) -> Vec<String> {
 /// A sibling of `path` whose name matches its leaf ignoring case but not
 /// exactly — a conflict for tag paths that `Path::exists` misses on a
 /// case-sensitive file system.
-pub(super) fn sibling_differing_in_case(path: &Path) -> Option<PathBuf> {
+pub(in crate::app) fn sibling_differing_in_case(path: &Path) -> Option<PathBuf> {
     let leaf = path.file_name()?.to_string_lossy().into_owned();
     let parent = path.parent()?;
     directory_names(parent)
@@ -66,7 +66,7 @@ pub(super) fn sibling_differing_in_case(path: &Path) -> Option<PathBuf> {
 ///
 /// `inside` is every tag in the folder. A referrer that is itself inside is
 /// left out: it moves with the folder and is rewritten either way.
-pub(super) fn outside_referrer_keys(
+pub(in crate::app) fn outside_referrer_keys(
     inside: &[TagEntry],
     index: &ReverseDependencyIndex,
     names: &TagNameIndex,
@@ -92,7 +92,7 @@ pub(super) fn outside_referrer_keys(
 impl Baboon {
     /// Open Rename Folder for a loose folder, with what it would change
     /// counted up front.
-    pub(super) fn open_loose_folder_rename(&mut self, rel_path: PathBuf, label: String) {
+    pub(in crate::app) fn open_loose_folder_rename(&mut self, rel_path: PathBuf, label: String) {
         if self.refuse_read_only_edit(self.active) {
             return;
         }

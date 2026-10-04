@@ -217,6 +217,7 @@ fn a_mod_always_gets_the_priority_suffix() {
 }
 
 use super::*;
+use crate::app::controller::saving::register_saved_copy_in_loaded_source;
 
 #[test]
 fn normalize_container_tag_rel_cleans_path() {

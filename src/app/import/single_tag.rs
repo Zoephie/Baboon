@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::app::controller::saving::load_new_tag_groups;
-use crate::app::controller::normalize_container_tag_rel;
+use crate::app::tag_ops::new_tag::normalize_container_tag_rel;
 
 impl Baboon {
     /// Open the "Import tag" dialog: pick a self-describing MCC/Reach tag file,

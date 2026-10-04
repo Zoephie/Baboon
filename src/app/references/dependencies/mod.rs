@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::app::controller::terminal::trim_terminal_lines;
-use crate::app::controller::send_folder_refactor_progress;
+use crate::app::tag_ops::refactor::send_folder_refactor_progress;
 
 impl Baboon {
     pub(in crate::app) fn fix_current_tag_dependencies(&mut self) {

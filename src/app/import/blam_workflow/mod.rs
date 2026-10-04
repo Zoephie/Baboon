@@ -4,7 +4,7 @@
 //! It owns application actions and async coordination; presentation lives in `ui/blam.rs`, folder detection in `app/blam/mod.rs`, and the importers in `blam-tags`.
 
 use super::*;
-use crate::app::controller::register_created_tag_in_source;
+use crate::app::tag_ops::new_tag::register_created_tag_in_source;
 
 /// Everything the worker needs, snapshotted on the UI thread so the job never
 /// reads `Baboon` state.

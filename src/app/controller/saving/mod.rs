@@ -213,7 +213,7 @@ pub(super) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String
         .filter(|extension| !extension.is_empty())
 }
 
-pub(super) fn register_saved_copy_in_loaded_source(
+pub(in crate::app) fn register_saved_copy_in_loaded_source(
     source: &mut LoadedSourceData,
     path: &Path,
 ) -> Result<bool, String> {
@@ -400,7 +400,7 @@ pub(in crate::app) fn new_tag_output_path_from_dialog(
     Ok((output, display))
 }
 
-pub(super) fn lexical_normalize_path(path: &Path) -> PathBuf {
+pub(in crate::app) fn lexical_normalize_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {

@@ -2,8 +2,8 @@
 //! job that holds the container's write lease.
 
 use super::*;
-use crate::app::controller::new_container_template_bytes;
-use crate::app::controller::container_rel_to_package_path;
+use crate::app::tag_ops::new_tag::new_container_template_bytes;
+use crate::app::tag_ops::new_tag::container_rel_to_package_path;
 
 impl Baboon {
     pub(in crate::app) fn current_source_is_container(&self) -> bool {
