@@ -704,7 +704,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "content_explorer",
-            &["references.content_explorer"],
+            &["dialog:ContentExplorer"],
             &["references/explorer/window.rs"],
             memory_kit,
             |h| {
@@ -714,7 +714,7 @@ fn cases() -> Vec<Case> {
                     .unwrap()
                     .entries[0]
                     .clone();
-                h.app.references.content_explorer = Some(ContentExplorer {
+                h.app.dialogs.open(ContentExplorer {
                     kit: active_id(h),
                     focus,
                     parents: Vec::new(),

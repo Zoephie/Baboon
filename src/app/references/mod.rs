@@ -9,12 +9,12 @@ pub(in crate::app) mod dependencies;
 pub(in crate::app) use dependencies::*;
 pub(in crate::app) mod ref_jump;
 pub(in crate::app) mod explorer;
-pub(in crate::app) use explorer::{ExplorerAct, draw_content_explorer_window};
+pub(in crate::app) use explorer::ExplorerAct;
 
-/// References: the content explorer, reference jumps waiting or loading, field
-/// navigation, and a referenced tag waiting to open.
+/// References: a reference jump waiting for its referrer to load, field
+/// navigation, and a referenced tag waiting to open. The Content Explorer and
+/// the query results are dialogs in the host.
 pub(in crate::app) struct ReferencesFeature {
-    pub(in crate::app) content_explorer: Option<ContentExplorer>,
     /// A reference-jump awaiting its referrer tag to finish loading before we
     /// can walk it to locate the exact referencing field. Set from the
     /// "References to X" popup; drained by `apply_field_nav`.

@@ -228,8 +228,8 @@ pub struct Baboon {
     /// the reference picker, TSV paste, block confirmation and clipboard, a
     /// deferred file action and a Campaign Evolved sound reference.
     pub(in crate::app) editor: EditorFeature,
-    /// References: the content explorer, reference jumps waiting or loading,
-    /// field navigation, and a referenced tag waiting to open.
+    /// References: a reference jump waiting for its referrer, field
+    /// navigation, and a referenced tag waiting to open.
     pub(in crate::app) references: ReferencesFeature,
     /// The browser: the keyword chooser and a tag waiting to be revealed.
     pub(in crate::app) browser: BrowserFeature,
@@ -470,7 +470,6 @@ impl Baboon {
             references: ReferencesFeature {
                 pending_ref_jump: None,
                 field_nav: None,
-                content_explorer: None,
                 pending_open: None,
             },
             browser: BrowserFeature {

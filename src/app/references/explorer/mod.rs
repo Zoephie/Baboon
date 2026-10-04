@@ -4,7 +4,7 @@
 use super::*;
 
 pub(in crate::app) mod window;
-pub(in crate::app) use window::{ExplorerAct, draw_content_explorer_window};
+pub(in crate::app) use window::ExplorerAct;
 
 impl Baboon {
 
@@ -23,7 +23,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.model.children_of_entry(key);
-        self.references.content_explorer = Some(ContentExplorer {
+        self.dialogs.open(ContentExplorer {
             kit: self.model.active_kit_id(),
             focus,
             parents,
@@ -43,7 +43,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.model.children_of_entry(&key);
-        if let Some(explorer) = self.references.content_explorer.as_mut() {
+        if let Some(explorer) = self.dialogs.get_mut::<ContentExplorer>() {
             explorer.back.push(explorer.focus.clone());
             explorer.forward.clear();
             explorer.focus = entry;
@@ -55,8 +55,8 @@ impl Baboon {
 
     pub(in crate::app) fn content_explorer_back(&mut self) {
         let Some(prev) = self
-            .references.content_explorer
-            .as_mut()
+            .dialogs
+            .get_mut::<ContentExplorer>()
             .and_then(|explorer| explorer.back.pop())
         else {
             return;
@@ -66,8 +66,8 @@ impl Baboon {
 
     pub(in crate::app) fn content_explorer_forward(&mut self) {
         let Some(next) = self
-            .references.content_explorer
-            .as_mut()
+            .dialogs
+            .get_mut::<ContentExplorer>()
             .and_then(|explorer| explorer.forward.pop())
         else {
             return;
@@ -84,7 +84,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.model.children_of_entry(&key);
-        if let Some(explorer) = self.references.content_explorer.as_mut() {
+        if let Some(explorer) = self.dialogs.get_mut::<ContentExplorer>() {
             let current = std::mem::replace(&mut explorer.focus, entry);
             if going_back {
                 explorer.forward.push(current);

@@ -140,7 +140,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
             && app.dialogs.get::<DeleteConfirm>().is_none()
             && app.dialogs.get::<ExtractTargetPrompt>().is_none()
             && app.dialogs.get::<QueryResultsWindow>().is_none()
-            && app.references.content_explorer.is_none()
+            && app.dialogs.get::<ContentExplorer>().is_none()
             && app.tag_ops.folder_refactor.is_none()
             && app.dialogs.get::<LooseFolderRenameState>().is_none()
             && app.dialogs.get::<TagImportDialog>().is_none()
@@ -561,7 +561,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ExploreReferences(kit.key(MODEL)),
             setup: no_setup,
             check: |app, kit, _| {
-                let explorer = app.references.content_explorer.as_ref().ok_or("no explorer")?;
+                let explorer = app.dialogs.get::<ContentExplorer>().ok_or("no explorer")?;
                 ensure(explorer.focus.key == kit.key(MODEL), "focus")?;
                 ensure(explorer.parents.is_empty() && explorer.children.is_empty(), "empty")?;
                 ensure(explorer.index_unavailable, "index unavailable")
