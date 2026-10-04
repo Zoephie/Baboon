@@ -36,6 +36,10 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::mods::{
+    CampaignProjectSnapshot, ExportedMod, ModExportChange, ModExportDialog, ModExportRow,
+    OverwriteConfirm,
+};
 use crate::app::import::{
     CacheImportDialog, CacheImportTarget, ImportMode, ImportTagDialog, PendingImport, ReplaceChoice,
 };

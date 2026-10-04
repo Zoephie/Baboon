@@ -6,6 +6,7 @@
 //! would fail here too.
 
 use super::*;
+use crate::app::mods::{CampaignProjectSnapshot, CampaignProjectTagKind, campaign_entry_project_parts};
 use std::path::PathBuf;
 
 fn samples() -> PathBuf {

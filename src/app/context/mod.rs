@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::mods::ModsCommand;
 use crate::app::import::ImportCommand;
 use crate::app::references::ReferencesCommand;
 use crate::app::search::SearchCommand;

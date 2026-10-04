@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::mods::{ClearStashConfirm, TagHistory};
 use crate::app::import::{
     BLAM_KEY, BLAM_TITLE, BlamLogKind, FolderConversionReport, ImportAnalysis, ImportSourceFacts,
     NativeTemplateCache, OutsideReference, draw_blam_pane,

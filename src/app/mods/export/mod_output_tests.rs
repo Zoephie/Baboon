@@ -114,7 +114,7 @@ fn a_copy_baboon_authored_exports_as_a_new_package() {
     let package = "/Game/Tags/objects/copy-biped".to_owned();
 
     let (_, _, authored_kind, authored_package) =
-        crate::app::campaign_entry_project_parts_with(&entry, Some(package.clone()))
+        crate::app::mods::campaign_entry_project_parts_with(&entry, Some(package.clone()))
             .expect("a container entry has project parts");
     assert_eq!(authored_kind, CampaignProjectTagKind::New);
     assert_eq!(authored_package.as_deref(), Some(package.as_str()));
@@ -128,7 +128,7 @@ fn a_copy_baboon_authored_exports_as_a_new_package() {
     // The same entry with nothing in the ledger is still what it looks
     // like: an edit to a tag the game ships.
     let (_, _, shipped_kind, shipped_package) =
-        crate::app::campaign_entry_project_parts_with(&entry, None).expect("project parts");
+        crate::app::mods::campaign_entry_project_parts_with(&entry, None).expect("project parts");
     assert_eq!(shipped_kind, CampaignProjectTagKind::Existing);
     assert_eq!(shipped_package, None);
     assert_eq!(

@@ -103,7 +103,7 @@ use references::ReferencesFeature;
 pub(in crate::app) mod import;
 use import::ImportFeature;
 pub(in crate::app) mod mods;
-use mods::*;
+use mods::ModsFeature;
 pub(in crate::app) mod tag_ops;
 use tag_ops::*;
 pub(in crate::app) mod kits;
