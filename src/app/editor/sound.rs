@@ -2642,3 +2642,7 @@ pub(in crate::app) fn draw_material_effects_summary(
 #[cfg(test)]
 #[path = "../tests/sound_players.rs"]
 mod sound_players;
+
+#[cfg(test)]
+#[path = "../tests/sound_synthetic.rs"]
+mod sound_synthetic;
