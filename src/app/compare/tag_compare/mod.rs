@@ -318,7 +318,7 @@ impl Baboon {
         request: u64,
         update: Result<TagCompareGitUpdate, String>,
     ) -> bool {
-        let Some(state) = self.tag_diff.as_mut() else {
+        let Some(state) = self.compare.tag_diff.as_mut() else {
             return false;
         };
         if state.git_pending != Some(request) {
@@ -769,7 +769,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
-        let Some(mut state) = self.tag_diff.take() else {
+        let Some(mut state) = self.compare.tag_diff.take() else {
             return;
         };
         let diff_kit = self.kit_index(state.kit).unwrap_or(self.active);
@@ -1740,7 +1740,7 @@ impl Baboon {
             ctx.request_repaint();
         }
         if open {
-            self.tag_diff = Some(state);
+            self.compare.tag_diff = Some(state);
         }
     }
 }

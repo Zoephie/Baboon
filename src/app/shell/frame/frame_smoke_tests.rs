@@ -670,14 +670,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tag_compare",
-            &["tag_diff"],
+            &["compare.tag_diff"],
             &["compare/tag_compare/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.tag_diff = Some(TagDiffState {
+                h.app.compare.tag_diff = Some(TagDiffState {
                     kit: active_id(h),
                     a_key: fixture::entry_key(SCENARIO),
                     source: TagCompareSource::OpenTag,

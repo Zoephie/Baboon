@@ -11,3 +11,9 @@ pub(in crate::app) mod diff;
 pub(in crate::app) use diff::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
+
+/// Tag comparison: the open Tag Compare.
+pub(in crate::app) struct CompareFeature {
+    /// "Compare Tags" (Tag Diff) window state.
+    pub(in crate::app) tag_diff: Option<TagDiffState>,
+}

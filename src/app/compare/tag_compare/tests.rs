@@ -199,7 +199,7 @@ fn matching_tag_keeps_path_and_type_below_tags_root() {
 #[test]
 fn a_superseded_compare_git_read_is_dropped() {
     let mut app = Baboon::for_test();
-    app.tag_diff = Some(TagDiffState {
+    app.compare.tag_diff = Some(TagDiffState {
         kit: app.kits[0].id,
         a_key: "file:a.weapon".to_owned(),
         source: TagCompareSource::GitHistory,
@@ -229,12 +229,12 @@ fn a_superseded_compare_git_read_is_dropped() {
     };
 
     app.handle_tag_compare_git(1, Ok(page("old")));
-    let state = app.tag_diff.as_ref().unwrap();
+    let state = app.compare.tag_diff.as_ref().unwrap();
     assert!(state.git_history.commits.is_empty(), "superseded: dropped");
     assert_eq!(state.git_pending, Some(2));
 
     app.handle_tag_compare_git(2, Ok(page("new")));
-    let state = app.tag_diff.as_ref().unwrap();
+    let state = app.compare.tag_diff.as_ref().unwrap();
     assert_eq!(state.git_history.commits[0].subject, "new");
     assert_eq!(state.git_pending, None);
 }

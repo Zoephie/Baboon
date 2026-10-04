@@ -210,8 +210,6 @@ pub struct Baboon {
     /// so the focus can only be honoured once none are outstanding.
     restoring_kits: HashSet<KitId>,
     restored_active_kit: Option<KitId>,
-    /// "Compare Tags" (Tag Diff) window state.
-    tag_diff: Option<TagDiffState>,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     status: String,
@@ -280,6 +278,8 @@ pub struct Baboon {
     /// References: the content explorer, reference jumps waiting or loading,
     /// field navigation, and a referenced tag waiting to open.
     pub(in crate::app) references: ReferencesFeature,
+    /// Tag comparison: the open Tag Compare.
+    pub(in crate::app) compare: CompareFeature,
 }
 
 impl Baboon {
@@ -426,7 +426,6 @@ impl Baboon {
             operation_notice: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
-            tag_diff: None,
             keyword_chooser_open: false,
             reveal_target: None,
             status: "Ready".to_owned(),
@@ -587,6 +586,9 @@ impl Baboon {
                 ref_jump_loading: HashSet::new(),
                 content_explorer: None,
                 pending_open: None,
+            },
+            compare: CompareFeature {
+                tag_diff: None,
             },
         }
     }

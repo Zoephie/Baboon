@@ -478,7 +478,7 @@ impl Baboon {
         if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
             close_menu(ui);
             if let Some(key) = self.kits[self.active].selected_key.clone() {
-                self.tag_diff = Some(TagDiffState {
+                self.compare.tag_diff = Some(TagDiffState {
                     kit: self.active_kit_id(),
                     a_key: key,
                     source: TagCompareSource::OpenTag,
