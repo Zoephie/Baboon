@@ -5,13 +5,13 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_import_tag_window(&mut self, ctx: &egui::Context) {
-        if self.import_tag_dialog.is_none() {
+        if self.import.import_tag_dialog.is_none() {
             return;
         }
         // Snapshot fields for the immutable overwrite lookup before borrowing the
         // dialog mutably for rendering (the banner lags edits by one frame).
         let (folder_snapshot, name_snapshot, group_tag) = {
-            let dialog = self.import_tag_dialog.as_ref().unwrap();
+            let dialog = self.import.import_tag_dialog.as_ref().unwrap();
             (
                 dialog.folder_rel.clone(),
                 dialog.name.clone(),
@@ -36,7 +36,7 @@ impl Baboon {
             .open(&mut open)
             .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
-                let dialog = self.import_tag_dialog.as_mut().unwrap();
+                let dialog = self.import.import_tag_dialog.as_mut().unwrap();
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("File").color(subtle_dark()));
@@ -265,7 +265,7 @@ impl Baboon {
         }
         if let Some(source_game) = show_compat {
             let group = self
-                .import_tag_dialog
+                .import.import_tag_dialog
                 .as_ref()
                 .map(|dialog| dialog.group_name.clone())
                 .unwrap_or_default();
@@ -276,7 +276,7 @@ impl Baboon {
             self.help.about_open = true;
         }
         if do_cancel {
-            self.import_tag_dialog = None;
+            self.import.import_tag_dialog = None;
         } else if do_analyze {
             self.analyze_import_conversion();
         } else if do_import {
@@ -285,7 +285,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn draw_import_discard_confirm(&mut self, ctx: &egui::Context) {
-        let Some(pending) = self.import_discard_confirm.as_ref() else {
+        let Some(pending) = self.import.import_discard_confirm.as_ref() else {
             return;
         };
         let label = self.tag_path_label(&pending.target_key);
@@ -313,7 +313,7 @@ impl Baboon {
         if discard {
             self.apply_import_discard();
         } else if cancel {
-            self.import_discard_confirm = None;
+            self.import.import_discard_confirm = None;
         }
     }
 }

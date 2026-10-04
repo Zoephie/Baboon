@@ -533,7 +533,7 @@ impl Baboon {
     /// a folder is the point — so the outcome is a document to read, not a
     /// status-bar line to catch.
     pub(in crate::app) fn draw_cache_import_window(&mut self, ctx: &egui::Context) {
-        if self.cache_import_dialog.is_none() {
+        if self.import.cache_import_dialog.is_none() {
             return;
         }
         let mut open = true;
@@ -545,7 +545,7 @@ impl Baboon {
             .resizable(true)
             .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
-                if let Some(dialog) = self.cache_import_dialog.as_mut() {
+                if let Some(dialog) = self.import.cache_import_dialog.as_mut() {
                     action = draw_cache_import_body(ui, ctx, dialog);
                 }
             });
@@ -554,7 +554,7 @@ impl Baboon {
             Some(CacheImportAction::Start) => self.start_cache_import(ctx.clone(), None),
             Some(CacheImportAction::ImportOutside) => {
                 let picked = self
-                    .cache_import_dialog
+                    .import.cache_import_dialog
                     .as_ref()
                     .map(|dialog| {
                         dialog
@@ -583,22 +583,22 @@ impl Baboon {
             }
             Some(CacheImportAction::ScanConflicts) => self.scan_cache_import_conflicts(ctx.clone()),
             Some(CacheImportAction::Cancel) => {
-                if let Some(dialog) = self.cache_import_dialog.as_ref() {
+                if let Some(dialog) = self.import.cache_import_dialog.as_ref() {
                     dialog.cancel.store(true, Ordering::Relaxed);
                 }
                 self.status = "Stopping the cache import".to_owned();
             }
-            Some(CacheImportAction::Close) => self.cache_import_dialog = None,
+            Some(CacheImportAction::Close) => self.import.cache_import_dialog = None,
             None => {}
         }
         // A run owns its window: closing it would leave a worker writing into a
         // kit with nothing left to report to.
         let running = self
-            .cache_import_dialog
+            .import.cache_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.running);
         if !open && !running {
-            self.cache_import_dialog = None;
+            self.import.cache_import_dialog = None;
         }
     }
 }

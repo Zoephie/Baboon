@@ -185,20 +185,6 @@ pub struct Baboon {
     active: usize,
     /// Monotonic [`KitId`] allocator; ids are never reused.
     next_kit_id: u64,
-    /// Import Tags: pull loose tags from another game's kit into the active
-    /// one. One dialog for both a single tag and a whole folder — which of the
-    /// two it is follows from the path, not from a mode the user has to pick.
-    tag_import_dialog: Option<TagImportDialog>,
-    /// Import Cache Folder: convert a folder of a monolithic cache's big-endian
-    /// tags into an open editing kit, at their own paths, following references.
-    /// Separate from `tag_import_dialog` because almost nothing is shared: there
-    /// is no path to resolve, no game to guess, and no destination to choose.
-    cache_import_dialog: Option<CacheImportDialog>,
-    /// The last import's index of native layout templates, kept for the next
-    /// one. Building it walks the destination kit's whole tag tree — about a
-    /// second for a real kit — and the result depends only on which kit it is,
-    /// so paying that once per session beats paying it once per tag.
-    native_template_cache: Option<NativeTemplateCache>,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.
@@ -223,10 +209,6 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     new_tag_open: bool,
     new_tag_dialog: NewTagDialog,
-    /// Import-a-tag-file dialog (Campaign Evolved), when open.
-    import_tag_dialog: Option<ImportTagDialog>,
-    /// Pending "discard unsaved edits and replace with the imported tag?" prompt.
-    import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
     overwrite_confirm: Option<OverwriteConfirm>,
     /// Mandatory confirmation for an in-place Campaign Evolved duplicate.
@@ -405,6 +387,9 @@ pub struct Baboon {
     /// Help: the About and help windows, tutorials, HaloScript and field docs,
     /// tag compatibility and map names.
     pub(in crate::app) help: HelpFeature,
+    /// Import: the Import Tags and cache import windows, single-tag import and
+    /// its discard prompt, and the template cache conversions share.
+    pub(in crate::app) import: ImportFeature,
 }
 
 impl Baboon {
@@ -540,9 +525,6 @@ impl Baboon {
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
             active: 0,
             next_kit_id: 1,
-            tag_import_dialog: None,
-            cache_import_dialog: None,
-            native_template_cache: None,
             available_update: None,
             last_update_check: None,
             chimp_usmap_path_input: prefs
@@ -561,8 +543,6 @@ impl Baboon {
             settings_tab: SettingsTab::Startup,
             new_tag_open: false,
             new_tag_dialog: NewTagDialog::default(),
-            import_tag_dialog: None,
-            import_discard_confirm: None,
             overwrite_confirm: None,
             container_duplicate_confirm: None,
             container_duplicate_running: HashSet::new(),
@@ -696,6 +676,13 @@ impl Baboon {
                 tag_compat: TagCompatUiState::default(),
                 map_names_game_tab: MapNamesGameTab::HaloCe,
                 def_docs_cache: HashMap::new(),
+            },
+            import: ImportFeature {
+                tag_import_dialog: None,
+                cache_import_dialog: None,
+                native_template_cache: None,
+                import_tag_dialog: None,
+                import_discard_confirm: None,
             },
         }
     }

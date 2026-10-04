@@ -34,14 +34,14 @@ impl Baboon {
     /// slow parts — measuring the source and building the preview — run on
     /// workers, so a path naming a whole kit's tag tree does not stall a frame.
     pub(in crate::app) fn draw_tag_import_window(&mut self, ctx: &egui::Context) {
-        if self.tag_import_dialog.is_none() {
+        if self.import.tag_import_dialog.is_none() {
             return;
         }
         // Resolved before the dialog is borrowed mutably, so the banner lags an
         // edit by one frame. That is the same bargain the Campaign Evolved
         // import dialog makes, and it beats re-statting the disk mid-render.
         let (single_output, folder_output, existing) = {
-            let dialog = self.tag_import_dialog.as_ref().expect("checked above");
+            let dialog = self.import.tag_import_dialog.as_ref().expect("checked above");
             let single = dialog.single_output();
             let folder = dialog.folder_output_root();
             let existing = if dialog.source_is_folder() {
@@ -60,7 +60,7 @@ impl Baboon {
         let mut action = None;
         let running;
         {
-            let dialog = self.tag_import_dialog.as_mut().expect("checked above");
+            let dialog = self.import.tag_import_dialog.as_mut().expect("checked above");
             running = dialog.running;
             let busy = dialog.running || dialog.analyzing;
             egui::Window::new("Import Tags")
@@ -496,7 +496,7 @@ impl Baboon {
             Some(ImportDialogAction::BrowseFile) => self.choose_import_source_file(ctx),
             Some(ImportDialogAction::BrowseFolder) => self.choose_import_source_folder(ctx),
             Some(ImportDialogAction::InvalidateAnalysis) => {
-                if let Some(dialog) = self.tag_import_dialog.as_mut() {
+                if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
                     dialog.draft = None;
                     dialog.draft_stamp = None;
                     dialog.written = None;
@@ -507,7 +507,7 @@ impl Baboon {
             Some(ImportDialogAction::AcceptLosses) => self.accept_import_losses(ctx),
             Some(ImportDialogAction::AcceptHeldBack) => self.accept_held_back_imports(),
             Some(ImportDialogAction::DiscardLossy) => {
-                if let Some(dialog) = self.tag_import_dialog.as_mut() {
+                if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
                     dialog.draft = None;
                     dialog.draft_stamp = None;
                     dialog.pending_losses.clear();
@@ -519,7 +519,7 @@ impl Baboon {
         // A running import owns the dialog: closing it would orphan the progress
         // and the report of a job that is still writing files.
         if !open && !running {
-            self.tag_import_dialog = None;
+            self.import.tag_import_dialog = None;
         }
     }
 }

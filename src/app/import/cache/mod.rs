@@ -214,7 +214,7 @@ impl Baboon {
     /// loaded there is nowhere for the tags to go, and finding that out after
     /// choosing a folder is a worse way to learn it.
     pub(in crate::app) fn open_cache_import_dialog(&mut self, prefix: String) {
-        if self.cache_import_dialog.is_some() {
+        if self.import.cache_import_dialog.is_some() {
             self.status = "A cache import is already open".to_owned();
             return;
         }
@@ -242,7 +242,7 @@ impl Baboon {
                 .to_owned();
             return;
         }
-        self.cache_import_dialog = Some(CacheImportDialog {
+        self.import.cache_import_dialog = Some(CacheImportDialog {
             kit,
             prefix,
             selected,
@@ -273,7 +273,7 @@ impl Baboon {
     /// still reach for others -- the outside-reference question is the same
     /// question whether one tag asked it or a thousand.
     pub(in crate::app) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
-        if self.cache_import_dialog.is_some() {
+        if self.import.cache_import_dialog.is_some() {
             self.status = "A cache import is already open".to_owned();
             return;
         }
@@ -296,7 +296,7 @@ impl Baboon {
                 .to_owned();
             return;
         }
-        self.cache_import_dialog = Some(CacheImportDialog {
+        self.import.cache_import_dialog = Some(CacheImportDialog {
             kit,
             prefix: display_path.clone(),
             selected: 1,
@@ -365,14 +365,14 @@ impl Baboon {
     /// it to bring.
     pub(in crate::app) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
         if let Some(index) = self
-            .cache_import_dialog
+            .import.cache_import_dialog
             .as_ref()
             .and_then(|dialog| self.kit_index(dialog.kit))
             && self.refuse_read_only_edit(index)
         {
             return;
         }
-        let Some(dialog) = self.cache_import_dialog.as_ref() else {
+        let Some(dialog) = self.import.cache_import_dialog.as_ref() else {
             return;
         };
         if dialog.running {
@@ -470,7 +470,7 @@ impl Baboon {
             only: None,
             cancel,
         };
-        if let Some(dialog) = self.cache_import_dialog.as_mut() {
+        if let Some(dialog) = self.import.cache_import_dialog.as_mut() {
             dialog.running = true;
             dialog.report = None;
             dialog.error = None;
@@ -500,7 +500,7 @@ impl Baboon {
         &mut self,
         progress: FolderConversionProgress,
     ) -> bool {
-        if let Some(dialog) = self.cache_import_dialog.as_mut()
+        if let Some(dialog) = self.import.cache_import_dialog.as_mut()
             && dialog.running
         {
             dialog.progress = Some(progress);
@@ -518,7 +518,7 @@ impl Baboon {
     /// source tag, so a tag whose extension turned out to differ is one that
     /// was not at the path the scan checked, and so was never at risk.
     pub(in crate::app) fn scan_cache_import_conflicts(&mut self, ctx: egui::Context) {
-        let Some(dialog) = self.cache_import_dialog.as_ref() else {
+        let Some(dialog) = self.import.cache_import_dialog.as_ref() else {
             return;
         };
         let Some(target) = dialog.target() else {
@@ -559,7 +559,7 @@ impl Baboon {
             kit,
             generation: self.kits[index].generation,
         };
-        if let Some(dialog) = self.cache_import_dialog.as_mut() {
+        if let Some(dialog) = self.import.cache_import_dialog.as_mut() {
             dialog.scanning = true;
             dialog.conflicts_stale = false;
         }
@@ -607,7 +607,7 @@ impl Baboon {
         stamp: KitStamp,
         conflicts: Result<Vec<OutsideReference>, String>,
     ) -> bool {
-        let Some(dialog) = self.cache_import_dialog.as_mut() else {
+        let Some(dialog) = self.import.cache_import_dialog.as_mut() else {
             return false;
         };
         if dialog.kit != stamp.kit {
@@ -644,7 +644,7 @@ impl Baboon {
         if self.resolve_stamp(stamp).is_none() {
             return false;
         }
-        let Some(dialog) = self.cache_import_dialog.as_mut() else {
+        let Some(dialog) = self.import.cache_import_dialog.as_mut() else {
             return false;
         };
         dialog.running = false;

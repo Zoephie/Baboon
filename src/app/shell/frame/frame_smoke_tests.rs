@@ -1000,11 +1000,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "import_tag",
-            &["import_tag_dialog"],
+            &["import.import_tag_dialog"],
             &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
-                h.app.import_tag_dialog = Some(ImportTagDialog {
+                h.app.import.import_tag_dialog = Some(ImportTagDialog {
                     kit: active_id(h),
                     source_path: PathBuf::from("/no/such/smoke.weapon"),
                     folder_rel: "objects/weapons".to_owned(),
@@ -1025,11 +1025,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "import_discard_confirm",
-            &["import_discard_confirm"],
+            &["import.import_discard_confirm"],
             &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
-                h.app.import_discard_confirm = Some(PendingImport {
+                h.app.import.import_discard_confirm = Some(PendingImport {
                     kit: active_id(h),
                     tag: fixture::new_tag_for("haloce_evolved", "weapon"),
                     target_key: ce_key(),
@@ -1039,7 +1039,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tag_import",
-            &["tag_import_dialog"],
+            &["import.tag_import_dialog"],
             &["import/tags_window.rs"],
             loose_kit,
             |h| h.app.open_tag_import_dialog(Some("objects".to_owned())),
@@ -1047,7 +1047,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "cache_import",
-            &["cache_import_dialog"],
+            &["import.cache_import_dialog"],
             &["import/cache_window/mod.rs"],
             loose_kit,
             |h| {
@@ -1057,7 +1057,7 @@ fn cases() -> Vec<Case> {
                     game: GameId::from_id(fixture::GAME).unwrap(),
                     tags_root: loose_root(h),
                 };
-                h.app.cache_import_dialog = Some(CacheImportDialog {
+                h.app.import.cache_import_dialog = Some(CacheImportDialog {
                     kit: active_id(h),
                     prefix: "objects/weapons".to_owned(),
                     selected: 2,
@@ -1391,7 +1391,7 @@ fn cases() -> Vec<Case> {
 const NOT_WINDOWS: &[(&str, &str)] = &[
     ("window_state", "native window geometry tracker"),
     ("native_clock", "the clock of the latest input"),
-    ("native_template_cache", "import cache"),
+    ("import.native_template_cache", "import cache"),
     ("available_update", "data shown in Settings and the status bar"),
     ("last_update_check", "data shown in Settings"),
     ("container_dump_job", "a running job; its progress is in the status bar"),

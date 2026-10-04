@@ -54,7 +54,7 @@ impl Baboon {
             .and_then(|s| s.to_str())
             .unwrap_or("imported")
             .to_owned();
-        self.import_tag_dialog = Some(ImportTagDialog {
+        self.import.import_tag_dialog = Some(ImportTagDialog {
             kit: self.active_kit_id(),
             source_path: picked,
             folder_rel: folder_rel.unwrap_or_default(),
@@ -73,7 +73,7 @@ impl Baboon {
     /// the draft. Nothing is registered until the user confirms, so this is
     /// safe to re-run as they change the profile.
     pub(in crate::app) fn analyze_import_conversion(&mut self) {
-        let Some(dialog) = self.import_tag_dialog.as_mut() else {
+        let Some(dialog) = self.import.import_tag_dialog.as_mut() else {
             return;
         };
         let ImportMode::Convert { source_game, draft } = &mut dialog.mode else {
@@ -123,18 +123,18 @@ impl Baboon {
     pub(in crate::app) fn confirm_import_tag(&mut self) {
         // The import is resolved and registered against the active kit's
         // source, so return to the workspace the dialog was opened for.
-        let Some(kit) = self.import_tag_dialog.as_ref().map(|dialog| dialog.kit) else {
+        let Some(kit) = self.import.import_tag_dialog.as_ref().map(|dialog| dialog.kit) else {
             return;
         };
         if !self.focus_navigation_kit(kit) {
-            self.import_tag_dialog = None;
+            self.import.import_tag_dialog = None;
             self.status = "The workspace this import came from is closed".to_owned();
             return;
         }
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        let Some(dialog) = self.import_tag_dialog.as_mut() else {
+        let Some(dialog) = self.import.import_tag_dialog.as_mut() else {
             return;
         };
         // Schema gate. A file authored for another game has to be converted;
@@ -230,7 +230,7 @@ impl Baboon {
                     .map(|e| e.key.clone())
             });
             let Some(key) = key else {
-                self.import_tag_dialog = None;
+                self.import.import_tag_dialog = None;
                 self.status = "Could not resolve the existing tag to overwrite".to_owned();
                 return;
             };
@@ -241,24 +241,24 @@ impl Baboon {
                 .map(|d| d.dirty.is_set())
                 .unwrap_or(false)
             {
-                self.import_discard_confirm = Some(PendingImport {
+                self.import.import_discard_confirm = Some(PendingImport {
                     kit: self.active_kit_id(),
                     tag,
                     target_key: key,
                 });
-                self.import_tag_dialog = None;
+                self.import.import_tag_dialog = None;
                 return;
             }
             self.apply_import_over_existing(&key, tag);
-            self.import_tag_dialog = None;
+            self.import.import_tag_dialog = None;
         } else {
             match self.add_new_container_tag(&logical, group_tag, &group_name, &extension, tag) {
                 Ok(()) => {
-                    self.import_tag_dialog = None;
+                    self.import.import_tag_dialog = None;
                     self.status = format!("Imported {logical}.{extension} (unsaved)");
                 }
                 Err(error) => {
-                    if let Some(dialog) = self.import_tag_dialog.as_mut() {
+                    if let Some(dialog) = self.import.import_tag_dialog.as_mut() {
                         dialog.error = Some(error);
                     }
                 }
@@ -310,7 +310,7 @@ impl Baboon {
 
     /// Resolve the pending "discard unsaved edits?" import confirmation.
     pub(in crate::app) fn apply_import_discard(&mut self) {
-        let Some(pending) = self.import_discard_confirm.take() else {
+        let Some(pending) = self.import.import_discard_confirm.take() else {
             return;
         };
         if !self.focus_navigation_kit(pending.kit) {
