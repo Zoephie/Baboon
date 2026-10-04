@@ -107,31 +107,28 @@ fn a_gbxmodel_never_redirects_to_a_legacy_dot_model() {
     assert_eq!(owning_model_key(&entries, &render), None);
 }
 
-/// The same parking-order bug the Bitmap Library pins: the grid draws while
-/// the kit's `tag_tree` is moved out, so opening during the walk writes into a
-/// placeholder that is thrown away.
+/// The same ordering the Bitmap Library pins: the grid draws while the kit's
+/// `tag_tree` is moved out, so a cell's open is a command the frame applies
+/// once the tree is back.
 #[test]
 fn opening_a_model_must_wait_until_the_tag_tree_is_back() {
     const KEY: &str = "file:objects/warthog.model";
 
-    let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
-
-    let mut view = KitView::for_test(&kit);
+    let mut app = Baboon::for_test();
+    let kit = app.model.kits[0].id;
     let taken = std::mem::replace(
-        &mut view.tag_tree,
-        egui_tiles::Tree::empty(tag_tree_id(kit.id)),
+        &mut app.views[kit].tag_tree,
+        egui_tiles::Tree::empty(tag_tree_id(kit)),
     );
-    view.model_browser.pending_open = Some(KEY.to_owned());
-    view.tag_tree = taken;
-    if let Some(key) = view.model_browser.pending_open.take() {
-        KitMut::new(&mut kit, &mut view).open_tag_pane(&key);
-    }
+    app.commands.send(BrowserCommand::LibraryCell {
+        kit,
+        library: Library::Models,
+        action: CellAction::Open(KEY.to_owned()),
+    });
+    app.views[kit].tag_tree = taken;
+    app.apply_commands(&egui::Context::default());
 
-    assert_eq!(kit.open_tabs, vec![KEY.to_owned()]);
-    assert!(
-        view.model_browser.pending_open.is_none(),
-        "the request is one-shot; leaving it set reopens the tab every frame"
-    );
+    assert_eq!(app.model.kits[0].open_tabs, vec![KEY.to_owned()]);
 }
 
 /// The session writer decides the Model Library was open by looking for its

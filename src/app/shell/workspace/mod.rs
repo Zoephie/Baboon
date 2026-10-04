@@ -1502,7 +1502,7 @@ impl Baboon {
             &self.kit_tools.editing_kit_validation,
         );
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
-        self.draw_keyword_chooser_window(ctx);
+        draw_keyword_chooser_window(&cx!(self, ctx), &mut self.browser);
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);

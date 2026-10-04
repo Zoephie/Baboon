@@ -70,8 +70,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app
-                .draw_thumbnail_library::<Bitmaps>(ui, &self.ctx, self.kit_index);
+            self.app.refresh_thumbnail_library::<Bitmaps>(self.kit_index, &self.ctx);
+            let app = &mut *self.app;
+            let kit = app.model.kits[self.kit_index].id;
+            draw_thumbnail_library::<Bitmaps>(
+                &cx!(app, &self.ctx),
+                ui,
+                self.kit_index,
+                &mut app.views[kit].bitmap_browser,
+            );
             return egui_tiles::UiResponse::None;
         }
         if key == MODEL_LIBRARY_KEY {
@@ -80,8 +87,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app
-                .draw_thumbnail_library::<Models>(ui, &self.ctx, self.kit_index);
+            self.app.refresh_thumbnail_library::<Models>(self.kit_index, &self.ctx);
+            let app = &mut *self.app;
+            let kit = app.model.kits[self.kit_index].id;
+            draw_thumbnail_library::<Models>(
+                &cx!(app, &self.ctx),
+                ui,
+                self.kit_index,
+                &mut app.views[kit].model_browser,
+            );
             return egui_tiles::UiResponse::None;
         }
         if key == GIT_REVIEW_KEY {
@@ -609,42 +623,6 @@ impl Baboon {
         let pending_browser_action = behavior.pending_browser_action.take();
         self.views[self.model.kits[kit_index].id].tag_tree = tree;
 
-        // A bitmap double-clicked in the Bitmap Library. Applied here, with the
-        // tree back in place: the grid draws while it is moved out, so opening
-        // from inside the walk writes the tab into the discarded placeholder.
-        if let Some(key) = self.views[self.model.kits[kit_index].id].bitmap_browser.pending_open.take() {
-            self.model.active = kit_index;
-            self.select_entry(key, ctx.clone());
-        }
-        // Likewise the extract, which additionally opens a blocking folder
-        // picker — not something to do part-way through drawing the pane that
-        // asked for it. `begin_extract_bitmap` resolves the tag against the
-        // active kit, so that has to be this one first.
-        if let Some(key) = self.views[self.model.kits[kit_index].id]
-            .bitmap_browser
-            .pending_menu_action
-            .take()
-        {
-            self.model.active = kit_index;
-            self.begin_extract_bitmap(key, ctx.clone());
-        }
-        // A model double-clicked in the Model Library opens the `.model` that
-        // owns it — or the render model itself when the kit has none — and the
-        // right-click path opens the clicked tag with no resolution. Parked and
-        // drained for the same reason as the bitmaps above.
-        if let Some(key) = self.views[self.model.kits[kit_index].id].model_browser.pending_open.take() {
-            self.model.active = kit_index;
-            let open = self.model.resolve_model_browser_open(kit_index, &key);
-            self.select_entry(open, ctx.clone());
-        }
-        if let Some(key) = self.views[self.model.kits[kit_index].id]
-            .model_browser
-            .pending_menu_action
-            .take()
-        {
-            self.model.active = kit_index;
-            self.select_entry(key, ctx.clone());
-        }
         // Git Review is another synthetic pane drawn while `tag_tree` is moved
         // out. Defer its double-click open until the real tree is back too.
         if let Some(key) = self.views[self.model.kits[kit_index].id].git_review.pending_open.take() {

@@ -319,6 +319,7 @@ pub(in crate::app) use thumbnail_library::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod keyword_chooser;
+pub(in crate::app) use keyword_chooser::draw_keyword_chooser_window;
 
 /// The browser: the keyword chooser and a tag waiting to be revealed.
 pub(in crate::app) struct BrowserFeature {
@@ -386,6 +387,14 @@ pub(in crate::app) enum BrowserCommand {
         key: String,
         keyword: String,
     },
+    /// List the active kit's tags carrying a keyword.
+    ShowTagsWithKeyword(String),
+    /// What a cell of one of `kit`'s thumbnail libraries asked for.
+    LibraryCell {
+        kit: KitId,
+        library: Library,
+        action: CellAction,
+    },
 }
 
 impl Baboon {
@@ -400,6 +409,30 @@ impl Baboon {
             BrowserCommand::AddKeyword { kit, key, keyword } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.kits[index].keywords.add(&key, &keyword);
+                }
+            }
+            BrowserCommand::ShowTagsWithKeyword(keyword) => self.show_tags_with_keyword(&keyword),
+            BrowserCommand::LibraryCell { kit, library, action } => {
+                let Some(index) = self.model.kit_index(kit) else {
+                    return;
+                };
+                // Each acts on the active kit, so this one first.
+                self.model.active = index;
+                match (library, action) {
+                    (Library::Bitmaps, CellAction::Open(key)) => self.select_entry(key, ctx.clone()),
+                    // Opens a native folder picker, which blocks until it is
+                    // answered: not something to do part-way through a draw.
+                    (Library::Bitmaps, CellAction::MenuAction(key)) => {
+                        self.begin_extract_bitmap(key, ctx.clone())
+                    }
+                    // A model opens the `.model` that owns it, or the render
+                    // model itself when the kit has none; the right-click item
+                    // opens the clicked tag with no resolution.
+                    (Library::Models, CellAction::Open(key)) => {
+                        let open = self.model.resolve_model_browser_open(index, &key);
+                        self.select_entry(open, ctx.clone());
+                    }
+                    (Library::Models, CellAction::MenuAction(key)) => self.select_entry(key, ctx.clone()),
                 }
             }
             BrowserCommand::RemoveKeyword { kit, key, keyword } => {

@@ -226,7 +226,8 @@ fn a_row_that_fits_exactly_counts_as_fitting() {
 /// `tag_tree` out for the duration — so opening a pane from in there writes it
 /// into the placeholder that is thrown away when the real tree goes back. The
 /// tag loaded, which is why the status line said so, and the tab never
-/// appeared. This pins the ordering the fix depends on.
+/// appeared. A cell's open is therefore a command, which runs once drawing is
+/// over and the tree is back.
 #[test]
 fn opening_a_bitmap_must_wait_until_the_tag_tree_is_back() {
     const KEY: &str = "file:bitmaps/field_grass";
@@ -248,25 +249,24 @@ fn opening_a_bitmap_must_wait_until_the_tag_tree_is_back() {
         "a pane opened during the walk cannot survive the tree being restored"
     );
 
-    // The fix: park it during the walk, open it once the tree is back.
-    let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
-    let mut view = KitView::for_test(&kit);
+    // The fix: the cell sends its open during the walk, and the frame applies
+    // it once the tree is back.
+    let mut app = Baboon::for_test();
+    let kit = app.model.kits[0].id;
     let taken = std::mem::replace(
-        &mut view.tag_tree,
-        egui_tiles::Tree::empty(tag_tree_id(kit.id)),
+        &mut app.views[kit].tag_tree,
+        egui_tiles::Tree::empty(tag_tree_id(kit)),
     );
-    view.bitmap_browser.pending_open = Some(KEY.to_owned());
-    view.tag_tree = taken;
-    if let Some(key) = view.bitmap_browser.pending_open.take() {
-        KitMut::new(&mut kit, &mut view).open_tag_pane(&key);
-    }
+    app.commands.send(BrowserCommand::LibraryCell {
+        kit,
+        library: Library::Bitmaps,
+        action: CellAction::Open(KEY.to_owned()),
+    });
+    app.views[kit].tag_tree = taken;
+    app.apply_commands(&egui::Context::default());
 
-    assert_eq!(kit.open_tabs, vec![KEY.to_owned()]);
-    assert_eq!(kit.selected_key.as_deref(), Some(KEY));
-    assert!(
-        view.bitmap_browser.pending_open.is_none(),
-        "the request is one-shot; leaving it set reopens the tab every frame"
-    );
+    assert_eq!(app.model.kits[0].open_tabs, vec![KEY.to_owned()]);
+    assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(KEY));
 }
 
 /// The session writer decides the Bitmap Library was open by looking for its

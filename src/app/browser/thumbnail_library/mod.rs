@@ -162,9 +162,11 @@ pub(in crate::app) trait ThumbnailSource: Sized + 'static {
     const SINGULAR: &'static str;
     /// Prefix of the thumbnail textures' debug names.
     const TEXTURE_PREFIX: &'static str;
-    /// The one item a cell's right-click menu offers. Choosing it parks the
-    /// key in [`ThumbnailLibrary::pending_menu_action`].
+    /// The one item a cell's right-click menu offers. Choosing it sends
+    /// [`CellAction::MenuAction`].
     const MENU_ITEM: &'static str;
+    /// Which library this is, for the commands its cells send.
+    const LIBRARY: Library;
     /// Why a worker sent no thumbnail, when it panicked.
     const CRASHED: &'static str;
 
@@ -211,18 +213,6 @@ pub(in crate::app) struct ThumbnailLibrary<S> {
     /// Set once the "scan the whole kit" request has gone out, so the library
     /// does not ask again every frame it is drawn.
     requested_scan: bool,
-    /// A double-clicked cell waiting to be opened as a tab.
-    ///
-    /// The grid draws inside `tree.ui`, where the kit's `tag_tree` has been
-    /// moved out; opening there writes the tab into a placeholder that is
-    /// discarded. `draw_tag_tiles` takes this once the tree is back.
-    pub(in crate::app) pending_open: Option<String>,
-    /// A cell whose right-click menu item ([`ThumbnailSource::MENU_ITEM`])
-    /// was chosen. Parked for the same reason, and for the Bitmap Library one
-    /// more: its extract opens a native folder picker, which blocks the thread
-    /// until the user answers it. Doing that mid-walk would stall the frame
-    /// with the kit's tag tree still moved out of it.
-    pub(in crate::app) pending_menu_action: Option<String>,
     source: PhantomData<S>,
 }
 
@@ -238,8 +228,6 @@ impl<S> Default for ThumbnailLibrary<S> {
             thumbnails: Arc::default(),
             pending: HashSet::new(),
             requested_scan: false,
-            pending_open: None,
-            pending_menu_action: None,
             source: PhantomData,
         }
     }
@@ -257,352 +245,356 @@ impl<S> ThumbnailLibrary<S> {
 
 /// What a grid cell asked for this frame. Both are parked rather than run on
 /// the spot — see the fields they land in on [`ThumbnailLibrary`].
-enum CellAction {
+/// What a library cell can ask for.
+pub(in crate::app) enum CellAction {
+    /// Open the cell's tag (double-click).
     Open(String),
+    /// The cell's right-click menu item.
     MenuAction(String),
 }
 
-impl Baboon {
-    /// Draw one kit's library pane.
-    pub(in crate::app) fn draw_thumbnail_library<S: ThumbnailSource>(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
-        self.refresh_thumbnail_library::<S>(kit_index, ctx);
+/// The two thumbnail libraries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum Library {
+    Bitmaps,
+    Models,
+}
 
-        let library = S::library(&self.views[self.model.kits[kit_index].id]);
-        let cell = library.cell_size();
-        let total = library.matches.len();
-        let all = library.entries.len();
-        let scanning = self.model.kits[kit_index].scanning_entries;
+/// Draw one kit's library pane.
+/// Its contents are refreshed beforehand, by
+/// [`Baboon::refresh_thumbnail_library`]: that snapshots the kit's tags
+/// and may start a scan.
+pub(in crate::app) fn draw_thumbnail_library<S: ThumbnailSource>(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<S>,
+) {
+    let cell = library.cell_size();
+    let total = library.matches.len();
+    let all = library.entries.len();
+    let scanning = cx.model.kits[kit_index].scanning_entries;
 
-        self.draw_thumbnail_library_toolbar::<S>(ui, kit_index, total, all, scanning);
-        ui.separator();
+    draw_thumbnail_library_toolbar::<S>(ui, library, total, all, scanning);
+    ui.separator();
 
-        if all == 0 {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(if scanning {
-                    S::INDEXING
-                } else {
-                    S::NONE_IN_KIT
-                })
-                .color(subtle_dark()),
-            );
-            return;
-        }
-        if total == 0 {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(format!(
-                    "No {} matches that search. {all} in this workspace.",
-                    S::SINGULAR
-                ))
-                .color(subtle_dark()),
-            );
-            return;
-        }
-
-        self.draw_thumbnail_grid::<S>(ui, ctx, kit_index, cell, total);
-    }
-
-    fn draw_thumbnail_library_toolbar<S: ThumbnailSource>(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        shown: usize,
-        total: usize,
-        scanning: bool,
-    ) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Search").color(subtle_dark()));
-            let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
-            ui.add(
-                egui::TextEdit::singleline(&mut library.filter)
-                    .hint_text(placeholder_text(S::SEARCH_HINT))
-                    .desired_width(240.0),
-            )
-            .on_hover_text(
-                "Space is AND, | is OR, ^foo and foo$ anchor to the start and end of the name — \
-                 the same search the tag browser uses.",
-            );
-            if ui.button("Clear").clicked() {
-                library.filter.clear();
-            }
-
-            ui.separator();
-            ui.label(RichText::new("Size").color(subtle_dark()));
-            let mut cell = library.cell_size();
-            if ui
-                .add(
-                    egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
-                        .show_value(false)
-                        .clamping(egui::SliderClamping::Always),
-                )
-                .changed()
-            {
-                library.cell_size = cell;
-            }
-            if ui.button("Reset").clicked() {
-                library.cell_size = DEFAULT_CELL;
-            }
-
-            ui.separator();
-            let count = if shown == total {
-                format!("{total} {}", S::PLURAL)
+    if all == 0 {
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(if scanning {
+                S::INDEXING
             } else {
-                format!("{shown} of {total} {}", S::PLURAL)
-            };
-            ui.label(RichText::new(count).color(subtle_dark()));
-            if scanning {
-                ui.spinner();
-                ui.label(RichText::new("indexing…").color(subtle_dark()));
-            }
-        });
-    }
-
-    fn draw_thumbnail_grid<S: ThumbnailSource>(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-        cell: f32,
-        total: usize,
-    ) {
-        let row_height = cell + CELL_CAPTION + CELL_GAP;
-        // Reserve the scrollbar before dividing. `available_width` here is the
-        // width *outside* the scroll area, and the bar is taken from the inside
-        // — count the full width and the rightmost column is drawn half off the
-        // edge, which is what a wide window made obvious.
-        let usable = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(cell);
-        let columns = grid_columns(usable, cell);
-        let rows = total.div_ceil(columns);
-
-        // Row virtualisation is what makes this affordable: `show_rows` hands
-        // back only the visible band, so a kit with twenty thousand bitmaps
-        // lays out the thirty on screen and queues jobs for those alone.
-        let mut action: Option<CellAction> = None;
-        let mut wanted: Vec<String> = Vec::new();
-        egui::ScrollArea::vertical()
-            .id_salt((S::ID_SALT, kit_index))
-            .auto_shrink([false, false])
-            .show_rows(ui, row_height, rows, |ui, row_range| {
-                // The gap becomes the only spacing in play, horizontally and
-                // vertically. egui's default `item_spacing` would otherwise be
-                // added between every cell on top of it — the column arithmetic
-                // above would be short by one gap per cell, and each row would
-                // stand taller than the `row_height` `show_rows` is scrolling
-                // by, so the grid would drift out of step with its scrollbar.
-                ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
-                for row in row_range {
-                    ui.horizontal(|ui| {
-                        for column in 0..columns {
-                            let Some(index) = row
-                                .checked_mul(columns)
-                                .and_then(|start| start.checked_add(column))
-                                .filter(|index| *index < total)
-                            else {
-                                break;
-                            };
-                            if let Some(requested) = self.draw_thumbnail_cell::<S>(
-                                ui,
-                                kit_index,
-                                index,
-                                cell,
-                                &mut wanted,
-                            ) {
-                                action = Some(requested);
-                            }
-                        }
-                    });
-                    ui.add_space(CELL_GAP);
-                }
-            });
-
-        // Requested at twice the cell's point size, so the thumbnail still looks
-        // right after the slider grows a little and on a high-DPI display.
-        let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
-        let library = S::library(&self.views[self.model.kits[kit_index].id]);
-        let entries = wanted
-            .into_iter()
-            .filter_map(|key| {
-                library
-                    .entries
-                    .iter()
-                    .find(|entry| entry.key == key)
-                    .cloned()
+                S::NONE_IN_KIT
             })
-            .collect();
-        self.queue_thumbnails::<S>(kit_index, entries, max_edge, ctx);
-        // Parked rather than opened here. This runs inside `tree.ui`, and
-        // `draw_tag_tiles` has moved the kit's `tag_tree` out for the duration —
-        // so `open_tag_pane` would insert the new tab into the placeholder that
-        // is thrown away when the real tree is put back. The tag loaded and no
-        // tab ever appeared. `draw_tag_tiles` drains these after the walk,
-        // which is where every other pane mutation is applied for the same
-        // reason.
-        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
-        match action {
-            Some(CellAction::Open(key)) => library.pending_open = Some(key),
-            Some(CellAction::MenuAction(key)) => library.pending_menu_action = Some(key),
-            None => {}
-        }
+            .color(subtle_dark()),
+        );
+        return;
+    }
+    if total == 0 {
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(format!(
+                "No {} matches that search. {all} in this workspace.",
+                S::SINGULAR
+            ))
+            .color(subtle_dark()),
+        );
+        return;
     }
 
-    /// One grid cell, and whatever the user asked it for.
-    fn draw_thumbnail_cell<S: ThumbnailSource>(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        index: usize,
-        cell: f32,
-        wanted: &mut Vec<String>,
-    ) -> Option<CellAction> {
-        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
-        let entry_index = *library.matches.get(index)?;
-        let entry = library.entries.get(entry_index)?;
-        let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
+    draw_thumbnail_grid::<S>(cx, ui, kit_index, library, cell, total);
+}
 
-        let cached = library
-            .thumbnails
-            .lock()
-            .ok()
-            .and_then(|mut thumbnails| thumbnails.get(&key));
-        // Cached as `None` is a thumbnail that could not be made: it is done,
-        // not loading, so it must not spin (and repaint) for as long as it is
-        // on screen.
-        let failed = matches!(cached, Some(None));
-        let texture = match cached {
-            Some(texture) => texture,
-            None => {
-                // Not made yet. Ask for it, draw the placeholder, and let the
-                // worker's reply repaint the frame.
-                if !library.pending.contains(&key) {
-                    wanted.push(key.clone());
-                }
-                None
-            }
-        };
-
-        let size = Vec2::new(cell, cell + CELL_CAPTION);
-        // `click_and_drag`, so a cell is both a target to open and a source to
-        // drag. The payload is the browser row's own `DraggedTagRef` — the
-        // shader bitmap rows and Foundation reference cells already accept it,
-        // and a shader slot already checks for the `bitm` group — so dragging a
-        // thumbnail onto a reference needs nothing on the drop side.
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-        response.dnd_set_drag_payload(DraggedTagRef {
-            group_tag: entry.group_tag,
-            input: entry_reference_input(entry),
-            rel_path: entry_rel_path(entry),
-            file_path: entry_loose_file(entry),
-        });
-        let (caption, hover_hint) = (S::caption(entry), S::hover_hint(entry));
-        let image_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
-        ui.painter()
-            .rect_filled(image_rect, 0.0, foundation_input());
-        if response.hovered() {
-            ui.painter()
-                .rect_stroke(
-                    image_rect,
-                    0.0,
-                    Stroke::new(1.0_f32, foundation_blue()),
-                    egui::StrokeKind::Middle,
-                );
-        } else {
-            ui.painter()
-                .rect_stroke(
-                    image_rect,
-                    0.0,
-                    Stroke::new(1.0_f32, foundation_input_edge()),
-                    egui::StrokeKind::Middle,
-                );
+fn draw_thumbnail_library_toolbar<S: ThumbnailSource>(
+    ui: &mut Ui,
+    library: &mut ThumbnailLibrary<S>,
+    shown: usize,
+    total: usize,
+    scanning: bool,
+) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Search").color(subtle_dark()));
+        ui.add(
+            egui::TextEdit::singleline(&mut library.filter)
+                .hint_text(placeholder_text(S::SEARCH_HINT))
+                .desired_width(240.0),
+        )
+        .on_hover_text(
+            "Space is AND, | is OR, ^foo and foo$ anchor to the start and end of the name — \
+             the same search the tag browser uses.",
+        );
+        if ui.button("Clear").clicked() {
+            library.filter.clear();
         }
 
-        match texture {
-            Some(texture) => {
-                let drawn = fit_within(texture.size_vec2(), cell - 2.0);
-                let at = egui::Rect::from_center_size(image_rect.center(), drawn);
-                egui::Image::new(&texture).paint_at(ui, at);
-            }
-            None if failed => {
-                ui.painter().text(
-                    image_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "No preview",
-                    FontId::proportional(11.0),
-                    subtle_dark(),
-                );
-            }
-            None => {
-                crate::app::shell::loading::paint_loading_rings(ui, image_rect);
-            }
-        }
-
-        let name = tag_leaf_name(&display_path);
-        ui.painter().text(
-            egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
-            Align2::CENTER_CENTER,
-            truncate_for_cell(&name, cell),
-            FontId::proportional(11.5),
-            text_dark(),
-        );
-        ui.painter().text(
-            egui::Pos2::new(rect.center().x, image_rect.bottom() + 21.0),
-            Align2::CENTER_CENTER,
-            caption,
-            FontId::proportional(10.0),
-            subtle_dark(),
-        );
-        // No trailing space: the row's `item_spacing` puts the gap *between*
-        // cells and none after the last one, which is what the column count
-        // assumes. Adding it here too would overflow the row by one gap per
-        // cell and push the rightmost column off the edge.
-
-        // The name follows the cursor while dragging, as the browser rows do —
-        // the thumbnail is left behind, so without this there is nothing to say
-        // which tag is in flight.
-        if response.dragged()
-            && let Some(pointer) = ui.ctx().pointer_interact_pos()
+        ui.separator();
+        ui.label(RichText::new("Size").color(subtle_dark()));
+        let mut cell = library.cell_size();
+        if ui
+            .add(
+                egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
+                    .show_value(false)
+                    .clamping(egui::SliderClamping::Always),
+            )
+            .changed()
         {
-            egui::Area::new(ui.make_persistent_id((S::ID_SALT, "drag_preview", &key)))
-                .order(egui::Order::Tooltip)
-                // Never in the hit-test: a fast drag can put the pointer
-                // inside the stale preview, which would block the drop target.
-                .interactable(false)
-                .fixed_pos(pointer + Vec2::new(12.0, 12.0))
-                .show(ui.ctx(), |ui| {
-                    ui.label(RichText::new(&name).color(text_dark()));
-                });
+            library.cell_size = cell;
+        }
+        if ui.button("Reset").clicked() {
+            library.cell_size = DEFAULT_CELL;
         }
 
-        // Double-click, not click: a single click on a grid this dense is far
-        // too easy to do by accident, and every open parses a tag and adds a tab.
-        let mut action = response
-            .double_clicked()
-            .then(|| CellAction::Open(key.clone()));
+        ui.separator();
+        let count = if shown == total {
+            format!("{total} {}", S::PLURAL)
+        } else {
+            format!("{shown} of {total} {}", S::PLURAL)
+        };
+        ui.label(RichText::new(count).color(subtle_dark()));
+        if scanning {
+            ui.spinner();
+            ui.label(RichText::new("indexing…").color(subtle_dark()));
+        }
+    });
+}
 
-        // The browser tree's own menu styling, so a right-click here looks like
-        // a right-click anywhere else in Baboon.
-        context_menu(&response, |ui| {
-            style_tag_context_menu(ui);
-            if context_menu_button(ui, S::MENU_ITEM).clicked() {
-                action = Some(CellAction::MenuAction(key.clone()));
-                close_menu(ui);
+fn draw_thumbnail_grid<S: ThumbnailSource>(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<S>,
+    cell: f32,
+    total: usize,
+) {
+    let row_height = cell + CELL_CAPTION + CELL_GAP;
+    // Reserve the scrollbar before dividing. `available_width` here is the
+    // width *outside* the scroll area, and the bar is taken from the inside
+    // — count the full width and the rightmost column is drawn half off the
+    // edge, which is what a wide window made obvious.
+    let usable = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(cell);
+    let columns = grid_columns(usable, cell);
+    let rows = total.div_ceil(columns);
+
+    // Row virtualisation is what makes this affordable: `show_rows` hands
+    // back only the visible band, so a kit with twenty thousand bitmaps
+    // lays out the thirty on screen and queues jobs for those alone.
+    let mut action: Option<CellAction> = None;
+    let mut wanted: Vec<String> = Vec::new();
+    egui::ScrollArea::vertical()
+        .id_salt((S::ID_SALT, kit_index))
+        .auto_shrink([false, false])
+        .show_rows(ui, row_height, rows, |ui, row_range| {
+            // The gap becomes the only spacing in play, horizontally and
+            // vertically. egui's default `item_spacing` would otherwise be
+            // added between every cell on top of it — the column arithmetic
+            // above would be short by one gap per cell, and each row would
+            // stand taller than the `row_height` `show_rows` is scrolling
+            // by, so the grid would drift out of step with its scrollbar.
+            ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
+            for row in row_range {
+                ui.horizontal(|ui| {
+                    for column in 0..columns {
+                        let Some(index) = row
+                            .checked_mul(columns)
+                            .and_then(|start| start.checked_add(column))
+                            .filter(|index| *index < total)
+                        else {
+                            break;
+                        };
+                        if let Some(requested) = draw_thumbnail_cell::<S>(
+                            ui,
+                            library,
+                            index,
+                            cell,
+                            &mut wanted,
+                        ) {
+                            action = Some(requested);
+                        }
+                    }
+                });
+                ui.add_space(CELL_GAP);
             }
         });
 
-        // Suppressed while that menu is open: a tooltip would otherwise sit over
-        // the item the cursor is on. Not `on_hover_text`: an egui tooltip would
-        // block the drag this cell offers (`hover_tooltip_beside_pointer`).
-        if !response.context_menu_opened() {
-            hover_tooltip_beside_pointer(ui, &response, &format!("{display_path}\n\n{hover_hint}"));
+    // Requested at twice the cell's point size, so the thumbnail still looks
+    // right after the slider grows a little and on a high-DPI display.
+    let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
+    let entries = wanted
+        .into_iter()
+        .filter_map(|key| {
+            library
+                .entries
+                .iter()
+                .find(|entry| entry.key == key)
+                .cloned()
+        })
+        .collect();
+    queue_thumbnails::<S>(cx, kit_index, library, entries, max_edge);
+    // Sent rather than opened here. This runs inside `tree.ui`, and
+    // `draw_tag_tiles` has moved the kit's `tag_tree` out for the duration —
+    // so opening a tab here would insert it into the placeholder that is
+    // thrown away when the real tree is put back. A command runs once the
+    // frame's drawing is over, with the tree back in place.
+    if let Some(action) = action {
+        cx.send(BrowserCommand::LibraryCell {
+            kit: cx.model.kits[kit_index].id,
+            library: S::LIBRARY,
+            action,
+        });
+    }
+}
+
+/// One grid cell, and whatever the user asked it for.
+fn draw_thumbnail_cell<S: ThumbnailSource>(
+    ui: &mut Ui,
+    library: &mut ThumbnailLibrary<S>,
+    index: usize,
+    cell: f32,
+    wanted: &mut Vec<String>,
+) -> Option<CellAction> {
+    let entry_index = *library.matches.get(index)?;
+    let entry = library.entries.get(entry_index)?;
+    let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
+
+    let cached = library
+        .thumbnails
+        .lock()
+        .ok()
+        .and_then(|mut thumbnails| thumbnails.get(&key));
+    // Cached as `None` is a thumbnail that could not be made: it is done,
+    // not loading, so it must not spin (and repaint) for as long as it is
+    // on screen.
+    let failed = matches!(cached, Some(None));
+    let texture = match cached {
+        Some(texture) => texture,
+        None => {
+            // Not made yet. Ask for it, draw the placeholder, and let the
+            // worker's reply repaint the frame.
+            if !library.pending.contains(&key) {
+                wanted.push(key.clone());
+            }
+            None
         }
-        action
+    };
+
+    let size = Vec2::new(cell, cell + CELL_CAPTION);
+    // `click_and_drag`, so a cell is both a target to open and a source to
+    // drag. The payload is the browser row's own `DraggedTagRef` — the
+    // shader bitmap rows and Foundation reference cells already accept it,
+    // and a shader slot already checks for the `bitm` group — so dragging a
+    // thumbnail onto a reference needs nothing on the drop side.
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    response.dnd_set_drag_payload(DraggedTagRef {
+        group_tag: entry.group_tag,
+        input: entry_reference_input(entry),
+        rel_path: entry_rel_path(entry),
+        file_path: entry_loose_file(entry),
+    });
+    let (caption, hover_hint) = (S::caption(entry), S::hover_hint(entry));
+    let image_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
+    ui.painter()
+        .rect_filled(image_rect, 0.0, foundation_input());
+    if response.hovered() {
+        ui.painter()
+            .rect_stroke(
+                image_rect,
+                0.0,
+                Stroke::new(1.0_f32, foundation_blue()),
+                egui::StrokeKind::Middle,
+            );
+    } else {
+        ui.painter()
+            .rect_stroke(
+                image_rect,
+                0.0,
+                Stroke::new(1.0_f32, foundation_input_edge()),
+                egui::StrokeKind::Middle,
+            );
     }
 
+    match texture {
+        Some(texture) => {
+            let drawn = fit_within(texture.size_vec2(), cell - 2.0);
+            let at = egui::Rect::from_center_size(image_rect.center(), drawn);
+            egui::Image::new(&texture).paint_at(ui, at);
+        }
+        None if failed => {
+            ui.painter().text(
+                image_rect.center(),
+                Align2::CENTER_CENTER,
+                "No preview",
+                FontId::proportional(11.0),
+                subtle_dark(),
+            );
+        }
+        None => {
+            crate::app::shell::loading::paint_loading_rings(ui, image_rect);
+        }
+    }
+
+    let name = tag_leaf_name(&display_path);
+    ui.painter().text(
+        egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
+        Align2::CENTER_CENTER,
+        truncate_for_cell(&name, cell),
+        FontId::proportional(11.5),
+        text_dark(),
+    );
+    ui.painter().text(
+        egui::Pos2::new(rect.center().x, image_rect.bottom() + 21.0),
+        Align2::CENTER_CENTER,
+        caption,
+        FontId::proportional(10.0),
+        subtle_dark(),
+    );
+    // No trailing space: the row's `item_spacing` puts the gap *between*
+    // cells and none after the last one, which is what the column count
+    // assumes. Adding it here too would overflow the row by one gap per
+    // cell and push the rightmost column off the edge.
+
+    // The name follows the cursor while dragging, as the browser rows do —
+    // the thumbnail is left behind, so without this there is nothing to say
+    // which tag is in flight.
+    if response.dragged()
+        && let Some(pointer) = ui.ctx().pointer_interact_pos()
+    {
+        egui::Area::new(ui.make_persistent_id((S::ID_SALT, "drag_preview", &key)))
+            .order(egui::Order::Tooltip)
+            // Never in the hit-test: a fast drag can put the pointer
+            // inside the stale preview, which would block the drop target.
+            .interactable(false)
+            .fixed_pos(pointer + Vec2::new(12.0, 12.0))
+            .show(ui.ctx(), |ui| {
+                ui.label(RichText::new(&name).color(text_dark()));
+            });
+    }
+
+    // Double-click, not click: a single click on a grid this dense is far
+    // too easy to do by accident, and every open parses a tag and adds a tab.
+    let mut action = response
+        .double_clicked()
+        .then(|| CellAction::Open(key.clone()));
+
+    // The browser tree's own menu styling, so a right-click here looks like
+    // a right-click anywhere else in Baboon.
+    context_menu(&response, |ui| {
+        style_tag_context_menu(ui);
+        if context_menu_button(ui, S::MENU_ITEM).clicked() {
+            action = Some(CellAction::MenuAction(key.clone()));
+            close_menu(ui);
+        }
+    });
+
+    // Suppressed while that menu is open: a tooltip would otherwise sit over
+    // the item the cursor is on. Not `on_hover_text`: an egui tooltip would
+    // block the drag this cell offers (`hover_tooltip_beside_pointer`).
+    if !response.context_menu_opened() {
+        hover_tooltip_beside_pointer(ui, &response, &format!("{display_path}\n\n{hover_hint}"));
+    }
+    action
+}
+
+impl Baboon {
     /// Snapshot the kit's listed tags and recompute the filter, both only when
     /// something they depend on has actually changed.
     pub(in crate::app) fn refresh_thumbnail_library<S: ThumbnailSource>(
@@ -665,62 +657,6 @@ impl Baboon {
         }
     }
 
-    /// Start thumbnail jobs for `entries` that have none, up to the in-flight
-    /// bound.
-    pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
-        &mut self,
-        kit_index: usize,
-        entries: Vec<TagEntry>,
-        max_edge: u32,
-        ctx: &egui::Context,
-    ) {
-        if entries.is_empty() {
-            return;
-        }
-        let Some(source) = self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .map(|source| source.source.clone())
-        else {
-            return;
-        };
-        let stamp = KitStamp {
-            kit: self.model.kits[kit_index].id,
-            generation: self.model.kits[kit_index].generation,
-        };
-
-        for entry in entries {
-            let key = entry.key.clone();
-            let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
-            let cached = library
-                .thumbnails
-                .lock()
-                .is_ok_and(|thumbnails| thumbnails.contains(&key));
-            if cached {
-                continue;
-            }
-            if library.pending.len() >= MAX_DECODES_IN_FLIGHT {
-                break;
-            }
-            if !library.pending.insert(key.clone()) {
-                continue;
-            }
-
-            // Through `spawn_worker` because tags have panicked the bitmap
-            // decoders and the geometry parser before: a thread that panics
-            // never sends, so `pending` would keep its key and one of the four
-            // slots would be gone for good. Four such tags stopped the library
-            // and every hover preview.
-            let source = source.clone();
-            let panic_key = key.clone();
-            spawn_worker(
-                &self.tx,
-                ctx,
-                move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
-                move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
-            );
-        }
-    }
 
     pub(in crate::app) fn handle_thumbnail_ready<S: ThumbnailSource>(
         &mut self,
@@ -764,3 +700,57 @@ impl Baboon {
 
 #[cfg(test)]
 mod tests;
+
+/// Start thumbnail jobs for `entries` that have none, up to the in-flight
+/// bound.
+pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
+    cx: &Ctx,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<S>,
+    entries: Vec<TagEntry>,
+    max_edge: u32,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    let Some(source) = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .map(|source| source.source.clone())
+    else {
+        return;
+    };
+    let stamp = KitStamp {
+        kit: cx.model.kits[kit_index].id,
+        generation: cx.model.kits[kit_index].generation,
+    };
+
+    for entry in entries {
+        let key = entry.key.clone();
+        let cached = library
+            .thumbnails
+            .lock()
+            .is_ok_and(|thumbnails| thumbnails.contains(&key));
+        if cached {
+            continue;
+        }
+        if library.pending.len() >= MAX_DECODES_IN_FLIGHT {
+            break;
+        }
+        if !library.pending.insert(key.clone()) {
+            continue;
+        }
+
+        // Through `spawn_worker` because tags have panicked the bitmap
+        // decoders and the geometry parser before: a thread that panics
+        // never sends, so `pending` would keep its key and one of the four
+        // slots would be gone for good. Four such tags stopped the library
+        // and every hover preview.
+        let source = source.clone();
+        let panic_key = key.clone();
+        cx.spawn(
+            move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
+            move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
+        );
+    }
+}

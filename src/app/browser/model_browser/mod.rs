@@ -246,6 +246,7 @@ impl ThumbnailSource for Models {
     const TEXTURE_PREFIX: &'static str = "model_thumb";
     /// The render model tag itself, with no owner resolution.
     const MENU_ITEM: &'static str = "Open render model tag";
+    const LIBRARY: Library = Library::Models;
     const CRASHED: &'static str = "render model crashed while parsing";
 
     fn library(view: &KitView) -> &ThumbnailLibrary<Self> {

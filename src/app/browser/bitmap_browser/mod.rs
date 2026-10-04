@@ -209,6 +209,7 @@ impl ThumbnailSource for Bitmaps {
     const SINGULAR: &'static str = "bitmap";
     const TEXTURE_PREFIX: &'static str = "bitmap_thumb";
     const MENU_ITEM: &'static str = "Extract bitmap images...";
+    const LIBRARY: Library = Library::Bitmaps;
     const CRASHED: &'static str = "bitmap decoder crashed";
 
     fn library(view: &KitView) -> &ThumbnailLibrary<Self> {
@@ -275,7 +276,14 @@ impl Baboon {
             .lock()
             .map(|mut requests| std::mem::take(&mut *requests))
             .unwrap_or_default();
-        self.queue_thumbnails::<Bitmaps>(kit_index, entries, 256, ctx);
+        let kit = self.model.kits[kit_index].id;
+        queue_thumbnails::<Bitmaps>(
+            &cx!(self, ctx),
+            kit_index,
+            &mut self.views[kit].bitmap_browser,
+            entries,
+            256,
+        );
     }
 }
 

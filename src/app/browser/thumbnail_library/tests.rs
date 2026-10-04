@@ -106,7 +106,14 @@ fn draws_and_queues_its_own<S: ThumbnailSource>(expected_suffix: &str) {
     };
     let _ = crate::app::run_ui_test(&ctx, input, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            app.draw_thumbnail_library::<S>(ui, &ctx, 0);
+            app.refresh_thumbnail_library::<S>(0, &ctx);
+            let kit = app.model.kits[0].id;
+            draw_thumbnail_library::<S>(
+                &cx!(app, &ctx),
+                ui,
+                0,
+                S::library_mut(&mut app.views[kit]),
+            );
         });
     });
     let pending = &S::library(&app.views[app.model.kits[0].id]).pending;
@@ -157,7 +164,14 @@ fn repaint_delay_with_thumbnails(failed: bool) -> std::time::Duration {
         };
         let output = crate::app::run_ui_test(&ctx, input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                app.draw_thumbnail_library::<Bitmaps>(ui, &ctx, 0);
+                app.refresh_thumbnail_library::<Bitmaps>(0, &ctx);
+                let kit = app.model.kits[0].id;
+                draw_thumbnail_library::<Bitmaps>(
+                    &cx!(app, &ctx),
+                    ui,
+                    0,
+                    Bitmaps::library_mut(&mut app.views[kit]),
+                );
             });
         });
         delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;

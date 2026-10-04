@@ -3,49 +3,48 @@
 
 use super::*;
 
-impl Baboon {
-    pub(in crate::app) fn draw_keyword_chooser_window(&mut self, ctx: &egui::Context) {
-        if !self.browser.keyword_chooser_open {
-            return;
-        }
-        let mut open = true;
-        let mut chosen: Option<String> = None;
-        let all = self.model.kits[self.model.active].keywords.all_keywords();
-        egui::Window::new("Keywords")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("keyword_chooser"))
-            .open(&mut open)
-            .default_width(window_width(ctx, 280.0))
-            .show(ctx, |ui| {
-                if all.is_empty() {
-                    ui.label(
-                        RichText::new("No keywords yet — add them on a tag's Keywords bar.")
-                            .color(subtle_dark()),
-                    );
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(420.0)
-                    .show(ui, |ui| {
-                        for (keyword, count) in &all {
-                            if ui
-                                .add(
-                                    egui::Label::new(
-                                        RichText::new(format!("{keyword}  ({count})"))
-                                            .color(text_dark()),
-                                    )
-                                    .sense(Sense::click()),
-                                )
-                                .on_hover_text("Show tags with this keyword")
-                                .clicked()
-                            {
-                                chosen = Some(keyword.clone());
-                            }
-                        }
-                    });
-            });
-        if let Some(keyword) = chosen {
-            self.show_tags_with_keyword(&keyword);
-        }
-        self.browser.keyword_chooser_open = open;
+pub(in crate::app) fn draw_keyword_chooser_window(cx: &Ctx, browser: &mut BrowserFeature) {
+    let ctx = cx.egui;
+    if !browser.keyword_chooser_open {
+        return;
     }
+    let mut open = true;
+    let mut chosen: Option<String> = None;
+    let all = cx.model.kits[cx.model.active].keywords.all_keywords();
+    egui::Window::new("Keywords")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("keyword_chooser"))
+        .open(&mut open)
+        .default_width(window_width(ctx, 280.0))
+        .show(ctx, |ui| {
+            if all.is_empty() {
+                ui.label(
+                    RichText::new("No keywords yet — add them on a tag's Keywords bar.")
+                        .color(subtle_dark()),
+                );
+            }
+            egui::ScrollArea::vertical()
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    for (keyword, count) in &all {
+                        if ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(format!("{keyword}  ({count})"))
+                                        .color(text_dark()),
+                                )
+                                .sense(Sense::click()),
+                            )
+                            .on_hover_text("Show tags with this keyword")
+                            .clicked()
+                        {
+                            chosen = Some(keyword.clone());
+                        }
+                    }
+                });
+        });
+    if let Some(keyword) = chosen {
+        cx.send(BrowserCommand::ShowTagsWithKeyword(keyword));
+    }
+    browser.keyword_chooser_open = open;
 }
