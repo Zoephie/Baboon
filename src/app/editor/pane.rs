@@ -2,14 +2,14 @@
 //! It owns one document's presentation and deferred-op application; layout of panes and source I/O belong elsewhere.
 
 use super::*;
-use crate::app::ui::PANE_HEADER_ACTION_GAP;
-use crate::app::ui::pane_header_breadcrumbs;
-use crate::app::ui::PANE_HEADER_ICON_TEXT_GAP;
-use crate::app::ui::pane_header_path_parts;
-use crate::app::ui::PANE_HEADER_ICON_SIZE;
-use crate::app::ui::pane_header_inline_left_width;
-use crate::app::ui::PANE_HEADER_COMMON_ACTIONS_WIDTH;
-use crate::app::ui::PANE_HEADER_SECTION_GAP;
+use crate::app::shell::frame::PANE_HEADER_ACTION_GAP;
+use crate::app::shell::frame::pane_header_breadcrumbs;
+use crate::app::shell::frame::PANE_HEADER_ICON_TEXT_GAP;
+use crate::app::shell::frame::pane_header_path_parts;
+use crate::app::shell::frame::PANE_HEADER_ICON_SIZE;
+use crate::app::shell::frame::pane_header_inline_left_width;
+use crate::app::shell::frame::PANE_HEADER_COMMON_ACTIONS_WIDTH;
+use crate::app::shell::frame::PANE_HEADER_SECTION_GAP;
 
 const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;

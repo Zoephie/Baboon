@@ -3,6 +3,8 @@
 
 use super::recents::{RecentAction, draw_recent_folders_menu};
 use super::*;
+use crate::app::shell::frame::tint_toward;
+use crate::app::shell::frame::wheel_scroll_tab_bar;
 
 /// Which loader the "+" menu on the kit tab bar should start.
 #[derive(Clone, Copy)]
@@ -244,7 +246,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
 impl Baboon {
     /// Draw every open kit as a tiled workspace. Dragging a game tab against a
     /// pane edge splits the window between two games.
-    pub(super) fn draw_kit_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_kit_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         self.sync_kit_tree();
         // Nothing to tab between: draw the welcome screen directly rather than
         // wrapping it in a tree whose tab bar would be an empty strip. A

@@ -87,7 +87,7 @@ impl Counters {
         crate::app::browser::TREE_ROWS_LAID_OUT.with(|c| c.set(0));
         crate::app::editor::fields::FUNCTION_PREVIEWS_BUILT.with(|c| c.set(0));
         crate::app::editor::fields::DROPDOWN_LABELS_BUILT.with(|c| c.set(0));
-        super::shell::terminal_output_tests::LINES_BUILT.with(|c| c.set(0));
+        crate::app::shell::workspace::terminal_output_tests::LINES_BUILT.with(|c| c.set(0));
         crate::app::editor::material::SHADER_MODELS_BUILT.with(|c| c.set(0));
     }
 
@@ -98,7 +98,7 @@ impl Counters {
                 .with(std::cell::Cell::get),
             dropdown_labels: crate::app::editor::fields::DROPDOWN_LABELS_BUILT
                 .with(std::cell::Cell::get),
-            terminal_lines: super::shell::terminal_output_tests::LINES_BUILT
+            terminal_lines: crate::app::shell::workspace::terminal_output_tests::LINES_BUILT
                 .with(std::cell::Cell::get),
             shader_models: crate::app::editor::material::SHADER_MODELS_BUILT.with(std::cell::Cell::get),
         }
@@ -298,12 +298,12 @@ pub(super) mod fixture {
     };
     use blam_tags::{Enum, TagFieldData, TagReferenceData, TagStructMut};
 
-    pub(in crate::app::ui) const GAME: &str = "halo3_mcc";
+    pub(in crate::app) const GAME: &str = "halo3_mcc";
 
     /// `folders` × `subfolders` × `tags` loose-file entries, as
     /// `folder_NN/sub_NN/tag_NNN.biped`. The defaults (40 × 10 × 150) are
     /// the 60,000 tags the browser virtualization tests use.
-    pub(in crate::app::ui) fn synthetic_entries(
+    pub(in crate::app) fn synthetic_entries(
         folders: usize,
         subfolders: usize,
         tags: usize,
@@ -326,12 +326,12 @@ pub(super) mod fixture {
         entries
     }
 
-    pub(in crate::app::ui) fn entry_key(display_path: &str) -> String {
+    pub(in crate::app) fn entry_key(display_path: &str) -> String {
         format!("file:{display_path}")
     }
 
     /// The browser entry for a document built in memory.
-    pub(in crate::app::ui) fn document_entry(display_path: &str, tag: &TagFile) -> TagEntry {
+    pub(in crate::app) fn document_entry(display_path: &str, tag: &TagFile) -> TagEntry {
         TagEntry {
             key: entry_key(display_path),
             display_path: display_path.to_owned(),
@@ -347,11 +347,11 @@ pub(super) mod fixture {
     /// so the browser draws the full (non-lazy) tree and nothing is read
     /// off disk. This is the tree container and monolithic sources draw,
     /// which are the ones that reach tens of thousands of tags.
-    pub(in crate::app::ui) fn install_kit(app: &mut Baboon, entries: Vec<TagEntry>) {
+    pub(in crate::app) fn install_kit(app: &mut Baboon, entries: Vec<TagEntry>) {
         install_kit_for_game(app, entries, GAME);
     }
 
-    pub(in crate::app::ui) fn install_kit_for_game(
+    pub(in crate::app) fn install_kit_for_game(
         app: &mut Baboon,
         entries: Vec<TagEntry>,
         game: &str,
@@ -379,7 +379,7 @@ pub(super) mod fixture {
 
     /// Open `tag` in a tab, as if it had just finished loading. Its entry
     /// must already be in the kit (see [`document_entry`]).
-    pub(in crate::app::ui) fn open_document(
+    pub(in crate::app) fn open_document(
         app: &mut Baboon,
         display_path: &str,
         tag: TagFile,
@@ -392,23 +392,23 @@ pub(super) mod fixture {
     }
 
     /// The tag pane's "Expand all" for `key`, applied on its next draw.
-    pub(in crate::app::ui) fn expand_all(app: &mut Baboon, key: &str) {
+    pub(in crate::app) fn expand_all(app: &mut Baboon, key: &str) {
         app.kits[app.active]
             .pending_expand
             .insert(key.to_owned(), true);
     }
 
     /// The browser search box's contents, as if typed.
-    pub(in crate::app::ui) fn set_filter(app: &mut Baboon, text: &str) {
+    pub(in crate::app) fn set_filter(app: &mut Baboon, text: &str) {
         app.kits[app.active].filter = text.to_owned();
     }
 
     /// "Reveal in browser": opens the tag's folders and scrolls to it.
-    pub(in crate::app::ui) fn reveal(app: &mut Baboon, key: &str) {
+    pub(in crate::app) fn reveal(app: &mut Baboon, key: &str) {
         app.reveal_in_browser(key);
     }
 
-    pub(in crate::app::ui) fn open_terminal(
+    pub(in crate::app) fn open_terminal(
         app: &mut Baboon,
         lines: impl IntoIterator<Item = String>,
     ) {
@@ -419,7 +419,7 @@ pub(super) mod fixture {
 
     /// One line of tool output arriving, with the app's own cap and
     /// autoscroll (see `push_terminal_line`).
-    pub(in crate::app::ui) fn push_terminal_line(app: &mut Baboon, line: String) {
+    pub(in crate::app) fn push_terminal_line(app: &mut Baboon, line: String) {
         app.terminal.lines.push(TerminalLineEntry::new(line));
         if app.terminal.lines.len() > 20_000 {
             let remove = app.terminal.lines.len() - 18_000;
@@ -428,11 +428,11 @@ pub(super) mod fixture {
         app.terminal.scroll_to_bottom = true;
     }
 
-    pub(in crate::app::ui) fn last_terminal_line(app: &Baboon) -> Option<String> {
+    pub(in crate::app) fn last_terminal_line(app: &Baboon) -> Option<String> {
         app.terminal.lines.last().map(|line| line.text.clone())
     }
 
-    pub(in crate::app::ui) fn terminal_line(index: usize) -> String {
+    pub(in crate::app) fn terminal_line(index: usize) -> String {
         format!(
             "{index}: tool.exe: importing C:\\Halo\\tags\\objects\\weapons\\rifle_{index}\\\
              render\\rifle_{index}.render_model from data\\objects\\weapons ... done"
@@ -440,11 +440,11 @@ pub(super) mod fixture {
     }
 
     /// A new tag of `group` from this repository's definitions.
-    pub(in crate::app::ui) fn new_tag(group: &str) -> TagFile {
+    pub(in crate::app) fn new_tag(group: &str) -> TagFile {
         new_tag_for(GAME, group)
     }
 
-    pub(in crate::app::ui) fn new_tag_for(game: &str, group: &str) -> TagFile {
+    pub(in crate::app) fn new_tag_for(game: &str, group: &str) -> TagFile {
         TagFile::new(
             locate_definitions_root()
                 .join(game)
@@ -458,7 +458,7 @@ pub(super) mod fixture {
     /// compression, big-endian; mono; 22 kHz): a sine sweep, so the
     /// waveform has shape. Inline samples are what CE plays from, so the
     /// player and its waveform work with no sound bank or audio files.
-    pub(in crate::app::ui) fn synthetic_ce_sound(permutations: usize, seconds: f32) -> TagFile {
+    pub(in crate::app) fn synthetic_ce_sound(permutations: usize, seconds: f32) -> TagFile {
         let mut tag = new_tag_for("haloce_mcc", "sound");
         let frames = (22_050.0 * seconds) as usize;
         let mut root = tag.root_mut();
@@ -496,7 +496,7 @@ pub(super) mod fixture {
 
     /// Give every block in `tag_struct` `counts[0]` elements, and every
     /// block in each block's first element `counts[1]`, and so on down.
-    pub(in crate::app::ui) fn populate_blocks(
+    pub(in crate::app) fn populate_blocks(
         tag_struct: &mut TagStructMut<'_>,
         counts: &[usize],
     ) -> usize {
@@ -532,7 +532,7 @@ pub(super) mod fixture {
     /// A scenario whose every top-level block holds `counts[0]` elements and
     /// so on down (see [`populate_blocks`]). Returns it with its element
     /// count.
-    pub(in crate::app::ui) fn large_scenario(counts: &[usize]) -> (TagFile, usize) {
+    pub(in crate::app) fn large_scenario(counts: &[usize]) -> (TagFile, usize) {
         let mut tag = new_tag("scenario");
         let added = populate_blocks(&mut tag.root_mut(), counts);
         (tag, added)
@@ -544,7 +544,7 @@ pub(super) mod fixture {
     /// the editor finds them once loaded — so nothing is read off disk.
     /// Returns the shader; [`install_render_method`] must run after the kit
     /// is installed.
-    pub(in crate::app::ui) fn synthetic_shader(categories: usize) -> TagFile {
+    pub(in crate::app) fn synthetic_shader(categories: usize) -> TagFile {
         let mut tag = new_tag("shader");
         {
             let mut root = tag.root_mut();
@@ -568,7 +568,7 @@ pub(super) mod fixture {
         tag
     }
 
-    pub(in crate::app::ui) fn install_render_method(
+    pub(in crate::app) fn install_render_method(
         app: &mut Baboon,
         shader: &TagFile,
         categories: usize,

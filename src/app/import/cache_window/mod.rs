@@ -2,7 +2,6 @@
 //! It owns presentation and action collection; the conversion run and its report belong to the controller.
 
 use super::*;
-use crate::app::ui::dialogs::draw_folder_import_report;
 
 /// What the Import Cache Folder window asks for, collected during the render
 /// pass and applied after it.

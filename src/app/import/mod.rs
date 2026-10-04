@@ -21,3 +21,5 @@ pub(in crate::app) mod single_tag;
 
 #[cfg(test)]
 mod campaign_import_gate_tests;
+pub(in crate::app) mod reports;
+pub(in crate::app) use reports::*;

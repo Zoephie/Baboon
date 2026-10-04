@@ -2,6 +2,9 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use crate::app::shell::frame::draw_kit_banner_tile;
+use crate::app::shell::frame::recheck_cached;
+use crate::app::shell::frame::editing_kit_title_text;
 
 #[cfg(test)]
 mod editing_kit_card_tests;
@@ -694,7 +697,7 @@ fn settings_window_body(
 }
 
 impl Baboon {
-    pub(super) fn draw_settings_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_settings_window(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;
         }
@@ -727,7 +730,7 @@ impl Baboon {
         self.draw_custom_editing_kit_removal_dialog(ctx);
     }
 
-    pub(super) fn set_editing_kit_path_input(
+    pub(in crate::app) fn set_editing_kit_path_input(
         &mut self,
         shortcut: EditingKitShortcut,
         input: String,
@@ -749,7 +752,7 @@ impl Baboon {
         self.refresh_builtin_editing_kit_validation(shortcut);
     }
 
-    pub(super) fn draw_settings_startup_tab(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_settings_startup_tab(&mut self, ui: &mut Ui) {
         ui.label(
             RichText::new("When reopening Baboon with a previous session:").color(text_dark()),
         );
@@ -908,7 +911,7 @@ impl Baboon {
     /// Radio rows for which build track update checks follow, plus whether the
     /// check runs at startup.
     /// Shared by Settings and the first-run wizard so the two cannot drift.
-    pub(super) fn draw_update_channel_picker(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_update_channel_picker(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("Check for updates on").color(text_dark()));
         for option in UpdateChannel::ALL {
             if ui
@@ -951,7 +954,7 @@ impl Baboon {
 
     /// Radio row for how nested containers in the tag editor start out.
     /// Shared by Settings and the first-run wizard so the two cannot drift.
-    pub(super) fn draw_nested_default_picker(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_nested_default_picker(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
         ui.horizontal(|ui| {
             for option in NestedDefault::ALL {
@@ -969,7 +972,7 @@ impl Baboon {
         );
     }
 
-    pub(super) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {
         ui.checkbox(
             &mut self.prefs.double_click_to_open_tags,
             "Double-click to open tags",
@@ -984,7 +987,7 @@ impl Baboon {
         self.draw_nested_default_picker(ui);
     }
 
-    pub(super) fn draw_settings_editing_kits_tab(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_settings_editing_kits_tab(&mut self, ui: &mut Ui) {
         ui.label(
             RichText::new(
                 "Add editing kits for quick loading, or auto-detect supported Steam installations.",
@@ -1355,7 +1358,7 @@ impl Baboon {
         self.status = format!("Removed editing kit {}", removal.name);
     }
 
-    pub(super) fn draw_settings_appearance_tab(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_settings_appearance_tab(&mut self, ui: &mut Ui) {
         ui.checkbox(&mut self.prefs.dark_mode, "Dark mode");
         ui.checkbox(&mut self.prefs.angles_in_degrees, "Angles in degrees")
             .on_hover_text(
@@ -1415,7 +1418,7 @@ impl Baboon {
         );
     }
 
-    pub(super) fn draw_settings_tools_tab(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_settings_tools_tab(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("Blender").color(text_dark()).strong());
         ui.add_space(4.0);
         ui.horizontal(|ui| {

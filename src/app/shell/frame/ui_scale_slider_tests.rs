@@ -35,7 +35,7 @@ fn frame(
                 let response = ui
                     .add(egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false));
                 rect = response.rect;
-                if crate::app::ui::first_run::commit_ui_scale_now(&response, *pending, *live) {
+                if crate::app::shell::first_run::commit_ui_scale_now(&response, *pending, *live) {
                     *live = *pending;
                 }
             });

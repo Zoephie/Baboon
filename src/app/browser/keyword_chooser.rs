@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_keyword_chooser_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_keyword_chooser_window(&mut self, ctx: &egui::Context) {
         if !self.keyword_chooser_open {
             return;
         }

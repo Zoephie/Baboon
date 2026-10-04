@@ -2,6 +2,9 @@
 //! It owns the editor area's layout; one pane's contents belong to `tag_pane`.
 
 use super::*;
+use crate::app::shell::frame::centered_empty_state;
+use crate::app::shell::frame::tint_toward;
+use crate::app::shell::frame::wheel_scroll_tab_bar;
 
 /// Bridges `egui_tiles` back to [`Baboon`] while a kit's tree is being drawn.
 ///
@@ -543,7 +546,7 @@ impl Baboon {
     }
 
     /// Draw one kit's open tags as a tiled layout.
-    pub(super) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
+    pub(in crate::app) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         if self.kits[kit_index].tag_tree.is_empty() {
             // An unloaded workspace never reaches here — it shows the welcome
             // screen instead — so this is only ever "loaded, nothing open yet".

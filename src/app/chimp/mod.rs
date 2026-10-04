@@ -90,3 +90,4 @@ impl Baboon {
         self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
     }
 }
+pub(in crate::app) mod prompts_window;

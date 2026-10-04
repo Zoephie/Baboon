@@ -537,7 +537,7 @@ impl Baboon {
                 );
             }
             None => {
-                crate::app::ui::paint_loading_rings(ui, image_rect);
+                crate::app::shell::loading::paint_loading_rings(ui, image_rect);
             }
         }
 

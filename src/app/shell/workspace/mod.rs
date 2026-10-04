@@ -3,12 +3,21 @@
 
 use super::recents::draw_recent_folders_menu;
 use super::*;
+use crate::app::shell::frame::terminal_line_is_strong;
+use crate::app::shell::frame::terminal_line_color;
+use crate::app::kits::terminal::open_terminal_log;
+use crate::app::shell::frame::draw_index_progress_bar;
+use crate::app::shell::frame::editing_kit_menu_row;
+use crate::app::shell::frame::editing_kit_menu_row_with_read_only;
+use crate::app::shell::frame::EditingKitMenuEntry;
+use crate::app::shell::frame::visible_editing_kit_menu_entries;
+use crate::app::shell::frame::EDITING_KIT_MENU_MIN_WIDTH;
 
 /// How often a progress bar is redrawn while its job runs.
 const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(200);
 
 impl Baboon {
-    pub(super) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
+    pub(in crate::app) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         if self.first_run_wizard.is_some() {
             ctx.set_zoom_factor(self.prefs.ui_scale);
@@ -1321,7 +1330,7 @@ impl Baboon {
     /// none if that kit has closed since, so the edit is dropped rather than
     /// landing in another kit's tag that happens to share its key. A popup
     /// with no recorded kit applies to the active one.
-    pub(super) fn popup_target_kit(&mut self, opened_from: Option<KitId>) -> Option<usize> {
+    pub(in crate::app) fn popup_target_kit(&mut self, opened_from: Option<KitId>) -> Option<usize> {
         match opened_from {
             Some(kit) => {
                 let index = self.resolve_kit(kit);
@@ -1402,7 +1411,7 @@ impl Baboon {
     /// Runs after the worker drain so a message set this frame is timed from
     /// this frame. Progress states are rendered from their own fields rather
     /// than from `status`, so expiring it never blanks a running scan.
-    pub(super) fn expire_status(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn expire_status(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         if self.status != self.status_shown {
             self.status_shown = self.status.clone();
@@ -1424,7 +1433,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
                 if self.prefs.enable_chimp
@@ -1637,7 +1646,7 @@ impl Baboon {
     }
 }
 
-pub(super) fn recent_folder_menu_label(path: &Path) -> String {
+pub(in crate::app) fn recent_folder_menu_label(path: &Path) -> String {
     const MAX_CHARS: usize = 54;
     let text = path.display().to_string();
     let count = text.chars().count();
@@ -1672,7 +1681,7 @@ fn terminal_line_text(line: &TerminalLineEntry) -> RichText {
 /// wrapped at: a width change re-measures once, an appended line measures
 /// itself. Drawing every line as a label, up to the 20,000 kept, cost 4.5 ms
 /// a frame in a release build.
-pub(super) fn draw_terminal_output(
+pub(in crate::app) fn draw_terminal_output(
     ui: &mut Ui,
     lines: &[TerminalLineEntry],
     want_scroll_bottom: bool,

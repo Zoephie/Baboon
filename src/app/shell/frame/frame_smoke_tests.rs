@@ -466,7 +466,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_storage",
             &["first_run_wizard"],
-            &["ui/first_run/mod.rs"],
+            &["shell/first_run/mod.rs"],
             welcome,
             |h| h.app.first_run_wizard = Some(FirstRunWizardState::new(None)),
             &["Welcome to Baboon", "Installed mode (recommended)"],
@@ -474,7 +474,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_interface",
             &["first_run_wizard"],
-            &["ui/first_run/mod.rs"],
+            &["shell/first_run/mod.rs"],
             welcome,
             |h| {
                 let mut wizard = FirstRunWizardState::new(None);
@@ -486,7 +486,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_editing_kits",
             &["first_run_wizard"],
-            &["ui/first_run/mod.rs"],
+            &["shell/first_run/mod.rs"],
             welcome,
             |h| {
                 let mut wizard = FirstRunWizardState::new(None);
@@ -567,7 +567,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_startup",
             &["settings_open", "settings_tab"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -578,7 +578,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_browser",
             &["settings_open"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -589,7 +589,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_editing_kits",
             &["settings_open"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -600,7 +600,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_appearance",
             &["settings_open"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -611,7 +611,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_tools",
             &["settings_open"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -622,7 +622,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_custom_kit_draft",
             &["custom_editing_kit_draft"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -634,7 +634,7 @@ fn cases() -> Vec<Case> {
         case(
             "settings_custom_kit_removal",
             &["custom_editing_kit_removal"],
-            &["ui/settings/mod.rs"],
+            &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
@@ -877,7 +877,7 @@ fn cases() -> Vec<Case> {
         case(
             "entry_index_wait_notice",
             &["show_entry_index_wait_notice"],
-            &["ui/shell/mod.rs"],
+            &["shell/workspace/mod.rs"],
             memory_kit,
             |h| {
                 h.app.show_entry_index_wait_notice = true;
@@ -1230,7 +1230,7 @@ fn cases() -> Vec<Case> {
         case(
             "keyword_chooser",
             &["keyword_chooser_open"],
-            &["ui/dialogs/keyword_chooser.rs"],
+            &["browser/keyword_chooser.rs"],
             memory_kit,
             |h| h.app.keyword_chooser_open = true,
             &["Keywords"],
@@ -1259,7 +1259,7 @@ fn cases() -> Vec<Case> {
         case(
             "operation_notice",
             &["operation_notice"],
-            &["ui/dialogs/operation_notice.rs"],
+            &["shell/operation_notice.rs"],
             welcome,
             |h| {
                 h.app.operation_notice = Some(OperationNotice {
@@ -1315,7 +1315,7 @@ fn cases() -> Vec<Case> {
         case(
             "chimp_mesh_texture_prompt",
             &["chimp_mesh_texture_prompt"],
-            &["ui/dialogs/chimp_prompts.rs"],
+            &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
                 h.app.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt::for_test(
@@ -1328,7 +1328,7 @@ fn cases() -> Vec<Case> {
         case(
             "chimp_texture_export_prompt",
             &["chimp_texture_export_prompt"],
-            &["ui/dialogs/chimp_prompts.rs"],
+            &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
                 h.app.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt::for_test(
@@ -1341,7 +1341,7 @@ fn cases() -> Vec<Case> {
         case(
             "chimp_level_export_prompt",
             &["chimp_level_export_prompt"],
-            &["ui/dialogs/chimp_prompts.rs"],
+            &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
                 h.app.chimp_level_export_prompt = Some(ChimpLevelExportPrompt::for_test(
@@ -1686,7 +1686,7 @@ fn every_window_has_a_smoke_case() {
     let sources = window_sources();
     assert!(
         sources.iter().any(|s| s == "tag_ops/delete_confirm.rs")
-            && sources.iter().any(|s| s == "ui/settings/mod.rs"),
+            && sources.iter().any(|s| s == "shell/settings/mod.rs"),
         "the source scan found {sources:?}; it no longer finds windows"
     );
     let problems = registry_problems(&cases(), &fields, &sources);
@@ -1701,9 +1701,9 @@ fn the_registry_check_notices_a_window_without_a_case() {
     let mut sources = window_sources();
     assert!(registry_problems(&cases(), &fields, &sources).is_empty());
     fields.push(("smoke_dialog".to_owned(), "Option<SmokeDialog>".to_owned()));
-    sources.push("ui/dialogs/smoke.rs".to_owned());
+    sources.push("shell/frame/dialogs/smoke.rs".to_owned());
     let problems = registry_problems(&cases(), &fields, &sources);
     assert!(problems.iter().any(|p| p.contains("Baboon::smoke_dialog")), "{problems:?}");
-    assert!(problems.iter().any(|p| p.contains("ui/dialogs/smoke.rs")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("shell/frame/dialogs/smoke.rs")), "{problems:?}");
     assert_eq!(problems.len(), 2, "{problems:?}");
 }

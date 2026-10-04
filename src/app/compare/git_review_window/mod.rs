@@ -1,7 +1,7 @@
 //! The Git Review pane: tag-only working-tree changes and commit history.
 
 use super::*;
-use crate::app::ui::{
+use crate::app::shell::frame::{
     PANE_HEADER_ACTION_GAP, PANE_HEADER_ICON_SIZE, PANE_HEADER_SECTION_GAP, browser_search_field,
     recheck_cached,
 };

@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_operation_notice_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_operation_notice_window(&mut self, ctx: &egui::Context) {
         let Some(notice) = self.operation_notice.as_ref() else {
             return;
         };

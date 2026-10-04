@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::ui::sidebar_wrappable_path_label;
+use crate::app::shell::frame::sidebar_wrappable_path_label;
 
 #[test]
 fn search_stacks_before_the_toolbar_reaches_600_points() {

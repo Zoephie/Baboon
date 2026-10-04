@@ -1,11 +1,11 @@
 //! The recent-folders menu, shared by the File menu and the kit tab bar.
 //! It owns presentation and choice collection; opening and forgetting belong to the controller.
 
-use super::shell::recent_folder_menu_label;
+use crate::app::shell::workspace::recent_folder_menu_label;
 use super::*;
 
 /// What the user picked from a recents menu.
-pub(super) enum RecentAction {
+pub(in crate::app) enum RecentAction {
     Open(PathBuf),
     /// Forget one entry without opening it.
     Forget(PathBuf),
@@ -44,7 +44,7 @@ fn recent_folder_path_button(ui: &mut Ui, label: &str, width: f32) -> egui::Resp
 /// Returns the choice rather than acting on it: this is rendered inside a menu
 /// closure that already holds a borrow of the app, and every action needs a
 /// mutable one.
-pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Option<RecentAction> {
+pub(in crate::app) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Option<RecentAction> {
     if recents.is_empty() {
         ui.add_enabled(false, egui::Button::new("No recent folders"));
         return None;
@@ -102,7 +102,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
 }
 
 impl Baboon {
-    pub(super) fn apply_recent_action(&mut self, action: RecentAction, ctx: &egui::Context) {
+    pub(in crate::app) fn apply_recent_action(&mut self, action: RecentAction, ctx: &egui::Context) {
         match action {
             RecentAction::Open(path) => self.load_recent_folder(path, ctx.clone()),
             RecentAction::Forget(path) => {

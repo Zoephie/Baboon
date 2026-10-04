@@ -147,7 +147,7 @@ pub(in crate::app) fn reference_target_missing_cached(
     let Some(root) = tags_root else {
         return false;
     };
-    crate::app::ui::recheck_cached(
+    crate::app::shell::frame::recheck_cached(
         ui.ctx(),
         ("reference_target_missing", root, group_tag, rel_path),
         || reference_target_missing(names, tags_root, group_tag, rel_path),

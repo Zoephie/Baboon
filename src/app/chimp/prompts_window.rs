@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_chimp_mesh_texture_prompt(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_chimp_mesh_texture_prompt(&mut self, ctx: &egui::Context) {
         let Some(prompt) = self.chimp_mesh_texture_prompt.as_ref() else {
             return;
         };
@@ -146,7 +146,7 @@ impl Baboon {
     /// and every piece of that — why it splits, what the numbers mean, that the
     /// shared library has to travel with the segments — is invisible from the
     /// files alone.
-    pub(in crate::app::ui) fn draw_chimp_texture_export_prompt(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_chimp_texture_export_prompt(&mut self, ctx: &egui::Context) {
         let Some(prompt) = self.chimp_texture_export_prompt.as_ref() else {
             return;
         };
@@ -218,7 +218,7 @@ impl Baboon {
         }
     }
 
-    pub(in crate::app::ui) fn draw_chimp_level_export_prompt(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_chimp_level_export_prompt(&mut self, ctx: &egui::Context) {
         let Some(prompt) = self.chimp_level_export_prompt.as_ref() else {
             return;
         };

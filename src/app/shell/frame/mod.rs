@@ -1,21 +1,8 @@
 //! Top-level windows, menus, dialogs, and frame composition for [`Baboon`].
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
-use crate::app::kits::terminal::open_terminal_log;
 use super::*;
 
-pub(in crate::app) mod dialogs;
-mod first_run;
-mod kit_tiles;
-mod loading;
-pub(in crate::app) use loading::{
-    centered_loading_state, paint_loading_rings, paint_loading_rings_sized,
-};
-mod recents;
-mod settings;
-mod shell;
-mod tag_tiles;
-mod welcome;
 
 pub(in crate::app) const PANE_HEADER_ICON_SIZE: f32 = 32.0;
 pub(in crate::app) const PANE_HEADER_SECTION_GAP: f32 = 20.0;
@@ -266,7 +253,7 @@ pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, pat
 /// browsers treat their tab strips), and sideways wheel/touchpad motion passes
 /// through directly. Called from `top_bar_right_ui`, which runs before the bar
 /// clamps the offset to the content, so no clamping is needed here.
-fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
+pub(in crate::app) fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
     if !ui.rect_contains_pointer(ui.max_rect()) {
         return;
     }
@@ -315,12 +302,12 @@ fn visible_builtin_editing_kit_shortcuts(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EditingKitMenuEntry {
+pub(in crate::app) enum EditingKitMenuEntry {
     Custom(CustomEditingKitProfile),
     BuiltIn(EditingKitShortcut),
 }
 
-fn visible_editing_kit_menu_entries(
+pub(in crate::app) fn visible_editing_kit_menu_entries(
     profiles: &[CustomEditingKitProfile],
     validation: &EditingKitValidationCache,
 ) -> Vec<EditingKitMenuEntry> {
@@ -336,7 +323,7 @@ fn visible_editing_kit_menu_entries(
         .collect()
 }
 
-const EDITING_KIT_MENU_MIN_WIDTH: f32 = 240.0;
+pub(in crate::app) const EDITING_KIT_MENU_MIN_WIDTH: f32 = 240.0;
 const EDITING_KIT_MENU_ICON_SIZE: f32 = 24.0;
 const EDITING_KIT_MENU_HORIZONTAL_PADDING: f32 = 8.0;
 const EDITING_KIT_MENU_ICON_GAP: f32 = 8.0;
@@ -366,7 +353,7 @@ fn editing_kit_menu_row_layout(row_rect: egui::Rect) -> EditingKitMenuRowLayout 
     }
 }
 
-fn editing_kit_title_text(
+pub(in crate::app) fn editing_kit_title_text(
     ui: &Ui,
     name: &str,
     read_only: bool,
@@ -408,7 +395,7 @@ fn editing_kit_title_text_with_style(
     job.into()
 }
 
-fn editing_kit_menu_row(
+pub(in crate::app) fn editing_kit_menu_row(
     ui: &mut Ui,
     label: &str,
     fallback: &str,
@@ -427,7 +414,7 @@ fn editing_kit_menu_row(
     )
 }
 
-fn editing_kit_menu_row_with_read_only(
+pub(in crate::app) fn editing_kit_menu_row_with_read_only(
     ui: &mut Ui,
     label: &str,
     fallback: &str,
@@ -489,7 +476,7 @@ fn editing_kit_menu_row_with_read_only(
     response
 }
 
-fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
+pub(in crate::app) fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
     match severity {
         TerminalLineSeverity::Normal | TerminalLineSeverity::Summary => {
             Color32::from_rgb(232, 232, 228)
@@ -500,14 +487,14 @@ fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
     }
 }
 
-fn terminal_line_is_strong(severity: TerminalLineSeverity) -> bool {
+pub(in crate::app) fn terminal_line_is_strong(severity: TerminalLineSeverity) -> bool {
     matches!(
         severity,
         TerminalLineSeverity::Error | TerminalLineSeverity::Summary
     )
 }
 
-fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text: &str) {
+pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text: &str) {
     let size = egui::vec2(width, 18.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let radius = 6.0;
@@ -579,7 +566,7 @@ pub(in crate::app) fn draw_game_banner_header(
 }
 
 /// Used by the kit browser and the live editing-kit form preview.
-fn draw_kit_banner_tile(
+pub(in crate::app) fn draw_kit_banner_tile(
     ui: &mut Ui,
     title_label: &str,
     path_label: &str,
@@ -717,7 +704,7 @@ pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path
 }
 
 /// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
-fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
+pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
     Color32::from_rgb(
         lerp(base.r(), accent.r()),
@@ -731,7 +718,7 @@ impl Baboon {
     /// resolved against that workspace's editing kit rather than the focused
     /// one, and a launch makes it active first: it saves the tag and starts an
     /// external editor, neither of which should follow the wrong game.
-    pub(super) fn draw_scenario_launcher_buttons(
+    pub(in crate::app) fn draw_scenario_launcher_buttons(
         &mut self,
         ui: &mut Ui,
         kit_index: usize,
@@ -782,7 +769,7 @@ impl Baboon {
         });
     }
 
-    fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if launcher_button(ui, self.blender_icon.as_ref(), "B", true)
                 .on_hover_text("Launch Blender")
@@ -844,7 +831,7 @@ impl Baboon {
         });
     }
 
-    fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
         let game = self.source_game();
         let commands = monitor_commands_for_game(game);
         let enabled = !commands.is_empty();
@@ -877,7 +864,7 @@ impl Baboon {
 
     /// Tools ▸ Assets: the asset libraries, browsed across the whole kit rather
     /// than one tag at a time.
-    fn draw_assets_tools_menu(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_assets_tools_menu(&mut self, ui: &mut Ui) {
         let enabled = self.source().is_some();
         let menu = ui
             .add_enabled_ui(enabled, |ui| {

@@ -2,7 +2,7 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
-use crate::app::ui::explorer_entry_row;
+use crate::app::shell::frame::explorer_entry_row;
 
 impl Baboon {
     pub(in crate::app) fn draw_tag_reference_picker_window(&mut self, ctx: &egui::Context) {

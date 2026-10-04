@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::shell::frame::EditingKitMenuEntry;
+use crate::app::shell::frame::visible_editing_kit_menu_entries;
 
 #[test]
 fn editing_kit_inputs_match_button_height() {

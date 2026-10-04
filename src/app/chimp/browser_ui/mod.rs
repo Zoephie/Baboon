@@ -96,7 +96,7 @@ impl Baboon {
                         ChimpBrowser::Groups => self.draw_chimp_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Packages => self.draw_chimp_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Archives => {
-                            crate::app::ui::centered_empty_state(
+                            crate::app::shell::frame::centered_empty_state(
                                 ui,
                                 "Select an archive to browse its folder hierarchy.",
                             );
@@ -164,7 +164,7 @@ impl Baboon {
 
     fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
         if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
-            crate::app::ui::centered_loading_state(
+            crate::app::shell::loading::centered_loading_state(
                 ui,
                 "Please wait — Chimp is starting up…",
                 "Discovering containers and indexing Unreal packages.",
@@ -211,7 +211,7 @@ impl Baboon {
                 ),
                 Vec2::splat(spinner_size),
             );
-            crate::app::ui::paint_loading_rings_sized(
+            crate::app::shell::loading::paint_loading_rings_sized(
                 ui,
                 spinner_rect,
                 spinner_size,
@@ -628,7 +628,7 @@ impl Baboon {
 
     fn draw_chimp_file(&mut self, ui: &mut Ui, kit_index: usize) {
         let Some(path) = self.kits[kit_index].chimp.selected_file.clone() else {
-            crate::app::ui::centered_empty_state(
+            crate::app::shell::frame::centered_empty_state(
                 ui,
                 "Select a file from a legacy .pak container.",
             );

@@ -16,12 +16,12 @@ use super::*;
 /// the frame the button is still down. Either one alone leaves a value showing in
 /// the slider that never reaches the window. A difference, by contrast, cannot be
 /// missed: whatever frame the pointer comes up on, it is applied then.
-pub(super) fn commit_ui_scale_now(response: &egui::Response, pending: f32, live: f32) -> bool {
+pub(in crate::app) fn commit_ui_scale_now(response: &egui::Response, pending: f32, live: f32) -> bool {
     pending != live && !response.is_pointer_button_down_on()
 }
 
 impl Baboon {
-    pub(super) fn draw_first_run_wizard(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_first_run_wizard(&mut self, ctx: &egui::Context) {
         let Some(page) = self.first_run_wizard.as_ref().map(|state| state.page) else {
             return;
         };

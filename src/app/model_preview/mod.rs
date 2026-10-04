@@ -761,7 +761,7 @@ fn draw_loading_section_body(ui: &mut Ui, height: f32) {
         Vec2::new(ui.available_width().max(1.0), height.max(1.0)),
         Sense::hover(),
     );
-    crate::app::ui::paint_loading_rings(ui, rect);
+    crate::app::shell::loading::paint_loading_rings(ui, rect);
 }
 
 /// Draw the final preview/setup card geometry before any model parsing begins.
@@ -1403,7 +1403,7 @@ fn draw_model_viewport_with_stats(
                 Stroke::new(1.0_f32, foundation_input_edge()),
                 egui::StrokeKind::Middle,
             );
-        crate::app::ui::paint_loading_rings(ui, rect);
+        crate::app::shell::loading::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);
     }

@@ -318,3 +318,4 @@ pub(in crate::app) mod thumbnail_library;
 pub(in crate::app) use thumbnail_library::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
+pub(in crate::app) mod keyword_chooser;

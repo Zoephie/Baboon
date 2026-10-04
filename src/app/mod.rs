@@ -125,7 +125,6 @@ use kits::*;
 pub(in crate::app) mod documents;
 use documents::*;
 pub(in crate::app) mod shell;
-mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

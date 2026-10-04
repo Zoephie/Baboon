@@ -1,12 +1,7 @@
-//! Modal dialogs, one module per dialog, and the conversion reports several of them share.
-//! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
+//! The import reports several import windows share: what a folder import
+//! wrote, and what a single conversion will cost.
 
 use super::*;
-
-mod chimp_prompts;
-mod keyword_chooser;
-mod operation_notice;
-
 
 /// What a folder import actually wrote, grouped by how much can be claimed for
 /// it.

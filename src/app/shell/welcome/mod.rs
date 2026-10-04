@@ -2,6 +2,9 @@
 //! It owns what an unloaded workspace offers the user; loading itself belongs to the controller.
 
 use super::*;
+use crate::app::shell::frame::editing_kit_title_text;
+use crate::app::shell::frame::EditingKitMenuEntry;
+use crate::app::shell::frame::visible_editing_kit_menu_entries;
 
 /// Paint the left pane to the taller column's bottom, not just its own content.
 fn draw_welcome_columns(ui: &mut Ui, contents: impl FnOnce(&mut [Ui])) {
