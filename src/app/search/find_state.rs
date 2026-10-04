@@ -96,7 +96,6 @@ pub(in crate::app) struct FindOccurrence {
 #[derive(Default)]
 pub(in crate::app) struct FindDialogState {
     pub(in crate::app) open: bool,
-    pub(in crate::app) focus_query: bool,
     pub(in crate::app) query: String,
     pub(in crate::app) within: FindWithin,
     pub(in crate::app) look_in: FindLookIn,
@@ -123,7 +122,36 @@ pub(in crate::app) struct FindDialogState {
 pub(in crate::app) type FindMatchingCells =
     std::collections::HashSet<(String, String, FindTargetKind)>;
 
+/// What Find searches for, as the Find window edits it.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) struct FindQuery {
+    pub(in crate::app) text: String,
+    pub(in crate::app) within: FindWithin,
+    pub(in crate::app) look_in: FindLookIn,
+    pub(in crate::app) match_case: bool,
+    pub(in crate::app) whole_word: bool,
+}
+
 impl FindDialogState {
+    /// The query as it stands.
+    pub(in crate::app) fn query(&self) -> FindQuery {
+        FindQuery {
+            text: self.query.clone(),
+            within: self.within,
+            look_in: self.look_in,
+            match_case: self.match_case,
+            whole_word: self.whole_word,
+        }
+    }
+
+    pub(in crate::app) fn set_query(&mut self, query: FindQuery) {
+        self.query = query.text;
+        self.within = query.within;
+        self.look_in = query.look_in;
+        self.match_case = query.match_case;
+        self.whole_word = query.whole_word;
+    }
+
     /// Currently selected occurrence, if its stored index remains valid.
     pub(in crate::app) fn active_occurrence(&self) -> Option<&FindOccurrence> {
         self.active.and_then(|index| self.occurrences.get(index))

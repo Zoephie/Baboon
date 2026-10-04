@@ -6,7 +6,9 @@ use super::*;
 pub(in crate::app) mod find;
 pub(in crate::app) use find::*;
 pub(in crate::app) mod find_window;
-pub(in crate::app) use find_window::{draw_find_window, draw_icon_window_header, draw_icon_window_header_without_close};
+pub(in crate::app) use find_window::{
+    FindWindow, draw_icon_window_header, draw_icon_window_header_without_close,
+};
 pub(in crate::app) mod find_state;
 pub(in crate::app) use find_state::*;
 pub(in crate::app) mod field_index;
@@ -36,8 +38,13 @@ pub(in crate::app) struct SearchFeature {
 
 /// What search can be asked to do.
 pub(in crate::app) enum SearchCommand {
-    /// Find's query or options changed: search again from the first match.
-    FindChanged,
+    /// Find's query or options changed to these: search again from the first
+    /// match.
+    FindChanged(FindQuery),
+    /// Show only what Find matches, or everything.
+    FindFilter(bool),
+    /// The Find window closed: stop finding.
+    FindClose,
     /// Move Find to the match `delta` away from the current one.
     FindStep(isize),
     /// Carry out what a row of the query results window asked for.
@@ -55,9 +62,16 @@ pub(in crate::app) enum SearchCommand {
 }
 
 impl Baboon {
+    /// Open Find, or select its query again if it is open.
+    pub(in crate::app) fn open_find(&mut self) {
+        self.search.find.open = true;
+        self.dialogs.open(FindWindow { focus_query: true });
+    }
+
     pub(in crate::app) fn apply_search_command(&mut self, command: SearchCommand, ctx: &egui::Context) {
         match command {
-            SearchCommand::FindChanged => {
+            SearchCommand::FindChanged(query) => {
+                self.search.find.set_query(query);
                 self.search.find.active = None;
                 self.search.find.results_key = None;
                 self.refresh_find(&ctx);
@@ -65,6 +79,8 @@ impl Baboon {
                     self.activate_find_occurrence(&ctx, hit);
                 }
             }
+            SearchCommand::FindFilter(filter) => self.search.find.filter_results = filter,
+            SearchCommand::FindClose => self.search.find.close(),
             SearchCommand::FindStep(delta) => self.step_find(&ctx, delta),
             SearchCommand::QueryResult { kit, action } => self.apply_query_result_action(kit, action, ctx),
             SearchCommand::RunFieldValueSearch => self.begin_field_value_search(ctx.clone()),
@@ -74,8 +90,7 @@ impl Baboon {
                     self.model.active = index;
                     self.model.kits[index].selected_key = Some(key);
                     self.search.find.within = FindWithin::CurrentTag;
-                    self.search.find.open = true;
-                    self.search.find.focus_query = true;
+                    self.open_find();
                 }
             }
         }

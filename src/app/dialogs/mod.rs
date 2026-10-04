@@ -29,6 +29,7 @@ pub(in crate::app) trait Dialog: Any {
 /// and asks for anything else with a command.
 pub(in crate::app) struct AppReads<'a> {
     pub(in crate::app) kit_tools: &'a KitsFeature,
+    pub(in crate::app) search: &'a SearchFeature,
 }
 
 /// The [`AppReads`] of an application, borrowed beside its dialogs.
@@ -36,6 +37,7 @@ macro_rules! app_reads {
     ($app:expr) => {
         $crate::app::dialogs::AppReads {
             kit_tools: &$app.kit_tools,
+            search: &$app.search,
         }
     };
 }

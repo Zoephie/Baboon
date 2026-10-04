@@ -262,8 +262,7 @@ impl Baboon {
             return;
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
-            self.search.find.open = true;
-            self.search.find.focus_query = true;
+            self.open_find();
         }
         self.refresh_find(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
@@ -319,7 +318,6 @@ impl Baboon {
         draw_query_results_window(&cx!(self, ctx), &mut self.search, &mut self.references);
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
-        draw_find_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());

@@ -655,14 +655,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "find",
-            &["search.find"],
+            &["search.find", "dialog:FindWindow"],
             &["search/find_window/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.search.find.open = true;
+                h.app.open_find();
                 h.app.search.find.query = "sky".to_owned();
             },
             &["Find", "Filter Results"],

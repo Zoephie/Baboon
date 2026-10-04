@@ -2,208 +2,219 @@
 
 use super::*;
 
-/// Draw the modeless Find window; a changed query or a step to the next
-/// or previous match is sent as a command.
-pub(in crate::app) fn draw_find_window(cx: &Ctx, search: &mut SearchFeature) {
-    if !search.find.open {
-        return;
-    }
-    let ctx = cx.egui;
-    let mut open = true;
-    let mut step = 0;
-    let mut changed = false;
-    let mut filter_changed = false;
-    // Enter and Escape belong to the query box. They used to be read from
-    // the global input, so committing a field edit with Enter anywhere in
-    // the app stepped to the next match, and Escape out of any menu or edit
-    // closed Find.
-    let mut query_escape = false;
-    let default_pos = ctx.content_rect().right_top() + egui::vec2(-488.0, 72.0);
-    egui::Window::new("Find")
-        .id(egui::Id::new("find_in_tag"))
-        .title_bar(false)
-        .collapsible(false)
-        .movable(true)
-        .resizable(false)
-        .default_width(window_width(ctx, 470.0))
-        .default_pos(default_pos)
-        .show(ctx, |ui| {
-            draw_find_window_header(ui, &mut open);
-            ui.separator();
-            egui::Grid::new("find_options")
-                .num_columns(3)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label(RichText::new("find:").strong().color(text_dark()));
-                    let response = ui.add_sized(
-                        [290.0, 25.0],
-                        egui::TextEdit::singleline(&mut search.find.query)
-                            .id(egui::Id::new("find_query"))
-                            .vertical_align(egui::Align::Center),
-                    );
-                    if search.find.focus_query {
-                        response.request_focus();
-                        if let Some(mut state) = egui::TextEdit::load_state(ctx, response.id) {
-                            state
-                                .cursor
-                                .set_char_range(Some(egui::text::CCursorRange::two(
-                                    egui::text::CCursor::new(0),
-                                    egui::text::CCursor::new(search.find.query.chars().count()),
-                                )));
-                            state.store(ctx, response.id);
+/// The modeless Find window. What it searches for and what it found are the
+/// Find search's, in [`SearchFeature`]; the window shows them as they stand
+/// each frame and sends any change to the query, a step to the next or
+/// previous match, or its closing as a command.
+pub(in crate::app) struct FindWindow {
+    /// Select the query on the next draw, as opening Find again does.
+    pub(in crate::app) focus_query: bool,
+}
+
+impl Dialog for FindWindow {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let find = &app.search.find;
+        // Closed by the search itself, as when its workspace goes.
+        if !find.open {
+            return false;
+        }
+        let mut query = find.query();
+        let mut filter_results = find.filter_results;
+        let ctx = cx.egui;
+        let mut open = true;
+        let mut step = 0;
+        let mut changed = false;
+        let mut filter_changed = false;
+        // Enter and Escape belong to the query box. They used to be read from
+        // the global input, so committing a field edit with Enter anywhere in
+        // the app stepped to the next match, and Escape out of any menu or edit
+        // closed Find.
+        let mut query_escape = false;
+        let default_pos = ctx.content_rect().right_top() + egui::vec2(-488.0, 72.0);
+        egui::Window::new("Find")
+            .id(egui::Id::new("find_in_tag"))
+            .title_bar(false)
+            .collapsible(false)
+            .movable(true)
+            .resizable(false)
+            .default_width(window_width(ctx, 470.0))
+            .default_pos(default_pos)
+            .show(ctx, |ui| {
+                draw_find_window_header(ui, &mut open);
+                ui.separator();
+                egui::Grid::new("find_options")
+                    .num_columns(3)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("find:").strong().color(text_dark()));
+                        let response = ui.add_sized(
+                            [290.0, 25.0],
+                            egui::TextEdit::singleline(&mut query.text)
+                                .id(egui::Id::new("find_query"))
+                                .vertical_align(egui::Align::Center),
+                        );
+                        if self.focus_query {
+                            response.request_focus();
+                            if let Some(mut state) = egui::TextEdit::load_state(ctx, response.id) {
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        egui::text::CCursor::new(query.text.chars().count()),
+                                    )));
+                                state.store(ctx, response.id);
+                            }
+                            self.focus_query = false;
                         }
-                        search.find.focus_query = false;
-                    }
-                    changed |= response.changed();
-                    // A single-line box gives up focus on Enter and Escape,
-                    // so the key arrives on the frame it loses focus.
-                    let in_query = response.has_focus() || lost_focus_once(&response);
-                    let (enter, escape, shift) = ui.input(|input| {
-                        (
-                            input.key_pressed(egui::Key::Enter),
-                            input.key_pressed(egui::Key::Escape),
-                            input.modifiers.shift,
-                        )
+                        changed |= response.changed();
+                        // A single-line box gives up focus on Enter and Escape,
+                        // so the key arrives on the frame it loses focus.
+                        let in_query = response.has_focus() || lost_focus_once(&response);
+                        let (enter, escape, shift) = ui.input(|input| {
+                            (
+                                input.key_pressed(egui::Key::Enter),
+                                input.key_pressed(egui::Key::Escape),
+                                input.modifiers.shift,
+                            )
+                        });
+                        if in_query && enter && !find.searching {
+                            step = if shift { -1 } else { 1 };
+                            // Keep the box focused so Enter keeps stepping.
+                            response.request_focus();
+                        }
+                        query_escape = in_query && escape;
+                        ui.end_row();
+
+                        ui.label(RichText::new("within:").strong().color(text_dark()));
+                        egui::ComboBox::from_id_salt("find_within")
+                            .selected_text(query.within.label())
+                            .width(190.0)
+                            .show_ui(ui, |ui| {
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut query.within,
+                                        FindWithin::CurrentTag,
+                                        FindWithin::CurrentTag.label(),
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut query.within,
+                                        FindWithin::OpenTags,
+                                        FindWithin::OpenTags.label(),
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut query.within,
+                                        FindWithin::AllTags,
+                                        FindWithin::AllTags.label(),
+                                    )
+                                    .changed();
+                            });
+                        changed |= ui.checkbox(&mut query.match_case, "match case").changed();
+                        ui.end_row();
+
+                        ui.label(RichText::new("look in:").strong().color(text_dark()));
+                        egui::ComboBox::from_id_salt("find_look_in")
+                            .selected_text(query.look_in.label())
+                            .width(190.0)
+                            .show_ui(ui, |ui| {
+                                changed |= ui
+                                    .checkbox(&mut query.look_in.field_names, "Field names")
+                                    .changed();
+                                changed |= ui
+                                    .checkbox(&mut query.look_in.field_values, "Field values")
+                                    .changed();
+                                changed |=
+                                    ui.checkbox(&mut query.look_in.blocks, "Blocks").changed();
+                            });
+                        changed |= ui
+                            .checkbox(&mut query.whole_word, "match whole word")
+                            .changed();
+                        ui.end_row();
                     });
-                    if in_query && enter && !search.find.searching {
-                        step = if shift { -1 } else { 1 };
-                        // Keep the box focused so Enter keeps stepping.
-                        response.request_focus();
-                    }
-                    query_escape = in_query && escape;
-                    ui.end_row();
-
-                    ui.label(RichText::new("within:").strong().color(text_dark()));
-                    egui::ComboBox::from_id_salt("find_within")
-                        .selected_text(search.find.within.label())
-                        .width(190.0)
-                        .show_ui(ui, |ui| {
-                            changed |= ui
-                                .selectable_value(
-                                    &mut search.find.within,
-                                    FindWithin::CurrentTag,
-                                    FindWithin::CurrentTag.label(),
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut search.find.within,
-                                    FindWithin::OpenTags,
-                                    FindWithin::OpenTags.label(),
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut search.find.within,
-                                    FindWithin::AllTags,
-                                    FindWithin::AllTags.label(),
-                                )
-                                .changed();
-                        });
-                    changed |= ui
-                        .checkbox(&mut search.find.match_case, "match case")
-                        .changed();
-                    ui.end_row();
-
-                    ui.label(RichText::new("look in:").strong().color(text_dark()));
-                    egui::ComboBox::from_id_salt("find_look_in")
-                        .selected_text(search.find.look_in.label())
-                        .width(190.0)
-                        .show_ui(ui, |ui| {
-                            changed |= ui
-                                .checkbox(&mut search.find.look_in.field_names, "Field names")
-                                .changed();
-                            changed |= ui
-                                .checkbox(&mut search.find.look_in.field_values, "Field values")
-                                .changed();
-                            changed |= ui
-                                .checkbox(&mut search.find.look_in.blocks, "Blocks")
-                                .changed();
-                        });
-                    changed |= ui
-                        .checkbox(&mut search.find.whole_word, "match whole word")
-                        .changed();
-                    ui.end_row();
-                });
-            ui.add_space(8.0);
-            if search.find.searching {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    let text = search
-                        .find
-                        .progress
-                        .map(|(done, total)| format!("searching… {done}/{total}"))
-                        .unwrap_or_else(|| "preparing all-tag search…".to_owned());
-                    ui.label(RichText::new(text).small().color(subtle_dark()));
-                });
-            } else if search.find.unreadable > 0 && search.find.within == FindWithin::AllTags {
-                ui.label(
-                    RichText::new(format!("{} tag(s) could not be read", search.find.unreadable))
-                        .small()
-                        .color(subtle_dark()),
-                );
-            }
-            ui.separator();
-            ui.horizontal(|ui| {
-                if selectable_icon_text_button(
-                    ui,
-                    ButtonIcon::Filter,
-                    "Filter Results",
-                    search.find.filter_results,
-                )
-                .on_hover_text("Show only matching fields and blocks in the selected scope")
-                .clicked()
-                {
-                    search.find.filter_results = !search.find.filter_results;
-                    filter_changed = true;
+                ui.add_space(8.0);
+                if find.searching {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        let text = find
+                            .progress
+                            .map(|(done, total)| format!("searching… {done}/{total}"))
+                            .unwrap_or_else(|| "preparing all-tag search…".to_owned());
+                        ui.label(RichText::new(text).small().color(subtle_dark()));
+                    });
+                } else if find.unreadable > 0 && find.within == FindWithin::AllTags {
+                    ui.label(
+                        RichText::new(format!("{} tag(s) could not be read", find.unreadable))
+                            .small()
+                            .color(subtle_dark()),
+                    );
                 }
-                let can_navigate = !search.find.occurrences.is_empty() && !search.find.searching;
-                let counter = search
-                    .find
-                    .active
-                    .map(|index| format!("{}/{}", index + 1, search.find.occurrences.len()))
-                    .unwrap_or_else(|| format!("0/{}", search.find.occurrences.len()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button(
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if selectable_icon_text_button(
                         ui,
-                        ButtonIcon::Right,
-                        "Next match (Enter)",
-                        can_navigate,
-                        text_dark(),
+                        ButtonIcon::Filter,
+                        "Filter Results",
+                        filter_results,
                     )
+                    .on_hover_text("Show only matching fields and blocks in the selected scope")
                     .clicked()
                     {
-                        step = 1;
+                        filter_results = !filter_results;
+                        filter_changed = true;
                     }
-                    if icon_button(
-                        ui,
-                        ButtonIcon::Left,
-                        "Previous match (Shift+Enter)",
-                        can_navigate,
-                        text_dark(),
-                    )
-                    .clicked()
-                    {
-                        step = -1;
-                    }
-                    ui.label(RichText::new(counter).strong().color(subtle_dark()));
+                    let can_navigate = !find.occurrences.is_empty() && !find.searching;
+                    let counter = find
+                        .active
+                        .map(|index| format!("{}/{}", index + 1, find.occurrences.len()))
+                        .unwrap_or_else(|| format!("0/{}", find.occurrences.len()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon_button(
+                            ui,
+                            ButtonIcon::Right,
+                            "Next match (Enter)",
+                            can_navigate,
+                            text_dark(),
+                        )
+                        .clicked()
+                        {
+                            step = 1;
+                        }
+                        if icon_button(
+                            ui,
+                            ButtonIcon::Left,
+                            "Previous match (Shift+Enter)",
+                            can_navigate,
+                            text_dark(),
+                        )
+                        .clicked()
+                        {
+                            step = -1;
+                        }
+                        ui.label(RichText::new(counter).strong().color(subtle_dark()));
+                    });
                 });
             });
-        });
-    if changed {
-        cx.send(SearchCommand::FindChanged);
-    }
-    if filter_changed {
-        ctx.request_repaint();
-    }
-    if step != 0 {
-        cx.send(SearchCommand::FindStep(step));
-    }
-    if !open || query_escape {
-        search.find.close();
-        ctx.data_mut(|data| {
-            data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
-        });
+        if changed {
+            cx.send(SearchCommand::FindChanged(query));
+        }
+        if filter_changed {
+            cx.send(SearchCommand::FindFilter(filter_results));
+            ctx.request_repaint();
+        }
+        if step != 0 {
+            cx.send(SearchCommand::FindStep(step));
+        }
+        if !open || query_escape {
+            cx.send(SearchCommand::FindClose);
+            ctx.data_mut(|data| {
+                data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
+            });
+            return false;
+        }
+        true
     }
 }
 

@@ -33,7 +33,7 @@ fn frame(
             let mut text = String::from("12");
             ui.add(egui::TextEdit::singleline(&mut text).id(egui::Id::new("a_field")));
         });
-        draw_find_window(&cx!(app, ctx), &mut app.search);
+        app.dialogs.draw(&cx!(app, ctx), &app_reads!(app));
     });
     // What the window asked for runs once drawing is over, as in a frame.
     app.apply_commands(ctx);
@@ -57,6 +57,7 @@ fn find_answers_enter_and_escape_only_in_its_query_box() {
     let ctx = egui::Context::default();
     let mut app = Baboon::for_test();
     app.search.find.open = true;
+    app.dialogs.open(FindWindow { focus_query: false });
     app.search.find.occurrences = vec![occurrence("a"), occurrence("b")];
     app.search.find.active = Some(0);
     let field = Some(egui::Id::new("a_field"));
@@ -83,4 +84,25 @@ fn find_answers_enter_and_escape_only_in_its_query_box() {
     assert_eq!(app.search.find.active, Some(0), "and keeps stepping");
     frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
     assert!(!app.search.find.open, "Escape in the query box closes Find");
+}
+
+/// What is typed into the query box becomes the search's query, a frame
+/// at a time: the window edits the query as it stands and sends the change.
+#[test]
+fn typing_in_the_query_box_sets_the_search_query() {
+    let ctx = egui::Context::default();
+    let mut app = Baboon::for_test();
+    app.open_find();
+    let query = Some(egui::Id::new("find_query"));
+    frame(&mut app, &ctx, Vec::new(), None);
+    frame(&mut app, &ctx, Vec::new(), query);
+    for letter in ["s", "k", "y"] {
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text(letter.to_owned())],
+            query,
+        );
+    }
+    assert_eq!(app.search.find.query, "sky");
 }
