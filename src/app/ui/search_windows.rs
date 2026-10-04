@@ -394,14 +394,14 @@ impl Baboon {
                                         if row.clicked() {
                                             to_open = Some(entry.key.clone());
                                         }
-                                        row.context_menu(|ui| {
+                                        context_menu(&row, |ui| {
                                             if ui.button("Open").clicked() {
                                                 to_open = Some(entry.key.clone());
-                                                ui.close();
+                                                close_menu(ui);
                                             }
                                             if ui.button("Reveal in browser").clicked() {
                                                 to_reveal = Some(entry.key.clone());
-                                                ui.close();
+                                                close_menu(ui);
                                             }
                                         });
                                     }

@@ -403,12 +403,9 @@ fn aligned_menu_custom_button<R>(
         .map_or(positioning_response.rect.min.x + frame_left, |width| {
             button_response.rect.right() - width + frame_left
         });
-    // As `egui::containers::menu::MenuButton` opens its menu, with the menu
-    // bar's config, but placed by the shifted response.
-    let found = egui::containers::menu::MenuConfig::find(ui);
-    let config = egui::containers::menu::MenuConfig::new()
-        .close_behavior(found.close_behavior)
-        .style(found.style);
+    // As `egui::containers::menu::MenuButton` opens its menu, in the menu
+    // bar's style, but placed by the shifted response.
+    let config = menu_config().style(egui::containers::menu::MenuConfig::find(ui).style);
     let inner = egui::Popup::menu(&positioning_response)
         .close_behavior(config.close_behavior)
         .style(config.style.clone())
@@ -418,6 +415,35 @@ fn aligned_menu_custom_button<R>(
         )
         .show(add_contents);
     egui::InnerResponse::new(inner.map(|response| response.inner), button_response)
+}
+
+/// How every Baboon menu closes: when an item asks it to (`ui.close()`), or
+/// on a click outside it, as egui 0.29 closed menus. egui 0.36 closes a menu
+/// on any click inside it by default, so ticking a checkbox in one shut it.
+/// Submenus inherit it from the menu they open in.
+pub(super) fn menu_config() -> egui::containers::menu::MenuConfig {
+    egui::containers::menu::MenuConfig::new()
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+}
+
+/// Close the menu `ui` is in, as egui 0.29's `Ui::close_menu` did; outside a
+/// menu it does nothing. egui 0.36's `Ui::close` instead closes the nearest
+/// closable container, which outside a menu is a collapsing header or the
+/// window the code sits in.
+pub(super) fn close_menu(ui: &Ui) {
+    if egui::containers::menu::is_in_menu(ui) {
+        ui.close_kind(egui::UiKind::Menu);
+    }
+}
+
+/// `response`'s right-click menu, closing as [`menu_config`] describes.
+pub(super) fn context_menu(
+    response: &egui::Response,
+    add_contents: impl FnOnce(&mut Ui),
+) -> Option<egui::InnerResponse<()>> {
+    egui::Popup::context_menu(response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(add_contents)
 }
 
 pub(super) fn aligned_menu_button<R>(
@@ -477,7 +503,10 @@ pub(super) fn icon_text_dropdown_button<R>(
     label: &str,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    let menu = ui.menu_button(format!("     {label}      "), add_contents);
+    let (response, inner) = egui::containers::menu::MenuButton::new(format!("     {label}      "))
+        .config(menu_config())
+        .ui(ui, add_contents);
+    let menu = egui::InnerResponse::new(inner.map(|inner| inner.inner), response);
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(
             menu.response.rect.left() + 13.0,

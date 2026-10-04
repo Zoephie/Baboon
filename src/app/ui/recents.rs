@@ -80,7 +80,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
                 .clicked()
             {
                 action = Some(RecentAction::Open(path.clone()));
-                ui.close();
+                close_menu(ui);
             }
             if ui
                 .add_sized([clear_width, row_height], egui::Button::new("×"))
@@ -96,7 +96,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
     ui.separator();
     if icon_text_button(ui, ButtonIcon::Clear, "Clear Recent Folders", true).clicked() {
         action = Some(RecentAction::ForgetAll);
-        ui.close();
+        close_menu(ui);
     }
     action
 }

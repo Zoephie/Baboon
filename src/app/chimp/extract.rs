@@ -150,7 +150,7 @@ pub(super) fn chimp_texture_export_menu(
 ) {
     if ui.button("Extract Texture2D…").clicked() {
         *out = Some(package.to_owned());
-        ui.close();
+        close_menu(ui);
     }
 }
 
@@ -1539,7 +1539,7 @@ pub(super) fn chimp_mesh_export_menu(
     .flatten();
     if let Some(format) = format {
         *requested = Some((package.to_owned(), format));
-        ui.close();
+        close_menu(ui);
     }
 }
 
@@ -1567,7 +1567,7 @@ pub(super) fn chimp_level_export_menu(
     .flatten();
     if let Some(format) = selected {
         *requested = Some((package.to_owned(), format));
-        ui.close();
+        close_menu(ui);
     }
 }
 

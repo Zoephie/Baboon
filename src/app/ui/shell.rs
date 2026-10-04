@@ -62,7 +62,7 @@ impl Baboon {
                 bottom: 2,
             }))
             .show(ui, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| {
+                egui::MenuBar::new().config(menu_config()).ui(ui, |ui| {
                     aligned_menu_button(ui, "File", |ui| {
                         self.draw_file_menu(ui, ctx);
                     });
@@ -96,7 +96,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.open_new_tag_dialog();
         }
         // One entry, two implementations. A container tag is a
@@ -116,7 +116,7 @@ impl Baboon {
             .on_disabled_hover_text("Load an editing kit or a Campaign Evolved container first")
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             if self.current_source_is_container() {
                 self.begin_import_tag(None);
             } else {
@@ -124,26 +124,26 @@ impl Baboon {
             }
         }
         if ui.button("Load Tag...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.begin_load_single(ctx.clone());
         }
         if ui.button("Load Folder...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.begin_load_folder(ctx.clone());
         }
         if ui.button("Load Monolithic blob_index.dat...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.begin_load_monolithic(ctx.clone());
         }
         if ui
             .button("Open Campaign Evolved container (.utoc)...")
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.begin_load_iostore_container(ctx.clone());
         }
         if ui.button("Open Baboon Project...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.begin_open_campaign_project(ctx.clone());
         }
         // A workspace's edits are autosaved to a recovery file
@@ -165,7 +165,7 @@ impl Baboon {
             .on_disabled_hover_text("Baboon projects hold changes to Campaign Evolved containers")
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.defer_file_action(DeferredFileAction::SaveProject, ctx);
         }
         if ui
@@ -175,7 +175,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
         }
         ui.separator();
@@ -184,14 +184,14 @@ impl Baboon {
             .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.open_loaded_tags_folder();
         }
         if ui
             .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.open_loaded_data_folder();
         }
         let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
@@ -201,7 +201,7 @@ impl Baboon {
         .inner
         .flatten();
         if let Some(action) = recent_action {
-            ui.close();
+            close_menu(ui);
             self.apply_recent_action(action, ctx);
         }
         ui.separator();
@@ -219,7 +219,7 @@ impl Baboon {
         )
         .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
         if ui
@@ -230,7 +230,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.save_current_tag_as();
         }
         if self.current_source_is_container() {
@@ -244,7 +244,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
             }
             if self.last_poke.is_some()
@@ -253,7 +253,7 @@ impl Baboon {
                     .on_hover_text("Restore the bytes from Baboon's last verified runtime poke")
                     .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.begin_undo_last_poke(ctx.clone());
             }
             if ui
@@ -270,7 +270,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.defer_file_action(DeferredFileAction::ExportMod, ctx);
             }
             // The same review, opened to look rather than to
@@ -286,7 +286,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.review_changes();
             }
             // Expert-gated because it is the one action here
@@ -307,7 +307,7 @@ impl Baboon {
                     )
                     .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.defer_file_action(
                     DeferredFileAction::ExtractAllContainerTags,
                     ctx,
@@ -331,7 +331,7 @@ impl Baboon {
                     ctx,
                 );
             }
-            ui.close();
+            close_menu(ui);
         }
         if ui
             .add_enabled(
@@ -344,13 +344,13 @@ impl Baboon {
                 DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
                 ctx,
             );
-            ui.close();
+            close_menu(ui);
         }
         ui.separator();
         // Goes through the same close request as the window's own close
         // button, so unsaved tags are still offered for saving first.
         if ui.button("Exit").clicked() {
-            ui.close();
+            close_menu(ui);
             self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
         }
     }
@@ -362,7 +362,7 @@ impl Baboon {
             .add_enabled(self.can_undo_current(), egui::Button::new("Undo    Ctrl+Z"))
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.undo_current_tag();
         }
         if ui
@@ -372,7 +372,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.redo_current_tag();
         }
         ui.separator();
@@ -388,7 +388,7 @@ impl Baboon {
             .on_hover_text("Return the current tag to the way its source has it")
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             if let Some(key) = selected {
                 self.discard_tag_changes(self.active, &key, ctx);
             }
@@ -412,7 +412,7 @@ impl Baboon {
                 .on_disabled_hover_text("This workspace has no unsaved modifications")
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.clear_stash_confirm = Some(ClearStashConfirm {
                     kit: self.active_kit_id(),
                     stashed,
@@ -424,7 +424,7 @@ impl Baboon {
         ui.separator();
         if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
             self.settings_open = true;
-            ui.close();
+            close_menu(ui);
         }
     }
 
@@ -434,7 +434,7 @@ impl Baboon {
     fn draw_tools_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("Run Tool...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.tool_commands.open = true;
         }
         self.draw_monitor_tools_menu(ui);
@@ -449,7 +449,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.show_references_for(&key);
             }
@@ -461,13 +461,13 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.open_content_explorer(&key);
             }
         }
         if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
-            ui.close();
+            close_menu(ui);
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.tag_diff = Some(TagDiffState {
                     kit: self.active_kit_id(),
@@ -497,33 +497,33 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.fix_current_tag_dependencies();
         }
 
         ui.separator();
         if ui.button("Search Field Values...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.field_value_search_open = true;
         }
         if ui.button("Browse Keywords...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.keyword_chooser_open = true;
         }
         if ui.button("Find Unreferenced Tags...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.show_unreferenced_tags();
         }
         if ui.button("List Scenario Map IDs...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.show_map_ids(ctx);
         }
         if ui.button("List Sounds by Class...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.show_sounds_by_class(ctx);
         }
         if ui.button("List Uncompressed Sounds...").clicked() {
-            ui.close();
+            close_menu(ui);
             self.show_uncompressed_sounds(ctx);
         }
 
@@ -555,7 +555,7 @@ impl Baboon {
                 .on_hover_text("Which tags reference which, for the reference searches above")
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.begin_build_reverse_dependencies(ctx.clone(), true);
             }
         }
@@ -573,7 +573,7 @@ impl Baboon {
             .on_hover_text("Rescan every tag in the folder from disk")
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             // Clear cached entries so the scan runs fresh.
             if let Some(s) = self.source_mut() {
                 s.all_entries.clear();
@@ -595,7 +595,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close();
+            close_menu(ui);
             self.refresh_tag_browser(ctx.clone());
         }
     }
@@ -613,14 +613,14 @@ impl Baboon {
             .clicked()
         {
             kit.browser_mode = BrowserMode::Folders;
-            ui.close();
+            close_menu(ui);
         }
         if ui
             .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
             .clicked()
         {
             kit.browser_mode = BrowserMode::Groups;
-            ui.close();
+            close_menu(ui);
         }
         ui.separator();
         let selected_sort = right_opening_menu_button(
@@ -644,7 +644,7 @@ impl Baboon {
         .flatten();
         if let Some(option) = selected_sort {
             kit.browser_sort = option;
-            ui.close();
+            close_menu(ui);
         }
         ui.separator();
         ui.checkbox(&mut self.prefs.show_browser_prefixes, "Show [tag]/[folder]");
@@ -671,7 +671,7 @@ impl Baboon {
         {
             self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
             self.remember_terminal_open_for_game();
-            ui.close();
+            close_menu(ui);
         }
     }
 
@@ -681,38 +681,38 @@ impl Baboon {
         if ui.button("About...").clicked() {
             self.help_panel_tab = HelpPanelTab::About;
             self.about_open = true;
-            ui.close();
+            close_menu(ui);
         }
         if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
             self.help_panel_tab = HelpPanelTab::Doc;
             self.about_open = true;
-            ui.close();
+            close_menu(ui);
         }
         if ui.button("Tutorials...").clicked() {
             self.help_panel_tab = HelpPanelTab::Tutorials;
             self.about_open = true;
-            ui.close();
+            close_menu(ui);
         }
         if ui.button("Tag Compatibility...").clicked() {
             self.help_panel_tab = HelpPanelTab::TagCompat;
             self.about_open = true;
-            ui.close();
+            close_menu(ui);
         }
         if ui.button("Map Names...").clicked() {
             self.help_panel_tab = HelpPanelTab::MapNames;
             self.about_open = true;
-            ui.close();
+            close_menu(ui);
         }
         if ui.button("Check for updates").clicked() {
             self.begin_check_for_updates(ctx.clone(), false);
-            ui.close();
+            close_menu(ui);
         }
         if let Some(update) = self.available_update.as_ref() {
             let label = format!("Update available: {}...", update.short_name());
             let url = update.release_url.clone();
             if ui.button(label).clicked() {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                ui.close();
+                close_menu(ui);
             }
         }
     }
@@ -759,7 +759,7 @@ impl Baboon {
                         response.on_disabled_hover_text(tooltip)
                     };
                     if response.clicked() {
-                        ui.close();
+                        close_menu(ui);
                         self.load_custom_editing_kit_profile(profile, ctx.clone());
                     }
                 }
@@ -783,7 +783,7 @@ impl Baboon {
                     .on_hover_text(tooltip)
                     .clicked()
                     {
-                        ui.close();
+                        close_menu(ui);
                         self.load_editing_kit_shortcut(shortcut, ctx.clone());
                     }
                 }
@@ -799,7 +799,7 @@ impl Baboon {
         if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
             self.settings_tab = SettingsTab::EditingKits;
             self.settings_open = true;
-            ui.close();
+            close_menu(ui);
         }
     }
 

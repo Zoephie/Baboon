@@ -227,6 +227,37 @@ impl Harness {
     fn painted_contains(&self, needle: &str) -> bool {
         self.painted.iter().any(|text| text.contains(needle))
     }
+
+    /// Slide onto the `nth` painting of exactly `text` over a few frames,
+    /// press and release, and return everything those frames asked the
+    /// platform to do.
+    pub(super) fn click(&mut self, text: &str, nth: usize) -> Vec<egui::OutputCommand> {
+        let rect = self
+            .painted_rects
+            .iter()
+            .filter(|(painted, _)| painted == text)
+            .nth(nth)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", self.painted));
+        let target = rect.center();
+        let from = target - egui::vec2(30.0, 30.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut steps: Vec<Vec<egui::Event>> = (1..=3)
+            .map(|step| vec![pointer_at(from + (target - from) * step as f32 / 3.0)])
+            .collect();
+        steps.extend([vec![button(true)], vec![button(false)], Vec::new()]);
+        let mut commands = Vec::new();
+        for events in steps {
+            self.frame(events);
+            commands.extend(self.commands.iter().cloned());
+        }
+        commands
+    }
 }
 
 fn pointer_at(point: egui::Pos2) -> egui::Event {

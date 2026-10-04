@@ -586,11 +586,11 @@ impl Baboon {
 
         // The browser tree's own menu styling, so a right-click here looks like
         // a right-click anywhere else in Baboon.
-        response.context_menu(|ui| {
+        context_menu(&response, |ui| {
             style_tag_context_menu(ui);
             if context_menu_button(ui, S::MENU_ITEM).clicked() {
                 action = Some(CellAction::MenuAction(key.clone()));
-                ui.close();
+                close_menu(ui);
             }
         });
 

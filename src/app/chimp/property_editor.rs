@@ -128,7 +128,7 @@ fn draw_chimp_property_block(
             .inner
             .unwrap_or(false);
             if added {
-                ui.close();
+                close_menu(ui);
             }
             ui.separator();
         }

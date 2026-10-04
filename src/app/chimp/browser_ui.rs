@@ -301,7 +301,7 @@ impl Baboon {
                             .and_then(Option::as_deref),
                     );
                     if actions.any() {
-                        response.context_menu(|ui| {
+                        context_menu(&response, |ui| {
                             if actions.texture {
                                 chimp_texture_export_menu(ui, &package.name, &mut extract_texture);
                             }
@@ -381,7 +381,7 @@ impl Baboon {
                                 let actions =
                                     ChimpPackageActions::of(&package.name, Some(kind.as_str()));
                                 if actions.any() {
-                                    response.context_menu(|ui| {
+                                    context_menu(&response, |ui| {
                                         if actions.texture {
                                             chimp_texture_export_menu(
                                                 ui,
@@ -743,7 +743,7 @@ fn draw_chimp_folder_node(
         let package_type = package_types.get(leaf.package).and_then(Option::as_deref);
         let actions = ChimpPackageActions::of(&package.name, package_type);
         if actions.any() {
-            response.context_menu(|ui| {
+            context_menu(&response, |ui| {
                 if actions.texture {
                     let mut request = None;
                     chimp_texture_export_menu(ui, &package.name, &mut request);

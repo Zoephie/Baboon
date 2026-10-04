@@ -5,39 +5,15 @@
 use super::perf_baseline::Harness;
 use super::*;
 
-/// Slide onto `text`'s `nth` painting over a few frames, press and release,
-/// and return every URL the frames asked to open.
+/// Click `text`'s `nth` painting and return every URL that asked to open.
 fn click(h: &mut Harness, text: &str, nth: usize) -> Vec<egui::OpenUrl> {
-    let rect = h
-        .painted_rects
-        .iter()
-        .filter(|(painted, _)| painted == text)
-        .nth(nth)
-        .map(|(_, rect)| *rect)
-        .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", h.painted));
-    let target = rect.center();
-    let mut opened = Vec::new();
-    let mut frame = |h: &mut Harness, events: Vec<egui::Event>| {
-        h.frame(events);
-        opened.extend(h.commands.iter().filter_map(|command| match command {
-            egui::OutputCommand::OpenUrl(open) => Some(open.clone()),
+    h.click(text, nth)
+        .into_iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::OpenUrl(open) => Some(open),
             _ => None,
-        }));
-    };
-    for step in 1..=3 {
-        let from = target - egui::vec2(30.0, 30.0);
-        frame(h, vec![egui::Event::PointerMoved(from + (target - from) * step as f32 / 3.0)]);
-    }
-    let button = |pressed| egui::Event::PointerButton {
-        pos: target,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    frame(h, vec![button(true)]);
-    frame(h, vec![button(false)]);
-    frame(h, Vec::new());
-    opened
+        })
+        .collect()
 }
 
 fn urls(opened: &[egui::OpenUrl]) -> Vec<&str> {

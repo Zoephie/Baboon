@@ -243,31 +243,31 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             self.close_requests.push(key.clone());
         }
         if is_folder_pane_key(&key) || key == GIT_REVIEW_KEY {
-            button_response.context_menu(|ui| {
+            context_menu(&button_response, |ui| {
                 if ui.button("Close").clicked() {
                     self.close_requests.push(key.clone());
-                    ui.close();
+                    close_menu(ui);
                 }
                 if ui.button("Close all").clicked() {
                     self.close_all = true;
-                    ui.close();
+                    close_menu(ui);
                 }
                 if ui.button("Close all but this").clicked() {
                     self.close_all_but = Some(key.clone());
-                    ui.close();
+                    close_menu(ui);
                 }
             });
             return button_response;
         }
         let discardable = self.app.tag_has_discardable_changes(self.kit_index, &key);
-        button_response.context_menu(|ui| {
+        context_menu(&button_response, |ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
-                ui.close();
+                close_menu(ui);
             }
             if ui.button("Open with File Explorer").clicked() {
                 self.reveal_in_explorer = Some(key.clone());
-                ui.close();
+                close_menu(ui);
             }
             ui.separator();
             // Offered for every game. For a loose kit this drops the in-memory
@@ -279,7 +279,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                 .clicked()
             {
                 self.discard = Some(key.clone());
-                ui.close();
+                close_menu(ui);
             }
             ui.separator();
             // Every container in the tag resolves its open state through one
@@ -287,20 +287,20 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             // however deeply nested.
             if ui.button("Expand all").clicked() {
                 self.expand = Some((key.clone(), true));
-                ui.close();
+                close_menu(ui);
             }
             if ui.button("Collapse all").clicked() {
                 self.expand = Some((key.clone(), false));
-                ui.close();
+                close_menu(ui);
             }
             ui.separator();
             if ui.button("Close all").clicked() {
                 self.close_all = true;
-                ui.close();
+                close_menu(ui);
             }
             if ui.button("Close all but this").clicked() {
                 self.close_all_but = Some(key.clone());
-                ui.close();
+                close_menu(ui);
             }
         });
         button_response

@@ -159,22 +159,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             style_list_menu(ui);
             ui.set_width(320.0);
             if ui.button("Load Folder...").clicked() {
-                ui.close();
+                close_menu(ui);
                 self.add_kit = Some(LoadKind::Folder);
             }
             if ui.button("Load Tag...").clicked() {
-                ui.close();
+                close_menu(ui);
                 self.add_kit = Some(LoadKind::SingleFile);
             }
             if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                ui.close();
+                close_menu(ui);
                 self.add_kit = Some(LoadKind::Monolithic);
             }
             if ui
                 .button("Open Campaign Evolved container (.utoc)...")
                 .clicked()
             {
-                ui.close();
+                close_menu(ui);
                 self.add_kit = Some(LoadKind::Container);
             }
             ui.separator();
@@ -186,7 +186,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                 .flatten()
             {
                 self.recent_action = Some(recent_action);
-                ui.close();
+                close_menu(ui);
             }
         })
         .response

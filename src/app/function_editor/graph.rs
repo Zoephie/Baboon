@@ -133,13 +133,13 @@ pub(super) fn draw_foundation_graph(
 
         let menu_position = response.interact_pointer_pos().unwrap_or(plot.center());
         if editor.curve_points_are_editable_structure() {
-            response.context_menu(|ui| {
+            context_menu(&response, |ui| {
                 let (x, _) = to_graph(menu_position);
                 if ui.button("Add point").clicked() {
                     if editor.insert_curve_point(*selected_graph, x).is_ok() {
                         changed = true;
                     }
-                    ui.close();
+                    close_menu(ui);
                 }
                 let is_graph_point = editor
                     .curve_is_graph_point(*selected_graph, *selected_point)
@@ -155,7 +155,7 @@ pub(super) fn draw_foundation_graph(
                         *selected_point = (*selected_point).saturating_sub(1);
                         changed = true;
                     }
-                    ui.close();
+                    close_menu(ui);
                 }
                 ui.separator();
                 let segment_count = editor.curve_segment_count(*selected_graph).unwrap_or(0);
@@ -185,7 +185,7 @@ pub(super) fn draw_foundation_graph(
                         {
                             changed = true;
                         }
-                        ui.close();
+                        close_menu(ui);
                     }
                 }
                 if selected_segment > 0 {
@@ -201,7 +201,7 @@ pub(super) fn draw_foundation_graph(
                             {
                                 changed = true;
                             }
-                            ui.close();
+                            close_menu(ui);
                         }
                     }
                 }

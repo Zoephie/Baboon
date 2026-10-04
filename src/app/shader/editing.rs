@@ -616,11 +616,11 @@ pub(in crate::app) fn draw_shader_grid_row(
             .map(|menu| menu.items.as_slice())
             .filter(|items| !items.is_empty());
         if reset.is_some() || menu_items.is_some() {
-            response.context_menu(|ui| {
+            context_menu(&response, |ui| {
                 if let Some(reset) = reset.clone() {
                     if ui.button("Reset to default").clicked() {
                         edit.block_ops.push(reset);
-                        ui.close();
+                        close_menu(ui);
                     }
                 }
                 if let Some(items) = menu_items {
@@ -632,7 +632,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                     for item in items {
                         if ui.button(&item.label).clicked() {
                             push_shader_context_action(edit, &item.action);
-                            ui.close();
+                            close_menu(ui);
                         }
                     }
                 }

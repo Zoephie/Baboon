@@ -740,6 +740,10 @@ mod frame_smoke;
 #[path = "../app/tests/external_links.rs"]
 mod external_links;
 
+#[cfg(test)]
+#[path = "../app/tests/menu_close.rs"]
+mod menu_close;
+
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(
@@ -928,7 +932,7 @@ impl Baboon {
             .inner;
         if let Some(command) = menu.inner.flatten() {
             self.submit_terminal_command(format!("tool {command}"), ctx);
-            ui.close();
+            close_menu(ui);
         }
         let response = menu.response;
         if enabled {
@@ -974,7 +978,7 @@ impl Baboon {
                 }
                 _ => {}
             }
-            ui.close();
+            close_menu(ui);
         }
         let response = menu.response;
         if !enabled {

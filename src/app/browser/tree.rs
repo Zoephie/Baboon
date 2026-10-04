@@ -512,44 +512,44 @@ fn tag_extract_menu_button(
             && context_menu_button(ui, "Extract model geometry").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if supports_bsp_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract BSP geometry").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if supports_scenario_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract level geometry (one file per BSP)").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if supports_particle_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract particle geometry (JMI + one JMS per object)")
                 .clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if supports_animation_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract animations").clicked()
         {
             action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if supports_tag_import_info_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract import-info").clicked()
         {
             action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if is_bitmap_group(entry.group_tag)
             && context_menu_button(ui, "Extract bitmap images...").clicked()
         {
             action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if is_bitmap_group(entry.group_tag)
             && browser_game_keeps_bitmap_sources(ui)
@@ -558,7 +558,7 @@ fn tag_extract_menu_button(
                 .clicked()
         {
             action = Some(BrowserAction::ExtractBitmapSource(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if crate::app::editor::is_sound_group(entry.group_tag) {
             let language = browser_sound_language(ui);
@@ -573,7 +573,7 @@ fn tag_extract_menu_button(
                     keys: vec![entry.key.clone()],
                     all_languages: false,
                 });
-                ui.close();
+                close_menu(ui);
             }
             if localized {
                 let available = browser_sound_available_languages(ui);
@@ -594,7 +594,7 @@ fn tag_extract_menu_button(
                         keys: vec![entry.key.clone()],
                         all_languages: true,
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
             }
         }
@@ -604,13 +604,13 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractMaterialShaderSources(
                 entry.key.clone(),
             ));
-            ui.close();
+            close_menu(ui);
         }
         if is_hlsl_include_group(entry.group_tag)
             && context_menu_button(ui, "Extract HLSL include...").clicked()
         {
             action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         action
     };
@@ -1187,7 +1187,7 @@ fn draw_tree_node_lazy_block(
         &response,
         &native_display_path(&node.rel_path.to_string_lossy()),
     );
-    response.context_menu(|ui| {
+    context_menu(&response, |ui| {
         style_tag_context_menu(ui);
         let favorited = browser_favorite_folders(ui).map(|folders| {
             folders
@@ -1206,11 +1206,11 @@ fn draw_tree_node_lazy_block(
             clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                 rel_path: node.rel_path.clone(),
             });
-            ui.close();
+            close_menu(ui);
         }
         if context_menu_button(ui, "Copy Folder Path").clicked() {
             clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-            ui.close();
+            close_menu(ui);
         }
         context_menu_separator(ui);
         if context_menu_button(ui, "Dump folder to JSON...").clicked() {
@@ -1218,7 +1218,7 @@ fn draw_tree_node_lazy_block(
                 rel_path: node.rel_path.clone(),
                 label: node.label.clone(),
             });
-            ui.close();
+            close_menu(ui);
         }
         if let Some(action) = folder_extract_menu_button(ui, node, entries, false, true) {
             clicked = Some(action);
@@ -1396,7 +1396,7 @@ fn draw_tree_node_block(
             &native_display_path(&node.rel_path.to_string_lossy()),
         );
     }
-    header_response.context_menu(|ui| {
+    context_menu(&header_response, |ui| {
         style_tag_context_menu(ui);
         if !groups_mode && favorite_keys.is_some() {
             let favorited = browser_favorite_folders(ui).map(|folders| {
@@ -1417,11 +1417,11 @@ fn draw_tree_node_block(
                 clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                     rel_path: node.rel_path.clone(),
                 });
-                ui.close();
+                close_menu(ui);
             }
             if context_menu_button(ui, "Copy Folder Path").clicked() {
                 clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                ui.close();
+                close_menu(ui);
             }
             context_menu_separator(ui);
         }
@@ -1441,11 +1441,11 @@ fn draw_tree_node_block(
             if let Some(rel) = folder_rel.filter(|_| folder_is_pending_and_empty(node)) {
                 if context_menu_button(ui, "Rename folder...").clicked() {
                     clicked = Some(BrowserAction::RenameContainerFolder { rel: rel.clone() });
-                    ui.close();
+                    close_menu(ui);
                 }
                 if context_menu_button(ui, "Delete folder").clicked() {
                     clicked = Some(BrowserAction::DeleteContainerFolder { rel });
-                    ui.close();
+                    close_menu(ui);
                 }
             }
             context_menu_separator(ui);
@@ -1457,7 +1457,7 @@ fn draw_tree_node_block(
         if !groups_mode && favorite_keys.is_none() {
             if context_menu_button(ui, "Copy Folder Path").clicked() {
                 clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                ui.close();
+                close_menu(ui);
             }
             context_menu_separator(ui);
         }
@@ -1469,7 +1469,7 @@ fn draw_tree_node_block(
             .clicked()
         {
             clicked = Some(BrowserAction::DumpLoadedFolderJson(tag_keys));
-            ui.close();
+            close_menu(ui);
         }
 
         // Monolithic caches only. The tags in one are big-endian and read-only,
@@ -1489,7 +1489,7 @@ fn draw_tree_node_block(
                 clicked = Some(BrowserAction::ImportCacheFolderIntoKit {
                     prefix: folder_display_path(node),
                 });
-                ui.close();
+                close_menu(ui);
             }
         }
 
@@ -1737,7 +1737,7 @@ fn folder_extract_menu_from_keys(
                         rel_path: rel_path.clone(),
                         label: label.clone(),
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
                 context_menu_separator(ui);
             }
@@ -1757,7 +1757,7 @@ fn folder_extract_menu_from_keys(
                         label: label.clone(),
                         keys: container_keys,
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
             }
 
@@ -1773,7 +1773,7 @@ fn folder_extract_menu_from_keys(
                 .inner;
             if bitmap_response.clicked() {
                 action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
-                ui.close();
+                close_menu(ui);
             }
             if browser_game_keeps_bitmap_sources(ui) {
                 let source_response = ui
@@ -1787,7 +1787,7 @@ fn folder_extract_menu_from_keys(
                     .on_hover_text(BITMAP_SOURCE_HOVER);
                 if source_response.clicked() {
                     action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
-                    ui.close();
+                    close_menu(ui);
                 }
             }
 
@@ -1827,7 +1827,7 @@ fn folder_extract_menu_from_keys(
                     keys: sound_keys.clone(),
                     all_languages: false,
                 });
-                ui.close();
+                close_menu(ui);
             }
             let available_languages = browser_sound_available_languages(ui);
             let language_suffix = available_languages
@@ -1857,7 +1857,7 @@ fn folder_extract_menu_from_keys(
                         keys: sound_keys,
                         all_languages: true,
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
             }
 
@@ -1877,7 +1877,7 @@ fn folder_extract_menu_from_keys(
                 action = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
                     material_shader_keys,
                 ));
-                ui.close();
+                close_menu(ui);
             }
 
             let hlsl_count = hlsl_include_keys.len();
@@ -1892,7 +1892,7 @@ fn folder_extract_menu_from_keys(
                 .inner;
             if hlsl_response.clicked() {
                 action = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
-                ui.close();
+                close_menu(ui);
             }
 
             if !has_extractable {
@@ -1938,7 +1938,7 @@ fn loose_folder_primary_menu_items(
         .clicked()
         {
             action = Some(BrowserAction::ToggleFolderFavorite(rel_path.to_path_buf()));
-            ui.close();
+            close_menu(ui);
         }
         context_menu_separator(ui);
     }
@@ -1952,7 +1952,7 @@ fn loose_folder_primary_menu_items(
                 label: label.to_owned(),
                 open_in_new_tab: true,
             });
-            ui.close();
+            close_menu(ui);
         }
     }
     // Explorer and clipboard-path commands form the next section at every
@@ -1972,21 +1972,21 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         .on_hover_text("Rename this folder and update every reference to the tags inside it")
         .clicked()
     {
-        ui.close();
+        close_menu(ui);
         return Some(BrowserAction::RenameLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
         });
     }
     if context_menu_button(ui, "Move to...").clicked() {
-        ui.close();
+        close_menu(ui);
         return Some(BrowserAction::MoveLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
         });
     }
     if context_menu_button(ui, "Copy to...").clicked() {
-        ui.close();
+        close_menu(ui);
         return Some(BrowserAction::CopyLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
@@ -2000,7 +2000,7 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         )
         .clicked()
     {
-        ui.close();
+        close_menu(ui);
         return Some(BrowserAction::ImportTagsIntoLooseFolder {
             rel_path: rel_path.to_path_buf(),
         });
@@ -2036,19 +2036,19 @@ fn container_authoring_menu_items(
         clicked = Some(BrowserAction::NewTagInFolder {
             folder_rel: folder_rel.clone(),
         });
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "Import tag here...").clicked() {
         clicked = Some(BrowserAction::ImportTagInFolder {
             folder_rel: folder_rel.clone(),
         });
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "New folder here...").clicked() {
         clicked = Some(BrowserAction::NewContainerFolder {
             parent_rel: folder_rel,
         });
-        ui.close();
+        close_menu(ui);
     }
     clicked
 }
@@ -2070,7 +2070,7 @@ fn draw_container_root_target(ui: &mut Ui) -> Option<BrowserAction> {
     );
     let (_, response) = ui.allocate_exact_size(size, Sense::click());
     let mut clicked = None;
-    response.context_menu(|ui| {
+    context_menu(&response, |ui| {
         style_tag_context_menu(ui);
         // Right-clicking blank space is ambiguous about what it acts on, so the
         // menu says.
@@ -2861,7 +2861,7 @@ pub(in crate::app) fn draw_entry(
         response.clicked()
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
-    response.context_menu(|ui| {
+    context_menu(&response, |ui| {
         if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys, false) {
             action = Some(menu_action);
         }
@@ -2890,7 +2890,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             action = Some(BrowserAction::ImportCacheTagIntoKit {
                 key: entry.key.clone(),
             });
-            ui.close();
+            close_menu(ui);
         }
 
     let rename_enabled = supports_rename_menu(entry);
@@ -2905,17 +2905,17 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         if context_menu_primary_button(ui, "Rename", rename_enabled, primary_button_width).clicked()
         {
             action = Some(BrowserAction::RenameTag(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if context_menu_primary_button(ui, "Move", rename_enabled, primary_button_width).clicked() {
             action = Some(BrowserAction::MoveTag(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if context_menu_primary_button(ui, "Duplicate", duplicate_enabled, primary_button_width)
             .clicked()
         {
             action = Some(BrowserAction::DuplicateTag(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if context_menu_primary_button(ui, "Delete", delete_enabled, primary_button_width)
             .on_disabled_hover_text(
@@ -2924,7 +2924,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .clicked()
         {
             action = Some(BrowserAction::DeleteTag(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
     });
 
@@ -2940,16 +2940,16 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         context_menu_separator(ui);
         if is_embedded_tag_entry(entry) && context_menu_button(ui, "Extract raw tag...").clicked() {
             action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if scenario_scripts {
             if context_menu_button(ui, "Extract scripts...").clicked() {
                 action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
-                ui.close();
+                close_menu(ui);
             }
             if context_menu_button(ui, "Import scripts...").clicked() {
                 action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
-                ui.close();
+                close_menu(ui);
             }
         }
     }
@@ -2963,7 +2963,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         };
         if context_menu_button(ui, label).clicked() {
             action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
     }
 
@@ -2984,7 +2984,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
                 .inner;
             if response.clicked() {
                 action = Some(BrowserAction::LaunchScenarioInSapien(entry.key.clone()));
-                ui.close();
+                close_menu(ui);
             }
             if !launch.sapien_present {
                 response.on_disabled_hover_text("sapien.exe was not found in this editing kit");
@@ -2997,7 +2997,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .inner;
         if response.clicked() {
             action = Some(BrowserAction::LaunchScenarioInTagTest(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if !launch.tag_test_present {
             response.on_disabled_hover_text("This kit's tag_test was not found in it");
@@ -3014,7 +3014,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .inner;
         if response.clicked() {
             action = Some(BrowserAction::ReimportGeometry(entry.key.clone()));
-            ui.close();
+            close_menu(ui);
         }
         if !enabled {
             response.on_disabled_hover_text("Reimport requires a loose editing-kit tag");
@@ -3032,29 +3032,29 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
     context_menu_separator(ui);
     if context_menu_button(ui, "Open with File Explorer").clicked() {
         action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "Copy Tag Path").clicked() {
         action = Some(BrowserAction::CopyTagName(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "Find Tag References...").clicked() {
         action = Some(BrowserAction::FindReferences(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "Explore references...").clicked() {
         action = Some(BrowserAction::ExploreReferences(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
 
     context_menu_separator(ui);
     if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
         action = Some(BrowserAction::DumpJson(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
     if context_menu_button(ui, "Dump Tag References...").clicked() {
         action = Some(BrowserAction::DumpReferences(entry.key.clone()));
-        ui.close();
+        close_menu(ui);
     }
     action
 }
@@ -3115,7 +3115,7 @@ pub(in crate::app) fn draw_favorites(
                     open_in_new_tab: false,
                 });
             }
-            response.context_menu(|ui| {
+            context_menu(&response, |ui| {
                 style_tag_context_menu(ui);
                 if let Some(folder_action) = loose_folder_primary_menu_items(
                     ui,
@@ -3135,11 +3135,11 @@ pub(in crate::app) fn draw_favorites(
                             .map(|root| root.join(folder))
                             .unwrap_or_else(|| folder.clone()),
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
                 if context_menu_button(ui, "Copy Folder Path").clicked() {
                     action = Some(BrowserAction::CopyFolderPath(folder.clone()));
-                    ui.close();
+                    close_menu(ui);
                 }
                 context_menu_separator(ui);
                 // Favorite folders do not own a tree node in this section.
@@ -3167,7 +3167,7 @@ pub(in crate::app) fn draw_favorites(
                         rel_path: folder.clone(),
                         label: label.clone(),
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
             });
         }

@@ -827,7 +827,7 @@ fn browser_toolbar_controls(
                 .clicked()
             {
                 *sort = option;
-                ui.close();
+                close_menu(ui);
             }
         }
     });
@@ -1017,7 +1017,7 @@ fn draw_folder_header_common_actions(
                 }
                 if context_menu_button(ui, "Copy Folder Path").clicked() {
                     action.replace(BrowserAction::CopyFolderPath(pane.rel_path.clone()));
-                    ui.close();
+                    close_menu(ui);
                 }
                 context_menu_separator(ui);
                 let extract_label = pane.rel_path.to_string_lossy().replace('\\', "/");
@@ -1044,7 +1044,7 @@ fn draw_folder_header_common_actions(
                         rel_path: pane.rel_path.clone(),
                         label: pane.label.clone(),
                     });
-                    ui.close();
+                    close_menu(ui);
                 }
             },
         );

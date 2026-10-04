@@ -96,18 +96,18 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
             .documents
             .get(&package)
             .is_some_and(|document| document.mesh_kind.is_some());
-        button_response.context_menu(|ui| {
+        context_menu(&button_response, |ui| {
             if ui.button("Close").clicked() {
                 self.close_requests.push(package.clone());
-                ui.close();
+                close_menu(ui);
             }
             if ui.button("Close all but this").clicked() {
                 self.close_all_but = Some(package.clone());
-                ui.close();
+                close_menu(ui);
             }
             if ui.button("Close all").clicked() {
                 self.close_all = true;
-                ui.close();
+                close_menu(ui);
             }
             if has_texture {
                 ui.separator();
