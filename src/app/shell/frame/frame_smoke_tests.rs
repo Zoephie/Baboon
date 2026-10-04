@@ -36,6 +36,10 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::browser::{
+    ContainerFolderDialog, ContentExplorer, ExtractKind, ExtractTargetPrompt,
+    LooseFolderRenameState, RenameTagState, TagNameOperation,
+};
 use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
 
 /// Frames each case runs after its setup. A window's first frame only

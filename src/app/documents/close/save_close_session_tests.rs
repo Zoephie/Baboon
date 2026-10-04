@@ -13,6 +13,7 @@
 
 use crate::app::loose_fixture::*;
 use super::*;
+use crate::app::browser::{BrowserAction, BrowserMode, BrowserSort};
 
 const MODEL: &str = "objects/props/crate.model";
 const OTHER: &str = "objects/props/barrel.model";

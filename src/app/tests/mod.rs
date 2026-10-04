@@ -1,6 +1,7 @@
 use crate::app::documents::saving::new_tag_output_path_from_dialog;
 
 use super::*;
+use crate::app::browser::{collect_bitmap_keys, tag_json_relative_path};
 
 mod classic_h2;
 

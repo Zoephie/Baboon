@@ -2,6 +2,10 @@
 //! jumps, and fixing a tag's dependencies.
 
 use super::*;
+use crate::app::browser::{
+    ContentExplorer, FieldNav, PendingRefJump, RefOccurrence, TagQueryResults,
+    contains_ignore_ascii_case,
+};
 
 pub(in crate::app) mod index;
 pub(in crate::app) use index::*;

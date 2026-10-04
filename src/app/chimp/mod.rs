@@ -5,6 +5,7 @@
 //! state; none of those concepts are forced through the editing-kit/tag model.
 
 use super::*;
+use crate::app::browser::{contains_ignore_ascii_case, style_list_menu};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 

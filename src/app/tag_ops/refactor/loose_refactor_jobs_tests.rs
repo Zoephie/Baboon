@@ -10,6 +10,7 @@
 
 use crate::app::loose_fixture::*;
 use super::*;
+use crate::app::browser::BrowserAction;
 
 const RENDER: &str = "objects/props/crate.render_model";
 const MODEL: &str = "objects/props/crate.model";

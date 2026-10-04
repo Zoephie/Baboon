@@ -186,12 +186,12 @@ fn a_new_container_tag_has_the_expected_capabilities() {
         "fields and block controls must be live for a new tag"
     );
     assert!(
-        crate::app::supports_rename_menu(&entry),
+        crate::app::browser::supports_rename_menu(&entry),
         "rename/move is the only way to correct a mistyped new-tag path"
     );
     // No `.ubulk` behind it, so there is nothing to pull out.
     assert!(
-        !crate::app::is_embedded_tag_entry(&entry),
+        !crate::app::browser::is_embedded_tag_entry(&entry),
         "a new tag has no embedded payload to extract"
     );
 }

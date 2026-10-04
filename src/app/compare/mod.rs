@@ -2,6 +2,7 @@
 //! review share.
 
 use super::*;
+use crate::app::browser::native_display_path;
 
 pub(in crate::app) mod git_review;
 pub(in crate::app) use git_review::*;

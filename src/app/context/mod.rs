@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::browser::BrowserCommand;
 
 /// A draw's view of the application. Built from Baboon's fields with
 /// [`Ctx::new`] rather than from `&Baboon`, so the draw can hold its own

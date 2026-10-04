@@ -2,6 +2,7 @@
 //! listings (map ids, sounds by class).
 
 use super::*;
+use crate::app::browser::{PendingRefJump, RefOccurrence, TagQueryResults};
 
 pub(in crate::app) mod find;
 pub(in crate::app) use find::*;

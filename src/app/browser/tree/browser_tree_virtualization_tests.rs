@@ -13,7 +13,7 @@ use eframe::egui;
 use super::{
     Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
 };
-use crate::app::BrowserSort;
+use crate::app::browser::BrowserSort;
 use crate::core::source::{TagEntry, TagEntryLocation, TagTree};
 
 /// 40 top folders × 10 subfolders × 150 tags: 60,000 tags, 440 folders.

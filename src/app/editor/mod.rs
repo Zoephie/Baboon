@@ -3,6 +3,12 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::browser::{
+    BrowserAction, BrowserCommand, CONTEXT_MENU_WIDTH, DraggedTagRef, FieldNav,
+    begin_bitmap_hovers, bitmap_hover_preview_ui, bitmap_hover_texture, context_menu_separator,
+    draw_tag_context_menu_contents, entry_matches, entry_reference_input, entry_rel_path,
+    is_bitmap_tag, paint_bitmap_hover_preview, queue_bitmap_hover_thumbnails, style_list_menu,
+};
 
 mod sound;
 pub(super) use sound::*;

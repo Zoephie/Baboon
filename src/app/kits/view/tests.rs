@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::browser::{BrowserMode, BrowserSort};
 
 fn empty_source() -> LoadedSourceData {
     LoadedSourceData {

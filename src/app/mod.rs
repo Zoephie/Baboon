@@ -76,7 +76,7 @@ use crate::core::keywords::*;
 mod prefs;
 use prefs::*;
 pub(in crate::app) mod browser;
-use browser::*;
+use browser::{BrowserFeature, KitBrowser, KitToolDragState};
 mod export;
 use export::*;
 pub(in crate::app) mod model_preview;

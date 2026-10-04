@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::browser::{BITMAP_LIBRARY_KEY, MODEL_LIBRARY_KEY};
 
 fn unique_temp_dir(name: &str) -> PathBuf {
     crate::test_kits::unique_temp_path(name)

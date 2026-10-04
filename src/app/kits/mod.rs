@@ -4,6 +4,10 @@
 //! scenarios, and dropping tags on the tools.
 
 use super::*;
+use crate::app::browser::{
+    Bitmaps, DraggedTagRef, FilterCache, KitBrowser, KitToolDragState, Models, PaletteTable,
+    ThumbnailLibrary, disclosure_triangle_icon, entry_rel_path, is_folder_pane_key,
+};
 
 pub(in crate::app) mod kit;
 pub(in crate::app) use kit::*;

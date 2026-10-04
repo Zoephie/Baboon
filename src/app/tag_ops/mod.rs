@@ -3,6 +3,9 @@
 //! inside a Campaign Evolved container.
 
 use super::*;
+use crate::app::browser::{
+    ContainerFolderDialog, LooseFolderRenameState, RenameTagState, TagNameOperation,
+};
 
 pub(in crate::app) mod delete;
 pub(in crate::app) mod duplicate;

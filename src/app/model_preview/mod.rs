@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use crate::app::browser::decode_thumbnail;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::{Marker, Node, RenderMesh};
 use std::sync::Arc;

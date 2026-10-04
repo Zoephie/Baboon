@@ -166,7 +166,7 @@ fn only_a_hovered_bitmap_row_requests_its_thumbnail() {
             };
             let _ = crate::app::run_ui_test(&ctx, input, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let requests = crate::app::begin_bitmap_hovers(
+                    let requests = crate::app::browser::begin_bitmap_hovers(
                         ui,
                         std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
                     );
