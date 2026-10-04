@@ -9,7 +9,7 @@ fn restored_loose_tag_uses_the_current_sources_key() {
     std::fs::write(&path, b"tag").expect("create tag");
     let canonical = std::fs::canonicalize(&path).expect("canonical tag path");
     let entry = crate::core::source::TagEntry {
-        key: format!("file:{}", canonical.display()),
+        key: file_entry_key(&canonical),
         display_path: "objects/characters/brute.model".to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),
@@ -465,8 +465,8 @@ fn moved_tags_remap_favorite_relative_paths() {
     let mut favorites = vec![old_relative.clone(), PathBuf::from("sound/brute.sound")];
     let mut remap = HashMap::new();
     remap.insert(
-        format!("file:{}", root.join(&old_relative).display()),
-        format!("file:{}", root.join(&new_relative).display()),
+        file_entry_key(&root.join(&old_relative)),
+        file_entry_key(&root.join(&new_relative)),
     );
 
     remap_favorite_paths(&root, &mut favorites, &remap);

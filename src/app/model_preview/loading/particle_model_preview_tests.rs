@@ -18,6 +18,7 @@
 //! Skips silently when the corresponding tag set is absent.
 
 use std::path::PathBuf;
+use crate::core::tag_key::file_entry_key;
 use crate::core::game::GameId;
 
 use blam_tags::TagFile;
@@ -299,7 +300,7 @@ fn load_model_preview_derives_object_names_from_the_entry() {
     let tag = read(&path, "haloreach_mcc");
     let names = names();
     let entry = crate::core::source::TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: "fx/particles/models/debris/falling_leaves/falling_leaves.particle_model"
             .to_owned(),
         group_tag: tag.header.group_tag,
@@ -359,7 +360,7 @@ fn a_shipped_render_model_previews_on_its_own() {
         "`mode` must open the Model Preview tab",
     );
     let entry = crate::core::source::TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: rel.to_owned(),
         group_tag: tag.header.group_tag,
         group_name: Some("render_model".to_owned()),
@@ -418,7 +419,7 @@ fn every_shipped_particle_model_previews() {
                 let rel = path.strip_prefix(&root).unwrap_or(&path);
                 let display = rel.to_string_lossy().replace('\\', "/");
                 let tag_entry = crate::core::source::TagEntry {
-                    key: format!("file:{}", path.display()),
+                    key: file_entry_key(&path),
                     display_path: display.clone(),
                     group_tag: tag.header.group_tag,
                     group_name: Some("particle_model".to_owned()),

@@ -64,7 +64,7 @@ fn h2_source(root: PathBuf) -> TagSource {
 
 fn model_entry(path: PathBuf, display_path: &str) -> TagEntry {
     TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: display_path.to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),

@@ -951,7 +951,7 @@ pub(in crate::app) fn load_referenced_tag_from_source(
         TagSource::LooseFolder { root, .. } => {
             let path = resolve_tag_path(root, reference, extension);
             let entry = TagEntry {
-                key: format!("file:{}", path.display()),
+                key: file_entry_key(&path),
                 display_path: format!("{}.{}", reference.replace('\\', "/"), extension),
                 group_tag,
                 group_name: Some(extension.to_owned()),

@@ -9,6 +9,7 @@ pub(crate) mod game;
 pub(crate) mod process;
 pub(crate) mod source;
 pub(crate) mod storage;
+pub(crate) mod tag_key;
 pub(crate) mod tool_commands;
 
 #[cfg(test)]

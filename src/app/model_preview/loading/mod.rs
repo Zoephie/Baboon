@@ -372,7 +372,7 @@ pub(super) fn load_model_preview(
         ));
     }
     let render_entry = TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: format!("{}.{}", normalized.replace('\\', "/"), extension),
         group_tag,
         group_name: names.name_for(group_tag).map(str::to_owned),

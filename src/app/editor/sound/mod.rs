@@ -1600,10 +1600,7 @@ pub(in crate::app) fn draw_sound_player(
         )
     });
     // Loose `.sound` file path (for the reimport data\ layout + tool tag path).
-    let abs_tag_path = edit
-        .tag_key
-        .strip_prefix("file:")
-        .map(std::path::PathBuf::from);
+    let abs_tag_path = file_key_path(edit.tag_key).map(std::path::Path::to_path_buf);
     // This tag's rel path (e.g. `sound\dialog\...\ambush`) + whether it spans
     // multiple pitch ranges — both feed the FMOD subsound id hash.
     let sound_rel = abs_tag_path

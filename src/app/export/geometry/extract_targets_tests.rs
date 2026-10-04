@@ -8,6 +8,7 @@
 //! `BLAM_TEST_H2EK` to the kits' `tags` folders.
 
 use std::path::{Path, PathBuf};
+use crate::core::tag_key::file_entry_key;
 use crate::core::game::GameId;
 
 use blam_tags::JmsFile;
@@ -36,7 +37,7 @@ fn loose_source(root: &Path, game: &str) -> TagSource {
 fn entry_for(root: &Path, rel: &str, group: &[u8; 4]) -> TagEntry {
     let path = root.join(rel);
     TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*group),
         group_name: Some(

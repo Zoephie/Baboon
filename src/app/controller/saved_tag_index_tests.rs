@@ -167,7 +167,7 @@ fn a_refresh_reports_a_tag_whose_references_cannot_be_read() {
     let bad = root.join("objects/bad.model");
     std::fs::write(&bad, b"not a tag").unwrap();
     let entry = |path: &Path| TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: path
             .strip_prefix(&root)
             .unwrap()

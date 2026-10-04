@@ -91,7 +91,7 @@ struct OpenTagGroup {
 }
 
 fn matching_tag_path(current_key: &str, current_root: &Path, other_root: &Path) -> Option<PathBuf> {
-    let current = Path::new(current_key.strip_prefix("file:")?);
+    let current = file_key_path(current_key)?;
     let relative = current.strip_prefix(current_root).ok()?;
     Some(other_root.join(relative))
 }
@@ -797,7 +797,7 @@ impl Baboon {
                     .find(|profile| profile.id == identity.id)
             })
             .is_some_and(|profile| profile.git_tracked);
-        let current_path = state.a_key.strip_prefix("file:").map(PathBuf::from);
+        let current_path = file_key_path(&state.a_key).map(Path::to_path_buf);
         let git_available =
             git_tracked && current_path.is_some() && !tags_root.as_os_str().is_empty();
         if state.source == TagCompareSource::GitHistory
@@ -855,7 +855,7 @@ impl Baboon {
                         let label = kit
                             .entry_for_key(key)
                             .map(|entry| entry.display_path.clone())
-                            .unwrap_or_else(|| key.strip_prefix("file:").unwrap_or(key).to_owned());
+                            .unwrap_or_else(|| key_label(key).to_owned());
                         Some((key.clone(), label))
                     })
                     .collect();
@@ -997,7 +997,7 @@ impl Baboon {
                         );
                         path_label(
                             ui,
-                            state.a_key.strip_prefix("file:").unwrap_or(&state.a_key),
+                            key_label(&state.a_key),
                             field_width,
                         );
                         ui.end_row();
@@ -1310,7 +1310,7 @@ impl Baboon {
                     );
                 }
                 if state.source == TagCompareSource::EditingKit {
-                    if tags_root.as_os_str().is_empty() || !state.a_key.starts_with("file:") {
+                    if tags_root.as_os_str().is_empty() || file_key_path(&state.a_key).is_none() {
                         ui.label(
                             RichText::new("Matching tags require a loose editing kit tag.")
                                 .color(subtle_dark()),

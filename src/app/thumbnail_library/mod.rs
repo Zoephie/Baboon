@@ -62,7 +62,7 @@ pub(in crate::app) struct Thumbnail {
 
 /// A loose tag's modified time, from its `file:` key.
 fn loose_tag_modified(key: &str) -> Option<std::time::SystemTime> {
-    let path = key.strip_prefix("file:")?;
+    let path = file_key_path(key)?;
     std::fs::metadata(path).ok()?.modified().ok()
 }
 

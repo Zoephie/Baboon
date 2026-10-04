@@ -1335,7 +1335,7 @@ impl Baboon {
             .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
         OverlayAdoption::Ready(
             TagEntry {
-                key: super::controller::new_container_key(&package),
+                key: crate::core::tag_key::new_tag_entry_key(&package),
                 display_path: format!("{}.{}", overlay.logical_path, extension),
                 group_tag: overlay.group_tag,
                 group_name: Some(group_name),

@@ -422,31 +422,8 @@ where
     Ok(entries)
 }
 
-// ── Entry keys ────────────────────────────────────────────────────────────────
-//
-// An entry key is saved in sessions, keyword sidecars, favourites and the index
-// database, so its spelling is a file format. Each kind is built here and
-// nowhere else in the loaders; `compat_keys` pins every spelling.
-
-/// A loose tag file's key: `file:` and the path exactly as displayed. Never
-/// normalized: the path is the root as the user gave it joined with what the
-/// walk found, so it can mix separators, and splitting it on `:` breaks drive
-/// letters.
-pub(crate) fn file_entry_key(path: &Path) -> String {
-    format!("file:{}", path.display())
-}
-
-/// A monolithic cache tag's key: its group with trailing spaces trimmed (`rm`
-/// for `rm  `) and its name as the cache stores it, backslashes included.
-pub(crate) fn cache_entry_key(group_tag: u32, name: &str) -> String {
-    format!("cache:{}:{name}", format_group_tag(group_tag))
-}
-
-/// A Campaign Evolved container tag's key: the container's label and the
-/// payload path in its original case.
-pub(crate) fn container_entry_key(chunk_label: &str, rel_path: &str) -> String {
-    format!("ublock:{chunk_label}:{rel_path}")
-}
+// Entry keys are built in `crate::core::tag_key`.
+pub(crate) use crate::core::tag_key::{cache_entry_key, container_entry_key, file_entry_key};
 
 /// The label a container's tags are keyed under: its `.utoc` file stem, so a
 /// renamed mod or a renumbered chunk changes every key in it.

@@ -23,6 +23,7 @@ use walkdir::WalkDir;
 
 use crate::core::format::TagNameIndex;
 use crate::core::game::GameId;
+use crate::core::tag_key::file_key_path;
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Snapshot reported while a background loose-folder index scan is running.

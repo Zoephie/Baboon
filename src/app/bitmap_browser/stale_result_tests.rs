@@ -60,7 +60,7 @@ fn a_generation_bump_keeps_thumbnails_that_are_still_right() {
         std::fs::write(path, b"bitmap").unwrap();
         set_time(path, 1_000_000);
     }
-    let key = |path: &Path| format!("file:{}", path.display());
+    let key = |path: &Path| file_entry_key(&path);
     let mut cache = ThumbnailCache::default();
     for listed in [
         key(&same),

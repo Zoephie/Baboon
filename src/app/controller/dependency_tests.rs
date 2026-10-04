@@ -12,7 +12,7 @@ fn entry(display_path: &str, group_tag: u32) -> TagEntry {
 
 fn abs_entry(root: &Path, display_path: &str, group_tag: u32) -> TagEntry {
     TagEntry {
-        key: format!("file:{}", root.join(display_path).display()),
+        key: file_entry_key(&root.join(display_path)),
         display_path: display_path.to_owned(),
         group_tag,
         group_name: None,
@@ -195,7 +195,7 @@ fn new_container_entry(display_path: &str, group_tag: u32, group_name: &str) -> 
         .unwrap_or(display_path);
     let package = new_container_package(logical, group_name);
     TagEntry {
-        key: new_container_key(&package),
+        key: new_tag_entry_key(&package),
         display_path: display_path.to_owned(),
         group_tag,
         group_name: Some(group_name.to_owned()),
@@ -268,7 +268,7 @@ fn renaming_a_new_tag_derives_the_same_identity_as_creating_it_there() {
     let created = new_container_package("objects/foo/bar", "camera_track");
     assert_eq!(created, "/Game/Tags/objects/foo/bar-camera_track");
     assert_eq!(
-        new_container_key(&created),
+        new_tag_entry_key(&created),
         "newtag:/Game/Tags/objects/foo/bar-camera_track"
     );
 

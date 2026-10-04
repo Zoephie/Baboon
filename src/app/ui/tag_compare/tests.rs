@@ -179,7 +179,7 @@ fn matching_tag_keeps_path_and_type_below_tags_root() {
         .join("characters")
         .join("brute")
         .join("brute.model");
-    let key = format!("file:{}", current_root.join(&relative).display());
+    let key = file_entry_key(&current_root.join(&relative));
     assert_eq!(
         matching_tag_path(&key, &current_root, &reference_root),
         Some(reference_root.join(relative))

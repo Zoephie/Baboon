@@ -5,7 +5,7 @@ use super::*;
 
 fn ce_bitmap(tags: &Path, rel: &str) -> TagEntry {
     TagEntry {
-        key: format!("file:{}", tags.join(rel).display()),
+        key: file_entry_key(&tags.join(rel)),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*b"bitm"),
         group_name: Some("bitmap".to_owned()),

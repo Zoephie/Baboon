@@ -917,7 +917,7 @@ fn cases() -> Vec<Case> {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                 h.app.delete_confirm = Some(DeleteConfirm {
                     kit: active_id(h),
-                    key: format!("file:{}", path.display()),
+                    key: file_entry_key(&path),
                     display_path: "objects/weapons/rifle/rifle.biped".to_owned(),
                     kind: DeleteKind::Loose,
                     referrers: vec!["levels/smoke/smoke.scenario".to_owned()],
@@ -956,7 +956,7 @@ fn cases() -> Vec<Case> {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
                 h.app.rename_tag = Some(RenameTagState {
                     kit: active_id(h),
-                    key: format!("file:{}", path.display()),
+                    key: file_entry_key(&path),
                     old_display: "objects/weapons/rifle/rifle.biped".to_owned(),
                     extension: "biped".to_owned(),
                     operation: TagNameOperation::Rename,

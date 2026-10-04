@@ -206,7 +206,7 @@ fn standalone_collision_and_physics_export_is_posed_by_the_owning_model() {
         let path = root.join(format!("{stem}.{extension}"));
         assert!(path.is_file(), "{} is not in this tag tree", path.display());
         let entry = TagEntry {
-            key: format!("file:{}", path.display()),
+            key: file_entry_key(&path),
             display_path: format!("{stem}.{extension}"),
             group_tag: u32::from_be_bytes(group_tag),
             group_name: Some(extension.to_owned()),
@@ -341,7 +341,7 @@ fn animation_graph_without_its_own_rest_pose_borrows_the_owning_models() {
     let path = root.join(format!("{stem}.model_animation_graph"));
     assert!(path.is_file(), "{} is not in this tag tree", path.display());
     let entry = TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: format!("{stem}.model_animation_graph"),
         group_tag: u32::from_be_bytes(*b"jmad"),
         group_name: Some("model_animation_graph".to_owned()),

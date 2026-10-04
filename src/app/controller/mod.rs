@@ -378,12 +378,6 @@ fn new_container_package(logical: &str, group_name: &str) -> String {
     format!("/Game/Tags/{logical}-{group_name}")
 }
 
-/// The browser/document key for a new tag at `package`. Prefixed so it cannot
-/// collide with a mounted container tag's key.
-pub(in crate::app) fn new_container_key(package: &str) -> String {
-    format!("newtag:{package}")
-}
-
 /// A container-relative payload path as a `/Game/…` package path.
 ///
 /// The content root is stripped case-insensitively and the remainder is left
@@ -1894,7 +1888,7 @@ impl Baboon {
         let template =
             new_container_template_for(self.find_container_template(group_tag), group_name)?;
         let package = new_container_package(logical, group_name);
-        let key = new_container_key(&package);
+        let key = new_tag_entry_key(&package);
         if self.kits[self.active].parsed_tags.contains_key(&key)
             || self
                 .source()
@@ -1971,7 +1965,7 @@ impl Baboon {
         }
 
         let package = new_container_package(new_rel, &group_name);
-        let new_key = new_container_key(&package);
+        let new_key = new_tag_entry_key(&package);
         if new_key == key {
             return Ok(format!("{} is already at that path", entry.display_path));
         }
@@ -9255,7 +9249,7 @@ impl Baboon {
             );
             return;
         }
-        let key = format!("file:{}", abs.display());
+        let key = file_entry_key(&abs);
         // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
         // the scanner's own constructor: this used to derive the display path
         // from the unstripped reference, which could double the extension.
@@ -10814,7 +10808,7 @@ fn run_tag_rename_job(
         .to_string_lossy()
         .replace('\\', "/");
     let new_entry = TagEntry {
-        key: format!("file:{}", new_path.display()),
+        key: file_entry_key(&new_path),
         display_path: new_display,
         group_tag: entry.group_tag,
         group_name: entry.group_name.clone(),
@@ -11294,7 +11288,7 @@ fn transform_folder_entries(
                 .to_string_lossy()
                 .replace('\\', "/");
             Some(TagEntry {
-                key: format!("file:{}", new_path.display()),
+                key: file_entry_key(&new_path),
                 display_path,
                 group_tag: entry.group_tag,
                 group_name: entry.group_name.clone(),
@@ -11708,7 +11702,7 @@ fn moved_key_map(
         };
         let new_path = destination.join(inner_rel);
         if new_path.starts_with(tags_root) {
-            map.insert(entry.key.clone(), format!("file:{}", new_path.display()));
+            map.insert(entry.key.clone(), file_entry_key(&new_path));
         }
     }
     map
@@ -11783,14 +11777,14 @@ fn remap_favorite_paths(
     old_to_new_keys: &HashMap<String, String>,
 ) {
     for relative_path in relative_paths {
-        let old_key = format!("file:{}", root.join(&*relative_path).display());
+        let old_key = file_entry_key(&root.join(&*relative_path));
         let Some(new_key) = old_to_new_keys
             .iter()
             .find_map(|(old, new)| same_entry_key(old, &old_key).then_some(new))
         else {
             continue;
         };
-        let Some(new_path) = new_key.strip_prefix("file:").map(PathBuf::from) else {
+        let Some(new_path) = file_key_path(new_key).map(Path::to_path_buf) else {
             continue;
         };
         if let Some(new_relative) = new_path

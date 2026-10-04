@@ -11,6 +11,7 @@
 //! Needs `BLAM_TEST_H3EK` / `BLAM_TEST_H2EK`; skips a kit that is not set.
 
 use std::path::Path;
+use crate::core::tag_key::file_entry_key;
 use crate::core::game::GameId;
 use std::time::{Duration, Instant};
 
@@ -35,7 +36,7 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
     }
     let definitions = crate::test_kits::definitions();
     let entry = TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*b"mode"),
         group_name: Some("render_model".to_owned()),

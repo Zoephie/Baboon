@@ -368,8 +368,8 @@ fn entry_from_index_item(item: &serde_json::Value) -> Option<TagEntry> {
         .get("group_name")
         .and_then(|v| v.as_str())
         .map(str::to_owned);
-    let location = if let Some(abs) = key.strip_prefix("file:") {
-        TagEntryLocation::LooseFile(PathBuf::from(abs))
+    let location = if let Some(abs) = file_key_path(&key) {
+        TagEntryLocation::LooseFile(abs.to_path_buf())
     } else {
         return None;
     };
@@ -829,9 +829,8 @@ fn load_entry_index_from_conn(
             let size: Option<i64> = row.get(5)?;
             let modified_secs: Option<i64> = row.get(6)?;
             let modified_nanos: Option<i64> = row.get(7)?;
-            let location = key
-                .strip_prefix("file:")
-                .map(|abs| TagEntryLocation::LooseFile(PathBuf::from(abs)));
+            let location =
+                file_key_path(&key).map(|abs| TagEntryLocation::LooseFile(abs.to_path_buf()));
             let fingerprint = match (size, modified_secs, modified_nanos) {
                 (Some(size), Some(modified_secs), Some(modified_nanos))
                     if size >= 0 && modified_secs >= 0 && modified_nanos >= 0 =>

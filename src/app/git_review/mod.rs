@@ -577,7 +577,7 @@ impl Baboon {
         // it (`retain_source_tags`), so this is the path the kit's own scan
         // produced, and its key is the scan's key. This used to canonicalize
         // the path against every entry in the kit, twice, per click.
-        let key = format!("file:{}", absolute.display());
+        let key = file_entry_key(&absolute);
         if self.kits[kit].entry_for_key(&key).is_none() {
             let new_entry = self.kits[kit].source.as_ref().and_then(|source| {
                 let TagSource::LooseFolder { root, .. } = &source.source else {

@@ -169,7 +169,7 @@ fn opening_a_reviewed_file_finds_the_scanned_entry() {
     bytes[36..40].copy_from_slice(b"weap");
     fs::write(&path, &bytes).unwrap();
     let entry = TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path: "objects/rifle.weapon".to_owned(),
         group_tag: u32::from_be_bytes(*b"weap"),
         group_name: Some("weapon".to_owned()),

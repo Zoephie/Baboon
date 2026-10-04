@@ -505,7 +505,7 @@ fn loose_duplicate_entry(
                 .ok_or_else(|| "The copied file is not a recognized tag".to_owned())
         }
         TagSource::SingleFile { .. } => Ok(TagEntry {
-            key: format!("file:{}", destination.display()),
+            key: file_entry_key(&destination),
             display_path: duplicate_display_path(&source_entry.display_path, new_leaf),
             group_tag: source_entry.group_tag,
             group_name: source_entry.group_name.clone(),

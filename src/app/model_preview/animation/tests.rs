@@ -217,7 +217,7 @@ fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
         definitions_root: std::path::PathBuf::new(),
     };
     let entry_for = |rel: &str| TagEntry {
-        key: format!("file:{}", tags_root.join(rel).display()),
+        key: file_entry_key(&tags_root.join(rel)),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),
@@ -310,7 +310,7 @@ fn a_real_kits_animation_decodes_into_frames() {
         definitions_root: std::path::PathBuf::new(),
     };
     let entry = TagEntry {
-        key: format!("file:{}", model_path.display()),
+        key: file_entry_key(&model_path),
         display_path: "objects/characters/masterchief/masterchief.model".to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),
@@ -447,7 +447,7 @@ fn a_halo_ce_biped_plays_its_idle() {
         definitions_root: crate::test_kits::definitions().to_path_buf(),
     };
     let entry = TagEntry {
-        key: format!("file:{}", tags.join(rel).display()),
+        key: file_entry_key(&tags.join(rel)),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*b"bipd"),
         group_name: Some("biped".to_owned()),
@@ -471,7 +471,7 @@ fn a_halo_2_model_plays_its_idle() {
         definitions_root: crate::test_kits::definitions().to_path_buf(),
     };
     let entry = TagEntry {
-        key: format!("file:{}", tags.join(rel).display()),
+        key: file_entry_key(&tags.join(rel)),
         display_path: rel.to_owned(),
         group_tag: u32::from_be_bytes(*b"hlmt"),
         group_name: Some("model".to_owned()),

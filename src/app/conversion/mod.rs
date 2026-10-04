@@ -978,11 +978,7 @@ fn discover_outside_references(
 /// `objects\Weapons\rifle` in one reference and `objects\weapons\rifle` in
 /// the next, and a case-sensitive lookup would follow one and drop the other.
 fn folded_cache_key(group_tag: u32, name: &str) -> String {
-    format!(
-        "cache:{}:{}",
-        format_group_tag(group_tag),
-        name.replace('/', "\\").to_ascii_lowercase()
-    )
+    crate::core::tag_key::cache_entry_key(group_tag, &name.replace('/', "\\").to_ascii_lowercase())
 }
 
 /// What class this entry lands in, asked once per class and remembered.

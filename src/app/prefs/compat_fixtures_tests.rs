@@ -321,11 +321,11 @@ fn compat_campaign_identities() {
     );
     let package = "/Game/Tags/objects/foo/bar-camera_track";
     assert_eq!(
-        crate::app::controller::new_container_key(package),
+        crate::core::tag_key::new_tag_entry_key(package),
         json("tag_keys.json")["newtag_ce"].as_str().unwrap()
     );
     let authored = TagEntry {
-        key: crate::app::controller::new_container_key(package),
+        key: crate::core::tag_key::new_tag_entry_key(package),
         display_path: "objects/foo/bar.camera_track".to_owned(),
         group_tag: u32::from_be_bytes(*b"trak"),
         group_name: Some("camera_track".to_owned()),

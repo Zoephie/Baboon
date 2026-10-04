@@ -284,7 +284,7 @@ fn load_entry_index_accepts_legacy_cache_without_metadata() {
     let text = serde_json::to_string(&serde_json::json!({
         "root": root.display().to_string(),
         "entries": [{
-            "key": format!("file:{}", path.display()),
+            "key": file_entry_key(&path),
             "display_path": "objects/a.model",
             "group_tag": u32::from_be_bytes(*b"hlmt"),
             "group_name": null
@@ -690,8 +690,8 @@ fn sqlite_reverse_dependency_index_round_trips_empty_and_targeted_dependencies()
     let root = temp_dir("sqlite_reverse");
     let game = unique_game("sqlite_reverse");
     fs::create_dir_all(root.join("objects")).unwrap();
-    let tag_key = format!("file:{}", root.join("objects/a.model").display());
-    let empty_key = format!("file:{}", root.join("objects/empty.model").display());
+    let tag_key = file_entry_key(&root.join("objects/a.model"));
+    let empty_key = file_entry_key(&root.join("objects/empty.model"));
     let mut index = ReverseDependencyIndex::default();
     index.set_tag_dependencies(
         tag_key.clone(),
