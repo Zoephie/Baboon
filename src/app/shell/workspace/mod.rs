@@ -317,7 +317,6 @@ impl Baboon {
         self.refresh_ref_jump_occurrences(ctx);
         draw_query_results_window(&cx!(self, ctx), &mut self.search, &mut self.references);
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
-        draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());

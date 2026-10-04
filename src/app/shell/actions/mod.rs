@@ -155,7 +155,11 @@ impl Baboon {
                 });
             }
             AppAction::FixDependencies => self.fix_current_tag_dependencies(),
-            AppAction::OpenFieldValueSearch => self.search.field_value_search_open = true,
+            AppAction::OpenFieldValueSearch => {
+                if self.dialogs.get::<FieldValueSearchWindow>().is_none() {
+                    self.dialogs.open(FieldValueSearchWindow::default());
+                }
+            }
             AppAction::OpenKeywordChooser => self.dialogs.open(KeywordChooser),
             AppAction::FindUnreferencedTags => self.show_unreferenced_tags(),
             AppAction::ListMapIds => self.show_map_ids(ctx),

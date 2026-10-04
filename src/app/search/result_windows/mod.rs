@@ -255,93 +255,103 @@ pub(in crate::app) enum QueryResultAction {
     Reveal(String),
 }
 
-/// The Search Field Values window, while it is open.
-pub(in crate::app) fn draw_field_value_search_window(cx: &Ctx, search: &mut SearchFeature) {
-    if !search.field_value_search_open {
-        return;
-    }
-    let ctx = cx.egui;
-    let mut open = true;
-    let mut do_search = false;
-    let mut do_build = false;
-    egui::Window::new("Search Field Values")
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("field_value_search"))
-        .open(&mut open)
-        .default_width(window_width(ctx, 400.0))
-        .show(ctx, |ui| {
-            ui.label(
-                RichText::new(
-                    "Find tags whose field values contain text — strings, string IDs, tag \
-                     references, and enum names.",
-                )
-                .color(subtle_dark()),
-            );
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let response = ui.add_enabled(
-                    !search.field_value_searching,
-                    egui::TextEdit::singleline(&mut search.field_value_query)
-                        .hint_text(placeholder_text("value to find"))
-                        .desired_width(240.0),
+/// The Search Field Values window: the text to find and the group to limit it
+/// to. Search sends them; whether a search is running is the search's, read
+/// through [`AppReads`].
+#[derive(Default)]
+pub(in crate::app) struct FieldValueSearchWindow {
+    pub(in crate::app) query: String,
+    pub(in crate::app) group: String,
+}
+
+impl Dialog for FieldValueSearchWindow {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let mut open = true;
+        let mut do_search = false;
+        let mut do_build = false;
+        egui::Window::new("Search Field Values")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("field_value_search"))
+            .open(&mut open)
+            .default_width(window_width(ctx, 400.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(
+                        "Find tags whose field values contain text — strings, string IDs, tag \
+                         references, and enum names.",
+                    )
+                    .color(subtle_dark()),
                 );
-                let submitted =
-                    lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if search.field_value_searching {
-                    ui.spinner();
-                    ui.label(RichText::new("searching…").color(subtle_dark()));
-                } else if icon_text_button(ui, ButtonIcon::Search, "Search", true).clicked()
-                    || submitted
-                {
-                    do_search = true;
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("group").color(subtle_dark()).small());
-                ui.add(
-                    egui::TextEdit::singleline(&mut search.field_value_group)
-                        .hint_text(placeholder_text("any (e.g. weap / weapon)"))
-                        .desired_width(180.0),
-                )
-                .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");
-            });
-            ui.add_space(4.0);
-            let indexed = cx.model.kits[cx.model.active]
-                .field_index
-                .is_ready_for(cx.model.kits[cx.model.active].generation);
-            ui.horizontal(|ui| {
-                if indexed {
-                    ui.label(
-                        RichText::new("• indexed — searches are instant")
-                            .color(Color32::from_rgb(120, 170, 90))
-                            .small(),
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let response = ui.add_enabled(
+                        !app.search.field_value_searching,
+                        egui::TextEdit::singleline(&mut self.query)
+                            .hint_text(placeholder_text("value to find"))
+                            .desired_width(240.0),
                     );
-                } else if cx.model.kits[cx.model.active].field_index.is_building() {
-                    ui.spinner();
-                    ui.label(
-                        RichText::new("building index…")
-                            .color(subtle_dark())
-                            .small(),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new("not indexed — first search scans live")
-                            .color(subtle_dark())
-                            .small(),
-                    );
-                    if ui.small_button("Build index").clicked() {
-                        do_build = true;
+                    let submitted =
+                        lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if app.search.field_value_searching {
+                        ui.spinner();
+                        ui.label(RichText::new("searching…").color(subtle_dark()));
+                    } else if icon_text_button(ui, ButtonIcon::Search, "Search", true).clicked()
+                        || submitted
+                    {
+                        do_search = true;
                     }
-                }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("group").color(subtle_dark()).small());
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.group)
+                            .hint_text(placeholder_text("any (e.g. weap / weapon)"))
+                            .desired_width(180.0),
+                    )
+                    .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");
+                });
+                ui.add_space(4.0);
+                let indexed = cx.model.kits[cx.model.active]
+                    .field_index
+                    .is_ready_for(cx.model.kits[cx.model.active].generation);
+                ui.horizontal(|ui| {
+                    if indexed {
+                        ui.label(
+                            RichText::new("• indexed — searches are instant")
+                                .color(Color32::from_rgb(120, 170, 90))
+                                .small(),
+                        );
+                    } else if cx.model.kits[cx.model.active].field_index.is_building() {
+                        ui.spinner();
+                        ui.label(
+                            RichText::new("building index…")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    } else {
+                        ui.label(
+                            RichText::new("not indexed — first search scans live")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                        if ui.small_button("Build index").clicked() {
+                            do_build = true;
+                        }
+                    }
+                });
             });
-        });
-    if do_search && !search.field_value_query.trim().is_empty() {
-        cx.send(SearchCommand::RunFieldValueSearch);
+        if do_search && !self.query.trim().is_empty() {
+            cx.send(SearchCommand::RunFieldValueSearch {
+                query: self.query.clone(),
+                group: self.group.clone(),
+            });
+        }
+        if do_build {
+            cx.send(SearchCommand::BuildFieldIndex);
+        }
+        open
     }
-    if do_build {
-        cx.send(SearchCommand::BuildFieldIndex);
-    }
-    search.field_value_search_open = open;
 }
 
 /// One line of the query results window.

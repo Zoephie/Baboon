@@ -236,13 +236,18 @@ impl Baboon {
     /// background scan (correct, slower) and builds the index for next time.
     /// Starts source-scoped indexing or search work without blocking the UI thread.
     /// Generation-tagged completion is ignored if the active source changes first.
-    pub(in crate::app) fn begin_field_value_search(&mut self, ctx: egui::Context) {
-        let display = self.search.field_value_query.trim().to_owned();
+    pub(in crate::app) fn begin_field_value_search(
+        &mut self,
+        query: &str,
+        group: &str,
+        ctx: egui::Context,
+    ) {
+        let display = query.trim().to_owned();
         if display.is_empty() {
             return;
         }
         let query_lower = display.to_ascii_lowercase();
-        let group_filter = self.search.field_value_group.trim().to_ascii_lowercase();
+        let group_filter = group.trim().to_ascii_lowercase();
         let stamp = self.model.kit_stamp();
 
         // Fast path: answer from the cached index.

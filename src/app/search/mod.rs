@@ -16,7 +16,9 @@ pub(in crate::app) use field_index::*;
 pub(in crate::app) mod field_search;
 pub(in crate::app) use field_search::*;
 pub(in crate::app) mod result_windows;
-pub(in crate::app) use result_windows::{QueryResultAction, draw_field_value_search_window, draw_query_results_window};
+pub(in crate::app) use result_windows::{
+    FieldValueSearchWindow, QueryResultAction, draw_query_results_window,
+};
 pub(in crate::app) mod listings;
 
 #[cfg(test)]
@@ -28,9 +30,6 @@ pub(in crate::app) struct SearchFeature {
     /// Modeless find-in-tag dialog and its exact occurrence list.
     pub(in crate::app) find: FindDialogState,
     pub(in crate::app) query_results: Option<TagQueryResults>,
-    pub(in crate::app) field_value_search_open: bool,
-    pub(in crate::app) field_value_query: String,
-    pub(in crate::app) field_value_group: String,
     pub(in crate::app) field_value_searching: bool,
     /// Find result waiting for its target open tab to finish parsing.
     pub(in crate::app) pending_find_jump: Option<FindOccurrence>,
@@ -52,8 +51,8 @@ pub(in crate::app) enum SearchCommand {
         kit: KitId,
         action: QueryResultAction,
     },
-    /// Search field values for the query in the Search Field Values window.
-    RunFieldValueSearch,
+    /// Search field values for `query`, in tags of `group` if it names one.
+    RunFieldValueSearch { query: String, group: String },
     /// Build the active kit's field-value index.
     BuildFieldIndex,
     /// Open Find on the tag at `key` in `kit`, which becomes the active and
@@ -83,7 +82,9 @@ impl Baboon {
             SearchCommand::FindClose => self.search.find.close(),
             SearchCommand::FindStep(delta) => self.step_find(&ctx, delta),
             SearchCommand::QueryResult { kit, action } => self.apply_query_result_action(kit, action, ctx),
-            SearchCommand::RunFieldValueSearch => self.begin_field_value_search(ctx.clone()),
+            SearchCommand::RunFieldValueSearch { query, group } => {
+                self.begin_field_value_search(&query, &group, ctx.clone())
+            }
             SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx.clone()),
             SearchCommand::FindInTag { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {

@@ -748,10 +748,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "field_value_search",
-            &["search.field_value_search_open"],
+            &["dialog:FieldValueSearchWindow"],
             &["search/result_windows/mod.rs"],
             loose_kit,
-            |h| h.app.search.field_value_search_open = true,
+            |h| h.app.dialogs.open(FieldValueSearchWindow::default()),
             &["Search Field Values"],
         ),
         case(

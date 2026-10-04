@@ -389,9 +389,6 @@ impl Baboon {
                 find: FindDialogState::default(),
                 query_results: None,
                 pending_find_jump: None,
-                field_value_search_open: false,
-                field_value_query: String::new(),
-                field_value_group: String::new(),
                 field_value_searching: false,
             },
             help: HelpFeature {
