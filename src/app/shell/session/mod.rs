@@ -67,7 +67,7 @@ impl Baboon {
         }
         let folders = ordered_unique_keys(kit.open_tabs.iter())
             .into_iter()
-            .filter_map(|key| kit.folder_browsers.get(&key))
+            .filter_map(|key| kit.browser.folder_browsers.get(&key))
             .map(|folder| LastSessionFolder {
                 rel_path: folder.rel_path.clone(),
                 label: folder.label.clone(),
@@ -95,8 +95,8 @@ impl Baboon {
                 .as_ref()
                 .and_then(|project| project.project_path.clone()),
             has_project: kit.project.active.is_some(),
-            browser_mode: Some(kit.browser_mode),
-            browser_sort: Some(kit.browser_sort),
+            browser_mode: Some(kit.browser.mode),
+            browser_sort: Some(kit.browser.sort),
             tags,
             folders,
             chimp_packages,
@@ -189,10 +189,10 @@ impl Baboon {
             // carries it across the load rather than resetting it, so each
             // workspace comes back in the view it was left in.
             if let Some(mode) = browser_mode {
-                self.kits[self.active].browser_mode = mode;
+                self.kits[self.active].browser.mode = mode;
             }
             if let Some(sort) = browser_sort {
-                self.kits[self.active].browser_sort = sort;
+                self.kits[self.active].browser.sort = sort;
             }
             // The project file it had open is queued the same way, and is
             // attached as this workspace's save target once the source has

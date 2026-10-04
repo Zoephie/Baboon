@@ -395,7 +395,7 @@ fn renaming_a_folder_moves_its_tags_and_rewrites_referrers_outside_it() {
         app.prefs.editing_kit_favorites[0].folders,
         vec![PathBuf::from("objects/crates")]
     );
-    assert_eq!(app.kits[0].active_favorite_folders.len(), 1);
+    assert_eq!(app.kits[0].browser.active_favorite_folders.len(), 1);
 }
 
 #[test]

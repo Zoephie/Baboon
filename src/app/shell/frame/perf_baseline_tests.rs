@@ -374,7 +374,7 @@ pub(super) mod fixture {
             chosen_kit_layout: None,
         });
         let kit = &mut app.kits[app.active];
-        kit.browser_mode = BrowserMode::Folders;
+        kit.browser.mode = BrowserMode::Folders;
     }
 
     /// Open `tag` in a tab, as if it had just finished loading. Its entry
@@ -400,7 +400,7 @@ pub(super) mod fixture {
 
     /// The browser search box's contents, as if typed.
     pub(in crate::app) fn set_filter(app: &mut Baboon, text: &str) {
-        app.kits[app.active].filter = text.to_owned();
+        app.kits[app.active].browser.filter = text.to_owned();
     }
 
     /// "Reveal in browser": opens the tag's folders and scrolls to it.

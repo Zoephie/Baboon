@@ -297,7 +297,7 @@ impl Baboon {
     /// since it was last resolved.
     pub(in crate::app) fn refresh_deletable_keys(&mut self, kit_index: usize) {
         let generation = self.kits[kit_index].generation;
-        if self.kits[kit_index].deletable_keys_generation == Some(generation) {
+        if self.kits[kit_index].browser.deletable_keys_generation == Some(generation) {
             return;
         }
         let keys = self.kits[kit_index]
@@ -305,8 +305,8 @@ impl Baboon {
             .as_ref()
             .map(|source| deletable_container_keys(source, &self.tag_ops.created_tags))
             .unwrap_or_default();
-        self.kits[kit_index].deletable_keys = Arc::new(keys);
-        self.kits[kit_index].deletable_keys_generation = Some(generation);
+        self.kits[kit_index].browser.deletable_keys = Arc::new(keys);
+        self.kits[kit_index].browser.deletable_keys_generation = Some(generation);
     }
 
     /// Open the delete confirmation for `key`, resolving everything the dialog

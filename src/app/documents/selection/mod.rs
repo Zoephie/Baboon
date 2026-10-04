@@ -127,7 +127,7 @@ impl Baboon {
             .entry_for_key(&key)
             .or_else(|| {
                 self.kits[self.active]
-                    .active_favorite_entries
+                    .browser.active_favorite_entries
                     .iter()
                     .find(|e| e.key == key)
             })

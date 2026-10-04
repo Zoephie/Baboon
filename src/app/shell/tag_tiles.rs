@@ -109,7 +109,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             .cloned()
             .or_else(|| {
                 self.app.kits[self.kit_index]
-                    .active_favorite_entries
+                    .browser.active_favorite_entries
                     .iter()
                     .find(|entry| entry.key == key)
                     .cloned()
@@ -186,7 +186,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         }
         if is_folder_pane_key(pane) {
             let label = self.app.kits[self.kit_index]
-                .folder_browsers
+                .browser.folder_browsers
                 .get(pane)
                 .map(|folder| folder.label.clone())
                 .unwrap_or_else(|| "Folder".to_owned());
@@ -522,7 +522,7 @@ impl Baboon {
             }
             if is_folder_pane_key(key) {
                 let label = kit
-                    .folder_browsers
+                    .browser.folder_browsers
                     .get(key)
                     .map(|folder| folder.label.clone())
                     .unwrap_or_else(|| "Folder".to_owned());
@@ -534,7 +534,7 @@ impl Baboon {
                 .as_ref()
                 .and_then(|source| source.entry_for_key(key))
                 .or_else(|| {
-                    kit.active_favorite_entries
+                    kit.browser.active_favorite_entries
                         .iter()
                         .find(|entry| &entry.key == key)
                 });

@@ -325,3 +325,48 @@ pub(in crate::app) struct BrowserFeature {
     pub(in crate::app) keyword_chooser_open: bool,
     pub(in crate::app) reveal_target: Option<RevealRequest>,
 }
+
+/// How this kit's browser lists its tags: mode, order and filter, the docked
+/// folder browsers, and the modified, deletable and favourite sets it marks,
+/// each with what it was built from.
+#[derive(Default)]
+pub(in crate::app) struct KitBrowser {
+    /// How this kit's browser lists tags, and in what order. Per kit because
+    /// the useful view differs by game — a folder-organized editing kit reads
+    /// best as Folders while a container source reads best as Groups — and two
+    /// browsers are on screen at once in a split. New kits start from the
+    /// saved [`Baboon::default_browser_mode`], so a single workspace behaves
+    /// exactly as it did when this was one application-wide setting.
+    pub(in crate::app) mode: BrowserMode,
+    pub(in crate::app) sort: BrowserSort,
+    pub(in crate::app) filter: String,
+    pub(in crate::app) filter_cache: FilterCache,
+    /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
+    pub(in crate::app) folder_browsers: HashMap<String, FolderBrowserState>,
+    /// Which tags the browser should mark as modified, and the signature the
+    /// set was built from. Rebuilt only when that signature changes: resolving
+    /// a tag key to its entry is a linear scan of the source, so doing it for
+    /// every dirty tag every frame would cost far more than the handful of
+    /// lookups it represents.
+    pub(in crate::app) modified_tags: std::sync::Arc<ModifiedTags>,
+    pub(in crate::app) modified_signature: Vec<String>,
+    /// Browser keys this workspace may delete, and the generation they were
+    /// resolved at. Recomputed only when the generation moves: answering it
+    /// walks every entry and stats each container's backups, which is far too
+    /// much to repeat for every frame the browser draws.
+    pub(in crate::app) deletable_keys: std::sync::Arc<HashSet<String>>,
+    pub(in crate::app) deletable_keys_generation: Option<u64>,
+    pub(in crate::app) active_favorite_entries: Vec<TagEntry>,
+    pub(in crate::app) active_favorite_folders: Vec<PathBuf>,
+}
+
+impl KitBrowser {
+    /// A browser opening in this view, with nothing filtered or cached yet.
+    pub(in crate::app) fn new(mode: BrowserMode, sort: BrowserSort) -> Self {
+        Self {
+            mode,
+            sort,
+            ..Self::default()
+        }
+    }
+}

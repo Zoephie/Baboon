@@ -599,8 +599,8 @@ fn a_session_written_on_exit_restores_its_workspace() {
     let kit = kit("session");
     let mut app = app();
     kit.install(&mut app);
-    app.kits[0].browser_mode = BrowserMode::Groups;
-    app.kits[0].browser_sort = BrowserSort::Type;
+    app.kits[0].browser.mode = BrowserMode::Groups;
+    app.kits[0].browser.sort = BrowserSort::Type;
     let other = kit.open(&mut app, OTHER);
     let key = kit.open(&mut app, MODEL);
     app.handle_browser_action(
@@ -658,12 +658,12 @@ fn a_session_written_on_exit_restores_its_workspace() {
     assert!(restored.open_tabs.contains(&key) && restored.open_tabs.contains(&other));
     assert!(
         restored
-            .folder_browsers
+            .browser.folder_browsers
             .values()
             .any(|folder| folder.rel_path == Path::new("objects/props"))
     );
-    assert_eq!(restored.browser_mode, BrowserMode::Groups);
-    assert_eq!(restored.browser_sort, BrowserSort::Type);
+    assert_eq!(restored.browser.mode, BrowserMode::Groups);
+    assert_eq!(restored.browser.sort, BrowserSort::Type);
     // The session does not record which tab was selected: each restored tag
     // is selected in turn, so the last one saved ends up selected.
     // QUIRK: with the saved order unstable, so is the restored selection.

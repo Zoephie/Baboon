@@ -1603,7 +1603,7 @@ impl Baboon {
             signature.extend(project.overlays.keys().cloned());
         }
         signature.sort();
-        if signature == self.kits[kit].modified_signature {
+        if signature == self.kits[kit].browser.modified_signature {
             return;
         }
         let mut modified = ModifiedTags::default();
@@ -1630,8 +1630,8 @@ impl Baboon {
                 modified.insert(&entry);
             }
         }
-        self.kits[kit].modified_tags = std::sync::Arc::new(modified);
-        self.kits[kit].modified_signature = signature;
+        self.kits[kit].browser.modified_tags = std::sync::Arc::new(modified);
+        self.kits[kit].browser.modified_signature = signature;
     }
 
     /// Forget one tag's stashed overlay, so the tag reads as its source has it

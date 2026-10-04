@@ -7,6 +7,7 @@
 //! though it worked. These tests are the cheapest place to catch that.
 
 use super::*;
+use crate::app::browser::KitBrowser;
 use crate::app::shell::session::RestorePlan;
 
 const OLD: &str = "ublock:pakchunk0:objects/vehicles/warthog";
@@ -69,7 +70,7 @@ fn kit_with_state() -> Kit {
     );
     kit.rmdf_cache.insert("shaders/foo".to_owned(), None);
     kit.rmop_cache.insert("shaders/bar".to_owned(), None);
-    kit.modified_signature = vec![OLD.to_owned()];
+    kit.browser.modified_signature = vec![OLD.to_owned()];
     kit
 }
 
@@ -215,22 +216,16 @@ fn every_field_of_a_kit_is_accounted_for() {
         render_method_epoch: _,
         h2_templates: _,
         index_jobs: _,
-        modified_signature: _,
         generation: _,
         field_index: _,
 
         // Rebuilt from the generation the moment it moves.
-        filter_cache: _,
-        modified_tags: _,
-        deletable_keys: _,
-        deletable_keys_generation: _,
         // The Bitmap and Model Libraries' snapshots and thumbnail caches. Keyed
         // on the kit generation, which a rename bumps, so both are rebuilt
         // against the new key rather than carried across it.
         bitmap_browser: _,
         model_browser: _,
         git_review: _,
-        folder_browsers: _,
 
         // The source's own entries, tree and indices, which the rename moves
         // through `apply_container_rename_source_state` rather than here: it
@@ -245,26 +240,19 @@ fn every_field_of_a_kit_is_accounted_for() {
         chimp: _,
         surface: _,
 
-        // Re-derived by the caller once the source entries have moved, because
-        // it needs the tag's new `display_path` and this function only has keys.
-        active_favorite_entries: _,
-        active_favorite_folders: _,
-
         // Not addressed by a tag key at all.
         blam: _,
         id: _,
         names: _,
-        browser_mode: _,
-        browser_sort: _,
-        filter: _,
         scanning_entries: _,
         terminal: _,
         requested_path: _,
         profile: _,
         project: _,
         pending_container_folders: _,
-        // Staged session-restore state, classified field by field below.
+        // Classified field by field below.
         restore: _,
+        browser: _,
     } = Kit::empty(KitId(9), TagNameIndex::default());
     let RestorePlan {
         // Carried by `rekey_tag_in_kit`.
@@ -279,4 +267,22 @@ fn every_field_of_a_kit_is_accounted_for() {
         pending_restore_model_library: _,
         pending_launch_tags: _,
     } = RestorePlan::default();
+    let KitBrowser {
+        // Dropped by `rekey_tag_in_kit`, deliberately.
+        modified_signature: _,
+        // Rebuilt from the generation the moment it moves.
+        filter_cache: _,
+        modified_tags: _,
+        deletable_keys: _,
+        deletable_keys_generation: _,
+        folder_browsers: _,
+        // Re-derived by the caller once the source entries have moved, because
+        // it needs the tag's new `display_path` and this function only has keys.
+        active_favorite_entries: _,
+        active_favorite_folders: _,
+        // Not addressed by a tag key at all.
+        mode: _,
+        sort: _,
+        filter: _,
+    } = KitBrowser::default();
 }

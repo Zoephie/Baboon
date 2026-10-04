@@ -17,8 +17,8 @@ impl Baboon {
     /// tags root. Kit-scoped because a finished background refactor refreshes
     /// the workspace it belonged to, which need not be the focused one.
     pub(in crate::app) fn refresh_favorite_entries_for(&mut self, kit: usize) {
-        self.kits[kit].active_favorite_entries.clear();
-        self.kits[kit].active_favorite_folders.clear();
+        self.kits[kit].browser.active_favorite_entries.clear();
+        self.kits[kit].browser.active_favorite_folders.clear();
         let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
@@ -40,13 +40,13 @@ impl Baboon {
                 continue;
             }
             if let Ok(Some(entry)) = loose_file_entry(&root, &path, &names) {
-                self.kits[kit].active_favorite_entries.push(entry);
+                self.kits[kit].browser.active_favorite_entries.push(entry);
             }
         }
         let mut missing_folders = Vec::new();
         for relative_path in saved_folders {
             if root.join(&relative_path).is_dir() {
-                self.kits[kit].active_favorite_folders.push(relative_path);
+                self.kits[kit].browser.active_favorite_folders.push(relative_path);
             } else {
                 missing_folders.push(relative_path);
             }
@@ -107,7 +107,7 @@ impl Baboon {
         {
             kit.tags.remove(position);
             self.kits[self.active]
-                .active_favorite_entries
+                .browser.active_favorite_entries
                 .retain(|favorite| favorite.key != entry.key);
             if kit.tags.is_empty() && kit.folders.is_empty() {
                 self.prefs.editing_kit_favorites.remove(index);
@@ -116,7 +116,7 @@ impl Baboon {
         } else {
             kit.tags.push(relative_path);
             self.kits[self.active]
-                .active_favorite_entries
+                .browser.active_favorite_entries
                 .push(entry.clone());
             self.status = format!("Added {} to Favorites", entry.display_path);
         }
@@ -151,7 +151,7 @@ impl Baboon {
         {
             favorites.folders.remove(position);
             self.kits[self.active]
-                .active_favorite_folders
+                .browser.active_favorite_folders
                 .retain(|current| !same_recent_path(current, &relative_path));
             if favorites.tags.is_empty() && favorites.folders.is_empty() {
                 self.prefs.editing_kit_favorites.remove(index);
@@ -160,7 +160,7 @@ impl Baboon {
         } else {
             favorites.folders.push(relative_path.clone());
             self.kits[self.active]
-                .active_favorite_folders
+                .browser.active_favorite_folders
                 .push(relative_path.clone());
             self.status = format!("Added {} to Favorites", relative_path.display());
         }
@@ -254,7 +254,7 @@ impl Baboon {
                 } else {
                     let normalized = rel_path.to_string_lossy().replace('\\', "/");
                     let base = folder_pane_key(&rel_path);
-                    let panes = &self.kits[self.active].folder_browsers;
+                    let panes = &self.kits[self.active].browser.folder_browsers;
                     panes
                         .get(&base)
                         .filter(|pane| {
@@ -281,20 +281,20 @@ impl Baboon {
                 };
                 let key = matching_key.unwrap_or_else(|| {
                     let base = folder_pane_key(&rel_path);
-                    if !self.kits[self.active].folder_browsers.contains_key(&base) {
+                    if !self.kits[self.active].browser.folder_browsers.contains_key(&base) {
                         return base;
                     }
                     (2..)
                         .map(|suffix| format!("{base}#{suffix}"))
                         .find(|candidate| {
                             !self.kits[self.active]
-                                .folder_browsers
+                                .browser.folder_browsers
                                 .contains_key(candidate)
                         })
                         .expect("folder pane suffix space is unbounded")
                 });
                 self.kits[self.active]
-                    .folder_browsers
+                    .browser.folder_browsers
                     .entry(key.clone())
                     .or_insert_with(|| FolderBrowserState {
                         rel_path,
@@ -549,8 +549,8 @@ impl Baboon {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
-        self.kits[self.active].filter.clear();
-        self.kits[self.active].browser_mode = BrowserMode::Folders;
+        self.kits[self.active].browser.filter.clear();
+        self.kits[self.active].browser.mode = BrowserMode::Folders;
         self.kits[self.active].selected_key = Some(entry.key.clone());
         self.browser.reveal_target = Some(RevealRequest {
             kit: self.active_kit_id(),

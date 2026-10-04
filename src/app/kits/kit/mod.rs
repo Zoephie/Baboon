@@ -2,6 +2,7 @@
 //! It owns kit identity and per-source state; global preferences, dialogs, and process-level services belong on [`Baboon`].
 
 use super::*;
+use crate::app::browser::KitBrowser;
 use crate::app::kits::terminal::KitTerminal;
 use crate::app::mods::project::KitProject;
 use crate::app::shell::session::RestorePlan;
@@ -110,40 +111,13 @@ pub(in crate::app) struct Kit {
     /// one last applied.
     pub(in crate::app) find_filter_applied: HashMap<String, AppliedFindFilter>,
 
-    // --- Browser and index state ---
-    /// How this kit's browser lists tags, and in what order. Per kit because
-    /// the useful view differs by game — a folder-organized editing kit reads
-    /// best as Folders while a container source reads best as Groups — and two
-    /// browsers are on screen at once in a split. New kits start from the
-    /// saved [`Baboon::default_browser_mode`], so a single workspace behaves
-    /// exactly as it did when this was one application-wide setting.
-    pub(in crate::app) browser_mode: BrowserMode,
-    pub(in crate::app) browser_sort: BrowserSort,
-    pub(in crate::app) filter: String,
-    pub(in crate::app) filter_cache: FilterCache,
-    /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
-    pub(in crate::app) folder_browsers: HashMap<String, FolderBrowserState>,
-    /// Which tags the browser should mark as modified, and the signature the
-    /// set was built from. Rebuilt only when that signature changes: resolving
-    /// a tag key to its entry is a linear scan of the source, so doing it for
-    /// every dirty tag every frame would cost far more than the handful of
-    /// lookups it represents.
-    pub(in crate::app) modified_tags: std::sync::Arc<ModifiedTags>,
-    pub(in crate::app) modified_signature: Vec<String>,
+    // --- Source generation and index state ---
     /// Bumped whenever this kit's source or its `all_entries` set is replaced,
     /// so caches and in-flight async results know to recompute or drop against
     /// fresh data. Per kit, so reloading one kit cannot invalidate another's.
     pub(in crate::app) generation: u64,
     pub(in crate::app) field_index: FieldValueIndex,
-    /// Browser keys this workspace may delete, and the generation they were
-    /// resolved at. Recomputed only when the generation moves: answering it
-    /// walks every entry and stats each container's backups, which is far too
-    /// much to repeat for every frame the browser draws.
-    pub(in crate::app) deletable_keys: std::sync::Arc<HashSet<String>>,
-    pub(in crate::app) deletable_keys_generation: Option<u64>,
     pub(in crate::app) keywords: KeywordStore,
-    pub(in crate::app) active_favorite_entries: Vec<TagEntry>,
-    pub(in crate::app) active_favorite_folders: Vec<PathBuf>,
     /// True while a background full-scan of this loose-folder source is running.
     pub(in crate::app) scanning_entries: bool,
 
@@ -185,6 +159,10 @@ pub(in crate::app) struct Kit {
     /// This kit's Campaign Evolved recovery/project database, and project
     /// contents staged until its source finishes mounting.
     pub(in crate::app) project: KitProject,
+    /// How this kit's browser lists its tags: mode, order and filter, the
+    /// docked folder browsers, and the modified, deletable and favourite sets
+    /// it marks, each with what it was built from.
+    pub(in crate::app) browser: KitBrowser,
 }
 
 impl Kit {
@@ -213,20 +191,9 @@ impl Kit {
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
             find_filter_applied: HashMap::new(),
-            browser_mode: BrowserMode::default(),
-            browser_sort: BrowserSort::default(),
-            filter: String::new(),
-            filter_cache: FilterCache::default(),
-            folder_browsers: HashMap::new(),
-            modified_tags: std::sync::Arc::new(ModifiedTags::default()),
-            modified_signature: Vec::new(),
             generation: 0,
             field_index: FieldValueIndex::default(),
-            deletable_keys: std::sync::Arc::new(HashSet::new()),
-            deletable_keys_generation: None,
             keywords: KeywordStore::default(),
-            active_favorite_entries: Vec::new(),
-            active_favorite_folders: Vec::new(),
             scanning_entries: false,
             requested_path: None,
             profile: None,
@@ -246,6 +213,7 @@ impl Kit {
             },
             terminal: KitTerminal::default(),
             project: KitProject::default(),
+            browser: KitBrowser::default(),
         }
     }
 
@@ -423,8 +391,7 @@ impl Baboon {
     fn empty_kit(&mut self) -> Kit {
         let id = self.next_kit_id();
         Kit {
-            browser_mode: self.prefs.browser_mode,
-            browser_sort: self.prefs.browser_sort,
+            browser: KitBrowser::new(self.prefs.browser_mode, self.prefs.browser_sort),
             ..Kit::empty(id, self.default_names.clone())
         }
     }
@@ -529,8 +496,7 @@ impl Baboon {
         // The browser view belongs to the workspace, not to the source in it:
         // reloading a kit — or restoring one, which stages the saved view
         // before the load lands — must not snap it back to the default.
-        let browser_mode = self.kits[index].browser_mode;
-        let browser_sort = self.kits[index].browser_sort;
+        let browser = KitBrowser::new(self.kits[index].browser.mode, self.kits[index].browser.sort);
         // Carried, then moved on, never reset: a job stamped by the source
         // being replaced must not resolve against the new one. Rebuilding
         // from `Kit::empty` reset it to 0, and the load handler's bump then
@@ -543,8 +509,7 @@ impl Baboon {
             names,
             requested_path,
             profile,
-            browser_mode,
-            browser_sort,
+            browser,
             restore,
             project: KitProject {
                 active: None,
@@ -673,7 +638,7 @@ impl Kit {
         self.model_previews.remove(key);
         self.find_filter_applied.remove(key);
         self.edit_buffers.forget_tag(key);
-        self.folder_browsers.remove(key);
+        self.browser.folder_browsers.remove(key);
     }
 
     /// [`Self::drop_document`] for every document except `keep`.
@@ -685,7 +650,7 @@ impl Kit {
             .chain(self.bitmap_previews.keys())
             .chain(self.model_previews.keys())
             .chain(self.find_filter_applied.keys())
-            .chain(self.folder_browsers.keys())
+            .chain(self.browser.folder_browsers.keys())
             .filter(|key| Some(key.as_str()) != keep)
             .cloned()
             .collect();
@@ -710,7 +675,7 @@ impl Kit {
     pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
         source.entry_for_key(key).or_else(|| {
-            self.active_favorite_entries
+            self.browser.active_favorite_entries
                 .iter()
                 .find(|entry| entry.key == key)
         })
@@ -822,7 +787,7 @@ impl Kit {
         if let Some(tile_id) = self.tile_for_key(key) {
             self.tag_tree.remove_recursively(tile_id);
         }
-        self.folder_browsers.remove(key);
+        self.browser.folder_browsers.remove(key);
         self.sync_open_tabs();
     }
 

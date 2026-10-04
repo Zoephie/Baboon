@@ -586,7 +586,7 @@ impl Baboon {
     ) {
         let key = entry.key.clone();
         let is_favorite = self.kits[kit_index]
-            .active_favorite_entries
+            .browser.active_favorite_entries
             .iter()
             .any(|favorite| favorite.key == key);
         let favorite_enabled = matches!(entry.location, TagEntryLocation::LooseFile(_));

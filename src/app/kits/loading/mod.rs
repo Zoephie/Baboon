@@ -962,7 +962,7 @@ impl Baboon {
         replace_loaded_tree_scope(&mut source.tree, Path::new(""), rel_path, &source.entries);
         source.group_tree = crate::core::source::build_group_tree(&source.entries);
         let new_generation = kit.generation.wrapping_add(1);
-        for pane in kit.folder_browsers.values_mut() {
+        for pane in kit.browser.folder_browsers.values_mut() {
             replace_loaded_tree_scope(&mut pane.tree, &pane.rel_path, rel_path, &source.entries);
             // Keep the materialized tree installed above. Marking it stale
             // caused the next frame to replace it with a direct-only lazy tree.

@@ -618,29 +618,29 @@ impl Baboon {
         // Folders/Groups buttons in that kit's own toolbar.
         let kit = &mut self.kits[self.active];
         if ui
-            .selectable_label(kit.browser_mode == BrowserMode::Folders, "Folders")
+            .selectable_label(kit.browser.mode == BrowserMode::Folders, "Folders")
             .clicked()
         {
-            kit.browser_mode = BrowserMode::Folders;
+            kit.browser.mode = BrowserMode::Folders;
             close_menu(ui);
         }
         if ui
-            .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
+            .selectable_label(kit.browser.mode == BrowserMode::Groups, "Tag Groups")
             .clicked()
         {
-            kit.browser_mode = BrowserMode::Groups;
+            kit.browser.mode = BrowserMode::Groups;
             close_menu(ui);
         }
         ui.separator();
         let selected_sort = right_opening_menu_button(
             ui,
-            format!("Sort by: {}", kit.browser_sort.label()),
+            format!("Sort by: {}", kit.browser.sort.label()),
             220.0,
             |ui| {
                 style_list_menu(ui);
                 for option in BrowserSort::ALL {
                     if ui
-                        .selectable_label(kit.browser_sort == option, option.label())
+                        .selectable_label(kit.browser.sort == option, option.label())
                         .clicked()
                     {
                         return Some(option);
@@ -652,7 +652,7 @@ impl Baboon {
         .inner
         .flatten();
         if let Some(option) = selected_sort {
-            kit.browser_sort = option;
+            kit.browser.sort = option;
             close_menu(ui);
         }
         ui.separator();

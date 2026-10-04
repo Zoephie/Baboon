@@ -69,7 +69,7 @@ impl Baboon {
         kit_index: usize,
         pane_key: &str,
     ) -> Option<BrowserAction> {
-        let Some(mut pane) = self.kits[kit_index].folder_browsers.remove(pane_key) else {
+        let Some(mut pane) = self.kits[kit_index].browser.folder_browsers.remove(pane_key) else {
             ui.label(RichText::new("This folder is no longer open").color(subtle_dark()));
             return None;
         };
@@ -134,15 +134,15 @@ impl Baboon {
             .as_ref()
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }));
         let favorite_keys: HashSet<String> = self.kits[kit_index]
-            .active_favorite_entries
+            .browser.active_favorite_entries
             .iter()
             .map(|entry| entry.key.clone())
             .collect();
         let pane_favorite_folders =
-            std::sync::Arc::new(self.kits[kit_index].active_favorite_folders.clone());
+            std::sync::Arc::new(self.kits[kit_index].browser.active_favorite_folders.clone());
         let selected = self.kits[kit_index].selected_key.clone();
-        let modified_tags = std::sync::Arc::clone(&self.kits[kit_index].modified_tags);
-        let deletable_keys = std::sync::Arc::clone(&self.kits[kit_index].deletable_keys);
+        let modified_tags = std::sync::Arc::clone(&self.kits[kit_index].browser.modified_tags);
+        let deletable_keys = std::sync::Arc::clone(&self.kits[kit_index].browser.deletable_keys);
         let game = self.kits[kit_index].source.as_ref().and_then(|source| source.game);
         let sound_language = self.audio.language.clone();
         let sound_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
@@ -389,7 +389,7 @@ impl Baboon {
             other => other,
         };
         self.kits[kit_index]
-            .folder_browsers
+            .browser.folder_browsers
             .insert(pane_key.to_owned(), pane);
         if let Some(status) = status_update {
             self.status = status;
@@ -445,9 +445,9 @@ impl Baboon {
             }
         }
 
-        let active_favorite_entries = self.kits[kit_index].active_favorite_entries.clone();
+        let active_favorite_entries = self.kits[kit_index].browser.active_favorite_entries.clone();
         let active_favorite_folders =
-            std::sync::Arc::new(self.kits[kit_index].active_favorite_folders.clone());
+            std::sync::Arc::new(self.kits[kit_index].browser.active_favorite_folders.clone());
         let favorite_keys: HashSet<String> = active_favorite_entries
             .iter()
             .map(|entry| entry.key.clone())
@@ -463,7 +463,7 @@ impl Baboon {
         self.refresh_modified_tags(kit_index);
         set_browser_modified_tags(
             ui,
-            std::sync::Arc::clone(&self.kits[kit_index].modified_tags),
+            std::sync::Arc::clone(&self.kits[kit_index].browser.modified_tags),
         );
         set_browser_favorite_folders(
             ui,
@@ -517,7 +517,7 @@ impl Baboon {
         self.refresh_deletable_keys(kit_index);
         set_browser_deletable_keys(
             ui,
-            std::sync::Arc::clone(&self.kits[kit_index].deletable_keys),
+            std::sync::Arc::clone(&self.kits[kit_index].browser.deletable_keys),
         );
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
@@ -531,9 +531,9 @@ impl Baboon {
             let scanning = kit.scanning_entries;
             // Collect deferred scan-trigger here; execute after borrow ends.
             let mut need_scan = false;
-            let prev_filter_empty = kit.filter.is_empty();
-            browser_search_field(ui, &mut kit.filter, "search tags");
-            if let Some(warning) = browser::browser_filter_warning(&kit.filter) {
+            let prev_filter_empty = kit.browser.filter.is_empty();
+            browser_search_field(ui, &mut kit.browser.filter, "search tags");
+            if let Some(warning) = browser::browser_filter_warning(&kit.browser.filter) {
                 ui.label(
                     RichText::new(warning)
                         .small()
@@ -550,8 +550,8 @@ impl Baboon {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let groups_clicked = browser_toolbar_controls(
                     ui,
-                    &mut kit.browser_mode,
-                    &mut kit.browser_sort,
+                    &mut kit.browser.mode,
+                    &mut kit.browser.sort,
                     &mut self.prefs.show_browser_prefixes,
                     &mut self.prefs.folders_before_tags,
                 );
@@ -564,7 +564,7 @@ impl Baboon {
                 }
             });
             if prev_filter_empty
-                && !kit.filter.is_empty()
+                && !kit.browser.filter.is_empty()
                 && matches!(source.source, TagSource::LooseFolder { .. })
                 && source.all_entries.is_empty()
                 && !scanning
@@ -573,8 +573,8 @@ impl Baboon {
             }
             ui.add_space(4.0);
             let selected = kit.selected_key.clone();
-            let filter = kit.filter.trim().to_owned();
-            let mode = kit.browser_mode;
+            let filter = kit.browser.filter.trim().to_owned();
+            let mode = kit.browser.mode;
             let show_prefixes = self.prefs.show_browser_prefixes;
             let folders_before_tags = self.prefs.folders_before_tags;
             let double_click_to_open = self.prefs.double_click_to_open_tags;
@@ -605,7 +605,7 @@ impl Baboon {
                 key: request.key.as_str(),
                 remaining: request.ancestors.as_slice(),
             });
-            let sort = kit.browser_sort;
+            let sort = kit.browser.sort;
             let action = ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -649,14 +649,14 @@ impl Baboon {
                             ui.label(RichText::new("Indexing tags…").color(subtle_dark()).small());
                             None
                         } else {
-                            kit.filter_cache.refresh(
+                            kit.browser.filter_cache.refresh(
                                 kit.generation,
                                 &filter,
                                 entries,
                                 has_all,
                                 groups_mode,
                             );
-                            let cache = &kit.filter_cache;
+                            let cache = &kit.browser.filter_cache;
                             if cache.entries.is_empty() {
                                 ui.label(RichText::new("No matching tags").color(subtle_dark()));
                                 None

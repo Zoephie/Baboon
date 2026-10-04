@@ -380,8 +380,7 @@ impl Baboon {
             // The startup workspace is seeded like any other new kit; every
             // later one goes through `Baboon::empty_kit`.
             kits: vec![Kit {
-                browser_mode: prefs.browser_mode,
-                browser_sort: prefs.browser_sort,
+                browser: KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
                 ..Kit::empty(KitId(0), names.clone())
             }],
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
