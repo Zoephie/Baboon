@@ -198,11 +198,7 @@ pub fn load_iostore_container_set(
     if !paks_dir.is_dir() {
         anyhow::bail!("failed to read {}", paks_dir.display());
     }
-    let mut utocs = utocs_under(&paks_dir);
-    // Mount base chunk first, then level chunks by number, so higher/patch
-    // chunks win on any collision (mirrors UE's FIoDispatcher last-wins). A mod
-    // is not named `pakchunkN`, so it sorts last and overrides what it patches.
-    utocs.sort_by_key(|p| (chunk_number(p), p.clone()));
+    let utocs = mount_order(utocs_under(&paks_dir));
     build_container_set(paks_dir, utocs, fallback_names, definitions_root)
 }
 
@@ -254,6 +250,18 @@ fn utocs_under(dir: &Path) -> Vec<PathBuf> {
         })
         .filter(|p| !is_container_backup(p))
         .collect()
+}
+
+/// Containers in the order they mount, lowest priority first, so a later one
+/// wins on any collision (Unreal's last-wins). This is the engine's rule, the
+/// one the Chimp workspace mounts by: patch containers (`*_P`) rank by their
+/// chunk version — a plain `_P` below `_2_P` — then `pakchunk` number, then
+/// path without regard to case. Sorting by chunk number and path alone put
+/// every mod after the game but ordered mods by case-sensitive name, so with
+/// two mods overriding one tag the browser and Chimp edited different copies.
+fn mount_order(mut utocs: Vec<PathBuf>) -> Vec<PathBuf> {
+    utocs.sort_by(|a, b| blam_tags::iostore::world::compare_mount_paths(a, b));
+    utocs
 }
 
 /// Whether a path is one of Baboon's own transactional artefacts rather than a
@@ -1111,6 +1119,60 @@ fn read_non_classic_tag(path: &Path) -> Result<TagFile> {
 #[cfg(test)]
 mod container_tests {
     use super::*;
+
+    /// Containers mount in Unreal's order, the same one Chimp uses, so the two
+    /// agree on which mod's copy of a tag wins. Ordered by chunk number and
+    /// then case-sensitive path, `B_P` sorted before `a_P` and every plain `_P`
+    /// above `a_2_P`.
+    #[test]
+    fn containers_mount_in_unreals_order() {
+        let paks = PathBuf::from("Paks");
+        let utocs = [
+            "~mods/z_P.utoc",
+            "~mods/a_2_P.utoc",
+            "pakchunk1-WinGDK.utoc",
+            "~mods/B_P.utoc",
+            "pakchunk0-WinGDK.utoc",
+            "~mods/a_P.utoc",
+        ]
+        .iter()
+        .map(|name| paks.join(name))
+        .collect::<Vec<_>>();
+        let ordered = mount_order(utocs)
+            .iter()
+            .map(|path| path.strip_prefix(&paks).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered,
+            [
+                "pakchunk0-WinGDK.utoc",
+                "pakchunk1-WinGDK.utoc",
+                "~mods/a_P.utoc",
+                "~mods/B_P.utoc",
+                "~mods/z_P.utoc",
+                "~mods/a_2_P.utoc",
+            ]
+        );
+    }
+
+    /// A package is named by the engine's rule: a plugin's `Content/` mounts at
+    /// its own name, not `/game`, and maps are packages too.
+    #[test]
+    fn package_names_follow_the_mount_they_come_from() {
+        assert_eq!(
+            container_package_name("Meteorite/Content/Tags/sound/x-sound.uasset").as_deref(),
+            Some("/game/tags/sound/x-sound"),
+        );
+        assert_eq!(
+            container_package_name("Engine/Content/Maps/Probe.umap").as_deref(),
+            Some("/engine/maps/probe"),
+        );
+        assert_eq!(
+            container_package_name("Meteorite/Plugins/Tools/Content/UI/W_Hud.uasset").as_deref(),
+            Some("/tools/ui/w_hud"),
+        );
+        assert_eq!(container_package_name("Meteorite/Content/Tags/x-sound.ubulk"), None);
+    }
 
     static PAKS: std::sync::LazyLock<&'static str> =
         std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));

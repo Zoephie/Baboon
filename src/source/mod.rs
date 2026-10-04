@@ -274,15 +274,14 @@ pub struct ContainerPackageIndex {
     by_package: HashMap<String, Vec<(usize, String)>>,
 }
 
-/// Cooked container path → UE package name, e.g.
+/// Cooked container path → lowercased UE package name, e.g.
 /// `Meteorite/Content/Tags/sound/x-sound.uasset` → `/game/tags/sound/x-sound`.
-/// Returns `None` for anything that isn't a `.uasset` under a `Content/` root.
+/// The engine's own derivation, so the tag browser and the Chimp workspace name
+/// a package the same way: a project's `Content/` mounts at `/game`, a plugin's
+/// at `/<plugin>`, and maps (`.umap`) are packages too. `None` for anything that
+/// isn't a `.uasset` or `.umap` under a `Content/` root.
 pub fn container_package_name(path: &str) -> Option<String> {
-    let normalized = path.replace('\\', "/");
-    let lower = normalized.to_ascii_lowercase();
-    let stem = lower.strip_suffix(".uasset")?;
-    let rest = stem.split_once("/content/").map(|(_, r)| r)?;
-    Some(format!("/game/{rest}"))
+    blam_tags::iostore::world::package_name_from_entry(path).map(|(lowercased, _)| lowercased)
 }
 
 impl ContainerPackageIndex {
