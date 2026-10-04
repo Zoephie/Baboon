@@ -993,6 +993,24 @@ pub fn read_entry(source: &TagSource, entry: &TagEntry) -> Result<TagFile> {
     }
 }
 
+/// The layout file for a classic tag of `group_tag`, named by the game's own
+/// `_meta.json`. The cross-game group table names the newest game's group: for
+/// Halo CE's `mode` it says `render_model`, a file Halo CE does not have (its
+/// layout is `model.json`).
+fn classic_layout_path(definitions_root: &Path, game: GameId, group_tag: u32) -> Result<PathBuf> {
+    let names = TagNameIndex::load_game(definitions_root, game)?;
+    let group_name = names.name_for(group_tag).with_context(|| {
+        format!(
+            "{} has no group {}",
+            game.as_str(),
+            blam_tags::format_group_tag(group_tag)
+        )
+    })?;
+    Ok(definitions_root
+        .join(game.as_str())
+        .join(format!("{group_name}.json")))
+}
+
 /// Read a tag at `path` for preview/decoding (e.g. a referenced bitmap), handling
 /// classic Halo CE / Halo 2 tags that need a JSON layout + `read_classic_tag_file`
 /// rather than the plain `TagFile::read`. `group_tag` selects the classic layout.
@@ -1007,11 +1025,7 @@ pub fn read_tag_at_path(
         let game = game.context("classic tag requires a detected game profile")?;
         let definitions_root =
             definitions_root.context("classic tag requires a definitions root")?;
-        let group_name = blam_tags::paths::group_tag_to_extension(group_tag)
-            .context("unknown group for classic tag layout")?;
-        let def_path = definitions_root
-            .join(game.as_str())
-            .join(format!("{group_name}.json"));
+        let def_path = classic_layout_path(definitions_root, game, group_tag)?;
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
         return read_classic_tag_file(&bytes, layout)
@@ -1037,11 +1051,7 @@ pub fn read_tag_from_bytes(
         let game = game.context("classic tag requires a detected game profile")?;
         let definitions_root =
             definitions_root.context("classic tag requires a definitions root")?;
-        let group_name =
-            group_tag_to_extension(group_tag).context("unknown group for classic tag layout")?;
-        let def_path = definitions_root
-            .join(game.as_str())
-            .join(format!("{group_name}.json"));
+        let def_path = classic_layout_path(definitions_root, game, group_tag)?;
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
         return read_classic_tag_file(bytes, layout)
@@ -1930,5 +1940,51 @@ mod mod_export_tests {
             std::panic::resume_unwind(payload);
         }
         eprintln!("re-saved {rel_path} into its own exported mod");
+    }
+}
+
+#[cfg(test)]
+mod classic_layout_tests {
+    use super::*;
+
+    /// A fresh classic tag of `definition`, as the bytes it saves to.
+    fn classic_bytes(definition: &str, engine: blam_tags::classic::ClassicEngine) -> Vec<u8> {
+        let tag =
+            TagFile::new_classic(crate::test_kits::definitions().join(definition), engine).unwrap();
+        let bytes = tag.write_to_bytes().unwrap();
+        assert!(ClassicHeader::parse(&bytes).is_some(), "{definition} is not classic");
+        bytes
+    }
+
+    /// Groups whose classic layout is not named what the cross-game table
+    /// calls them: Halo CE's `mode` is `model.json` (not `render_model`) and
+    /// its `coll` is `model_collision_geometry.json`; Halo 2's `gldf` is
+    /// `chocolate_mountain.json`. Each failed with "failed to load classic
+    /// layout" when re-read from bytes or from disk.
+    #[test]
+    fn classic_tags_read_back_with_their_own_games_layout() {
+        let defs = crate::test_kits::definitions();
+        let dir = crate::test_kits::unique_temp_dir("classic-layout");
+        use blam_tags::classic::ClassicEngine;
+        for (game, engine, definition, group) in [
+            (GameId::HaloCe, ClassicEngine::HaloCe, "haloce_mcc/model.json", *b"mode"),
+            (
+                GameId::HaloCe,
+                ClassicEngine::HaloCe,
+                "haloce_mcc/model_collision_geometry.json",
+                *b"coll",
+            ),
+            (GameId::Halo2, ClassicEngine::Halo2V4, "halo2_mcc/chocolate_mountain.json", *b"gldf"),
+        ] {
+            let group = u32::from_be_bytes(group);
+            let bytes = classic_bytes(definition, engine);
+            read_tag_from_bytes(&bytes, Some(game), Some(defs), group)
+                .unwrap_or_else(|error| panic!("{definition} from bytes: {error:#}"));
+            let path = dir.join("tag");
+            std::fs::write(&path, &bytes).unwrap();
+            read_tag_at_path(&path, Some(game), Some(defs), group)
+                .unwrap_or_else(|error| panic!("{definition} from disk: {error:#}"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
