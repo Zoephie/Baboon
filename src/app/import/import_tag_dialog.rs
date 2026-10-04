@@ -269,11 +269,11 @@ impl Baboon {
                 .as_ref()
                 .map(|dialog| dialog.group_name.clone())
                 .unwrap_or_default();
-            self.tag_compat.ensure_loaded(&locate_help_docs_root());
-            self.tag_compat
+            self.help.tag_compat.ensure_loaded(&locate_help_docs_root());
+            self.help.tag_compat
                 .focus(&source_game, GameId::CampaignEvolved.as_str(), &group);
-            self.help_panel_tab = HelpPanelTab::TagCompat;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::TagCompat;
+            self.help.about_open = true;
         }
         if do_cancel {
             self.import_tag_dialog = None;

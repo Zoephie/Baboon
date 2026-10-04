@@ -524,8 +524,8 @@ impl Baboon {
                 self.load_custom_editing_kit_profile(profile, ctx.clone());
             }
             Some(WelcomeAction::OpenAbout) => {
-                self.help_panel_tab = HelpPanelTab::About;
-                self.about_open = true;
+                self.help.help_panel_tab = HelpPanelTab::About;
+                self.help.about_open = true;
             }
             Some(WelcomeAction::OpenSettings) => {
                 self.settings_tab = SettingsTab::EditingKits;

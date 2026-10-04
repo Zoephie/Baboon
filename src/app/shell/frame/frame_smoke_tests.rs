@@ -500,67 +500,67 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "help_about",
-            &["about_open", "help_panel_tab"],
+            &["help.about_open", "help.help_panel_tab"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::About;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::About;
             },
             &["Baboon Help", "blam-tags created by"],
         ),
         case(
             "help_doc",
-            &["about_open", "help_docs"],
+            &["help.about_open", "help.help_docs"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::Doc;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::Doc;
             },
             &["Baboon Help", "Supported games"],
         ),
         case(
             "help_tutorials",
-            &["about_open", "tutorials"],
+            &["help.about_open", "help.tutorials"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::Tutorials;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::Tutorials;
             },
             &["Baboon Help", "Watch on YouTube"],
         ),
         case(
             "help_script_doc",
-            &["about_open", "script_docs"],
+            &["help.about_open", "help.script_docs"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::ScriptDoc;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::ScriptDoc;
             },
             &["Baboon Help", "Network safe"],
         ),
         case(
             "help_tag_compat",
-            &["about_open", "tag_compat"],
+            &["help.about_open", "help.tag_compat"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::TagCompat;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::TagCompat;
             },
             &["Baboon Help", "Only what is lost"],
         ),
         case(
             "help_map_names",
-            &["about_open"],
+            &["help.about_open"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.about_open = true;
-                h.app.help_panel_tab = HelpPanelTab::MapNames;
+                h.app.help.about_open = true;
+                h.app.help.help_panel_tab = HelpPanelTab::MapNames;
             },
             &["Baboon Help", "The Pillar of Autumn"],
         ),

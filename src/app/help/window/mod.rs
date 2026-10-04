@@ -5,11 +5,11 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_about_window(&mut self, ctx: &egui::Context) {
-        if !self.about_open {
+        if !self.help.about_open {
             return;
         }
 
-        let mut open = self.about_open;
+        let mut open = self.help.about_open;
         egui::Window::new("Baboon Help")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("baboon_help"))
@@ -21,72 +21,72 @@ impl Baboon {
             .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.help_panel_tab, HelpPanelTab::About, "About");
-                    ui.selectable_value(&mut self.help_panel_tab, HelpPanelTab::Doc, "Doc");
+                    ui.selectable_value(&mut self.help.help_panel_tab, HelpPanelTab::About, "About");
+                    ui.selectable_value(&mut self.help.help_panel_tab, HelpPanelTab::Doc, "Doc");
                     ui.selectable_value(
-                        &mut self.help_panel_tab,
+                        &mut self.help.help_panel_tab,
                         HelpPanelTab::Tutorials,
                         "Tutorials",
                     );
                     ui.selectable_value(
-                        &mut self.help_panel_tab,
+                        &mut self.help.help_panel_tab,
                         HelpPanelTab::ScriptDoc,
                         "Script Doc",
                     );
                     ui.selectable_value(
-                        &mut self.help_panel_tab,
+                        &mut self.help.help_panel_tab,
                         HelpPanelTab::TagCompat,
                         "Tag Compatibility",
                     );
                     ui.selectable_value(
-                        &mut self.help_panel_tab,
+                        &mut self.help.help_panel_tab,
                         HelpPanelTab::MapNames,
                         "Map Names",
                     );
                 });
                 ui.separator();
                 ui.add_space(8.0);
-                match self.help_panel_tab {
+                match self.help.help_panel_tab {
                     HelpPanelTab::About => draw_about_tab(ui),
-                    HelpPanelTab::Doc => draw_doc_tab(ui, &self.help_docs),
+                    HelpPanelTab::Doc => draw_doc_tab(ui, &self.help.help_docs),
                     HelpPanelTab::Tutorials => draw_tutorials_tab(
                         ui,
-                        &self.tutorials,
-                        &mut self.tutorials_game,
-                        &mut self.tutorials_category,
+                        &self.help.tutorials,
+                        &mut self.help.tutorials_game,
+                        &mut self.help.tutorials_category,
                     ),
                     HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
                     HelpPanelTab::TagCompat => self.draw_tag_compat_tab(ui),
-                    HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
+                    HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.help.map_names_game_tab),
                 }
             });
-        self.about_open = open;
+        self.help.about_open = open;
     }
 }
 
 impl Baboon {
     fn draw_script_doc_tab(&mut self, ui: &mut Ui) {
-        self.script_docs.ensure_loaded(&locate_help_docs_root());
-        if let Some(error) = self.script_docs.error() {
+        self.help.script_docs.ensure_loaded(&locate_help_docs_root());
+        if let Some(error) = self.help.script_docs.error() {
             doc_load_error(ui, &format!("Script documentation failed to load: {error}"));
             return;
         }
 
-        let old_game = self.script_docs.game.clone();
-        let old_category = self.script_docs.category;
-        let old_network_filter = self.script_docs.network_filter;
+        let old_game = self.help.script_docs.game.clone();
+        let old_category = self.help.script_docs.category;
+        let old_network_filter = self.help.script_docs.network_filter;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Game").color(subtle_dark()));
             egui::ComboBox::from_id_salt("script_docs_game")
                 .selected_text(
                     script_doc_games()
-                        .find(|game| game.as_str() == self.script_docs.game)
+                        .find(|game| game.as_str() == self.help.script_docs.game)
                         .map_or("Unknown game", GameFacts::display_name),
                 )
                 .show_ui(ui, |ui| {
                     for game in script_doc_games() {
                         ui.selectable_value(
-                            &mut self.script_docs.game,
+                            &mut self.help.script_docs.game,
                             game.as_str().to_owned(),
                             game.display_name(),
                         );
@@ -94,25 +94,25 @@ impl Baboon {
                 });
             ui.separator();
             ui.selectable_value(
-                &mut self.script_docs.category,
+                &mut self.help.script_docs.category,
                 ScriptDocCategory::Functions,
                 "Functions",
             );
             ui.selectable_value(
-                &mut self.script_docs.category,
+                &mut self.help.script_docs.category,
                 ScriptDocCategory::Globals,
                 "Globals",
             );
             ui.selectable_value(
-                &mut self.script_docs.category,
+                &mut self.help.script_docs.category,
                 ScriptDocCategory::Types,
                 "Types",
             );
-            if self.script_docs.category == ScriptDocCategory::Functions {
+            if self.help.script_docs.category == ScriptDocCategory::Functions {
                 ui.separator();
                 ui.label(RichText::new("Network safe").color(subtle_dark()));
                 egui::ComboBox::from_id_salt("script_docs_network_safe")
-                    .selected_text(match self.script_docs.network_filter {
+                    .selected_text(match self.help.script_docs.network_filter {
                         ScriptDocNetworkFilter::All => "All",
                         ScriptDocNetworkFilter::Yes => "Yes",
                         ScriptDocNetworkFilter::Unknown => "Unknown",
@@ -120,22 +120,22 @@ impl Baboon {
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
-                            &mut self.script_docs.network_filter,
+                            &mut self.help.script_docs.network_filter,
                             ScriptDocNetworkFilter::All,
                             "All",
                         );
                         ui.selectable_value(
-                            &mut self.script_docs.network_filter,
+                            &mut self.help.script_docs.network_filter,
                             ScriptDocNetworkFilter::Yes,
                             "Yes",
                         );
                         ui.selectable_value(
-                            &mut self.script_docs.network_filter,
+                            &mut self.help.script_docs.network_filter,
                             ScriptDocNetworkFilter::Unknown,
                             "Unknown",
                         );
                         ui.selectable_value(
-                            &mut self.script_docs.network_filter,
+                            &mut self.help.script_docs.network_filter,
                             ScriptDocNetworkFilter::No,
                             "No",
                         );
@@ -144,21 +144,21 @@ impl Baboon {
         });
         let search_changed = ui
             .add(
-                egui::TextEdit::singleline(&mut self.script_docs.search)
+                egui::TextEdit::singleline(&mut self.help.script_docs.search)
                     .hint_text(placeholder_text(
                         "Search names, signatures, descriptions, types, or examples...",
                     ))
                     .desired_width(f32::INFINITY),
             )
             .changed();
-        if old_game != self.script_docs.game
-            || old_category != self.script_docs.category
-            || old_network_filter != self.script_docs.network_filter
+        if old_game != self.help.script_docs.game
+            || old_category != self.help.script_docs.category
+            || old_network_filter != self.help.script_docs.network_filter
             || search_changed
         {
-            self.script_docs.invalidate();
+            self.help.script_docs.invalidate();
         }
-        self.script_docs.refresh();
+        self.help.script_docs.refresh();
         ui.add_space(6.0);
         ui.separator();
 
@@ -172,18 +172,18 @@ impl Baboon {
                 |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(format!("{} results", self.script_docs.rows.len()))
+                            RichText::new(format!("{} results", self.help.script_docs.rows.len()))
                                 .color(subtle_dark()),
                         );
                     });
                     ui.separator();
-                    let selected = self.script_docs.selected.as_deref();
+                    let selected = self.help.script_docs.selected.as_deref();
                     ScrollArea::vertical()
                         .id_salt("script_docs_results")
                         .auto_shrink([false, false])
-                        .show_rows(ui, 42.0, self.script_docs.rows.len(), |ui, range| {
+                        .show_rows(ui, 42.0, self.help.script_docs.rows.len(), |ui, range| {
                             for index in range {
-                                let row = &self.script_docs.rows[index];
+                                let row = &self.help.script_docs.rows[index];
                                 let response = ui
                                     .allocate_ui(Vec2::new(ui.available_width(), 42.0), |ui| {
                                         let response = ui.selectable_label(
@@ -215,7 +215,7 @@ impl Baboon {
                     ScrollArea::vertical()
                         .id_salt("script_docs_detail")
                         .auto_shrink([false, false])
-                        .show(ui, |ui| match &self.script_docs.detail {
+                        .show(ui, |ui| match &self.help.script_docs.detail {
                             Some(detail) => draw_script_doc_detail(ui, detail),
                             None => {
                                 ui.label(
@@ -228,26 +228,26 @@ impl Baboon {
             );
         });
         if let Some(key) = clicked {
-            self.script_docs.select(key);
+            self.help.script_docs.select(key);
         }
     }
 
     /// What a tag loses crossing between two games, read out of the generated
     /// compatibility database.
     fn draw_tag_compat_tab(&mut self, ui: &mut Ui) {
-        self.tag_compat.ensure_loaded(&locate_help_docs_root());
-        match draw_tag_compat_body(ui, &mut self.tag_compat) {
+        self.help.tag_compat.ensure_loaded(&locate_help_docs_root());
+        match draw_tag_compat_body(ui, &mut self.help.tag_compat) {
             Some(TagCompatRequest::ExportSheet) => self.export_tag_compat_sheet(),
             None => {}
         }
     }
 
     fn export_tag_compat_sheet(&mut self) {
-        let pair = self.tag_compat.pairs.get(self.tag_compat.pair);
+        let pair = self.help.tag_compat.pairs.get(self.help.tag_compat.pair);
         let stem = pair
             .map(|pair| format!("{}-to-{}", pair.source_game, pair.target_game))
             .unwrap_or_else(|| "tag-compat".to_owned());
-        let group = self.tag_compat.selected_group.clone().unwrap_or_default();
+        let group = self.help.tag_compat.selected_group.clone().unwrap_or_default();
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export compatibility sheet")
             .add_filter("Comma-separated values", &["csv"])
@@ -256,7 +256,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = match std::fs::write(&path, self.tag_compat.visible_csv()) {
+        self.status = match std::fs::write(&path, self.help.tag_compat.visible_csv()) {
             Ok(()) => format!("Wrote {}", path.display()),
             Err(error) => format!("Could not write {}: {error}", path.display()),
         };

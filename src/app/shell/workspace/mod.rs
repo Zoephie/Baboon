@@ -688,28 +688,28 @@ impl Baboon {
     fn draw_help_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("About...").clicked() {
-            self.help_panel_tab = HelpPanelTab::About;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::About;
+            self.help.about_open = true;
             close_menu(ui);
         }
         if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
-            self.help_panel_tab = HelpPanelTab::Doc;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::Doc;
+            self.help.about_open = true;
             close_menu(ui);
         }
         if ui.button("Tutorials...").clicked() {
-            self.help_panel_tab = HelpPanelTab::Tutorials;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::Tutorials;
+            self.help.about_open = true;
             close_menu(ui);
         }
         if ui.button("Tag Compatibility...").clicked() {
-            self.help_panel_tab = HelpPanelTab::TagCompat;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::TagCompat;
+            self.help.about_open = true;
             close_menu(ui);
         }
         if ui.button("Map Names...").clicked() {
-            self.help_panel_tab = HelpPanelTab::MapNames;
-            self.about_open = true;
+            self.help.help_panel_tab = HelpPanelTab::MapNames;
+            self.help.about_open = true;
             close_menu(ui);
         }
         if ui.button("Check for updates").clicked() {

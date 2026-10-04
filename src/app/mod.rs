@@ -286,15 +286,6 @@ pub struct Baboon {
     exported_mod: Option<ExportedMod>,
     /// Review of a pending Export Mod, before anything is written.
     mod_export: Option<ModExportDialog>,
-    about_open: bool,
-    help_panel_tab: HelpPanelTab,
-    help_docs: HelpDocsState,
-    tutorials: TutorialsState,
-    tutorials_game: String,
-    tutorials_category: TutorialCategory,
-    script_docs: ScriptDocsUiState,
-    tag_compat: TagCompatUiState,
-    map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
     blender_path_input: String,
     editing_kit_path_inputs: HashMap<String, String>,
@@ -325,9 +316,6 @@ pub struct Baboon {
     content_explorer: Option<ContentExplorer>,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
-    /// Parsed-once documentation overlay (help/units + explanations) per group
-    /// JSON, keyed by definition file path. Built lazily during render.
-    def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
     rename_tag: Option<RenameTagState>,
     /// Rename Folder dialog for a loose tags folder, if one is open.
@@ -414,6 +402,9 @@ pub struct Baboon {
     /// Search: the Find dialog, tag query results, the field-value search and a
     /// Find hit waiting to be opened.
     pub(in crate::app) search: SearchFeature,
+    /// Help: the About and help windows, tutorials, HaloScript and field docs,
+    /// tag compatibility and map names.
+    pub(in crate::app) help: HelpFeature,
 }
 
 impl Baboon {
@@ -595,15 +586,6 @@ impl Baboon {
             chimp_discard_prompt: None,
             exported_mod: None,
             mod_export: None,
-            about_open: false,
-            help_panel_tab: HelpPanelTab::About,
-            help_docs: HelpDocsState::load(),
-            tutorials: TutorialsState::load(&ctx),
-            tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
-            tutorials_category: TutorialCategory::ThreeD,
-            script_docs: ScriptDocsUiState::default(),
-            tag_compat: TagCompatUiState::default(),
-            map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
             editing_kit_path_attention: None,
@@ -629,7 +611,6 @@ impl Baboon {
             content_explorer: None,
             keyword_chooser_open: false,
             reveal_target: None,
-            def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
             loose_folder_rename: None,
@@ -703,6 +684,18 @@ impl Baboon {
                 field_value_query: String::new(),
                 field_value_group: String::new(),
                 field_value_searching: false,
+            },
+            help: HelpFeature {
+                about_open: false,
+                help_panel_tab: HelpPanelTab::About,
+                help_docs: HelpDocsState::load(),
+                tutorials: TutorialsState::load(&ctx),
+                tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
+                tutorials_category: TutorialCategory::ThreeD,
+                script_docs: ScriptDocsUiState::default(),
+                tag_compat: TagCompatUiState::default(),
+                map_names_game_tab: MapNamesGameTab::HaloCe,
+                def_docs_cache: HashMap::new(),
             },
         }
     }

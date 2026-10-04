@@ -423,11 +423,11 @@ impl Baboon {
         // whole `parent_tag` inheritance chain (object-family fields live in
         // parent files).
         let path = root.join(game.as_str()).join(format!("{group}.json"));
-        if let Some(docs) = self.def_docs_cache.get(&path) {
+        if let Some(docs) = self.help.def_docs_cache.get(&path) {
             return Some(docs.clone());
         }
         let docs = Rc::new(build_def_docs(&root, game, &group));
-        self.def_docs_cache.insert(path, docs.clone());
+        self.help.def_docs_cache.insert(path, docs.clone());
         Some(docs)
     }
 
