@@ -36,9 +36,10 @@ atomic-write-file = "0.3"
 blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "0dff753", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
-# Linux needs a windowing backend named: eframe's `glow` used to pull in both
-# through glutin-winit's defaults, and since 0.31 it pulls in neither.
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+# Named because eframe 0.36's `glow` no longer brings them, as 0.29's did:
+# `links` lets a clicked link open the browser (without it egui's request to
+# open a URL is dropped), and Linux needs a windowing backend, `wayland`/`x11`.
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "links", "wayland", "x11"] }
 egui_extras = { version = "0.36", features = ["image", "svg"] }
 # Tiling layout for the editor area (rerun-io). Targets egui 0.36 exactly, so it
 # drops in against the pinned eframe without a version bump.

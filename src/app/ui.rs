@@ -736,6 +736,10 @@ mod perf_baseline;
 #[path = "../app/tests/frame_smoke.rs"]
 mod frame_smoke;
 
+#[cfg(test)]
+#[path = "../app/tests/external_links.rs"]
+mod external_links;
+
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(

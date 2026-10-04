@@ -132,6 +132,10 @@ pub(super) struct Harness {
     pixels_per_point: f32,
     /// Every text painted by the last frame, for the scenario checks.
     pub(super) painted: Vec<String>,
+    /// The same texts with where they were painted, for clicking them.
+    pub(super) painted_rects: Vec<(String, egui::Rect)>,
+    /// What the last frame asked the platform to do.
+    pub(super) commands: Vec<egui::OutputCommand>,
 }
 
 impl Harness {
@@ -162,6 +166,8 @@ impl Harness {
             time: 0.0,
             pixels_per_point,
             painted: Vec::new(),
+            painted_rects: Vec::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -192,14 +198,19 @@ impl Harness {
         let tessellate = started.elapsed();
         std::hint::black_box(primitives);
         // Outside the timed spans.
-        self.painted = output
+        self.painted_rects = output
             .shapes
             .iter()
             .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
                 _ => None,
             })
             .collect();
+        self.painted = self.painted_rects.iter().map(|(text, _)| text.clone()).collect();
+        self.commands = output.platform_output.commands;
         FrameSample {
             run,
             tessellate,
