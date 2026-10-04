@@ -9612,8 +9612,10 @@ impl Baboon {
                     // overwrite confirmation. Both report through `status`
                     // instead of returning a path, so success is read back off
                     // the document's dirty flag.
-                    match self.entry_for_key(&tag_id).map(|entry| &entry.location) {
-                        Some(TagEntryLocation::NewContainer { .. }) => {
+                    match close_prompt_save_route(
+                        self.entry_for_key(&tag_id).map(|entry| &entry.location),
+                    ) {
+                        ClosePromptSave::NewContainer => {
                             self.save_new_container_tag(&tag_id);
                             if self.tag_is_dirty(&tag_id) {
                                 let label = self.tag_path_label(&tag_id);
@@ -9623,7 +9625,7 @@ impl Baboon {
                             }
                             continue;
                         }
-                        Some(TagEntryLocation::Container { .. }) => {
+                        ClosePromptSave::ContainerInPlace => {
                             self.overwrite_current_tag_in_place(&tag_id);
                             if self.tag_is_dirty(&tag_id) {
                                 // The overwrite failure reason is in `status`.
@@ -9635,7 +9637,7 @@ impl Baboon {
                             }
                             continue;
                         }
-                        _ => {}
+                        ClosePromptSave::File => {}
                     }
                     match self.save_tag_by_key(&tag_id) {
                         Ok(path) => saved.push(path.display().to_string()),
@@ -10293,6 +10295,43 @@ mod tests {
         assert!(!super::close_action_includes_chimp(
             &super::PendingCloseAction::CloseTab("tag".to_owned())
         ));
+    }
+
+    /// The close prompt's Save sends container tags to the container writers
+    /// and only file tags to the file save.
+    #[test]
+    fn the_close_prompt_saves_container_tags_through_the_containers() {
+        use super::{ClosePromptSave, TagEntryLocation, close_prompt_save_route};
+        let route = |location: TagEntryLocation| close_prompt_save_route(Some(&location));
+        assert_eq!(
+            route(TagEntryLocation::NewContainer {
+                template: crate::source::NewContainerTemplate::Derived {
+                    group: "camera_track".to_owned(),
+                },
+                package: "/Game/Tags/objects/foo/bar-camera_track".to_owned(),
+                group_tag: u32::from_be_bytes(*b"trak"),
+            }),
+            ClosePromptSave::NewContainer
+        );
+        assert_eq!(
+            route(TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Meteorite/Content/Tags/objects/a-biped.ubulk".to_owned(),
+            }),
+            ClosePromptSave::ContainerInPlace
+        );
+        assert_eq!(
+            route(TagEntryLocation::LooseFile(PathBuf::from("/kit/tags/a.biped"))),
+            ClosePromptSave::File
+        );
+        assert_eq!(
+            route(TagEntryLocation::Monolithic {
+                name: r"objects\a".to_owned(),
+                group_tag: u32::from_be_bytes(*b"bipd"),
+            }),
+            ClosePromptSave::File
+        );
+        assert_eq!(close_prompt_save_route(None), ClosePromptSave::File);
     }
 
     /// A mod without `_P` mounts at the same priority as the game's own
@@ -12627,6 +12666,29 @@ fn moved_key_map(
         }
     }
     map
+}
+
+/// How the close prompt's Save writes one tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClosePromptSave {
+    /// A brand-new container tag: a new override container, via a dialog.
+    NewContainer,
+    /// A mounted container tag: overwritten inside its own pak.
+    ContainerInPlace,
+    /// Everything else is a file on disk, or has none and is refused there.
+    File,
+}
+
+/// A container tag has no file to write, so sending one down the file path
+/// would fail, or worse, write the payload somewhere it does not belong.
+fn close_prompt_save_route(location: Option<&TagEntryLocation>) -> ClosePromptSave {
+    match location {
+        Some(TagEntryLocation::NewContainer { .. }) => ClosePromptSave::NewContainer,
+        Some(TagEntryLocation::Container { .. }) => ClosePromptSave::ContainerInPlace,
+        Some(TagEntryLocation::LooseFile(_) | TagEntryLocation::Monolithic { .. }) | None => {
+            ClosePromptSave::File
+        }
+    }
 }
 
 fn same_entry_key(a: &str, b: &str) -> bool {

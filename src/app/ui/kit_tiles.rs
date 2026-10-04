@@ -335,3 +335,7 @@ impl Baboon {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/kit_activation.rs"]
+mod kit_activation_tests;

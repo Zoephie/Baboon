@@ -3034,6 +3034,101 @@ mod tests {
         assert_h2_write_atomic_verifies(&tag, "h2_function_empty_create");
     }
 
+    /// Undo and redo snapshot a document as `write_to_bytes` and restore it
+    /// through `read_tag_from_bytes`. A classic (Halo CE / Halo 2) document
+    /// snapshots in classic format, which only the classic reader with the
+    /// game's layout can parse; the MCC reader refuses it.
+    #[test]
+    fn a_classic_snapshot_restores_through_the_classic_reader() {
+        // A Halo 2 `sound_mix` as a classic file: the 64-byte header (group
+        // and `BLM!` stored reversed), the root block header, one zeroed
+        // element. Read through the same reader a loose classic tag uses.
+        let group = u32::from_be_bytes(*b"snmx");
+        let definitions = locate_definitions_root();
+        let layout =
+            blam_tags::TagLayout::from_json(definitions.join("halo2_mcc/sound_mix.json")).unwrap();
+        let root = layout.block_layouts[layout.header.tag_group_block_index as usize].struct_index;
+        let size = layout.struct_layouts[root as usize].size as usize;
+        let mut bytes = vec![0u8; 64];
+        bytes[36..40].copy_from_slice(b"xmns");
+        bytes[60..64].copy_from_slice(b"!MLB");
+        bytes.extend_from_slice(b"dfbt");
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&(size as u32).to_le_bytes());
+        bytes.resize(bytes.len() + size, 0);
+        let mut tag = crate::source::read_tag_from_bytes(
+            &bytes,
+            Some("halo2_mcc"),
+            Some(&definitions),
+            group,
+        )
+        .expect("a classic tag");
+        apply_field_edit(&mut tag, "left stereo gain", "-3").unwrap();
+        let snapshot = tag.write_to_bytes().expect("snapshot");
+
+        assert!(
+            TagFile::read_from_bytes(&snapshot).is_err(),
+            "the MCC reader cannot parse a classic snapshot"
+        );
+        assert!(
+            crate::source::read_tag_from_bytes(&snapshot, None, None, group).is_err(),
+            "a classic snapshot needs the game to find its layout"
+        );
+        let restored = crate::source::read_tag_from_bytes(
+            &snapshot,
+            Some("halo2_mcc"),
+            Some(&locate_definitions_root()),
+            group,
+        )
+        .expect("restore");
+        assert!(matches!(
+            restored.container,
+            blam_tags::file::TagContainer::Classic { .. }
+        ));
+        let gain = |tag: &TagFile| match tag.root().field_path("left stereo gain")?.value()? {
+            TagFieldData::Real(value) => Some(value),
+            _ => None,
+        };
+        assert_eq!(gain(&restored), Some(-3.0), "the edit survives the round trip");
+        assert_eq!(restored.write_to_bytes().unwrap(), snapshot);
+    }
+
+    /// The root element of a freshly created tag gets every block index at 0,
+    /// while an element added to a block gets NONE (-1). The engine's
+    /// invariant is NONE everywhere; the root is a known gap in
+    /// `TagBlockData::new_root_default`. This pins today's behaviour so that
+    /// closing the gap is a deliberate change, and shows the contrast.
+    #[test]
+    fn a_fresh_root_has_block_indices_at_zero_unlike_a_new_element() {
+        let block_index = |tag: &TagFile, path: &str| match tag.root().field_path(path)?.value()? {
+            TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => {
+                Some(v as i64)
+            }
+            TagFieldData::ShortBlockIndex(v) | TagFieldData::CustomShortBlockIndex(v) => {
+                Some(v as i64)
+            }
+            TagFieldData::LongBlockIndex(v) | TagFieldData::CustomLongBlockIndex(v) => {
+                Some(v as i64)
+            }
+            _ => None,
+        };
+        let effect = TagFile::new(test_definition_path("haloreach_mcc/effect.json")).unwrap();
+        // Known gap: the engine invariant says this should be NONE (-1).
+        assert_eq!(block_index(&effect, "loop start event"), Some(0));
+
+        let mut physics =
+            TagFile::new(test_definition_path("haloreach_mcc/physics_model.json")).unwrap();
+        physics
+            .root_mut()
+            .field_path_mut("materials")
+            .unwrap()
+            .as_block_mut()
+            .unwrap()
+            .add_element();
+        assert_eq!(block_index(&physics, "materials[0]/phantom type"), Some(-1));
+    }
+
     fn h2_classic_shader_tag() -> TagFile {
         let mut tag = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
         let mut header = vec![0; 64];
