@@ -116,12 +116,22 @@ fn edited() -> (SyntheticInstall, Baboon, PathBuf) {
     (install, app, staging)
 }
 
+/// Draw the save window and apply what it sent, as a frame does.
 fn draw_save(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
-    move |ui| app.draw_chimp_save_window(ui.ctx())
+    move |ui| {
+        let ctx = ui.ctx().clone();
+        draw_chimp_save_window(&cx!(app, &ctx), &mut app.views);
+        app.apply_commands(&ctx);
+    }
 }
 
+/// Draw the discard prompt and apply what it sent, as a frame does.
 fn draw_discard(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
-    move |ui| app.draw_chimp_discard_window(ui.ctx())
+    move |ui| {
+        let ctx = ui.ctx().clone();
+        draw_chimp_discard_window(&cx!(app, &ctx), &mut app.chimp);
+        app.apply_commands(&ctx);
+    }
 }
 
 /// The save dialog needs something modified and a Paks folder to default

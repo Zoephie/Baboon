@@ -317,8 +317,8 @@ impl Baboon {
         draw_import_tag_window(&cx!(self, ctx), &mut self.import);
         draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
         draw_overwrite_confirm_window(&cx!(self, ctx), &mut self.mods);
-        self.draw_chimp_discard_window(ctx);
-        self.draw_chimp_save_window(ctx);
+        draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
+        draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
         draw_clear_stash_confirm_window(&cx!(self, ctx), &mut self.mods);
         draw_container_duplicate_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);

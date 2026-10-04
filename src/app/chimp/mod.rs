@@ -95,6 +95,71 @@ impl Baboon {
 pub(in crate::app) mod prompts_window;
 pub(in crate::app) use prompts_window::*;
 
+/// What Chimp's panes and windows ask of the application.
+pub(in crate::app) enum ChimpCommand {
+    /// `package`'s pane was drawn, and `edit` is what it changed. A frame
+    /// without an edit closes the run that coalesces into one undo step, as a
+    /// drag across a value is one step and not one per frame.
+    PaneDrawn {
+        kit: KitId,
+        package: String,
+        edit: Option<ChimpEdit>,
+    },
+    /// Export a mesh, with the textures `with_textures` asks for.
+    ExportMesh {
+        prompt: ChimpMeshTexturePrompt,
+        with_textures: ChimpTextureScope,
+    },
+    ExportTexture(ChimpTextureExportPrompt),
+    ExportLevel(ChimpLevelExportPrompt),
+    /// The discard prompt's Save: open the save dialog for the close it holds.
+    SaveBeforeClose(ChimpDiscardPrompt),
+    /// The discard prompt's Discard: restore its packages, then run its close.
+    Discard(ChimpDiscardPrompt),
+    /// The save dialog's choice for a kit's modified packages.
+    Save {
+        kit: KitId,
+        action: ChimpSaveAction,
+        pending_close_action: Option<PendingCloseAction>,
+    },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_chimp_command(&mut self, command: ChimpCommand, ctx: &egui::Context) {
+        match command {
+            ChimpCommand::PaneDrawn { kit, package, edit } => {
+                let Some(kit_index) = self.model.kit_index(kit) else {
+                    return;
+                };
+                let now = ctx.input(|input| input.time);
+                let Some((world, document, pane)) = self.chimp_document_and_pane(kit_index, &package)
+                else {
+                    return;
+                };
+                match edit {
+                    Some(edit) => {
+                        apply_chimp_edit(&world, document, pane, edit, now);
+                    }
+                    None => end_chimp_edit_run(document),
+                }
+            }
+            ChimpCommand::ExportMesh {
+                prompt,
+                with_textures,
+            } => self.start_chimp_mesh_export(prompt, with_textures, ctx.clone()),
+            ChimpCommand::ExportTexture(prompt) => self.start_chimp_texture_export(prompt, ctx.clone()),
+            ChimpCommand::ExportLevel(prompt) => self.start_chimp_level_export(prompt, ctx.clone()),
+            ChimpCommand::SaveBeforeClose(prompt) => self.save_chimp_before_close(prompt),
+            ChimpCommand::Discard(prompt) => self.discard_chimp_for_prompt(prompt, ctx),
+            ChimpCommand::Save {
+                kit,
+                action,
+                pending_close_action,
+            } => self.save_chimp_changes(kit, action, pending_close_action, ctx),
+        }
+    }
+}
+
 /// Chimp's app-wide prompts and jobs: mesh texture, texture export and level
 /// export prompts, the level job, writes in flight, the discard prompt and the
 /// usmap path being typed.
