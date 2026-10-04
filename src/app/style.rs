@@ -50,6 +50,11 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
         egui::Visuals::light()
     };
     visuals.override_text_color = Some(text_dark());
+    // egui 0.29's: a hovered or pressed widget grows a point on each side,
+    // and a slider's handle is round.
+    visuals.widgets.hovered.expansion = 1.0;
+    visuals.widgets.active.expansion = 1.0;
+    visuals.handle_shape = egui::style::HandleShape::Circle;
     visuals.panel_fill = editor_bg();
     visuals.window_fill = editor_bg();
     visuals.faint_bg_color = row_type();
@@ -272,6 +277,13 @@ pub(super) fn foundation_style() -> egui::Style {
     // the vertical floor here makes text, icon, and image+text buttons align;
     // dense custom-painted editor cells continue to use their explicit sizes.
     style.spacing.interact_size.y = BUTTON_HEIGHT;
+    // egui 0.36 changed these defaults; Baboon keeps egui 0.29's: animations
+    // (collapsing, fades, scroll) a twelfth of a second rather than a fifth,
+    // scroll areas without a fade at their edges, and window edges that grab
+    // for a resize five points out rather than three.
+    style.animation_time = 1.0 / 12.0;
+    style.spacing.scroll.fade.strength = 0.0;
+    style.interaction.resize_grab_radius_side = 5.0;
     style
 }
 

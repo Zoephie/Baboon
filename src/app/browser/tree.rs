@@ -488,9 +488,9 @@ pub(in crate::app) fn style_list_menu(ui: &mut Ui) {
 pub(in crate::app) fn style_tag_context_menu(ui: &mut Ui) {
     // `set_min_width` is not enough here: during egui's menu sizing pass the
     // full-width rows can see a larger available width and grow the popup to
-    // it. Fix both bounds so 328 points of content plus the default 6-point
-    // inset on each side produces a 340-point frame at 100% display scaling.
-    let menu_margin = ui.spacing().menu_margin;
+    // it. Fix both bounds so the content plus the menu frame's inset and
+    // stroke on each side produces a 340-point frame at 100% display scaling.
+    let menu_margin = Frame::menu(ui.style()).total_margin();
     ui.set_width((CONTEXT_MENU_WIDTH - menu_margin.sum().x).max(1.0));
     style_list_menu(ui);
 }
@@ -2137,7 +2137,8 @@ fn show_group_tree_header<R>(
                 .fill(Color32::from_rgb(48, 58, 66))
                 .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 89, 98)))
                 .corner_radius(egui::CornerRadius::same(4))
-                .inner_margin(egui::Margin::symmetric(6, 1))
+                // A 6 by 1 inset: egui counts the stroke as padding.
+                .inner_margin(egui::Margin::symmetric(5, 0))
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new(fourcc)

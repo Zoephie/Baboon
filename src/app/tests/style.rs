@@ -182,3 +182,26 @@ fn a_window_without_a_title_bar_moves_by_its_body() {
     assert_eq!(window_moved_by_drag(true, body), Vec2::ZERO);
     assert_eq!(window_moved_by_drag(true, Vec2::new(150.0, 10.0)), Vec2::new(100.0, 50.0));
 }
+
+/// The egui defaults that changed between 0.29 and 0.36 and that Baboon sets
+/// back to 0.29's. egui 0.36's own defaults differ in each,
+/// which the first assertions check, so this cannot pass by accident.
+#[test]
+fn style_keeps_egui_0_29_defaults_that_0_36_changed() {
+    let egui_default = egui::Style::default();
+    assert_ne!(egui_default.animation_time, 1.0 / 12.0);
+    assert_ne!(egui_default.spacing.scroll.fade.strength, 0.0);
+    assert_ne!(egui_default.interaction.resize_grab_radius_side, 5.0);
+    assert_ne!(egui::Visuals::light().widgets.hovered.expansion, 1.0);
+
+    let style = foundation_style();
+    assert_eq!(style.animation_time, 1.0 / 12.0);
+    assert_eq!(style.spacing.scroll.fade.strength, 0.0);
+    assert_eq!(style.interaction.resize_grab_radius_side, 5.0);
+    // Set the same in either theme; the theme is a global other tests read,
+    // so it is left as it is.
+    let visuals = foundation_visuals();
+    assert_eq!(visuals.widgets.hovered.expansion, 1.0);
+    assert_eq!(visuals.widgets.active.expansion, 1.0);
+    assert!(matches!(visuals.handle_shape, egui::style::HandleShape::Circle));
+}

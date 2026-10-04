@@ -497,7 +497,8 @@ impl Baboon {
                     Frame::NONE
                         .fill(wash)
                         .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.5)))
-                        .inner_margin(egui::Margin::symmetric(6, 6))
+                        // A 6-point inset: egui counts the stroke as padding.
+                        .inner_margin(egui::Margin::symmetric(5, 5))
                         .show(ui, |ui| {
                             ui.label(RichText::new(title).color(accent).small());
                             // Scrolled within its own pane: an editor row is

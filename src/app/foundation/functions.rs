@@ -31,7 +31,8 @@ fn draw_foundation_function_row_contents(
         Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
-            .inner_margin(egui::Margin::same(6))
+            // A 6-point inset: egui counts the stroke as padding.
+            .inner_margin(egui::Margin::same(5))
             .show(ui, |ui| {
                 // `Frame::show` inherits the parent layout, and this row is
                 // built inside a `horizontal_top`. Force a vertical layout so
@@ -127,7 +128,8 @@ fn draw_foundation_wrapped_function_row_contents(
         Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
-            .inner_margin(egui::Margin::same(6))
+            // A 6-point inset: egui counts the stroke as padding.
+            .inner_margin(egui::Margin::same(5))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(640.0);

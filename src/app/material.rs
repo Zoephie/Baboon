@@ -31,12 +31,8 @@ pub(super) fn draw_material_tag(
     Frame::NONE
         .fill(material_panel())
         .stroke(Stroke::new(1.0_f32, material_panel_edge()))
-        .inner_margin(egui::Margin {
-            left: 2,
-            right: 2,
-            top: 2,
-            bottom: 2,
-        })
+        // A 2-point inset: egui counts the stroke as padding.
+        .inner_margin(egui::Margin::same(1))
         .show(ui, |ui| {
             if is_shader_tag(entry) {
                 // Built once per revision of the document, not every frame:
