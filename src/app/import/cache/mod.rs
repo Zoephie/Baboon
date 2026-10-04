@@ -215,7 +215,7 @@ impl Baboon {
     /// choosing a folder is a worse way to learn it.
     pub(in crate::app) fn open_cache_import_dialog(&mut self, prefix: String) {
         if self.import.cache_import_dialog.is_some() {
-            self.status = "A cache import is already open".to_owned();
+            self.model.status = "A cache import is already open".to_owned();
             return;
         }
         let kit = self.active_kit_id();
@@ -223,7 +223,7 @@ impl Baboon {
             return;
         };
         if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
-            self.status = "This is not a monolithic cache workspace".to_owned();
+            self.model.status = "This is not a monolithic cache workspace".to_owned();
             return;
         }
         let selected = source_data
@@ -232,12 +232,12 @@ impl Baboon {
             .filter(|entry| cache_entry_is_under(entry, &prefix))
             .count();
         if selected == 0 {
-            self.status = format!("{prefix} holds no tags to import");
+            self.model.status = format!("{prefix} holds no tags to import");
             return;
         }
         let targets = self.cache_import_targets();
         if targets.is_empty() {
-            self.status = "Open the editing kit these tags should land in first — File › Load \
+            self.model.status = "Open the editing kit these tags should land in first — File › Load \
                  Folder"
                 .to_owned();
             return;
@@ -274,7 +274,7 @@ impl Baboon {
     /// question whether one tag asked it or a thousand.
     pub(in crate::app) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
         if self.import.cache_import_dialog.is_some() {
-            self.status = "A cache import is already open".to_owned();
+            self.model.status = "A cache import is already open".to_owned();
             return;
         }
         let kit = self.active_kit_id();
@@ -282,17 +282,17 @@ impl Baboon {
             return;
         };
         if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
-            self.status = "This is not a monolithic cache workspace".to_owned();
+            self.model.status = "This is not a monolithic cache workspace".to_owned();
             return;
         }
         let Some(entry) = source_data.entries.iter().find(|entry| entry.key == key) else {
-            self.status = "That tag is no longer in this cache".to_owned();
+            self.model.status = "That tag is no longer in this cache".to_owned();
             return;
         };
         let display_path = entry.display_path.clone();
         let targets = self.cache_import_targets();
         if targets.is_empty() {
-            self.status = "Open the editing kit this tag should land in first — File › Load Folder"
+            self.model.status = "Open the editing kit this tag should land in first — File › Load Folder"
                 .to_owned();
             return;
         }
@@ -333,7 +333,7 @@ impl Baboon {
     /// Ordered by label so the list does not shuffle between openings.
     fn cache_import_targets(&self) -> Vec<CacheImportTarget> {
         let mut targets: Vec<CacheImportTarget> = self
-            .kits
+            .model.kits
             .iter()
             .filter_map(|kit| {
                 let source = kit.source.as_ref()?;
@@ -425,7 +425,7 @@ impl Baboon {
         let Some(index) = self.kit_index(kit) else {
             return;
         };
-        let Some(source_data) = self.kits[index].source.as_ref() else {
+        let Some(source_data) = self.model.kits[index].source.as_ref() else {
             return;
         };
         // Cloning the source shares the open cache rather than reopening it:
@@ -437,7 +437,7 @@ impl Baboon {
         let entries = source_data.entries.clone();
         let stamp = KitStamp {
             kit,
-            generation: self.kits[index].generation,
+            generation: self.model.kits[index].generation,
         };
         // A cache tag is Reach's own format at another byte order, so the source
         // profile is the destination's. That pair is refused everywhere else and
@@ -460,7 +460,7 @@ impl Baboon {
             target_game,
             target_tags_root,
             kit_roots: self
-                .prefs
+                .model.prefs
                 .editing_kit_paths
                 .iter()
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))
@@ -483,7 +483,7 @@ impl Baboon {
                 failed: 0,
             });
         }
-        self.status = "Importing cache tags".to_owned();
+        self.model.status = "Importing cache tags".to_owned();
         let tx = self.tx.clone();
         spawn_worker(
             &self.tx,
@@ -543,7 +543,7 @@ impl Baboon {
         let Some(index) = self.kit_index(kit) else {
             return;
         };
-        let Some(source_data) = self.kits[index].source.as_ref() else {
+        let Some(source_data) = self.model.kits[index].source.as_ref() else {
             return;
         };
         let entries = source_data
@@ -557,7 +557,7 @@ impl Baboon {
             .collect::<Vec<_>>();
         let stamp = KitStamp {
             kit,
-            generation: self.kits[index].generation,
+            generation: self.model.kits[index].generation,
         };
         if let Some(dialog) = self.import.cache_import_dialog.as_mut() {
             dialog.scanning = true;
@@ -664,7 +664,7 @@ impl Baboon {
                     .iter()
                     .map(|reference| (reference.key.clone(), true))
                     .collect();
-                self.status = format!(
+                self.model.status = format!(
                     "Imported {} tag(s), {} failed, {} held back{}",
                     report.converted_count(),
                     report.failed_count(),
@@ -679,7 +679,7 @@ impl Baboon {
                 }
             }
             Err(error) => {
-                self.status = format!("Cache import failed: {error}");
+                self.model.status = format!("Cache import failed: {error}");
                 dialog.error = Some(error);
             }
         }

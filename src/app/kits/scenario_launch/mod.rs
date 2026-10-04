@@ -349,7 +349,7 @@ impl Baboon {
     /// Sapien has no way to be given a scenario is a reason for there to be no
     /// button.
     pub(in crate::app) fn kit_offers_scenario_sapien(&self, kit: usize) -> bool {
-        self.kits
+        self.model.kits
             .get(kit)
             .and_then(|kit| kit.source.as_ref())
             .and_then(|source| source.game)
@@ -357,7 +357,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -370,40 +370,40 @@ impl Baboon {
     pub(in crate::app) fn launch_scenario_in_sapien(&mut self, key: &str) {
         let context = {
             let Some(source) = self.source() else {
-                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                self.model.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
             let Some(entry) = self.entry_for_key(key) else {
-                self.status = "The scenario tag is no longer in the source".to_owned();
+                self.model.status = "The scenario tag is no longer in the source".to_owned();
                 return;
             };
             match scenario_launch_context(source, entry) {
                 Ok(context) => context,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
         };
         if !context.game.sapien_takes_scenario_argument() {
-            self.status =
+            self.model.status =
                 "Opening a scenario directly in Sapien is not supported for this editing kit"
                     .to_owned();
             return;
         }
         let executable = context.kit_root.join("sapien.exe");
         if !executable.is_file() {
-            self.status = format!("Sapien executable not found: {}", executable.display());
+            self.model.status = format!("Sapien executable not found: {}", executable.display());
             return;
         }
 
-        let dirty = self.kits[self.active]
+        let dirty = self.model.kits[self.model.active]
             .parsed_tags
             .get(key)
             .is_some_and(|document| document.dirty.is_set());
         if dirty {
             if let Err(error) = self.save_tag_by_key(key) {
-                self.status = format!("Could not save scenario before launch: {error}");
+                self.model.status = format!("Could not save scenario before launch: {error}");
                 return;
             }
         }
@@ -417,16 +417,16 @@ impl Baboon {
             .current_dir(&context.kit_root);
         match process.spawn() {
             Ok(_) => {
-                self.status = format!("Launched Sapien for {}", context.scenario_path);
+                self.model.status = format!("Launched Sapien for {}", context.scenario_path);
             }
             Err(error) => {
-                self.status = format!("Could not launch Sapien for this scenario: {error}");
+                self.model.status = format!("Could not launch Sapien for this scenario: {error}");
             }
         }
     }
 
     pub(in crate::app) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -439,17 +439,17 @@ impl Baboon {
     pub(in crate::app) fn launch_scenario_in_tag_test(&mut self, key: &str) {
         let context = {
             let Some(source) = self.source() else {
-                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                self.model.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
             let Some(entry) = self.entry_for_key(key) else {
-                self.status = "The scenario tag is no longer in the source".to_owned();
+                self.model.status = "The scenario tag is no longer in the source".to_owned();
                 return;
             };
             match scenario_launch_context(source, entry) {
                 Ok(context) => context,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
@@ -457,17 +457,17 @@ impl Baboon {
         let executable_name = tag_test_executable_for_game(Some(context.game));
         let executable = context.kit_root.join(executable_name);
         if !executable.is_file() {
-            self.status = format!("tag_test executable not found: {}", executable.display());
+            self.model.status = format!("tag_test executable not found: {}", executable.display());
             return;
         }
 
-        let dirty = self.kits[self.active]
+        let dirty = self.model.kits[self.model.active]
             .parsed_tags
             .get(key)
             .is_some_and(|document| document.dirty.is_set());
         if dirty {
             if let Err(error) = self.save_tag_by_key(key) {
-                self.status = format!("Could not save scenario before launch: {error}");
+                self.model.status = format!("Could not save scenario before launch: {error}");
                 return;
             }
         }
@@ -475,7 +475,7 @@ impl Baboon {
         let startup_file = context.kit_root.join("init.txt");
         let command = scenario_startup_command(context.game, &context.scenario_path);
         if let Err(error) = update_scenario_startup_file(&startup_file, &command) {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         let mut process = Command::new(&executable);
@@ -485,14 +485,14 @@ impl Baboon {
         process.current_dir(&context.kit_root);
         match process.spawn() {
             Ok(_) => {
-                self.status = format!(
+                self.model.status = format!(
                     "Launched tag_test for {} using {}",
                     context.scenario_path,
                     startup_file.display()
                 );
             }
             Err(error) => {
-                self.status = format!(
+                self.model.status = format!(
                     "Wrote {}, but could not launch tag_test: {error}",
                     startup_file.display()
                 );

@@ -114,6 +114,8 @@ pub(in crate::app) mod shell;
 use shell::*;
 mod ui_kit;
 use ui_kit::*;
+mod model;
+use model::Model;
 pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
@@ -159,7 +161,6 @@ pub struct Baboon {
     /// [`Baboon::run_logic`]: while the window is hidden eframe runs no egui
     /// pass, so egui's own clock stays at the last frame shown.
     native_clock: Option<f64>,
-    default_names: TagNameIndex,
     /// Cloneable sender given to background jobs; every completion is funneled
     /// back through the receive loop so UI state mutates only on the UI thread.
     tx: Sender<WorkerMessage>,
@@ -170,29 +171,12 @@ pub struct Baboon {
     /// code that has no frame's context to hand: it wakes the UI when the
     /// job answers.
     egui_ctx: egui::Context,
-    /// Every open kit: the content store of the multi-kit model, each owning
-    /// its source and all state scoped to it. **Never empty** — an unloaded
-    /// Baboon holds one empty workspace kit, so readers of per-kit state need
-    /// no "nothing loaded" special case. Cross-frame references use [`KitId`],
-    /// never a position, since positions shift when a kit closes.
-    kits: Vec<Kit>,
     /// Layout of the open kits: which workspaces are visible and how they are
     /// split. References kits by [`KitId`]; `kits` remains the content store,
     /// so repairing the tree never creates or destroys a kit.
     kit_tree: egui_tiles::Tree<KitId>,
-    /// Index into `kits` of the kit the browser, tabs, and editor act on.
-    /// Always a valid index; kept in range whenever `kits` changes.
-    active: usize,
-    /// Monotonic [`KitId`] allocator; ids are never reused.
-    next_kit_id: u64,
-    /// The live preferences: what Settings edits and every reader consults.
-    /// `browser_mode` / `browser_sort` here are only the seed a new workspace
-    /// starts from — each kit keeps its own — and [`Baboon::current_prefs`]
-    /// takes the focused kit's when it writes them out.
-    prefs: GuiPrefs,
     /// What was last written to disk, so an unchanged frame writes nothing.
     saved_prefs: GuiPrefs,
-    status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
     /// all through a setter, the change is detected by comparison — which
@@ -252,6 +236,9 @@ pub struct Baboon {
     /// restored, the operation notice, toolbar icons and game artwork, and when
     /// prefs are next checked.
     pub(in crate::app) shell: ShellFeature,
+    /// The application model: open kits and the active one, the live
+    /// preferences, the default tag names and the status line.
+    pub(in crate::app) model: Model,
 }
 
 impl Baboon {
@@ -305,7 +292,7 @@ impl Baboon {
                 app.begin_command_line_launch(launch, cc.egui_ctx.clone())
             }
             StartupArguments::Invalid(error) => {
-                app.status = format!("Command line: {error}");
+                app.model.status = format!("Command line: {error}");
             }
         }
         if app.should_check_updates_on_startup() {
@@ -373,22 +360,11 @@ impl Baboon {
         Self {
             window_state,
             native_clock: None,
-            default_names: names.clone(),
             tx,
             rx,
             egui_ctx: ctx.clone(),
-            // The startup workspace is seeded like any other new kit; every
-            // later one goes through `Baboon::empty_kit`.
-            kits: vec![Kit {
-                browser: KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
-                ..Kit::empty(KitId(0), names.clone())
-            }],
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
-            active: 0,
-            next_kit_id: 1,
             saved_prefs: prefs.clone(),
-            prefs: live_prefs,
-            status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
             audio: audio::AudioState::default(),
@@ -567,6 +543,19 @@ impl Baboon {
                 custom_editing_kit_texture_failures: HashSet::new(),
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
+            model: Model {
+                default_names: names.clone(),
+                // The startup workspace is seeded like any other new kit; every
+                // later one goes through `Baboon::empty_kit`.
+                kits: vec![Kit {
+                    browser: KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
+                    ..Kit::empty(KitId(0), names.clone())
+                }],
+                active: 0,
+                next_kit_id: 1,
+                prefs: live_prefs,
+                status: "Ready".to_owned(),
+            },
         }
     }
 
@@ -658,7 +647,7 @@ impl Baboon {
         profile_id: Option<&str>,
     ) -> Option<egui::TextureHandle> {
         let profile = profile_id.and_then(|profile_id| {
-            self.prefs
+            self.model.prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == profile_id)

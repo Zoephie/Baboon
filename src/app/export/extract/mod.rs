@@ -15,16 +15,16 @@ impl Baboon {
     /// expensive half of the job.
     pub(in crate::app) fn begin_dump_tag_references(&mut self, key: &str, _ctx: egui::Context) {
         let Some(source) = self.source() else {
-            self.status = "No tag source is loaded".to_owned();
+            self.model.status = "No tag source is loaded".to_owned();
             return;
         };
         let Some(index) = source.reverse_dependencies.as_ref() else {
-            self.status = "Build the reference index first — Tools ▸ Build/Rebuild Reference Index"
+            self.model.status = "Build the reference index first — Tools ▸ Build/Rebuild Reference Index"
                 .to_owned();
             return;
         };
         let Some(root) = self.entry_for_key(key).cloned() else {
-            self.status = "That tag is no longer in the source".to_owned();
+            self.model.status = "That tag is no longer in the source".to_owned();
             return;
         };
         // Built once over the whole entry set. `children_of_entry` rebuilds this
@@ -48,7 +48,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = match fs::write(&output, report) {
+        self.model.status = match fs::write(&output, report) {
             Ok(()) => format!("Wrote {}", output.display()),
             Err(error) => format!("Could not write {}: {error}", output.display()),
         };
@@ -68,7 +68,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Dumping JSON for {}", entry.display_path);
+        self.model.status = format!("Dumping JSON for {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             export_tag_json(&source, &entry, &output).map_err(|e| e.to_string())
@@ -91,7 +91,7 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         if entries.is_empty() {
-            self.status = "No loaded tags found in folder".to_owned();
+            self.model.status = "No loaded tags found in folder".to_owned();
             return;
         }
         let source = source_data.source.clone();
@@ -101,7 +101,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Dumping {} loaded tag(s) to JSON", entries.len());
+        self.model.status = format!("Dumping {} loaded tag(s) to JSON", entries.len());
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             export_tag_json_entries(&source, &entries, &output).map_err(|e| e.to_string())
@@ -130,7 +130,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Dumping JSON for folder {label}");
+        self.model.status = format!("Dumping JSON for folder {label}");
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             export_loose_folder_json(&root, &rel_path, &names, &output)
@@ -151,7 +151,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting raw tag {}", entry.display_path);
+        self.model.status = format!("Extracting raw tag {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_raw_tag(&source, &entry, &output).map_err(|e| e.to_string())
@@ -170,7 +170,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting bitmap {}", entry.display_path);
+        self.model.status = format!("Extracting bitmap {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_bitmap_images(&source, &entry, &output).map_err(|e| e.to_string())
@@ -195,18 +195,18 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         if entries.is_empty() {
-            self.status = "No bitmap tags found".to_owned();
+            self.model.status = "No bitmap tags found".to_owned();
             return;
         }
         let source = source_data.source.clone();
         let mut dialog = rfd::FileDialog::new().set_title("Extract Bitmap Source");
-        if let Some(layout) = self.kit_layout_for(self.active) {
+        if let Some(layout) = self.kit_layout_for(self.model.active) {
             dialog = dialog.set_directory(layout.data);
         }
         let Some(output) = dialog.pick_folder() else {
             return;
         };
-        self.status = match entries.as_slice() {
+        self.model.status = match entries.as_slice() {
             [entry] if !folder => format!("Extracting bitmap source for {}", entry.display_path),
             entries => format!("Extracting {} bitmap source(s)", entries.len()),
         };
@@ -232,7 +232,7 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         if entries.is_empty() {
-            self.status = "No bitmap tags found in folder".to_owned();
+            self.model.status = "No bitmap tags found in folder".to_owned();
             return;
         }
         let source = source_data.source.clone();
@@ -242,7 +242,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting {} bitmap tag(s)", entries.len());
+        self.model.status = format!("Extracting {} bitmap tag(s)", entries.len());
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_bitmap_entries(&source, &entries, &output).map_err(|e| e.to_string())
@@ -260,7 +260,7 @@ impl Baboon {
             .filter(|entry| crate::app::editor::is_sound_group(entry.group_tag))
             .collect();
         if entries.is_empty() {
-            self.status = "No loaded sound tags found".to_owned();
+            self.model.status = "No loaded sound tags found".to_owned();
             return;
         }
 
@@ -281,8 +281,8 @@ impl Baboon {
                     .ok()
                 })
                 .flatten();
-                let Some(layout) = self.kit_layout_for(self.active) else {
-                    self.status = "Could not resolve the editing kit's data folder".to_owned();
+                let Some(layout) = self.kit_layout_for(self.model.active) else {
+                    self.model.status = "Could not resolve the editing kit's data folder".to_owned();
                     return;
                 };
                 let mut items = Vec::new();
@@ -311,7 +311,7 @@ impl Baboon {
                     }
                 }
                 if items.is_empty() {
-                    self.status = if read_errors > 0 {
+                    self.model.status = if read_errors > 0 {
                         format!("Could not read {read_errors} sound tag(s)")
                     } else {
                         "The selected sound tags contain no extractable audio".to_owned()
@@ -344,7 +344,7 @@ impl Baboon {
                 let selected_language = self.audio.language.clone();
                 let mut items = Vec::new();
                 for entry in &entries {
-                    let Some(binding) = self.ce_sound_binding(self.active, &entry.key, entry)
+                    let Some(binding) = self.ce_sound_binding(self.model.active, &entry.key, entry)
                     else {
                         continue;
                     };
@@ -381,7 +381,7 @@ impl Baboon {
                     }
                 }
                 if items.is_empty() {
-                    self.status = "The selected sound tags have no audio bound".to_owned();
+                    self.model.status = "The selected sound tags have no audio bound".to_owned();
                     return;
                 }
                 self.export.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
@@ -391,7 +391,7 @@ impl Baboon {
                 });
             }
             _ => {
-                self.status =
+                self.model.status =
                     "Sound extraction requires an editing-kit or container source".to_owned();
             }
         }
@@ -405,8 +405,8 @@ impl Baboon {
     /// in one go, and it should not be reachable by a stale request. The folder-
     /// scoped twin below carries no such gate, because it is bounded and aimed.
     pub(in crate::app) fn begin_extract_all_container_tags(&mut self, _ctx: egui::Context) {
-        if !self.prefs.expert_mode {
-            self.status = "Extracting all tags requires Expert mode".to_owned();
+        if !self.model.prefs.expert_mode {
+            self.model.status = "Extracting all tags requires Expert mode".to_owned();
             return;
         }
         self.raise_container_dump_confirm(ContainerDumpScope::AllShipped, "Extract All Tags");
@@ -428,14 +428,14 @@ impl Baboon {
     /// destination, and keep that destination out of the game's own Paks folder.
     pub(in crate::app) fn raise_container_dump_confirm(&mut self, scope: ContainerDumpScope, dialog_title: &str) {
         if self.export.container_dump_job.is_some() {
-            self.status = "An extraction is already running".to_owned();
+            self.model.status = "An extraction is already running".to_owned();
             return;
         }
         let Some(source_data) = self.source() else {
             return;
         };
         let TagSource::IoStoreContainerSet { root, .. } = &source_data.source else {
-            self.status = "Extracting tags needs a Campaign Evolved container".to_owned();
+            self.model.status = "Extracting tags needs a Campaign Evolved container".to_owned();
             return;
         };
         let root = root.clone();
@@ -443,7 +443,7 @@ impl Baboon {
         // set — there is no background scan to wait on first.
         let total = container_dump_entries(&source_data.entries, &scope).len();
         if total == 0 {
-            self.status = match &scope {
+            self.model.status = match &scope {
                 ContainerDumpScope::AllShipped => {
                     "This workspace has no container tags to extract".to_owned()
                 }
@@ -459,7 +459,7 @@ impl Baboon {
         // Files landing in the game's own Paks folder would be found by the next
         // mount and are a nuisance to unpick by hand.
         if output.starts_with(&root) {
-            self.status = format!(
+            self.model.status = format!(
                 "Choose a folder outside {} — extracting into the game's own Paks folder would \
                  leave the extracted tags beside its containers",
                 root.display()
@@ -483,13 +483,13 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         if self.export.container_dump_job.is_some() {
-            self.status = "An extraction is already running".to_owned();
+            self.model.status = "An extraction is already running".to_owned();
             return;
         }
         let Some(index) = self.kit_index(kit) else {
             return;
         };
-        let Some(source_data) = self.kits[index].source.as_ref() else {
+        let Some(source_data) = self.model.kits[index].source.as_ref() else {
             return;
         };
         // Cloning the source is cheap: the mounted archives are behind `Arc`, so
@@ -504,7 +504,7 @@ impl Baboon {
             .collect();
         let total = entries.len();
         if total == 0 {
-            self.status = match &scope {
+            self.model.status = match &scope {
                 ContainerDumpScope::AllShipped => {
                     "This workspace has no container tags to extract".to_owned()
                 }
@@ -516,7 +516,7 @@ impl Baboon {
         }
         let stamp = KitStamp {
             kit,
-            generation: self.kits[index].generation,
+            generation: self.model.kits[index].generation,
         };
         let cancel = Arc::new(AtomicBool::new(false));
         self.export.container_dump_job = Some(ContainerDumpJob {
@@ -527,7 +527,7 @@ impl Baboon {
             started: std::time::Instant::now(),
             cancel: cancel.clone(),
         });
-        self.status = format!("Extracting {total} tag(s) to {}", output.display());
+        self.model.status = format!("Extracting {total} tag(s) to {}", output.display());
         let tx = self.tx.clone();
         let worker_ctx = ctx.clone();
         spawn_worker(&self.tx, &ctx, move || {
@@ -583,7 +583,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting geometry from {}", entry.display_path);
+        self.model.status = format!("Extracting geometry from {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_geometry_for_entry(&source, &entry, &output, target)
@@ -603,7 +603,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting import info from {}", entry.display_path);
+        self.model.status = format!("Extracting import info from {}", entry.display_path);
         let tx = self.tx.clone();
         let is_model = entry.group_tag == u32::from_be_bytes(*b"hlmt");
         spawn_export(&tx, &ctx, move || {
@@ -633,7 +633,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting animations from {}", entry.display_path);
+        self.model.status = format!("Extracting animations from {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_animations_for_entry(&source, &entry, &output, target)
@@ -657,7 +657,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting source shaders from {}", entry.display_path);
+        self.model.status = format!("Extracting source shaders from {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_material_shader_sources(&source, &entry, &output)
@@ -677,7 +677,7 @@ impl Baboon {
         };
         let entries = entries_for_keys(source_data, &keys);
         if entries.is_empty() {
-            self.status = "No material shaders found in folder".to_owned();
+            self.model.status = "No material shaders found in folder".to_owned();
             return;
         }
         let source = source_data.source.clone();
@@ -687,7 +687,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!(
+        self.model.status = format!(
             "Extracting source shaders from {} material shader(s)",
             entries.len()
         );
@@ -702,7 +702,7 @@ impl Baboon {
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_scenario_scripts(&mut self, key: String, ctx: egui::Context) {
         if !self.active_game_is_campaign_evolved() {
-            self.status = "Script extraction is only available for Campaign Evolved".to_owned();
+            self.model.status = "Script extraction is only available for Campaign Evolved".to_owned();
             return;
         }
         let Some((source, entry)) = self.export_context(&key) else {
@@ -714,7 +714,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting scripts from {}", entry.display_path);
+        self.model.status = format!("Extracting scripts from {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_scenario_scripts(&source, &entry, &output).map_err(|e| e.to_string())
@@ -729,19 +729,19 @@ impl Baboon {
     /// first — synchronously, since the result has to be mutated in the same
     /// step rather than handed to a worker.
     pub(in crate::app) fn import_scenario_scripts(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         if !self.active_game_is_campaign_evolved() {
-            self.status = "Script import is only available for Campaign Evolved".to_owned();
+            self.model.status = "Script import is only available for Campaign Evolved".to_owned();
             return;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag is no longer in the browser".to_owned();
+            self.model.status = "Tag is no longer in the browser".to_owned();
             return;
         };
         if !is_scenario_group(entry.group_tag) {
-            self.status = "Script import is only available for scenario tags".to_owned();
+            self.model.status = "Script import is only available for scenario tags".to_owned();
             return;
         }
         let Some(folder) = rfd::FileDialog::new()
@@ -751,39 +751,39 @@ impl Baboon {
             return;
         };
 
-        if !self.kits[self.active].parsed_tags.contains_key(key) {
+        if !self.model.kits[self.model.active].parsed_tags.contains_key(key) {
             let Some(source) = self.source().map(|source| source.source.clone()) else {
-                self.status = "No tag source is loaded".to_owned();
+                self.model.status = "No tag source is loaded".to_owned();
                 return;
             };
-            self.status = format!("Loading {}", entry.display_path);
+            self.model.status = format!("Loading {}", entry.display_path);
             match read_entry(&source, &entry) {
                 Ok(tag) => {
-                    self.kits[self.active]
+                    self.model.kits[self.model.active]
                         .parsed_tags
                         .insert(key.to_owned(), TagDocument::clean(tag));
                 }
                 Err(error) => {
-                    self.status = format!("Could not load {}: {error:#}", entry.display_path);
+                    self.model.status = format!("Could not load {}: {error:#}", entry.display_path);
                     return;
                 }
             }
         }
 
-        let Some(document) = self.kits[self.active].parsed_tags.get_mut(key) else {
-            self.status = "Load the tag before importing scripts".to_owned();
+        let Some(document) = self.model.kits[self.model.active].parsed_tags.get_mut(key) else {
+            self.model.status = "Load the tag before importing scripts".to_owned();
             return;
         };
         match replace_scenario_scripts(&mut document.tag, &folder) {
             Ok(message) => {
                 document.dirty.touch();
-                self.kits[self.active].open_tag_pane(key);
-                self.kits[self.active].selected_key = Some(key.to_owned());
-                self.status = format!("{message} (unsaved)");
+                self.model.kits[self.model.active].open_tag_pane(key);
+                self.model.kits[self.model.active].selected_key = Some(key.to_owned());
+                self.model.status = format!("{message} (unsaved)");
             }
             // A failed read leaves the block untouched — `replace_scenario_scripts`
             // reads the whole folder before it clears anything.
-            Err(error) => self.status = format!("Could not import scripts: {error:#}"),
+            Err(error) => self.model.status = format!("Could not import scripts: {error:#}"),
         }
     }
 
@@ -799,7 +799,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting HLSL include from {}", entry.display_path);
+        self.model.status = format!("Extracting HLSL include from {}", entry.display_path);
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_hlsl_include_source(&source, &entry, &output).map_err(|e| e.to_string())
@@ -818,7 +818,7 @@ impl Baboon {
         };
         let entries = entries_for_keys(source_data, &keys);
         if entries.is_empty() {
-            self.status = "No HLSL includes found in folder".to_owned();
+            self.model.status = "No HLSL includes found in folder".to_owned();
             return;
         }
         let source = source_data.source.clone();
@@ -828,7 +828,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = format!("Extracting {} HLSL include(s)", entries.len());
+        self.model.status = format!("Extracting {} HLSL include(s)", entries.len());
         let tx = self.tx.clone();
         spawn_export(&tx, &ctx, move || {
             extract_hlsl_include_entries(&source, &entries, &output).map_err(|e| e.to_string())

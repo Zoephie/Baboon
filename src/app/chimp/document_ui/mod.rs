@@ -36,7 +36,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
-        let dirty = self.app.kits[self.kit_index]
+        let dirty = self.app.model.kits[self.kit_index]
             .chimp
             .documents
             .get(pane)
@@ -86,12 +86,12 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         if button_response.middle_clicked() {
             self.close_requests.push(package.clone());
         }
-        let has_texture = self.app.kits[self.kit_index]
+        let has_texture = self.app.model.kits[self.kit_index]
             .chimp
             .documents
             .get(&package)
             .is_some_and(|document| !document.texture_previews.is_empty());
-        let has_mesh = self.app.kits[self.kit_index]
+        let has_mesh = self.app.model.kits[self.kit_index]
             .chimp
             .documents
             .get(&package)
@@ -149,7 +149,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
             row_type()
         };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
-            if self.app.kits[self.kit_index]
+            if self.app.model.kits[self.kit_index]
                 .chimp
                 .documents
                 .get(package)
@@ -185,12 +185,12 @@ fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
 
 impl Baboon {
     pub(super) fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        let Some(mut tree) = self.kits[kit_index].chimp.document_tree.take() else {
+        let Some(mut tree) = self.model.kits[kit_index].chimp.document_tree.take() else {
             crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         };
         if tree.is_empty() {
-            self.kits[kit_index].chimp.document_tree = Some(tree);
+            self.model.kits[kit_index].chimp.document_tree = Some(tree);
             crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         }
@@ -214,16 +214,16 @@ impl Baboon {
         let extract_texture = behavior.extract_texture.take();
         let extract_mesh = behavior.extract_mesh.take();
         let export_level = behavior.export_level.take();
-        self.kits[kit_index].chimp.document_tree = Some(tree);
-        self.kits[kit_index].chimp.sync_open_packages();
+        self.model.kits[kit_index].chimp.document_tree = Some(tree);
+        self.model.kits[kit_index].chimp.sync_open_packages();
         if let Some(package) = focused {
-            self.kits[kit_index].chimp.selected_package = Some(package);
+            self.model.kits[kit_index].chimp.selected_package = Some(package);
         }
 
         let mut requested = if close_all {
-            self.kits[kit_index].chimp.open_packages.clone()
+            self.model.kits[kit_index].chimp.open_packages.clone()
         } else if let Some(keep) = close_all_but {
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .chimp
                 .open_packages
                 .iter()
@@ -242,7 +242,7 @@ impl Baboon {
             }
         }
         if blocked {
-            self.status = "Save or discard modified Chimp packages before closing them.".to_owned();
+            self.model.status = "Save or discard modified Chimp packages before closing them.".to_owned();
         }
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture(kit_index, &package);
@@ -262,7 +262,7 @@ impl Baboon {
         package: &str,
         scope: &str,
     ) {
-        if !self.kits[kit_index].chimp.documents.contains_key(package) {
+        if !self.model.kits[kit_index].chimp.documents.contains_key(package) {
             ui.label("This package is no longer loaded.");
             return;
         }
@@ -273,8 +273,8 @@ impl Baboon {
         let mut extract_json = false;
         let mut extract_export = false;
         {
-            let writing = self.chimp.chimp_writes.contains_key(&self.kits[kit_index].id);
-            let document = self.kits[kit_index]
+            let writing = self.chimp.chimp_writes.contains_key(&self.model.kits[kit_index].id);
+            let document = self.model.kits[kit_index]
                 .chimp
                 .documents
                 .get_mut(&package)
@@ -309,13 +309,13 @@ impl Baboon {
 
         // Read before the document borrow: `document` borrows this kit, and the
         // preference lives on the application.
-        let expert = self.prefs.expert_mode;
+        let expert = self.model.prefs.expert_mode;
         let mut scan_referrers = false;
-        let world = match &self.kits[kit_index].chimp.mount {
+        let world = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
         };
-        let document = self.kits[kit_index]
+        let document = self.model.kits[kit_index]
             .chimp
             .documents
             .get_mut(&package)
@@ -380,7 +380,7 @@ impl Baboon {
                 false
             }
             ChimpDocumentView::Texture => {
-                draw_chimp_texture_preview(ui, document, &mut self.prefs.bitmap_preview_view);
+                draw_chimp_texture_preview(ui, document, &mut self.model.prefs.bitmap_preview_view);
                 false
             }
             ChimpDocumentView::Mesh => {

@@ -20,8 +20,8 @@ impl Baboon {
     pub(in crate::app) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         if self.shell.first_run_wizard.is_some() {
-            ctx.set_zoom_factor(self.prefs.ui_scale);
-            set_dark_mode(self.prefs.dark_mode);
+            ctx.set_zoom_factor(self.model.prefs.ui_scale);
+            set_dark_mode(self.model.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
             self.draw_first_run_wizard(ctx);
@@ -45,14 +45,14 @@ impl Baboon {
         // Every kit, not just the active one: a background kit's sidecar can be
         // dirty from edits made before the user switched away.
         let mut keyword_notice = None;
-        for kit in &mut self.kits {
+        for kit in &mut self.model.kits {
             kit.keywords.save_if_dirty();
             if let Some(notice) = kit.keywords.take_notice() {
                 keyword_notice = Some(notice);
             }
         }
         if let Some(notice) = keyword_notice {
-            self.status = notice;
+            self.model.status = notice;
         }
         self.draw_and_apply_color_popup(ctx);
         self.draw_and_apply_function_popup(ctx);
@@ -100,7 +100,7 @@ impl Baboon {
         style_list_menu(ui);
         if ui
             .add_enabled(
-                !self.editing_kit_is_read_only(self.active),
+                !self.editing_kit_is_read_only(self.model.active),
                 egui::Button::new("New Tag..."),
             )
             .clicked()
@@ -160,8 +160,8 @@ impl Baboon {
         // these write a copy the user owns and can move, back up
         // or hand to someone. Before them, the only way to get a
         // `.baboon` out of Baboon was to export a mod.
-        let can_save_project = self.current_source_is_campaign_project_capable(self.active);
-        let project_target = self.kits[self.active]
+        let can_save_project = self.current_source_is_campaign_project_capable(self.model.active);
+        let project_target = self.model.kits[self.model.active]
             .project.active
             .as_ref()
             .and_then(|project| project.project_path.clone());
@@ -205,7 +205,7 @@ impl Baboon {
         }
         let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
             style_list_menu(ui);
-            draw_recent_folders_menu(ui, &self.prefs.recent_folders)
+            draw_recent_folders_menu(ui, &self.model.prefs.recent_folders)
         })
         .inner
         .flatten();
@@ -215,7 +215,7 @@ impl Baboon {
         }
         ui.separator();
         let save_label =
-            if self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp {
+            if self.model.prefs.enable_chimp && self.model.kits[self.model.active].surface == KitSurface::Chimp {
                 "Save Chimp Changes...    Ctrl+S"
             } else {
                 "Save Current Tag    Ctrl+S"
@@ -224,7 +224,7 @@ impl Baboon {
             ui,
             ButtonIcon::Save,
             save_label,
-            !self.editing_kit_is_read_only(self.active),
+            !self.editing_kit_is_read_only(self.model.active),
         )
         .clicked()
         {
@@ -233,8 +233,8 @@ impl Baboon {
         }
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some()
-                    && !self.editing_kit_is_read_only(self.active),
+                self.model.kits[self.model.active].selected_key.is_some()
+                    && !self.editing_kit_is_read_only(self.model.active),
                 egui::Button::new("Save Current Tag As..."),
             )
             .clicked()
@@ -267,8 +267,8 @@ impl Baboon {
             }
             if ui
                 .add_enabled(
-                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
-                        || self.kits[self.active]
+                    self.model.kits[self.model.active].parsed_tags.values().any(|d| d.dirty.is_set())
+                        || self.model.kits[self.model.active]
                             .project.active
                             .as_ref()
                             .is_some_and(|project| !project.overlays.is_empty()),
@@ -287,7 +287,7 @@ impl Baboon {
             // is carrying before quitting.
             if ui
                 .add_enabled(
-                    self.kits[self.active].has_unwritten_modifications(),
+                    self.model.kits[self.model.active].has_unwritten_modifications(),
                     egui::Button::new("Review Changes..."),
                 )
                 .on_hover_text(
@@ -302,7 +302,7 @@ impl Baboon {
             // that writes tens of thousands of files: useful
             // for getting the tag set out to diff or grep, and
             // not something to trip over while editing.
-            if self.prefs.expert_mode
+            if self.model.prefs.expert_mode
                 && ui
                     .add_enabled(
                         self.export.container_dump_job.is_none(),
@@ -326,7 +326,7 @@ impl Baboon {
         ui.separator();
         if ui
             .add_enabled(
-                self.kits[self.active].selected_key.is_some(),
+                self.model.kits[self.model.active].selected_key.is_some(),
                 egui::Button::new("Close Current Tag    Ctrl+W"),
             )
             .clicked()
@@ -334,7 +334,7 @@ impl Baboon {
             // Deferred, per upstream: the close runs after the
             // editor renders, so an edit committed by the menu
             // taking focus is applied before the dirty check.
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
+            if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                 self.defer_file_action(
                     DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
                     ctx,
@@ -344,7 +344,7 @@ impl Baboon {
         }
         if ui
             .add_enabled(
-                !self.kits[self.active].open_tabs.is_empty(),
+                !self.model.kits[self.model.active].open_tabs.is_empty(),
                 egui::Button::new("Close All Tags"),
             )
             .clicked()
@@ -388,10 +388,10 @@ impl Baboon {
         // The same two actions as the tab context menu and the
         // toolbar, spelled out. An unlabelled trash icon among
         // the tool launchers is not where anyone looks for this.
-        let selected = self.kits[self.active].selected_key.clone();
+        let selected = self.model.kits[self.model.active].selected_key.clone();
         let discardable = selected
             .as_deref()
-            .is_some_and(|key| self.tag_has_discardable_changes(self.active, key));
+            .is_some_and(|key| self.tag_has_discardable_changes(self.model.active, key));
         if ui
             .add_enabled(discardable, egui::Button::new("Discard Unsaved Changes"))
             .on_hover_text("Return the current tag to the way its source has it")
@@ -399,12 +399,12 @@ impl Baboon {
         {
             close_menu(ui);
             if let Some(key) = selected {
-                self.discard_tag_changes(self.active, &key, ctx);
+                self.discard_tag_changes(self.model.active, &key, ctx);
             }
         }
-        if self.current_source_is_campaign_project_capable(self.active) {
-            let stashed = self.stashed_campaign_tags(self.active);
-            let unsaved = self.kits[self.active]
+        if self.current_source_is_campaign_project_capable(self.model.active) {
+            let stashed = self.stashed_campaign_tags(self.model.active);
+            let unsaved = self.model.kits[self.model.active]
                 .parsed_tags
                 .values()
                 .filter(|document| document.dirty.is_set())
@@ -450,7 +450,7 @@ impl Baboon {
         self.draw_assets_tools_menu(ui);
 
         ui.separator();
-        let has_current = self.kits[self.active].selected_key.is_some();
+        let has_current = self.model.kits[self.model.active].selected_key.is_some();
         if ui
             .add_enabled(
                 has_current,
@@ -459,7 +459,7 @@ impl Baboon {
             .clicked()
         {
             close_menu(ui);
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
+            if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                 self.show_references_for(&key);
             }
         }
@@ -471,13 +471,13 @@ impl Baboon {
             .clicked()
         {
             close_menu(ui);
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
+            if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                 self.open_content_explorer(&key);
             }
         }
         if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
             close_menu(ui);
-            if let Some(key) = self.kits[self.active].selected_key.clone() {
+            if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                 self.compare.tag_diff = Some(TagDiffState {
                     kit: self.active_kit_id(),
                     a_key: key,
@@ -549,7 +549,7 @@ impl Baboon {
             let has_index = self
                 .source()
                 .is_some_and(|source| source.reverse_dependencies.is_some());
-            let label = if self.kits[self.active].index_jobs.building_references {
+            let label = if self.model.kits[self.model.active].index_jobs.building_references {
                 "Building Reference Index…"
             } else if has_index {
                 "Rebuild Reference Index"
@@ -558,7 +558,7 @@ impl Baboon {
             };
             if ui
                 .add_enabled(
-                    indexable && !self.kits[self.active].index_jobs.building_references,
+                    indexable && !self.model.kits[self.model.active].index_jobs.building_references,
                     egui::Button::new(label),
                 )
                 .on_hover_text("Which tags reference which, for the reference searches above")
@@ -576,7 +576,7 @@ impl Baboon {
             .unwrap_or(false);
         if ui
             .add_enabled(
-                can_regen && !self.kits[self.active].scanning_entries,
+                can_regen && !self.model.kits[self.model.active].scanning_entries,
                 egui::Button::new("Regenerate Tag Index"),
             )
             .on_hover_text("Rescan every tag in the folder from disk")
@@ -589,7 +589,7 @@ impl Baboon {
                 s.group_tree = crate::core::source::build_group_tree(&[]);
                 s.reverse_dependencies = None;
             }
-            self.kits[self.active].field_index.invalidate();
+            self.model.kits[self.model.active].field_index.invalidate();
             self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
         }
         let can_refresh_browser = self.source().is_some_and(|source| {
@@ -598,8 +598,8 @@ impl Baboon {
         if ui
             .add_enabled(
                 can_refresh_browser
-                    && !self.kits[self.active].scanning_entries
-                    && !self.kits[self.active].index_jobs.refreshing,
+                    && !self.model.kits[self.model.active].scanning_entries
+                    && !self.model.kits[self.model.active].index_jobs.refreshing,
                 egui::Button::new("Refresh Tag Browser"),
             )
             .clicked()
@@ -616,7 +616,7 @@ impl Baboon {
         // The browser view belongs to a workspace, so this
         // menu shows and sets the focused kit's — matching the
         // Folders/Groups buttons in that kit's own toolbar.
-        let kit = &mut self.kits[self.active];
+        let kit = &mut self.model.kits[self.model.active];
         if ui
             .selectable_label(kit.browser.mode == BrowserMode::Folders, "Folders")
             .clicked()
@@ -656,29 +656,29 @@ impl Baboon {
             close_menu(ui);
         }
         ui.separator();
-        ui.checkbox(&mut self.prefs.show_browser_prefixes, "Show [tag]/[folder]");
-        ui.checkbox(&mut self.prefs.show_block_sizes, "Show block sizes");
-        ui.checkbox(&mut self.prefs.angles_in_degrees, "Angles in degrees")
+        ui.checkbox(&mut self.model.prefs.show_browser_prefixes, "Show [tag]/[folder]");
+        ui.checkbox(&mut self.model.prefs.show_block_sizes, "Show block sizes");
+        ui.checkbox(&mut self.model.prefs.angles_in_degrees, "Angles in degrees")
             .on_hover_text(
                 "Angle fields hold radians on disk. Guerilla and the other Halo \
                  tools show them in degrees, and so does Baboon — turn this off to \
                  read and type the stored radians instead.",
             );
         ui.checkbox(
-            &mut self.prefs.scroll_to_cycle_dropdowns,
+            &mut self.model.prefs.scroll_to_cycle_dropdowns,
             "Scroll wheel cycles dropdowns",
         );
-        ui.checkbox(&mut self.prefs.expert_mode, "Expert mode");
+        ui.checkbox(&mut self.model.prefs.expert_mode, "Expert mode");
         ui.separator();
-        let terminal_enabled = self.kits[self.active].terminal.work_dir.is_some();
+        let terminal_enabled = self.model.kits[self.model.active].terminal.work_dir.is_some();
         if ui
             .add_enabled(
                 terminal_enabled,
-                egui::Button::selectable(self.kits[self.active].terminal.open, "Terminal"),
+                egui::Button::selectable(self.model.kits[self.model.active].terminal.open, "Terminal"),
             )
             .clicked()
         {
-            self.kits[self.active].terminal.open = !self.kits[self.active].terminal.open;
+            self.model.kits[self.model.active].terminal.open = !self.model.kits[self.model.active].terminal.open;
             self.remember_terminal_open_for_game();
             close_menu(ui);
         }
@@ -730,7 +730,7 @@ impl Baboon {
     fn draw_editing_kits_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
         let entries = visible_editing_kit_menu_entries(
-            &self.prefs.custom_editing_kit_profiles,
+            &self.model.prefs.custom_editing_kit_profiles,
             &self.kit_tools.editing_kit_validation,
         );
         let total_rows = entries.len();
@@ -775,7 +775,7 @@ impl Baboon {
                 EditingKitMenuEntry::BuiltIn(shortcut) => {
                     let texture = self.game_banner_texture(ui.ctx(), Some(shortcut.game)).cloned();
                     let configured_path = self
-                        .prefs
+                        .model.prefs
                         .editing_kit_paths
                         .get(shortcut.game.as_str())
                         .expect("validated built-in path");
@@ -827,8 +827,8 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
-                    if self.kits[self.active].scanning_entries {
-                        let progress = self.kits[self.active].index_jobs.entry_progress.as_ref();
+                    if self.model.kits[self.model.active].scanning_entries {
+                        let progress = self.model.kits[self.model.active].index_jobs.entry_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Indexing tags...");
@@ -849,8 +849,8 @@ impl Baboon {
                             };
                             draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
                         }
-                    } else if self.kits[self.active].index_jobs.building_references {
-                        let progress = self.kits[self.active]
+                    } else if self.model.kits[self.model.active].index_jobs.building_references {
+                        let progress = self.model.kits[self.model.active]
                             .index_jobs
                             .reference_progress
                             .as_ref();
@@ -868,7 +868,7 @@ impl Baboon {
                             draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
                         }
                     } else {
-                        ui.label(&self.status);
+                        ui.label(&self.model.status);
                     }
                     // Additive rather than part of the chain above: the
                     // extraction outlives whatever the user does next, and its
@@ -931,8 +931,8 @@ impl Baboon {
                     // writes only the recovery file — none of which was visible
                     // anywhere before.
                     let project = self
-                        .current_source_is_campaign_project_capable(self.active)
-                        .then(|| self.kits[self.active].project.active.as_ref())
+                        .current_source_is_campaign_project_capable(self.model.active)
+                        .then(|| self.model.kits[self.model.active].project.active.as_ref())
                         .flatten()
                         // A workspace with neither a project file nor a stash has
                         // nothing to say here, and saying it anyway on every
@@ -990,8 +990,8 @@ impl Baboon {
     /// The "please wait" window shown while the active kit is still indexing.
     fn draw_entry_index_wait_notice(&mut self, ctx: &egui::Context) {
         if self.kit_tools.show_entry_index_wait_notice
-            && (self.kits[self.active].scanning_entries
-                || self.kits[self.active].index_jobs.references_for_entry_index)
+            && (self.model.kits[self.model.active].scanning_entries
+                || self.model.kits[self.model.active].index_jobs.references_for_entry_index)
         {
             let mut open = self.kit_tools.show_entry_index_wait_notice;
             let mut hide_notice = false;
@@ -1004,8 +1004,8 @@ impl Baboon {
                     ui.set_min_width(360.0);
                     ui.label("Please wait until indexing is completed for best compatibility.");
                     ui.add_space(8.0);
-                    if self.kits[self.active].scanning_entries {
-                        let progress = self.kits[self.active].index_jobs.entry_progress.as_ref();
+                    if self.model.kits[self.model.active].scanning_entries {
+                        let progress = self.model.kits[self.model.active].index_jobs.entry_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Indexing tags...");
@@ -1026,9 +1026,9 @@ impl Baboon {
                             };
                             draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
                         }
-                    } else if self.kits[self.active].index_jobs.references_for_entry_index {
+                    } else if self.model.kits[self.model.active].index_jobs.references_for_entry_index {
                         ui.label(RichText::new("Building reference index...").strong());
-                        if let Some(progress) = self.kits[self.active]
+                        if let Some(progress) = self.model.kits[self.model.active]
                             .index_jobs
                             .reference_progress
                             .as_ref()
@@ -1061,8 +1061,8 @@ impl Baboon {
     /// The terminal panel, when the active kit has it open.
     fn draw_terminal_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
-        if self.kits[self.active].terminal.open {
-            let work_dir_label = self.kits[self.active]
+        if self.model.kits[self.model.active].terminal.open {
+            let work_dir_label = self.model.kits[self.model.active]
                 .terminal.work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
@@ -1101,7 +1101,7 @@ impl Baboon {
                                             .on_hover_text("Close terminal")
                                             .clicked()
                                         {
-                                            self.kits[self.active].terminal.open = false;
+                                            self.model.kits[self.model.active].terminal.open = false;
                                             self.remember_terminal_open_for_game();
                                         }
                                         if icon_button(
@@ -1131,7 +1131,7 @@ impl Baboon {
                                             && let Some(path) = self.kit_tools.terminal.last_log_path.clone()
                                             && let Err(error) = open_terminal_log(&path)
                                         {
-                                            self.status = error;
+                                            self.model.status = error;
                                         }
                                         if self.kit_tools.terminal.running {
                                             if self.kit_tools.terminal.process.is_some()
@@ -1238,8 +1238,8 @@ impl Baboon {
         if let Some(result) = draw_color_popup(
             ctx,
             &mut self.editor.color_popup,
-            &mut self.prefs.custom_color_swatches,
-            &mut self.prefs.palette_last_dir,
+            &mut self.model.prefs.custom_color_swatches,
+            &mut self.model.prefs.palette_last_dir,
         ) {
             let (tag_key, label, ops) = match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
@@ -1335,13 +1335,13 @@ impl Baboon {
             Some(kit) => {
                 let index = self.resolve_kit(kit);
                 if index.is_none() {
-                    self.status =
+                    self.model.status =
                         "The editing kit this was opened from has closed; the edit was dropped."
                             .to_owned();
                 }
                 index
             }
-            None => Some(self.active),
+            None => Some(self.model.active),
         }
     }
 
@@ -1365,12 +1365,12 @@ impl Baboon {
         // happened. Checked against the open tabs rather than hooked into each
         // close path, so a close confirmed after the save prompt counts and a
         // cancelled one does not.
-        let focus = self.kits.get(self.active).and_then(|kit| {
+        let focus = self.model.kits.get(self.model.active).and_then(|kit| {
             kit.selected_key
                 .clone()
                 .map(|key| crate::app::audio::SoundOwner { kit: kit.id, key })
         });
-        let kits = &self.kits;
+        let kits = &self.model.kits;
         self.audio.follow_tabs(focus.as_ref(), |owner| {
             kits.iter()
                 .find(|kit| kit.id == owner.kit)
@@ -1400,7 +1400,7 @@ impl Baboon {
         if let Some(request) = self.export.pending_sound_extract.take() {
             self.audio.run_extract(request, ctx);
             if let Some(status) = self.audio.status.clone() {
-                self.status = status;
+                self.model.status = status;
             }
         }
         self.process_pending_tool_import(ctx);
@@ -1413,16 +1413,16 @@ impl Baboon {
     /// than from `status`, so expiring it never blanks a running scan.
     pub(in crate::app) fn expire_status(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        if self.status != self.status_shown {
-            self.status_shown = self.status.clone();
+        if self.model.status != self.status_shown {
+            self.status_shown = self.model.status.clone();
             self.status_changed_at = now;
         }
-        if self.status.is_empty() {
+        if self.model.status.is_empty() {
             return;
         }
         let elapsed = now - self.status_changed_at;
         if elapsed >= STATUS_LINGER_SECS {
-            self.status.clear();
+            self.model.status.clear();
             self.status_shown.clear();
         } else {
             // Nothing else may be animating, so ask for the frame that will
@@ -1436,18 +1436,18 @@ impl Baboon {
     pub(in crate::app) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.editor.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
-                if self.prefs.enable_chimp
-                    && self.kits[self.active].surface == KitSurface::Chimp =>
+                if self.model.prefs.enable_chimp
+                    && self.model.kits[self.model.active].surface == KitSurface::Chimp =>
             {
-                self.open_chimp_save_dialog(self.active)
+                self.open_chimp_save_dialog(self.model.active)
             }
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(ctx),
             Some(DeferredFileAction::SaveProject) => {
-                let (kit, now) = (self.active, ctx.input(|input| input.time));
+                let (kit, now) = (self.model.active, ctx.input(|input| input.time));
                 self.save_campaign_project_file(kit, now);
             }
             Some(DeferredFileAction::SaveProjectAs) => {
-                let (kit, now) = (self.active, ctx.input(|input| input.time));
+                let (kit, now) = (self.model.active, ctx.input(|input| input.time));
                 self.save_campaign_project_file_as(kit, now);
             }
             Some(DeferredFileAction::ExportMod) => self.export_mod(),
@@ -1457,20 +1457,20 @@ impl Baboon {
             Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             Some(DeferredFileAction::CloseCurrentTab)
-                if self.prefs.enable_chimp
-                    && self.kits[self.active].surface == KitSurface::Chimp =>
+                if self.model.prefs.enable_chimp
+                    && self.model.kits[self.model.active].surface == KitSurface::Chimp =>
             {
-                if let Some(package) = self.kits[self.active].chimp.selected_package.clone() {
-                    let kit = self.active;
+                if let Some(package) = self.model.kits[self.model.active].chimp.selected_package.clone() {
+                    let kit = self.model.active;
                     if !self.close_chimp_package(kit, &package) {
-                        self.status =
+                        self.model.status =
                             "Save or discard modified Chimp packages before closing them."
                                 .to_owned();
                     }
                 }
             }
             Some(DeferredFileAction::CloseCurrentTab) => {
-                if let Some(key) = self.kits[self.active].selected_key.clone() {
+                if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                     self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
                 }
             }
@@ -1495,18 +1495,18 @@ impl Baboon {
     }
 
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
-        ctx.set_zoom_factor(self.prefs.ui_scale);
+        ctx.set_zoom_factor(self.model.prefs.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
-        set_dark_mode(self.prefs.dark_mode);
+        set_dark_mode(self.model.prefs.dark_mode);
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
         // of the frame, and neither can reach `Baboon`.
-        crate::core::format::set_angles_in_degrees(self.prefs.angles_in_degrees);
+        crate::core::format::set_angles_in_degrees(self.model.prefs.angles_in_degrees);
         ctx.set_visuals(foundation_visuals());
-        set_combo_scroll_cycle_enabled(ctx, self.prefs.scroll_to_cycle_dropdowns);
-        apply_scroll_speed(ctx, self.prefs.scroll_speed);
-        set_zoom_speed(ctx, self.prefs.zoom_speed);
+        set_combo_scroll_cycle_enabled(ctx, self.model.prefs.scroll_to_cycle_dropdowns);
+        apply_scroll_speed(ctx, self.model.prefs.scroll_speed);
+        set_zoom_speed(ctx, self.model.prefs.zoom_speed);
         // Opened before any pane draws and settled after the last one, so a
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);

@@ -36,18 +36,18 @@ fn distance_on_disk(kit: &LooseKit, rel: &str) -> f32 {
 }
 
 fn distance_in_document(app: &Baboon, key: &str) -> f32 {
-    real_of(&app.kits[app.active].parsed_tags[key].tag, DISTANCE).expect("a real")
+    real_of(&app.model.kits[app.model.active].parsed_tags[key].tag, DISTANCE).expect("a real")
 }
 
 fn is_dirty(app: &Baboon, key: &str) -> bool {
-    app.kits[app.active]
+    app.model.kits[app.model.active]
         .parsed_tags
         .get(key)
         .is_some_and(|document| document.dirty.is_set())
 }
 
 fn tab_open(app: &Baboon, key: &str) -> bool {
-    app.kits[app.active].open_tabs.iter().any(|open| open == key)
+    app.model.kits[app.model.active].open_tabs.iter().any(|open| open == key)
 }
 
 /// A kit installed with `MODEL` open and edited, and `OTHER` open and clean.
@@ -73,7 +73,7 @@ fn closing_a_clean_tab_closes_it_without_a_prompt() {
 
     assert!(!app.documents.save_changes_prompt.visible);
     assert!(!tab_open(&app, &key));
-    assert!(!app.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn the_prompt_s_save_writes_the_tag_then_closes_it() {
     assert_eq!(distance_on_disk(&kit, MODEL), 12.5);
     assert!(!app.documents.save_changes_prompt.visible);
     assert!(app.documents.save_changes_prompt.dirty_tags.is_empty());
-    assert_eq!(app.status, "Saved 1 file(s)");
+    assert_eq!(app.model.status, "Saved 1 file(s)");
     assert!(!tab_open(&app, &key), "the close went ahead");
     assert!(tab_open(&app, &other));
     // The reference the tag already held is written back untouched.
@@ -146,7 +146,7 @@ fn the_prompt_s_dont_save_closes_without_writing() {
     assert_eq!(fs::read(kit.root.join(MODEL)).unwrap(), before, "nothing written");
     assert!(!app.documents.save_changes_prompt.visible);
     assert!(!tab_open(&app, &key));
-    assert!(!app.kits[0].parsed_tags.contains_key(&key));
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn an_unchecked_tag_is_not_saved_and_the_prompt_comes_back() {
     driver.click(&mut app, "Save");
 
     assert_eq!(distance_on_disk(&kit, MODEL), 0.0);
-    assert_eq!(app.status, "No files selected to save");
+    assert_eq!(app.model.status, "No files selected to save");
     assert!(app.documents.save_changes_prompt.visible, "prompted again");
     assert_eq!(app.documents.save_changes_prompt.dirty_tags.len(), 1);
     assert!(app.documents.save_changes_prompt.dirty_tags[0].checked, "re-listed checked");
@@ -207,7 +207,7 @@ fn a_failed_save_keeps_the_prompt_up_with_the_reason() {
     let error = prompt.error.as_deref().expect("an error is shown");
     assert!(error.starts_with("Save failed: "), "{error}");
     assert!(error.contains("crate.model"), "{error}");
-    assert_eq!(app.status, error);
+    assert_eq!(app.model.status, error);
     assert_eq!(prompt.dirty_tags.len(), 1, "the tag is listed again");
     assert!(tab_open(&app, &key));
     assert!(is_dirty(&app, &key));
@@ -229,9 +229,9 @@ fn close_all_prompts_for_the_dirty_tags_only_then_closes_everything() {
     );
     PromptDriver::new().click(&mut app, "Don't Save");
 
-    assert!(app.kits[0].open_tabs.is_empty());
-    assert!(app.kits[0].parsed_tags.is_empty());
-    assert_eq!(app.kits[0].selected_key, None);
+    assert!(app.model.kits[0].open_tabs.is_empty());
+    assert!(app.model.kits[0].parsed_tags.is_empty());
+    assert_eq!(app.model.kits[0].selected_key, None);
     assert!(!tab_open(&app, &other));
 }
 
@@ -243,10 +243,10 @@ fn close_all_but_this_keeps_the_named_tab_and_its_unsaved_edit() {
     app.request_close_action(PendingCloseAction::CloseAllButThis(key.clone()), &ctx());
 
     assert!(!app.documents.save_changes_prompt.visible);
-    assert_eq!(app.kits[0].open_tabs, vec![key.clone()]);
-    assert!(!app.kits[0].parsed_tags.contains_key(&other));
+    assert_eq!(app.model.kits[0].open_tabs, vec![key.clone()]);
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&other));
     assert!(is_dirty(&app, &key));
-    assert_eq!(app.kits[0].selected_key.as_deref(), Some(key.as_str()));
+    assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(key.as_str()));
 
     // Keeping the clean one instead lists the dirty one.
     let (_kit, mut app, key, other) = edited("close-all-but-other");
@@ -369,7 +369,7 @@ fn the_app_does_not_close_while_a_folder_refactor_runs() {
     assert!(root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
     assert!(app.editor.deferred_file_action.is_none());
     assert_eq!(
-        app.status,
+        app.model.status,
         "Wait for the folder move/rename to finish before closing"
     );
 }
@@ -402,11 +402,11 @@ fn save_current_tag_writes_the_selected_tag() {
     assert_eq!(distance_on_disk(&kit, MODEL), 12.5);
     assert!(!is_dirty(&app, &key));
     assert_eq!(
-        app.status,
+        app.model.status,
         format!("Saved {}", kit.root.join(MODEL).display())
     );
     // The save records what the tag now references.
-    let source = app.kits[0].source.as_ref().unwrap();
+    let source = app.model.kits[0].source.as_ref().unwrap();
     assert!(source.reverse_dependencies.is_none(), "no index was built to update");
 }
 
@@ -414,7 +414,7 @@ fn save_current_tag_writes_the_selected_tag() {
 fn save_current_tag_needs_a_selection() {
     let mut app = app();
     app.save_current_tag(&ctx());
-    assert_eq!(app.status, "No tag selected");
+    assert_eq!(app.model.status, "No tag selected");
 }
 
 #[test]
@@ -435,17 +435,17 @@ fn save_tag_by_key_refuses_what_it_cannot_write() {
 
     // A big-endian document has no writer.
     kit.open(&mut app, MODEL);
-    app.kits[0].parsed_tags.get_mut(&key).unwrap().tag.endian = blam_tags::Endian::Be;
+    app.model.kits[0].parsed_tags.get_mut(&key).unwrap().tag.endian = blam_tags::Endian::Be;
     let refused = app.save_tag_by_key(&key).unwrap_err();
     let entry = app.entry_for_key(&key).cloned().unwrap();
     assert_eq!(
         Some(refused),
-        unsaveable_reason(&entry, &app.kits[0].parsed_tags[&key].tag)
+        unsaveable_reason(&entry, &app.model.kits[0].parsed_tags[&key].tag)
             .map(|reason| reason.to_string())
     );
 
     // A clean, loaded tag saves even with nothing to save.
-    app.kits[0].parsed_tags.get_mut(&key).unwrap().tag.endian = blam_tags::Endian::Le;
+    app.model.kits[0].parsed_tags.get_mut(&key).unwrap().tag.endian = blam_tags::Endian::Le;
     assert_eq!(app.save_tag_by_key(&key), Ok(kit.root.join(MODEL)));
 }
 
@@ -456,16 +456,16 @@ fn save_as_refuses_before_its_dialog() {
     let kit = kit("save-as-guards");
     let mut app = app();
     app.save_current_tag_as();
-    assert_eq!(app.status, "No tag selected");
+    assert_eq!(app.model.status, "No tag selected");
 
     kit.install(&mut app);
-    app.kits[0].selected_key = Some("file:/nowhere.model".to_owned());
+    app.model.kits[0].selected_key = Some("file:/nowhere.model".to_owned());
     app.save_current_tag_as();
-    assert_eq!(app.status, "Selected tag is no longer in the source");
+    assert_eq!(app.model.status, "Selected tag is no longer in the source");
 
-    app.kits[0].selected_key = Some(kit.key(MODEL));
+    app.model.kits[0].selected_key = Some(kit.key(MODEL));
     app.save_current_tag_as();
-    assert_eq!(app.status, "Load the selected tag before saving");
+    assert_eq!(app.model.status, "Load the selected tag before saving");
 }
 
 /// What Save As does after its dialog: a copy written inside the loaded tags
@@ -475,14 +475,14 @@ fn a_save_as_copy_inside_the_tags_folder_joins_the_browser() {
     let kit = kit("save-as-register");
     let mut app = app();
     kit.install(&mut app);
-    let generation = app.kits[0].generation;
+    let generation = app.model.kits[0].generation;
     let copy = kit.write_mcc("objects/copies/crate_copy", "model", |_| {});
 
     assert_eq!(app.register_saved_copy_if_in_loaded_folder(&copy), Ok(true));
 
     let key = kit.key("objects/copies/crate_copy.model");
     assert!(app.entry_for_key(&key).is_some());
-    assert_ne!(app.kits[0].generation, generation);
+    assert_ne!(app.model.kits[0].generation, generation);
 
     // Outside the tags folder there is nothing to register.
     let outside = kit.base.join("elsewhere.model");
@@ -496,11 +496,11 @@ fn discarding_reloads_the_tag_from_disk() {
     let label = app.tag_path_label(&key);
 
     app.discard_tag_changes(0, &key, &ctx());
-    assert_eq!(app.status, format!("Discarded unsaved changes to {label}"));
-    assert!(!app.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
-    assert!(app.kits[0].loading_tags.contains(&key), "and read again");
+    assert_eq!(app.model.status, format!("Discarded unsaved changes to {label}"));
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
+    assert!(app.model.kits[0].loading_tags.contains(&key), "and read again");
     pump_until(&mut app, "the reload", |app| {
-        app.kits[0].parsed_tags.contains_key(&key)
+        app.model.kits[0].parsed_tags.contains_key(&key)
     });
 
     assert!(!is_dirty(&app, &key));
@@ -509,20 +509,20 @@ fn discarding_reloads_the_tag_from_disk() {
     assert!(label.ends_with("crate.model"));
 
     app.discard_tag_changes(0, &key, &ctx());
-    assert_eq!(app.status, "That tag has no unsaved changes");
+    assert_eq!(app.model.status, "That tag has no unsaved changes");
 }
 
 #[test]
 fn discarding_a_closed_tag_drops_its_document_without_reloading() {
     let (_kit, mut app, key, _other) = edited("discard-closed");
-    app.kits[0].close_tag_pane(&key);
+    app.model.kits[0].close_tag_pane(&key);
     let label = app.tag_path_label(&key);
 
     app.discard_tag_changes(0, &key, &ctx());
 
-    assert_eq!(app.status, format!("Discarded unsaved changes to {label}"));
-    assert!(!app.kits[0].parsed_tags.contains_key(&key));
-    assert!(!app.kits[0].loading_tags.contains(&key));
+    assert_eq!(app.model.status, format!("Discarded unsaved changes to {label}"));
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
+    assert!(!app.model.kits[0].loading_tags.contains(&key));
 }
 
 #[test]
@@ -533,20 +533,20 @@ fn undo_and_redo_walk_the_selected_tag_s_edits() {
 
     app.undo_current_tag();
     assert_eq!(distance_in_document(&app, &key), 12.5);
-    assert!(app.status.starts_with("Undo"), "{}", app.status);
+    assert!(app.model.status.starts_with("Undo"), "{}", app.model.status);
     app.undo_current_tag();
     assert_eq!(distance_in_document(&app, &key), 0.0);
     app.redo_current_tag();
     app.redo_current_tag();
     assert_eq!(distance_in_document(&app, &key), 20.0);
-    assert!(app.status.starts_with("Redo"), "{}", app.status);
+    assert!(app.model.status.starts_with("Redo"), "{}", app.model.status);
     assert!(is_dirty(&app, &key));
 
-    app.kits[0].selected_key = None;
+    app.model.kits[0].selected_key = None;
     app.undo_current_tag();
-    assert_eq!(app.status, "Nothing to undo");
+    assert_eq!(app.model.status, "Nothing to undo");
     app.redo_current_tag();
-    assert_eq!(app.status, "Nothing to redo");
+    assert_eq!(app.model.status, "Nothing to redo");
 }
 
 /// A classic Halo CE tag's undo snapshots are classic bytes, and re-parse
@@ -559,9 +559,9 @@ fn a_classic_tag_round_trips_through_undo_and_save() {
     let mut app = app();
     kit.install(&mut app);
     let key = kit.open(&mut app, "physics/pebble.point_physics");
-    let friction = |app: &Baboon| real_of(&app.kits[0].parsed_tags[&key].tag, "air friction");
+    let friction = |app: &Baboon| real_of(&app.model.kits[0].parsed_tags[&key].tag, "air friction");
     assert_eq!(
-        app.kits[0].parsed_tags[&key].tag.classic_engine(),
+        app.model.kits[0].parsed_tags[&key].tag.classic_engine(),
         Some(blam_tags::classic::ClassicEngine::HaloCe)
     );
 
@@ -570,7 +570,7 @@ fn a_classic_tag_round_trips_through_undo_and_save() {
     app.undo_current_tag();
     assert_eq!(friction(&app), Some(0.25));
     assert_eq!(
-        app.kits[0].parsed_tags[&key].tag.classic_engine(),
+        app.model.kits[0].parsed_tags[&key].tag.classic_engine(),
         Some(blam_tags::classic::ClassicEngine::HaloCe),
         "the snapshot came back classic"
     );
@@ -599,8 +599,8 @@ fn a_session_written_on_exit_restores_its_workspace() {
     let kit = kit("session");
     let mut app = app();
     kit.install(&mut app);
-    app.kits[0].browser.mode = BrowserMode::Groups;
-    app.kits[0].browser.sort = BrowserSort::Type;
+    app.model.kits[0].browser.mode = BrowserMode::Groups;
+    app.model.kits[0].browser.sort = BrowserSort::Type;
     let other = kit.open(&mut app, OTHER);
     let key = kit.open(&mut app, MODEL);
     app.handle_browser_action(
@@ -623,7 +623,7 @@ fn a_session_written_on_exit_restores_its_workspace() {
     // stable from run to run (QUIRK: not the order the tabs show in).
     assert_eq!(
         saved.tags.iter().map(|tag| tag.key.clone()).collect::<Vec<_>>(),
-        app.kits[0]
+        app.model.kits[0]
             .open_tabs
             .iter()
             .filter(|tab| !is_folder_pane_key(tab))
@@ -650,11 +650,11 @@ fn a_session_written_on_exit_restores_its_workspace() {
     let mut next = Baboon::for_test();
     next.begin_last_session_restore(prompt.checked_kits(), ctx());
     pump_until(&mut next, "the restore", |app| {
-        app.kits[app.active].open_tabs.len() >= 3
-            && app.kits[app.active].parsed_tags.len() >= 2
+        app.model.kits[app.model.active].open_tabs.len() >= 3
+            && app.model.kits[app.model.active].parsed_tags.len() >= 2
     });
 
-    let restored = &next.kits[next.active];
+    let restored = &next.model.kits[next.model.active];
     assert!(restored.open_tabs.contains(&key) && restored.open_tabs.contains(&other));
     assert!(
         restored

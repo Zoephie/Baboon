@@ -58,7 +58,7 @@ impl Baboon {
 
         // Tag content: current edited bytes if the tag is loaded, else the
         // original `.ubulk`.
-        let tag_bytes = if let Some(doc) = self.kits[self.active].parsed_tags.get(key) {
+        let tag_bytes = if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) {
             doc.tag
                 .write_to_bytes()
                 .map_err(|e| format!("serialize tag: {e}"))?
@@ -141,7 +141,7 @@ impl Baboon {
             return;
         };
         let lease = self.park_container_write_lease(lease);
-        self.status = format!("Saving into {}…", job.utoc_path.display());
+        self.model.status = format!("Saving into {}…", job.utoc_path.display());
         let panic_job = job.clone();
         spawn_worker(
             &self.tx,
@@ -189,11 +189,11 @@ impl Baboon {
         &mut self,
         key: &str,
     ) -> Option<(InPlaceOverwriteJob, ContainerWriteLease)> {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return None;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return None;
         };
         let TagEntryLocation::Container {
@@ -201,39 +201,39 @@ impl Baboon {
             rel_path,
         } = &entry.location
         else {
-            self.status = "Not a Campaign Evolved container tag".to_owned();
+            self.model.status = "Not a Campaign Evolved container tag".to_owned();
             return None;
         };
         let container_idx = *container;
         let rel_path = rel_path.clone();
-        let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
-            self.status = "Load the tag before saving".to_owned();
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) else {
+            self.model.status = "Load the tag before saving".to_owned();
             return None;
         };
         let dirty_revision = doc.dirty.revision();
         let bytes = match doc.tag.write_to_bytes() {
             Ok(b) => b,
             Err(e) => {
-                self.status = format!("Failed to serialize tag: {e}");
+                self.model.status = format!("Failed to serialize tag: {e}");
                 return None;
             }
         };
         let (root, containers) = {
             let Some(source) = self.source() else {
-                self.status = "No source loaded".to_owned();
+                self.model.status = "No source loaded".to_owned();
                 return None;
             };
             let TagSource::IoStoreContainerSet {
                 root, containers, ..
             } = &source.source
             else {
-                self.status = "Source is not a container".to_owned();
+                self.model.status = "Source is not a container".to_owned();
                 return None;
             };
             (root.clone(), containers.clone())
         };
         let Some(utoc_path) = containers.get(container_idx).map(|m| m.utoc_path.clone()) else {
-            self.status = "Container provenance is stale".to_owned();
+            self.model.status = "Container provenance is stale".to_owned();
             return None;
         };
         // The same lease Duplicate, Rename and Delete take: it refuses a second
@@ -244,7 +244,7 @@ impl Baboon {
         {
             Ok(lease) => lease,
             Err(failure) => {
-                self.status = failure.to_string();
+                self.model.status = failure.to_string();
                 return None;
             }
         };
@@ -277,11 +277,11 @@ impl Baboon {
             } else {
                 ""
             };
-            self.status = format!("Overwrite failed: {e}{hint}");
+            self.model.status = format!("Overwrite failed: {e}{hint}");
             return;
         }
         let Some(kit) = self.resolve_stamp(job.stamp) else {
-            self.status = format!(
+            self.model.status = format!(
                 "Saved into {}, but the workspace changed meanwhile; reload it to see the tag",
                 job.utoc_path.display()
             );
@@ -291,7 +291,7 @@ impl Baboon {
         match written.reopened {
             Some(Ok(archive)) => {
                 // Only onto the container the write was for.
-                if let Some(source) = self.kits[kit].source.as_mut()
+                if let Some(source) = self.model.kits[kit].source.as_mut()
                     && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
                     && let Some(m) = containers.get_mut(job.container_idx)
                     && m.utoc_path == job.utoc_path
@@ -302,12 +302,12 @@ impl Baboon {
             Some(Err(error)) => reload_error = Some(error),
             None => {}
         }
-        if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&job.key)
+        if let Some(doc) = self.model.kits[kit].parsed_tags.get_mut(&job.key)
             && doc.dirty.revision() == job.dirty_revision
         {
             doc.dirty.clear();
         }
-        self.status = match reload_error {
+        self.model.status = match reload_error {
             Some(e) => format!(
                 "Saved into {}, but reloading the pak failed: {e}",
                 job.utoc_path.display()
@@ -327,7 +327,7 @@ impl Baboon {
     /// user copies the emitted `.utoc`/`.ucas`/`.pak` into `Paks/`.
     pub(in crate::app) fn save_new_container_tag(&mut self, key: &str) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let TagEntryLocation::NewContainer {
@@ -336,27 +336,27 @@ impl Baboon {
             group_tag,
         } = &entry.location
         else {
-            self.status = "Not a new container tag".to_owned();
+            self.model.status = "Not a new container tag".to_owned();
             return;
         };
-        let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
-            self.status = "Load the tag before saving".to_owned();
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) else {
+            self.model.status = "Load the tag before saving".to_owned();
             return;
         };
         let bytes = match doc.tag.write_to_bytes() {
             Ok(b) => b,
             Err(e) => {
-                self.status = format!("Failed to serialize tag: {e}");
+                self.model.status = format!("Failed to serialize tag: {e}");
                 return;
             }
         };
         let template = {
             let Some(source) = self.source() else {
-                self.status = "No source loaded".to_owned();
+                self.model.status = "No source loaded".to_owned();
                 return;
             };
             let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-                self.status = "Source is not a container".to_owned();
+                self.model.status = "Source is not a container".to_owned();
                 return;
             };
             match new_container_template_bytes(
@@ -368,7 +368,7 @@ impl Baboon {
             ) {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
@@ -376,7 +376,7 @@ impl Baboon {
         // An authored tag's wrapper came from an unrelated donor, so the
         // writer has to strip the donor's bindings rather than carry them.
         let Some(wrapper_origin) = wrapper_origin_for(&entry.location) else {
-            self.status = "Not a new container tag".to_owned();
+            self.model.status = "Not a new container tag".to_owned();
             return;
         };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
@@ -384,7 +384,7 @@ impl Baboon {
             return;
         };
         if let Err(error) = ensure_mod_output_dir(&output) {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         match blam_tags::iostore::writer::write_new_tag_container(
@@ -396,16 +396,16 @@ impl Baboon {
             &output,
         ) {
             Ok(()) => {
-                if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
+                if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
                     doc.dirty.clear();
                 }
                 let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
-                self.status = format!(
+                self.model.status = format!(
                     "Saved new tag → {stem}.utoc/.ucas/.pak — copy all three into \
                      Meteorite/Content/Paks/ (base game unchanged)"
                 );
             }
-            Err(e) => self.status = format!("Save failed: {e}"),
+            Err(e) => self.model.status = format!("Save failed: {e}"),
         }
     }
 }

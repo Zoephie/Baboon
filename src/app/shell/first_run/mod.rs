@@ -122,13 +122,13 @@ impl Baboon {
                 .changed()
             {
                 let value = self.kit_tools.blender_path_input.trim();
-                self.prefs.blender_path = (!value.is_empty()).then(|| PathBuf::from(value));
+                self.model.prefs.blender_path = (!value.is_empty()).then(|| PathBuf::from(value));
             }
             if ui.button("Browse...").clicked() {
                 self.choose_blender_path();
             }
             if ui.button("Clear").clicked() {
-                self.prefs.blender_path = None;
+                self.model.prefs.blender_path = None;
                 self.kit_tools.blender_path_input.clear();
             }
         });
@@ -137,32 +137,32 @@ impl Baboon {
         self.draw_nested_default_picker(ui);
         ui.add_space(12.0);
         ui.label(RichText::new("Appearance").strong());
-        ui.checkbox(&mut self.prefs.dark_mode, "Dark mode");
+        ui.checkbox(&mut self.model.prefs.dark_mode, "Dark mode");
         ui.horizontal(|ui| {
             ui.label("UI scale");
             let response = ui.add(egui::Slider::new(
                 &mut self.shell.pending_ui_scale,
                 MIN_UI_SCALE..=MAX_UI_SCALE,
             ));
-            if commit_ui_scale_now(&response, self.shell.pending_ui_scale, self.prefs.ui_scale) {
-                self.prefs.ui_scale = self.shell.pending_ui_scale;
+            if commit_ui_scale_now(&response, self.shell.pending_ui_scale, self.model.prefs.ui_scale) {
+                self.model.prefs.ui_scale = self.shell.pending_ui_scale;
             }
         });
         ui.horizontal(|ui| {
             ui.label("Model viewport size");
             ui.add(egui::Slider::new(
-                &mut self.prefs.model_preview_size,
+                &mut self.model.prefs.model_preview_size,
                 MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
             ));
         });
         ui.add_space(12.0);
         ui.label(RichText::new("Tag browser").strong());
         ui.checkbox(
-            &mut self.prefs.double_click_to_open_tags,
+            &mut self.model.prefs.double_click_to_open_tags,
             "Double-click to open tags",
         );
         ui.checkbox(
-            &mut self.prefs.folders_before_tags,
+            &mut self.model.prefs.folders_before_tags,
             "List subfolders before tags",
         );
         self.draw_first_run_error(ui);
@@ -242,7 +242,7 @@ impl Baboon {
                     match self.save_first_run_checkpoint(true) {
                         Ok(()) => {
                             self.shell.first_run_wizard = None;
-                            self.status = "Setup complete".to_owned();
+                            self.model.status = "Setup complete".to_owned();
                         }
                         Err(error) => {
                             self.shell.first_run_wizard

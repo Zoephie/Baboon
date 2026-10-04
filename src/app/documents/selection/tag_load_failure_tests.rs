@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn a_failed_tag_load_names_the_tag() {
     let mut app = Baboon::for_test();
-    let kit = app.kits[0].id;
-    app.kits[0].open_tag_pane("objects/broken.model");
+    let kit = app.model.kits[0].id;
+    app.model.kits[0].open_tag_pane("objects/broken.model");
 
     app.handle_tag_loaded(
         kit,
@@ -16,5 +16,5 @@ fn a_failed_tag_load_names_the_tag() {
 
     let line = &app.kit_tools.terminal.lines.last().expect("a terminal line").text;
     assert_eq!(line, "Could not load objects/broken.model: truncated");
-    assert_eq!(app.status, *line);
+    assert_eq!(app.model.status, *line);
 }

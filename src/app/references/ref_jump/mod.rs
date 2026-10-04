@@ -25,8 +25,8 @@ impl Baboon {
             self.references.field_nav = None;
         }
         if let Some(hit) = self.search.pending_find_jump.clone() {
-            if self.kits[self.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
-                && self.kits[self.active]
+            if self.model.kits[self.model.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
+                && self.model.kits[self.model.active]
                     .parsed_tags
                     .contains_key(&hit.tag_key)
             {
@@ -43,10 +43,10 @@ impl Baboon {
             return;
         };
         // Wait until the referrer is the focused tab and finished loading.
-        if self.kits[kit].selected_key.as_deref() != Some(jump.tag_key.as_str()) {
+        if self.model.kits[kit].selected_key.as_deref() != Some(jump.tag_key.as_str()) {
             return;
         }
-        let Some(doc) = self.kits[kit].parsed_tags.get(&jump.tag_key) else {
+        let Some(doc) = self.model.kits[kit].parsed_tags.get(&jump.tag_key) else {
             return; // still loading — retry next frame
         };
         let mut refs = Vec::new();
@@ -59,7 +59,7 @@ impl Baboon {
         match hit {
             Some(reference) => self.navigate_to_field(ctx, &jump.tag_key, &reference.field_path),
             None => {
-                self.status = format!(
+                self.model.status = format!(
                     "Could not locate the referencing field in {}",
                     jump.tag_key.replace('\\', "/")
                 );
@@ -125,7 +125,7 @@ impl Baboon {
 
         let target = normalize_ref(&rel_path);
         for (index, key) in pending {
-            if let Some(doc) = self.kits[self.active].parsed_tags.get(&key) {
+            if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) {
                 let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
                 self.references.ref_jump_occurrences.insert(index, occurrences);
                 continue;
@@ -203,7 +203,7 @@ impl Baboon {
         let occurrences = match result {
             Ok(occurrences) => occurrences,
             Err(error) => {
-                self.status = format!("Could not read the referring tag: {error}");
+                self.model.status = format!("Could not read the referring tag: {error}");
                 Vec::new()
             }
         };
@@ -231,7 +231,7 @@ impl Baboon {
         });
         if let Some(container_key) = container_key {
             let Some(key) = container_key else {
-                self.status = format!(
+                self.model.status = format!(
                     "Referenced Campaign Evolved tag not found: {} (group {})",
                     req.rel_path.replace('\\', "/"),
                     blam_tags::format_group_tag(req.group_tag)
@@ -240,7 +240,7 @@ impl Baboon {
             };
             self.select_entry(key.clone(), ctx.clone());
             if req.float {
-                self.kits[self.active].open_tag_pane_beside(&key);
+                self.model.kits[self.model.active].open_tag_pane_beside(&key);
             }
             return;
         }
@@ -248,7 +248,7 @@ impl Baboon {
         let root = match self.source().map(|s| &s.source) {
             Some(TagSource::LooseFolder { root, .. }) => root.clone(),
             _ => {
-                self.status = "Open requires a loose-folder source".to_owned();
+                self.model.status = "Open requires a loose-folder source".to_owned();
                 return;
             }
         };
@@ -273,7 +273,7 @@ impl Baboon {
         }
         let abs = blam_tags::paths::resolve_tag_path(&root, &rel, ext);
         if !abs.exists() {
-            self.status = format!(
+            self.model.status = format!(
                 "Referenced tag not found: {} (group {})",
                 abs.display(),
                 blam_tags::format_group_tag(req.group_tag)
@@ -290,19 +290,19 @@ impl Baboon {
                 .map(|source| source.names.clone())
                 .unwrap_or_default();
             if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
-                let folder_seeds = self.kits[self.active].folder_seeds();
+                let folder_seeds = self.model.kits[self.model.active].folder_seeds();
                 if let Some(source) = self.source_mut() {
                     source.upsert_entry(entry, &folder_seeds);
                 }
-                self.kits[self.active].generation =
-                    self.kits[self.active].generation.wrapping_add(1);
+                self.model.kits[self.model.active].generation =
+                    self.model.kits[self.model.active].generation.wrapping_add(1);
             }
         }
         self.select_entry(key.clone(), ctx.clone());
         // Alt-click asks for the tag beside the current one rather than as
         // another tab in the same group.
         if req.float {
-            self.kits[self.active].open_tag_pane_beside(&key);
+            self.model.kits[self.model.active].open_tag_pane_beside(&key);
         }
     }
 }

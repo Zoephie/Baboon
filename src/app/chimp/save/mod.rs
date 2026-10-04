@@ -25,12 +25,12 @@ enum ChimpSaveAction {
 
 impl Baboon {
     fn chimp_default_output_folder(&self, kit_index: usize) -> Option<PathBuf> {
-        let root = match &self.kits.get(kit_index)?.source.as_ref()?.source {
+        let root = match &self.model.kits.get(kit_index)?.source.as_ref()?.source {
             TagSource::IoStoreContainerSet { root, .. } => root,
             _ => return None,
         };
         Some(
-            self.prefs
+            self.model.prefs
                 .chimp_output_dir
                 .clone()
                 .unwrap_or_else(|| root.clone()),
@@ -53,7 +53,7 @@ impl Baboon {
     /// requires, for tests that draw it.
     #[cfg(test)]
     pub(in crate::app) fn open_chimp_save_dialog_for_test(&mut self, kit_index: usize) {
-        self.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.model.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder: PathBuf::from("/no/such/Paks"),
@@ -63,7 +63,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
-        self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
+        self.model.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
     }
 
     fn open_chimp_save_dialog_with_pending(
@@ -71,21 +71,21 @@ impl Baboon {
         kit_index: usize,
         pending_close_action: Option<PendingCloseAction>,
     ) -> bool {
-        let dirty = self.kits[kit_index]
+        let dirty = self.model.kits[kit_index]
             .chimp
             .documents
             .values()
             .filter(|document| document.dirty)
             .count();
         if dirty == 0 {
-            self.status = "Chimp has no modified packages to save".to_owned();
+            self.model.status = "Chimp has no modified packages to save".to_owned();
             return false;
         }
         let Some(folder) = self.chimp_default_output_folder(kit_index) else {
-            self.status = "Chimp does not have a Paks output folder".to_owned();
+            self.model.status = "Chimp does not have a Paks output folder".to_owned();
             return false;
         };
-        self.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.model.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder,
@@ -179,15 +179,15 @@ impl Baboon {
                     kit,
                     packages,
                     pending_action: Some(action),
-                    error: Some(self.status.clone()),
+                    error: Some(self.model.status.clone()),
                 });
             }
         } else if discard {
             self.chimp.chimp_discard_prompt = None;
             match self.discard_chimp_packages(index, &packages) {
                 Ok(count) => {
-                    self.active = index;
-                    self.status = format!("Discarded {count} modified Chimp package(s)");
+                    self.model.active = index;
+                    self.model.status = format!("Discarded {count} modified Chimp package(s)");
                     if let Some(action) = pending_action {
                         self.request_close_action(action, ctx);
                     }
@@ -206,19 +206,19 @@ impl Baboon {
 
     pub(in crate::app) fn draw_chimp_save_window(&mut self, ctx: &egui::Context) {
         let Some(kit_index) = self
-            .kits
+            .model.kits
             .iter()
             .position(|kit| kit.chimp.save_dialog.is_some())
         else {
             return;
         };
         let dirty_packages = self.chimp_dirty_packages(kit_index);
-        let source_containers: Vec<PathBuf> = match &self.kits[kit_index].chimp.mount {
+        let source_containers: Vec<PathBuf> = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => {
                 let mut paths: Vec<_> = dirty_packages
                     .iter()
                     .filter_map(|package| {
-                        let document = self.kits[kit_index].chimp.documents.get(package)?;
+                        let document = self.model.kits[kit_index].chimp.documents.get(package)?;
                         world
                             .containers()
                             .get(document.provider.container)
@@ -233,8 +233,8 @@ impl Baboon {
         };
         let mut close = false;
         let mut action = None;
-        let expert_mode = self.prefs.expert_mode;
-        let dialog = self.kits[kit_index]
+        let expert_mode = self.model.prefs.expert_mode;
+        let dialog = self.model.kits[kit_index]
             .chimp
             .save_dialog
             .as_mut()
@@ -377,11 +377,11 @@ impl Baboon {
             });
         let pending_close_action = dialog.pending_close_action.clone();
         if close || action.is_some() {
-            self.kits[kit_index].chimp.save_dialog = None;
+            self.model.kits[kit_index].chimp.save_dialog = None;
         }
         match action {
             Some(ChimpSaveAction::Export(output)) => {
-                self.prefs.chimp_output_dir = output.parent().map(Path::to_path_buf);
+                self.model.prefs.chimp_output_dir = output.parent().map(Path::to_path_buf);
                 let action = ChimpSaveAction::Export(output);
                 if !self.begin_chimp_write(kit_index, action, pending_close_action.clone(), ctx)
                     && let Some(action) = pending_close_action
@@ -392,8 +392,8 @@ impl Baboon {
             // Guarded here as well as in the dialog: this is the one action in
             // the app that edits the installed game's own containers, and it
             // should not be reachable by any route expert mode has not opened.
-            Some(ChimpSaveAction::Overwrite) if !self.prefs.expert_mode => {
-                self.status =
+            Some(ChimpSaveAction::Overwrite) if !self.model.prefs.expert_mode => {
+                self.model.status =
                     "Overwriting the game's own PAKs needs expert mode — save this as a mod \
                      instead"
                         .to_owned();
@@ -424,7 +424,7 @@ impl Baboon {
                 kit_index,
                 packages,
                 Some(action),
-                Some(self.status.clone()),
+                Some(self.model.status.clone()),
             );
         }
     }
@@ -437,7 +437,7 @@ impl Baboon {
         world: &World,
     ) -> Result<Vec<ChimpRebuilt>, String> {
         let mut rebuilt = Vec::new();
-        for (package, document) in self.kits[kit_index]
+        for (package, document) in self.model.kits[kit_index]
             .chimp
             .documents
             .iter()
@@ -469,24 +469,24 @@ impl Baboon {
         pending_close: Option<PendingCloseAction>,
         ctx: &egui::Context,
     ) -> bool {
-        let kit = self.kits[kit_index].id;
+        let kit = self.model.kits[kit_index].id;
         if self.chimp.chimp_writes.contains_key(&kit) {
-            self.status = "A Chimp save is already running".to_owned();
+            self.model.status = "A Chimp save is already running".to_owned();
             return false;
         }
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return false;
         };
         let world = world.clone();
         let rebuilt = match self.rebuild_dirty_chimp_documents(kit_index, &world) {
             Ok(rebuilt) => rebuilt,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         };
         if rebuilt.is_empty() {
-            self.status = "Chimp has no modified packages to save".to_owned();
+            self.model.status = "Chimp has no modified packages to save".to_owned();
             return false;
         }
         match action {
@@ -494,10 +494,10 @@ impl Baboon {
                 if let Some(parent) = output.parent()
                     && let Err(error) = fs::create_dir_all(parent)
                 {
-                    self.status = format!("Could not create {}: {error}", parent.display());
+                    self.model.status = format!("Could not create {}: {error}", parent.display());
                     return false;
                 }
-                self.status = format!("Building {}…", output.display());
+                self.model.status = format!("Building {}…", output.display());
                 let panic_output = output.clone();
                 spawn_worker(
                     &self.tx,
@@ -550,12 +550,12 @@ impl Baboon {
                                     );
                                 }
                             }
-                            self.status = failure.to_string();
+                            self.model.status = failure.to_string();
                             return false;
                         }
                     }
                 }
-                self.status = format!("Overwriting {} source container(s)…", groups.len());
+                self.model.status = format!("Overwriting {} source container(s)…", groups.len());
                 let panic_leases = leases.clone();
                 spawn_worker(
                     &self.tx,
@@ -604,7 +604,7 @@ impl Baboon {
     ) -> Result<(), String> {
         let mut clean = Vec::new();
         for write in written {
-            let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&write.package)
+            let Some(document) = self.model.kits[kit_index].chimp.documents.get_mut(&write.package)
             else {
                 continue;
             };
@@ -623,7 +623,7 @@ impl Baboon {
         }
         self.clear_chimp_recovery_packages(kit_index, &clean)?;
         for package in &clean {
-            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
+            if let Some(document) = self.model.kits[kit_index].chimp.documents.get_mut(package) {
                 document.dirty = false;
             }
         }
@@ -665,7 +665,7 @@ impl Baboon {
     ) {
         if let Err(error) = result {
             remove_chimp_triplet(temporary);
-            self.status = format!("Could not build {}: {error}", output.display());
+            self.model.status = format!("Could not build {}: {error}", output.display());
             return;
         }
         let Some(kit_index) = self.kit_index(kit) else {
@@ -683,13 +683,13 @@ impl Baboon {
                 Ok(lease) => lease,
                 Err(failure) => {
                     remove_chimp_triplet(temporary);
-                    self.status = failure.to_string();
+                    self.model.status = failure.to_string();
                     return;
                 }
             };
         if let Err(failure) = self.unmap_leased_containers(&mut lease) {
             remove_chimp_triplet(temporary);
-            self.status = failure.to_string();
+            self.model.status = failure.to_string();
             self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
             return;
         }
@@ -707,23 +707,23 @@ impl Baboon {
             ctx,
         );
         if let Err(error) = replaced {
-            self.status = format!("Could not install {}: {error}", output.display());
+            self.model.status = format!("Could not install {}: {error}", output.display());
             return;
         }
         if let Err(error) = self.settle_chimp_written(kit_index, written, false) {
-            self.status = format!(
+            self.model.status = format!(
                 "Built {} but could not clear Chimp recovery: {error}",
                 output.display()
             );
             return;
         }
-        self.status = format!(
+        self.model.status = format!(
             "Built {} modified Unreal package(s) into {}",
             written.len(),
             output.display()
         );
         if !report.reopen_failures.is_empty() {
-            self.status.push_str(&format!(
+            self.model.status.push_str(&format!(
                 "; {} tag mount(s) could not be reopened",
                 report.reopen_failures.len()
             ));
@@ -758,10 +758,10 @@ impl Baboon {
         }
         self.drain_pending_chimp_remounts(ctx);
         match (result, self.kit_index(kit)) {
-            (Err(error), _) => self.status = error,
+            (Err(error), _) => self.model.status = error,
             (Ok(()), None) => {}
             (Ok(()), Some(kit_index)) => {
-                self.status = match self.settle_chimp_written(kit_index, &written, true) {
+                self.model.status = match self.settle_chimp_written(kit_index, &written, true) {
                     Ok(()) => format!(
                         "Overwrote {} modified Unreal package(s) across {containers} source \
                          container(s)",

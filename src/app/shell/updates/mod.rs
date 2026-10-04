@@ -20,7 +20,7 @@ impl Baboon {
             Ok(result) => {
                 let outdated = is_update_available(&result);
                 if !silent {
-                    self.status = if outdated {
+                    self.model.status = if outdated {
                         String::new()
                     } else {
                         update_check_status(&result)
@@ -33,7 +33,7 @@ impl Baboon {
                 self.shell.available_update = None;
                 self.shell.last_update_check = None;
                 if !silent {
-                    self.status = update_check_error_status(self.prefs.update_channel, &error);
+                    self.model.status = update_check_error_status(self.model.prefs.update_channel, &error);
                 }
             }
         }
@@ -337,9 +337,9 @@ impl Baboon {
     /// line on "up to date" or on a failure the user never asked about.
     pub(in crate::app) fn begin_check_for_updates(&mut self, ctx: egui::Context, silent: bool) {
         if !silent {
-            self.status = "Checking for updates...".to_owned();
+            self.model.status = "Checking for updates...".to_owned();
         }
-        let channel = self.prefs.update_channel;
+        let channel = self.model.prefs.update_channel;
         spawn_worker(
             &self.tx,
             &ctx,
@@ -353,6 +353,6 @@ impl Baboon {
 
     /// Whether the automatic startup check should run.
     pub(in crate::app) fn should_check_updates_on_startup(&self) -> bool {
-        self.prefs.check_updates_on_startup
+        self.model.prefs.check_updates_on_startup
     }
 }

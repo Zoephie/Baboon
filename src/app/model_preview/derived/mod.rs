@@ -1553,7 +1553,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) {
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         let Some(state) = kit.caches.model_previews.get(key) else {
             return;
         };
@@ -1579,7 +1579,7 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
-        if let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(key) {
             state.overlays_pending = true;
         }
 
@@ -1632,7 +1632,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(&key) else {
             return true;
         };
         // The in-flight marker is cleared before the staleness check: a result

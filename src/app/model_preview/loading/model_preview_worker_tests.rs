@@ -66,7 +66,7 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
         active_tab: ModelTagPanelTab::ModelPreview,
         ..ModelPreviewState::default()
     };
-    app.kits[0].caches.model_previews.insert(entry.key.clone(), preview);
+    app.model.kits[0].caches.model_previews.insert(entry.key.clone(), preview);
     Some(Fixture {
         app,
         key: entry.key,
@@ -76,11 +76,11 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
 
 impl Fixture {
     fn state(&self) -> &ModelPreviewState {
-        &self.app.kits[0].caches.model_previews[&self.key]
+        &self.app.model.kits[0].caches.model_previews[&self.key]
     }
 
     fn state_mut(&mut self) -> &mut ModelPreviewState {
-        self.app.kits[0].caches.model_previews.get_mut(&self.key).unwrap()
+        self.app.model.kits[0].caches.model_previews.get_mut(&self.key).unwrap()
     }
 
     /// One frame's worth of preview work: drain replies, then the post-draw hook.
@@ -102,12 +102,12 @@ impl Fixture {
 
     /// Open the tag as an edited document, so the worker parses its bytes.
     fn open_edited(&mut self) {
-        let entry = self.app.kits[0].entry_for_key(&self.key).unwrap().clone();
-        let source = self.app.kits[0].source.as_ref().unwrap().source.clone();
+        let entry = self.app.model.kits[0].entry_for_key(&self.key).unwrap().clone();
+        let source = self.app.model.kits[0].source.as_ref().unwrap().source.clone();
         let tag = crate::core::source::read_entry(&source, &entry).expect("read render_model");
         let mut document = TagDocument::clean(tag);
         document.dirty.touch();
-        self.app.kits[0]
+        self.app.model.kits[0]
             .parsed_tags
             .insert(self.key.clone(), document);
     }
@@ -238,7 +238,7 @@ fn a_result_dropped_for_a_generation_bump_is_requested_again() {
     fixture.frame();
     let first = fixture.state().preview_load_id.expect("a worker started");
     let reply = wait_for_reply(&fixture);
-    fixture.app.kits[0].generation = fixture.app.kits[0].generation.wrapping_add(1);
+    fixture.app.model.kits[0].generation = fixture.app.model.kits[0].generation.wrapping_add(1);
     fixture.app.tx.send(reply).unwrap();
     fixture.app.process_worker_messages(&fixture.ctx);
     assert!(fixture.state().data.is_none(), "a stale result was installed");

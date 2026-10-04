@@ -33,12 +33,12 @@ fn a_tag_edited_during_its_save_stays_dirty() {
         "halo4_mcc/camera_track.json",
     ))
     .unwrap();
-    app.kits[0]
+    app.model.kits[0]
         .parsed_tags
         .insert("tag".to_owned(), TagDocument::modified(tag));
-    let at_save = app.kits[0].parsed_tags["tag"].dirty.revision();
+    let at_save = app.model.kits[0].parsed_tags["tag"].dirty.revision();
 
-    app.kits[0]
+    app.model.kits[0]
         .parsed_tags
         .get_mut("tag")
         .unwrap()
@@ -46,14 +46,14 @@ fn a_tag_edited_during_its_save_stays_dirty() {
         .touch();
     app.finish_in_place_overwrite(job(&app, at_save), saved());
     assert!(
-        app.kits[0].parsed_tags["tag"].dirty.is_set(),
+        app.model.kits[0].parsed_tags["tag"].dirty.is_set(),
         "edited mid-save"
     );
 
-    let now = app.kits[0].parsed_tags["tag"].dirty.revision();
+    let now = app.model.kits[0].parsed_tags["tag"].dirty.revision();
     app.finish_in_place_overwrite(job(&app, now), saved());
     assert!(
-        !app.kits[0].parsed_tags["tag"].dirty.is_set(),
+        !app.model.kits[0].parsed_tags["tag"].dirty.is_set(),
         "saved as it stands"
     );
 }
@@ -76,9 +76,9 @@ fn a_failed_in_place_overwrite_releases_its_lease() {
     let utoc = job.utoc_path.clone();
     app.handle_in_place_overwrite_finished(job, lease, failed);
     assert!(
-        app.status.contains("export this mod again"),
+        app.model.status.contains("export this mod again"),
         "{}",
-        app.status
+        app.model.status
     );
     let again = app
         .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)

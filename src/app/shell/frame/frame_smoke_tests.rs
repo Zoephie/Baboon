@@ -120,7 +120,7 @@ fn loose_kit(h: &mut Harness) {
         root,
         "Smoke Kit".to_owned(),
         GameId::from_id(fixture::GAME).unwrap(),
-        &h.app.default_names,
+        &h.app.model.default_names,
         &locate_definitions_root(),
     )
     .expect("the synthetic loose kit loads");
@@ -161,7 +161,7 @@ fn container_kit(h: &mut Harness) {
             packages: Default::default(),
             shipped: Default::default(),
         },
-        names: h.app.default_names.clone(),
+        names: h.app.model.default_names.clone(),
         game: Some(GameId::CampaignEvolved),
         tree: crate::core::source::build_tree(&entries),
         group_tree: crate::core::source::build_group_tree(&entries),
@@ -326,7 +326,7 @@ fn cases() -> Vec<Case> {
             |h| {
                 let model = render_model_tag();
                 let key = fixture::open_document(&mut h.app, "objects/smoke.render_model", model);
-                let kit = &mut h.app.kits[h.app.active];
+                let kit = &mut h.app.model.kits[h.app.model.active];
                 kit.caches.model_previews.entry(key).or_default().active_tab =
                     ModelTagPanelTab::ModelPreview;
             },
@@ -365,7 +365,7 @@ fn cases() -> Vec<Case> {
             &[],
             &[],
             loose_kit,
-            |h| h.app.kits[h.app.active].open_tag_pane(GIT_REVIEW_KEY),
+            |h| h.app.model.kits[h.app.model.active].open_tag_pane(GIT_REVIEW_KEY),
             &["Git Review", "No Git repository found"],
         ),
         case(
@@ -373,7 +373,7 @@ fn cases() -> Vec<Case> {
             &[],
             &[],
             loose_kit,
-            |h| h.app.kits[h.app.active].open_tag_pane(BLAM_KEY),
+            |h| h.app.model.kits[h.app.model.active].open_tag_pane(BLAM_KEY),
             &["Blam!", "No import has run yet."],
         ),
         case(
@@ -414,7 +414,7 @@ fn cases() -> Vec<Case> {
                     "shaders/left.shader",
                     fixture::synthetic_shader(1),
                 );
-                let kit = &mut h.app.kits[h.app.active];
+                let kit = &mut h.app.model.kits[h.app.model.active];
                 let key = fixture::entry_key("levels/right.scenario");
                 kit.parsed_tags.insert(key.clone(), TagDocument::clean(scenario_tag()));
                 kit.open_tag_pane_beside(&key);
@@ -443,7 +443,7 @@ fn cases() -> Vec<Case> {
                     })
                     .collect();
                 fixture::install_kit_for_game(&mut h.app, entries, "haloreach_mcc");
-                let ids: Vec<KitId> = h.app.kits.iter().map(|kit| kit.id).collect();
+                let ids: Vec<KitId> = h.app.model.kits.iter().map(|kit| kit.id).collect();
                 let mut tree = egui_tiles::Tree::empty("smoke_kit_tree");
                 let panes = ids.iter().map(|id| tree.tiles.insert_pane(*id)).collect();
                 tree.root = Some(tree.tiles.insert_horizontal_tile(panes));
@@ -456,10 +456,10 @@ fn cases() -> Vec<Case> {
             &[],
             &[],
             |h| {
-                h.app.prefs.enable_chimp = true;
+                h.app.model.prefs.enable_chimp = true;
                 container_kit(h);
             },
-            |h| h.app.kits[h.app.active].surface = KitSurface::Chimp,
+            |h| h.app.model.kits[h.app.model.active].surface = KitSurface::Chimp,
             &["The Unreal package index has not been started."],
         ),
         // --- windows over the shell ---
@@ -701,7 +701,7 @@ fn cases() -> Vec<Case> {
             &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
-                let focus = h.app.kits[h.app.active]
+                let focus = h.app.model.kits[h.app.model.active]
                     .source
                     .as_ref()
                     .unwrap()
@@ -726,7 +726,7 @@ fn cases() -> Vec<Case> {
             &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
-                let entries = h.app.kits[h.app.active].source.as_ref().unwrap().entries[..3]
+                let entries = h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries[..3]
                     .to_vec();
                 h.app.search.query_results = Some(TagQueryResults {
                     kit: active_id(h),
@@ -881,7 +881,7 @@ fn cases() -> Vec<Case> {
             memory_kit,
             |h| {
                 h.app.kit_tools.show_entry_index_wait_notice = true;
-                h.app.kits[h.app.active].scanning_entries = true;
+                h.app.model.kits[h.app.model.active].scanning_entries = true;
             },
             &["Indexing"],
         ),
@@ -1307,7 +1307,7 @@ fn cases() -> Vec<Case> {
             &["chimp/save/mod.rs"],
             container_kit,
             |h| {
-                let kit = h.app.active;
+                let kit = h.app.model.active;
                 h.app.open_chimp_save_dialog_for_test(kit);
             },
             &["Save Chimp changes"],
@@ -1438,7 +1438,7 @@ fn painted_after(steps: &[Step]) -> (Vec<String>, String) {
     for dir in TEMP_DIRS.with(|dirs| std::mem::take(&mut *dirs.borrow_mut())) {
         let _ = std::fs::remove_dir_all(dir);
     }
-    (h.painted, h.app.status)
+    (h.painted, h.app.model.status)
 }
 
 fn missing(painted: &[String], expect: &[&'static str]) -> Vec<&'static str> {

@@ -35,28 +35,28 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         if let Err(error) = load_chimp_usmap(path.as_deref()) {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         if self
-            .kits
+            .model.kits
             .iter()
             .any(|kit| kit.chimp.documents.values().any(|document| document.dirty))
         {
-            self.status =
+            self.model.status =
                 "Build or discard modified Chimp packages before changing the USMAP.".to_owned();
             return;
         }
 
-        self.prefs.chimp_usmap_path = path;
+        self.model.prefs.chimp_usmap_path = path;
         self.chimp.chimp_usmap_path_input = self
-            .prefs
+            .model.prefs
             .chimp_usmap_path
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_default();
         let remount: Vec<usize> = self
-            .kits
+            .model.kits
             .iter()
             .enumerate()
             .filter_map(|(index, kit)| {
@@ -68,10 +68,10 @@ impl Baboon {
             })
             .collect();
         for &index in &remount {
-            self.kits[index].chimp = ChimpState::default();
+            self.model.kits[index].chimp = ChimpState::default();
             self.begin_chimp_mount(index, ctx.clone());
         }
-        self.status = match &self.prefs.chimp_usmap_path {
+        self.model.status = match &self.model.prefs.chimp_usmap_path {
             Some(path) if remount.is_empty() => {
                 format!("Chimp USMAP set to {}", path.display())
             }
@@ -94,7 +94,7 @@ impl Baboon {
             .set_title("Select Chimp USMAP")
             .add_filter("Unreal mappings", &["usmap"]);
         if let Some(directory) = self
-            .prefs
+            .model.prefs
             .chimp_usmap_path
             .as_ref()
             .and_then(|path| path.parent())
@@ -112,7 +112,7 @@ impl Baboon {
     /// specific: "the workspace is open" is not something anyone can act on,
     /// while "still indexing package types" is.
     pub(in crate::app) fn chimp_activity(&self, kit_index: usize) -> String {
-        let Some(kit) = self.kits.get(kit_index) else {
+        let Some(kit) = self.model.kits.get(kit_index) else {
             return "mounted".to_owned();
         };
         if matches!(kit.chimp.mount, ChimpMount::Loading) {
@@ -131,22 +131,22 @@ impl Baboon {
     }
 
     pub(in crate::app) fn begin_chimp_mount(&mut self, kit_index: usize, ctx: egui::Context) {
-        if !self.prefs.enable_chimp {
+        if !self.model.prefs.enable_chimp {
             return;
         }
-        let Some(source) = self.kits.get(kit_index).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit_index).and_then(|kit| kit.source.as_ref()) else {
             return;
         };
         let TagSource::IoStoreContainerSet { root, .. } = &source.source else {
             return;
         };
         let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
+            kit: self.model.kits[kit_index].id,
+            generation: self.model.kits[kit_index].generation,
         };
         let root = root.clone();
-        let usmap_path = self.prefs.chimp_usmap_path.clone();
-        self.kits[kit_index].chimp.mount = ChimpMount::Loading;
+        let usmap_path = self.model.prefs.chimp_usmap_path.clone();
+        self.model.kits[kit_index].chimp.mount = ChimpMount::Loading;
         let tx = self.tx.clone();
         // A mount that panicked used to send nothing and stay `Loading`, which
         // refuses every container write for the session. Through
@@ -215,23 +215,23 @@ impl Baboon {
         let Some(index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.kits[index].chimp.reset_filter();
+        self.model.kits[index].chimp.reset_filter();
         match result {
             Ok(world) => {
                 let packages = world.packages().len();
                 let files = world.pak_files().len();
-                self.kits[index].chimp.mount = ChimpMount::Ready(world.clone());
-                self.kits[index].chimp.type_indexing = true;
-                self.kits[index].chimp.package_types.clear();
-                self.status =
+                self.model.kits[index].chimp.mount = ChimpMount::Ready(world.clone());
+                self.model.kits[index].chimp.type_indexing = true;
+                self.model.kits[index].chimp.package_types.clear();
+                self.model.status =
                     format!("Chimp indexed {packages} Unreal packages and {files} pak files");
                 self.reconcile_chimp_providers(index, &world);
                 self.restore_chimp_recovery(index, &world);
                 self.finish_pending_chimp_session_restore(index, ctx);
             }
             Err(error) => {
-                self.kits[index].chimp.mount = ChimpMount::Failed(error.clone());
-                self.status = format!("Chimp could not open: {error}");
+                self.model.kits[index].chimp.mount = ChimpMount::Failed(error.clone());
+                self.model.status = format!("Chimp could not open: {error}");
             }
         }
         false
@@ -252,7 +252,7 @@ impl Baboon {
     /// drawing either way, because a `ChimpDocument` holds its own bytes.
     fn reconcile_chimp_providers(&mut self, kit_index: usize, world: &World) {
         let mut orphaned = Vec::new();
-        for (package, document) in &mut self.kits[kit_index].chimp.documents {
+        for (package, document) in &mut self.model.kits[kit_index].chimp.documents {
             match world
                 .package(package)
                 .and_then(|record| record.active_provider())
@@ -273,7 +273,7 @@ impl Baboon {
         }
         if !orphaned.is_empty() {
             orphaned.sort();
-            self.status = format!(
+            self.model.status = format!(
                 "{} open Chimp package(s) are no longer in the mounted containers: {}",
                 orphaned.len(),
                 orphaned.join(", ")
@@ -282,12 +282,12 @@ impl Baboon {
     }
 
     fn finish_pending_chimp_session_restore(&mut self, kit_index: usize, ctx: egui::Context) {
-        let packages = std::mem::take(&mut self.kits[kit_index].restore.pending_restore_chimp_packages);
+        let packages = std::mem::take(&mut self.model.kits[kit_index].restore.pending_restore_chimp_packages);
         if packages.is_empty() {
-            self.kits[kit_index].restore.pending_restore_active_chimp_package = None;
+            self.model.kits[kit_index].restore.pending_restore_active_chimp_package = None;
             return;
         }
-        let world = match &self.kits[kit_index].chimp.mount {
+        let world = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
         };
@@ -298,26 +298,26 @@ impl Baboon {
                 missing += 1;
                 continue;
             }
-            if self.kits[kit_index].documents_contains_chimp(&package) {
-                let kit = self.kits[kit_index].id;
-                self.kits[kit_index].chimp.open_document_pane(kit, &package);
+            if self.model.kits[kit_index].documents_contains_chimp(&package) {
+                let kit = self.model.kits[kit_index].id;
+                self.model.kits[kit_index].chimp.open_document_pane(kit, &package);
             } else {
                 self.begin_chimp_open_package(kit_index, package, ctx.clone());
             }
             queued += 1;
         }
-        if self.kits[kit_index].chimp.loading_packages.is_empty()
-            && let Some(active) = self.kits[kit_index]
+        if self.model.kits[kit_index].chimp.loading_packages.is_empty()
+            && let Some(active) = self.model.kits[kit_index]
                 .restore.pending_restore_active_chimp_package
                 .take()
-            && self.kits[kit_index].documents_contains_chimp(&active)
+            && self.model.kits[kit_index].documents_contains_chimp(&active)
         {
-            let kit = self.kits[kit_index].id;
-            self.kits[kit_index].chimp.selected_package = Some(active.clone());
-            self.kits[kit_index].chimp.open_document_pane(kit, &active);
+            let kit = self.model.kits[kit_index].id;
+            self.model.kits[kit_index].chimp.selected_package = Some(active.clone());
+            self.model.kits[kit_index].chimp.open_document_pane(kit, &active);
         }
         if queued > 0 || missing > 0 {
-            self.status = match (queued, missing) {
+            self.model.status = match (queued, missing) {
                 (queued, 0) => format!("Reopening {queued} Chimp package(s)"),
                 (0, missing) => format!("Could not find {missing} saved Chimp package(s)"),
                 (queued, missing) => format!(
@@ -340,17 +340,17 @@ impl Baboon {
             .len()
             .saturating_sub(type_index.failures);
         let kinds = type_index.type_counts.len();
-        let chimp = &mut self.kits[index].chimp;
+        let chimp = &mut self.model.kits[index].chimp;
         chimp.package_types = type_index.package_types;
         chimp.type_indexing = false;
         chimp.reset_filter();
-        self.status =
+        self.model.status =
             format!("Chimp classified {classified} packages into {kinds} Unreal file types");
         false
     }
 
     fn chimp_recovery_dir(&self, kit_index: usize) -> Option<PathBuf> {
-        let root = match &self.kits.get(kit_index)?.source.as_ref()?.source {
+        let root = match &self.model.kits.get(kit_index)?.source.as_ref()?.source {
             TagSource::IoStoreContainerSet { root, .. } => root,
             _ => return None,
         };
@@ -371,7 +371,7 @@ impl Baboon {
         let Some((directory, manifest)) = self.load_chimp_recovery_manifest(kit_index) else {
             return;
         };
-        let expected_source = self.kits[kit_index]
+        let expected_source = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.source.root_path().display().to_string())
@@ -382,7 +382,7 @@ impl Baboon {
         let mut restored = 0usize;
         let mut failures: Vec<String> = Vec::new();
         for (package, filename) in
-            chimp_recovery_still_closed(&self.kits[kit_index].chimp, manifest.packages)
+            chimp_recovery_still_closed(&self.model.kits[kit_index].chimp, manifest.packages)
         {
             let Some(provider) = world
                 .package(&package)
@@ -418,19 +418,19 @@ impl Baboon {
             };
             document.original = source_bytes;
             document.dirty = true;
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .chimp
                 .documents
                 .insert(package.clone(), document);
-            let kit_id = self.kits[kit_index].id;
-            self.kits[kit_index]
+            let kit_id = self.model.kits[kit_index].id;
+            self.model.kits[kit_index]
                 .chimp
                 .open_document_pane(kit_id, &package);
             restored += 1;
         }
         // The recovery files are left in place either way, so an edit that
         // could not come back this time is not deleted by having been tried.
-        self.status = match (restored, failures.first()) {
+        self.model.status = match (restored, failures.first()) {
             (0, None) => return,
             (restored, None) => format!("Chimp recovered {restored} unsaved package edit(s)"),
             (restored, Some(first)) => format!(
@@ -451,7 +451,7 @@ impl Baboon {
         let now = ctx.input(|input| input.time);
         let mut due = Vec::new();
         let mut next: Option<f64> = None;
-        for (package, document) in &self.kits[kit_index].chimp.documents {
+        for (package, document) in &self.model.kits[kit_index].chimp.documents {
             match document.checkpoint_due {
                 Some(at) if at <= now => due.push(package.clone()),
                 Some(at) => next = Some(next.map_or(at, |next| next.min(at))),
@@ -468,7 +468,7 @@ impl Baboon {
 
     /// Checkpoint `package` now if it has a checkpoint waiting.
     pub(super) fn flush_chimp_checkpoint(&mut self, kit_index: usize, package: &str) {
-        let waiting = self.kits[kit_index]
+        let waiting = self.model.kits[kit_index]
             .chimp
             .documents
             .get_mut(package)
@@ -477,15 +477,15 @@ impl Baboon {
         // Said, not swallowed: the user is relying on this copy to survive a
         // crash, and a failed one leaves them unprotected without knowing.
         if waiting && let Err(error) = self.checkpoint_chimp_document(kit_index, package) {
-            self.status = format!("Chimp could not save a recovery copy of {package}: {error}");
+            self.model.status = format!("Chimp could not save a recovery copy of {package}: {error}");
         }
     }
 
     /// Checkpoint every waiting document in every kit, before the app or a
     /// workspace closes and the delay would lose them.
     pub(in crate::app) fn flush_all_chimp_checkpoints(&mut self) {
-        for kit_index in 0..self.kits.len() {
-            let packages: Vec<String> = self.kits[kit_index]
+        for kit_index in 0..self.model.kits.len() {
+            let packages: Vec<String> = self.model.kits[kit_index]
                 .chimp
                 .documents
                 .iter()
@@ -504,10 +504,10 @@ impl Baboon {
         let Some(directory) = self.chimp_recovery_dir(kit_index) else {
             return Ok(());
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return Ok(());
         };
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return Ok(());
         };
         let (bytes, _) = rebuild_chimp_document(world, document)?;
@@ -524,7 +524,7 @@ impl Baboon {
         let path = directory.join(&filename);
         fs::write(&path, bytes)
             .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
-        let source = self.kits[kit_index]
+        let source = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.source.root_path().display().to_string())
@@ -590,7 +590,7 @@ impl Baboon {
 
     pub(in crate::app) fn chimp_dirty_packages(&self, kit_index: usize) -> Vec<String> {
         sorted_unique_dirty_chimp_keys(
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .chimp
                 .documents
                 .iter()
@@ -606,11 +606,11 @@ impl Baboon {
         error: Option<String>,
     ) {
         if packages.is_empty() {
-            self.status = "Chimp has no modified packages".to_owned();
+            self.model.status = "Chimp has no modified packages".to_owned();
             return;
         }
         self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
-            kit: self.kits[kit_index].id,
+            kit: self.model.kits[kit_index].id,
             packages,
             pending_action,
             error,
@@ -622,10 +622,10 @@ impl Baboon {
         kit_index: usize,
         packages: &[String],
     ) -> Result<usize, String> {
-        if self.chimp.chimp_writes.contains_key(&self.kits[kit_index].id) {
+        if self.chimp.chimp_writes.contains_key(&self.model.kits[kit_index].id) {
             return Err("A Chimp save is still running; discard once it finishes".to_owned());
         }
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return Err(
                 "Chimp is not mounted; the original package data is unavailable".to_owned(),
             );
@@ -633,7 +633,7 @@ impl Baboon {
         let world = world.clone();
         let mut restored = Vec::new();
         for package in packages {
-            let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+            let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
                 continue;
             };
             if !document.dirty {
@@ -652,7 +652,7 @@ impl Baboon {
         self.clear_chimp_recovery_packages(kit_index, packages)?;
         let restored_count = restored.len();
         for (package, document) in restored {
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .chimp
                 .documents
                 .insert(package, document);
@@ -666,28 +666,28 @@ impl Baboon {
         package: String,
         ctx: egui::Context,
     ) {
-        if self.kits[kit_index].documents_contains_chimp(&package) {
-            let kit_id = self.kits[kit_index].id;
-            self.kits[kit_index]
+        if self.model.kits[kit_index].documents_contains_chimp(&package) {
+            let kit_id = self.model.kits[kit_index].id;
+            self.model.kits[kit_index]
                 .chimp
                 .open_document_pane(kit_id, &package);
             return;
         }
-        self.kits[kit_index].chimp.selected_package = Some(package.clone());
-        if !self.kits[kit_index]
+        self.model.kits[kit_index].chimp.selected_package = Some(package.clone());
+        if !self.model.kits[kit_index]
             .chimp
             .loading_packages
             .insert(package.clone())
         {
             return;
         }
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
         let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
+            kit: self.model.kits[kit_index].id,
+            generation: self.model.kits[kit_index].generation,
         };
         let panic_package = package.clone();
         spawn_worker(
@@ -717,11 +717,11 @@ impl Baboon {
         package: String,
         ctx: egui::Context,
     ) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
-        let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get_mut(&package) else {
             return;
         };
         if matches!(document.referrers, ChimpReferrerState::Scanning) {
@@ -729,8 +729,8 @@ impl Baboon {
         }
         document.referrers = ChimpReferrerState::Scanning;
         let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
+            kit: self.model.kits[kit_index].id,
+            generation: self.model.kits[kit_index].generation,
         };
         // A scan that panicked used to leave the document `Scanning` for good,
         // which also refuses a second scan.
@@ -763,11 +763,11 @@ impl Baboon {
         let state = match scan {
             Ok(scan) => ChimpReferrerState::Done(scan),
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 ChimpReferrerState::Idle
             }
         };
-        if let Some(document) = self.kits[index].chimp.documents.get_mut(&package) {
+        if let Some(document) = self.model.kits[index].chimp.documents.get_mut(&package) {
             document.referrers = state;
         }
         false
@@ -782,25 +782,25 @@ impl Baboon {
         let Some(index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.kits[index].chimp.loading_packages.remove(&package);
+        self.model.kits[index].chimp.loading_packages.remove(&package);
         match result {
             Ok(document) => {
-                self.kits[index]
+                self.model.kits[index]
                     .chimp
                     .documents
                     .insert(package.clone(), document);
-                let kit_id = self.kits[index].id;
-                self.kits[index].chimp.open_document_pane(kit_id, &package);
+                let kit_id = self.model.kits[index].id;
+                self.model.kits[index].chimp.open_document_pane(kit_id, &package);
             }
-            Err(error) => self.status = error,
+            Err(error) => self.model.status = error,
         }
-        if self.kits[index].chimp.loading_packages.is_empty()
-            && let Some(active) = self.kits[index].restore.pending_restore_active_chimp_package.take()
-            && self.kits[index].documents_contains_chimp(&active)
+        if self.model.kits[index].chimp.loading_packages.is_empty()
+            && let Some(active) = self.model.kits[index].restore.pending_restore_active_chimp_package.take()
+            && self.model.kits[index].documents_contains_chimp(&active)
         {
-            let kit_id = self.kits[index].id;
-            self.kits[index].chimp.selected_package = Some(active.clone());
-            self.kits[index].chimp.open_document_pane(kit_id, &active);
+            let kit_id = self.model.kits[index].id;
+            self.model.kits[index].chimp.selected_package = Some(active.clone());
+            self.model.kits[index].chimp.open_document_pane(kit_id, &active);
         }
         false
     }
@@ -812,7 +812,7 @@ impl Baboon {
     /// simply refuses to close — so the caller reports that, since one blocked
     /// package in a "close all" is not worth a message per package.
     pub(in crate::app) fn close_chimp_package(&mut self, kit_index: usize, package: &str) -> bool {
-        if self.kits[kit_index]
+        if self.model.kits[kit_index]
             .chimp
             .documents
             .get(package)
@@ -820,8 +820,8 @@ impl Baboon {
         {
             return false;
         }
-        self.kits[kit_index].chimp.close_document_pane(package);
-        self.kits[kit_index].chimp.documents.remove(package);
+        self.model.kits[kit_index].chimp.close_document_pane(package);
+        self.model.kits[kit_index].chimp.documents.remove(package);
         true
     }
 }

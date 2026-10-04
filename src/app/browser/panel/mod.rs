@@ -69,7 +69,7 @@ impl Baboon {
         kit_index: usize,
         pane_key: &str,
     ) -> Option<BrowserAction> {
-        let Some(mut pane) = self.kits[kit_index].browser.folder_browsers.remove(pane_key) else {
+        let Some(mut pane) = self.model.kits[kit_index].browser.folder_browsers.remove(pane_key) else {
             ui.label(RichText::new("This folder is no longer open").color(subtle_dark()));
             return None;
         };
@@ -79,7 +79,7 @@ impl Baboon {
         // A loose pane owns a lazy subtree whose indices address the shared
         // lazy entry vector. Its growth must not rebuild/collapse the pane.
         // Eager sources still use entry count as cache invalidation.
-        let source_len = self.kits[kit_index]
+        let source_len = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| match source.source {
@@ -87,13 +87,13 @@ impl Baboon {
                 _ => source.full_entry_set().len(),
             })
             .unwrap_or(0);
-        let generation = self.kits[kit_index].generation;
+        let generation = self.model.kits[kit_index].generation;
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
+            Arc::clone(&self.model.kits[kit_index].bitmap_browser.thumbnails),
         );
         if pane.cached_generation != generation || pane.cached_source_len != source_len {
-            if let Some(source) = self.kits[kit_index].source.as_mut() {
+            if let Some(source) = self.model.kits[kit_index].source.as_mut() {
                 if let TagSource::LooseFolder { root, .. } = &source.source {
                     let root = root.clone();
                     let names = source.names.clone();
@@ -106,7 +106,7 @@ impl Baboon {
                         Ok(tree) => pane.tree = tree,
                         Err(error) => {
                             pane.tree = TagTree::default();
-                            self.status = format!("Could not load folder tab: {error}");
+                            self.model.status = format!("Could not load folder tab: {error}");
                         }
                     }
                     pane.group_tree = TagTree::default();
@@ -125,34 +125,34 @@ impl Baboon {
             pane.cached_source_len = source_len;
         }
 
-        let is_loose = self.kits[kit_index]
+        let is_loose = self.model.kits[kit_index]
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
-        let is_container = self.kits[kit_index]
+        let is_container = self.model.kits[kit_index]
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }));
-        let favorite_keys: HashSet<String> = self.kits[kit_index]
+        let favorite_keys: HashSet<String> = self.model.kits[kit_index]
             .browser.active_favorite_entries
             .iter()
             .map(|entry| entry.key.clone())
             .collect();
         let pane_favorite_folders =
-            std::sync::Arc::new(self.kits[kit_index].browser.active_favorite_folders.clone());
-        let selected = self.kits[kit_index].selected_key.clone();
-        let modified_tags = std::sync::Arc::clone(&self.kits[kit_index].browser.modified_tags);
-        let deletable_keys = std::sync::Arc::clone(&self.kits[kit_index].browser.deletable_keys);
-        let game = self.kits[kit_index].source.as_ref().and_then(|source| source.game);
+            std::sync::Arc::new(self.model.kits[kit_index].browser.active_favorite_folders.clone());
+        let selected = self.model.kits[kit_index].selected_key.clone();
+        let modified_tags = std::sync::Arc::clone(&self.model.kits[kit_index].browser.modified_tags);
+        let deletable_keys = std::sync::Arc::clone(&self.model.kits[kit_index].browser.deletable_keys);
+        let game = self.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
         let sound_language = self.audio.language.clone();
-        let sound_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
+        let sound_tags_root = self.model.kits[kit_index].source.as_ref().and_then(|source| {
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 Some(root.clone())
             } else {
                 None
             }
         });
-        let scenario_launch = self.kits[kit_index]
+        let scenario_launch = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| {
@@ -161,15 +161,15 @@ impl Baboon {
                 })
             })
             .unwrap_or_default();
-        let mut show_browser_prefixes = self.prefs.show_browser_prefixes;
-        let mut folders_before_tags = self.prefs.folders_before_tags;
-        let double_click_to_open = self.prefs.double_click_to_open_tags;
+        let mut show_browser_prefixes = self.model.prefs.show_browser_prefixes;
+        let mut folders_before_tags = self.model.prefs.folders_before_tags;
+        let double_click_to_open = self.model.prefs.double_click_to_open_tags;
         let search_hint = folder_browser_search_hint(&pane.label);
         let mut action = None;
         let mut need_scan = false;
         let mut status_update = None;
-        let scanning = self.kits[kit_index].scanning_entries;
-        let source = self.kits[kit_index].source.as_mut();
+        let scanning = self.model.kits[kit_index].scanning_entries;
+        let source = self.model.kits[kit_index].source.as_mut();
 
         Frame::NONE
             .inner_margin(egui::Margin {
@@ -373,8 +373,8 @@ impl Baboon {
 
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
 
-        self.prefs.show_browser_prefixes = show_browser_prefixes;
-        self.prefs.folders_before_tags = folders_before_tags;
+        self.model.prefs.show_browser_prefixes = show_browser_prefixes;
+        self.model.prefs.folders_before_tags = folders_before_tags;
 
         action = match action {
             Some(BrowserAction::OpenFolderBrowser {
@@ -388,14 +388,14 @@ impl Baboon {
             }
             other => other,
         };
-        self.kits[kit_index]
+        self.model.kits[kit_index]
             .browser.folder_browsers
             .insert(pane_key.to_owned(), pane);
         if let Some(status) = status_update {
-            self.status = status;
+            self.model.status = status;
         }
         if need_scan {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.begin_scan_all_entries(ctx.clone());
         }
         action
@@ -416,7 +416,7 @@ impl Baboon {
         ctx: &egui::Context,
         kit_index: usize,
     ) {
-        let salt = self.kits[kit_index].id.0;
+        let salt = self.model.kits[kit_index].id.0;
         ui.push_id(salt, |ui| self.draw_kit_browser_inner(ui, ctx, kit_index));
     }
 
@@ -424,12 +424,12 @@ impl Baboon {
         // This kit's own source, not `source()` — that reads the *active* kit,
         // so in a split every browser drew the focused kit's banner and the
         // header flickered between games as the cursor moved between panes.
-        let sidebar_header = self.kits[kit_index].source.as_ref().map(|source| {
+        let sidebar_header = self.model.kits[kit_index].source.as_ref().map(|source| {
             (
                 source.game,
                 source.source.origin_label(),
                 sidebar_source_path_label(&source.source),
-                self.kits[kit_index]
+                self.model.kits[kit_index]
                     .profile
                     .as_ref()
                     .map(|profile| profile.id.clone()),
@@ -445,17 +445,17 @@ impl Baboon {
             }
         }
 
-        let active_favorite_entries = self.kits[kit_index].browser.active_favorite_entries.clone();
+        let active_favorite_entries = self.model.kits[kit_index].browser.active_favorite_entries.clone();
         let active_favorite_folders =
-            std::sync::Arc::new(self.kits[kit_index].browser.active_favorite_folders.clone());
+            std::sync::Arc::new(self.model.kits[kit_index].browser.active_favorite_folders.clone());
         let favorite_keys: HashSet<String> = active_favorite_entries
             .iter()
             .map(|entry| entry.key.clone())
             .collect();
         // Indexed directly rather than through `source_mut()`: the block
-        // below also borrows `self.kits[kit_index].filter`, `self.kits[kit_index].filter_cache`, and
-        // `self.status`, and a method call would borrow all of `self`.
-        let kit_id = self.kits[kit_index].id;
+        // below also borrows the kit's browser filter and filter cache and the
+        // status line, and a method call would borrow all of `self`.
+        let kit_id = self.model.kits[kit_index].id;
         // Refreshed before the tree is drawn, and published into egui memory so
         // the row and folder painters can reach it without threading it through
         // every drawing function. The browsers draw one after another, so what
@@ -463,11 +463,11 @@ impl Baboon {
         self.refresh_modified_tags(kit_index);
         set_browser_modified_tags(
             ui,
-            std::sync::Arc::clone(&self.kits[kit_index].browser.modified_tags),
+            std::sync::Arc::clone(&self.model.kits[kit_index].browser.modified_tags),
         );
         set_browser_favorite_folders(
             ui,
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .source
                 .as_ref()
                 .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }))
@@ -475,21 +475,21 @@ impl Baboon {
         );
         set_browser_game(
             ui,
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .source
                 .as_ref()
                 .and_then(|source| source.game),
         );
         set_browser_sound_language(
             ui,
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .source
                 .as_ref()
                 .and_then(|source| source.game),
             self.audio.language.as_deref(),
         );
-        let browser_game = self.kits[kit_index].source.as_ref().and_then(|source| source.game);
-        let browser_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
+        let browser_game = self.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+        let browser_tags_root = self.model.kits[kit_index].source.as_ref().and_then(|source| {
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 Some(root.as_path())
             } else {
@@ -497,17 +497,17 @@ impl Baboon {
             }
         });
         set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
-        set_browser_entries_scanning(ui, self.kits[kit_index].scanning_entries);
+        set_browser_entries_scanning(ui, self.model.kits[kit_index].scanning_entries);
         set_browser_loose_source(
             ui,
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .source
                 .as_ref()
                 .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. })),
         );
         set_browser_scenario_launch(
             ui,
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .source
                 .as_ref()
                 .map(crate::app::kits::scenario_launch::scenario_launch_availability)
@@ -517,15 +517,15 @@ impl Baboon {
         self.refresh_deletable_keys(kit_index);
         set_browser_deletable_keys(
             ui,
-            std::sync::Arc::clone(&self.kits[kit_index].browser.deletable_keys),
+            std::sync::Arc::clone(&self.model.kits[kit_index].browser.deletable_keys),
         );
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
+            Arc::clone(&self.model.kits[kit_index].bitmap_browser.thumbnails),
         );
         let mut open_git_review = false;
         let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
             let scanning = kit.scanning_entries;
@@ -552,8 +552,8 @@ impl Baboon {
                     ui,
                     &mut kit.browser.mode,
                     &mut kit.browser.sort,
-                    &mut self.prefs.show_browser_prefixes,
-                    &mut self.prefs.folders_before_tags,
+                    &mut self.model.prefs.show_browser_prefixes,
+                    &mut self.model.prefs.folders_before_tags,
                 );
                 if groups_clicked
                     && matches!(source.source, TagSource::LooseFolder { .. })
@@ -575,9 +575,9 @@ impl Baboon {
             let selected = kit.selected_key.clone();
             let filter = kit.browser.filter.trim().to_owned();
             let mode = kit.browser.mode;
-            let show_prefixes = self.prefs.show_browser_prefixes;
-            let folders_before_tags = self.prefs.folders_before_tags;
-            let double_click_to_open = self.prefs.double_click_to_open_tags;
+            let show_prefixes = self.model.prefs.show_browser_prefixes;
+            let folders_before_tags = self.model.prefs.folders_before_tags;
+            let double_click_to_open = self.model.prefs.double_click_to_open_tags;
             let mut status_update = None;
             // Groups and filtered Folders use all_entries (background
             // scan) so every tag is visible, not just visited folders.
@@ -763,7 +763,7 @@ impl Baboon {
                 })
                 .inner;
             if let Some(status) = status_update {
-                self.status = status;
+                self.model.status = status;
             }
             // Browser actions and the scan below all resolve against the active
             // kit, and this browser is drawn inside the workspace-tree walk,
@@ -773,7 +773,7 @@ impl Baboon {
             // which is exactly what loading a large tag or indexing does. This
             // browser's own kit is the right target either way.
             if action.is_some() || need_scan {
-                self.active = kit_index;
+                self.model.active = kit_index;
             }
             if let Some(action) = action {
                 self.handle_browser_action(action, ctx.clone());
@@ -787,7 +787,7 @@ impl Baboon {
             ui.label("Use File to load a tag, folder, or monolithic cache.");
         }
         if open_git_review {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.open_git_review(ctx);
         }
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);

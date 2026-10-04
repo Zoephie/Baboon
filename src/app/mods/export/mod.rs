@@ -20,7 +20,7 @@ impl Baboon {
     /// The mounted mod currently serving this tag, if the mount resolved it to
     /// one rather than to the game's own pack.
     pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
+        let source = self.model.kits.get(kit)?.source.as_ref()?;
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
             return None;
         };
@@ -36,7 +36,7 @@ impl Baboon {
 
     /// The container a tag would be written into, and whether it is a mod.
     pub(in crate::app) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
+        let source = self.model.kits.get(kit)?.source.as_ref()?;
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
             return None;
         };
@@ -52,7 +52,7 @@ impl Baboon {
 
     /// Every mod this workspace has mounted, by container label.
     pub(in crate::app) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return Vec::new();
         };
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
@@ -73,7 +73,7 @@ impl Baboon {
     /// open — so this is what the review dialog says out loud and what the export
     /// releases before it writes.
     pub(in crate::app) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return Vec::new();
         };
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
@@ -94,13 +94,13 @@ impl Baboon {
         output: PathBuf,
         ctx: &egui::Context,
     ) {
-        let exporting = self.active;
+        let exporting = self.model.active;
         if let Err(error) = ensure_export_directory(&output) {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         let Some(source) = self.source() else {
-            self.status = "No source loaded".to_owned();
+            self.model.status = "No source loaded".to_owned();
             return;
         };
         let TagSource::IoStoreContainerSet {
@@ -110,7 +110,7 @@ impl Baboon {
             ..
         } = &source.source
         else {
-            self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
+            self.model.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
         // Tag bytes ride along as the `Arc` the overlay already holds rather
@@ -230,7 +230,7 @@ impl Baboon {
         }
         let count = overrides.len() + new_pkgs.len();
         if count == 0 {
-            self.status = "Nothing selected to export".to_owned();
+            self.model.status = "Nothing selected to export".to_owned();
             return;
         }
         // Taken before anything is built, so a second export to the same files
@@ -241,7 +241,7 @@ impl Baboon {
             match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
                 Ok(lease) => lease,
                 Err(failure) => {
-                    self.status = failure.to_string();
+                    self.model.status = failure.to_string();
                     return;
                 }
             };
@@ -254,7 +254,7 @@ impl Baboon {
         if let Some(directory) = staging.parent()
             && let Err(error) = fs::create_dir_all(directory)
         {
-            self.status =
+            self.model.status =
                 ContainerWriteFailure::at(LeasePhase::Write, directory, error).to_string();
             self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
             return;
@@ -293,7 +293,7 @@ impl Baboon {
             // wondering what state their installed mod is in.
             discard_staging(&staging);
             self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
-            self.status = format!(
+            self.model.status = format!(
                 "Export Mod failed: {}. Nothing was replaced",
                 ContainerWriteFailure::at(LeasePhase::Write, &staging, error)
             );
@@ -302,7 +302,7 @@ impl Baboon {
         if let Err(failure) = self.unmap_leased_containers(&mut lease) {
             discard_staging(&staging);
             self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
-            self.status = failure.to_string();
+            self.model.status = failure.to_string();
             return;
         }
         // Each existing file is moved aside before any of the new ones land, so
@@ -337,7 +337,7 @@ impl Baboon {
                 if let Err(error) =
                     save_campaign_project(&sidecar, snapshot, None, ProjectScope::ModSidecar)
                 {
-                    self.status = format!(
+                    self.model.status = format!(
                         "Exported {count} tag(s), but the .baboon sidecar failed: {}",
                         ContainerWriteFailure::at(LeasePhase::Commit, &sidecar, error)
                     );
@@ -353,7 +353,7 @@ impl Baboon {
                     .source()
                     .map(|source| directory.starts_with(source.source.root_path()))
                     .unwrap_or(false);
-                self.status = if !reopen_failures.is_empty() {
+                self.model.status = if !reopen_failures.is_empty() {
                     // The mod was written; what failed is picking it back up.
                     format!(
                         "Exported {count} tag(s) as {stem}, but {} — reload the source",
@@ -380,19 +380,19 @@ impl Baboon {
                 // only way to see it was a reload — which rebuilds the
                 // workspace and costs every open tab and the stash with it.
                 if in_place && !replaced_a_mount {
-                    let folder_seeds = self.kits[exporting].folder_seeds();
-                    let mounted = self.kits[exporting].source.as_mut().map(|source| {
+                    let folder_seeds = self.model.kits[exporting].folder_seeds();
+                    let mounted = self.model.kits[exporting].source.as_mut().map(|source| {
                         crate::core::source::mount_additional_container(source, &output, &folder_seeds)
                     });
                     match mounted {
                         Some(Ok(count)) if count > 0 => {
-                            self.kits[exporting].generation =
-                                self.kits[exporting].generation.wrapping_add(1);
-                            self.kits[exporting].field_index.invalidate();
-                            self.status
+                            self.model.kits[exporting].generation =
+                                self.model.kits[exporting].generation.wrapping_add(1);
+                            self.model.kits[exporting].field_index.invalidate();
+                            self.model.status
                                 .push_str(&format!(" — mounted, {count} tag(s) now served by it"));
                         }
-                        Some(Err(error)) => self.status.push_str(&format!(
+                        Some(Err(error)) => self.model.status.push_str(&format!(
                             " — but {}; reload the source to see it",
                             ContainerWriteFailure::at(LeasePhase::Remount, &output, error)
                         )),
@@ -410,7 +410,7 @@ impl Baboon {
                     });
                 }
             }
-            Err(error) => self.status = format!("Export Mod failed: {error}"),
+            Err(error) => self.model.status = format!("Export Mod failed: {error}"),
         }
     }
 }

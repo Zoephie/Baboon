@@ -14,19 +14,19 @@ impl Baboon {
         move_folder: bool,
     ) {
         if self.tag_ops.folder_refactor.is_some() {
-            self.status = "A folder move/copy is already running".to_owned();
+            self.model.status = "A folder move/copy is already running".to_owned();
             return;
         }
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .parsed_tags
             .values()
             .any(|doc| doc.dirty.is_set())
         {
-            self.status = "Save or close dirty tags before moving/copying folders".to_owned();
+            self.model.status = "Save or close dirty tags before moving/copying folders".to_owned();
             return;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Folder move/copy requires a loaded tags folder".to_owned();
+            self.model.status = "Folder move/copy requires a loaded tags folder".to_owned();
             return;
         };
         let title = if move_folder {
@@ -88,7 +88,7 @@ impl Baboon {
             phase: "Preparing".to_owned(),
             progress: None,
         });
-        self.status = format!("{job_label}: Preparing");
+        self.model.status = format!("{job_label}: Preparing");
         self.spawn_job(
             move || WorkerMessage::FolderRefactorFinished {
                 stamp,
@@ -119,21 +119,21 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(in crate::app) fn open_rename_tag(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         self.open_name_operation(key, TagNameOperation::Rename);
     }
 
     pub(in crate::app) fn open_container_duplicate(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         self.open_name_operation(key, TagNameOperation::SaveAsOverlay);
     }
 
     pub(in crate::app) fn open_duplicate_tag(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         self.open_name_operation(key, TagNameOperation::Duplicate);
@@ -166,7 +166,7 @@ impl Baboon {
             }
         };
         if !supported {
-            self.status = match operation {
+            self.model.status = match operation {
                 TagNameOperation::Duplicate => {
                     "Only loose-file and Campaign Evolved container tags can be duplicated"
                         .to_owned()
@@ -276,10 +276,10 @@ impl Baboon {
         };
         if !self.focus_navigation_kit(kit) {
             self.tag_ops.rename_tag = None;
-            self.status = "The workspace this rename came from is closed".to_owned();
+            self.model.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some((
@@ -314,7 +314,7 @@ impl Baboon {
         }
         let new_name = new_name_raw.trim().to_owned();
         if new_name.is_empty() {
-            self.status = "Enter a new tag name".to_owned();
+            self.model.status = "Enter a new tag name".to_owned();
             return;
         }
         // Where the whole path is editable a separator is the move half of the
@@ -322,11 +322,11 @@ impl Baboon {
         // an unsaved one — the field says so, and this has to agree with it or
         // the dialog invites a path and then refuses it.
         if !whole_path_editable && new_name.contains(['/', '\\']) {
-            self.status = "Enter a name only; use Move to choose a folder".to_owned();
+            self.model.status = "Enter a name only; use Move to choose a folder".to_owned();
             return;
         }
         if new_name.contains('.') {
-            self.status = "Enter a name without an extension".to_owned();
+            self.model.status = "Enter a name without an extension".to_owned();
             return;
         }
         let new_rel = if whole_path_editable {
@@ -352,8 +352,8 @@ impl Baboon {
                 &new_rel,
                 matches!(operation, TagNameOperation::SaveAsOverlay),
             ) {
-                Ok(message) => self.status = message,
-                Err(error) => self.status = error,
+                Ok(message) => self.model.status = message,
+                Err(error) => self.model.status = error,
             }
             return;
         }
@@ -379,36 +379,36 @@ impl Baboon {
                 Ok(Some(path)) => {
                     let what = if redirect { "renamed tag" } else { "tag copy" };
                     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
-                    self.status = format!(
+                    self.model.status = format!(
                         "Exported {what} → {stem}.utoc/.ucas/.pak — copy all three into \
                          Meteorite/Content/Paks/ (base game unchanged)"
                     );
                 }
                 Ok(None) => {}
-                Err(e) => self.status = format!("Export failed: {e}"),
+                Err(e) => self.model.status = format!("Export failed: {e}"),
             }
             return;
         }
 
         // Loose folder: move the file on disk + rewrite references.
         if self.tag_ops.folder_refactor.is_some() {
-            self.status = "A move/rename is already running".to_owned();
+            self.model.status = "A move/rename is already running".to_owned();
             return;
         }
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .parsed_tags
             .values()
             .any(|doc| doc.dirty.is_set())
         {
-            self.status = "Save or close dirty tags before renaming".to_owned();
+            self.model.status = "Save or close dirty tags before renaming".to_owned();
             return;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Rename requires a loaded tags folder".to_owned();
+            self.model.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
         let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Tag no longer exists".to_owned();
+            self.model.status = "Tag no longer exists".to_owned();
             return;
         };
         self.tag_ops.rename_tag = None;
@@ -432,27 +432,27 @@ impl Baboon {
             return;
         }
         if self.tag_ops.folder_refactor.is_some() {
-            self.status = "A move/rename is already running".to_owned();
+            self.model.status = "A move/rename is already running".to_owned();
             return;
         }
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .parsed_tags
             .values()
             .any(|doc| doc.dirty.is_set())
         {
-            self.status = "Save or close dirty tags before moving".to_owned();
+            self.model.status = "Save or close dirty tags before moving".to_owned();
             return;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Move requires a loaded tags folder".to_owned();
+            self.model.status = "Move requires a loaded tags folder".to_owned();
             return;
         };
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag no longer exists".to_owned();
+            self.model.status = "Tag no longer exists".to_owned();
             return;
         };
         if !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
-            self.status = "Only loose-folder tags can be moved".to_owned();
+            self.model.status = "Only loose-folder tags can be moved".to_owned();
             return;
         }
         let Some(destination_parent) = rfd::FileDialog::new()
@@ -465,7 +465,7 @@ impl Baboon {
         let root = lexical_normalize_path(&root);
         let destination_parent = lexical_normalize_path(&destination_parent);
         if !destination_parent.starts_with(&root) {
-            self.status = "Choose a destination inside the loaded tags folder".to_owned();
+            self.model.status = "Choose a destination inside the loaded tags folder".to_owned();
             return;
         }
         let folder_rel = destination_parent
@@ -515,7 +515,7 @@ impl Baboon {
             phase: "Preparing".to_owned(),
             progress: None,
         });
-        self.status = format!("{job_label}: Preparing");
+        self.model.status = format!("{job_label}: Preparing");
         self.spawn_job(
             move || WorkerMessage::FolderRefactorFinished {
                 stamp,

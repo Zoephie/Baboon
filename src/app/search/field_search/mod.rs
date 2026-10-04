@@ -24,7 +24,7 @@ impl Baboon {
                 let note = entries
                     .is_empty()
                     .then(|| format!("No tag field values contain \"{query}\"."));
-                self.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
+                self.model.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
                 self.search.query_results = Some(TagQueryResults {
                     kit: stamp.kit,
                     title: format!("Field value '{query}' ({})", entries.len()),
@@ -34,7 +34,7 @@ impl Baboon {
                     ref_target: None,
                 });
             }
-            Err(error) => self.status = format!("Field search failed: {error}"),
+            Err(error) => self.model.status = format!("Field search failed: {error}"),
         }
         false
     }
@@ -47,14 +47,14 @@ impl Baboon {
     ) -> bool {
         if let Some(kit_index) = self.resolve_stamp(stamp) {
             match blobs {
-                Ok(blobs) => self.kits[kit_index]
+                Ok(blobs) => self.model.kits[kit_index]
                     .field_index
                     .install(stamp.generation, blobs),
                 Err(error) => {
                     // Not building and not ready, so the next search tries
                     // again rather than waiting on a build that ended.
-                    self.kits[kit_index].field_index.invalidate();
-                    self.status = error;
+                    self.model.kits[kit_index].field_index.invalidate();
+                    self.model.status = error;
                 }
             }
         }
@@ -246,13 +246,13 @@ impl Baboon {
         let stamp = self.kit_stamp();
 
         // Fast path: answer from the cached index.
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .field_index
             .is_ready_for(stamp.generation)
         {
             // Over-fetch when group-filtering so the cap applies post-filter.
             let raw_cap = if group_filter.is_empty() { 1000 } else { 8000 };
-            let hits = self.kits[self.active]
+            let hits = self.model.kits[self.model.active]
                 .field_index
                 .query(&query_lower, raw_cap);
             let mut entries = Vec::new();
@@ -274,7 +274,7 @@ impl Baboon {
             let note = entries
                 .is_empty()
                 .then(|| format!("No tag field values contain \"{display}\"."));
-            self.status = format!(
+            self.model.status = format!(
                 "Field search for \"{display}\": {} match(es) (indexed)",
                 entries.len()
             );
@@ -310,7 +310,7 @@ impl Baboon {
         };
         let tag_source = self.source().expect("checked").source.clone();
         self.search.field_value_searching = true;
-        self.status = format!("Searching field values for \"{display}\"…");
+        self.model.status = format!("Searching field values for \"{display}\"…");
         let panic_query = display.clone();
         spawn_worker(
             &self.tx,
@@ -350,10 +350,10 @@ impl Baboon {
     /// Generation-tagged completion is ignored if the active source changes first.
     pub(in crate::app) fn begin_build_field_index(&mut self, ctx: egui::Context) {
         let stamp = self.kit_stamp();
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .field_index
             .is_ready_for(stamp.generation)
-            || self.kits[self.active].field_index.is_building()
+            || self.model.kits[self.model.active].field_index.is_building()
         {
             return;
         }
@@ -366,7 +366,7 @@ impl Baboon {
             source.all_entries.clone()
         };
         let tag_source = source.source.clone();
-        self.kits[self.active].field_index.mark_building();
+        self.model.kits[self.model.active].field_index.mark_building();
         // A build that panicked used to leave the index building forever, and
         // a building index is never started again.
         spawn_worker(
@@ -384,7 +384,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn show_tags_with_keyword(&mut self, keyword: &str) {
-        let keys = self.kits[self.active].keywords.tags_with(keyword);
+        let keys = self.model.kits[self.model.active].keywords.tags_with(keyword);
         let entries: Vec<TagEntry> = keys
             .iter()
             .filter_map(|key| self.entry_for_key(key).cloned())

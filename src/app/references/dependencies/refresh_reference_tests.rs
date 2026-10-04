@@ -48,7 +48,7 @@ fn a_refresh_patches_the_reference_index_instead_of_dropping_it() {
         egui::Context::default(),
     );
 
-    let index = app.kits[0]
+    let index = app.model.kits[0]
         .source
         .as_ref()
         .and_then(|source| source.reverse_dependencies.as_ref())

@@ -271,39 +271,39 @@ impl Baboon {
     /// can be resident.
     #[allow(dead_code)]
     pub(in crate::app) fn kit_index(&self, id: KitId) -> Option<usize> {
-        self.kits.iter().position(|kit| kit.id == id)
+        self.model.kits.iter().position(|kit| kit.id == id)
     }
 
     #[allow(dead_code)]
     pub(in crate::app) fn kit(&self, id: KitId) -> Option<&Kit> {
-        self.kits.iter().find(|kit| kit.id == id)
+        self.model.kits.iter().find(|kit| kit.id == id)
     }
 
     #[allow(dead_code)]
     pub(in crate::app) fn kit_mut(&mut self, id: KitId) -> Option<&mut Kit> {
-        self.kits.iter_mut().find(|kit| kit.id == id)
+        self.model.kits.iter_mut().find(|kit| kit.id == id)
     }
 
     /// The active kit. Infallible: `kits` is never empty and `active` is
     /// always a valid index into it.
     #[allow(dead_code)]
     pub(in crate::app) fn active_kit(&self) -> &Kit {
-        &self.kits[self.active]
+        &self.model.kits[self.model.active]
     }
 
     #[allow(dead_code)]
     pub(in crate::app) fn active_kit_mut(&mut self) -> &mut Kit {
-        &mut self.kits[self.active]
+        &mut self.model.kits[self.model.active]
     }
 
     pub(in crate::app) fn active_kit_id(&self) -> KitId {
-        self.kits[self.active].id
+        self.model.kits[self.model.active].id
     }
 
     /// Stamp identifying the active kit and its current revision, to be
     /// attached to a background job so its result can be routed back.
     pub(in crate::app) fn kit_stamp(&self) -> KitStamp {
-        let kit = &self.kits[self.active];
+        let kit = &self.model.kits[self.model.active];
         KitStamp {
             kit: kit.id,
             generation: kit.generation,
@@ -315,7 +315,7 @@ impl Baboon {
     /// Ids are never reused, so a closed kit cannot alias a live one.
     pub(in crate::app) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
         let index = self.kit_index(stamp.kit)?;
-        (self.kits[index].generation == stamp.generation).then_some(index)
+        (self.model.kits[index].generation == stamp.generation).then_some(index)
     }
 
     /// Focus the kit a piece of navigation state belongs to, before acting on
@@ -326,7 +326,7 @@ impl Baboon {
     pub(in crate::app) fn focus_navigation_kit(&mut self, kit: KitId) -> bool {
         match self.kit_index(kit) {
             Some(index) => {
-                self.active = index;
+                self.model.active = index;
                 // Bring its workspace tab to the front too. `active` alone only
                 // decides where the action lands; if that workspace is a
                 // background tab the user is still looking at another game, and
@@ -351,22 +351,22 @@ impl Baboon {
 
     /// The active kit's source, or `None` for an empty workspace.
     pub(in crate::app) fn source(&self) -> Option<&LoadedSourceData> {
-        self.kits[self.active].source.as_ref()
+        self.model.kits[self.model.active].source.as_ref()
     }
 
     pub(in crate::app) fn source_mut(&mut self) -> Option<&mut LoadedSourceData> {
-        self.kits[self.active].source.as_mut()
+        self.model.kits[self.model.active].source.as_mut()
     }
 
     pub(in crate::app) fn names(&self) -> &TagNameIndex {
-        &self.kits[self.active].names
+        &self.model.kits[self.model.active].names
     }
 
     /// Allocate the next never-reused kit id.
     #[allow(dead_code)]
     pub(in crate::app) fn next_kit_id(&mut self) -> KitId {
-        let id = KitId(self.next_kit_id);
-        self.next_kit_id = self.next_kit_id.wrapping_add(1);
+        let id = KitId(self.model.next_kit_id);
+        self.model.next_kit_id = self.model.next_kit_id.wrapping_add(1);
         id
     }
 
@@ -376,8 +376,8 @@ impl Baboon {
     fn empty_kit(&mut self) -> Kit {
         let id = self.next_kit_id();
         Kit {
-            browser: KitBrowser::new(self.prefs.browser_mode, self.prefs.browser_sort),
-            ..Kit::empty(id, self.default_names.clone())
+            browser: KitBrowser::new(self.model.prefs.browser_mode, self.model.prefs.browser_sort),
+            ..Kit::empty(id, self.model.default_names.clone())
         }
     }
 
@@ -386,8 +386,8 @@ impl Baboon {
     pub(in crate::app) fn add_kit(&mut self) -> KitId {
         let kit = self.empty_kit();
         let id = kit.id;
-        self.kits.push(kit);
-        self.active = self.kits.len() - 1;
+        self.model.kits.push(kit);
+        self.model.active = self.model.kits.len() - 1;
         id
     }
 
@@ -398,29 +398,29 @@ impl Baboon {
         let Some(index) = self.kit_index(id) else {
             return;
         };
-        let closing_campaign_evolved = self.kits[index]
+        let closing_campaign_evolved = self.model.kits[index]
             .source
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if closing_campaign_evolved {
             self.reset_runtime_poke_source_state();
         }
-        self.kits.remove(index);
-        if self.kits.is_empty() {
+        self.model.kits.remove(index);
+        if self.model.kits.is_empty() {
             let kit = self.empty_kit();
-            self.kits.push(kit);
+            self.model.kits.push(kit);
         }
-        self.active = active_after_removal(self.active, index, self.kits.len());
+        self.model.active = active_after_removal(self.model.active, index, self.model.kits.len());
     }
 
     /// Whether any kit holds unsaved edits.
     pub(in crate::app) fn any_kit_dirty(&self) -> bool {
-        self.kits.iter().any(kit_has_dirty_documents)
+        self.model.kits.iter().any(kit_has_dirty_documents)
     }
 
     /// Index of the first kit holding unsaved edits.
     pub(in crate::app) fn first_dirty_kit(&self) -> Option<usize> {
-        self.kits.iter().position(kit_has_dirty_documents)
+        self.model.kits.iter().position(kit_has_dirty_documents)
     }
 
     /// Route an open request for `path` to a kit.
@@ -436,17 +436,17 @@ impl Baboon {
     pub(in crate::app) fn open_kit_for(&mut self, path: &Path) -> bool {
         let path = clean_recent_path(path.to_path_buf());
         if let Some(index) = self
-            .kits
+            .model.kits
             .iter()
             .position(|kit| requested_path_matches(kit, &path))
         {
-            self.active = index;
+            self.model.active = index;
             return true;
         }
-        if !self.kits[self.active].can_accept_source_load() {
+        if !self.model.kits[self.model.active].can_accept_source_load() {
             self.add_kit();
         }
-        self.kits[self.active].requested_path = Some(path);
+        self.model.kits[self.model.active].requested_path = Some(path);
         false
     }
 
@@ -458,7 +458,7 @@ impl Baboon {
         let Some(index) = self.kit_index(kit) else {
             return;
         };
-        self.kits[index].release_source_load();
+        self.model.kits[index].release_source_load();
     }
 
     /// Install a freshly loaded source into the active kit, replacing whatever
@@ -466,29 +466,29 @@ impl Baboon {
     /// the kit strip; until then this preserves single-source behavior.
     pub(in crate::app) fn install_loaded_source(&mut self, source: LoadedSourceData) {
         let mut names = source.names.clone();
-        names.merge_missing(self.default_names.clone());
+        names.merge_missing(self.model.default_names.clone());
         let id = self.active_kit_id();
-        let index = self.active;
+        let index = self.model.active;
         // The requested path outlives the load it started, so a later open of
         // the same folder can find this kit.
-        let requested_path = self.kits[index].requested_path.clone();
-        let profile = self.kits[index].profile.clone();
+        let requested_path = self.model.kits[index].requested_path.clone();
+        let profile = self.model.kits[index].profile.clone();
         // The whole restore plan, staged before the load, carries over.
-        let restore = std::mem::take(&mut self.kits[index].restore);
+        let restore = std::mem::take(&mut self.model.kits[index].restore);
         // A project staged for this source is still waiting for it; the
         // previous source's open project is not carried.
-        let pending_project = std::mem::take(&mut self.kits[index].project.pending);
+        let pending_project = std::mem::take(&mut self.model.kits[index].project.pending);
         // The browser view belongs to the workspace, not to the source in it:
         // reloading a kit — or restoring one, which stages the saved view
         // before the load lands — must not snap it back to the default.
-        let browser = KitBrowser::new(self.kits[index].browser.mode, self.kits[index].browser.sort);
+        let browser = KitBrowser::new(self.model.kits[index].browser.mode, self.model.kits[index].browser.sort);
         // Carried, then moved on, never reset: a job stamped by the source
         // being replaced must not resolve against the new one. Rebuilding
         // from `Kit::empty` reset it to 0, and the load handler's bump then
         // gave every source in the kit generation 1, so a stale result from
         // the previous source passed `resolve_stamp`.
-        let generation = self.kits[index].generation.wrapping_add(1);
-        self.kits[index] = Kit {
+        let generation = self.model.kits[index].generation.wrapping_add(1);
+        self.model.kits[index] = Kit {
             source: Some(source),
             generation,
             names,
@@ -500,7 +500,7 @@ impl Baboon {
                 active: None,
                 pending: pending_project,
             },
-            ..Kit::empty(id, self.default_names.clone())
+            ..Kit::empty(id, self.model.default_names.clone())
         };
     }
 }

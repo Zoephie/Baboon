@@ -25,7 +25,7 @@ fn open_folder_launches_the_platform_file_manager() {
         launched,
         Some((expected.into(), vec![folder.clone().into_os_string()]))
     );
-    assert!(app.status.starts_with("Opened Tag folder"), "{}", app.status);
+    assert!(app.model.status.starts_with("Opened Tag folder"), "{}", app.model.status);
 
     // A folder that is not there launches nothing.
     let mut launched = false;
@@ -34,5 +34,5 @@ fn open_folder_launches_the_platform_file_manager() {
         Ok(())
     });
     assert!(!launched);
-    assert!(app.status.contains("not found"), "{}", app.status);
+    assert!(app.model.status.contains("not found"), "{}", app.model.status);
 }

@@ -23,7 +23,7 @@ fn draw_tiles(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
 fn a_clean_pane_describes_the_package_and_offers_its_views() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
-    let bytes = app.kits[0].chimp.documents[THING].original.len();
+    let bytes = app.model.kits[0].chimp.documents[THING].original.len();
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
     let utoc = install.root.join("Paks").join("pakchunk0-Windows.utoc");
@@ -42,7 +42,7 @@ fn a_clean_pane_describes_the_package_and_offers_its_views() {
     assert!(!frames.shows("Texture") && !frames.shows("Mesh"));
     frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
     assert!(!app.has_chimp_save_dialog(), "disabled while clean");
-    assert_eq!(app.kits[0].chimp.documents[THING].edits, 0);
+    assert_eq!(app.model.kits[0].chimp.documents[THING].edits, 0);
 }
 
 /// An edit made in the pane marks the document modified, counts it,
@@ -55,17 +55,17 @@ fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
     let mut frames = Frames::new();
     frames.click_exact("Properties", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.kits[0].chimp.documents[THING].view,
+        app.model.kits[0].chimp.documents[THING].view,
         ChimpDocumentView::Properties
     );
     assert!(frames.shows("●  Thing"));
-    assert!(!app.kits[0].chimp.documents[THING].dirty);
+    assert!(!app.model.kits[0].chimp.documents[THING].dirty);
 
     // The editor sits in a panel nested inside the pane's own.
     frames.value_x = VALUE_X - 8.0;
     let before = frames.time();
     frames.enter_value_of("Count", "42", &mut draw_pane(&mut app, THING));
-    let document = &app.kits[0].chimp.documents[THING];
+    let document = &app.model.kits[0].chimp.documents[THING];
     assert!(matches!(first_value(document, "Count"), PropValue::Int(42)));
     assert!(document.dirty);
     assert_eq!(document.edits, 1);
@@ -78,7 +78,7 @@ fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
     );
 
     frames.enter_value_of("Count", "43", &mut draw_pane(&mut app, THING));
-    let document = &app.kits[0].chimp.documents[THING];
+    let document = &app.model.kits[0].chimp.documents[THING];
     assert_eq!(document.edits, 2);
     assert!(document.checkpoint_due.unwrap() > first, "pushed back");
 
@@ -95,7 +95,7 @@ fn the_header_view_edits_and_scans_through_the_pane() {
     let mut frames = Frames::new();
     frames.click_exact("Header", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.kits[0].chimp.documents[THING].view,
+        app.model.kits[0].chimp.documents[THING].view,
         ChimpDocumentView::Header
     );
     frames.click_exact("Rocket", 0, &mut draw_pane(&mut app, THING));
@@ -105,7 +105,7 @@ fn the_header_view_edits_and_scans_through_the_pane() {
         egui::Modifiers::NONE,
         &mut draw_pane(&mut app, THING),
     );
-    let document = &app.kits[0].chimp.documents[THING];
+    let document = &app.model.kits[0].chimp.documents[THING];
     assert_eq!(document.header.name_map.names()[2], "Comet");
     assert!(document.dirty);
     assert_eq!(document.edits, 1);
@@ -116,12 +116,12 @@ fn the_header_view_edits_and_scans_through_the_pane() {
         &mut draw_pane(&mut app, THING),
     );
     assert!(matches!(
-        app.kits[0].chimp.documents[THING].referrers,
+        app.model.kits[0].chimp.documents[THING].referrers,
         ChimpReferrerState::Scanning
     ));
     apply_until(&mut app, |app| {
         matches!(
-            app.kits[0].chimp.documents[THING].referrers,
+            app.model.kits[0].chimp.documents[THING].referrers,
             ChimpReferrerState::Done(_)
         )
     });
@@ -138,13 +138,13 @@ fn the_metadata_view_and_the_orphaned_and_unloaded_states() {
     let mut frames = Frames::new();
     frames.click_exact("Metadata", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.kits[0].chimp.documents[THING].view,
+        app.model.kits[0].chimp.documents[THING].view,
         ChimpDocumentView::Metadata
     );
     assert!(frames.shows("Decoded package metadata"));
     assert!(frames.shows("Copy metadata JSON"));
 
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .get_mut(THING)
@@ -170,7 +170,7 @@ fn the_metadata_view_and_the_orphaned_and_unloaded_states() {
 fn the_tab_menu_closes_clean_packages_and_keeps_modified_ones() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING, OTHER]);
-    app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
+    app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_tiles(&mut app));
     assert!(frames.shows("• Thing"));
@@ -178,22 +178,22 @@ fn the_tab_menu_closes_clean_packages_and_keeps_modified_ones() {
 
     frames.right_click_exact("• Thing", &mut draw_tiles(&mut app));
     frames.click_exact("Close", 0, &mut draw_tiles(&mut app));
-    assert!(app.kits[0].chimp.documents.contains_key(THING));
+    assert!(app.model.kits[0].chimp.documents.contains_key(THING));
     assert_eq!(
-        app.status,
+        app.model.status,
         "Save or discard modified Chimp packages before closing them."
     );
 
     frames.right_click_exact("• Thing", &mut draw_tiles(&mut app));
     frames.click("Close all but this", &mut draw_tiles(&mut app));
-    assert!(!app.kits[0].chimp.documents.contains_key(OTHER));
-    assert_eq!(app.kits[0].chimp.open_packages, [THING]);
+    assert!(!app.model.kits[0].chimp.documents.contains_key(OTHER));
+    assert_eq!(app.model.kits[0].chimp.open_packages, [THING]);
 
-    app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = false;
+    app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = false;
     frames.right_click_exact("Thing", &mut draw_tiles(&mut app));
     frames.click_exact("Close all", 0, &mut draw_tiles(&mut app));
-    assert!(app.kits[0].chimp.documents.is_empty());
-    assert!(app.kits[0].chimp.open_packages.is_empty());
+    assert!(app.model.kits[0].chimp.documents.is_empty());
+    assert!(app.model.kits[0].chimp.open_packages.is_empty());
     frames.frame(Vec::new(), &mut draw_tiles(&mut app));
     assert!(frames.shows("Select a package to inspect it."));
 }

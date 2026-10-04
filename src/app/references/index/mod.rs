@@ -16,12 +16,12 @@ impl Baboon {
             return true;
         };
         // The build is over whether or not its result is still wanted.
-        self.kits[kit_index].index_jobs.reference_progress = None;
-        self.kits[kit_index].index_jobs.building_references = false;
+        self.model.kits[kit_index].index_jobs.reference_progress = None;
+        self.model.kits[kit_index].index_jobs.building_references = false;
         let paired_entry_index_build =
-            std::mem::take(&mut self.kits[kit_index].index_jobs.references_for_entry_index);
+            std::mem::take(&mut self.model.kits[kit_index].index_jobs.references_for_entry_index);
         let changed_during_build = std::mem::take(
-            &mut self.kits[kit_index]
+            &mut self.model.kits[kit_index]
                 .index_jobs
                 .references_changed_during_build,
         );
@@ -41,7 +41,7 @@ impl Baboon {
                 None => index.clear_tag(&key),
             }
         }
-        if let Some(source) = self.kits[kit_index].source.as_mut() {
+        if let Some(source) = self.model.kits[kit_index].source.as_mut() {
             let n = index.len();
             // An incomplete index is used for this session but not saved: saved,
             // it would load back next time as complete.
@@ -59,7 +59,7 @@ impl Baboon {
                 });
             }
             source.reverse_dependencies = Some(index);
-            self.status = if missing > 0 {
+            self.model.status = if missing > 0 {
                 format!(
                     "Reference index built without {missing} tag(s): a reader crashed on them. \
                      Rebuild it to try again."
@@ -86,10 +86,10 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        if !self.kits[kit_index].index_jobs.building_references {
+        if !self.model.kits[kit_index].index_jobs.building_references {
             return true;
         }
-        if let Some(progress) = self.kits[kit_index].index_jobs.reference_progress.as_mut() {
+        if let Some(progress) = self.model.kits[kit_index].index_jobs.reference_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
         }
@@ -107,7 +107,7 @@ impl Baboon {
             phase: progress.phase.clone(),
             progress: progress.progress,
         });
-        self.status = format!("{}: {}", progress.label, progress.phase);
+        self.model.status = format!("{}: {}", progress.label, progress.phase);
         false
     }
 
@@ -126,17 +126,17 @@ impl Baboon {
         let done = match result {
             Ok(done) => done,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         };
         // The kit was closed or reloaded while the job ran: the work on disk is
         // done, but there is no longer anything here to apply it to.
         let Some(kit_index) = self.resolve_stamp(stamp) else {
-            self.status = done.status;
+            self.model.status = done.status;
             return false;
         };
-        if let Some(source) = self.kits[kit_index].source.as_mut() {
+        if let Some(source) = self.model.kits[kit_index].source.as_mut() {
             source.entries.clear();
             source.all_entries = done.all_entries;
             source.tree = done.tree;
@@ -165,9 +165,9 @@ impl Baboon {
                 .as_ref()
                 .map(|(from, to)| (from.as_path(), to.as_path()));
             self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys, moved_folder);
-            self.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
+            self.model.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
         }
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         kit.parsed_tags.clear();
         kit.loading_tags.clear();
         kit.caches.bitmap_previews.clear();
@@ -180,7 +180,7 @@ impl Baboon {
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));
         trim_terminal_lines(&mut self.kit_tools.terminal.lines);
         self.kit_tools.terminal.scroll_to_bottom = true;
-        self.status = done.status;
+        self.model.status = done.status;
         false
     }
 }

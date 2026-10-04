@@ -15,10 +15,10 @@ impl Baboon {
 
         let mut open = self.kit_tools.tool_commands.open;
         let window_size = self
-            .prefs
+            .model.prefs
             .tool_commands_window_size
             .unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
-        let mut window_pos = self.prefs.tool_commands_window_pos.unwrap_or_else(|| {
+        let mut window_pos = self.model.prefs.tool_commands_window_pos.unwrap_or_else(|| {
             let available = ctx.content_rect();
             egui::pos2(
                 available.center().x - window_size.x * 0.5,
@@ -100,17 +100,17 @@ impl Baboon {
                 .available_height()
                 .max(MIN_TOOL_COMMANDS_WINDOW_SIZE.y - 80.0);
             let max_left_width = (available_width - 320.0).max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
-            self.prefs.tool_commands_left_width = self
-                .prefs
+            self.model.prefs.tool_commands_left_width = self
+                .model.prefs
                 .tool_commands_left_width
                 .clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
             ui.horizontal(|ui| {
                 ui.set_height(available_height);
                 ui.allocate_ui_with_layout(
-                    Vec2::new(self.prefs.tool_commands_left_width, available_height),
+                    Vec2::new(self.model.prefs.tool_commands_left_width, available_height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        ui.set_width(self.prefs.tool_commands_left_width);
+                        ui.set_width(self.model.prefs.tool_commands_left_width);
                         ui.label(RichText::new("Commands").color(text_dark()).strong());
                         ui.separator();
                         let list_height = ui.available_height().max(120.0);
@@ -134,7 +134,7 @@ impl Baboon {
                     Stroke::new(2.0_f32, handle_color),
                 );
                 if handle_response.dragged() {
-                    self.prefs.tool_commands_left_width = (self.prefs.tool_commands_left_width
+                    self.model.prefs.tool_commands_left_width = (self.model.prefs.tool_commands_left_width
                         + ui.input(|input| input.pointer.delta().x))
                     .clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
                 }
@@ -156,8 +156,8 @@ impl Baboon {
         });
         if let Some(response) = response {
             let rect = response.response.rect;
-            self.prefs.tool_commands_window_pos = dragged_window_pos.or(Some(rect.min));
-            self.prefs.tool_commands_window_size = Some(rect.size());
+            self.model.prefs.tool_commands_window_pos = dragged_window_pos.or(Some(rect.min));
+            self.model.prefs.tool_commands_window_size = Some(rect.size());
         }
         if close_requested {
             open = false;
@@ -214,7 +214,7 @@ impl Baboon {
                 ui.add_space(6.0);
             }
             let collapsed = self
-                .prefs
+                .model.prefs
                 .tool_commands_collapsed_categories
                 .contains(&category);
             let mut toggle_clicked = false;
@@ -245,17 +245,17 @@ impl Baboon {
             });
             if toggle_clicked {
                 if collapsed {
-                    self.prefs
+                    self.model.prefs
                         .tool_commands_collapsed_categories
                         .remove(&category);
                 } else {
-                    self.prefs
+                    self.model.prefs
                         .tool_commands_collapsed_categories
                         .insert(category.clone());
                 }
             }
             if self
-                .prefs
+                .model.prefs
                 .tool_commands_collapsed_categories
                 .contains(&category)
             {
@@ -477,7 +477,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
-        let layout = self.kit_layout_for(self.active);
+        let layout = self.kit_layout_for(self.model.active);
         let kit_root = layout.as_ref().map(|layout| layout.root.clone());
         let data_root = layout.as_ref().map(|layout| layout.data.clone());
         let tags_root = layout.as_ref().map(|layout| layout.tags.clone());

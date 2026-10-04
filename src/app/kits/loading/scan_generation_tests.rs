@@ -33,7 +33,7 @@ fn a_finished_scan_moves_the_kit_generation() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    let before = app.kits[0].generation;
+    let before = app.model.kits[0].generation;
     let stamp = app.kit_stamp();
     // Not empty: an empty scan leaves the reference build thinking the
     // scan is unfinished, and it starts another scan, which bumps the
@@ -47,10 +47,10 @@ fn a_finished_scan_moves_the_kit_generation() {
     }];
 
     app.handle_all_entries_scanned(stamp, Ok(scanned), &egui::Context::default());
-    assert!(!app.kits[0].scanning_entries, "no second scan was started");
+    assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
 
     std::fs::remove_dir_all(&root).unwrap();
-    assert_ne!(app.kits[0].generation, before);
+    assert_ne!(app.model.kits[0].generation, before);
 }
 
 /// Loading a source into one kit leaves another kit's index work alone.
@@ -60,9 +60,9 @@ fn a_finished_scan_moves_the_kit_generation() {
 #[test]
 fn loading_one_kit_leaves_another_kits_index_build_running() {
     let mut app = Baboon::for_test();
-    app.kits[0].index_jobs.building_references = true;
-    let second = KitId(app.kits[0].id.0 + 1);
-    app.kits.push(Kit::empty(second, TagNameIndex::default()));
+    app.model.kits[0].index_jobs.building_references = true;
+    let second = KitId(app.model.kits[0].id.0 + 1);
+    app.model.kits.push(Kit::empty(second, TagNameIndex::default()));
 
     app.handle_source_loaded(
         second,
@@ -87,7 +87,7 @@ fn loading_one_kit_leaves_another_kits_index_build_running() {
         &egui::Context::default(),
     );
 
-    assert!(app.kits[0].index_jobs.building_references);
+    assert!(app.model.kits[0].index_jobs.building_references);
 }
 
 /// An empty tags folder scans to nothing, and that is a finished scan.
@@ -129,8 +129,8 @@ fn an_empty_folder_is_scanned_once() {
     app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
 
     std::fs::remove_dir_all(&root).unwrap();
-    assert!(!app.kits[0].scanning_entries, "no second scan was started");
-    let index = app.kits[0]
+    assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
+    let index = app.model.kits[0]
         .source
         .as_ref()
         .unwrap()

@@ -52,7 +52,7 @@ impl Baboon {
                 .clicked()
             {
                 self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
-                    kit: self.kits[kit_index].id,
+                    kit: self.model.kits[kit_index].id,
                     packages,
                     pending_action: None,
                     error: None,
@@ -61,10 +61,10 @@ impl Baboon {
         });
         self.draw_chimp_level_progress(ui, kit_index);
         ui.add_space(4.0);
-        let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
+        let ready = matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
         egui::Panel::left(egui::Id::new((
             "chimp_package_browser",
-            self.kits[kit_index].id.0,
+            self.model.kits[kit_index].id.0,
         )))
         .resizable(true)
         .default_size(360.0)
@@ -84,9 +84,9 @@ impl Baboon {
             )
             .show(ui, |ui| {
                 if ready {
-                    match self.kits[kit_index].chimp.browser {
+                    match self.model.kits[kit_index].chimp.browser {
                         ChimpBrowser::Folders => {
-                            match self.kits[kit_index].chimp.folder_selection {
+                            match self.model.kits[kit_index].chimp.folder_selection {
                                 ChimpFolderSelection::Package => {
                                     self.draw_chimp_tiles(ui, ctx, kit_index)
                                 }
@@ -115,7 +115,7 @@ impl Baboon {
     /// sits there — the one thing a user cannot tell from a frozen-looking
     /// screen is the difference between working and stuck.
     fn draw_chimp_level_progress(&mut self, ui: &mut Ui, kit_index: usize) {
-        let kit = self.kits[kit_index].id;
+        let kit = self.model.kits[kit_index].id;
         let Some(job) = self.chimp.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
             return;
         };
@@ -163,7 +163,7 @@ impl Baboon {
     }
 
     fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
-        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+        if matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Loading) {
             crate::app::shell::loading::centered_loading_state(
                 ui,
                 "Please wait — Chimp is starting up…",
@@ -175,7 +175,7 @@ impl Baboon {
             ui.add_space(48.0);
             ui.heading("Chimp");
             ui.add_space(8.0);
-            match &self.kits[kit_index].chimp.mount {
+            match &self.model.kits[kit_index].chimp.mount {
                 ChimpMount::Idle => {
                     ui.label("The Unreal package index has not been started.");
                     if ui.button("Start Chimp").clicked() {
@@ -195,7 +195,7 @@ impl Baboon {
     }
 
     fn draw_chimp_browser(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+        if matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Loading) {
             // Allocate the whole browser body so an otherwise empty loading
             // state cannot collapse the resizable side panel around its icon.
             let available = ui.available_size();
@@ -220,56 +220,56 @@ impl Baboon {
         }
         ui.horizontal(|ui| {
             for (browser, label) in ChimpBrowser::TABS {
-                ui.selectable_value(&mut self.kits[kit_index].chimp.browser, browser, label);
+                ui.selectable_value(&mut self.model.kits[kit_index].chimp.browser, browser, label);
             }
         });
         ui.add_space(4.0);
         let response = ui.add(
-            egui::TextEdit::singleline(&mut self.kits[kit_index].chimp.filter)
+            egui::TextEdit::singleline(&mut self.model.kits[kit_index].chimp.filter)
                 .hint_text(placeholder_text("Search package or container…"))
                 .desired_width(f32::INFINITY),
         );
         if response.changed() {
-            self.kits[kit_index].chimp.reset_filter();
+            self.model.kits[kit_index].chimp.reset_filter();
         }
         ui.add_space(4.0);
 
-        let world = match &self.kits[kit_index].chimp.mount {
+        let world = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => {
                 self.draw_chimp_mount_status(ui, kit_index);
                 return;
             }
         };
-        self.kits[kit_index].chimp.refresh_filter(&world);
+        self.model.kits[kit_index].chimp.refresh_filter(&world);
         // Container diagnostics are not surfaced here. A mount routinely skips
         // archives that carry nothing Chimp reads, and reporting that above the
         // browser on every view described the mount rather than anything the
         // reader can act on. The Archives tab still lists what it could not
         // open, which is where that question is actually being asked.
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Archives {
+        if self.model.kits[kit_index].chimp.browser == ChimpBrowser::Archives {
             self.draw_chimp_archives(ui, &world, kit_index);
             return;
         }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Files {
+        if self.model.kits[kit_index].chimp.browser == ChimpBrowser::Files {
             self.draw_chimp_pak_files(ui, &world, kit_index);
             return;
         }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Folders {
+        if self.model.kits[kit_index].chimp.browser == ChimpBrowser::Folders {
             self.draw_chimp_folders(ui, ctx, &world, kit_index);
             return;
         }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Groups {
+        if self.model.kits[kit_index].chimp.browser == ChimpBrowser::Groups {
             self.draw_chimp_groups(ui, ctx, &world, kit_index);
             return;
         }
-        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_packages);
-        let selected = self.kits[kit_index].chimp.selected_package.clone();
+        let indices = Arc::clone(&self.model.kits[kit_index].chimp.filtered_packages);
+        let selected = self.model.kits[kit_index].chimp.selected_package.clone();
         let mut extract_texture = None;
         let mut extract_mesh = None;
         let mut export_level = None;
         egui::ScrollArea::vertical()
-            .id_salt(("chimp_packages", self.kits[kit_index].id.0))
+            .id_salt(("chimp_packages", self.model.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show_rows(ui, 22.0, indices.len(), |ui, range| {
                 for row in range {
@@ -294,7 +294,7 @@ impl Baboon {
                     };
                     let actions = ChimpPackageActions::of(
                         &package.name,
-                        self.kits[kit_index]
+                        self.model.kits[kit_index]
                             .chimp
                             .package_types
                             .get(indices[row])
@@ -336,7 +336,7 @@ impl Baboon {
         world: &World,
         kit_index: usize,
     ) {
-        if self.kits[kit_index].chimp.type_indexing {
+        if self.model.kits[kit_index].chimp.type_indexing {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(
@@ -348,24 +348,24 @@ impl Baboon {
             ui.add_space(4.0);
         }
 
-        let groups = &self.kits[kit_index].chimp.filtered_groups;
-        let selected = self.kits[kit_index].chimp.selected_package.clone();
+        let groups = &self.model.kits[kit_index].chimp.filtered_groups;
+        let selected = self.model.kits[kit_index].chimp.selected_package.clone();
         let mut open_package = None;
         let mut extract_texture = None;
         let mut extract_mesh = None;
         let mut export_level = None;
-        if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
+        if groups.is_empty() && !self.model.kits[kit_index].chimp.type_indexing {
             ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
             return;
         }
 
         egui::ScrollArea::vertical()
-            .id_salt(("chimp_groups", self.kits[kit_index].id.0))
+            .id_salt(("chimp_groups", self.model.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (kind, indices) in groups {
                     egui::CollapsingHeader::new(format!("{kind}  ·  {}", indices.len()))
-                        .id_salt(("chimp_group", self.kits[kit_index].id.0, &kind))
+                        .id_salt(("chimp_group", self.model.kits[kit_index].id.0, &kind))
                         .default_open(false)
                         .show(ui, |ui| {
                             for &index in indices {
@@ -427,16 +427,16 @@ impl Baboon {
     }
 
     fn draw_chimp_archives(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
-        let selected = self.kits[kit_index].chimp.selected_archive;
+        let selected = self.model.kits[kit_index].chimp.selected_archive;
         egui::ScrollArea::vertical()
-            .id_salt(("chimp_archives", self.kits[kit_index].id.0))
+            .id_salt(("chimp_archives", self.model.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if ui
                     .selectable_label(selected.is_none(), "All mounted archives")
                     .clicked()
                 {
-                    let chimp = &mut self.kits[kit_index].chimp;
+                    let chimp = &mut self.model.kits[kit_index].chimp;
                     chimp.selected_archive = None;
                     chimp.browser = ChimpBrowser::Folders;
                     chimp.folder_selection = ChimpFolderSelection::Package;
@@ -467,7 +467,7 @@ impl Baboon {
                             }
                         ));
                     if response.clicked() {
-                        let chimp = &mut self.kits[kit_index].chimp;
+                        let chimp = &mut self.model.kits[kit_index].chimp;
                         chimp.selected_archive = Some(ChimpArchive::IoStore(container.index));
                         chimp.browser = ChimpBrowser::Folders;
                         chimp.folder_selection = ChimpFolderSelection::Package;
@@ -494,7 +494,7 @@ impl Baboon {
                             container.read_order
                         ));
                     if response.clicked() {
-                        let chimp = &mut self.kits[kit_index].chimp;
+                        let chimp = &mut self.model.kits[kit_index].chimp;
                         chimp.selected_archive = Some(ChimpArchive::Pak(container.index));
                         chimp.browser = ChimpBrowser::Folders;
                         chimp.folder_selection = ChimpFolderSelection::File;
@@ -529,7 +529,7 @@ impl Baboon {
         world: &World,
         kit_index: usize,
     ) {
-        let selected_archive = self.kits[kit_index].chimp.selected_archive;
+        let selected_archive = self.model.kits[kit_index].chimp.selected_archive;
         if let Some(archive) = selected_archive {
             ui.horizontal(|ui| {
                 let path = match archive {
@@ -542,21 +542,21 @@ impl Baboon {
                     .unwrap_or("archive");
                 ui.label(RichText::new(name).strong());
                 if ui.small_button("Show all").clicked() {
-                    let chimp = &mut self.kits[kit_index].chimp;
+                    let chimp = &mut self.model.kits[kit_index].chimp;
                     chimp.selected_archive = None;
                     chimp.reset_filter();
                 }
             });
             ui.separator();
         }
-        let selected_package = self.kits[kit_index].chimp.selected_package.clone();
-        let selected_file = self.kits[kit_index].chimp.selected_file.clone();
+        let selected_package = self.model.kits[kit_index].chimp.selected_package.clone();
+        let selected_file = self.model.kits[kit_index].chimp.selected_file.clone();
         // Borrowed, like the tree beside it: this used to clone the type of
         // every mounted package (about 104k strings) every frame the default
         // Folders tab was drawn, only to satisfy the borrow checker.
-        let chimp = &self.kits[kit_index].chimp;
+        let chimp = &self.model.kits[kit_index].chimp;
         let clicked = egui::ScrollArea::vertical()
-            .id_salt(("chimp_folders", self.kits[kit_index].id.0))
+            .id_salt(("chimp_folders", self.model.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 draw_chimp_folder_node(
@@ -572,7 +572,7 @@ impl Baboon {
             .inner;
         match clicked {
             Some(ChimpTreeClick::Package(package)) => {
-                self.kits[kit_index].chimp.folder_selection = ChimpFolderSelection::Package;
+                self.model.kits[kit_index].chimp.folder_selection = ChimpFolderSelection::Package;
                 self.begin_chimp_open_package(kit_index, package, ctx.clone());
             }
             Some(ChimpTreeClick::ExtractTexture(package)) => {
@@ -585,7 +585,7 @@ impl Baboon {
                 self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
             }
             Some(ChimpTreeClick::File(file)) => {
-                let chimp = &mut self.kits[kit_index].chimp;
+                let chimp = &mut self.model.kits[kit_index].chimp;
                 chimp.folder_selection = ChimpFolderSelection::File;
                 chimp.selected_file = Some(file);
             }
@@ -594,10 +594,10 @@ impl Baboon {
     }
 
     fn draw_chimp_pak_files(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
-        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_files);
-        let selected = self.kits[kit_index].chimp.selected_file.clone();
+        let indices = Arc::clone(&self.model.kits[kit_index].chimp.filtered_files);
+        let selected = self.model.kits[kit_index].chimp.selected_file.clone();
         egui::ScrollArea::vertical()
-            .id_salt(("chimp_pak_files", self.kits[kit_index].id.0))
+            .id_salt(("chimp_pak_files", self.model.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show_rows(ui, 22.0, indices.len(), |ui, range| {
                 for row in range {
@@ -620,21 +620,21 @@ impl Baboon {
                         response
                     };
                     if response.clicked() {
-                        self.kits[kit_index].chimp.selected_file = Some(file.path.clone());
+                        self.model.kits[kit_index].chimp.selected_file = Some(file.path.clone());
                     }
                 }
             });
     }
 
     fn draw_chimp_file(&mut self, ui: &mut Ui, kit_index: usize) {
-        let Some(path) = self.kits[kit_index].chimp.selected_file.clone() else {
+        let Some(path) = self.model.kits[kit_index].chimp.selected_file.clone() else {
             crate::app::shell::frame::centered_empty_state(
                 ui,
                 "Select a file from a legacy .pak container.",
             );
             return;
         };
-        let world = match &self.kits[kit_index].chimp.mount {
+        let world = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
         };
@@ -678,9 +678,9 @@ impl Baboon {
                 .read_pak_provider(provider)
                 .and_then(|bytes| fs::write(&output, bytes).map_err(anyhow::Error::from))
             {
-                Ok(()) => self.status = format!("Extracted {}", output.display()),
+                Ok(()) => self.model.status = format!("Extracted {}", output.display()),
                 Err(error) => {
-                    self.status = format!("Could not extract {}: {error:#}", output.display())
+                    self.model.status = format!("Could not extract {}: {error:#}", output.display())
                 }
             }
         }

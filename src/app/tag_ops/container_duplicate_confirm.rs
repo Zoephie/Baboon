@@ -47,7 +47,7 @@ impl Baboon {
                 };
                 let (label, is_mod) = self.container_label_for_tag(index, &key)?;
                 let utoc = match &entry.location {
-                    TagEntryLocation::Container { container, .. } => self.kits[index]
+                    TagEntryLocation::Container { container, .. } => self.model.kits[index]
                         .source
                         .as_ref()
                         .and_then(|source| match &source.source {

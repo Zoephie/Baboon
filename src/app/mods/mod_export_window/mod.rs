@@ -598,7 +598,7 @@ impl Baboon {
         let destination = dialog.destination();
         let existing = dialog.existing_files();
         let in_game_folder = self
-            .kits
+            .model.kits
             .iter()
             .find(|k| k.id == kit)
             .and_then(|k| k.source.as_ref())
@@ -608,22 +608,22 @@ impl Baboon {
         let name_ok = !dialog.name.trim().is_empty();
         // The editor needs its source's naming and definitions to render values
         // the way the editor does.
-        let kit_index = self.kits.iter().position(|k| k.id == kit);
+        let kit_index = self.model.kits.iter().position(|k| k.id == kit);
         let names = kit_index
-            .map(|index| self.kits[index].names.clone())
+            .map(|index| self.model.kits[index].names.clone())
             .unwrap_or_default();
         let game = kit_index
-            .and_then(|index| self.kits[index].source.as_ref())
+            .and_then(|index| self.model.kits[index].source.as_ref())
             .and_then(|source| source.game.clone());
         let definitions_root = kit_index
-            .and_then(|index| self.kits[index].source.as_ref())
+            .and_then(|index| self.model.kits[index].source.as_ref())
             .and_then(|source| match &source.source {
                 TagSource::LooseFolder {
                     definitions_root, ..
                 } => Some(definitions_root.clone()),
                 _ => None,
             });
-        let expert_mode = self.prefs.expert_mode;
+        let expert_mode = self.model.prefs.expert_mode;
         // Mods installed under `Paks` are mounted like any other container, so
         // they serve their tags in place of the game's. Both facts below follow
         // from that and neither was visible: comparisons here are against the
@@ -1055,7 +1055,7 @@ impl Baboon {
                 .set_title("Save review diagnostic into folder")
                 .pick_folder()
         {
-            self.status = match self.save_review_diagnostic(folder.clone()) {
+            self.model.status = match self.save_review_diagnostic(folder.clone()) {
                 Ok(count) => {
                     format!(
                         "Wrote a diagnostic for {count} tag(s) to {}",

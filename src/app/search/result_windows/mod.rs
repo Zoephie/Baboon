@@ -9,15 +9,15 @@ impl Baboon {
         if self.editor.tag_reference_picker.is_none() {
             return;
         }
-        let expert_mode = self.prefs.expert_mode;
+        let expert_mode = self.model.prefs.expert_mode;
         // The catalog has to come from the kit the picker was opened from, the
         // same kit its selection is applied to — otherwise it would offer
         // another game's tags to pick from.
         let picker_kit = self
             .editor.tag_reference_picker_kit
             .and_then(|kit| self.resolve_kit(kit))
-            .unwrap_or(self.active);
-        let Some(catalog) = self.kits[picker_kit]
+            .unwrap_or(self.model.active);
+        let Some(catalog) = self.model.kits[picker_kit]
             .source
             .as_ref()
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
@@ -62,7 +62,7 @@ impl Baboon {
                 .take()
                 .expect("picker remains open while processing selection");
             let kit = picker_kit;
-            if self.kits[kit].parsed_tags.contains_key(&picker.tag_key) {
+            if self.model.kits[kit].parsed_tags.contains_key(&picker.tag_key) {
                 let ops = DeferredOps {
                     pending: vec![PendingFieldEdit {
                         path: picker.field_path.clone(),
@@ -81,13 +81,13 @@ impl Baboon {
                     // `insert_clean` from upstream: the picked reference is
                     // now the document's value, so the draft starts
                     // unmodified rather than looking like an uncommitted edit.
-                    self.kits[kit]
+                    self.model.kits[kit]
                         .edit_buffers
                         .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
                     self.invalidate_tag_caches_in(kit, &picker.tag_key);
                 }
             } else {
-                self.status = "The tag being edited is no longer open".to_owned();
+                self.model.status = "The tag being edited is no longer open".to_owned();
             }
         } else if !open {
             self.editor.tag_reference_picker = None;
@@ -112,7 +112,7 @@ impl Baboon {
             .as_ref()
             .map(|explorer| explorer.kit)
             .expect("checked above");
-        let explorer_kit_index = self.resolve_kit(explorer_kit).unwrap_or(self.active);
+        let explorer_kit_index = self.resolve_kit(explorer_kit).unwrap_or(self.model.active);
         let mut filter = self
             .references.content_explorer
             .as_ref()
@@ -163,8 +163,8 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.kits[self.active].index_jobs.building_references
-                            || self.kits[explorer_kit_index].scanning_entries
+                        let note = if self.model.kits[self.model.active].index_jobs.building_references
+                            || self.model.kits[explorer_kit_index].scanning_entries
                         {
                             "Reference index is building — reopen this in a moment."
                         } else {
@@ -251,7 +251,7 @@ impl Baboon {
             // close the window if that kit has gone.
             Some(_) if !self.focus_navigation_kit(explorer_kit) => {
                 self.references.content_explorer = None;
-                self.status = "That workspace has been closed".to_owned();
+                self.model.status = "That workspace has been closed".to_owned();
             }
             Some(ExplorerAct::Navigate(entry)) => self.content_explorer_navigate(entry),
             Some(ExplorerAct::Back) => self.content_explorer_back(),
@@ -468,7 +468,7 @@ impl Baboon {
         // opening some unrelated tag that happens to share the key.
         let acting = to_jump.is_some() || to_open.is_some() || to_reveal.is_some();
         if acting && !self.focus_navigation_kit(results.kit) {
-            self.status = "That workspace has been closed".to_owned();
+            self.model.status = "That workspace has been closed".to_owned();
             if open {
                 self.search.query_results = Some(results);
             }
@@ -551,9 +551,9 @@ impl Baboon {
                     .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");
                 });
                 ui.add_space(4.0);
-                let indexed = self.kits[self.active]
+                let indexed = self.model.kits[self.model.active]
                     .field_index
-                    .is_ready_for(self.kits[self.active].generation);
+                    .is_ready_for(self.model.kits[self.model.active].generation);
                 ui.horizontal(|ui| {
                     if indexed {
                         ui.label(
@@ -561,7 +561,7 @@ impl Baboon {
                                 .color(Color32::from_rgb(120, 170, 90))
                                 .small(),
                         );
-                    } else if self.kits[self.active].field_index.is_building() {
+                    } else if self.model.kits[self.model.active].field_index.is_building() {
                         ui.spinner();
                         ui.label(
                             RichText::new("building index…")

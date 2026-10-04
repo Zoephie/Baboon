@@ -200,7 +200,7 @@ fn matching_tag_keeps_path_and_type_below_tags_root() {
 fn a_superseded_compare_git_read_is_dropped() {
     let mut app = Baboon::for_test();
     app.compare.tag_diff = Some(TagDiffState {
-        kit: app.kits[0].id,
+        kit: app.model.kits[0].id,
         a_key: "file:a.weapon".to_owned(),
         source: TagCompareSource::GitHistory,
         b_kit: None,

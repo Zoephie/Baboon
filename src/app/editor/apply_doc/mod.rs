@@ -25,12 +25,12 @@ impl Baboon {
             if !ops.is_empty() {
                 self.refuse_read_only_edit(kit_index);
             }
-            if let Some(doc) = self.kits[kit_index].parsed_tags.get_mut(tag_key) {
+            if let Some(doc) = self.model.kits[kit_index].parsed_tags.get_mut(tag_key) {
                 doc.journal.end_edit_window();
             }
             return None;
         }
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         let doc = kit.parsed_tags.get_mut(tag_key)?;
         let applied = apply_deferred_ops(doc, ops, label);
         if step == UndoStep::Own {
@@ -47,7 +47,7 @@ impl Baboon {
             preview.invalidate_load();
         }
         if let Some(status) = &applied.status {
-            self.status = status.clone();
+            self.model.status = status.clone();
         }
         Some(applied)
     }

@@ -35,10 +35,10 @@ impl Baboon {
         if self.refuse_read_only_edit(kit_index) {
             return;
         }
-        if self.kits[kit_index].blam.running {
+        if self.model.kits[kit_index].blam.running {
             return;
         }
-        let asset_rel = self.kits[kit_index]
+        let asset_rel = self.model.kits[kit_index]
             .blam
             .asset_path
             .trim()
@@ -46,29 +46,29 @@ impl Baboon {
             .trim_matches('/')
             .to_owned();
         if asset_rel.is_empty() {
-            self.kits[kit_index].blam.status = "Pick an asset data folder first".to_owned();
+            self.model.kits[kit_index].blam.status = "Pick an asset data folder first".to_owned();
             return;
         }
         let Some(layout) = self.kit_layout_for(kit_index) else {
-            self.kits[kit_index].blam.status =
+            self.model.kits[kit_index].blam.status =
                 "This workspace has no loose editing kit to import into".to_owned();
             return;
         };
         let Some(tags_root) = self.loaded_tags_root_for(kit_index) else {
-            self.kits[kit_index].blam.status =
+            self.model.kits[kit_index].blam.status =
                 "This workspace has no loose tags folder to import into".to_owned();
             return;
         };
-        let Some(game) = self.kits[kit_index]
+        let Some(game) = self.model.kits[kit_index]
             .source
             .as_ref()
             .and_then(|source| source.game.clone())
         else {
-            self.kits[kit_index].blam.status =
+            self.model.kits[kit_index].blam.status =
                 "This workspace's game is unknown, so no schemas can be chosen".to_owned();
             return;
         };
-        let names = self.kits[kit_index]
+        let names = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.names.clone())
@@ -78,7 +78,7 @@ impl Baboon {
             .next()
             .unwrap_or(asset_rel.as_str())
             .to_owned();
-        let blam = &self.kits[kit_index].blam;
+        let blam = &self.model.kits[kit_index].blam;
         let job = BlamImportJob {
             data_dir: layout.data.join(&asset_rel),
             tags_root,
@@ -93,8 +93,8 @@ impl Baboon {
             structure: blam.import_structure,
         };
         let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
+            kit: self.model.kits[kit_index].id,
+            generation: self.model.kits[kit_index].generation,
         };
         let tx = self.tx.clone();
         let mut ticked = Vec::new();
@@ -110,7 +110,7 @@ impl Baboon {
         if job.structure {
             ticked.push("structure");
         }
-        let blam = &mut self.kits[kit_index].blam;
+        let blam = &mut self.model.kits[kit_index].blam;
         blam.running = true;
         blam.status = "Importing…".to_owned();
         blam.log.clear();
@@ -149,7 +149,7 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        let blam = &mut self.kits[kit_index].blam;
+        let blam = &mut self.model.kits[kit_index].blam;
         if kind == BlamLogKind::Info {
             blam.status = message.clone();
         }
@@ -167,20 +167,20 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.kits[kit_index].blam.running = false;
+        self.model.kits[kit_index].blam.running = false;
         let created_count = created.len();
-        let folder_seeds = self.kits[kit_index].folder_seeds();
+        let folder_seeds = self.model.kits[kit_index].folder_seeds();
         for (entry, tag) in created {
             let key = entry.key.clone();
-            if let Some(source) = self.kits[kit_index].source.as_mut() {
+            if let Some(source) = self.model.kits[kit_index].source.as_mut() {
                 register_created_tag_in_source(source, entry, &folder_seeds);
             }
             // A re-imported tag that is open would keep showing — and could
             // save — the bytes from before the import; replace the document
             // with what is now on disk. Any unsaved edits to it are already
             // overwritten on disk, which is what Import was asked to do.
-            if self.kits[kit_index].parsed_tags.contains_key(&key) {
-                self.kits[kit_index]
+            if self.model.kits[kit_index].parsed_tags.contains_key(&key) {
+                self.model.kits[kit_index]
                     .parsed_tags
                     .insert(key, TagDocument::clean(tag));
             }
@@ -188,12 +188,12 @@ impl Baboon {
         if created_count > 0 {
             // The source's content changed: stale caches and in-flight work
             // keyed to the old revision must not answer for the new one.
-            self.kits[kit_index].generation = self.kits[kit_index].generation.wrapping_add(1);
-            self.kits[kit_index].field_index.invalidate();
+            self.model.kits[kit_index].generation = self.model.kits[kit_index].generation.wrapping_add(1);
+            self.model.kits[kit_index].field_index.invalidate();
         }
         let mut failures = 0usize;
         for (label, result) in &outcomes {
-            let blam = &mut self.kits[kit_index].blam;
+            let blam = &mut self.model.kits[kit_index].blam;
             match result {
                 Ok(summary) => blam.push_log(BlamLogKind::Good, format!("{label}: {summary}")),
                 Err(error) => {
@@ -209,7 +209,7 @@ impl Baboon {
         } else {
             format!("Imported {created_count} tag(s), {failures} pipeline(s) failed")
         };
-        let blam = &mut self.kits[kit_index].blam;
+        let blam = &mut self.model.kits[kit_index].blam;
         blam.push_log(
             if failures == 0 && created_count > 0 {
                 BlamLogKind::Good
@@ -219,8 +219,8 @@ impl Baboon {
             tally.clone(),
         );
         blam.status = tally.clone();
-        if kit_index == self.active {
-            self.status = format!("Blam! — {tally}");
+        if kit_index == self.model.active {
+            self.model.status = format!("Blam! — {tally}");
         }
         false
     }

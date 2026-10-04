@@ -17,14 +17,14 @@ impl Baboon {
         let Some(index) = self.resolve_kit(kit) else {
             return true;
         };
-        self.kits[index].loading_tags.remove(&key);
-        if !self.kits[index].open_tabs.iter().any(|tab| tab == &key) {
+        self.model.kits[index].loading_tags.remove(&key);
+        if !self.model.kits[index].open_tabs.iter().any(|tab| tab == &key) {
             return true;
         }
         match result {
             Ok(tag) => {
-                self.status = "Tag loaded".to_owned();
-                self.kits[index]
+                self.model.status = "Tag loaded".to_owned();
+                self.model.kits[index]
                     .parsed_tags
                     .insert(key.clone(), TagDocument::clean(tag));
                 // A restored session stages this tag's undo history before the
@@ -42,7 +42,7 @@ impl Baboon {
                     .push(TerminalLineEntry::new(message.clone()));
                 trim_terminal_lines(&mut self.kit_tools.terminal.lines);
                 self.kit_tools.terminal.scroll_to_bottom = true;
-                self.status = message;
+                self.model.status = message;
             }
         }
         false
@@ -68,15 +68,15 @@ impl Baboon {
         };
         match result {
             Ok(tag) => {
-                if self.kits[index].open_tabs.iter().any(|tab| tab == &key) {
-                    self.kits[index]
+                if self.model.kits[index].open_tabs.iter().any(|tab| tab == &key) {
+                    self.model.kits[index]
                         .parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
-                    self.kits[index].caches.bitmap_previews.remove(&key);
+                    self.model.kits[index].caches.bitmap_previews.remove(&key);
                 }
-                self.status = "Bitmap reimported and reloaded".to_owned();
+                self.model.status = "Bitmap reimported and reloaded".to_owned();
             }
-            Err(error) => self.status = format!("Bitmap reimport failed: {error}"),
+            Err(error) => self.model.status = format!("Bitmap reimport failed: {error}"),
         }
         false
     }
@@ -87,13 +87,13 @@ mod tag_load_failure_tests;
 
 impl Baboon {
     pub(in crate::app) fn loaded_tags_root(&self) -> Option<PathBuf> {
-        self.loaded_tags_root_for(self.active)
+        self.loaded_tags_root_for(self.model.active)
     }
 
     /// A specific kit's loose tags root. Background work has to name its kit:
     /// the one it started in may no longer be the focused one when it lands.
     pub(in crate::app) fn loaded_tags_root_for(&self, kit: usize) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.kits.get(kit)?.source.as_ref()?.source
+        let TagSource::LooseFolder { root, .. } = &self.model.kits.get(kit)?.source.as_ref()?.source
         else {
             return None;
         };
@@ -101,11 +101,11 @@ impl Baboon {
     }
 
     pub(in crate::app) fn select_entry(&mut self, key: String, ctx: egui::Context) {
-        self.kits[self.active].open_tag_pane(&key);
-        self.kits[self.active].selected_key = Some(key.clone());
+        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.model.kits[self.model.active].selected_key = Some(key.clone());
         // A tag the project has an overlay for opens from the project, not from
         // disk — otherwise reopening it would silently discard its edits.
-        if !self.load_campaign_overlay_for_key(self.active, &key) {
+        if !self.load_campaign_overlay_for_key(self.model.active, &key) {
             self.ensure_tag_loading(key, ctx);
         }
     }
@@ -113,8 +113,8 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn ensure_tag_loading(&mut self, key: String, ctx: egui::Context) {
-        if self.kits[self.active].parsed_tags.contains_key(&key)
-            || self.kits[self.active].loading_tags.contains(&key)
+        if self.model.kits[self.model.active].parsed_tags.contains_key(&key)
+            || self.model.kits[self.model.active].loading_tags.contains(&key)
         {
             return;
         }
@@ -126,7 +126,7 @@ impl Baboon {
         let Some(entry) = source
             .entry_for_key(&key)
             .or_else(|| {
-                self.kits[self.active]
+                self.model.kits[self.model.active]
                     .browser.active_favorite_entries
                     .iter()
                     .find(|e| e.key == key)
@@ -140,15 +140,15 @@ impl Baboon {
         // read — `read_entry` would only fail on the worker thread. Retire the
         // entry here instead of leaving a row that fails forever.
         if matches!(entry.location, TagEntryLocation::NewContainer { .. }) {
-            let kit = self.active;
+            let kit = self.model.active;
             self.forget_new_container_entry(kit, &key);
-            self.status = format!("The unsaved new tag {} was discarded", entry.display_path);
+            self.model.status = format!("The unsaved new tag {} was discarded", entry.display_path);
             return;
         }
         let source_kind = source.source.clone();
         let kit = self.active_kit_id();
-        self.kits[self.active].loading_tags.insert(key.clone());
-        self.status = format!("Loading {}", entry.display_path);
+        self.model.kits[self.model.active].loading_tags.insert(key.clone());
+        self.model.status = format!("Loading {}", entry.display_path);
         let panic_key = key.clone();
         spawn_worker(
             &self.tx,
@@ -168,12 +168,12 @@ impl Baboon {
     /// Kept for save/export paths that address "the current tag".
     #[allow(dead_code)]
     pub(in crate::app) fn selected_entry(&self) -> Option<&TagEntry> {
-        let key = self.kits[self.active].selected_key.as_ref()?;
+        let key = self.model.kits[self.model.active].selected_key.as_ref()?;
         self.entry_for_key(key)
     }
 
     pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
-        self.entry_for_key_in(self.active, key)
+        self.entry_for_key_in(self.model.active, key)
     }
 
     /// Resolve a tag key against a specific kit. Anything that runs for a kit
@@ -181,21 +181,21 @@ impl Baboon {
     /// inside its own source, so resolving it against the active kit silently
     /// finds nothing and the caller skips the tag.
     pub(in crate::app) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
-        self.kits.get(kit)?.entry_for_key(key)
+        self.model.kits.get(kit)?.entry_for_key(key)
     }
 
     pub(in crate::app) fn unload_tag(&mut self, key: &str) {
-        self.kits[self.active].drop_document(key);
+        self.model.kits[self.model.active].drop_document(key);
     }
 
     /// Drop cached previews derived from a tag's contents so they rebuild from
     /// the (newly restored) tag bytes after an undo/redo.
     /// Drop derived previews for `key` in `kit`, after its document changed.
     pub(in crate::app) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
-        if let Some(preview) = self.kits[kit].caches.model_previews.get_mut(key) {
+        if let Some(preview) = self.model.kits[kit].caches.model_previews.get_mut(key) {
             preview.invalidate_load();
         }
-        if let Some(bitmap) = self.kits[kit].caches.bitmap_previews.get_mut(key) {
+        if let Some(bitmap) = self.model.kits[kit].caches.bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
             bitmap.decoding = None;
             bitmap.texture = None;

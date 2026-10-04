@@ -8,17 +8,17 @@ use std::time::Duration;
 fn an_export_that_panics_still_reports_and_replaces_its_status() {
     let mut app = crate::app::Baboon::for_test();
     let ctx = egui::Context::default();
-    app.status = "Extracting bitmap objects/rock".to_owned();
+    app.model.status = "Extracting bitmap objects/rock".to_owned();
     with_panicking_workers(|| {
         spawn_export(&app.tx, &ctx, || Ok("Extracted objects/rock".to_owned()))
     });
     assert!(apply_next_worker_message(&mut app), "the export answered");
-    assert!(app.status.starts_with("The export failed"), "{}", app.status);
+    assert!(app.model.status.starts_with("The export failed"), "{}", app.model.status);
 
     // And one that runs reports its own result.
     spawn_export(&app.tx, &ctx, || Ok("Extracted objects/rock".to_owned()));
     assert!(apply_next_worker_message(&mut app));
-    assert_eq!(app.status, "Extracted objects/rock");
+    assert_eq!(app.model.status, "Extracted objects/rock");
 }
 
 /// The test helper applies results in the order they arrived. It used to
@@ -30,7 +30,7 @@ fn the_test_helper_applies_results_in_arrival_order() {
     app.tx.send(WorkerMessage::ExportFinished(Ok("first".to_owned()))).unwrap();
     app.tx.send(WorkerMessage::ExportFinished(Ok("second".to_owned()))).unwrap();
     assert!(apply_next_worker_message(&mut app));
-    assert_eq!(app.status, "second", "the later result is applied last");
+    assert_eq!(app.model.status, "second", "the later result is applied last");
 }
 
 /// Every export reports through `spawn_export`, not a hand-rolled send

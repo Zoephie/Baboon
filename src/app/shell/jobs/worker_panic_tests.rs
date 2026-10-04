@@ -27,11 +27,11 @@ fn a_source_load_that_panics_releases_its_kit() {
         let mut app = Baboon::for_test();
         let ctx = egui::Context::default();
         with_panicking_workers(|| begin(&mut app, path.clone(), ctx.clone()));
-        assert!(app.kits[0].requested_path.is_some(), "{loader}: reserved");
+        assert!(app.model.kits[0].requested_path.is_some(), "{loader}: reserved");
 
         assert!(apply_next_worker_message(&mut app), "{loader}: the load answered");
-        assert_eq!(app.kits[0].requested_path, None, "{loader}: the kit is free again");
-        assert!(app.status.contains("crashed"), "{loader}: {}", app.status);
+        assert_eq!(app.model.kits[0].requested_path, None, "{loader}: the kit is free again");
+        assert!(app.model.status.contains("crashed"), "{loader}: {}", app.model.status);
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
@@ -65,15 +65,15 @@ fn campaign_evolved_source(root: &Path) -> LoadedSourceData {
 #[test]
 fn a_chimp_mount_that_panics_does_not_stay_loading() {
     let mut app = Baboon::for_test();
-    app.prefs.enable_chimp = true;
+    app.model.prefs.enable_chimp = true;
     app.install_loaded_source(campaign_evolved_source(Path::new("/no/such/Paks")));
     let ctx = egui::Context::default();
     with_panicking_workers(|| app.begin_chimp_mount(0, ctx.clone()));
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Loading));
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
 
     assert!(apply_next_worker_message(&mut app), "the mount answered");
     assert!(
-        matches!(app.kits[0].chimp.mount, ChimpMount::Failed(_)),
+        matches!(app.model.kits[0].chimp.mount, ChimpMount::Failed(_)),
         "the mount settled as failed"
     );
 }
@@ -109,11 +109,11 @@ fn a_field_index_build_that_panics_stops_building() {
     loose_kit(&mut app, &root);
     let ctx = egui::Context::default();
     with_panicking_workers(|| app.begin_build_field_index(ctx.clone()));
-    assert!(app.kits[0].field_index.is_building());
+    assert!(app.model.kits[0].field_index.is_building());
 
     assert!(apply_next_worker_message(&mut app), "the build answered");
-    assert!(!app.kits[0].field_index.is_building());
-    assert!(app.status.contains("crashed"), "{}", app.status);
+    assert!(!app.model.kits[0].field_index.is_building());
+    assert!(app.model.status.contains("crashed"), "{}", app.model.status);
 }
 
 /// While it resolves its source the import dialog spins and repaints every

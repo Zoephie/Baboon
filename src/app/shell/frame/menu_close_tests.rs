@@ -25,21 +25,21 @@ fn view_menu_toggles_keep_it_open_and_an_action_closes_it() {
     idle(&mut h);
     assert!(view_menu_open(&h), "the View menu opened");
 
-    let block_sizes = h.app.prefs.show_block_sizes;
+    let block_sizes = h.app.model.prefs.show_block_sizes;
     h.click("Show block sizes", 0);
     idle(&mut h);
-    assert_eq!(h.app.prefs.show_block_sizes, !block_sizes, "the checkbox toggled");
+    assert_eq!(h.app.model.prefs.show_block_sizes, !block_sizes, "the checkbox toggled");
     assert!(view_menu_open(&h), "a toggle leaves the menu open");
 
-    let expert = h.app.prefs.expert_mode;
+    let expert = h.app.model.prefs.expert_mode;
     h.click("Expert mode", 0);
     idle(&mut h);
-    assert_eq!(h.app.prefs.expert_mode, !expert);
+    assert_eq!(h.app.model.prefs.expert_mode, !expert);
     assert!(view_menu_open(&h), "so does a second one");
 
     h.click("Tag Groups", 0);
     idle(&mut h);
-    assert_eq!(h.app.kits[h.app.active].browser.mode, BrowserMode::Groups);
+    assert_eq!(h.app.model.kits[h.app.model.active].browser.mode, BrowserMode::Groups);
     assert!(!view_menu_open(&h), "an action closes it");
 }
 

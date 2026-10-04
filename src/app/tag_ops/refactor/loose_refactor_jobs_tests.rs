@@ -75,7 +75,7 @@ fn renaming_a_tag_moves_it_and_rewrites_every_referrer() {
     kit.open(&mut app, RENDER);
     kit.open(&mut app, MODEL);
     app.handle_browser_action(BrowserAction::ToggleFavorite(old_key.clone()), ctx());
-    let generation = app.kits[0].generation;
+    let generation = app.model.kits[0].generation;
 
     app.handle_browser_action(BrowserAction::RenameTag(old_key.clone()), ctx());
     {
@@ -91,7 +91,7 @@ fn renaming_a_tag_moves_it_and_rewrites_every_referrer() {
     let new_rel = "objects/props/crate_renamed.render_model";
     let new_key = kit.key(new_rel);
     assert_eq!(
-        app.status,
+        app.model.status,
         "Renamed tag, updated 2 reference(s) in 2 tag(s)"
     );
     assert!(!kit.root.join(RENDER).exists());
@@ -104,20 +104,20 @@ fn renaming_a_tag_moves_it_and_rewrites_every_referrer() {
         );
     }
     // Open state follows the tag to its new key.
-    let tabs = &app.kits[0].open_tabs;
+    let tabs = &app.model.kits[0].open_tabs;
     assert!(tabs.contains(&new_key) && !tabs.contains(&old_key), "{tabs:?}");
     assert!(tabs.contains(&model_key));
-    assert_eq!(app.kits[0].selected_key.as_deref(), Some(model_key.as_str()));
+    assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(model_key.as_str()));
     // Every document is dropped, edited or not, to be read again.
-    assert!(app.kits[0].parsed_tags.is_empty());
-    assert_ne!(app.kits[0].generation, generation);
+    assert!(app.model.kits[0].parsed_tags.is_empty());
+    assert_ne!(app.model.kits[0].generation, generation);
     // Favorites follow it too.
     assert_eq!(
-        app.prefs.editing_kit_favorites[0].tags,
+        app.model.prefs.editing_kit_favorites[0].tags,
         vec![PathBuf::from(new_rel)]
     );
     // The browser and the reference index know the tag by its new path.
-    let source = app.kits[0].source.as_ref().unwrap();
+    let source = app.model.kits[0].source.as_ref().unwrap();
     assert!(source.all_entries.iter().any(|entry| entry.key == new_key));
     assert!(!source.all_entries.iter().any(|entry| entry.key == old_key));
     let index = source.reverse_dependencies.as_ref().expect("the index survives");
@@ -145,18 +145,18 @@ fn a_rename_waits_for_unsaved_edits_and_for_a_running_refactor() {
     app.handle_browser_action(BrowserAction::RenameTag(kit.key(BARREL)), ctx());
     app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = "keg".to_owned();
     app.begin_rename_tag(&ctx());
-    assert_eq!(app.status, "Save or close dirty tags before renaming");
+    assert_eq!(app.model.status, "Save or close dirty tags before renaming");
     assert!(app.tag_ops.rename_tag.is_some(), "the dialog stays open");
     assert!(kit.root.join(BARREL).is_file());
 
-    app.kits[0].parsed_tags.get_mut(&key).unwrap().dirty.clear();
+    app.model.kits[0].parsed_tags.get_mut(&key).unwrap().dirty.clear();
     app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
         label: "Moving".to_owned(),
         phase: "Preparing".to_owned(),
         progress: None,
     });
     app.begin_rename_tag(&ctx());
-    assert_eq!(app.status, "A move/rename is already running");
+    assert_eq!(app.model.status, "A move/rename is already running");
 
     // The name itself is checked before either.
     app.tag_ops.folder_refactor = None;
@@ -167,7 +167,7 @@ fn a_rename_waits_for_unsaved_edits_and_for_a_running_refactor() {
     ] {
         app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = input.to_owned();
         app.begin_rename_tag(&ctx());
-        assert_eq!(app.status, refusal, "{input:?}");
+        assert_eq!(app.model.status, refusal, "{input:?}");
     }
 }
 
@@ -364,8 +364,8 @@ fn renaming_a_folder_moves_its_tags_and_rewrites_referrers_outside_it() {
     assert!(app.tag_ops.folder_refactor.is_some());
     settle(&mut app, "the folder rename");
 
-    assert!(app.status.starts_with("Renamed"), "{}", app.status);
-    assert!(!app.status.contains("NOT"), "{}", app.status);
+    assert!(app.model.status.starts_with("Renamed"), "{}", app.model.status);
+    assert!(!app.model.status.contains("NOT"), "{}", app.model.status);
     assert_eq!(
         tree(&kit),
         vec![
@@ -383,19 +383,19 @@ fn renaming_a_folder_moves_its_tags_and_rewrites_referrers_outside_it() {
         );
     }
     let new_key = kit.key("objects/crates/crate.render_model");
-    assert!(app.kits[0].open_tabs.contains(&new_key));
-    assert!(!app.kits[0].open_tabs.contains(&old_key));
+    assert!(app.model.kits[0].open_tabs.contains(&new_key));
+    assert!(!app.model.kits[0].open_tabs.contains(&old_key));
     assert_eq!(
-        app.prefs.editing_kit_favorites[0].tags,
+        app.model.prefs.editing_kit_favorites[0].tags,
         vec![PathBuf::from("objects/crates/crate.render_model")]
     );
     // A favorited folder follows the rename, as its tags do. It used to be
     // left at the old path and then pruned as missing, losing the favorite.
     assert_eq!(
-        app.prefs.editing_kit_favorites[0].folders,
+        app.model.prefs.editing_kit_favorites[0].folders,
         vec![PathBuf::from("objects/crates")]
     );
-    assert_eq!(app.kits[0].browser.active_favorite_folders.len(), 1);
+    assert_eq!(app.model.kits[0].browser.active_favorite_folders.len(), 1);
 }
 
 #[test]
@@ -511,13 +511,13 @@ fn duplicating_a_tag_copies_its_bytes_beside_it() {
     let copy = kit.root.join("objects/props/crate_copy.model");
     assert_eq!(fs::read(&copy).unwrap(), fs::read(kit.root.join(MODEL)).unwrap());
     assert_eq!(
-        app.status,
+        app.model.status,
         format!("Duplicated {MODEL} → {}", copy.display())
     );
     let copy_key = kit.key("objects/props/crate_copy.model");
     assert!(app.entry_for_key(&copy_key).is_some(), "registered in the browser");
-    assert!(app.kits[0].parsed_tags.contains_key(&copy_key), "and opened clean");
-    assert!(!app.kits[0].parsed_tags[&copy_key].dirty.is_set());
+    assert!(app.model.kits[0].parsed_tags.contains_key(&copy_key), "and opened clean");
+    assert!(!app.model.kits[0].parsed_tags[&copy_key].dirty.is_set());
     assert!(app.tag_ops.rename_tag.is_none());
 
     // A name already taken is refused, and nothing is written.
@@ -527,7 +527,7 @@ fn duplicating_a_tag_copies_its_bytes_beside_it() {
     app.begin_rename_tag(&ctx());
     assert!(app.tag_ops.rename_tag.is_some(), "the dialog stays open");
     assert_eq!(fs::read(kit.root.join(BARREL)).unwrap(), barrel);
-    assert_eq!(app.status, "A tag with that name already exists in this source");
+    assert_eq!(app.model.status, "A tag with that name already exists in this source");
 }
 
 /// A dirty tag is duplicated with its edit; the original file is not saved.
@@ -547,7 +547,7 @@ fn duplicating_an_edited_tag_copies_the_edit_not_the_file() {
     let copy = TagFile::read(kit.root.join("objects/props/crate_edited.model")).unwrap();
     assert_eq!(real_of(&copy, "disappear distance"), Some(9.0));
     assert_eq!(fs::read(kit.root.join(MODEL)).unwrap(), original);
-    assert!(app.kits[0].parsed_tags[&key].dirty.is_set(), "the original stays dirty");
+    assert!(app.model.kits[0].parsed_tags[&key].dirty.is_set(), "the original stays dirty");
 }
 
 #[test]
@@ -561,7 +561,7 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
     let mut app = app();
     kit.install(&mut app);
     let key = kit.open(&mut app, doomed);
-    let generation = app.kits[0].generation;
+    let generation = app.model.kits[0].generation;
 
     app.handle_browser_action(BrowserAction::DeleteTag(key.clone()), ctx());
     assert!(app.tag_ops.delete_confirm.is_some());
@@ -569,10 +569,10 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
 
     assert!(!kit.root.join(doomed).exists());
     let destination = app
-        .status
+        .model.status
         .strip_prefix(&format!("Deleted {doomed} — moved to "))
         .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("{}", app.status));
+        .unwrap_or_else(|| panic!("{}", app.model.status));
     assert_eq!(fs::read(&destination).unwrap(), bytes, "moved, not destroyed");
     assert!(destination.ends_with(doomed));
     assert!(
@@ -583,9 +583,9 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
         destination.display()
     );
     assert!(app.entry_for_key(&key).is_none());
-    assert!(!app.kits[0].parsed_tags.contains_key(&key));
-    assert_eq!(app.kits[0].selected_key, None);
-    assert_ne!(app.kits[0].generation, generation);
+    assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
+    assert_eq!(app.model.kits[0].selected_key, None);
+    assert_ne!(app.model.kits[0].generation, generation);
     assert!(app.tag_ops.delete_confirm.is_none());
     let _ = fs::remove_file(destination);
 }

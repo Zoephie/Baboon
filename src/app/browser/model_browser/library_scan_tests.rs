@@ -13,9 +13,9 @@ fn a_library_scans_its_own_kit_not_the_focused_one() {
     ));
     std::fs::create_dir_all(&root).unwrap();
     let mut app = Baboon::for_test();
-    let second = KitId(app.kits[0].id.0 + 1);
-    app.kits.push(Kit::empty(second, TagNameIndex::default()));
-    app.active = 1;
+    let second = KitId(app.model.kits[0].id.0 + 1);
+    app.model.kits.push(Kit::empty(second, TagNameIndex::default()));
+    app.model.active = 1;
     app.install_loaded_source(LoadedSourceData {
         label: "library kit".to_owned(),
         source: TagSource::LooseFolder {
@@ -35,11 +35,11 @@ fn a_library_scans_its_own_kit_not_the_focused_one() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    app.active = 0;
+    app.model.active = 0;
 
     app.refresh_thumbnail_library::<Models>(1, &egui::Context::default());
 
     std::fs::remove_dir_all(&root).unwrap();
-    assert!(app.kits[1].scanning_entries, "the library's kit is scanned");
-    assert!(!app.kits[0].scanning_entries, "the focused kit is not");
+    assert!(app.model.kits[1].scanning_entries, "the library's kit is scanned");
+    assert!(!app.model.kits[0].scanning_entries, "the focused kit is not");
 }

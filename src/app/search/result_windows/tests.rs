@@ -54,7 +54,7 @@ fn the_query_results_window_draws_only_rows_in_view() {
     for _ in 0..2 {
         ROWS_BUILT.with(|built| built.set(0));
         app.search.query_results = Some(TagQueryResults {
-            kit: app.kits[0].id,
+            kit: app.model.kits[0].id,
             title: "Sounds".to_owned(),
             entries: entries.clone(),
             annotations: Vec::new(),

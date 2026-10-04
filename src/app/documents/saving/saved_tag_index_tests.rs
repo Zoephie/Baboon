@@ -46,13 +46,13 @@ fn a_saved_tag_updates_its_index_row_and_references() {
         chosen_kit_layout: None,
     });
     crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
-    app.kits[0]
+    app.model.kits[0]
         .parsed_tags
         .insert(entry.key.clone(), TagDocument::modified(tag));
 
     let saved = app.save_tag_by_key(&entry.key);
     let refresh = crate::core::source::refresh_entry_index(game.as_str(), &root, &names);
-    let referrers = app.kits[0]
+    let referrers = app.model.kits[0]
         .source
         .as_ref()
         .and_then(|source| source.reverse_dependencies.as_ref())
@@ -120,19 +120,19 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
     });
     // A build starts, and reads the tag as it is: pointing at nothing.
     let stamp = app.kit_stamp();
-    app.kits[0].index_jobs.building_references = true;
+    app.model.kits[0].index_jobs.building_references = true;
     let mut read_before_the_save = ReverseDependencyIndex::default();
     read_before_the_save.set_tag_dependencies(entry.key.clone(), Vec::new());
 
     // Then the tag is edited and saved while the build is still running.
     crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
-    app.kits[0]
+    app.model.kits[0]
         .parsed_tags
         .insert(entry.key.clone(), TagDocument::modified(tag));
     let saved = app.save_tag_by_key(&entry.key);
     app.handle_reverse_dependencies_built(stamp, read_before_the_save, 0);
 
-    let referrers = app.kits[0]
+    let referrers = app.model.kits[0]
         .source
         .as_ref()
         .and_then(|source| source.reverse_dependencies.as_ref())
@@ -146,7 +146,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
     assert!(saved.is_ok(), "{saved:?}");
     assert_eq!(referrers, Some(vec![entry.key.clone()]));
     assert!(
-        app.kits[0]
+        app.model.kits[0]
             .index_jobs
             .references_changed_during_build
             .is_empty(),
@@ -262,18 +262,18 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
         let tag =
             TagFile::new(locate_definitions_root().join(format!("halo3_mcc/{group}.json")))
                 .unwrap();
-        app.kits[0]
+        app.model.kits[0]
             .parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
-        app.kits[0]
+        app.model.kits[0]
             .caches.rmop_cache
             .insert("rmop:shaders\\bump".to_owned(), None);
-        let epoch = app.kits[0].caches.render_method_epoch;
+        let epoch = app.model.kits[0].caches.render_method_epoch;
         let saved = app.save_tag_by_key(key);
         assert!(saved.is_ok(), "{saved:?}");
         (
-            app.kits[0].caches.rmop_cache.is_empty(),
-            app.kits[0].caches.render_method_epoch != epoch,
+            app.model.kits[0].caches.rmop_cache.is_empty(),
+            app.model.kits[0].caches.render_method_epoch != epoch,
         )
     };
 

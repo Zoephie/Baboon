@@ -586,7 +586,7 @@ impl Baboon {
                 if let Some(dialog) = self.import.cache_import_dialog.as_ref() {
                     dialog.cancel.store(true, Ordering::Relaxed);
                 }
-                self.status = "Stopping the cache import".to_owned();
+                self.model.status = "Stopping the cache import".to_owned();
             }
             Some(CacheImportAction::Close) => self.import.cache_import_dialog = None,
             None => {}

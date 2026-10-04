@@ -20,10 +20,10 @@ fn input(time: f64, events: Vec<egui::Event>) -> egui::RawInput {
 fn a_workspace_activates_on_a_press_not_on_hover() {
     let mut app = Baboon::for_test();
     app.add_kit();
-    assert_eq!(app.kits.len(), 2);
-    let (left, right) = (app.kits[0].id, app.kits[1].id);
+    assert_eq!(app.model.kits.len(), 2);
+    let (left, right) = (app.model.kits[0].id, app.model.kits[1].id);
     app.kit_tree = egui_tiles::Tree::new_horizontal("kit_activation_test", vec![left, right]);
-    app.active = 1;
+    app.model.active = 1;
 
     let ctx = egui::Context::default();
     let mut time = 0.0;
@@ -47,18 +47,18 @@ fn a_workspace_activates_on_a_press_not_on_hover() {
     for _ in 0..3 {
         frame(&mut app, vec![egui::Event::PointerMoved(over_left)]);
     }
-    assert_eq!(app.active, 1, "hovering the left workspace changes nothing");
+    assert_eq!(app.model.active, 1, "hovering the left workspace changes nothing");
 
     frame(&mut app, vec![press(over_left, true)]);
     frame(&mut app, vec![press(over_left, false)]);
-    assert_eq!(app.active, 0, "a press inside the left workspace activates it");
+    assert_eq!(app.model.active, 0, "a press inside the left workspace activates it");
 
     for _ in 0..3 {
         frame(&mut app, vec![egui::Event::PointerMoved(over_right)]);
     }
-    assert_eq!(app.active, 0, "hovering the right workspace changes nothing");
+    assert_eq!(app.model.active, 0, "hovering the right workspace changes nothing");
 
     frame(&mut app, vec![press(over_right, true)]);
     frame(&mut app, vec![press(over_right, false)]);
-    assert_eq!(app.active, 1);
+    assert_eq!(app.model.active, 1);
 }

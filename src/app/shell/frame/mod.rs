@@ -543,7 +543,7 @@ pub(in crate::app) fn draw_game_banner_header(
     let texture = app.workspace_banner_texture(ui.ctx(), Some(game), profile_id);
     let title = profile_id
         .and_then(|id| {
-            app.prefs
+            app.model.prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == id)
@@ -556,7 +556,7 @@ pub(in crate::app) fn draw_game_banner_header(
                 game_platform_label(game)
             )
         });
-    let read_only = app.prefs.custom_editing_kit_profiles.iter().any(|profile| {
+    let read_only = app.model.prefs.custom_editing_kit_profiles.iter().any(|profile| {
         profile.read_only
             && !profile.is_campaign_evolved()
             && (profile_id == Some(profile.id.as_str())
@@ -746,7 +746,7 @@ impl Baboon {
             .on_hover_text("Save if needed, then launch this scenario in tag_test")
             .clicked()
             {
-                self.active = kit_index;
+                self.model.active = kit_index;
                 self.launch_scenario_in_tag_test(&key);
             }
             if offers_sapien {
@@ -761,7 +761,7 @@ impl Baboon {
                 .on_hover_text("Save if needed, then launch this scenario in Sapien")
                 .clicked()
                 {
-                    self.active = kit_index;
+                    self.model.active = kit_index;
                     self.launch_scenario_in_sapien(&key);
                 }
             }
@@ -803,9 +803,9 @@ impl Baboon {
             // modifications across sessions. This is the way back to the
             // shipped tags; it is drawn here, outside the workspace tree, so it
             // always acts on the focused kit.
-            if self.current_source_is_campaign_project_capable(self.active) {
-                let stashed = self.stashed_campaign_tags(self.active);
-                let unsaved = self.kits[self.active]
+            if self.current_source_is_campaign_project_capable(self.model.active) {
+                let stashed = self.stashed_campaign_tags(self.model.active);
+                let unsaved = self.model.kits[self.model.active]
                     .parsed_tags
                     .values()
                     .filter(|document| document.dirty.is_set())
@@ -893,8 +893,8 @@ impl Baboon {
                 "blam" => {
                     // Re-detect on every open: the data folder may have
                     // changed since the pane was last shown.
-                    self.kits[self.active].blam.scanned_path = None;
-                    self.kits[self.active].open_tag_pane(BLAM_KEY);
+                    self.model.kits[self.model.active].blam.scanned_path = None;
+                    self.model.kits[self.model.active].open_tag_pane(BLAM_KEY);
                 }
                 _ => {}
             }
@@ -912,7 +912,7 @@ impl Baboon {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(RichText::new("Keywords:").color(subtle_dark()));
-            let existing = self.kits[kit_index].keywords.keywords(tag_key).to_vec();
+            let existing = self.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
             let mut remove: Option<String> = None;
             for keyword in &existing {
                 if keyword_pill(ui, tag_key, keyword) {
@@ -920,7 +920,7 @@ impl Baboon {
                 }
             }
             if let Some(keyword) = remove {
-                self.kits[kit_index].keywords.remove(tag_key, &keyword);
+                self.model.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
             // The draft is this pane's own. It used to be one field on the app,
             // so text typed into one pane's box showed in every other pane.
@@ -976,7 +976,7 @@ impl Baboon {
             );
             let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (add_clicked || submitted) && !draft.trim().is_empty() {
-                self.kits[kit_index].keywords.add(tag_key, &draft);
+                self.model.kits[kit_index].keywords.add(tag_key, &draft);
                 draft.clear();
             }
             ui.data_mut(|data| data.insert_temp(draft_id, draft));
@@ -1122,7 +1122,7 @@ impl Baboon {
         // Every kit, not only one whose Chimp workspace is on screen: a
         // checkpoint waiting on a workspace the user switched away from would
         // otherwise wait until they came back.
-        for kit_index in 0..self.kits.len() {
+        for kit_index in 0..self.model.kits.len() {
             self.run_due_chimp_checkpoints(kit_index, ctx);
         }
     }

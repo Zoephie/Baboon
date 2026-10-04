@@ -723,7 +723,7 @@ impl Baboon {
                 self.shell.settings_tab = selected;
             });
         if !open {
-            self.shell.pending_ui_scale = self.prefs.ui_scale;
+            self.shell.pending_ui_scale = self.model.prefs.ui_scale;
         }
         self.shell.settings_open = open;
         self.draw_custom_editing_kit_dialog(ctx);
@@ -737,9 +737,9 @@ impl Baboon {
     ) {
         let trimmed = input.trim().to_owned();
         if trimmed.is_empty() {
-            self.prefs.editing_kit_paths.remove(shortcut.game.as_str());
+            self.model.prefs.editing_kit_paths.remove(shortcut.game.as_str());
         } else {
-            self.prefs
+            self.model.prefs
                 .editing_kit_paths
                 .insert(shortcut.game.as_str().to_owned(), PathBuf::from(&trimmed));
         }
@@ -758,17 +758,17 @@ impl Baboon {
         );
         ui.add_space(2.0);
         ui.radio_value(
-            &mut self.prefs.session_restore,
+            &mut self.model.prefs.session_restore,
             SessionRestore::Ask,
             "Ask which windows to reopen",
         );
         ui.radio_value(
-            &mut self.prefs.session_restore,
+            &mut self.model.prefs.session_restore,
             SessionRestore::Always,
             "Reopen the last session automatically",
         );
         ui.radio_value(
-            &mut self.prefs.session_restore,
+            &mut self.model.prefs.session_restore,
             SessionRestore::Never,
             "Start fresh (never reopen)",
         );
@@ -777,9 +777,9 @@ impl Baboon {
         ui.separator();
         ui.label(RichText::new("Saving").color(text_dark()).strong());
         ui.add_space(4.0);
-        if self.prefs.expert_mode {
+        if self.model.prefs.expert_mode {
             ui.checkbox(
-                &mut self.prefs.confirm_container_overwrite,
+                &mut self.model.prefs.confirm_container_overwrite,
                 "Confirm before Save overwrites Campaign Evolved game files",
             );
             ui.label(
@@ -812,7 +812,7 @@ impl Baboon {
         ui.add_space(4.0);
         let chimp_changed = ui
             .checkbox(
-                &mut self.prefs.enable_chimp,
+                &mut self.model.prefs.enable_chimp,
                 "Enable Chimp workspace for Campaign Evolved",
             )
             .changed();
@@ -825,7 +825,7 @@ impl Baboon {
         );
         ui.horizontal(|ui| {
             let output = self
-                .prefs
+                .model.prefs
                 .chimp_output_dir
                 .as_ref()
                 .map(|path| path.display().to_string())
@@ -836,27 +836,27 @@ impl Baboon {
                     .set_title("Choose Chimp mod output folder")
                     .pick_folder()
             {
-                self.prefs.chimp_output_dir = Some(path);
+                self.model.prefs.chimp_output_dir = Some(path);
             }
-            if self.prefs.chimp_output_dir.is_some() && ui.button("Use default").clicked() {
-                self.prefs.chimp_output_dir = None;
+            if self.model.prefs.chimp_output_dir.is_some() && ui.button("Use default").clicked() {
+                self.model.prefs.chimp_output_dir = None;
             }
         });
         if chimp_changed {
             let dirty = self
-                .kits
+                .model.kits
                 .iter()
                 .any(|kit| kit.chimp.documents.values().any(|document| document.dirty));
-            if !self.prefs.enable_chimp && dirty {
-                self.prefs.enable_chimp = true;
-                self.status =
+            if !self.model.prefs.enable_chimp && dirty {
+                self.model.prefs.enable_chimp = true;
+                self.model.status =
                     "Build the Chimp mod before disabling a workspace with recovered edits."
                         .to_owned();
                 return;
             }
-            if self.prefs.enable_chimp {
+            if self.model.prefs.enable_chimp {
                 let indices: Vec<usize> = self
-                    .kits
+                    .model.kits
                     .iter()
                     .enumerate()
                     .filter(|(_, kit)| {
@@ -870,7 +870,7 @@ impl Baboon {
                     self.begin_chimp_mount(index, ui.ctx().clone());
                 }
             } else {
-                for kit in &mut self.kits {
+                for kit in &mut self.model.kits {
                     kit.surface = KitSurface::Tags;
                     kit.chimp = ChimpState::default();
                 }
@@ -882,7 +882,7 @@ impl Baboon {
         ui.label(RichText::new("Runtime poking").color(text_dark()).strong());
         ui.add_space(4.0);
         ui.checkbox(
-            &mut self.prefs.confirm_runtime_poke,
+            &mut self.model.prefs.confirm_runtime_poke,
             "Confirm before poking the running game",
         );
         ui.label(
@@ -915,7 +915,7 @@ impl Baboon {
         ui.label(RichText::new("Check for updates on").color(text_dark()));
         for option in UpdateChannel::ALL {
             if ui
-                .radio_value(&mut self.prefs.update_channel, option, option.label())
+                .radio_value(&mut self.model.prefs.update_channel, option, option.label())
                 .on_hover_text(option.help())
                 .changed()
             {
@@ -926,7 +926,7 @@ impl Baboon {
         }
         ui.add_space(4.0);
         ui.checkbox(
-            &mut self.prefs.check_updates_on_startup,
+            &mut self.model.prefs.check_updates_on_startup,
             "Check for updates when Baboon starts",
         );
     }
@@ -958,7 +958,7 @@ impl Baboon {
         ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
         ui.horizontal(|ui| {
             for option in NestedDefault::ALL {
-                ui.radio_value(&mut self.prefs.nested_default, option, option.label())
+                ui.radio_value(&mut self.model.prefs.nested_default, option, option.label())
                     .on_hover_text(option.help());
             }
         });
@@ -974,11 +974,11 @@ impl Baboon {
 
     pub(in crate::app) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {
         ui.checkbox(
-            &mut self.prefs.double_click_to_open_tags,
+            &mut self.model.prefs.double_click_to_open_tags,
             "Double-click to open tags",
         );
         ui.checkbox(
-            &mut self.prefs.folders_before_tags,
+            &mut self.model.prefs.folders_before_tags,
             "List subfolders before tags in browser",
         );
         ui.add_space(12.0);
@@ -1003,15 +1003,15 @@ impl Baboon {
             }
             if ui.button("Refresh Status").clicked() {
                 self.refresh_editing_kit_validation();
-                self.status = "Editing-kit status refreshed".to_owned();
+                self.model.status = "Editing-kit status refreshed".to_owned();
             }
         });
         ui.add_space(6.0);
 
-        if self.prefs.custom_editing_kit_profiles.is_empty() {
+        if self.model.prefs.custom_editing_kit_profiles.is_empty() {
             ui.label(RichText::new("No editing kits configured").color(subtle_dark()));
         }
-        for profile in self.prefs.custom_editing_kit_profiles.clone() {
+        for profile in self.model.prefs.custom_editing_kit_profiles.clone() {
             let validation = self.kit_tools.editing_kit_validation.custom(&profile.id);
             let warning = self
                 .kit_tools.editing_kit_validation
@@ -1052,20 +1052,20 @@ impl Baboon {
             request
         });
         if let Some(request) = reorder {
-            let previous = self.prefs.custom_editing_kit_profiles.clone();
-            if reorder_editing_kit_profiles(&mut self.prefs.custom_editing_kit_profiles, &request) {
+            let previous = self.model.prefs.custom_editing_kit_profiles.clone();
+            if reorder_editing_kit_profiles(&mut self.model.prefs.custom_editing_kit_profiles, &request) {
                 let prefs = self.current_prefs();
                 if let Err(error) = save_gui_prefs(
                     &prefs,
                     &self.kit_tools.terminal_open_games,
                     self.shell.first_run_wizard.is_none(),
                 ) {
-                    self.prefs.custom_editing_kit_profiles = previous;
-                    self.status = error;
+                    self.model.prefs.custom_editing_kit_profiles = previous;
+                    self.model.status = error;
                 } else {
                     self.saved_prefs = prefs;
                     self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-                    self.status = "Editing kit order saved".to_owned();
+                    self.model.status = "Editing kit order saved".to_owned();
                 }
             }
         }
@@ -1160,7 +1160,7 @@ impl Baboon {
             }
         };
         if custom_profile_tags_conflicts(
-            &self.prefs.custom_editing_kit_profiles,
+            &self.model.prefs.custom_editing_kit_profiles,
             draft.editing_id.as_deref(),
             &layout.tags,
         ) {
@@ -1179,7 +1179,7 @@ impl Baboon {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let existing_profile = self
-            .prefs
+            .model.prefs
             .custom_editing_kit_profiles
             .iter()
             .find(|profile| profile.id == id)
@@ -1219,26 +1219,26 @@ impl Baboon {
             tags_folder,
             data_folder,
         };
-        let previous_profiles = self.prefs.custom_editing_kit_profiles.clone();
+        let previous_profiles = self.model.prefs.custom_editing_kit_profiles.clone();
         let previous = existing_profile;
         if let Some(index) = self
-            .prefs
+            .model.prefs
             .custom_editing_kit_profiles
             .iter()
             .position(|existing| existing.id == id)
         {
-            self.prefs.custom_editing_kit_profiles[index] = profile.clone();
+            self.model.prefs.custom_editing_kit_profiles[index] = profile.clone();
         } else {
-            self.prefs.custom_editing_kit_profiles.push(profile.clone());
+            self.model.prefs.custom_editing_kit_profiles.push(profile.clone());
         }
         let prefs = self.current_prefs();
         if let Err(error) = save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, true) {
-            self.prefs.custom_editing_kit_profiles = previous_profiles;
+            self.model.prefs.custom_editing_kit_profiles = previous_profiles;
             if previous.as_ref().and_then(|profile| profile.icon.as_ref()) != profile.icon.as_ref()
                 && let Some(icon) = &profile.icon
             {
                 let _ =
-                    remove_unreferenced_custom_icon(icon, &self.prefs.custom_editing_kit_profiles);
+                    remove_unreferenced_custom_icon(icon, &self.model.prefs.custom_editing_kit_profiles);
             }
             draft.error = Some(error);
             return false;
@@ -1254,7 +1254,7 @@ impl Baboon {
                 || !same_recent_path(&previous.root, &profile.root)
                 || previous.tags_folder != profile.tags_folder
                 || previous.data_folder != profile.data_folder;
-            for kit in &mut self.kits {
+            for kit in &mut self.model.kits {
                 if kit
                     .profile
                     .as_ref()
@@ -1271,14 +1271,14 @@ impl Baboon {
                 && let Some(old_icon) = previous.icon
                 && let Err(error) = remove_unreferenced_custom_icon(
                     &old_icon,
-                    &self.prefs.custom_editing_kit_profiles,
+                    &self.model.prefs.custom_editing_kit_profiles,
                 )
             {
-                self.status = error;
+                self.model.status = error;
                 return true;
             }
         }
-        self.status = format!("Saved editing kit {}", profile.name);
+        self.model.status = format!("Saved editing kit {}", profile.name);
         true
     }
 
@@ -1318,20 +1318,20 @@ impl Baboon {
     }
 
     fn remove_custom_editing_kit_profile(&mut self, removal: &CustomEditingKitRemoval) {
-        let previous_profiles = self.prefs.custom_editing_kit_profiles.clone();
+        let previous_profiles = self.model.prefs.custom_editing_kit_profiles.clone();
         let removed = self
-            .prefs
+            .model.prefs
             .custom_editing_kit_profiles
             .iter()
             .find(|profile| profile.id == removal.id)
             .cloned();
-        self.prefs
+        self.model.prefs
             .custom_editing_kit_profiles
             .retain(|profile| profile.id != removal.id);
         let prefs = self.current_prefs();
         if let Err(error) = save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, true) {
-            self.prefs.custom_editing_kit_profiles = previous_profiles;
-            self.status = error;
+            self.model.prefs.custom_editing_kit_profiles = previous_profiles;
+            self.model.status = error;
             return;
         }
         self.saved_prefs = prefs;
@@ -1339,7 +1339,7 @@ impl Baboon {
         self.shell.custom_editing_kit_textures.remove(&removal.id);
         self.shell.custom_editing_kit_texture_failures.remove(&removal.id);
         self.refresh_editing_kit_validation();
-        for kit in &mut self.kits {
+        for kit in &mut self.model.kits {
             if kit
                 .profile
                 .as_ref()
@@ -1350,17 +1350,17 @@ impl Baboon {
         }
         if let Some(icon) = removed.and_then(|profile| profile.icon)
             && let Err(error) =
-                remove_unreferenced_custom_icon(&icon, &self.prefs.custom_editing_kit_profiles)
+                remove_unreferenced_custom_icon(&icon, &self.model.prefs.custom_editing_kit_profiles)
         {
-            self.status = error;
+            self.model.status = error;
             return;
         }
-        self.status = format!("Removed editing kit {}", removal.name);
+        self.model.status = format!("Removed editing kit {}", removal.name);
     }
 
     pub(in crate::app) fn draw_settings_appearance_tab(&mut self, ui: &mut Ui) {
-        ui.checkbox(&mut self.prefs.dark_mode, "Dark mode");
-        ui.checkbox(&mut self.prefs.angles_in_degrees, "Angles in degrees")
+        ui.checkbox(&mut self.model.prefs.dark_mode, "Dark mode");
+        ui.checkbox(&mut self.model.prefs.angles_in_degrees, "Angles in degrees")
             .on_hover_text(
                 "Angle fields hold radians on disk. Guerilla and the other Halo tools show them \
                  in degrees, and so does Baboon — turn this off to read and type the stored \
@@ -1376,8 +1376,8 @@ impl Baboon {
             );
             draw_ui_scale_input(ui, &mut self.shell.pending_ui_scale);
             if ui.button("Apply").clicked() {
-                self.prefs.ui_scale = self.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
-                self.status = "UI scale applied".to_owned();
+                self.model.prefs.ui_scale = self.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+                self.model.status = "UI scale applied".to_owned();
             }
             if ui.button("Reset").clicked() {
                 self.shell.pending_ui_scale = DEFAULT_UI_SCALE;
@@ -1387,15 +1387,15 @@ impl Baboon {
             ui.label(RichText::new("Model viewport").color(subtle_dark()));
             ui.add(
                 egui::Slider::new(
-                    &mut self.prefs.model_preview_size,
+                    &mut self.model.prefs.model_preview_size,
                     MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
                 )
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
             );
-            draw_model_viewport_size_input(ui, &mut self.prefs.model_preview_size);
+            draw_model_viewport_size_input(ui, &mut self.model.prefs.model_preview_size);
             if ui.button("Reset").clicked() {
-                self.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
+                self.model.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
             }
         });
         draw_speed_row(
@@ -1403,7 +1403,7 @@ impl Baboon {
             "Scroll speed",
             "How far the mouse wheel or trackpad scrolls lists and panels. \
              100% is the original speed.",
-            &mut self.prefs.scroll_speed,
+            &mut self.model.prefs.scroll_speed,
             MIN_SCROLL_SPEED..=MAX_SCROLL_SPEED,
             DEFAULT_SCROLL_SPEED,
         );
@@ -1412,7 +1412,7 @@ impl Baboon {
             "Zoom speed",
             "How fast the mouse wheel zooms the model and bitmap viewports. \
              100% is the original speed.",
-            &mut self.prefs.zoom_speed,
+            &mut self.model.prefs.zoom_speed,
             MIN_ZOOM_SPEED..=MAX_ZOOM_SPEED,
             DEFAULT_ZOOM_SPEED,
         );
@@ -1429,12 +1429,12 @@ impl Baboon {
                 && ui.input(|input| input.key_pressed(egui::Key::Enter))
             {
                 let trimmed = self.kit_tools.blender_path_input.trim();
-                self.prefs.blender_path = if trimmed.is_empty() {
+                self.model.prefs.blender_path = if trimmed.is_empty() {
                     None
                 } else {
                     Some(PathBuf::from(trimmed))
                 };
-                self.status = if let Some(path) = &self.prefs.blender_path {
+                self.model.status = if let Some(path) = &self.model.prefs.blender_path {
                     format!("Blender path set to {}", path.display())
                 } else {
                     "Blender path cleared".to_owned()
@@ -1444,9 +1444,9 @@ impl Baboon {
                 self.choose_blender_path();
             }
             if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
-                self.prefs.blender_path = None;
+                self.model.prefs.blender_path = None;
                 self.kit_tools.blender_path_input.clear();
-                self.status = "Blender path cleared".to_owned();
+                self.model.status = "Blender path cleared".to_owned();
             }
         });
 
@@ -1486,7 +1486,7 @@ impl Baboon {
             Vec2::new(ui.available_width(), BUTTON_HEIGHT),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                if self.prefs.chimp_usmap_path.is_some() && ui.button("Use bundled").clicked() {
+                if self.model.prefs.chimp_usmap_path.is_some() && ui.button("Use bundled").clicked() {
                     self.apply_chimp_usmap_path(None, ui.ctx().clone());
                 }
             },

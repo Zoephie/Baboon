@@ -93,21 +93,21 @@ impl Baboon {
     /// Open Rename Folder for a loose folder, with what it would change
     /// counted up front.
     pub(in crate::app) fn open_loose_folder_rename(&mut self, rel_path: PathBuf, label: String) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         if self.tag_ops.folder_refactor.is_some() {
-            self.status = "A folder move/rename is already running".to_owned();
+            self.model.status = "A folder move/rename is already running".to_owned();
             return;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Rename requires a loaded tags folder".to_owned();
+            self.model.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
         let rel_path = match validate_relative_folder_path(&rel_path) {
             Ok(rel_path) => rel_path,
             Err(_) => {
-                self.status = "The tags root itself cannot be renamed".to_owned();
+                self.model.status = "The tags root itself cannot be renamed".to_owned();
                 return;
             }
         };
@@ -115,7 +115,7 @@ impl Baboon {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
         else {
-            self.status = format!("Cannot rename {label}");
+            self.model.status = format!("Cannot rename {label}");
             return;
         };
         // From the workspace's tag list when it holds every tag: walking a
@@ -143,7 +143,7 @@ impl Baboon {
             None => match scan_folder_subtree_entries(&root, &rel_path, &names) {
                 Ok(entries) => entries,
                 Err(error) => {
-                    self.status = format!("Could not scan {label}: {error}");
+                    self.model.status = format!("Could not scan {label}: {error}");
                     return;
                 }
             },
@@ -188,14 +188,14 @@ impl Baboon {
         let old_name = state.old_name.clone();
         let raw = state.name_input.clone();
         if !self.focus_navigation_kit(kit) {
-            self.status = "The workspace this rename came from is closed".to_owned();
+            self.model.status = "The workspace this rename came from is closed".to_owned();
             return true;
         }
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return true;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Rename requires a loaded tags folder".to_owned();
+            self.model.status = "Rename requires a loaded tags folder".to_owned();
             return true;
         };
         let reject = |this: &mut Self, error: String| {
@@ -207,7 +207,7 @@ impl Baboon {
         if self.tag_ops.folder_refactor.is_some() {
             return reject(self, "A folder move/rename is already running".to_owned());
         }
-        if self.kits[self.active]
+        if self.model.kits[self.model.active]
             .parsed_tags
             .values()
             .any(|doc| doc.dirty.is_set())

@@ -60,11 +60,11 @@ impl Baboon {
         let picker_was_open = self.editor.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
-        let bitmap_preview_view = self.prefs.bitmap_preview_view;
-        let model_preview_perspective = self.prefs.model_preview_perspective;
+        let bitmap_preview_view = self.model.prefs.bitmap_preview_view;
+        let model_preview_perspective = self.model.prefs.model_preview_perspective;
 
-        let Some(doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
-            if self.kits[kit_index].loading_tags.contains(&key) {
+        let Some(doc) = self.model.kits[kit_index].parsed_tags.remove(&key) else {
+            if self.model.kits[kit_index].loading_tags.contains(&key) {
                 ui.label("Loading tag data...");
             } else {
                 ui.label("Select the tag again to load it.");
@@ -74,10 +74,10 @@ impl Baboon {
 
         let filter_in_scope = match self.search.find.within {
             FindWithin::CurrentTag => {
-                self.kits[kit_index].selected_key.as_deref() == Some(key.as_str())
+                self.model.kits[kit_index].selected_key.as_deref() == Some(key.as_str())
             }
             FindWithin::OpenTags | FindWithin::AllTags => {
-                self.kits[kit_index].open_tabs.contains(&key)
+                self.model.kits[kit_index].open_tabs.contains(&key)
             }
         };
         let apply_find_filter = supports_field_search
@@ -95,7 +95,7 @@ impl Baboon {
                 self.search.find.whole_word,
                 doc.content_stamp(),
             );
-            let cached = self.kits[kit_index]
+            let cached = self.model.kits[kit_index]
                 .find_filter_applied
                 .get(&key)
                 .filter(|applied| applied.signature == signature)
@@ -110,7 +110,7 @@ impl Baboon {
                     self.search.find.match_case,
                     self.search.find.whole_word,
                 ));
-                self.kits[kit_index].find_filter_applied.insert(
+                self.model.kits[kit_index].find_filter_applied.insert(
                     key.clone(),
                     AppliedFindFilter {
                         signature,
@@ -121,16 +121,16 @@ impl Baboon {
             });
             Some(FieldFilterAction::Apply(filter))
         } else {
-            self.kits[kit_index]
+            self.model.kits[kit_index]
                 .find_filter_applied
                 .remove(&key)
                 .map(|_| FieldFilterAction::RestoreDefaults)
         };
 
         // Where the sound player's keyboard shortcuts act: the focused tab.
-        let sound_has_focus = self.active == kit_index
-            && self.kits[kit_index].selected_key.as_deref() == Some(key.as_str());
-        let kit = &mut self.kits[kit_index];
+        let sound_has_focus = self.model.active == kit_index
+            && self.model.kits[kit_index].selected_key.as_deref() == Some(key.as_str());
+        let kit = &mut self.model.kits[kit_index];
         let kit_id = kit.id;
         let bitmap_hover_requests =
             begin_bitmap_hovers(ui, Arc::clone(&kit.bitmap_browser.thumbnails));
@@ -166,7 +166,7 @@ impl Baboon {
         let sound_status_shown = self.audio.status_is_for(&sound_owner);
         let sound_looping = self.audio.looping();
         let sound_preview = self.audio.preview_for(&sound_owner).cloned();
-        let expert_mode = self.prefs.expert_mode;
+        let expert_mode = self.model.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
         // `source()`: a method borrows all of `self`, and the context below
         // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
@@ -198,9 +198,9 @@ impl Baboon {
             tag_reference_catalog: source
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
             tag_reference_picker: &mut self.editor.tag_reference_picker,
-            status: Some(&mut self.status),
+            status: Some(&mut self.model.status),
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
-            show_block_sizes: self.prefs.show_block_sizes,
+            show_block_sizes: self.model.prefs.show_block_sizes,
             buffers: &mut kit.edit_buffers,
             pending: &mut ops.pending,
             block_ops: &mut ops.block_ops,
@@ -244,7 +244,7 @@ impl Baboon {
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
             expand_all,
-            nested_default: self.prefs.nested_default,
+            nested_default: self.model.prefs.nested_default,
         };
 
         if is_bitmap_tag(entry) {
@@ -258,10 +258,10 @@ impl Baboon {
                 names,
                 &mut grid_color_popup,
                 preview,
-                self.prefs.expert_mode,
+                self.model.prefs.expert_mode,
                 &mut edit_context,
             );
-            self.prefs.bitmap_preview_view = preview.view_settings();
+            self.model.prefs.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
             let model_preview = if is_previewable_geometry_group_for_game(
@@ -297,11 +297,11 @@ impl Baboon {
                 &mut grid_color_popup,
                 &mut grid_function_popup,
                 model_preview,
-                &mut self.prefs.model_preview_size,
-                self.prefs.expert_mode,
+                &mut self.model.prefs.model_preview_size,
+                self.model.prefs.expert_mode,
                 &mut edit_context,
             );
-            self.prefs.model_preview_perspective = model_preview.perspective;
+            self.model.prefs.model_preview_perspective = model_preview.perspective;
         }
 
         let find_filter_block_jump = ctx.data_mut(|data| {
@@ -344,7 +344,7 @@ impl Baboon {
         }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
-            self.status = format!("Copied {} '{}' element(s)", clip.elements.len(), clip.label);
+            self.model.status = format!("Copied {} '{}' element(s)", clip.elements.len(), clip.label);
             self.editor.block_clipboard = Some(clip);
         }
         // "Paste TSV…" was chosen: open the import window.
@@ -422,7 +422,7 @@ impl Baboon {
         let inline_left_width = pane_header_inline_left_width(available, action_width);
         let wide = inline_left_width.is_some();
         let left_width = inline_left_width.unwrap_or(available);
-        let title_height = if self.prefs.expert_mode {
+        let title_height = if self.model.prefs.expert_mode {
             48.0
         } else {
             PANE_HEADER_ICON_SIZE
@@ -460,10 +460,10 @@ impl Baboon {
                                 ui.label(
                                     RichText::new(title).size(15.0).strong().color(text_dark()),
                                 );
-                                if self.prefs.expert_mode {
+                                if self.model.prefs.expert_mode {
                                     ui.label(
                                         RichText::new(group_label(
-                                            &self.kits[kit_index].names,
+                                            &self.model.kits[kit_index].names,
                                             entry.group_tag,
                                         ))
                                         .size(11.0)
@@ -569,7 +569,7 @@ impl Baboon {
                     )
                     .clicked()
                 {
-                    self.active = kit_index;
+                    self.model.active = kit_index;
                     self.begin_reimport_bitmap(entry.key.clone(), ctx.clone());
                 }
             }
@@ -585,7 +585,7 @@ impl Baboon {
         entry: &TagEntry,
     ) {
         let key = entry.key.clone();
-        let is_favorite = self.kits[kit_index]
+        let is_favorite = self.model.kits[kit_index]
             .browser.active_favorite_entries
             .iter()
             .any(|favorite| favorite.key == key);
@@ -620,8 +620,8 @@ impl Baboon {
                 action = Some(BrowserAction::ToggleFavorite(key.clone()));
             }
             if icon_text_button(ui, ButtonIcon::Find, "Find", true).clicked() {
-                self.active = kit_index;
-                self.kits[kit_index].selected_key = Some(key.clone());
+                self.model.active = kit_index;
+                self.model.kits[kit_index].selected_key = Some(key.clone());
                 self.search.find.within = FindWithin::CurrentTag;
                 self.search.find.open = true;
                 self.search.find.focus_query = true;
@@ -629,7 +629,7 @@ impl Baboon {
         });
 
         if let Some(action) = action {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.handle_browser_action(action, ctx.clone());
         }
     }

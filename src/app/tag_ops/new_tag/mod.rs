@@ -131,7 +131,7 @@ impl Baboon {
             return;
         }
         // Campaign Evolved containers have no loose tags folder to write into —
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         // create the tag purely in memory and let Save / Export Mod write it.
@@ -241,7 +241,7 @@ impl Baboon {
         };
         self.register_created_tag(entry, tag);
         self.tag_ops.new_tag_open = false;
-        self.status = format!("Created {}", output.display());
+        self.model.status = format!("Created {}", output.display());
     }
 
     /// Create a brand-new Campaign Evolved tag in memory (no pak write). The tag
@@ -282,7 +282,7 @@ impl Baboon {
         {
             Ok(()) => {
                 self.tag_ops.new_tag_open = false;
-                self.status = format!("Created {rel}.{} (unsaved)", group.extension);
+                self.model.status = format!("Created {rel}.{} (unsaved)", group.extension);
             }
             Err(error) => self.tag_ops.new_tag_dialog.error = Some(error),
         }
@@ -307,7 +307,7 @@ impl Baboon {
             new_container_template_for(self.find_container_template(group_tag), group_name)?;
         let package = new_container_package(logical, group_name);
         let key = new_tag_entry_key(&package);
-        if self.kits[self.active].parsed_tags.contains_key(&key)
+        if self.model.kits[self.model.active].parsed_tags.contains_key(&key)
             || self
                 .source()
                 .is_some_and(|s| s.entry_for_key(&key).is_some())
@@ -369,7 +369,7 @@ impl Baboon {
             // `TagFile` is not `Clone`; a round-trip through its own bytes is
             // how a document is copied, and it is exactly what Save would have
             // written anyway.
-            let bytes = self.kits[self.active]
+            let bytes = self.model.kits[self.model.active]
                 .parsed_tags
                 .get(key)
                 .ok_or("Load the tag before copying it")?
@@ -387,20 +387,20 @@ impl Baboon {
         if new_key == key {
             return Ok(format!("{} is already at that path", entry.display_path));
         }
-        if self.kits[self.active].parsed_tags.contains_key(&new_key)
+        if self.model.kits[self.model.active].parsed_tags.contains_key(&new_key)
             || self
                 .source()
                 .is_some_and(|source| source.entry_for_key(&new_key).is_some())
         {
             return Err(format!("A tag already exists at {new_rel}"));
         }
-        let Some(document) = self.kits[self.active].parsed_tags.remove(key) else {
+        let Some(document) = self.model.kits[self.model.active].parsed_tags.remove(key) else {
             return Err("Load the tag before renaming it".to_owned());
         };
         // The project stashes overlays under the package path, so the old
         // identity has to go — otherwise the checkpoint keeps a copy of the tag
         // at its previous path and restores it as a second tag next session.
-        let kit = self.active;
+        let kit = self.model.active;
         self.forget_campaign_overlay(kit, key);
         self.forget_new_container_entry(kit, key);
         let old_display = entry.display_path.clone();
@@ -427,7 +427,7 @@ impl Baboon {
     /// container index plus its `.uasset` container path — the package template
     /// for a new tag of the same group.
     pub(in crate::app) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
-        self.find_container_template_in(self.active, group_tag)
+        self.find_container_template_in(self.model.active, group_tag)
     }
 
     /// A specific kit's template. Project recovery names its kit: the container
@@ -442,7 +442,7 @@ impl Baboon {
         kit: usize,
         group_tag: u32,
     ) -> Option<(usize, String)> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
+        let source = self.model.kits.get(kit)?.source.as_ref()?;
         pick_container_template(
             source.entries.iter().chain(source.all_entries.iter()),
             group_tag,
@@ -455,8 +455,8 @@ impl Baboon {
     pub(in crate::app) fn register_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
         self.stash_in_memory_tag(entry, tag);
-        self.kits[self.active].open_tag_pane(&key);
-        self.kits[self.active].selected_key = Some(key);
+        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.model.kits[self.model.active].selected_key = Some(key);
     }
 
     /// The same registration without opening or selecting the tag.
@@ -466,11 +466,11 @@ impl Baboon {
     /// otherwise open two tabs and steal the selection on every launch.
     pub(in crate::app) fn stash_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
-        let folder_seeds = self.kits[self.active].folder_seeds();
+        let folder_seeds = self.model.kits[self.model.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             source.upsert_entry(entry.clone(), &folder_seeds);
         }
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         // Index what the new tag points at. Nothing else can: the reverse-
         // dependency builder reads tags from their source, and this one has no
         // source — so without this the tag is invisible to reference queries in
@@ -480,27 +480,27 @@ impl Baboon {
             collect_tag_dependency_refs(tag.root(), &mut refs);
             refs
         };
-        self.kits[self.active].set_tag_references(&key, Some(dependencies));
-        self.kits[self.active]
+        self.model.kits[self.model.active].set_tag_references(&key, Some(dependencies));
+        self.model.kits[self.model.active]
             .parsed_tags
             .insert(key, TagDocument::modified(tag));
     }
 
     pub(in crate::app) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
-        let folder_seeds = self.kits[self.active].folder_seeds();
+        let folder_seeds = self.model.kits[self.model.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             register_created_tag_in_source(source, entry.clone(), &folder_seeds);
         }
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         // Keyed by entry, so a stale index would answer searches without the
         // tag that was just created.
-        self.kits[self.active].field_index.invalidate();
-        self.kits[self.active]
+        self.model.kits[self.model.active].field_index.invalidate();
+        self.model.kits[self.model.active]
             .parsed_tags
             .insert(key.clone(), TagDocument::clean(tag));
-        self.kits[self.active].open_tag_pane(&key);
-        self.kits[self.active].selected_key = Some(key.clone());
+        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.model.kits[self.model.active].selected_key = Some(key.clone());
     }
 
     pub(in crate::app) fn register_saved_copy_if_in_loaded_folder(&mut self, path: &Path) -> Result<bool, String> {
@@ -509,7 +509,7 @@ impl Baboon {
         };
         let registered = register_saved_copy_in_loaded_source(source, path)?;
         if registered {
-            self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+            self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         }
         Ok(registered)
     }

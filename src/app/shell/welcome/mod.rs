@@ -69,8 +69,8 @@ impl Baboon {
         // notice for its duration: a second click on H3EK while the first was
         // still indexing queued a duplicate load, and nothing on this screen
         // is safe to offer until the kit is in.
-        if self.kits[kit_index].source.is_none()
-            && let Some(path) = self.kits[kit_index].requested_path.clone()
+        if self.model.kits[kit_index].source.is_none()
+            && let Some(path) = self.model.kits[kit_index].requested_path.clone()
         {
             let name = path
                 .file_name()
@@ -85,9 +85,9 @@ impl Baboon {
         }
 
         let mut action = None;
-        let recents = self.prefs.recent_folders.clone();
+        let recents = self.model.prefs.recent_folders.clone();
         let editing_kits = visible_editing_kit_menu_entries(
-            &self.prefs.custom_editing_kit_profiles,
+            &self.model.prefs.custom_editing_kit_profiles,
             &self.kit_tools.editing_kit_validation,
         );
 
@@ -279,7 +279,7 @@ impl Baboon {
                                                                     )
                                                                     .cloned();
                                                                 let path = self
-                                                                    .prefs
+                                                                    .model.prefs
                                                                     .editing_kit_paths
                                                                     .get(shortcut.game.as_str())
                                                                     .cloned();
@@ -501,7 +501,7 @@ impl Baboon {
         // leave this pane empty. Press-activation normally beats the click by a
         // frame, but not when a frame runs long.
         if action.is_some() {
-            self.active = kit_index;
+            self.model.active = kit_index;
         }
         match action {
             Some(WelcomeAction::LoadFolder) => self.begin_load_folder(ctx.clone()),
@@ -511,11 +511,11 @@ impl Baboon {
             Some(WelcomeAction::LoadRecent(path)) => self.load_recent_folder(path, ctx.clone()),
             Some(WelcomeAction::ForgetRecent(path)) => {
                 self.remove_recent_folder(&path);
-                self.status = format!("Removed {} from recent folders", path.display());
+                self.model.status = format!("Removed {} from recent folders", path.display());
             }
             Some(WelcomeAction::ForgetAllRecents) => {
-                self.prefs.recent_folders.clear();
-                self.status = "Cleared recent folders".to_owned();
+                self.model.prefs.recent_folders.clear();
+                self.model.status = "Cleared recent folders".to_owned();
             }
             Some(WelcomeAction::LoadKit(shortcut)) => {
                 self.load_editing_kit_shortcut(shortcut, ctx.clone())

@@ -454,33 +454,33 @@ impl GitReviewState {
 
 impl Baboon {
     pub(in crate::app) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
-        self.kits.get(kit).is_some_and(|kit| {
+        self.model.kits.get(kit).is_some_and(|kit| {
             matches!(
                 kit.source.as_ref().map(|source| &source.source),
                 Some(TagSource::LooseFolder { .. })
             ) && profile_has_git_tracking(
                 kit.profile.as_ref(),
-                &self.prefs.custom_editing_kit_profiles,
+                &self.model.prefs.custom_editing_kit_profiles,
             )
         })
     }
 
     pub(in crate::app) fn open_git_review(&mut self, ctx: &egui::Context) {
-        let kit = self.active;
+        let kit = self.model.active;
         if !matches!(
-            self.kits[kit].source.as_ref().map(|source| &source.source),
+            self.model.kits[kit].source.as_ref().map(|source| &source.source),
             Some(TagSource::LooseFolder { .. })
         ) {
-            self.status = "Git Review is available for folder-based editing kits".to_owned();
+            self.model.status = "Git Review is available for folder-based editing kits".to_owned();
             return;
         }
         if !self.git_review_enabled_for_kit(kit) {
-            self.status =
+            self.model.status =
                 "Enable Tracked in Git in this editing kit's settings to use Git Review"
                     .to_owned();
             return;
         }
-        self.kits[kit].open_tag_pane(GIT_REVIEW_KEY);
+        self.model.kits[kit].open_tag_pane(GIT_REVIEW_KEY);
         self.run_git_review_job(kit, GitReviewJob::Refresh, ctx);
     }
 
@@ -496,7 +496,7 @@ impl Baboon {
         job: GitReviewJob,
         ctx: &egui::Context,
     ) {
-        let Some((source_root, definitions_root, game)) = self.kits[kit_index]
+        let Some((source_root, definitions_root, game)) = self.model.kits[kit_index]
             .source
             .as_ref()
             .and_then(|source| match &source.source {
@@ -508,7 +508,7 @@ impl Baboon {
                 _ => None,
             })
         else {
-            self.kits[kit_index].git_review.error =
+            self.model.kits[kit_index].git_review.error =
                 Some("Git Review requires a folder-based editing kit.".to_owned());
             return;
         };
@@ -517,8 +517,8 @@ impl Baboon {
             definitions_root,
             game,
         };
-        let kit = self.kits[kit_index].id;
-        let state = &mut self.kits[kit_index].git_review;
+        let kit = self.model.kits[kit_index].id;
+        let state = &mut self.model.kits[kit_index].git_review;
         state.request += 1;
         state.loading = true;
         let request = state.request;
@@ -552,7 +552,7 @@ impl Baboon {
         let Some(kit_index) = self.kit_index(kit) else {
             return false;
         };
-        let state = &mut self.kits[kit_index].git_review;
+        let state = &mut self.model.kits[kit_index].git_review;
         if state.request != request {
             return false;
         }
@@ -565,12 +565,12 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str) {
-        let Some(repo) = self.kits[kit].git_review.repo_root.as_ref() else {
+        let Some(repo) = self.model.kits[kit].git_review.repo_root.as_ref() else {
             return;
         };
         let absolute = git_worktree_path(repo, path);
         if !absolute.is_file() {
-            self.status = format!("Cannot open deleted tag {}", native_git_display_path(path));
+            self.model.status = format!("Cannot open deleted tag {}", native_git_display_path(path));
             return;
         }
         // The review only lists files under the kit's root as the kit spells
@@ -578,8 +578,8 @@ impl Baboon {
         // produced, and its key is the scan's key. This used to canonicalize
         // the path against every entry in the kit, twice, per click.
         let key = file_entry_key(&absolute);
-        if self.kits[kit].entry_for_key(&key).is_none() {
-            let new_entry = self.kits[kit].source.as_ref().and_then(|source| {
+        if self.model.kits[kit].entry_for_key(&key).is_none() {
+            let new_entry = self.model.kits[kit].source.as_ref().and_then(|source| {
                 let TagSource::LooseFolder { root, .. } = &source.source else {
                     return None;
                 };
@@ -588,19 +588,19 @@ impl Baboon {
                     .flatten()
             });
             let Some(entry) = new_entry else {
-                self.status = format!(
+                self.model.status = format!(
                     "Cannot find tag {} in the loaded editing kit",
                     native_git_display_path(path)
                 );
                 return;
             };
-            let folder_seeds = self.kits[kit].folder_seeds();
-            if let Some(source) = self.kits[kit].source.as_mut() {
+            let folder_seeds = self.model.kits[kit].folder_seeds();
+            if let Some(source) = self.model.kits[kit].source.as_mut() {
                 source.upsert_entry(entry, &folder_seeds);
             }
-            self.kits[kit].generation = self.kits[kit].generation.wrapping_add(1);
+            self.model.kits[kit].generation = self.model.kits[kit].generation.wrapping_add(1);
         }
-        self.kits[kit].git_review.pending_open = Some(key);
+        self.model.kits[kit].git_review.pending_open = Some(key);
     }
 }
 

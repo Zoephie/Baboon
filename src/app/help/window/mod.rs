@@ -256,7 +256,7 @@ impl Baboon {
         else {
             return;
         };
-        self.status = match std::fs::write(&path, self.help.tag_compat.visible_csv()) {
+        self.model.status = match std::fs::write(&path, self.help.tag_compat.visible_csv()) {
             Ok(()) => format!("Wrote {}", path.display()),
             Err(error) => format!("Could not write {}: {error}", path.display()),
         };

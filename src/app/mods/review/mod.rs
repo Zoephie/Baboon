@@ -56,11 +56,11 @@ impl Baboon {
         let snapshot = match self.capture_campaign_project(exporting, 0.0) {
             Ok(Some(snapshot)) => snapshot,
             Ok(None) => {
-                self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
+                self.model.status = "Export Mod is only for Campaign Evolved containers".to_owned();
                 return None;
             }
             Err(error) => {
-                self.status = format!("Could not checkpoint project for export: {error}");
+                self.model.status = format!("Could not checkpoint project for export: {error}");
                 return None;
             }
         };
@@ -110,7 +110,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_mod_review(&mut self, review_only: bool) {
-        let exporting = self.active;
+        let exporting = self.model.active;
         let Some((snapshot, rows)) = self.capture_mod_export_rows(exporting) else {
             return;
         };
@@ -120,7 +120,7 @@ impl Baboon {
         // "Browse..." picker opens into and what the preview claims, and
         // neither can name a directory that does not exist yet. A failure is
         // ignored — the write path reports it properly, with the error.
-        let folder = self.kits[exporting]
+        let folder = self.model.kits[exporting]
             .source
             .as_ref()
             .map(|source| default_mod_export_folder(source.source.root_path()))
@@ -162,7 +162,7 @@ impl Baboon {
         let Some(entry) = self.campaign_entry_for_identity(kit, &overlay.identity) else {
             return false;
         };
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         matches!(
@@ -198,7 +198,7 @@ impl Baboon {
         let Some(entry) = self.campaign_entry_for_identity(kit, identity) else {
             return failed("This tag is no longer in the source".to_owned());
         };
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return failed("No source loaded".to_owned());
         };
         let edited_tag = match TagFile::read_from_bytes(&overlay.bytes) {
@@ -219,17 +219,17 @@ impl Baboon {
             }
         };
         if overlay.kind == CampaignProjectTagKind::New {
-            return describe_whole(edited_tag, &self.kits[kit].names);
+            return describe_whole(edited_tag, &self.model.kits[kit].names);
         }
         let base = match crate::core::source::read_shipped_entry(&source.source, &entry) {
             Ok(Some(base)) => base,
             // Only a mod carries this tag, so there is no shipped version to
             // difference against — describing it whole is the honest answer, and
             // it is what the reviewer needs to see either way.
-            Ok(None) => return describe_whole(edited_tag, &self.kits[kit].names),
+            Ok(None) => return describe_whole(edited_tag, &self.model.kits[kit].names),
             Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
         };
-        let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
+        let (rows, truncated) = diff_tags(&base, &edited_tag, &self.model.kits[kit].names, LIMIT);
         ModRowDiff {
             rows,
             base: Some(base),

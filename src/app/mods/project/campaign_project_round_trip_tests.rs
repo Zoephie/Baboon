@@ -81,12 +81,12 @@ impl CeKit {
         });
         for entry in entries.iter().rev() {
             let tag = TagFile::new(definition("haloce_evolved", GROUP)).unwrap();
-            app.kits[0]
+            app.model.kits[0]
                 .parsed_tags
                 .insert(entry.key.clone(), TagDocument::clean(tag));
-            app.kits[0].open_tag_pane(&entry.key);
+            app.model.kits[0].open_tag_pane(&entry.key);
         }
-        app.kits[0].selected_key = Some(entries[0].key.clone());
+        app.model.kits[0].selected_key = Some(entries[0].key.clone());
         app
     }
 }
@@ -114,7 +114,7 @@ fn autosave_at(app: &mut Baboon, ctx: &egui::Context, time: f64) {
 }
 
 fn project(app: &Baboon) -> &ActiveCampaignProject {
-    app.kits[0].project.active.as_ref().expect("a project")
+    app.model.kits[0].project.active.as_ref().expect("a project")
 }
 
 fn step(id: u64, label: &str, bytes: &[u8]) -> HistoryStep {
@@ -269,7 +269,7 @@ fn a_capture_holds_the_workspace_and_a_checkpoint_writes_it() {
     let mut app = kit.app(&["objects/rock", "objects/stone"]);
     edit_field(&mut app, &key("objects/rock"), FRICTION, "0.25");
     edit_field(&mut app, &key("objects/rock"), FRICTION, "0.5");
-    app.kits[0]
+    app.model.kits[0]
         .pending_container_folders
         .insert("objects/mine".to_owned());
 
@@ -287,9 +287,9 @@ fn a_capture_holds_the_workspace_and_a_checkpoint_writes_it() {
     assert_eq!(friction_in(&rock.bytes), Some(0.5));
     assert_eq!(
         *rock.bytes,
-        app.kits[0].parsed_tags[&key("objects/rock")].tag.write_to_bytes().unwrap()
+        app.model.kits[0].parsed_tags[&key("objects/rock")].tag.write_to_bytes().unwrap()
     );
-    let open: Vec<String> = app.kits[0]
+    let open: Vec<String> = app.model.kits[0]
         .open_tabs
         .iter()
         .map(|key| kit.identity(&key["ublock:pakchunk0:".len()..]))
@@ -328,7 +328,7 @@ fn a_capture_holds_the_workspace_and_a_checkpoint_writes_it() {
     let mut app = Baboon::for_test();
     loose.install(&mut app);
     assert!(matches!(app.capture_campaign_project(0, 1.0), Ok(None)));
-    assert!(app.kits[0].project.active.is_none());
+    assert!(app.model.kits[0].project.active.is_none());
 }
 
 /// When the autosave writes: not before it is due, once something changed,
@@ -378,7 +378,7 @@ fn autosave_writes_only_when_due_and_changed() {
 
     // While a write is in flight a due tick only pushes the next one back.
     edit_field(&mut app, &key("objects/rock"), FRICTION, "1");
-    app.kits[0].project.active.as_mut().unwrap().save_in_flight = Some(99);
+    app.model.kits[0].project.active.as_mut().unwrap().save_in_flight = Some(99);
     autosave_at(&mut app, &ctx, 14.0);
     assert_eq!(project(&app).revision, 2);
     assert_eq!(project(&app).next_autosave_at, 14.0 + CAMPAIGN_PROJECT_AUTOSAVE_SECS);
@@ -394,7 +394,7 @@ fn autosave_writes_only_when_due_and_changed() {
     let mut app = Baboon::for_test();
     loose.install(&mut app);
     autosave_at(&mut app, &ctx, 20.0);
-    assert!(app.kits[0].project.active.is_none());
+    assert!(app.model.kits[0].project.active.is_none());
 }
 
 /// A recovery file left by an earlier session is adopted, not overwritten:
@@ -408,19 +408,19 @@ fn a_new_session_adopts_the_recovery_file() {
     app.checkpoint_campaign_project(0, 1.0).unwrap();
 
     let mut next = kit.app(&["objects/rock"]);
-    next.kits[0].parsed_tags.clear();
+    next.model.kits[0].parsed_tags.clear();
     autosave_at(&mut next, &egui::Context::default(), 1.0);
 
     assert!(next.tag_has_stashed_overlay(0, &key("objects/rock")));
     assert_eq!(
-        next.status,
+        next.model.status,
         "Restored 1 stashed modification(s) from this workspace's last session"
     );
     assert!(project(&next).saved_digests.is_some(), "believed, so not rewritten");
     // Opening the tag serves it from the stash.
     assert!(next.load_campaign_overlay_for_key(0, &key("objects/rock")));
     assert_eq!(
-        real_of(&next.kits[0].parsed_tags[&key("objects/rock")].tag, FRICTION),
+        real_of(&next.model.kits[0].parsed_tags[&key("objects/rock")].tag, FRICTION),
         Some(0.5)
     );
 }
@@ -436,28 +436,28 @@ fn clearing_the_stash_forgets_every_overlay_and_document() {
 
     app.clear_campaign_stash(0, &ctx());
 
-    assert_eq!(app.status, "Cleared 1 stashed modification");
+    assert_eq!(app.model.status, "Cleared 1 stashed modification");
     assert!(project(&app).overlays.is_empty());
-    assert!(app.kits[0].parsed_tags.is_empty(), "documents dropped, dirty or not");
+    assert!(app.model.kits[0].parsed_tags.is_empty(), "documents dropped, dirty or not");
     assert!(load_campaign_project(&kit.recovery()).unwrap().overlays.is_empty());
     // The open tabs are asked for again, from the (absent) containers.
     for path in ["objects/rock", "objects/stone"] {
-        assert!(app.kits[0].loading_tags.contains(&key(path)), "{path}");
+        assert!(app.model.kits[0].loading_tags.contains(&key(path)), "{path}");
     }
     drain_messages(&mut app, Duration::from_millis(200));
 
     app.clear_campaign_stash(0, &ctx());
-    assert_eq!(app.status, "Cleared this workspace's unsaved modifications");
+    assert_eq!(app.model.status, "Cleared this workspace's unsaved modifications");
 }
 
 /// Write the user's own project, named, through the app's Save Project.
 fn save_user_project(app: &mut Baboon, path: &Path) {
     // The project exists from the first autosave on.
     app.capture_campaign_project(0, 1.0).unwrap();
-    app.kits[0].project.active.as_mut().unwrap().project_path = Some(path.to_path_buf());
+    app.model.kits[0].project.active.as_mut().unwrap().project_path = Some(path.to_path_buf());
     app.save_campaign_project_file(0, 2.0);
     assert_eq!(
-        app.status,
+        app.model.status,
         format!("Saved 1 modified tag(s) to {}", path.display())
     );
 }
@@ -486,11 +486,11 @@ fn discarding_never_writes_the_user_s_project() {
     driver.click(&mut app, "Discard...");
     assert!(app.documents.save_changes_prompt.confirm_discard, "the first click arms");
     assert!(app.documents.save_changes_prompt.visible);
-    assert!(app.kits[0].open_tabs.contains(&rock));
+    assert!(app.model.kits[0].open_tabs.contains(&rock));
     driver.click(&mut app, "Delete Stashed Edits");
 
     assert!(!app.documents.save_changes_prompt.visible);
-    assert!(!app.kits[0].open_tabs.contains(&rock));
+    assert!(!app.model.kits[0].open_tabs.contains(&rock));
     assert!(!app.tag_has_stashed_overlay(0, &rock));
     assert!(load_campaign_project(&kit.recovery()).unwrap().overlays.is_empty());
     assert_eq!(fs::read(&user).unwrap(), user_bytes, "the user's project is untouched");
@@ -515,14 +515,14 @@ fn stashing_for_mod_keeps_the_edit_out_of_the_user_s_project() {
     PromptDriver::new().click(&mut app, "Stash for Mod");
 
     assert_eq!(
-        app.status,
+        app.model.status,
         format!(
             "Stashed for Export Mod. {} is unchanged until you save it",
             user.display()
         )
     );
     assert!(!app.documents.save_changes_prompt.visible);
-    assert!(!app.kits[0].open_tabs.contains(&rock), "the close went ahead");
+    assert!(!app.model.kits[0].open_tabs.contains(&rock), "the close went ahead");
     let stashed = load_campaign_project(&kit.recovery()).unwrap();
     assert_eq!(
         friction_in(&stashed.overlays[&kit.identity("objects/rock")].bytes),
@@ -558,8 +558,8 @@ fn the_prompt_s_save_routes_a_container_tag_into_its_pak() {
         Some("Save failed: objects/rock.point_physics: Container provenance is stale")
     );
     assert!(app.mods.container_write_leases.is_empty(), "no lease was taken");
-    assert!(app.kits[0].open_tabs.contains(&rock));
-    assert!(app.kits[0].parsed_tags[&rock].dirty.is_set());
+    assert!(app.model.kits[0].open_tabs.contains(&rock));
+    assert!(app.model.kits[0].parsed_tags[&rock].dirty.is_set());
     assert!(fs::read_dir(&kit.root).unwrap().next().is_none(), "nothing written");
 }
 
@@ -573,7 +573,7 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
     edit_field(&mut app, &key("objects/rock"), FRICTION, "0.5");
     app.capture_campaign_project(0, 1.0).unwrap();
     let orphan = "70706879:objects/gone";
-    app.kits[0]
+    app.model.kits[0]
         .project.active
         .as_mut()
         .unwrap()
@@ -615,7 +615,7 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
     let write = |app: &mut Baboon, included: &[&str], output: &Path| {
         let included = included.iter().map(|id| (*id).to_owned()).collect();
         app.write_reviewed_mod(&snapshot, &included, output.to_path_buf(), &ctx());
-        app.status.clone()
+        app.model.status.clone()
     };
     assert_eq!(write(&mut app, &[], &output), "Nothing selected to export");
     assert_eq!(write(&mut app, &[orphan], &output), "Nothing selected to export");
@@ -642,5 +642,5 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
     );
     app.export_mod();
     assert!(app.mods.mod_export.is_none());
-    assert_eq!(app.status, "Export Mod is only for Campaign Evolved containers");
+    assert_eq!(app.model.status, "Export Mod is only for Campaign Evolved containers");
 }

@@ -102,13 +102,13 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             self.app.draw_blam_pane(ui, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
-        let Some(entry) = self.app.kits[self.kit_index]
+        let Some(entry) = self.app.model.kits[self.kit_index]
             .source
             .as_ref()
             .and_then(|source| source.entry_for_key(&key))
             .cloned()
             .or_else(|| {
-                self.app.kits[self.kit_index]
+                self.app.model.kits[self.kit_index]
                     .browser.active_favorite_entries
                     .iter()
                     .find(|entry| entry.key == key)
@@ -185,14 +185,14 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             return RichText::new(BLAM_TITLE).color(text_dark()).into();
         }
         if is_folder_pane_key(pane) {
-            let label = self.app.kits[self.kit_index]
+            let label = self.app.model.kits[self.kit_index]
                 .browser.folder_browsers
                 .get(pane)
                 .map(|folder| folder.label.clone())
                 .unwrap_or_else(|| "Folder".to_owned());
             return RichText::new(label).color(text_dark()).into();
         }
-        let dirty = self.app.kits[self.kit_index]
+        let dirty = self.app.model.kits[self.kit_index]
             .parsed_tags
             .get(pane)
             .is_some_and(|document| document.dirty.is_set());
@@ -441,7 +441,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             row_type()
         };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(key))
-            if self.app.kits[self.kit_index]
+            if self.app.model.kits[self.kit_index]
                 .parsed_tags
                 .get(key)
                 .is_some_and(|document| document.dirty.is_set()));
@@ -490,7 +490,7 @@ impl Baboon {
         tree: &egui_tiles::Tree<String>,
     ) -> HashMap<String, (String, Option<u32>)> {
         let mut labels = HashMap::new();
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         // One targeted scan per open pane. Iterating the entries instead and
         // testing each against a set of the open keys was measurably *slower*:
         // it hashes all 24,000 keys rather than comparing a few thousand that
@@ -547,7 +547,7 @@ impl Baboon {
 
     /// Draw one kit's open tags as a tiled layout.
     pub(in crate::app) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        if self.kits[kit_index].tag_tree.is_empty() {
+        if self.model.kits[kit_index].tag_tree.is_empty() {
             // An unloaded workspace never reaches here — it shows the welcome
             // screen instead — so this is only ever "loaded, nothing open yet".
             centered_empty_state(
@@ -559,8 +559,8 @@ impl Baboon {
 
         // Move the tree out for the duration: the behavior needs `&mut Baboon`,
         // and the tree lives on a kit inside it.
-        let placeholder = egui_tiles::Tree::empty(tag_tree_id(self.kits[kit_index].id));
-        let mut tree = std::mem::replace(&mut self.kits[kit_index].tag_tree, placeholder);
+        let placeholder = egui_tiles::Tree::empty(tag_tree_id(self.model.kits[kit_index].id));
+        let mut tree = std::mem::replace(&mut self.model.kits[kit_index].tag_tree, placeholder);
         let tab_labels = self.tab_labels_for_open_panes(kit_index, &tree);
         let mut behavior = TagPaneBehavior {
             app: self,
@@ -587,64 +587,64 @@ impl Baboon {
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         let pending_browser_action = behavior.pending_browser_action.take();
-        self.kits[kit_index].tag_tree = tree;
+        self.model.kits[kit_index].tag_tree = tree;
 
         // A bitmap double-clicked in the Bitmap Library. Applied here, with the
         // tree back in place: the grid draws while it is moved out, so opening
         // from inside the walk writes the tab into the discarded placeholder.
-        if let Some(key) = self.kits[kit_index].bitmap_browser.pending_open.take() {
-            self.active = kit_index;
+        if let Some(key) = self.model.kits[kit_index].bitmap_browser.pending_open.take() {
+            self.model.active = kit_index;
             self.select_entry(key, ctx.clone());
         }
         // Likewise the extract, which additionally opens a blocking folder
         // picker — not something to do part-way through drawing the pane that
         // asked for it. `begin_extract_bitmap` resolves the tag against the
         // active kit, so that has to be this one first.
-        if let Some(key) = self.kits[kit_index]
+        if let Some(key) = self.model.kits[kit_index]
             .bitmap_browser
             .pending_menu_action
             .take()
         {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.begin_extract_bitmap(key, ctx.clone());
         }
         // A model double-clicked in the Model Library opens the `.model` that
         // owns it — or the render model itself when the kit has none — and the
         // right-click path opens the clicked tag with no resolution. Parked and
         // drained for the same reason as the bitmaps above.
-        if let Some(key) = self.kits[kit_index].model_browser.pending_open.take() {
-            self.active = kit_index;
+        if let Some(key) = self.model.kits[kit_index].model_browser.pending_open.take() {
+            self.model.active = kit_index;
             let open = self.resolve_model_browser_open(kit_index, &key);
             self.select_entry(open, ctx.clone());
         }
-        if let Some(key) = self.kits[kit_index]
+        if let Some(key) = self.model.kits[kit_index]
             .model_browser
             .pending_menu_action
             .take()
         {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.select_entry(key, ctx.clone());
         }
         // Git Review is another synthetic pane drawn while `tag_tree` is moved
         // out. Defer its double-click open until the real tree is back too.
-        if let Some(key) = self.kits[kit_index].git_review.pending_open.take() {
-            self.active = kit_index;
+        if let Some(key) = self.model.kits[kit_index].git_review.pending_open.take() {
+            self.model.active = kit_index;
             self.select_entry(key, ctx.clone());
         }
 
         // The tree owns the layout, so a drag or split there is what changes
         // the open set — re-derive it rather than the other way round.
-        self.kits[kit_index].sync_open_tabs();
+        self.model.kits[kit_index].sync_open_tabs();
         if let Some(key) = focused {
             if !is_folder_pane_key(&key) {
-                self.kits[kit_index].selected_key = Some(key);
+                self.model.kits[kit_index].selected_key = Some(key);
             }
         }
         // Pane contents are drawn while `tag_tree` is temporarily moved out.
         // Opening from a breadcrumb or folder browser before this point would
         // add the new tab to the discarded placeholder tree.
         if let Some(action) = pending_browser_action {
-            self.active = kit_index;
+            self.model.active = kit_index;
             self.handle_browser_action(action, ctx.clone());
         }
         // Everything below addresses the *active* kit: the close prompt and the
@@ -663,7 +663,7 @@ impl Baboon {
             || close_all_but.is_some()
             || !close_requests.is_empty()
         {
-            self.active = kit_index;
+            self.model.active = kit_index;
         }
         if let Some(key) = reveal {
             self.reveal_in_browser(&key);
@@ -675,7 +675,7 @@ impl Baboon {
             self.discard_tag_changes(kit_index, &key, ctx);
         }
         if let Some((key, open)) = expand {
-            self.kits[kit_index].pending_expand.insert(key, open);
+            self.model.kits[kit_index].pending_expand.insert(key, open);
         }
         if close_all {
             self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);

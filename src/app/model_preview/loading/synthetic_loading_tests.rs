@@ -393,40 +393,40 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
                 "0, 4, 5",
             );
             document.dirty.touch();
-            app.kits[0].parsed_tags.insert(entry.key.clone(), document);
+            app.model.kits[0].parsed_tags.insert(entry.key.clone(), document);
         }
         let ctx = egui::Context::default();
         // Not the preview tab: nothing is asked for.
-        app.kits[0]
+        app.model.kits[0]
             .caches.model_previews
             .insert(entry.key.clone(), ModelPreviewState::default());
         app.maybe_request_model_preview(0, &entry.key, &ctx);
-        assert!(app.kits[0].caches.model_previews[&entry.key].preview_load_id.is_none());
+        assert!(app.model.kits[0].caches.model_previews[&entry.key].preview_load_id.is_none());
 
-        app.kits[0]
+        app.model.kits[0]
             .caches.model_previews
             .get_mut(&entry.key)
             .unwrap()
             .active_tab = ModelTagPanelTab::ModelPreview;
         app.maybe_request_model_preview(0, &entry.key, &ctx);
-        let state = &app.kits[0].caches.model_previews[&entry.key];
+        let state = &app.model.kits[0].caches.model_previews[&entry.key];
         let first = state.preview_load_id.expect("a worker started");
         assert!(state.data.is_none(), "the shells show while it parses");
         assert_eq!(state.loaded_key.as_deref(), Some(entry.key.as_str()));
         // Asking again while it runs starts nothing new.
         app.maybe_request_model_preview(0, &entry.key, &ctx);
         assert_eq!(
-            app.kits[0].caches.model_previews[&entry.key].preview_load_id,
+            app.model.kits[0].caches.model_previews[&entry.key].preview_load_id,
             Some(first)
         );
 
         let deadline = Instant::now() + Duration::from_secs(60);
-        while app.kits[0].caches.model_previews[&entry.key].data.is_none() {
+        while app.model.kits[0].caches.model_previews[&entry.key].data.is_none() {
             assert!(Instant::now() < deadline, "the preview never landed");
             app.process_worker_messages(&ctx);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let state = &app.kits[0].caches.model_previews[&entry.key];
+        let state = &app.model.kits[0].caches.model_previews[&entry.key];
         assert!(state.preview_load_id.is_none(), "the request is answered");
         assert_eq!(state.render_model_path.as_deref(), Some(relative));
         let data = state.data.as_ref().unwrap().as_ref().expect("it loads");

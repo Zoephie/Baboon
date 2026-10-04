@@ -361,7 +361,7 @@ pub(super) mod fixture {
             source: TagSource::SingleFile {
                 path: PathBuf::from("perf-synthetic"),
             },
-            names: app.default_names.clone(),
+            names: app.model.default_names.clone(),
             game: GameId::from_id(game),
             tree: crate::core::source::build_tree(&entries),
             group_tree: crate::core::source::build_group_tree(&entries),
@@ -373,7 +373,7 @@ pub(super) mod fixture {
             complete_scan: true,
             chosen_kit_layout: None,
         });
-        let kit = &mut app.kits[app.active];
+        let kit = &mut app.model.kits[app.model.active];
         kit.browser.mode = BrowserMode::Folders;
     }
 
@@ -385,7 +385,7 @@ pub(super) mod fixture {
         tag: TagFile,
     ) -> String {
         let key = entry_key(display_path);
-        let kit = &mut app.kits[app.active];
+        let kit = &mut app.model.kits[app.model.active];
         kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
         kit.open_tag_pane(&key);
         key
@@ -393,14 +393,14 @@ pub(super) mod fixture {
 
     /// The tag pane's "Expand all" for `key`, applied on its next draw.
     pub(in crate::app) fn expand_all(app: &mut Baboon, key: &str) {
-        app.kits[app.active]
+        app.model.kits[app.model.active]
             .pending_expand
             .insert(key.to_owned(), true);
     }
 
     /// The browser search box's contents, as if typed.
     pub(in crate::app) fn set_filter(app: &mut Baboon, text: &str) {
-        app.kits[app.active].browser.filter = text.to_owned();
+        app.model.kits[app.model.active].browser.filter = text.to_owned();
     }
 
     /// "Reveal in browser": opens the tag's folders and scrolls to it.
@@ -412,7 +412,7 @@ pub(super) mod fixture {
         app: &mut Baboon,
         lines: impl IntoIterator<Item = String>,
     ) {
-        app.kits[app.active].terminal.open = true;
+        app.model.kits[app.model.active].terminal.open = true;
         app.kit_tools.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
         app.kit_tools.terminal.scroll_to_bottom = true;
     }
@@ -576,7 +576,7 @@ pub(super) mod fixture {
         parameters: usize,
     ) {
         let render_method = RenderMethod::from_tag(shader).expect("synthetic shader parses");
-        let kit = &mut app.kits[app.active];
+        let kit = &mut app.model.kits[app.model.active];
         let mut definition_categories = Vec::new();
         for category in 0..categories {
             let mut options = Vec::new();

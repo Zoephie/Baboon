@@ -52,7 +52,7 @@ impl Baboon {
             egui::DragAndDrop::clear_payload(ctx);
             ctx.data_mut(|data| data.remove_temp::<egui::CursorIcon>(cursor_id));
             self.end_kit_tool_hover(ctx);
-            self.status = match plan {
+            self.model.status = match plan {
                 Ok(plan) => self.drop_tag_on_kit_tool(&target, &plan),
                 Err(objection) => objection,
             };
@@ -71,11 +71,11 @@ impl Baboon {
         if self.kit_tools.kit_tool_drag.hover.is_none() {
             // The first frame over a tool: keep the status the drag interrupted
             // so it can come back if the drag leaves without dropping.
-            let interrupted = std::mem::take(&mut self.status);
+            let interrupted = std::mem::take(&mut self.model.status);
             self.kit_tools.kit_tool_drag.saved_status = Some((interrupted, self.status_changed_at));
         }
         self.kit_tools.kit_tool_drag.hover = Some(target);
-        self.status = message;
+        self.model.status = message;
     }
 
     /// Undo the hover feedback: the drag left the tool's window, ended
@@ -87,7 +87,7 @@ impl Baboon {
             && left_a_tool
             && ctx.input(|input| input.time) - shown_at < STATUS_LINGER_SECS
         {
-            self.status = saved;
+            self.model.status = saved;
         }
     }
 
@@ -173,12 +173,12 @@ impl Baboon {
 
     /// The game of the loaded editing kit whose tags folder holds `file`.
     fn game_of_loaded_kit_containing(&self, file: &Path) -> Option<GameId> {
-        (0..self.kits.len()).find_map(|kit_index| {
+        (0..self.model.kits.len()).find_map(|kit_index| {
             let kit_root = self.editing_kit_root_for(kit_index)?;
             if !tag_within_kit(file, &kit_root) {
                 return None;
             }
-            self.kits[kit_index].source.as_ref()?.game
+            self.model.kits[kit_index].source.as_ref()?.game
         })
     }
 

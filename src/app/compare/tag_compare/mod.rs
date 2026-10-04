@@ -347,7 +347,7 @@ impl Baboon {
             },
             TagCompareGitUpdate::Head(result) => {
                 let current = self
-                    .kits
+                    .model.kits
                     .iter()
                     .find(|kit| kit.id == state.kit)
                     .and_then(|kit| kit.parsed_tags.get(&state.a_key));
@@ -731,7 +731,7 @@ pub(in crate::app) fn draw_tag_diff_list(
 impl Baboon {
     fn comparison_kits(&self, game: GameId, current_root: &Path) -> Vec<ComparisonKit> {
         let mut kits = Vec::new();
-        for profile in &self.prefs.custom_editing_kit_profiles {
+        for profile in &self.model.prefs.custom_editing_kit_profiles {
             if profile.game != game.as_str() {
                 continue;
             }
@@ -772,10 +772,10 @@ impl Baboon {
         let Some(mut state) = self.compare.tag_diff.take() else {
             return;
         };
-        let diff_kit = self.kit_index(state.kit).unwrap_or(self.active);
-        let current = self.kits[diff_kit].parsed_tags.get(&state.a_key);
+        let diff_kit = self.kit_index(state.kit).unwrap_or(self.model.active);
+        let current = self.model.kits[diff_kit].parsed_tags.get(&state.a_key);
         let group = current.map(|doc| doc.tag.group().tag);
-        let source = self.kits[diff_kit].source.as_ref();
+        let source = self.model.kits[diff_kit].source.as_ref();
         let game = source.and_then(|source| source.game);
         let (tags_root, definitions_root) = source
             .and_then(|source| match &source.source {
@@ -787,11 +787,11 @@ impl Baboon {
                 _ => None,
             })
             .unwrap_or((Path::new(""), None));
-        let git_tracked = self.kits[diff_kit]
+        let git_tracked = self.model.kits[diff_kit]
             .profile
             .as_ref()
             .and_then(|identity| {
-                self.prefs
+                self.model.prefs
                     .custom_editing_kit_profiles
                     .iter()
                     .find(|profile| profile.id == identity.id)
@@ -829,7 +829,7 @@ impl Baboon {
         }
         let current_game = current.map(|doc| blam_tags::game::Game::of(&doc.tag));
         let open_tags: Vec<OpenTagGroup> = self
-            .kits
+            .model.kits
             .iter()
             .filter_map(|kit| {
                 let other_source = kit.source.as_ref()?;
@@ -942,7 +942,7 @@ impl Baboon {
         let current_label = if state.source == TagCompareSource::GitHistory {
             "Before".to_owned()
         } else if state.source == TagCompareSource::EditingKit {
-            self.kits[diff_kit]
+            self.model.kits[diff_kit]
                 .profile
                 .as_ref()
                 .map(|profile| profile.name.clone())
@@ -1674,10 +1674,10 @@ impl Baboon {
                     .and_then(|root| matching_tag_path(&state.a_key, tags_root, root)),
                 _ => selected_path,
             };
-            let a = self.kits[diff_kit].parsed_tags.get(&state.a_key);
+            let a = self.model.kits[diff_kit].parsed_tags.get(&state.a_key);
             let b = match state.source {
                 TagCompareSource::OpenTag => {
-                    selected_open_tag(&self.kits, state.b_kit, state.b_key.as_deref())
+                    selected_open_tag(&self.model.kits, state.b_kit, state.b_key.as_deref())
                 }
                 _ => None,
             };

@@ -602,7 +602,7 @@ impl Baboon {
         // Borrowed for the draw, which reads the review and writes only locals:
         // the commit list, the change list and a diff of up to 5,000 rows used
         // to be copied out every frame.
-        let state = &self.kits[kit_index].git_review;
+        let state = &self.model.kits[kit_index].git_review;
         let branch = state.branch.clone();
         let repo = state.repo_root.clone();
         // Looking for GitHub Desktop stats the disk (on macOS, every folder on
@@ -878,7 +878,7 @@ impl Baboon {
                     });
             });
 
-        let state = &mut self.kits[kit_index].git_review;
+        let state = &mut self.model.kits[kit_index].git_review;
         state.commit_filter = commit_filter;
         state.filter = filter_text;
         state.filters = filters;
@@ -892,7 +892,7 @@ impl Baboon {
             }
             Some(GitReviewAction::OpenGitHubDesktop) => {
                 if let (Some(launcher), Some(repo)) = (github_desktop.as_ref(), repo.as_ref()) {
-                    self.status = match launcher.open(repo) {
+                    self.model.status = match launcher.open(repo) {
                         Ok(()) => format!("Opening {} in GitHub Desktop", repo.display()),
                         Err(error) => format!("Could not open GitHub Desktop: {error}"),
                     };

@@ -13,11 +13,11 @@ impl Baboon {
     /// The Blam! surface only covers Halo 3 pipelines for now, so both the
     /// Tools menu entry and the surface strip answer to the kit's game.
     pub(in crate::app) fn active_kit_is_halo3(&self) -> bool {
-        self.kit_is_halo3(self.active)
+        self.kit_is_halo3(self.model.active)
     }
 
     pub(in crate::app) fn kit_is_halo3(&self, kit_index: usize) -> bool {
-        self.kits[kit_index]
+        self.model.kits[kit_index]
             .source
             .as_ref()
             .is_some_and(|source| source.game == Some(GameId::Halo3))
@@ -26,14 +26,14 @@ impl Baboon {
     /// The Blam! pane: a [`BLAM_KEY`] tile in the kit's tag tree, so it drags,
     /// splits, and resizes like any open tag.
     pub(in crate::app) fn draw_blam_pane(&mut self, ui: &mut Ui, kit_index: usize) {
-        let kit_id = self.kits[kit_index].id;
+        let kit_id = self.model.kits[kit_index].id;
         let data_root = self.kit_layout_for(kit_index).map(|layout| layout.data);
 
         // Re-detect when the asset path changes (or a rescan was forced), not
         // every frame — the ticks follow the typed path without hammering disk.
-        let trimmed = self.kits[kit_index].blam.asset_path.trim().to_owned();
-        if self.kits[kit_index].blam.scanned_path.as_deref() != Some(trimmed.as_str()) {
-            let blam = &mut self.kits[kit_index].blam;
+        let trimmed = self.model.kits[kit_index].blam.asset_path.trim().to_owned();
+        if self.model.kits[kit_index].blam.scanned_path.as_deref() != Some(trimmed.as_str()) {
+            let blam = &mut self.model.kits[kit_index].blam;
             if let Some(data_root) = data_root.as_ref().filter(|_| !trimmed.is_empty()) {
                 let asset_folder = data_root.join(trimmed.replace('\\', "/"));
                 blam.rescan(&asset_folder);
@@ -57,11 +57,11 @@ impl Baboon {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status:").color(subtle_dark()));
-                    if self.kits[kit_index].blam.running {
+                    if self.model.kits[kit_index].blam.running {
                         ui.spinner();
                     }
                     ui.label(
-                        RichText::new(&self.kits[kit_index].blam.status)
+                        RichText::new(&self.model.kits[kit_index].blam.status)
                             .color(text_dark())
                             .monospace(),
                     );
@@ -87,7 +87,7 @@ impl Baboon {
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
-                        let blam = &self.kits[kit_index].blam;
+                        let blam = &self.model.kits[kit_index].blam;
                         if blam.log.is_empty() {
                             ui.label(
                                 RichText::new("No import has run yet.")
@@ -139,7 +139,7 @@ impl Baboon {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(
-                                    &mut self.kits[kit_index].blam.asset_path,
+                                    &mut self.model.kits[kit_index].blam.asset_path,
                                 )
                                 .desired_width(320.0)
                                 .font(egui::TextStyle::Monospace)
@@ -167,8 +167,8 @@ impl Baboon {
                         ui.add_space(12.0);
 
                         ui.label(RichText::new("Pipelines").color(text_dark()).strong());
-                        let scan = self.kits[kit_index].blam.scan;
-                        let blam = &mut self.kits[kit_index].blam;
+                        let scan = self.model.kits[kit_index].blam.scan;
+                        let blam = &mut self.model.kits[kit_index].blam;
                         ui.add_enabled(
                             scan.render,
                             egui::Checkbox::new(&mut blam.import_render, "Render (render_model)"),
@@ -240,12 +240,12 @@ impl Baboon {
         if browse_clicked
             && let Some(path) = self.pick_tool_command_path(ToolCommandArgKind::PathData)
         {
-            let blam = &mut self.kits[kit_index].blam;
+            let blam = &mut self.model.kits[kit_index].blam;
             blam.asset_path = path;
             blam.scanned_path = None;
         }
         if rescan_clicked {
-            self.kits[kit_index].blam.scanned_path = None;
+            self.model.kits[kit_index].blam.scanned_path = None;
         }
         if import_clicked {
             self.begin_blam_import(kit_index, ui.ctx().clone());

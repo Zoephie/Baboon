@@ -15,7 +15,7 @@ impl Baboon {
     /// progress and release the container-write guard while its worker was
     /// still reading. Only the level export's own message ends it.
     pub(in crate::app) fn handle_export_finished(&mut self, result: Result<String, String>) -> bool {
-        self.status = match result {
+        self.model.status = match result {
             Ok(message) => message,
             Err(error) => error,
         };
@@ -51,7 +51,7 @@ impl Baboon {
         done: usize,
         total: usize,
     ) -> bool {
-        if !self.kits.iter().any(|existing| existing.id == kit) {
+        if !self.model.kits.iter().any(|existing| existing.id == kit) {
             self.chimp.chimp_level_job = None;
             return true;
         }
@@ -142,7 +142,7 @@ impl Baboon {
                         ));
                     }
                 }
-                self.status = if report.cancelled {
+                self.model.status = if report.cancelled {
                     format!("Extraction cancelled after {} tag(s)", report.written)
                 } else {
                     format!("Extracted {} tag(s)", report.written)
@@ -160,7 +160,7 @@ impl Baboon {
                 });
             }
             Err(error) => {
-                self.status = format!("Extraction failed: {error}");
+                self.model.status = format!("Extraction failed: {error}");
                 self.shell.operation_notice = Some(OperationNotice {
                     title: "Extraction failed".to_owned(),
                     message: error,
@@ -184,12 +184,12 @@ impl Baboon {
         };
         match result {
             Ok(()) => {
-                if !self.kits[kit_index].index_jobs.references_for_entry_index {
-                    self.status = format!("Index saved: {}", path.display());
+                if !self.model.kits[kit_index].index_jobs.references_for_entry_index {
+                    self.model.status = format!("Index saved: {}", path.display());
                 }
             }
             Err(error) => {
-                self.status = format!("Index save failed: {} ({error})", path.display());
+                self.model.status = format!("Index save failed: {} ({error})", path.display());
             }
         }
         false
@@ -421,11 +421,11 @@ mod level_export_job_tests;
 
 impl Baboon {
     pub(in crate::app) fn save_current_tag(&mut self, ctx: &egui::Context) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(key) = self.kits[self.active].selected_key.clone() else {
-            self.status = "No tag selected".to_owned();
+        let Some(key) = self.model.kits[self.model.active].selected_key.clone() else {
+            self.model.status = "No tag selected".to_owned();
             return;
         };
         // A brand-new (in-memory) container tag has no baseline to overwrite —
@@ -443,11 +443,11 @@ impl Baboon {
         // gets the export, which is the supported one.
         if self.current_source_is_container() {
             match container_save_route(
-                self.prefs.expert_mode,
-                self.prefs.confirm_container_overwrite,
+                self.model.prefs.expert_mode,
+                self.model.prefs.confirm_container_overwrite,
             ) {
                 ContainerSaveRoute::ExportReview => {
-                    self.status = "Your change is kept in this workspace — export it as a mod to \
+                    self.model.status = "Your change is kept in this workspace — export it as a mod to \
                                    put it in the game"
                         .to_owned();
                     self.export_mod();
@@ -465,19 +465,19 @@ impl Baboon {
             return;
         }
         match self.save_tag_by_key(&key) {
-            Ok(path) => self.status = format!("Saved {}", path.display()),
-            Err(error) => self.status = format!("Save failed: {error}"),
+            Ok(path) => self.model.status = format!("Saved {}", path.display()),
+            Err(error) => self.model.status = format!("Save failed: {error}"),
         }
     }
 
     pub(in crate::app) fn save_tag_by_key(&mut self, key: &str) -> Result<PathBuf, String> {
-        if self.refuse_read_only_edit(self.active) {
-            return Err(self.status.clone());
+        if self.refuse_read_only_edit(self.model.active) {
+            return Err(self.model.status.clone());
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return Err("Selected tag is no longer in the source".to_owned());
         };
-        let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) else {
             return Err("Load the selected tag before saving".to_owned());
         };
         if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
@@ -504,13 +504,13 @@ impl Baboon {
             collect_tag_dependency_refs(doc.tag.root(), &mut refs);
             refs
         };
-        if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
+        if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
             doc.dirty.clear();
         }
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
         if is_render_method_layout_group(entry.group_tag) {
-            self.kits[self.active].forget_render_methods();
+            self.model.kits[self.model.active].forget_render_methods();
         }
         self.record_saved_tag_in_indexes(&entry, dependencies);
         Ok(output)
@@ -547,15 +547,15 @@ impl Baboon {
                 entry.display_path
             )));
         }
-        self.kits[self.active].set_tag_references(&entry.key, Some(dependencies));
+        self.model.kits[self.model.active].set_tag_references(&entry.key, Some(dependencies));
     }
 
     pub(in crate::app) fn save_current_tag_as(&mut self) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(key) = self.kits[self.active].selected_key.clone() else {
-            self.status = "No tag selected".to_owned();
+        let Some(key) = self.model.kits[self.model.active].selected_key.clone() else {
+            self.model.status = "No tag selected".to_owned();
             return;
         };
         // For a container tag, "Save As" opens the rename dialog in duplicate
@@ -565,15 +565,15 @@ impl Baboon {
             return;
         }
         let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Selected tag is no longer in the source".to_owned();
+            self.model.status = "Selected tag is no longer in the source".to_owned();
             return;
         };
-        let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
-            self.status = "Load the selected tag before saving".to_owned();
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) else {
+            self.model.status = "Load the selected tag before saving".to_owned();
             return;
         };
         if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
-            self.status = reason.to_owned();
+            self.model.status = reason.to_owned();
             return;
         }
 
@@ -598,7 +598,7 @@ impl Baboon {
 
         match doc.tag.write_atomic(&output) {
             Ok(()) => {
-                self.status = match self.register_saved_copy_if_in_loaded_folder(&output) {
+                self.model.status = match self.register_saved_copy_if_in_loaded_folder(&output) {
                     Ok(_) => format!("Saved copy to {}", output.display()),
                     Err(error) => format!(
                         "Saved copy to {}, but did not update browser: {error}",
@@ -606,7 +606,7 @@ impl Baboon {
                     ),
                 };
             }
-            Err(error) => self.status = format!("Save As failed: {error}"),
+            Err(error) => self.model.status = format!("Save As failed: {error}"),
         }
     }
 }

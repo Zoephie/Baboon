@@ -467,7 +467,7 @@ impl Baboon {
     /// monolithic cache is read-only, and a Campaign Evolved container has its
     /// own import path because a tag there is a package, not a file.
     pub(in crate::app) fn can_import_tags(&self) -> bool {
-        if self.editing_kit_is_read_only(self.active) {
+        if self.editing_kit_is_read_only(self.model.active) {
             return false;
         }
         self.source().is_some_and(|source| {
@@ -486,20 +486,20 @@ impl Baboon {
     /// Open Import Tags for the active kit. `destination_rel` pre-fills the
     /// destination from a right-clicked folder.
     pub(in crate::app) fn open_tag_import_dialog(&mut self, destination_rel: Option<String>) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some(target_game) = self.source().and_then(|source| source.game).map(|game| game.as_str().to_owned()) else {
-            self.status = "Import Tags needs a loaded editing kit with a detected game".to_owned();
+            self.model.status = "Import Tags needs a loaded editing kit with a detected game".to_owned();
             return;
         };
         let Some(target_tags_root) = self.loaded_tags_root() else {
-            self.status = "Import Tags needs a loaded tags folder".to_owned();
+            self.model.status = "Import Tags needs a loaded tags folder".to_owned();
             return;
         };
         let sources = import_sources_for(&target_game);
         if sources.is_empty() {
-            self.status = format!("Nothing converts into {target_game}");
+            self.model.status = format!("Nothing converts into {target_game}");
             return;
         }
         let base = destination_rel
@@ -579,7 +579,7 @@ impl Baboon {
             }
         }
         if let Some(root) = self
-            .prefs
+            .model.prefs
             .editing_kit_paths
             .get(&dialog.source_game)
             .map(|root| import_tags_root(root))
@@ -588,7 +588,7 @@ impl Baboon {
             return Some(root);
         }
         let mut others = self
-            .prefs
+            .model.prefs
             .editing_kit_paths
             .iter()
             .filter(|(game, _)| *game != &dialog.target_game)
@@ -630,7 +630,7 @@ impl Baboon {
             return;
         }
         let kit_roots = self
-            .prefs
+            .model.prefs
             .editing_kit_paths
             .iter()
             .map(|(game, root)| (game.clone(), root.clone()))
@@ -743,7 +743,7 @@ impl Baboon {
         // `Send` but not `Sync`, and only one analysis runs at a time.
         let mut cache = self.import.native_template_cache.take().unwrap_or_default();
         let mut kit_roots: HashMap<String, PathBuf> = self
-            .prefs
+            .model.prefs
             .editing_kit_paths
             .iter()
             .map(|(game, root)| (game.clone(), import_tags_root(root)))
@@ -949,7 +949,7 @@ impl Baboon {
                         output.display()
                     )
                 };
-                self.status = summary.clone();
+                self.model.status = summary.clone();
                 let kit = self.import.tag_import_dialog.as_ref().map(|dialog| dialog.kit);
                 if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
                     dialog.written = Some(summary);
@@ -1050,7 +1050,7 @@ impl Baboon {
             target_game: dialog.target_game.clone(),
             target_tags_root: dialog.target_tags_root.clone(),
             kit_roots: self
-                .prefs
+                .model.prefs
                 .editing_kit_paths
                 .iter()
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))
@@ -1077,7 +1077,7 @@ impl Baboon {
             dialog.report = None;
             dialog.error = None;
         }
-        self.status = "Importing tags".to_owned();
+        self.model.status = "Importing tags".to_owned();
         self.spawn_job(
             move || WorkerMessage::FolderConversionFinished(run_folder_conversion_job(job, &tx)),
             |_| WorkerMessage::FolderConversionFinished(Err("The tag import worker crashed".to_owned())),
@@ -1088,7 +1088,7 @@ impl Baboon {
         &mut self,
         progress: FolderConversionProgress,
     ) -> bool {
-        self.status = format!("Importing tags: {}", progress.phase);
+        self.model.status = format!("Importing tags: {}", progress.phase);
         if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
             dialog.progress = Some(progress);
         }
@@ -1106,7 +1106,7 @@ impl Baboon {
             dialog.progress = None;
             match result {
                 Ok(report) => {
-                    self.status = format!(
+                    self.model.status = format!(
                         "Imported {} tag(s); {} failed",
                         report.converted_count(),
                         report.failed_count()
@@ -1116,7 +1116,7 @@ impl Baboon {
                     dialog.error = None;
                 }
                 Err(error) => {
-                    self.status = error.clone();
+                    self.model.status = error.clone();
                     dialog.error = Some(error);
                 }
             }
@@ -1138,7 +1138,7 @@ impl Baboon {
         if !self.focus_navigation_kit(kit) {
             return;
         }
-        if self.can_import_tags() && !self.kits[self.active].scanning_entries {
+        if self.can_import_tags() && !self.model.kits[self.model.active].scanning_entries {
             self.refresh_tag_browser(ctx.clone());
         }
     }

@@ -296,34 +296,34 @@ impl Baboon {
     /// Bring a workspace's deletable set up to date, if anything has changed
     /// since it was last resolved.
     pub(in crate::app) fn refresh_deletable_keys(&mut self, kit_index: usize) {
-        let generation = self.kits[kit_index].generation;
-        if self.kits[kit_index].browser.deletable_keys_generation == Some(generation) {
+        let generation = self.model.kits[kit_index].generation;
+        if self.model.kits[kit_index].browser.deletable_keys_generation == Some(generation) {
             return;
         }
-        let keys = self.kits[kit_index]
+        let keys = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| deletable_container_keys(source, &self.tag_ops.created_tags))
             .unwrap_or_default();
-        self.kits[kit_index].browser.deletable_keys = Arc::new(keys);
-        self.kits[kit_index].browser.deletable_keys_generation = Some(generation);
+        self.model.kits[kit_index].browser.deletable_keys = Arc::new(keys);
+        self.model.kits[kit_index].browser.deletable_keys_generation = Some(generation);
     }
 
     /// Open the delete confirmation for `key`, resolving everything the dialog
     /// needs to describe exactly what will happen.
     pub(in crate::app) fn open_delete_tag(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let kit = self.active_kit_id();
         if self.tag_ops.container_delete_running.contains(&kit)
             || self.tag_ops.container_duplicate_running.contains(&kit)
         {
-            self.status =
+            self.model.status =
                 "A Campaign Evolved write is already running for this workspace".to_owned();
             return;
         }
@@ -331,7 +331,7 @@ impl Baboon {
         let thresholds = container_appended_thresholds(&containers);
         if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
@@ -341,7 +341,7 @@ impl Baboon {
             ),
             None => (Vec::new(), true),
         };
-        let has_unsaved_edits = self.kits[self.active]
+        let has_unsaved_edits = self.model.kits[self.model.active]
             .parsed_tags
             .get(key)
             .is_some_and(|document| document.dirty.is_set());
@@ -392,24 +392,24 @@ impl Baboon {
             return;
         };
         if !self.focus_navigation_kit(confirm.kit) {
-            self.status = "The workspace this delete came from is closed".to_owned();
+            self.model.status = "The workspace this delete came from is closed".to_owned();
             return;
         }
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         // Re-resolved after the dialog, not carried through it: a modeless
         // confirmation outlives the frame that opened it, and the source can
         // have moved on underneath.
         let Some(entry) = self.entry_for_key(&confirm.key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let containers = self.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
         if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         match &entry.location {
@@ -417,20 +417,20 @@ impl Baboon {
                 let path = path.clone();
                 match self.delete_loose_tag(&entry, &path) {
                     Ok(destination) => {
-                        self.status = format!(
+                        self.model.status = format!(
                             "Deleted {} — moved to {}",
                             entry.display_path,
                             destination.display()
                         );
                     }
-                    Err(error) => self.status = error,
+                    Err(error) => self.model.status = error,
                 }
             }
             TagEntryLocation::Container {
                 container,
                 rel_path,
             } => self.start_container_delete(&entry, *container, rel_path.clone(), ctx),
-            _ => self.status = "This tag cannot be deleted".to_owned(),
+            _ => self.model.status = "This tag cannot be deleted".to_owned(),
         }
     }
 
@@ -443,7 +443,7 @@ impl Baboon {
                 .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
         }
         move_to_trash(path, &destination)?;
-        self.forget_deleted_tag(self.active, &entry.key);
+        self.forget_deleted_tag(self.model.active, &entry.key);
         Ok(destination)
     }
 
@@ -457,18 +457,18 @@ impl Baboon {
         let kit = self.active_kit_id();
         let (root, containers, target_label, is_mod) = {
             let Some(source) = self.source() else {
-                self.status = "No source is loaded".to_owned();
+                self.model.status = "No source is loaded".to_owned();
                 return;
             };
             let TagSource::IoStoreContainerSet {
                 root, containers, ..
             } = &source.source
             else {
-                self.status = "Source is not a Campaign Evolved container source".to_owned();
+                self.model.status = "Source is not a Campaign Evolved container source".to_owned();
                 return;
             };
             let Some(target) = containers.get(target_container) else {
-                self.status = "Container provenance is stale".to_owned();
+                self.model.status = "Container provenance is stale".to_owned();
                 return;
             };
             (
@@ -488,7 +488,7 @@ impl Baboon {
         ) {
             Ok(target) => target,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
@@ -499,7 +499,7 @@ impl Baboon {
             .get(target_container)
             .map(|container| container.utoc_path.clone())
         else {
-            self.status = "Container provenance is stale".to_owned();
+            self.model.status = "Container provenance is stale".to_owned();
             return;
         };
         let lease = match self
@@ -507,13 +507,13 @@ impl Baboon {
         {
             Ok(lease) => lease,
             Err(failure) => {
-                self.status = failure.to_string();
+                self.model.status = failure.to_string();
                 return;
             }
         };
         let lease_id = self.park_container_write_lease(lease);
         self.tag_ops.container_delete_running.insert(kit);
-        self.status = format!("Deleting {} from {target_label}…", entry.display_path);
+        self.model.status = format!("Deleting {} from {target_label}…", entry.display_path);
         let input = ContainerDeleteWorkerInput {
             root,
             containers,
@@ -527,7 +527,7 @@ impl Baboon {
         };
         let stamp = KitStamp {
             kit,
-            generation: self.kits[self.active].generation,
+            generation: self.model.kits[self.model.active].generation,
         };
         spawn_worker(
             &self.tx,
@@ -569,7 +569,7 @@ impl Baboon {
                     message: error.clone(),
                     failed: true,
                 });
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         };
@@ -583,11 +583,11 @@ impl Baboon {
             return true;
         };
         let Some(target_container) = super::duplicate::container_index_for_utoc(
-            self.kits[kit_index].source.as_ref(),
+            self.model.kits[kit_index].source.as_ref(),
             result.target_container,
             &result.target_utoc,
         ) else {
-            self.status = format!(
+            self.model.status = format!(
                 "Deleted {} from {}, but this workspace no longer has that container mounted — \
                  reload the source. Backup: {}",
                 result.display_path,
@@ -599,8 +599,8 @@ impl Baboon {
         let mut result = result;
         result.target_container = target_container;
         {
-            let Some(source) = self.kits[kit_index].source.as_mut() else {
-                self.status = "Delete completed after its source was unloaded".to_owned();
+            let Some(source) = self.model.kits[kit_index].source.as_mut() else {
+                self.model.status = "Delete completed after its source was unloaded".to_owned();
                 return false;
             };
             let TagSource::IoStoreContainerSet {
@@ -611,11 +611,11 @@ impl Baboon {
                 ..
             } = &mut source.source
             else {
-                self.status = "Delete completed against a non-container source".to_owned();
+                self.model.status = "Delete completed against a non-container source".to_owned();
                 return false;
             };
             let Some(target) = containers.get_mut(result.target_container) else {
-                self.status = "Delete completed with stale container provenance".to_owned();
+                self.model.status = "Delete completed with stale container provenance".to_owned();
                 return false;
             };
             target.archive = result.archive;
@@ -644,7 +644,7 @@ impl Baboon {
             ),
             failed: false,
         });
-        self.status = match ledger_error {
+        self.model.status = match ledger_error {
             Some(error) => format!(
                 "Deleted {} from {} (UTOC changed; UCAS bytes retained), but the duplicate \
                  record could not be updated ({error}). Backup: {}",
@@ -672,8 +672,8 @@ impl Baboon {
         // First, while the entry is still resolvable: a stashed overlay for a
         // tag that no longer exists would resurrect it on the next project load.
         self.forget_campaign_overlay(kit_index, key);
-        self.kits[kit_index].close_tag_pane(key);
-        forget_tag_in_kit(&mut self.kits[kit_index], key);
+        self.model.kits[kit_index].close_tag_pane(key);
+        forget_tag_in_kit(&mut self.model.kits[kit_index], key);
         // Navigation state names tags by key, and this key now names nothing.
         if self
             .browser.reveal_target

@@ -10,7 +10,7 @@ impl Baboon {
         }
         let mut open = true;
         let mut chosen: Option<String> = None;
-        let all = self.kits[self.active].keywords.all_keywords();
+        let all = self.model.kits[self.model.active].keywords.all_keywords();
         egui::Window::new("Keywords")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("keyword_chooser"))

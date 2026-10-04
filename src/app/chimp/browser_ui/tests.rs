@@ -113,11 +113,11 @@ fn the_folder_tree_opens_a_package() {
     assert!(frames.shows("Other"));
     frames.click_exact("Thing", 0, &mut draw_workspace(&mut app));
     assert_eq!(
-        app.kits[0].chimp.folder_selection,
+        app.model.kits[0].chimp.folder_selection,
         ChimpFolderSelection::Package
     );
-    assert_eq!(app.kits[0].chimp.selected_package.as_deref(), Some(THING));
-    apply_until(&mut app, |app| app.kits[0].chimp.documents.contains_key(THING));
+    assert_eq!(app.model.kits[0].chimp.selected_package.as_deref(), Some(THING));
+    apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(THING));
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("1 exports • 2 imports •"), "the pane is drawn");
 }
@@ -130,15 +130,15 @@ fn the_package_list_opens_and_filters() {
     let mut app = install.app_with_open(&[]);
     let mut frames = Frames::new();
     frames.click_exact("Packages", 0, &mut draw_workspace(&mut app));
-    assert_eq!(app.kits[0].chimp.browser, ChimpBrowser::Packages);
+    assert_eq!(app.model.kits[0].chimp.browser, ChimpBrowser::Packages);
     assert!(frames.shows(THING) && frames.shows(OTHER));
     frames.click_exact(OTHER, 0, &mut draw_workspace(&mut app));
-    apply_until(&mut app, |app| app.kits[0].chimp.documents.contains_key(OTHER));
+    apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(OTHER));
 
     frames.click("Search package or container…", &mut draw_workspace(&mut app));
     frames.type_text("thing", &mut draw_workspace(&mut app));
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert_eq!(chimp.filter, "thing");
     let ChimpMount::Ready(world) = &chimp.mount else {
         unreachable!()
@@ -171,16 +171,16 @@ fn the_archive_list_scopes_the_tree() {
         assert!(frames.shows(text), "{text}");
     }
     frames.click("pakchunk0-Windows.utoc  ·  2 packages", &mut draw_workspace(&mut app));
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert_eq!(chimp.selected_archive, Some(ChimpArchive::IoStore(0)));
     assert_eq!(chimp.browser, ChimpBrowser::Folders);
     assert!(frames.shows("Game  ·  2"));
     frames.click("Show all", &mut draw_workspace(&mut app));
-    assert_eq!(app.kits[0].chimp.selected_archive, None);
+    assert_eq!(app.model.kits[0].chimp.selected_archive, None);
 
     frames.click_exact("Archives", 0, &mut draw_workspace(&mut app));
     frames.click("pakchunk0-Windows.pak  ·  0 files", &mut draw_workspace(&mut app));
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert_eq!(chimp.selected_archive, Some(ChimpArchive::Pak(0)));
     assert_eq!(chimp.folder_selection, ChimpFolderSelection::File);
     assert!(frames.shows("Select a file from a legacy .pak container."));
@@ -193,14 +193,14 @@ fn the_group_list_opens_a_package_by_type() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[]);
     // Indexed by mount order, which sorts `Other` first.
-    app.kits[0].chimp.package_types = vec![Some("Texture2D".to_owned()), None];
+    app.model.kits[0].chimp.package_types = vec![Some("Texture2D".to_owned()), None];
     let mut frames = Frames::new();
     frames.click_exact("Groups", 0, &mut draw_workspace(&mut app));
     assert!(frames.shows("Texture2D  ·  1"));
     assert!(frames.shows("Unknown  ·  1"));
     frames.click("Texture2D  ·  1", &mut draw_workspace(&mut app));
     frames.click_exact("Other", 0, &mut draw_workspace(&mut app));
-    apply_until(&mut app, |app| app.kits[0].chimp.documents.contains_key(OTHER));
+    apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(OTHER));
 }
 
 /// Before the mount, the workspace offers to start it, waits while it
@@ -209,30 +209,30 @@ fn the_group_list_opens_a_package_by_type() {
 fn the_mount_status_starts_waits_and_retries() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[]);
-    app.prefs.enable_chimp = true;
-    app.kits[0].chimp.mount = ChimpMount::Idle;
+    app.model.prefs.enable_chimp = true;
+    app.model.kits[0].chimp.mount = ChimpMount::Idle;
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("The Unreal package index has not been started."));
     frames.click("Start Chimp", &mut draw_workspace(&mut app));
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Loading));
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("Please wait — Chimp is starting up…"));
     apply_until(&mut app, |app| {
-        matches!(app.kits[0].chimp.mount, ChimpMount::Ready(_))
-            && !app.kits[0].chimp.type_indexing
+        matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
+            && !app.model.kits[0].chimp.type_indexing
     });
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("Game  ·  2"));
 
-    app.kits[0].chimp.mount = ChimpMount::Failed("no containers".to_owned());
+    app.model.kits[0].chimp.mount = ChimpMount::Failed("no containers".to_owned());
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("no containers"));
     frames.click("Retry", &mut draw_workspace(&mut app));
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Loading));
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
     apply_until(&mut app, |app| {
-        matches!(app.kits[0].chimp.mount, ChimpMount::Ready(_))
-            && !app.kits[0].chimp.type_indexing
+        matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
+            && !app.model.kits[0].chimp.type_indexing
     });
 }
 
@@ -249,7 +249,7 @@ fn the_toolbar_discard_prompts_for_modified_packages() {
     frames.click_at(button, &mut draw_workspace(&mut app));
     assert!(app.chimp.chimp_discard_prompt.is_none(), "disabled while clean");
 
-    app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
+    app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
     frames.click_at(button, &mut draw_workspace(&mut app));
     let prompt = app.chimp.chimp_discard_prompt.as_ref().expect("the prompt opened");
     assert_eq!(prompt.packages, [THING]);

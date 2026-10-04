@@ -33,15 +33,15 @@ fn an_overlay_that_cannot_be_placed_is_not_retried_every_frame() {
         bytes: Arc::new(Vec::new()),
         digest: [0; 32],
     });
-    app.kits[0].project.active = Some(project);
+    app.model.kits[0].project.active = Some(project);
 
     app.adopt_pending_new_overlays(0);
 
-    let queue = &app.kits[0]
+    let queue = &app.model.kits[0]
         .project.active
         .as_ref()
         .unwrap()
         .pending_new_overlays;
     assert!(queue.is_empty(), "dropped from the retry queue");
-    assert!(app.status.contains("Could not restore 1"), "{}", app.status);
+    assert!(app.model.status.contains("Could not restore 1"), "{}", app.model.status);
 }

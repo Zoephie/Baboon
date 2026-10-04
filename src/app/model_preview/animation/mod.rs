@@ -373,7 +373,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) {
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         let Some(state) = kit.caches.model_previews.get(key) else {
             return;
         };
@@ -405,7 +405,7 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
-        if let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(key) {
             state.animation.requested_list = true;
         }
 
@@ -434,7 +434,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) {
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         let Some(state) = kit.caches.model_previews.get(key) else {
             return;
         };
@@ -471,7 +471,7 @@ impl Baboon {
             kit: kit.id,
             generation: kit.generation,
         };
-        if let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(key) {
             state.animation.decoding = Some(selected);
             state.animation.error = None;
         }
@@ -505,7 +505,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(&key) else {
             return true;
         };
         if stale {
@@ -536,7 +536,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(&key) else {
             return true;
         };
         // Cleared before the staleness check, so a decode dropped for a

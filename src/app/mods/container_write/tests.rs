@@ -253,7 +253,7 @@ fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    let archive = |app: &Baboon| match &app.kits[0].source.as_ref().unwrap().source {
+    let archive = |app: &Baboon| match &app.model.kits[0].source.as_ref().unwrap().source {
         TagSource::IoStoreContainerSet { containers, .. } => {
             std::sync::Arc::clone(&containers[0].archive)
         }

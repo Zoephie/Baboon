@@ -9,9 +9,9 @@ impl Baboon {
         shortcut: EditingKitShortcut,
         ctx: egui::Context,
     ) {
-        let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned() else {
+        let Some(path) = self.model.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned() else {
             if let Some(profile) = self
-                .prefs
+                .model.prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.game == shortcut.game.as_str())
@@ -57,7 +57,7 @@ impl Baboon {
             .copied()
             .find(|shortcut| shortcut.game == launch.game)
         else {
-            self.status = format!(
+            self.model.status = format!(
                 "Command line: {} is not a supported MCC editing kit",
                 launch.kit_label
             );
@@ -65,7 +65,7 @@ impl Baboon {
         };
         // Several kits of one game can share a root, each with its own tags
         // folder; the one holding the first tag named is the one meant.
-        let profiles = &self.prefs.custom_editing_kit_profiles;
+        let profiles = &self.model.prefs.custom_editing_kit_profiles;
         let first_absolute = launch.tag_paths.iter().find(|path| path.is_absolute());
         let profile = first_absolute
             .and_then(|tag| {
@@ -85,18 +85,18 @@ impl Baboon {
             .filter(|profile| profile.has_chosen_folders())
             .cloned()
         {
-            self.kits[self.active].restore.pending_launch_tags = Some(launch.tag_paths);
+            self.model.kits[self.model.active].restore.pending_launch_tags = Some(launch.tag_paths);
             if !self.load_custom_editing_kit_profile(profile, ctx) {
-                self.kits[self.active].restore.pending_launch_tags = None;
-                self.status = format!("Command line: {}", self.status);
+                self.model.kits[self.model.active].restore.pending_launch_tags = None;
+                self.model.status = format!("Command line: {}", self.model.status);
             }
             return;
         }
         let Some(path) = profile
             .map(|profile| profile.root)
-            .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned())
+            .or_else(|| self.model.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned())
         else {
-            self.status = format!(
+            self.model.status = format!(
                 "Command line: set the {} path in Settings before launching tags",
                 launch.kit_label
             );
@@ -106,10 +106,10 @@ impl Baboon {
             .kit_tools.editing_kit_validation
             .refresh_builtin(shortcut, Some(&path));
         let Some(layout) = status.layout().cloned() else {
-            self.status = format!("Command line: {}", status.message());
+            self.model.status = format!("Command line: {}", status.message());
             return;
         };
-        self.kits[self.active].restore.pending_launch_tags = Some(launch.tag_paths);
+        self.model.kits[self.model.active].restore.pending_launch_tags = Some(launch.tag_paths);
         self.begin_load_editing_kit_layout(
             layout,
             shortcut.game.as_str().to_owned(),
@@ -121,18 +121,18 @@ impl Baboon {
     }
 
     pub(in crate::app) fn finish_pending_command_line_launch(&mut self, ctx: egui::Context) {
-        let Some(requested) = self.kits[self.active].restore.pending_launch_tags.take() else {
+        let Some(requested) = self.model.kits[self.model.active].restore.pending_launch_tags.take() else {
             return;
         };
         // Command-line startup deliberately remains popup-free. Indexing still
         // runs in the background and remains visible in the status bar.
         self.kit_tools.show_entry_index_wait_notice = false;
         let Some(source) = self.source() else {
-            self.status = "Command line: the editing-kit source did not load".to_owned();
+            self.model.status = "Command line: the editing-kit source did not load".to_owned();
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
-            self.status = "Command line: the selected source is not a loose editing kit".to_owned();
+            self.model.status = "Command line: the selected source is not a loose editing kit".to_owned();
             return;
         };
         let root = root.clone();
@@ -140,13 +140,13 @@ impl Baboon {
         let resolved = match resolve_launch_tag_entries(&root, &requested, &names) {
             Ok(resolved) => resolved,
             Err(error) => {
-                self.status = format!("Command line: {error}");
+                self.model.status = format!("Command line: {error}");
                 return;
             }
         };
         let errors = resolved.errors;
         let entries = resolved.entries;
-        let folder_seeds = self.kits[self.active].folder_seeds();
+        let folder_seeds = self.model.kits[self.model.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             for entry in &entries {
                 if source.entry_for_key(&entry.key).is_none() {
@@ -157,7 +157,7 @@ impl Baboon {
         for entry in &entries {
             self.select_entry(entry.key.clone(), ctx.clone());
         }
-        self.status = match (entries.len(), errors.len()) {
+        self.model.status = match (entries.len(), errors.len()) {
             (opened, 0) => format!("Opened {opened} command-line tag(s)"),
             (opened, skipped) => format!(
                 "Opened {opened} command-line tag(s); skipped {skipped}: {}",
@@ -174,13 +174,13 @@ impl Baboon {
         let layout = match self.kit_tools.editing_kit_validation.refresh_custom(&profile) {
             Ok(layout) => layout,
             Err(error) => {
-                self.status = format!("{} is unavailable: {error}", profile.name);
+                self.model.status = format!("{} is unavailable: {error}", profile.name);
                 return false;
             }
         };
         if profile.is_campaign_evolved() {
             self.begin_load_folder_path(profile.root.clone(), ctx);
-            self.kits[self.active].profile = Some(EditingKitProfileIdentity {
+            self.model.kits[self.model.active].profile = Some(EditingKitProfileIdentity {
                 id: profile.id,
                 name: profile.name,
             });
@@ -218,7 +218,7 @@ impl Baboon {
         // Profiles keep the game id they were saved with; one this build does
         // not know has no definitions to load against.
         let Some(game) = GameId::from_id(&game) else {
-            self.status = format!("{label} is for a game this version of Baboon does not know ({game})");
+            self.model.status = format!("{label} is for a game this version of Baboon does not know ({game})");
             return;
         };
         let chosen_layout = chosen_folders.then(|| KitLayout {
@@ -237,19 +237,19 @@ impl Baboon {
             layout.root.clone()
         };
         if let Some(profile_identity) = profile.as_ref() {
-            if let Some(index) = self.kits.iter().position(|kit| {
+            if let Some(index) = self.model.kits.iter().position(|kit| {
                 kit.profile.as_ref().map(|open| open.id.as_str())
                     == Some(profile_identity.id.as_str())
             }) {
-                self.active = index;
-                self.status = format!("Switched to {}", label);
+                self.model.active = index;
+                self.model.status = format!("Switched to {}", label);
                 return;
             }
             // A kit already open on this profile's tags folder (opened as a
             // folder) becomes this profile's. Matched on the tags folder, not
             // the root: kits sharing a root are different kits.
             if !chosen_folders
-                && let Some(index) = self.kits.iter().position(|kit| {
+                && let Some(index) = self.model.kits.iter().position(|kit| {
                     kit.requested_path
                         .as_deref()
                         .is_some_and(|open| same_recent_path(open, &layout.root))
@@ -265,27 +265,27 @@ impl Baboon {
                             == Some(game)
                 })
             {
-                self.active = index;
-                self.kits[index].profile = Some(profile_identity.clone());
-                self.status = format!("Switched to {}", label);
+                self.model.active = index;
+                self.model.kits[index].profile = Some(profile_identity.clone());
+                self.model.status = format!("Switched to {}", label);
                 return;
             }
-            if !self.kits[self.active].can_accept_source_load() {
+            if !self.model.kits[self.model.active].can_accept_source_load() {
                 self.add_kit();
             }
-            self.kits[self.active].requested_path = Some(identity_path.clone());
+            self.model.kits[self.model.active].requested_path = Some(identity_path.clone());
         } else if self.open_kit_for(&layout.root) {
-            self.status = format!("Switched to {}", label);
+            self.model.status = format!("Switched to {}", label);
             return;
         }
-        self.kits[self.active].profile = profile;
+        self.model.kits[self.model.active].profile = profile;
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
+        let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         let tags_root = layout.tags;
         let recent_path = identity_path;
-        self.status = format!("Indexing {} as {game}", tags_root.display());
+        self.model.status = format!("Indexing {} as {game}", tags_root.display());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
         // leaving the kit reserved for this load ("starting up") for good.
         spawn_worker(
@@ -319,7 +319,7 @@ impl Baboon {
             format!("Select {} Editing Kit Folder", shortcut.label)
         };
         let mut dialog = rfd::FileDialog::new().set_title(title);
-        if let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game.as_str()) {
+        if let Some(path) = self.model.prefs.editing_kit_paths.get(shortcut.game.as_str()) {
             if path.is_dir() {
                 dialog = dialog.set_directory(path);
             } else if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
@@ -327,7 +327,7 @@ impl Baboon {
             }
         }
         if let Some(path) = dialog.pick_folder() {
-            self.prefs
+            self.model.prefs
                 .editing_kit_paths
                 .insert(shortcut.game.as_str().to_owned(), path.clone());
             self.kit_tools.editing_kit_path_inputs
@@ -335,16 +335,16 @@ impl Baboon {
             if self.kit_tools.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) {
                 self.kit_tools.editing_kit_path_attention = None;
             }
-            self.status = format!("{} path set to {}", shortcut.label, path.display());
+            self.model.status = format!("{} path set to {}", shortcut.label, path.display());
             self.refresh_builtin_editing_kit_validation(shortcut);
         }
     }
 
     pub(in crate::app) fn auto_detect_editing_kit_paths(&mut self) {
         let detected = detect_editing_kit_paths();
-        let previous = self.prefs.custom_editing_kit_profiles.clone();
+        let previous = self.model.prefs.custom_editing_kit_profiles.clone();
         let added = add_standard_editing_kit_profiles(
-            &mut self.prefs.custom_editing_kit_profiles,
+            &mut self.model.prefs.custom_editing_kit_profiles,
             &detected,
         );
         if added > 0 {
@@ -354,15 +354,15 @@ impl Baboon {
                 &self.kit_tools.terminal_open_games,
                 self.shell.first_run_wizard.is_none(),
             ) {
-                self.prefs.custom_editing_kit_profiles = previous;
-                self.status = error;
+                self.model.prefs.custom_editing_kit_profiles = previous;
+                self.model.status = error;
                 return;
             }
             self.saved_prefs = prefs;
             self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
         }
         self.refresh_editing_kit_validation();
-        self.status = if added == 0 {
+        self.model.status = if added == 0 {
             "No new editing kit paths detected".to_owned()
         } else {
             format!("Detected {added} editing kit path(s)")
@@ -376,6 +376,6 @@ impl Baboon {
         self.kit_tools.editing_kit_path_inputs
             .entry(shortcut.game.as_str().to_owned())
             .or_default();
-        self.status = status;
+        self.model.status = status;
     }
 }

@@ -463,17 +463,17 @@ fn chimp_export_bytes(
 
 impl Baboon {
     pub(super) fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
         let bytes = if document.dirty {
-            let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
                 return;
             };
             match rebuild_chimp_document(world, document) {
                 Ok((bytes, _)) => bytes,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
@@ -489,19 +489,19 @@ impl Baboon {
             return;
         };
         match fs::write(&path, bytes) {
-            Ok(()) => self.status = format!("Extracted {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Extracted {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
     pub(super) fn extract_chimp_export(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
         let index = document
             .selected_export
             .min(document.payloads.len().saturating_sub(1));
-        let world = match &self.kits[kit_index].chimp.mount {
+        let world = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => Some(world),
             _ => None,
         };
@@ -516,7 +516,7 @@ impl Baboon {
             Ok(Some(payload)) => payload,
             Ok(None) => return,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
@@ -533,13 +533,13 @@ impl Baboon {
             return;
         };
         match fs::write(&path, payload) {
-            Ok(()) => self.status = format!("Extracted {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Extracted {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
     pub(super) fn extract_chimp_json(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
         let value = chimp_document_json(document);
@@ -556,8 +556,8 @@ impl Baboon {
         match serde_json::to_vec_pretty(&value)
             .and_then(|bytes| fs::write(&path, bytes).map_err(serde_json::Error::io))
         {
-            Ok(()) => self.status = format!("Exported {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Exported {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
@@ -567,16 +567,16 @@ impl Baboon {
     /// what the export is — a numbered UDIM set or a single file, a mip chain or
     /// one flat image — and what the picker should be named and filtered for.
     pub(super) fn begin_extract_chimp_texture(&mut self, kit_index: usize, package: &str) {
-        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+        if !matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
-        let export_index = self.kits[kit_index]
+        let export_index = self.model.kits[kit_index]
             .chimp
             .documents
             .get(package)
             .map(|document| document.selected_export);
         self.chimp.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
-            kit: self.kits[kit_index].id,
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             // DDS and split UDIM: the pair that round-trips into Unreal.
             export: ChimpTextureExport::default(),
@@ -607,15 +607,15 @@ impl Baboon {
         else {
             return;
         };
-        let Some(kit_index) = self.kits.iter().position(|entry| entry.id == kit) else {
+        let Some(kit_index) = self.model.kits.iter().position(|entry| entry.id == kit) else {
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
         let tx = self.tx.clone();
-        self.status = format!("Extracting {package}…");
+        self.model.status = format!("Extracting {package}…");
         spawn_export(&tx, &ctx, move || {
             write_chimp_texture(&world, &package, &path, export, export_index)
         });
@@ -632,17 +632,17 @@ impl Baboon {
         package: &str,
         format: ChimpLevelFormat,
     ) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let cells = chimp_level_cells(world, package);
         if cells.is_empty() {
-            self.status = format!("{package} is not a World Partition level");
+            self.model.status = format!("{package} is not a World Partition level");
             return;
         }
         let default = SegmentBudget::default();
         self.chimp.chimp_level_export_prompt = Some(ChimpLevelExportPrompt {
-            kit: self.kits[kit_index].id,
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             cells,
             format,
@@ -672,10 +672,10 @@ impl Baboon {
         else {
             return;
         };
-        let Some(kit_index) = self.kits.iter().position(|kit| kit.id == prompt.kit) else {
+        let Some(kit_index) = self.model.kits.iter().position(|kit| kit.id == prompt.kit) else {
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
@@ -699,7 +699,7 @@ impl Baboon {
             total: cells.len(),
             phase_started: Instant::now(),
         });
-        self.status = format!("Exporting {name}…");
+        self.model.status = format!("Exporting {name}…");
         let panic_name = name.clone();
         spawn_worker(
             &self.tx.clone(),
@@ -795,13 +795,13 @@ impl Baboon {
         else {
             return;
         };
-        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+        if !matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
         // Asked once the destination is known, so the prompt can say exactly
         // where the textures would land.
         self.chimp.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt {
-            kit: self.kits[kit_index].id,
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             format,
             texture_export: ChimpTextureExport::default(),
@@ -817,10 +817,10 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         let Some(kit_index) = self.kit_index(prompt.kit) else {
-            self.status = "The workspace this export came from is closed".to_owned();
+            self.model.status = "The workspace this export came from is closed".to_owned();
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
@@ -832,7 +832,7 @@ impl Baboon {
             ..
         } = prompt;
         let tx = self.tx.clone();
-        self.status = format!("Extracting {package} as {}…", format.label());
+        self.model.status = format!("Extracting {package} as {}…", format.label());
         spawn_export(&tx, &ctx, move || {
             write_chimp_mesh(&world, &package, &path, format, textures, texture_export)
         });

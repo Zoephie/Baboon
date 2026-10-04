@@ -117,8 +117,8 @@ impl EditingKitValidationCache {
 impl Baboon {
     pub(in crate::app) fn refresh_editing_kit_validation(&mut self) {
         self.kit_tools.editing_kit_validation.refresh(
-            &self.prefs.editing_kit_paths,
-            &self.prefs.custom_editing_kit_profiles,
+            &self.model.prefs.editing_kit_paths,
+            &self.model.prefs.custom_editing_kit_profiles,
         );
         self.shell.custom_editing_kit_texture_failures.clear();
     }
@@ -129,7 +129,7 @@ impl Baboon {
     ) -> EditingKitPathStatus {
         self.kit_tools.editing_kit_validation.refresh_builtin(
             shortcut,
-            self.prefs
+            self.model.prefs
                 .editing_kit_paths
                 .get(shortcut.game.as_str())
                 .map(PathBuf::as_path),

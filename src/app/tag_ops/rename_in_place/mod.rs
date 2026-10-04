@@ -519,11 +519,11 @@ impl Baboon {
             || self.tag_ops.container_delete_running.contains(&kit)
             || self.tag_ops.container_rename_running.contains(&kit)
         {
-            self.status = "Another container write is already running in this workspace".to_owned();
+            self.model.status = "Another container write is already running in this workspace".to_owned();
             return;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let TagEntryLocation::Container {
@@ -531,7 +531,7 @@ impl Baboon {
             rel_path,
         } = entry.location.clone()
         else {
-            self.status = "Only Campaign Evolved container tags are renamed in place".to_owned();
+            self.model.status = "Only Campaign Evolved container tags are renamed in place".to_owned();
             return;
         };
 
@@ -539,26 +539,26 @@ impl Baboon {
         let grounds = match container_rename_eligibility(&entry, &containers, &self.tag_ops.created_tags) {
             Ok(grounds) => grounds,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
         let destination = match container_rename_destination(&entry, &rel_path, new_rel) {
             Ok(destination) => destination,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
         let Some(old_package) = container_rel_to_package_path(&rel_path) else {
-            self.status = "This tag's container path has no package name".to_owned();
+            self.model.status = "This tag's container path has no package name".to_owned();
             return;
         };
         if destination.package.eq_ignore_ascii_case(&old_package) {
             // `FPackageId` lowercases, so a case-only change hashes to the id it
             // already has and the writer would refuse it anyway. Saying so here
             // costs nothing and does not open a container to find out.
-            self.status = format!("{} is already at that path", entry.display_path);
+            self.model.status = format!("{} is already at that path", entry.display_path);
             return;
         }
         if self.source().is_some_and(|source| {
@@ -568,12 +568,12 @@ impl Baboon {
                 .chain(source.all_entries.iter())
                 .any(|existing| existing.display_path == destination.display)
         }) {
-            self.status = format!("A tag already exists at {}", destination.display);
+            self.model.status = format!("A tag already exists at {}", destination.display);
             return;
         }
 
         let Some(target) = containers.get(container) else {
-            self.status = "This tag's container is no longer mounted".to_owned();
+            self.model.status = "This tag's container is no longer mounted".to_owned();
             return;
         };
         let (target_label, is_mod, target_utoc) = (
@@ -584,7 +584,7 @@ impl Baboon {
         let root = match self.source().map(|source| &source.source) {
             Some(TagSource::IoStoreContainerSet { root, .. }) => root.clone(),
             _ => {
-                self.status = "Source is not a Campaign Evolved container source".to_owned();
+                self.model.status = "Source is not a Campaign Evolved container source".to_owned();
                 return;
             }
         };
@@ -592,7 +592,7 @@ impl Baboon {
         // to keep an edit is to save first, which for a container tag is a
         // second in-place write with its own backup. One transaction is both
         // simpler and safer.
-        let tag_bytes = match self.kits[self.active]
+        let tag_bytes = match self.model.kits[self.model.active]
             .parsed_tags
             .get(key)
             .filter(|document| document.dirty.is_set())
@@ -600,7 +600,7 @@ impl Baboon {
             Some(document) => match document.tag.write_to_bytes() {
                 Ok(bytes) => Some(bytes),
                 Err(error) => {
-                    self.status = format!("Could not serialize unsaved edits: {error}");
+                    self.model.status = format!("Could not serialize unsaved edits: {error}");
                     return;
                 }
             },
@@ -612,17 +612,17 @@ impl Baboon {
         {
             Ok(lease) => lease,
             Err(failure) => {
-                self.status = failure.to_string();
+                self.model.status = failure.to_string();
                 return;
             }
         };
         let lease_id = self.park_container_write_lease(lease);
         let stamp = KitStamp {
             kit,
-            generation: self.kits[self.active].generation,
+            generation: self.model.kits[self.model.active].generation,
         };
         self.tag_ops.container_rename_running.insert(kit);
-        self.status = format!("Renaming {} → {}…", entry.display_path, destination.display);
+        self.model.status = format!("Renaming {} → {}…", entry.display_path, destination.display);
         let input = ContainerRenameWorkerInput {
             root,
             containers,
@@ -684,7 +684,7 @@ impl Baboon {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
-                self.status = error.clone();
+                self.model.status = error.clone();
                 self.shell.operation_notice = Some(OperationNotice {
                     title: "Rename failed".to_owned(),
                     message: error,
@@ -700,11 +700,11 @@ impl Baboon {
             return true;
         };
         let Some(target_container) = container_index_for_utoc(
-            self.kits[kit_index].source.as_ref(),
+            self.model.kits[kit_index].source.as_ref(),
             result.target_container,
             &result.target_utoc,
         ) else {
-            self.status = format!(
+            self.model.status = format!(
                 "Renamed in {}, but this workspace no longer has that container mounted — \
                  reload the source to see it. Backup: {}",
                 result.target_label,
@@ -719,18 +719,18 @@ impl Baboon {
             *container = target_container;
         }
         let new_key = result.entry.key.clone();
-        let folder_seeds = self.kits[kit_index].folder_seeds();
+        let folder_seeds = self.model.kits[kit_index].folder_seeds();
         {
-            let Some(source) = self.kits[kit_index].source.as_mut() else {
-                self.status = "Rename completed after its source was unloaded".to_owned();
+            let Some(source) = self.model.kits[kit_index].source.as_mut() else {
+                self.model.status = "Rename completed after its source was unloaded".to_owned();
                 return false;
             };
             let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
-                self.status = "Rename completed against a non-container source".to_owned();
+                self.model.status = "Rename completed against a non-container source".to_owned();
                 return false;
             };
             let Some(target) = containers.get_mut(target_container) else {
-                self.status = "Rename completed with stale container provenance".to_owned();
+                self.model.status = "Rename completed with stale container provenance".to_owned();
                 return false;
             };
             target.archive = result.archive.clone();
@@ -754,7 +754,7 @@ impl Baboon {
                 &request,
                 &folder_seeds,
             ) {
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         }
@@ -768,7 +768,7 @@ impl Baboon {
         // The project stashes overlays under the tag's logical path, so the old
         // identity has to go or a checkpoint restores the tag at both paths.
         self.forget_campaign_overlay(kit_index, &result.old_key);
-        rekey_tag_in_kit(&mut self.kits[kit_index], &result.old_key, &new_key);
+        rekey_tag_in_kit(&mut self.model.kits[kit_index], &result.old_key, &new_key);
         self.refresh_favorite_entries_for(kit_index);
         if self
             .browser.reveal_target
@@ -778,7 +778,7 @@ impl Baboon {
             self.browser.reveal_target = None;
         }
 
-        self.status = match ledger_error {
+        self.model.status = match ledger_error {
             Some(error) => format!(
                 "Renamed {} → {} in {}, but the record could not be saved: {error}",
                 result.old_display, result.entry.display_path, result.target_label

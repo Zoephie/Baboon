@@ -51,15 +51,15 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         }
         // An unloaded workspace has no tags to browse or edit, so it offers
         // ways to open one instead of an empty browser and an empty editor.
-        if self.app.kits[kit_index].is_empty_workspace() {
+        if self.app.model.kits[kit_index].is_empty_workspace() {
             self.app.draw_welcome_screen(ui, &self.ctx, kit_index);
             return egui_tiles::UiResponse::None;
         }
-        let campaign_evolved = self.app.kits[kit_index]
+        let campaign_evolved = self.app.model.kits[kit_index]
             .source
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
-        if campaign_evolved && self.app.prefs.enable_chimp {
+        if campaign_evolved && self.app.model.prefs.enable_chimp {
             Frame::NONE
                 .fill(menu_bar())
                 .inner_margin(egui::Margin {
@@ -74,7 +74,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                         ui.separator();
                         for (surface, label, hover) in KitSurface::TABS {
                             ui.selectable_value(
-                                &mut self.app.kits[kit_index].surface,
+                                &mut self.app.model.kits[kit_index].surface,
                                 surface,
                                 label,
                             )
@@ -82,7 +82,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                         }
                     });
                 });
-            if self.app.kits[kit_index].surface == KitSurface::Chimp {
+            if self.app.model.kits[kit_index].surface == KitSurface::Chimp {
                 self.app.draw_chimp_workspace(ui, &self.ctx, kit_index);
                 return egui_tiles::UiResponse::None;
             }
@@ -114,7 +114,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         let Some(index) = self.app.kit_index(*pane) else {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
-        let kit = &self.app.kits[index];
+        let kit = &self.app.model.kits[index];
         let dirty = kit.has_unwritten_modifications();
         let label = kit_strip_label(kit);
         let text = if dirty { format!("• {label}") } else { label };
@@ -153,7 +153,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         scroll_offset: &mut f32,
     ) {
         wheel_scroll_tab_bar(ui, scroll_offset);
-        let recents = self.app.prefs.recent_folders.clone();
+        let recents = self.app.model.prefs.recent_folders.clone();
         let menu_margin = Frame::menu(ui.style()).total_margin();
         let root_popup_width = 320.0 + menu_margin.left + menu_margin.right;
         let recent_popup_width = 240.0 + menu_margin.left + menu_margin.right;
@@ -224,7 +224,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
             if self.app.kit_index(*kit_id)
-                .is_some_and(|index| self.app.kits[index].has_unwritten_modifications()));
+                .is_some_and(|index| self.app.model.kits[index].has_unwritten_modifications()));
         if dirty {
             tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {
@@ -252,7 +252,7 @@ impl Baboon {
         // wrapping it in a tree whose tab bar would be an empty strip. A
         // zero-height tab bar still leaves the "+" and the bar's own painting
         // behind, so the tree is skipped outright.
-        if self.kits.len() == 1 && self.kits[0].is_empty_workspace() {
+        if self.model.kits.len() == 1 && self.model.kits[0].is_empty_workspace() {
             self.draw_welcome_screen(ui, ctx, 0);
             return;
         }
@@ -276,7 +276,7 @@ impl Baboon {
         if let Some(kit_id) = focused
             && let Some(index) = self.kit_index(kit_id)
         {
-            self.active = index;
+            self.model.active = index;
         }
         for kit_id in close_requests {
             self.request_close_action(PendingCloseAction::CloseKit(kit_id), ctx);
@@ -300,7 +300,7 @@ impl Baboon {
     /// The kit list is the content store and the tree only references it, so
     /// this only ever repairs the tree — it never creates or removes a kit.
     fn sync_kit_tree(&mut self) {
-        let live: Vec<KitId> = self.kits.iter().map(|kit| kit.id).collect();
+        let live: Vec<KitId> = self.model.kits.iter().map(|kit| kit.id).collect();
         let laid_out: Vec<(egui_tiles::TileId, KitId)> = self
             .kit_tree
             .tiles

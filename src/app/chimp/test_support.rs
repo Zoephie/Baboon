@@ -484,15 +484,15 @@ impl SyntheticInstall {
     /// A test app whose kit 0 is this install, mounted, with `packages` open.
     pub(super) fn app_with_open(&self, packages: &[&str]) -> Baboon {
         let mut app = Baboon::for_test();
-        app.kits[0].source = Some(self.source());
-        app.kits[0].chimp.mount = ChimpMount::Ready(self.world.clone());
-        let kit = app.kits[0].id;
+        app.model.kits[0].source = Some(self.source());
+        app.model.kits[0].chimp.mount = ChimpMount::Ready(self.world.clone());
+        let kit = app.model.kits[0].id;
         for package in packages {
-            app.kits[0]
+            app.model.kits[0]
                 .chimp
                 .documents
                 .insert((*package).to_owned(), self.document(package));
-            app.kits[0].chimp.open_document_pane(kit, package);
+            app.model.kits[0].chimp.open_document_pane(kit, package);
         }
         app
     }
@@ -541,14 +541,14 @@ pub(super) fn apply_until(app: &mut Baboon, mut done: impl FnMut(&Baboon) -> boo
         assert!(
             Instant::now() < deadline,
             "the workers never settled: {} / mount {} / indexing {}",
-            app.status,
-            match &app.kits[0].chimp.mount {
+            app.model.status,
+            match &app.model.kits[0].chimp.mount {
                 ChimpMount::Idle => "idle".to_owned(),
                 ChimpMount::Loading => "loading".to_owned(),
                 ChimpMount::Ready(_) => "ready".to_owned(),
                 ChimpMount::Failed(error) => error.clone(),
             },
-            app.kits[0].chimp.type_indexing
+            app.model.kits[0].chimp.type_indexing
         );
         std::thread::sleep(Duration::from_millis(10));
         app.process_worker_messages(&egui::Context::default());

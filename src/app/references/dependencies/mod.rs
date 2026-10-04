@@ -7,41 +7,41 @@ use crate::app::tag_ops::refactor::send_folder_refactor_progress;
 
 impl Baboon {
     pub(in crate::app) fn fix_current_tag_dependencies(&mut self) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(key) = self.kits[self.active].selected_key.clone() else {
-            self.status = "No tag selected".to_owned();
+        let Some(key) = self.model.kits[self.model.active].selected_key.clone() else {
+            self.model.status = "No tag selected".to_owned();
             return;
         };
         let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Selected tag is no longer in the source".to_owned();
+            self.model.status = "Selected tag is no longer in the source".to_owned();
             return;
         };
         let TagEntryLocation::LooseFile(_) = entry.location else {
-            self.status = "Fix Tag Dependencies requires a loose-folder tag".to_owned();
+            self.model.status = "Fix Tag Dependencies requires a loose-folder tag".to_owned();
             return;
         };
         let Some(root) = self.loaded_tags_root() else {
-            self.status = "Fix Tag Dependencies requires a loaded tags folder".to_owned();
+            self.model.status = "Fix Tag Dependencies requires a loaded tags folder".to_owned();
             return;
         };
 
         let entries = match self.dependency_database_entries() {
             Ok(entries) => entries,
             Err(error) => {
-                self.status = format!("Could not build dependency database: {error}");
+                self.model.status = format!("Could not build dependency database: {error}");
                 return;
             }
         };
         let names = self.names().clone();
         let index = build_dependency_candidate_index(&entries, &names);
-        let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&key) else {
-            self.status = "Load the selected tag before fixing dependencies".to_owned();
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(&key) else {
+            self.model.status = "Load the selected tag before fixing dependencies".to_owned();
             return;
         };
         if doc.tag.endian != Endian::Le {
-            self.status = "Only little-endian loose tags can be edited".to_owned();
+            self.model.status = "Only little-endian loose tags can be edited".to_owned();
             return;
         }
 
@@ -55,7 +55,7 @@ impl Baboon {
             .extend(report.lines.into_iter().map(TerminalLineEntry::new));
         trim_terminal_lines(&mut self.kit_tools.terminal.lines);
         self.kit_tools.terminal.scroll_to_bottom = true;
-        self.status = status;
+        self.model.status = status;
     }
 
     /// Every tag in the loaded folder, for Fix Tag Dependencies to match
@@ -68,7 +68,7 @@ impl Baboon {
     /// periodic refresh, so it is used as it is; before it exists, this says
     /// so rather than blocking on a scan of its own.
     pub(in crate::app) fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
-        let source = self.kits[self.active]
+        let source = self.model.kits[self.model.active]
             .source
             .as_ref()
             .ok_or_else(|| "no tag source is loaded".to_owned())?;
@@ -87,8 +87,8 @@ impl Baboon {
     /// currently building (auto after the full scan, or via Tools → Build
     /// Reference Index).
     pub(in crate::app) fn reference_index_unavailable_note(&self) -> String {
-        if self.kits[self.active].index_jobs.building_references
-            || self.kits[self.active].scanning_entries
+        if self.model.kits[self.model.active].index_jobs.building_references
+            || self.model.kits[self.model.active].scanning_entries
         {
             "Reference index is building — try again in a moment.".to_owned()
         } else {
@@ -146,8 +146,8 @@ impl Baboon {
         force: bool,
         paired_entry_index_build: bool,
     ) {
-        if self.kits[self.active].index_jobs.building_references
-            || self.kits[self.active].scanning_entries
+        if self.model.kits[self.model.active].index_jobs.building_references
+            || self.model.kits[self.model.active].scanning_entries
         {
             return;
         }
@@ -190,8 +190,8 @@ impl Baboon {
             // index once the scan lands. Containers have nothing to scan — an
             // empty mount simply has nothing to index.
             if is_loose {
-                if !self.kits[self.active].scanning_entries {
-                    self.status = "Indexing tags, then building reference index…".to_owned();
+                if !self.model.kits[self.model.active].scanning_entries {
+                    self.model.status = "Indexing tags, then building reference index…".to_owned();
                 }
                 self.begin_scan_all_entries_with_label(
                     ctx,
@@ -203,13 +203,13 @@ impl Baboon {
         let tag_source = source.source.clone();
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
-        self.kits[self.active].index_jobs.building_references = true;
-        self.kits[self.active]
+        self.model.kits[self.model.active].index_jobs.building_references = true;
+        self.model.kits[self.model.active]
             .index_jobs
             .references_changed_during_build
             .clear();
-        self.kits[self.active].index_jobs.references_for_entry_index = paired_entry_index_build;
-        self.kits[self.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
+        self.model.kits[self.model.active].index_jobs.references_for_entry_index = paired_entry_index_build;
+        self.model.kits[self.model.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
             label: "Building reference index...".to_owned(),
             processed: 0,
             total: entries.len(),
@@ -217,7 +217,7 @@ impl Baboon {
         if paired_entry_index_build {
             self.kit_tools.show_entry_index_wait_notice = true;
         }
-        self.status = "Building reference index…".to_owned();
+        self.model.status = "Building reference index…".to_owned();
         // A build that panicked used to send nothing and leave the index
         // "building" for the session; it reports every tag missing instead.
         let entry_total = entries.len();

@@ -127,7 +127,7 @@ fn container_folder_rel(parent_rel: Option<&str>, leaf: &str) -> String {
 impl Baboon {
     /// Names occupying `parent_rel` in the given workspace.
     fn folder_siblings_in(&self, kit_index: usize, parent_rel: Option<&str>) -> Vec<String> {
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         let entries = kit
             .source
             .as_ref()
@@ -138,7 +138,7 @@ impl Baboon {
 
     /// Raise the New Folder dialog for `parent_rel` (`None` = container root).
     pub(in crate::app) fn open_new_container_folder(&mut self, parent_rel: Option<String>) {
-        let kit = self.kits[self.active].id;
+        let kit = self.model.kits[self.model.active].id;
         self.tag_ops.container_folder_dialog = Some(ContainerFolderDialog {
             kit,
             parent_rel: parent_rel.map(|rel| normalize_folder_rel(&rel)),
@@ -156,7 +156,7 @@ impl Baboon {
             Some((parent, leaf)) => (Some(parent.to_owned()), leaf.to_owned()),
             None => (None, rel.clone()),
         };
-        let kit = self.kits[self.active].id;
+        let kit = self.model.kits[self.model.active].id;
         self.tag_ops.container_folder_dialog = Some(ContainerFolderDialog {
             kit,
             parent_rel,
@@ -203,10 +203,10 @@ impl Baboon {
         match renaming {
             Some(old) => self.rename_pending_container_folder(kit_index, &old, &rel),
             None => {
-                self.kits[kit_index]
+                self.model.kits[kit_index]
                     .pending_container_folders
                     .insert(rel.clone());
-                self.status = format!("Created folder {rel}");
+                self.model.status = format!("Created folder {rel}");
             }
         }
         self.refresh_container_folder_tree(kit_index);
@@ -221,7 +221,7 @@ impl Baboon {
     fn rename_pending_container_folder(&mut self, kit_index: usize, old: &str, new: &str) {
         let old_key = folder_key(old);
         let prefix = format!("{old_key}/");
-        let folders = &mut self.kits[kit_index].pending_container_folders;
+        let folders = &mut self.model.kits[kit_index].pending_container_folders;
         let moved: Vec<String> = folders
             .iter()
             .filter(|folder| {
@@ -237,16 +237,16 @@ impl Baboon {
             let suffix = &folder[old.len().min(folder.len())..];
             folders.insert(format!("{new}{suffix}"));
         }
-        self.status = format!("Renamed folder {old} to {new}");
+        self.model.status = format!("Renamed folder {old} to {new}");
     }
 
     /// Retire a pending folder. Only ever called for one the browser drew as
     /// empty, so nothing beneath it can be stranded.
     pub(in crate::app) fn delete_container_folder(&mut self, rel: String) {
         let rel = normalize_folder_rel(&rel);
-        let kit_index = self.active;
+        let kit_index = self.model.active;
         let key = folder_key(&rel);
-        let folders = &mut self.kits[kit_index].pending_container_folders;
+        let folders = &mut self.model.kits[kit_index].pending_container_folders;
         let removed: Vec<String> = folders
             .iter()
             .filter(|folder| folder_key(folder) == key)
@@ -255,7 +255,7 @@ impl Baboon {
         for folder in removed {
             folders.remove(&folder);
         }
-        self.status = format!("Removed folder {rel}");
+        self.model.status = format!("Removed folder {rel}");
         self.refresh_container_folder_tree(kit_index);
     }
 
@@ -274,24 +274,24 @@ impl Baboon {
             .into_iter()
             .map(|folder| normalize_folder_rel(&folder))
             .filter(|folder| !folder.is_empty());
-        let before = self.kits[kit_index].pending_container_folders.len();
-        self.kits[kit_index]
+        let before = self.model.kits[kit_index].pending_container_folders.len();
+        self.model.kits[kit_index]
             .pending_container_folders
             .extend(normalized);
-        if self.kits[kit_index].pending_container_folders.len() != before {
+        if self.model.kits[kit_index].pending_container_folders.len() != before {
             self.refresh_container_folder_tree(kit_index);
         }
     }
 
     /// Re-seed this workspace's folder tree after the pending set changed.
     fn refresh_container_folder_tree(&mut self, kit_index: usize) {
-        let seeds = self.kits[kit_index].folder_seeds();
-        if let Some(source) = self.kits[kit_index].source.as_mut() {
+        let seeds = self.model.kits[kit_index].folder_seeds();
+        if let Some(source) = self.model.kits[kit_index].source.as_mut() {
             crate::core::source::rebuild_folder_tree(source, &seeds);
         }
         // The browser memoises its filtered tree on the generation, so without
         // this a folder created while a filter is active would not appear.
-        self.kits[kit_index].generation = self.kits[kit_index].generation.wrapping_add(1);
+        self.model.kits[kit_index].generation = self.model.kits[kit_index].generation.wrapping_add(1);
     }
 }
 

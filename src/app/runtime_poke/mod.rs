@@ -2609,17 +2609,17 @@ impl Baboon {
                 .selected_entry()
                 .is_some_and(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
             && self
-                .kits
-                .get(self.active)
+                .model.kits
+                .get(self.model.active)
                 .and_then(|kit| kit.selected_key.as_ref())
-                .is_some_and(|key| self.kits[self.active].parsed_tags.contains_key(key))
+                .is_some_and(|key| self.model.kits[self.model.active].parsed_tags.contains_key(key))
     }
 
     fn current_poke_request(&self) -> Result<PokeRequest, String> {
         if !cfg!(windows) {
             return Err("Runtime poking is only available on Windows".to_owned());
         }
-        let key = self.kits[self.active]
+        let key = self.model.kits[self.model.active]
             .selected_key
             .clone()
             .ok_or_else(|| "No tag selected".to_owned())?;
@@ -2635,11 +2635,11 @@ impl Baboon {
                 _ => "Poke Current Tag is only for Campaign Evolved container tags".to_owned(),
             });
         }
-        let source_data = self.kits[self.active]
+        let source_data = self.model.kits[self.model.active]
             .source
             .as_ref()
             .ok_or_else(|| "No source loaded".to_owned())?;
-        let document = self.kits[self.active]
+        let document = self.model.kits[self.model.active]
             .parsed_tags
             .get(&key)
             .ok_or_else(|| "Load the selected tag before poking".to_owned())?;
@@ -2662,18 +2662,18 @@ impl Baboon {
     /// the preflight plan is shown for confirmation first is the user's
     /// `confirm_runtime_poke` preference, not a property of how it was invoked.
     pub(super) fn begin_poke_current_tag(&mut self, ctx: egui::Context) {
-        if !self.prefs.confirm_runtime_poke {
+        if !self.model.prefs.confirm_runtime_poke {
             self.begin_poke_current_tag_direct(ctx);
             return;
         }
         if self.poke.poke_direct_running || self.poke.poke_undo_running {
-            self.status = "A runtime poke or undo is already in progress".to_owned();
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
         let request = match self.current_poke_request() {
             Ok(request) => request,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
@@ -2687,7 +2687,7 @@ impl Baboon {
             prior,
         } = request;
         let tx = self.tx.clone();
-        self.status = "Preparing runtime poke…".to_owned();
+        self.model.status = "Preparing runtime poke…".to_owned();
         self.poke.poke_dialog = Some(PokeDialog {
             kit,
             key: key.clone(),
@@ -2714,13 +2714,13 @@ impl Baboon {
 
     pub(super) fn begin_poke_current_tag_direct(&mut self, ctx: egui::Context) {
         if self.poke.poke_direct_running || self.poke.poke_undo_running || self.poke.poke_dialog.is_some() {
-            self.status = "A runtime poke or undo is already in progress".to_owned();
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
         let request = match self.current_poke_request() {
             Ok(request) => request,
             Err(error) => {
-                self.status = format!("Poke failed: {error}");
+                self.model.status = format!("Poke failed: {error}");
                 return;
             }
         };
@@ -2734,7 +2734,7 @@ impl Baboon {
             prior,
         } = request;
         self.poke.poke_direct_running = true;
-        self.status = "Poking current tag…".to_owned();
+        self.model.status = "Poking current tag…".to_owned();
         let panic_key = key.clone();
         spawn_worker(
             &self.tx,
@@ -2769,7 +2769,7 @@ impl Baboon {
         let kit = dialog.kit;
         let key = dialog.key.clone();
         dialog.state = PokeDialogState::Writing;
-        self.status = "Poking current tag…".to_owned();
+        self.model.status = "Poking current tag…".to_owned();
         let panic_key = key.clone();
         spawn_worker(
             &self.tx,
@@ -2789,11 +2789,11 @@ impl Baboon {
 
     pub(super) fn begin_undo_last_poke(&mut self, ctx: egui::Context) {
         if self.poke.poke_undo_running || self.poke.poke_direct_running || self.poke.poke_dialog.is_some() {
-            self.status = "A runtime poke or undo is already in progress".to_owned();
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
         let Some(last) = self.poke.last_poke.take() else {
-            self.status = "There is no runtime poke to undo".to_owned();
+            self.model.status = "There is no runtime poke to undo".to_owned();
             return;
         };
         self.poke.poke_undo_running = true;
@@ -2852,7 +2852,7 @@ impl Baboon {
         if let Some(dialog) = self.poke.poke_dialog.as_mut() {
             dialog.state = state;
         }
-        self.status = status;
+        self.model.status = status;
     }
 
     pub(super) fn handle_poke_write(
@@ -2871,11 +2871,11 @@ impl Baboon {
         match result {
             Ok((last, report)) => {
                 self.poke.last_poke = Some(last);
-                self.status = report.status();
+                self.model.status = report.status();
                 self.poke.poke_dialog = None;
             }
             Err(error) => {
-                self.status = format!("Poke failed: {error}");
+                self.model.status = format!("Poke failed: {error}");
                 if let Some(dialog) = self.poke.poke_dialog.as_mut() {
                     dialog.state = PokeDialogState::Error(error);
                 }
@@ -2891,7 +2891,7 @@ impl Baboon {
     ) {
         self.poke.poke_direct_running = false;
         let current = self
-            .kits
+            .model.kits
             .iter()
             .find(|candidate| candidate.id == kit)
             .is_some_and(|candidate| candidate.parsed_tags.contains_key(&key));
@@ -2901,13 +2901,13 @@ impl Baboon {
         match result {
             Ok(Some((last, report))) => {
                 self.poke.last_poke = Some(last);
-                self.status = report.status();
+                self.model.status = report.status();
             }
             Ok(None) => {
-                self.status = "Poke complete: no changed fields".to_owned();
+                self.model.status = "Poke complete: no changed fields".to_owned();
             }
             Err(error) => {
-                self.status = format!("Poke failed: {error}");
+                self.model.status = format!("Poke failed: {error}");
             }
         }
     }
@@ -2919,9 +2919,9 @@ impl Baboon {
     ) {
         self.poke.poke_undo_running = false;
         match result {
-            Ok(report) => self.status = report.status(),
+            Ok(report) => self.model.status = report.status(),
             Err(error) => {
-                self.status = format!("Undo Last Poke failed: {error}");
+                self.model.status = format!("Undo Last Poke failed: {error}");
                 // A failed undo is intentionally not offered again. Its
                 // process-bound state may now be only partially applicable.
                 // An undo that crashed is the exception: its record comes back
@@ -2930,14 +2930,14 @@ impl Baboon {
                     && self.poke.last_poke.is_none()
                 {
                     self.poke.last_poke = Some(record);
-                    self.status.push_str("; it can be tried again");
+                    self.model.status.push_str("; it can be tried again");
                 }
             }
         }
     }
 
     pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
-        let mut dont_ask = !self.prefs.confirm_runtime_poke;
+        let mut dont_ask = !self.model.prefs.confirm_runtime_poke;
         let Some(dialog) = self.poke.poke_dialog.as_ref() else {
             return;
         };
@@ -3028,13 +3028,13 @@ impl Baboon {
         if !open || close {
             self.poke.poke_dialog = None;
             if cancellable {
-                self.status = "Runtime poke cancelled".to_owned();
+                self.model.status = "Runtime poke cancelled".to_owned();
             }
         } else if confirm {
             // Apply the opt-out only when the user commits to the poke, so
             // cancelling out of the dialog never disarms the next one.
-            if dont_ask && self.prefs.confirm_runtime_poke {
-                self.prefs.confirm_runtime_poke = false;
+            if dont_ask && self.model.prefs.confirm_runtime_poke {
+                self.model.prefs.confirm_runtime_poke = false;
                 self.persist_prefs_if_changed();
             }
             self.confirm_poke(ctx.clone());

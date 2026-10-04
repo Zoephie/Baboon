@@ -10,15 +10,15 @@ use crate::app::kits::loading::loose_entry_key_for_canonical_path;
 impl Baboon {
     /// Snapshot every kit's source and open tag/folder panes for the restore prompt.
     pub(in crate::app) fn current_session_state(&self) -> Option<LastSessionState> {
-        let kits = (0..self.kits.len())
+        let kits = (0..self.model.kits.len())
             .filter_map(|index| self.session_kit_state(index))
             .collect::<Vec<_>>();
         (!kits.is_empty()).then_some(LastSessionState { kits })
     }
 
     pub(in crate::app) fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
-        let kit = &self.kits[kit_index];
-        let was_active = kit_index == self.active;
+        let kit = &self.model.kits[kit_index];
+        let was_active = kit_index == self.model.active;
         let source = kit.source.as_ref()?;
         let (source_kind, source_path) = match &source.source {
             TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
@@ -137,7 +137,7 @@ impl Baboon {
                     let started = if let Some(profile) = profile_id
                         .as_deref()
                         .and_then(|id| {
-                            self.prefs
+                            self.model.prefs
                                 .custom_editing_kit_profiles
                                 .iter()
                                 .find(|profile| profile.id == id)
@@ -174,31 +174,31 @@ impl Baboon {
             // focused workspace would otherwise be whichever one happened to
             // load last. Remember the kit the session named and every kit still
             // to land, so the focus can be set once they all have.
-            let restoring = self.kits[self.active].id;
+            let restoring = self.model.kits[self.model.active].id;
             self.shell.restoring_kits.insert(restoring);
             if was_active {
                 self.shell.restored_active_kit = Some(restoring);
             }
-            self.kits[self.active].restore.pending_restore_tags = tags;
-            self.kits[self.active].restore.pending_restore_folders = folders;
-            self.kits[self.active].restore.pending_restore_chimp_packages = chimp_packages;
-            self.kits[self.active].restore.pending_restore_bitmap_library = bitmap_library_open;
-            self.kits[self.active].restore.pending_restore_model_library = model_library_open;
-            self.kits[self.active].restore.pending_restore_active_chimp_package = active_chimp_package;
+            self.model.kits[self.model.active].restore.pending_restore_tags = tags;
+            self.model.kits[self.model.active].restore.pending_restore_folders = folders;
+            self.model.kits[self.model.active].restore.pending_restore_chimp_packages = chimp_packages;
+            self.model.kits[self.model.active].restore.pending_restore_bitmap_library = bitmap_library_open;
+            self.model.kits[self.model.active].restore.pending_restore_model_library = model_library_open;
+            self.model.kits[self.model.active].restore.pending_restore_active_chimp_package = active_chimp_package;
             // Its browser view is staged the same way: `install_loaded_source`
             // carries it across the load rather than resetting it, so each
             // workspace comes back in the view it was left in.
             if let Some(mode) = browser_mode {
-                self.kits[self.active].browser.mode = mode;
+                self.model.kits[self.model.active].browser.mode = mode;
             }
             if let Some(sort) = browser_sort {
-                self.kits[self.active].browser.sort = sort;
+                self.model.kits[self.model.active].browser.sort = sort;
             }
             // The project file it had open is queued the same way, and is
             // attached as this workspace's save target once the source has
             // mounted. The edits themselves come back from the recovery file.
             if let Some(project_path) = project_path {
-                let restoring = self.active;
+                let restoring = self.model.active;
                 self.queue_campaign_project_target(restoring, project_path);
             }
         }
@@ -246,7 +246,7 @@ impl Baboon {
             return;
         };
         if let Some(index) = self.kit_index(active) {
-            self.active = index;
+            self.model.active = index;
         }
     }
 
@@ -255,13 +255,13 @@ impl Baboon {
         // Ahead of the early return below: a workspace whose only open tab was
         // the Bitmap Library has no tags staged, and would otherwise come back
         // without it.
-        if std::mem::take(&mut self.kits[self.active].restore.pending_restore_bitmap_library) {
+        if std::mem::take(&mut self.model.kits[self.model.active].restore.pending_restore_bitmap_library) {
             self.open_bitmap_library();
         }
-        if std::mem::take(&mut self.kits[self.active].restore.pending_restore_model_library) {
+        if std::mem::take(&mut self.model.kits[self.model.active].restore.pending_restore_model_library) {
             self.open_model_library();
         }
-        let restore_folders = std::mem::take(&mut self.kits[self.active].restore.pending_restore_folders);
+        let restore_folders = std::mem::take(&mut self.model.kits[self.model.active].restore.pending_restore_folders);
         for folder in &restore_folders {
             self.handle_browser_action(
                 BrowserAction::OpenFolderBrowser {
@@ -272,7 +272,7 @@ impl Baboon {
                 ctx.clone(),
             );
         }
-        let restore = std::mem::take(&mut self.kits[self.active].restore.pending_restore_tags);
+        let restore = std::mem::take(&mut self.model.kits[self.model.active].restore.pending_restore_tags);
         if restore.is_empty() && restore_folders.is_empty() {
             return;
         }
@@ -287,13 +287,13 @@ impl Baboon {
             }
         }
         if opened > 0 {
-            self.status = if missing > 0 {
+            self.model.status = if missing > 0 {
                 format!("Restored {opened} window(s); skipped {missing} missing item(s)")
             } else {
                 format!("Restored {opened} window(s)")
             };
         } else if missing > 0 {
-            self.status = "No saved windows could be restored".to_owned();
+            self.model.status = "No saved windows could be restored".to_owned();
         }
     }
 
@@ -330,14 +330,14 @@ impl Baboon {
         }
         let entry = loose_file_entry(&root, &path, &source.names).ok()??;
         let current_key = entry.key.clone();
-        let folder_seeds = self.kits[self.active].folder_seeds();
+        let folder_seeds = self.model.kits[self.model.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             if tag.key != current_key {
                 source.remove_entry(&tag.key, &folder_seeds);
             }
             source.upsert_entry(entry, &folder_seeds);
         }
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         Some(current_key)
     }
 
@@ -351,13 +351,13 @@ impl Baboon {
             }
             LastOpenedWindowsAction::Cancel { remember } => {
                 if remember {
-                    self.prefs.session_restore = SessionRestore::Never;
+                    self.model.prefs.session_restore = SessionRestore::Never;
                 }
                 self.shell.last_opened_windows = None;
             }
             LastOpenedWindowsAction::Restore { kits, remember } => {
                 if remember {
-                    self.prefs.session_restore = SessionRestore::Always;
+                    self.model.prefs.session_restore = SessionRestore::Always;
                 }
                 self.shell.last_opened_windows = None;
                 self.begin_last_session_restore(kits, ctx.clone());

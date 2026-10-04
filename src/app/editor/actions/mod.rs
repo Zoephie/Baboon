@@ -22,7 +22,7 @@ impl Baboon {
         if !crate::app::editor::is_sound_group(entry.group_tag) {
             return None;
         }
-        if let Some(hit) = self.kits[kit_index].caches.ce_sound_bindings.get(tag_key) {
+        if let Some(hit) = self.model.kits[kit_index].caches.ce_sound_bindings.get(tag_key) {
             return Some(hit.clone());
         }
 
@@ -46,7 +46,7 @@ impl Baboon {
         use crate::core::source::ce_audio;
 
         let Some(TagSource::IoStoreContainerSet { index, .. }) =
-            self.kits[kit_index].source.as_ref().map(|s| &s.source)
+            self.model.kits[kit_index].source.as_ref().map(|s| &s.source)
         else {
             return None;
         };
@@ -66,7 +66,7 @@ impl Baboon {
     ) -> Option<std::sync::Arc<crate::core::source::ce_audio::CeSoundBinding>> {
         use crate::core::source::ce_audio;
 
-        if let Some(hit) = self.kits[kit_index].caches.ce_sound_bindings.get(cache_key) {
+        if let Some(hit) = self.model.kits[kit_index].caches.ce_sound_bindings.get(cache_key) {
             return Some(hit.clone());
         }
 
@@ -75,7 +75,7 @@ impl Baboon {
         // The `matches!` ends its borrow immediately, which the destructure
         // below could not do across the `ce_usmap` assignment.
         if !matches!(
-            self.kits[kit_index].source.as_ref().map(|s| &s.source),
+            self.model.kits[kit_index].source.as_ref().map(|s| &s.source),
             Some(TagSource::IoStoreContainerSet { .. })
         ) {
             return None;
@@ -96,7 +96,7 @@ impl Baboon {
             containers,
             packages,
             ..
-        }) = self.kits[kit_index].source.as_ref().map(|s| &s.source)
+        }) = self.model.kits[kit_index].source.as_ref().map(|s| &s.source)
         else {
             return None;
         };
@@ -115,7 +115,7 @@ impl Baboon {
             package,
             Some((root.as_path(), &mut store)),
         ));
-        self.kits[kit_index]
+        self.model.kits[kit_index]
             .caches.ce_sound_bindings
             .insert(cache_key.to_owned(), binding.clone());
         Some(binding)
@@ -131,18 +131,18 @@ impl Baboon {
         let Some(kit_index) = self.kit_index(kit_id) else {
             return;
         };
-        let paks_root = match self.kits[kit_index].source.as_ref().map(|s| &s.source) {
+        let paks_root = match self.model.kits[kit_index].source.as_ref().map(|s| &s.source) {
             Some(TagSource::IoStoreContainerSet { root, .. }) => root.clone(),
             _ => return,
         };
         let Some(binding) =
             self.ce_sound_binding_for_ref(kit_index, request.group_tag, &request.reference)
         else {
-            self.status = format!("{} not found in mounted containers", request.label);
+            self.model.status = format!("{} not found in mounted containers", request.label);
             return;
         };
         if binding.is_empty() {
-            self.status = format!("{} has no audio bound", request.label);
+            self.model.status = format!("{} has no audio bound", request.label);
             return;
         }
 
@@ -209,7 +209,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) {
-        let Some(state) = self.kits[kit_index].caches.model_previews.get(key) else {
+        let Some(state) = self.model.kits[kit_index].caches.model_previews.get(key) else {
             return;
         };
         if !state.render_mode.uses_textures() || state.textures_pending {
@@ -221,7 +221,7 @@ impl Baboon {
         if data.textures.is_some() || data.preview.materials.is_empty() {
             return;
         }
-        let Some(source) = self.kits[kit_index]
+        let Some(source) = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.source.clone())
@@ -231,10 +231,10 @@ impl Baboon {
         let materials = data.preview.materials.clone();
         let textures_id = data.textures_id;
         let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
+            kit: self.model.kits[kit_index].id,
+            generation: self.model.kits[kit_index].generation,
         };
-        if let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(key) {
+        if let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(key) {
             state.textures_pending = true;
         }
 
@@ -269,7 +269,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(&key) else {
             return true;
         };
         // The in-flight marker is cleared before the staleness check: a result
@@ -307,7 +307,7 @@ impl Baboon {
             self.set_tsv_paste_status("The workspace this paste came from is closed.");
             return;
         }
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some(paste) = self.editor.tsv_paste.as_ref() else {
@@ -317,7 +317,7 @@ impl Baboon {
         let block_path = paste.block_path.clone();
         let text = paste.text.clone();
 
-        let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) else {
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(&tag_key) else {
             self.set_tsv_paste_status("Tag is no longer open.");
             return;
         };
@@ -372,7 +372,7 @@ impl Baboon {
             return;
         }
         let applied_rows = data_rows.saturating_sub(skipped_rows);
-        let active = self.active;
+        let active = self.model.active;
         let ops = DeferredOps {
             pending: edits,
             ..DeferredOps::default()
@@ -385,7 +385,7 @@ impl Baboon {
 
         let summary =
             tsv_paste_summary(&applied.outcomes, applied_rows, skipped_rows, element_count);
-        self.status = summary.clone();
+        self.model.status = summary.clone();
         self.set_tsv_paste_status(&summary);
     }
 
@@ -406,7 +406,7 @@ impl Baboon {
         kit_index: usize,
         entry: &TagEntry,
     ) -> Option<Rc<DefDocs>> {
-        let source = self.kits[kit_index].source.as_ref()?;
+        let source = self.model.kits[kit_index].source.as_ref()?;
         let root = match &source.source {
             TagSource::LooseFolder {
                 definitions_root, ..
@@ -414,7 +414,7 @@ impl Baboon {
             _ => return None,
         };
         let game = source.game.clone()?;
-        let group = self.kits[kit_index]
+        let group = self.model.kits[kit_index]
             .names
             .name_for(entry.group_tag)
             .or_else(|| group_tag_to_extension(entry.group_tag))?
@@ -476,7 +476,7 @@ impl Baboon {
             });
         if do_apply {
             let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
-            if routed && self.refuse_read_only_edit(self.active) {
+            if routed && self.refuse_read_only_edit(self.model.active) {
                 self.editor.block_confirm = None;
                 return;
             }
@@ -485,7 +485,7 @@ impl Baboon {
             {
                 let deletes_model_variant = confirm.path == "variants"
                     && matches!(confirm.kind, BlockOpKind::Delete(_))
-                    && self.kits[self.active]
+                    && self.model.kits[self.model.active]
                         .parsed_tags
                         .get(&confirm.tag_key)
                         .is_some_and(|doc| doc.tag.header.group_tag.to_be_bytes() == *b"hlmt");
@@ -496,13 +496,13 @@ impl Baboon {
                     }],
                     ..DeferredOps::default()
                 };
-                let active = self.active;
+                let active = self.model.active;
                 let applied =
                     self.apply_doc_ops(active, &confirm.tag_key, "Block edit", ops, UndoStep::Own);
                 let refresh_model_preview = deletes_model_variant
                     && applied.is_some_and(|applied| applied.status.is_some());
                 if refresh_model_preview
-                    && let Some(preview) = self.kits[self.active]
+                    && let Some(preview) = self.model.kits[self.model.active]
                         .caches.model_previews
                         .get_mut(&confirm.tag_key)
                 {

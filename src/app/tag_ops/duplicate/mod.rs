@@ -817,7 +817,7 @@ fn parse_duplicate_body(
 
 impl Baboon {
     pub(in crate::app) fn begin_duplicate_tag(&mut self) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some(state) = self.tag_ops.rename_tag.as_ref() else {
@@ -827,7 +827,7 @@ impl Baboon {
         let raw_name = state.new_path_input.clone();
         let old_display = state.old_display.clone();
         let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let destination_display = duplicate_display_path(&old_display, raw_name.trim());
@@ -839,7 +839,7 @@ impl Baboon {
             match validate_duplicate_leaf_name(&raw_name, &destination_display, &existing) {
                 Ok(name) => name,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             };
@@ -848,7 +848,7 @@ impl Baboon {
                 self.tag_ops.rename_tag = None;
                 match self.duplicate_loose_tag(&entry, &new_leaf) {
                     Ok(()) => {}
-                    Err(error) => self.status = error,
+                    Err(error) => self.model.status = error,
                 }
             }
             TagEntryLocation::Container { .. } => {
@@ -860,7 +860,7 @@ impl Baboon {
                 });
             }
             TagEntryLocation::Monolithic { .. } | TagEntryLocation::NewContainer { .. } => {
-                self.status =
+                self.model.status =
                     "Only loose-file and Campaign Evolved container tags can be duplicated"
                         .to_owned();
             }
@@ -876,7 +876,7 @@ impl Baboon {
             let source = self.source().ok_or("No tag source is loaded")?;
             (source.source.clone(), source.names.clone())
         };
-        let is_dirty = self.kits[self.active]
+        let is_dirty = self.model.kits[self.model.active]
             .parsed_tags
             .get(&entry.key)
             .is_some_and(|document| document.dirty.is_set());
@@ -888,7 +888,7 @@ impl Baboon {
         };
         let bytes = select_duplicate_bytes(
             &stored_bytes,
-            self.kits[self.active].parsed_tags.get(&entry.key),
+            self.model.kits[self.model.active].parsed_tags.get(&entry.key),
         )?;
         write_create_new(&destination, &bytes)?;
         let parsed = match parse_duplicate_body(&bytes, &source_kind, entry) {
@@ -912,7 +912,7 @@ impl Baboon {
         // Expand and scroll to the copy so it is visible beside the tag it came
         // from, rather than only selected somewhere in a collapsed tree.
         self.reveal_in_browser(&duplicate_key);
-        self.status = format!(
+        self.model.status = format!(
             "Duplicated {} → {}",
             entry.display_path,
             destination.display()
@@ -928,27 +928,27 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         if !self.focus_navigation_kit(kit) {
-            self.status = "The workspace this duplicate came from is closed".to_owned();
+            self.model.status = "The workspace this duplicate came from is closed".to_owned();
             return;
         }
         if self.tag_ops.container_delete_running.contains(&kit) {
-            self.status =
+            self.model.status =
                 "A Campaign Evolved delete is already running for this workspace".to_owned();
             return;
         }
         if self.tag_ops.container_duplicate_running.contains(&kit) {
-            self.status =
+            self.model.status =
                 "A Campaign Evolved duplicate is already running for this workspace".to_owned();
             return;
         }
         let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Tag is no longer in the source".to_owned();
+            self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let (target_container, source_rel_path) = match exact_container_provider(&entry) {
             Ok(provider) => provider,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
@@ -959,7 +959,7 @@ impl Baboon {
         ) {
             Ok(paths) => paths,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
@@ -970,7 +970,7 @@ impl Baboon {
         if let Err(error) =
             validate_duplicate_leaf_name(&destination_leaf, &paths.display, &existing)
         {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         // Everything the write needs is read here, on the UI thread, against
@@ -989,7 +989,7 @@ impl Baboon {
             diagnostics,
         ) = {
             let Some(source) = self.source() else {
-                self.status = "No source is loaded".to_owned();
+                self.model.status = "No source is loaded".to_owned();
                 return;
             };
             let TagSource::IoStoreContainerSet {
@@ -999,11 +999,11 @@ impl Baboon {
                 ..
             } = &source.source
             else {
-                self.status = "Source is not a Campaign Evolved container source".to_owned();
+                self.model.status = "Source is not a Campaign Evolved container source".to_owned();
                 return;
             };
             let Some(target) = containers.get(target_container) else {
-                self.status = "Container provenance is stale".to_owned();
+                self.model.status = "Container provenance is stale".to_owned();
                 return;
             };
             let resolved = match resolve_source_uasset(
@@ -1014,18 +1014,18 @@ impl Baboon {
             ) {
                 Ok(resolved) => resolved,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             };
             let wrapper = match read_effective_wrapper(containers, &resolved) {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             };
-            let is_dirty = self.kits[self.active]
+            let is_dirty = self.model.kits[self.model.active]
                 .parsed_tags
                 .get(&key)
                 .is_some_and(|document| document.dirty.is_set());
@@ -1035,7 +1035,7 @@ impl Baboon {
                 match target.archive.read(&source_rel_path) {
                     Ok(bytes) => bytes,
                     Err(error) => {
-                        self.status = format!(
+                        self.model.status = format!(
                             "Could not read {} from {}: {error}",
                             source_rel_path, target.chunk_label
                         );
@@ -1045,11 +1045,11 @@ impl Baboon {
             };
             let body = match select_duplicate_bytes(
                 &stored_bytes,
-                self.kits[self.active].parsed_tags.get(&key),
+                self.model.kits[self.model.active].parsed_tags.get(&key),
             ) {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             };
@@ -1101,17 +1101,17 @@ impl Baboon {
         {
             Ok(lease) => lease,
             Err(failure) => {
-                self.status = failure.to_string();
+                self.model.status = failure.to_string();
                 return;
             }
         };
         let lease_id = self.park_container_write_lease(lease);
         let stamp = KitStamp {
             kit,
-            generation: self.kits[self.active].generation,
+            generation: self.model.kits[self.model.active].generation,
         };
         self.tag_ops.container_duplicate_running.insert(kit);
-        self.status = format!("Duplicating {} in {}…", entry.display_path, target_label);
+        self.model.status = format!("Duplicating {} in {}…", entry.display_path, target_label);
         let input = ContainerDuplicateWorkerInput {
             root,
             containers,
@@ -1173,7 +1173,7 @@ impl Baboon {
         clear_container_duplicate_running(&mut self.tag_ops.container_duplicate_running, stamp.kit);
         if completion == ContainerDuplicateCompletion::Failed {
             if let Err(error) = &result {
-                self.status = error.clone();
+                self.model.status = error.clone();
                 self.shell.operation_notice = Some(OperationNotice {
                     title: "Duplicate failed".to_owned(),
                     message: error.clone(),
@@ -1196,11 +1196,11 @@ impl Baboon {
         // pak either way, so the only thing that can genuinely stop it being
         // registered is the workspace no longer holding that container at all.
         let Some(target_container) = container_index_for_utoc(
-            self.kits[kit_index].source.as_ref(),
+            self.model.kits[kit_index].source.as_ref(),
             result.target_container,
             &result.target_utoc,
         ) else {
-            self.status = format!(
+            self.model.status = format!(
                 "Duplicated into {}, but this workspace no longer has that container mounted — \
                  reload the source to see it. Backup: {}",
                 result.target_label,
@@ -1218,18 +1218,18 @@ impl Baboon {
         let display_for_notice = result.entry.display_path.clone();
         // Read before the source borrow: the tree rebuild below has to re-apply
         // the workspace's pending folders, and `source` holds `kits[kit_index]`.
-        let folder_seeds = self.kits[kit_index].folder_seeds();
+        let folder_seeds = self.model.kits[kit_index].folder_seeds();
         {
-            let Some(source) = self.kits[kit_index].source.as_mut() else {
-                self.status = "Duplicate completed after its source was unloaded".to_owned();
+            let Some(source) = self.model.kits[kit_index].source.as_mut() else {
+                self.model.status = "Duplicate completed after its source was unloaded".to_owned();
                 return false;
             };
             let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
-                self.status = "Duplicate completed against a non-container source".to_owned();
+                self.model.status = "Duplicate completed against a non-container source".to_owned();
                 return false;
             };
             let Some(target) = containers.get_mut(result.target_container) else {
-                self.status = "Duplicate completed with stale container provenance".to_owned();
+                self.model.status = "Duplicate completed with stale container provenance".to_owned();
                 return false;
             };
             target.archive = result.archive;
@@ -1245,7 +1245,7 @@ impl Baboon {
                 &result.tag,
                 &folder_seeds,
             ) {
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         }
@@ -1265,15 +1265,15 @@ impl Baboon {
         if let Ok(bytes) = result.tag.write_to_bytes() {
             self.stash_authored_tag(kit_index, &entry, result.package.clone(), bytes, 0.0);
         }
-        self.kits[kit_index].generation = self.kits[kit_index].generation.wrapping_add(1);
+        self.model.kits[kit_index].generation = self.model.kits[kit_index].generation.wrapping_add(1);
         // The field-value index is keyed by entry, so it has to be rebuilt
         // before the next search can see the copy.
-        self.kits[kit_index].field_index.invalidate();
-        register_clean_duplicate_document(&mut self.kits[kit_index], entry, result.tag);
+        self.model.kits[kit_index].field_index.invalidate();
+        register_clean_duplicate_document(&mut self.model.kits[kit_index], entry, result.tag);
         // Expand and scroll to the copy, but only when its workspace is the one
         // on screen: revealing forces Folders mode and clears the filter, which
         // has no business happening in a workspace the user moved away from.
-        if self.active == kit_index {
+        if self.model.active == kit_index {
             self.reveal_in_browser(&key);
         }
         // A review left open while this ran is now describing a stash that has
@@ -1291,7 +1291,7 @@ impl Baboon {
             ),
             failed: false,
         });
-        self.status = match ledger_error {
+        self.model.status = match ledger_error {
             // The copy exists and works; only the record of who made it failed
             // to persist, which costs the user the ability to delete it later.
             Some(error) => format!(

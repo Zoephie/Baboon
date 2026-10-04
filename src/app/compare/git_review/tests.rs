@@ -138,21 +138,21 @@ fn refresh_restores_only_revisions_still_in_the_same_repository() {
 #[test]
 fn an_older_git_review_result_is_dropped() {
     let mut app = Baboon::for_test();
-    let kit = app.kits[0].id;
-    app.kits[0].git_review.request = 2;
-    app.kits[0].git_review.loading = true;
+    let kit = app.model.kits[0].id;
+    app.model.kits[0].git_review.request = 2;
+    app.model.kits[0].git_review.loading = true;
     let view = |path: &str| GitReviewView {
         selected_path: Some(path.to_owned()),
         ..Default::default()
     };
 
     app.handle_git_review_updated(kit, 1, Ok(view("first.weapon")));
-    let state = &app.kits[0].git_review;
+    let state = &app.model.kits[0].git_review;
     assert_eq!(state.selected_path, None, "stale: not applied");
     assert!(state.loading, "the newer job is still running");
 
     app.handle_git_review_updated(kit, 2, Ok(view("second.weapon")));
-    let state = &app.kits[0].git_review;
+    let state = &app.model.kits[0].git_review;
     assert_eq!(state.selected_path.as_deref(), Some("second.weapon"));
     assert!(!state.loading);
 }
@@ -178,7 +178,7 @@ fn opening_a_reviewed_file_finds_the_scanned_entry() {
     let entries = vec![entry.clone()];
 
     let mut app = Baboon::for_test();
-    app.kits[0].source = Some(LoadedSourceData {
+    app.model.kits[0].source = Some(LoadedSourceData {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: tags.clone(),
@@ -197,13 +197,13 @@ fn opening_a_reviewed_file_finds_the_scanned_entry() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    app.kits[0].git_review.repo_root = Some(root.clone());
-    let generation = app.kits[0].generation;
+    app.model.kits[0].git_review.repo_root = Some(root.clone());
+    let generation = app.model.kits[0].generation;
 
     app.open_git_review_file(0, "tags/objects/rifle.weapon");
     let _ = fs::remove_dir_all(&root);
 
-    assert_eq!(app.kits[0].git_review.pending_open, Some(entry.key));
-    assert_eq!(app.kits[0].generation, generation, "no entry was added");
-    assert_eq!(app.kits[0].source.as_ref().unwrap().entries.len(), 1);
+    assert_eq!(app.model.kits[0].git_review.pending_open, Some(entry.key));
+    assert_eq!(app.model.kits[0].generation, generation, "no entry was added");
+    assert_eq!(app.model.kits[0].source.as_ref().unwrap().entries.len(), 1);
 }

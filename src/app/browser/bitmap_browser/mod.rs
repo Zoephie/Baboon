@@ -257,12 +257,12 @@ impl ThumbnailSource for Bitmaps {
 impl Baboon {
     /// Open (or focus) the Bitmap Library in the active kit.
     pub(in crate::app) fn open_bitmap_library(&mut self) {
-        let kit = self.active;
-        if self.kits[kit].source.is_none() {
-            self.status = "Load an editing kit before browsing its bitmaps".to_owned();
+        let kit = self.model.active;
+        if self.model.kits[kit].source.is_none() {
+            self.model.status = "Load an editing kit before browsing its bitmaps".to_owned();
             return;
         }
-        self.kits[kit].open_tag_pane(BITMAP_LIBRARY_KEY);
+        self.model.kits[kit].open_tag_pane(BITMAP_LIBRARY_KEY);
     }
 
     pub(in crate::app) fn queue_bitmap_hover_thumbnails(

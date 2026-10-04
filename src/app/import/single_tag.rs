@@ -10,11 +10,11 @@ impl Baboon {
     /// parse it, validate its schema against our JSON, and seed the dialog.
     /// `folder_rel` pre-fills the destination folder (from a right-clicked node).
     pub(in crate::app) fn begin_import_tag(&mut self, folder_rel: Option<String>) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         if !self.current_source_is_container() {
-            self.status = "Import tag is only for Campaign Evolved containers".to_owned();
+            self.model.status = "Import tag is only for Campaign Evolved containers".to_owned();
             return;
         }
         let Some(picked) = rfd::FileDialog::new().set_title("Import Tag").pick_file() else {
@@ -23,19 +23,19 @@ impl Baboon {
         let bytes = match fs::read(&picked) {
             Ok(bytes) => bytes,
             Err(error) => {
-                self.status = format!("Could not read {}: {error}", picked.display());
+                self.model.status = format!("Could not read {}: {error}", picked.display());
                 return;
             }
         };
         let tag = match TagFile::read_from_bytes(&bytes) {
             Ok(tag) => tag,
             Err(error) => {
-                self.status = format!("Not a valid MCC tag file: {error}");
+                self.model.status = format!("Not a valid MCC tag file: {error}");
                 return;
             }
         };
         if tag.classic_engine().is_some() || tag.endian != Endian::Le {
-            self.status = "Only little-endian MCC tags can be imported".to_owned();
+            self.model.status = "Only little-endian MCC tags can be imported".to_owned();
             return;
         }
         let group_tag = tag.header.group_tag;
@@ -128,10 +128,10 @@ impl Baboon {
         };
         if !self.focus_navigation_kit(kit) {
             self.import.import_tag_dialog = None;
-            self.status = "The workspace this import came from is closed".to_owned();
+            self.model.status = "The workspace this import came from is closed".to_owned();
             return;
         }
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         let Some(dialog) = self.import.import_tag_dialog.as_mut() else {
@@ -231,11 +231,11 @@ impl Baboon {
             });
             let Some(key) = key else {
                 self.import.import_tag_dialog = None;
-                self.status = "Could not resolve the existing tag to overwrite".to_owned();
+                self.model.status = "Could not resolve the existing tag to overwrite".to_owned();
                 return;
             };
             // Already open with unsaved edits → confirm discard first.
-            if self.kits[self.active]
+            if self.model.kits[self.model.active]
                 .parsed_tags
                 .get(&key)
                 .map(|d| d.dirty.is_set())
@@ -255,7 +255,7 @@ impl Baboon {
             match self.add_new_container_tag(&logical, group_tag, &group_name, &extension, tag) {
                 Ok(()) => {
                     self.import.import_tag_dialog = None;
-                    self.status = format!("Imported {logical}.{extension} (unsaved)");
+                    self.model.status = format!("Imported {logical}.{extension} (unsaved)");
                 }
                 Err(error) => {
                     if let Some(dialog) = self.import.import_tag_dialog.as_mut() {
@@ -269,16 +269,16 @@ impl Baboon {
     /// Replace an existing container tag's document with imported bytes, marked
     /// dirty (no pak write). Opens/selects the tab.
     pub(in crate::app) fn apply_import_over_existing(&mut self, key: &str, tag: TagFile) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        self.kits[self.active].open_tag_pane(key);
-        self.kits[self.active].selected_key = Some(key.to_owned());
-        self.kits[self.active]
+        self.model.kits[self.model.active].open_tag_pane(key);
+        self.model.kits[self.model.active].selected_key = Some(key.to_owned());
+        self.model.kits[self.model.active]
             .parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
         let label = self.tag_path_label(key);
-        self.status = format!("Imported over {label} (unsaved)");
+        self.model.status = format!("Imported over {label} (unsaved)");
     }
 
     /// If an import at `folder_rel`/`name` (group `group_tag`) would land on an
@@ -314,7 +314,7 @@ impl Baboon {
             return;
         };
         if !self.focus_navigation_kit(pending.kit) {
-            self.status = "The workspace this import came from is closed".to_owned();
+            self.model.status = "The workspace this import came from is closed".to_owned();
             return;
         }
         self.apply_import_over_existing(&pending.target_key, pending.tag);

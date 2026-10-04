@@ -18,31 +18,31 @@ fn app_with_undoable_tag() -> Baboon {
     document.journal.begin_edit(&document.tag, "Edit");
     document.journal.end_edit_window();
     let mut app = Baboon::for_test();
-    app.prefs.enable_chimp = true;
-    app.kits[0].parsed_tags.insert(KEY.to_owned(), document);
-    app.kits[0].selected_key = Some(KEY.to_owned());
+    app.model.prefs.enable_chimp = true;
+    app.model.kits[0].parsed_tags.insert(KEY.to_owned(), document);
+    app.model.kits[0].selected_key = Some(KEY.to_owned());
     app
 }
 
 fn can_undo_tag(app: &Baboon) -> bool {
-    app.kits[0].parsed_tags[KEY].journal.can_undo()
+    app.model.kits[0].parsed_tags[KEY].journal.can_undo()
 }
 
 #[test]
 fn undo_on_the_chimp_surface_leaves_the_hidden_tag_alone() {
     let mut app = app_with_undoable_tag();
-    app.kits[0].surface = KitSurface::Chimp;
+    app.model.kits[0].surface = KitSurface::Chimp;
 
     assert!(!app.can_undo_current(), "the Edit menu's Undo is disabled");
     app.undo_current_tag();
     assert!(can_undo_tag(&app), "the hidden tag's history is untouched");
     app.redo_current_tag();
-    assert!(!app.kits[0].parsed_tags[KEY].journal.can_redo());
+    assert!(!app.model.kits[0].parsed_tags[KEY].journal.can_redo());
 
     // Back on the tag surface, the same undo acts on the tag.
-    app.kits[0].surface = KitSurface::Tags;
+    app.model.kits[0].surface = KitSurface::Tags;
     assert!(app.can_undo_current());
     app.undo_current_tag();
     assert!(!can_undo_tag(&app));
-    assert!(app.kits[0].parsed_tags[KEY].journal.can_redo());
+    assert!(app.model.kits[0].parsed_tags[KEY].journal.can_redo());
 }

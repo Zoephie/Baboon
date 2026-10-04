@@ -107,11 +107,11 @@ impl Baboon {
             RecentAction::Open(path) => self.load_recent_folder(path, ctx.clone()),
             RecentAction::Forget(path) => {
                 self.remove_recent_folder(&path);
-                self.status = format!("Removed {} from recent folders", path.display());
+                self.model.status = format!("Removed {} from recent folders", path.display());
             }
             RecentAction::ForgetAll => {
-                self.prefs.recent_folders.clear();
-                self.status = "Cleared recent folders".to_owned();
+                self.model.prefs.recent_folders.clear();
+                self.model.status = "Cleared recent folders".to_owned();
             }
         }
     }

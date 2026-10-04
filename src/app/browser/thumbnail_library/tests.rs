@@ -48,7 +48,7 @@ fn app_with_mixed_kit() -> Baboon {
 }
 
 fn listed<S: ThumbnailSource>(app: &Baboon) -> Vec<String> {
-    let library = S::library(&app.kits[0]);
+    let library = S::library(&app.model.kits[0]);
     library
         .matches
         .iter()
@@ -80,7 +80,7 @@ fn each_library_lists_only_its_own_kind_of_tag() {
 fn a_search_narrows_only_its_own_library() {
     let mut app = app_with_mixed_kit();
     let ctx = egui::Context::default();
-    app.kits[0].model_browser.filter = "ghost".to_owned();
+    app.model.kits[0].model_browser.filter = "ghost".to_owned();
     app.refresh_thumbnail_library::<Models>(0, &ctx);
     app.refresh_thumbnail_library::<Bitmaps>(0, &ctx);
 
@@ -109,7 +109,7 @@ fn draws_and_queues_its_own<S: ThumbnailSource>(expected_suffix: &str) {
             app.draw_thumbnail_library::<S>(ui, &ctx, 0);
         });
     });
-    let pending = &S::library(&app.kits[0]).pending;
+    let pending = &S::library(&app.model.kits[0]).pending;
     assert!(!pending.is_empty(), "no thumbnail was asked for");
     assert!(pending.len() <= MAX_DECODES_IN_FLIGHT);
     assert!(
@@ -133,7 +133,7 @@ fn the_model_library_queues_models() {
 fn repaint_delay_with_thumbnails(failed: bool) -> std::time::Duration {
     let mut app = app_with_mixed_kit();
     if failed {
-        let mut thumbnails = Bitmaps::library(&app.kits[0]).thumbnails.lock().unwrap();
+        let mut thumbnails = Bitmaps::library(&app.model.kits[0]).thumbnails.lock().unwrap();
         for index in 0..40 {
             thumbnails.insert(format!("file:textures/grass_{index:02}.bitmap"), None);
         }

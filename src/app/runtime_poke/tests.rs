@@ -916,7 +916,7 @@ fn an_undo_that_panics_keeps_the_record_and_settles() {
     assert!(crate::app::apply_next_worker_message(&mut app), "the undo answered");
     assert!(!app.poke.poke_undo_running, "no longer running");
     assert!(app.poke.last_poke.is_some(), "the record came back");
-    assert!(app.status.contains("tried again"), "{}", app.status);
+    assert!(app.model.status.contains("tried again"), "{}", app.model.status);
 }
 
 /// A confirmed poke that panicked left its dialog on "Writing" for good.
@@ -925,7 +925,7 @@ fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
     let mut app = Baboon::for_test();
     let plan = last_poke_for_test(patch_for_test(), vec![1]).plan;
     app.poke.poke_dialog = Some(PokeDialog {
-        kit: app.kits[0].id,
+        kit: app.model.kits[0].id,
         key: "file:objects/test".to_owned(),
         state: PokeDialogState::Ready(plan),
     });

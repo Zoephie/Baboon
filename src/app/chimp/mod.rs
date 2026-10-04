@@ -87,7 +87,7 @@ impl Baboon {
     /// has no undo of its own yet; so on that surface they do nothing rather
     /// than silently changing a tag the user cannot see.
     pub(in crate::app) fn chimp_surface_is_active(&self) -> bool {
-        self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
+        self.model.prefs.enable_chimp && self.model.kits[self.model.active].surface == KitSurface::Chimp
     }
 }
 pub(in crate::app) mod prompts_window;

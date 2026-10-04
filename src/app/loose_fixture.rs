@@ -120,7 +120,7 @@ pub(in crate::app) fn pump_until(app: &mut Baboon, what: &str, mut done: impl Fn
         assert!(
             Instant::now() < deadline,
             "timed out waiting for {what}; status: {}",
-            app.status
+            app.model.status
         );
         if let Ok(message) = app.rx.recv_timeout(Duration::from_millis(50)) {
             app.apply_worker_message(message, &ctx);
@@ -231,7 +231,7 @@ impl LooseKit {
         let key = self.key(rel_with_extension);
         app.select_entry(key.clone(), ctx());
         pump_until(app, &format!("{rel_with_extension} to load"), |app| {
-            app.kits[app.active].parsed_tags.contains_key(&key)
+            app.model.kits[app.model.active].parsed_tags.contains_key(&key)
         });
         key
     }
@@ -253,7 +253,7 @@ pub(in crate::app) fn edit_field(app: &mut Baboon, key: &str, path: &str, input:
         }],
         ..DeferredOps::default()
     };
-    let active = app.active;
+    let active = app.model.active;
     let applied = app
         .apply_doc_ops(active, key, "Edit", ops, UndoStep::Own)
         .expect("the document is open");

@@ -1128,7 +1128,7 @@ impl Baboon {
         else {
             return None;
         };
-        let source = self.kits.get(kit)?.source.as_ref()?;
+        let source = self.model.kits.get(kit)?.source.as_ref()?;
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
             return None;
         };
@@ -1147,10 +1147,10 @@ impl Baboon {
     /// document reopened later in the same session does not get a second, stale
     /// copy of it.
     pub(in crate::app) fn apply_pending_history(&mut self, kit: usize, key: &str) {
-        let Some(history) = self.kits[kit].restore.pending_history.remove(key) else {
+        let Some(history) = self.model.kits[kit].restore.pending_history.remove(key) else {
             return;
         };
-        let Some(document) = self.kits[kit].parsed_tags.get_mut(key) else {
+        let Some(document) = self.model.kits[kit].parsed_tags.get_mut(key) else {
             return;
         };
         let steps = |steps: Vec<HistoryStep>| {
@@ -1185,7 +1185,7 @@ impl Baboon {
             return;
         };
         self.ensure_campaign_project(kit, now);
-        let Some(project) = self.kits[kit].project.active.as_mut() else {
+        let Some(project) = self.model.kits[kit].project.active.as_mut() else {
             return;
         };
         project.overlays.insert(
@@ -1203,7 +1203,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
-        self.kits[kit]
+        self.model.kits[kit]
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
@@ -1214,7 +1214,7 @@ impl Baboon {
         kit: usize,
         identity: &str,
     ) -> Option<TagEntry> {
-        let source = self.kits[kit].source.as_ref()?;
+        let source = self.model.kits[kit].source.as_ref()?;
         let entries = || source.entries.iter().chain(source.all_entries.iter());
         if let Some(entry) = entries().find(|entry| {
             campaign_entry_project_parts(entry)
@@ -1234,11 +1234,11 @@ impl Baboon {
 
     fn ensure_campaign_project(&mut self, kit: usize, now: f64) {
         if !self.current_source_is_campaign_project_capable(kit)
-            || self.kits[kit].project.active.is_some()
+            || self.model.kits[kit].project.active.is_some()
         {
             return;
         }
-        let root = self.kits[kit]
+        let root = self.model.kits[kit]
             .source
             .as_ref()
             .map(|source| source.source.root_path().to_path_buf());
@@ -1265,7 +1265,7 @@ impl Baboon {
             }
             _ => None,
         };
-        self.kits[kit].project.active = Some(match &restored {
+        self.model.kits[kit].project.active = Some(match &restored {
             Some(snapshot) => ActiveCampaignProject::adopted(path, snapshot, now),
             None => ActiveCampaignProject::fresh(path, now),
         });
@@ -1279,7 +1279,7 @@ impl Baboon {
             .map(|snapshot| snapshot.overlays.len())
             .filter(|count| *count > 0)
         {
-            self.status = format!(
+            self.model.status = format!(
                 "Restored {count} stashed modification(s) from this workspace's last session"
             );
         }
@@ -1297,10 +1297,10 @@ impl Baboon {
     fn new_overlay_entry(&self, kit: usize, overlay: &CampaignProjectOverlay) -> OverlayAdoption {
         // The names and the template come off the source: before it has
         // loaded, this is a "not yet" rather than a "no".
-        if self.kits[kit].source.is_none() {
+        if self.model.kits[kit].source.is_none() {
             return OverlayAdoption::NotYet;
         }
-        let Some(group_name) = self.kits[kit]
+        let Some(group_name) = self.model.kits[kit]
             .names
             .name_for(overlay.group_tag)
             .map(str::to_owned)
@@ -1361,15 +1361,15 @@ impl Baboon {
     /// A background kit's queue waits until that kit is focused, which is before
     /// anything can be exported from it.
     fn adopt_pending_new_overlays(&mut self, kit: usize) {
-        if kit != self.active
-            || self.kits[kit]
+        if kit != self.model.active
+            || self.model.kits[kit]
                 .project.active
                 .as_ref()
                 .is_none_or(|project| project.pending_new_overlays.is_empty())
         {
             return;
         }
-        let queued = self.kits[kit]
+        let queued = self.model.kits[kit]
             .project.active
             .as_ref()
             .map(|project| project.pending_new_overlays.clone())
@@ -1404,26 +1404,26 @@ impl Baboon {
             // The document was parsed from the overlay's own bytes, so the
             // project already holds its serialization -- recording that spares
             // the next autosave from writing every adopted tag out again.
-            if let Some(revision) = self.kits[kit]
+            if let Some(revision) = self.model.kits[kit]
                 .parsed_tags
                 .get(&key)
                 .map(|document| document.content_stamp())
             {
-                if let Some(project) = self.kits[kit].project.active.as_mut() {
+                if let Some(project) = self.model.kits[kit].project.active.as_mut() {
                     project.captured_revisions.insert(key, revision);
                 }
             }
             adopted += 1;
         }
-        if let Some(project) = self.kits[kit].project.active.as_mut() {
+        if let Some(project) = self.model.kits[kit].project.active.as_mut() {
             project.pending_new_overlays = still_pending;
         }
         if adopted > 0 {
-            self.status =
+            self.model.status =
                 format!("Restored {adopted} stashed new tag(s) from this workspace's last session");
         }
         if !failed.is_empty() {
-            self.status = format!(
+            self.model.status = format!(
                 "Could not restore {} stashed new tag(s) (still saved in the project): {}",
                 failed.len(),
                 failed.join("; ")
@@ -1437,7 +1437,7 @@ impl Baboon {
         now: f64,
     ) -> Result<Option<CampaignProjectSnapshot>, String> {
         // This kit's source, not the active one: autosave runs for every kit.
-        let Some(source) = self.kits[kit].source.as_ref() else {
+        let Some(source) = self.model.kits[kit].source.as_ref() else {
             return Ok(None);
         };
         let TagSource::IoStoreContainerSet { root, .. } = &source.source else {
@@ -1450,7 +1450,7 @@ impl Baboon {
             .as_str()
             .to_owned();
         self.ensure_campaign_project(kit, now);
-        let mut overlays = self.kits[kit]
+        let mut overlays = self.model.kits[kit]
             .project.active
             .as_ref()
             .map(|project| project.overlays.clone())
@@ -1461,13 +1461,13 @@ impl Baboon {
         // serialized again. Autosave runs twice a second whether or not
         // anything was edited, and a stashed 105 MiB animation graph costs
         // ~100 ms to write out.
-        let captured = self.kits[kit]
+        let captured = self.model.kits[kit]
             .project.active
             .as_ref()
             .map(|project| project.captured_revisions.clone())
             .unwrap_or_default();
         let mut now_captured: HashMap<String, (u64, u64)> = HashMap::new();
-        for (key, document) in &self.kits[kit].parsed_tags {
+        for (key, document) in &self.model.kits[kit].parsed_tags {
             if !document.dirty.is_set() {
                 continue;
             }
@@ -1510,7 +1510,7 @@ impl Baboon {
         // whole open set now, so nothing is recorded as floating.
         let floating_order: Vec<String> = Vec::new();
         let mut tabs = Vec::new();
-        for key in self.kits[kit].open_tabs.iter().chain(floating_order.iter()) {
+        for key in self.model.kits[kit].open_tabs.iter().chain(floating_order.iter()) {
             let Some(entry) = self.entry_for_key_in(kit, key) else {
                 continue;
             };
@@ -1533,7 +1533,7 @@ impl Baboon {
                 floating: false,
             });
         }
-        let selected_identity = self.kits[kit].selected_key.as_ref().and_then(|key| {
+        let selected_identity = self.model.kits[kit].selected_key.as_ref().and_then(|key| {
             self.entry_for_key_in(kit, key)
                 .and_then(campaign_entry_project_parts)
                 .map(|(identity, _, _, _)| identity)
@@ -1542,7 +1542,7 @@ impl Baboon {
         // whose edits were undone back to the original is still a tag whose
         // history the user may want on the other side of a restart.
         let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
-        for (key, document) in &self.kits[kit].parsed_tags {
+        for (key, document) in &self.model.kits[kit].parsed_tags {
             let (undo, redo) = document.journal.stacks();
             if undo.is_empty() && redo.is_empty() {
                 continue;
@@ -1570,7 +1570,7 @@ impl Baboon {
             );
         }
         trim_history_for_disk(&mut history, HISTORY_STEP_LIMIT, HISTORY_BYTE_BUDGET);
-        if let Some(project) = self.kits[kit].project.active.as_mut() {
+        if let Some(project) = self.model.kits[kit].project.active.as_mut() {
             project.overlays.clone_from(&overlays);
             project.captured_revisions = now_captured;
         }
@@ -1581,7 +1581,7 @@ impl Baboon {
             tabs,
             overlays,
             history,
-            folders: self.kits[kit].pending_container_folders.clone(),
+            folders: self.model.kits[kit].pending_container_folders.clone(),
         }))
     }
 
@@ -1593,21 +1593,21 @@ impl Baboon {
     /// small — a handful of entries — so building and comparing it every frame
     /// is far cheaper than the entry lookups the rebuild performs.
     pub(in crate::app) fn refresh_modified_tags(&mut self, kit: usize) {
-        let mut signature: Vec<String> = self.kits[kit]
+        let mut signature: Vec<String> = self.model.kits[kit]
             .parsed_tags
             .iter()
             .filter(|(_, document)| document.dirty.is_set())
             .map(|(key, _)| key.clone())
             .collect();
-        if let Some(project) = self.kits[kit].project.active.as_ref() {
+        if let Some(project) = self.model.kits[kit].project.active.as_ref() {
             signature.extend(project.overlays.keys().cloned());
         }
         signature.sort();
-        if signature == self.kits[kit].browser.modified_signature {
+        if signature == self.model.kits[kit].browser.modified_signature {
             return;
         }
         let mut modified = ModifiedTags::default();
-        let dirty_keys: Vec<String> = self.kits[kit]
+        let dirty_keys: Vec<String> = self.model.kits[kit]
             .parsed_tags
             .iter()
             .filter(|(_, document)| document.dirty.is_set())
@@ -1620,7 +1620,7 @@ impl Baboon {
         }
         // Stashed tags need not be open, so they are resolved from the project
         // rather than from the open documents.
-        let identities: Vec<String> = self.kits[kit]
+        let identities: Vec<String> = self.model.kits[kit]
             .project.active
             .as_ref()
             .map(|project| project.overlays.keys().cloned().collect())
@@ -1630,8 +1630,8 @@ impl Baboon {
                 modified.insert(&entry);
             }
         }
-        self.kits[kit].browser.modified_tags = std::sync::Arc::new(modified);
-        self.kits[kit].browser.modified_signature = signature;
+        self.model.kits[kit].browser.modified_tags = std::sync::Arc::new(modified);
+        self.model.kits[kit].browser.modified_signature = signature;
     }
 
     /// Forget one tag's stashed overlay, so the tag reads as its source has it
@@ -1647,7 +1647,7 @@ impl Baboon {
         let Some((identity, ..)) = campaign_entry_project_parts(&entry) else {
             return false;
         };
-        self.kits[kit]
+        self.model.kits[kit]
             .project.active
             .as_mut()
             .is_some_and(|project| project.overlays.remove(&identity).is_some())
@@ -1662,7 +1662,7 @@ impl Baboon {
         let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
             return false;
         };
-        self.kits[kit]
+        self.model.kits[kit]
             .project.active
             .as_ref()
             .is_some_and(|project| project.overlays.contains_key(&identity))
@@ -1671,7 +1671,7 @@ impl Baboon {
     /// Forget every stashed overlay in this kit's project, returning how many
     /// tags were carrying one.
     pub(in crate::app) fn forget_all_campaign_overlays(&mut self, kit: usize) -> usize {
-        let Some(project) = self.kits[kit].project.active.as_mut() else {
+        let Some(project) = self.model.kits[kit].project.active.as_mut() else {
             return 0;
         };
         let count = project.overlays.len();
@@ -1681,7 +1681,7 @@ impl Baboon {
 
     /// Identities of the tags this kit currently has stashed, as display paths.
     pub(in crate::app) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
-        let Some(project) = self.kits[kit].project.active.as_ref() else {
+        let Some(project) = self.model.kits[kit].project.active.as_ref() else {
             return Vec::new();
         };
         let mut paths: Vec<String> = project
@@ -1697,14 +1697,14 @@ impl Baboon {
     /// every stashed overlay and every unsaved document. The tags then reload
     /// exactly as the game ships them.
     pub(in crate::app) fn clear_campaign_stash(&mut self, kit: usize, ctx: &egui::Context) {
-        self.active = kit;
+        self.model.active = kit;
         let stashed = self.forget_all_campaign_overlays(kit);
-        let open = self.kits[kit].open_tabs.clone();
+        let open = self.model.kits[kit].open_tabs.clone();
         // Every parsed document goes, not just the dirty ones: a document
         // opened from the project reads clean while still holding the stashed
         // bytes, so keeping it would put the edits straight back.
         {
-            let kit_state = &mut self.kits[kit];
+            let kit_state = &mut self.model.kits[kit];
             kit_state.parsed_tags.clear();
             kit_state.loading_tags.clear();
             kit_state.caches.bitmap_previews.clear();
@@ -1714,13 +1714,13 @@ impl Baboon {
         }
         let now = ctx.input(|input| input.time);
         if let Err(error) = self.checkpoint_campaign_project(kit, now) {
-            self.status = format!("Could not update the Campaign Evolved project: {error}");
+            self.model.status = format!("Could not update the Campaign Evolved project: {error}");
             return;
         }
         for key in open {
             self.select_entry(key, ctx.clone());
         }
-        self.status = match stashed {
+        self.model.status = match stashed {
             0 => "Cleared this workspace's unsaved modifications".to_owned(),
             1 => "Cleared 1 stashed modification".to_owned(),
             n => format!("Cleared {n} stashed modifications"),
@@ -1736,7 +1736,7 @@ impl Baboon {
             return Ok(false);
         };
         let fingerprint = snapshot.fingerprint();
-        let Some(project) = self.kits[kit].project.active.as_mut() else {
+        let Some(project) = self.model.kits[kit].project.active.as_mut() else {
             return Ok(false);
         };
         if fingerprint == project.last_saved_fingerprint && project.recovery_path.is_file() {
@@ -1771,7 +1771,7 @@ impl Baboon {
     /// in a background workspace must keep checkpointing or its edits are the
     /// ones lost to a crash.
     pub(in crate::app) fn maybe_autosave_campaign_projects(&mut self, ctx: &egui::Context) {
-        for kit in 0..self.kits.len() {
+        for kit in 0..self.model.kits.len() {
             self.maybe_autosave_campaign_project(kit, ctx);
         }
     }
@@ -1783,7 +1783,7 @@ impl Baboon {
         let now = ctx.input(|input| input.time);
         self.ensure_campaign_project(kit, now);
         self.adopt_pending_new_overlays(kit);
-        let due = self.kits[kit]
+        let due = self.model.kits[kit]
             .project.active
             .as_ref()
             .is_some_and(|project| now >= project.next_autosave_at);
@@ -1791,12 +1791,12 @@ impl Baboon {
         // do not do it. The check used to sit *after* the capture, which is the
         // expensive part.
         if due
-            && self.kits[kit]
+            && self.model.kits[kit]
                 .project.active
                 .as_ref()
                 .is_some_and(|project| project.save_in_flight.is_some())
         {
-            if let Some(project) = self.kits[kit].project.active.as_mut() {
+            if let Some(project) = self.model.kits[kit].project.active.as_mut() {
                 project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(750));
@@ -1807,12 +1807,12 @@ impl Baboon {
                 Ok(Some(snapshot)) => snapshot,
                 Ok(None) => return,
                 Err(error) => {
-                    self.status = format!("Campaign project autosave failed: {error}");
+                    self.model.status = format!("Campaign project autosave failed: {error}");
                     return;
                 }
             };
             let fingerprint = snapshot.fingerprint();
-            let Some(project) = self.kits[kit].project.active.as_mut() else {
+            let Some(project) = self.model.kits[kit].project.active.as_mut() else {
                 return;
             };
             if fingerprint == project.last_saved_fingerprint && project.recovery_path.is_file() {
@@ -1851,7 +1851,7 @@ impl Baboon {
         }
         // Wake when the next check is due: an edit made in this frame must be
         // saved even if nothing else happens after it.
-        if let Some(project) = self.kits[kit].project.active.as_ref() {
+        if let Some(project) = self.model.kits[kit].project.active.as_ref() {
             let wait = (project.next_autosave_at - now).max(0.0);
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
         }
@@ -1867,14 +1867,14 @@ impl Baboon {
         // Locate the kit whose project this save belongs to. Matching on the
         // path and the in-flight revision is enough, and it means a save that
         // outlives its kit is dropped instead of landing on another one.
-        let Some(kit) = self.kits.iter().position(|kit| {
+        let Some(kit) = self.model.kits.iter().position(|kit| {
             kit.project.active.as_ref().is_some_and(|project| {
                 project.recovery_path == path && project.save_in_flight == Some(revision)
             })
         }) else {
             return true;
         };
-        let Some(project) = self.kits[kit].project.active.as_mut() else {
+        let Some(project) = self.model.kits[kit].project.active.as_mut() else {
             return true;
         };
         project.save_in_flight = None;
@@ -1893,7 +1893,7 @@ impl Baboon {
                 }
             }
             Err(error) => {
-                self.status = format!("Campaign project autosave failed: {error}");
+                self.model.status = format!("Campaign project autosave failed: {error}");
             }
         }
         false
@@ -1925,7 +1925,7 @@ impl Baboon {
         if is_campaign_recovery_file(&path) {
             return;
         }
-        self.kits[kit].project.pending = Some(PendingCampaignProject {
+        self.model.kits[kit].project.pending = Some(PendingCampaignProject {
             path,
             snapshot: None,
         });
@@ -1934,7 +1934,7 @@ impl Baboon {
     /// Write this workspace's project to its associated `.baboon`, asking for a
     /// destination when it has none yet.
     pub(in crate::app) fn save_campaign_project_file(&mut self, kit: usize, now: f64) {
-        let Some(path) = self.kits[kit]
+        let Some(path) = self.model.kits[kit]
             .project.active
             .as_ref()
             .and_then(|project| project.project_path.clone())
@@ -1947,10 +1947,10 @@ impl Baboon {
 
     pub(in crate::app) fn save_campaign_project_file_as(&mut self, kit: usize, now: f64) {
         if !self.current_source_is_campaign_project_capable(kit) {
-            self.status = "Baboon projects require a Campaign Evolved container source".to_owned();
+            self.model.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
         }
-        let current = self.kits[kit]
+        let current = self.model.kits[kit]
             .project.active
             .as_ref()
             .and_then(|project| project.project_path.clone());
@@ -1970,7 +1970,7 @@ impl Baboon {
             .and_then(Path::parent)
             .map(Path::to_path_buf)
             .or_else(|| {
-                self.kits[kit]
+                self.model.kits[kit]
                     .source
                     .as_ref()
                     .map(|source| source.source.root_path().to_path_buf())
@@ -1994,48 +1994,48 @@ impl Baboon {
         let snapshot = match self.capture_campaign_project(kit, now) {
             Ok(Some(snapshot)) => snapshot,
             Ok(None) => {
-                self.status =
+                self.model.status =
                     "Baboon projects require a Campaign Evolved container source".to_owned();
                 return;
             }
             Err(error) => {
-                self.status = format!("Could not save the Baboon project: {error}");
+                self.model.status = format!("Could not save the Baboon project: {error}");
                 return;
             }
         };
         // Nothing here knows what is in a file the user named, and it may be an
         // older project entirely, so it is replaced rather than merged into.
         if let Err(error) = save_campaign_project(&path, &snapshot, None, ProjectScope::Session) {
-            self.status = error;
+            self.model.status = error;
             return;
         }
         let count = snapshot.overlays.len();
-        if let Some(project) = self.kits[kit].project.active.as_mut() {
+        if let Some(project) = self.model.kits[kit].project.active.as_mut() {
             project.project_path = Some(path.clone());
         }
         // The recovery file stays the live copy, so it is brought level with what
         // was just written out.
         if let Err(error) = self.checkpoint_campaign_project(kit, now) {
-            self.status = format!(
+            self.model.status = format!(
                 "Saved {}, but the recovery file failed: {error}",
                 path.display()
             );
             return;
         }
-        self.status = format!("Saved {count} modified tag(s) to {}", path.display());
+        self.model.status = format!("Saved {count} modified tag(s) to {}", path.display());
     }
 
     pub(in crate::app) fn begin_open_campaign_project_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let snapshot = match load_campaign_project(&path) {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                self.status = error;
+                self.model.status = error;
                 return;
             }
         };
         let source_path = if crate::core::source::find_paks_dir(&snapshot.source_path).is_some() {
             snapshot.source_path.clone()
-        } else if let Some(configured) = self.prefs.editing_kit_paths.get(GameId::CampaignEvolved.as_str())
+        } else if let Some(configured) = self.model.prefs.editing_kit_paths.get(GameId::CampaignEvolved.as_str())
             && crate::core::source::find_paks_dir(configured).is_some()
         {
             configured.clone()
@@ -2044,7 +2044,7 @@ impl Baboon {
                 .set_title("Locate Campaign Evolved Install or Paks Folder")
                 .pick_folder()
             else {
-                self.status = "Campaign Evolved project source was not found".to_owned();
+                self.model.status = "Campaign Evolved project source was not found".to_owned();
                 return;
             };
             selected
@@ -2052,7 +2052,7 @@ impl Baboon {
         self.begin_load_folder_path(source_path, ctx);
         // Staged after the load starts: the loader has routed to a kit and
         // left it active, so this lands on the kit the source will mount into.
-        self.kits[self.active].project.pending = Some(PendingCampaignProject {
+        self.model.kits[self.model.active].project.pending = Some(PendingCampaignProject {
             path,
             snapshot: Some(snapshot),
         });
@@ -2064,12 +2064,12 @@ impl Baboon {
         now: f64,
         ctx: &egui::Context,
     ) {
-        let Some(pending) = self.kits[kit].project.pending.take() else {
+        let Some(pending) = self.model.kits[kit].project.pending.take() else {
             self.ensure_campaign_project(kit, now);
             return;
         };
         if !self.current_source_is_campaign_project_capable(kit) {
-            self.status = "Baboon projects require a Campaign Evolved container source".to_owned();
+            self.model.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
         }
         // A restored session stages its project file as a save target only; the
@@ -2077,7 +2077,7 @@ impl Baboon {
         // and `ensure_campaign_project` has just picked it back up.
         let Some(snapshot) = pending.snapshot else {
             self.ensure_campaign_project(kit, now);
-            if let Some(project) = self.kits[kit].project.active.as_mut() {
+            if let Some(project) = self.model.kits[kit].project.active.as_mut() {
                 project.project_path = Some(pending.path);
             }
             return;
@@ -2121,7 +2121,7 @@ impl Baboon {
         // Staged by document key before any tag is opened, so it is already
         // waiting whichever way the document arrives — restored from a stashed
         // edit below, or read back off disk by a worker some frames later.
-        self.kits[kit].restore.pending_history = snapshot
+        self.model.kits[kit].restore.pending_history = snapshot
             .history
             .iter()
             .filter_map(|(identity, history)| {
@@ -2133,10 +2133,10 @@ impl Baboon {
 
         // Rebuild the kit's tag layout from the project, rather than the flat
         // tab list the rack used: the tiles tree owns which tags are open.
-        let kit_id = self.kits[kit].id;
-        self.kits[kit].tag_tree = egui_tiles::Tree::empty(tag_tree_id(kit_id));
-        self.kits[kit].open_tabs.clear();
-        self.kits[kit].selected_key = None;
+        let kit_id = self.model.kits[kit].id;
+        self.model.kits[kit].tag_tree = egui_tiles::Tree::empty(tag_tree_id(kit_id));
+        self.model.kits[kit].open_tabs.clear();
+        self.model.kits[kit].selected_key = None;
         for tab in &snapshot.tabs {
             let Some(key) = identity_to_key.get(&tab.identity).cloned() else {
                 continue;
@@ -2149,7 +2149,7 @@ impl Baboon {
                     // that spares the first autosave after a restore from
                     // writing every stashed tag out again.
                     restored_revisions.insert(key.clone(), document.content_stamp());
-                    self.kits[kit].parsed_tags.insert(key.clone(), document);
+                    self.model.kits[kit].parsed_tags.insert(key.clone(), document);
                     self.apply_pending_history(kit, &key);
                 } else {
                     missing += 1;
@@ -2158,20 +2158,20 @@ impl Baboon {
             } else {
                 self.ensure_tag_loading(key.clone(), ctx.clone());
             }
-            self.kits[kit].open_tag_pane(&key);
+            self.model.kits[kit].open_tag_pane(&key);
         }
-        self.kits[kit].selected_key = snapshot
+        self.model.kits[kit].selected_key = snapshot
             .selected_identity
             .as_ref()
             .and_then(|identity| identity_to_key.get(identity))
             .cloned()
-            .or_else(|| self.kits[kit].open_tabs.last().cloned());
+            .or_else(|| self.model.kits[kit].open_tabs.last().cloned());
         // Tiles reveal the active tab themselves, so there is no scroll target
         // to remember; `open_tag_pane` already made each restored tag active.
-        if let Some(key) = self.kits[kit].selected_key.clone() {
-            self.kits[kit].open_tag_pane(&key);
+        if let Some(key) = self.model.kits[kit].selected_key.clone() {
+            self.model.kits[kit].open_tag_pane(&key);
         }
-        let root = self.kits[kit]
+        let root = self.model.kits[kit]
             .source
             .as_ref()
             .map(|source| source.source.root_path().to_path_buf());
@@ -2181,16 +2181,16 @@ impl Baboon {
         project.captured_revisions = restored_revisions;
         let tabs = snapshot.tabs.len();
         let stashed = snapshot.overlays.len();
-        self.kits[kit].project.active = Some(project);
+        self.model.kits[kit].project.active = Some(project);
         // These overlays have only ever existed in the file the user opened. The
         // recovery file is what every later autosave writes and what the next
         // session picks up, so it is brought level with them now rather than at
         // the mercy of whether anything is edited afterwards.
         if let Err(error) = self.checkpoint_campaign_project(kit, now) {
-            self.status = format!("Opened the project, but its recovery file failed: {error}");
+            self.model.status = format!("Opened the project, but its recovery file failed: {error}");
             return;
         }
-        self.status = if missing == 0 {
+        self.model.status = if missing == 0 {
             format!("Restored Campaign Evolved project ({tabs} tab(s), {stashed} modified tag(s))")
         } else {
             format!(
@@ -2200,7 +2200,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn load_campaign_overlay_for_key(&mut self, kit: usize, key: &str) -> bool {
-        if self.kits[kit].parsed_tags.contains_key(key) {
+        if self.model.kits[kit].parsed_tags.contains_key(key) {
             return true;
         }
         let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
@@ -2209,7 +2209,7 @@ impl Baboon {
         let Some((identity, _, _, _)) = campaign_entry_project_parts(&entry) else {
             return false;
         };
-        let Some(overlay) = self.kits[kit]
+        let Some(overlay) = self.model.kits[kit]
             .project.active
             .as_ref()
             .and_then(|project| project.overlays.get(&identity))
@@ -2223,14 +2223,14 @@ impl Baboon {
                 // serialization already, so autosave need not redo it.
                 let document = TagDocument::modified(tag);
                 let revision = document.content_stamp();
-                self.kits[kit].parsed_tags.insert(key.to_owned(), document);
-                if let Some(project) = self.kits[kit].project.active.as_mut() {
+                self.model.kits[kit].parsed_tags.insert(key.to_owned(), document);
+                if let Some(project) = self.model.kits[kit].project.active.as_mut() {
                     project.captured_revisions.insert(key.to_owned(), revision);
                 }
                 true
             }
             Err(error) => {
-                self.status = format!("Could not restore {}: {error}", entry.display_path);
+                self.model.status = format!("Could not restore {}: {error}", entry.display_path);
                 false
             }
         }

@@ -6,7 +6,7 @@ const FIELD: &str = "node list checksum";
 fn app_with_open_tag() -> Baboon {
     let mut app = Baboon::for_test();
     let schema = locate_definitions_root().join("halo3_mcc/render_model.json");
-    app.kits[0].parsed_tags.insert(
+    app.model.kits[0].parsed_tags.insert(
         KEY.to_owned(),
         TagDocument::clean(TagFile::new(schema).unwrap()),
     );
@@ -24,7 +24,7 @@ fn set(value: &str) -> DeferredOps {
 }
 
 fn value(app: &Baboon) -> String {
-    let doc = &app.kits[0].parsed_tags[KEY];
+    let doc = &app.model.kits[0].parsed_tags[KEY];
     doc.tag
         .root()
         .field_path(FIELD)
@@ -37,7 +37,7 @@ fn value(app: &Baboon) -> String {
 }
 
 fn undo_steps(app: &mut Baboon) -> usize {
-    let doc = app.kits[0].parsed_tags.get_mut(KEY).unwrap();
+    let doc = app.model.kits[0].parsed_tags.get_mut(KEY).unwrap();
     let mut steps = 0;
     while doc.journal.undo(&doc.tag).is_some() {
         steps += 1;
@@ -78,18 +78,18 @@ fn a_read_only_kit_refuses_every_ui_edit() {
         tags_folder: None,
         data_folder: None,
     };
-    app.kits[0].profile = Some(EditingKitProfileIdentity {
+    app.model.kits[0].profile = Some(EditingKitProfileIdentity {
         id: profile.id.clone(),
         name: profile.name.clone(),
     });
-    app.prefs.custom_editing_kit_profiles = vec![profile];
+    app.model.prefs.custom_editing_kit_profiles = vec![profile];
     let before = value(&app);
 
     let applied = app.apply_doc_ops(0, KEY, "Edit color", set("7"), UndoStep::Own);
 
     assert!(applied.is_none());
     assert_eq!(value(&app), before, "the tag is unchanged");
-    assert!(app.status.contains("read-only"), "status: {}", app.status);
+    assert!(app.model.status.contains("read-only"), "status: {}", app.model.status);
     assert_eq!(undo_steps(&mut app), 0);
 }
 
@@ -101,7 +101,7 @@ fn an_applied_edit_marks_its_draft_clean() {
     let mut app = app_with_open_tag();
     let draft_key = format!("{KEY}|{FIELD}");
     let shown = value(&app);
-    let draft = app.kits[0]
+    let draft = app.model.kits[0]
         .edit_buffers
         .draft_mut(draft_key.clone(), &shown);
     draft.text = "07".to_owned();
@@ -111,7 +111,7 @@ fn an_applied_edit_marks_its_draft_clean() {
 
     let shown = value(&app);
     assert_eq!(shown, "7");
-    let draft = app.kits[0].edit_buffers.take(&draft_key, &shown);
+    let draft = app.model.kits[0].edit_buffers.take(&draft_key, &shown);
     assert!(!draft.changed, "the applied draft still reads as unsaved");
     assert_eq!(draft.text, "7");
 }

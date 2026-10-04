@@ -23,24 +23,24 @@ impl Baboon {
             self.settle_restored_kit(kit);
             return true;
         };
-        self.active = index;
+        self.model.active = index;
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
                 self.release_source_load(kit);
                 self.settle_restored_kit(kit);
-                self.status = error;
+                self.model.status = error;
                 return false;
             }
         };
         // Check the outgoing project to disk before its source is replaced, and
         // refuse the switch if that fails rather than losing its edits.
-        let outgoing = self.active;
+        let outgoing = self.model.active;
         if self.current_source_is_campaign_project_capable(outgoing)
             && let Err(error) =
                 self.checkpoint_campaign_project(outgoing, ctx.input(|input| input.time))
         {
-            self.status = format!(
+            self.model.status = format!(
                 "Could not switch sources because the Campaign Evolved project checkpoint failed: {error}"
             );
             return false;
@@ -51,7 +51,7 @@ impl Baboon {
         // it, not before, or it would be wiped on the way in.
         let runtime_source_changed =
             matches!(&loaded.source, TagSource::IoStoreContainerSet { .. })
-                || self.kits[self.active]
+                || self.model.kits[self.model.active]
                     .source
                     .as_ref()
                     .is_some_and(|source| {
@@ -65,26 +65,26 @@ impl Baboon {
         if runtime_source_changed {
             self.reset_runtime_poke_source_state();
         }
-        self.status = loaded_source_status(&loaded);
+        self.model.status = loaded_source_status(&loaded);
         self.install_loaded_source(loaded);
         self.editor.color_popup = None;
         self.editor.function_popup = None;
         self.apply_loaded_source_identity(game);
         if let Some((key, tag)) = initial_tag {
-            let kit = &mut self.kits[self.active];
+            let kit = &mut self.model.kits[self.model.active];
             kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
             kit.open_tag_pane(&key);
         }
-        let installed = self.active;
+        let installed = self.model.active;
         self.apply_pending_campaign_project(installed, ctx.input(|input| input.time), ctx);
         self.refresh_favorite_entries_for(installed);
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
-        let campaign_evolved = self.kits[installed]
+        self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
+        let campaign_evolved = self.model.kits[installed]
             .source
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved {
-            if let Some(TagSource::IoStoreContainerSet { containers, .. }) = self.kits[installed]
+            if let Some(TagSource::IoStoreContainerSet { containers, .. }) = self.model.kits[installed]
                 .source
                 .as_ref()
                 .map(|source| &source.source)
@@ -94,14 +94,14 @@ impl Baboon {
             // Tags is the primary Campaign Evolved workspace. Chimp still
             // mounts eagerly when enabled so it is ready if the user selects
             // it, but loading a project must not switch surfaces implicitly.
-            self.kits[installed].surface = campaign_evolved_surface_on_load();
-            if self.prefs.enable_chimp {
+            self.model.kits[installed].surface = campaign_evolved_surface_on_load();
+            if self.model.prefs.enable_chimp {
                 self.begin_chimp_mount(installed, ctx.clone());
             }
         }
         // A fresh source for this kit: none of its old index work applies.
         // Other kits' jobs are theirs, and are left running.
-        self.kits[installed].index_jobs = IndexJobs::default();
+        self.model.kits[installed].index_jobs = IndexJobs::default();
         let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
@@ -131,7 +131,7 @@ impl Baboon {
     /// this game, and which keyword sidecar it uses.
     fn apply_loaded_source_identity(&mut self, game: Option<GameId>) {
         let terminal_open = game.is_some_and(|game| self.kit_tools.terminal_open_games.contains(game.as_str()));
-        let kit = &mut self.kits[self.active];
+        let kit = &mut self.model.kits[self.model.active];
         kit.terminal.work_dir = kit
             .source
             .as_ref()
@@ -151,8 +151,8 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.kits[kit_index].scanning_entries = false;
-        self.kits[kit_index].index_jobs.entry_progress = None;
+        self.model.kits[kit_index].scanning_entries = false;
+        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
@@ -161,10 +161,10 @@ impl Baboon {
                 // tree (positions in the lazy list, just cleared) on a new one.
                 // Done before the jobs below take their stamps.
                 let browser_refresh_error = self.install_complete_entry_set(kit_index, scanned);
-                let kit = &mut self.kits[kit_index];
+                let kit = &mut self.model.kits[kit_index];
                 if let Some(source) = kit.source.as_mut() {
                     source.reverse_dependencies = None;
-                    self.status = browser_refresh_error.map_or_else(
+                    self.model.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
                     );
@@ -208,7 +208,7 @@ impl Baboon {
             }
             Err(e) => {
                 self.kit_tools.show_entry_index_wait_notice = false;
-                self.status = format!("Scan failed: {e}");
+                self.model.status = format!("Scan failed: {e}");
             }
         }
         false
@@ -224,18 +224,18 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.kits[kit_index].scanning_entries = false;
-        self.kits[kit_index].index_jobs.entry_progress = None;
+        self.model.kits[kit_index].scanning_entries = false;
+        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(entries) => {
                 let count = entries.len();
                 self.install_folder_extractables(kit_index, &rel_path, entries);
-                self.status = format!(
+                self.model.status = format!(
                     "Loaded the entire {label} folder: {count} tag(s) available for extraction"
                 );
             }
             Err(error) => {
-                self.status = format!("Could not load the entire {label} folder: {error}")
+                self.model.status = format!("Could not load the entire {label} folder: {error}")
             }
         }
         false
@@ -253,10 +253,10 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        if !self.kits[kit_index].scanning_entries {
+        if !self.model.kits[kit_index].scanning_entries {
             return true;
         }
-        if let Some(progress) = self.kits[kit_index].index_jobs.entry_progress.as_mut() {
+        if let Some(progress) = self.model.kits[kit_index].index_jobs.entry_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
             progress.matched = matched;
@@ -275,7 +275,7 @@ impl Baboon {
         let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
-        self.kits[kit_index].index_jobs.refreshing = false;
+        self.model.kits[kit_index].index_jobs.refreshing = false;
         if self.resolve_stamp(stamp).is_none() {
             return true;
         }
@@ -286,12 +286,12 @@ impl Baboon {
                 // save (a recompile, an import, a new file) reaches the
                 // shader grid here.
                 if refresh_touches_render_methods(&refresh) {
-                    self.kits[kit_index].forget_render_methods();
+                    self.model.kits[kit_index].forget_render_methods();
                 }
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
             }
             Ok(_) => {}
-            Err(error) => self.status = format!("Index refresh failed: {error}"),
+            Err(error) => self.model.status = format!("Index refresh failed: {error}"),
         }
         false
     }
@@ -373,13 +373,13 @@ impl Baboon {
     /// Captured source identity prevents stale results from replacing newer state.
     pub(in crate::app) fn begin_load_single_path(&mut self, path: PathBuf, ctx: egui::Context) {
         if self.open_kit_for(&path) {
-            self.status = format!("Switched to {}", path.display());
+            self.model.status = format!("Switched to {}", path.display());
             return;
         }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
-        self.status = format!("Loading {}", path.display());
+        let names = self.model.default_names.clone();
+        self.model.status = format!("Loading {}", path.display());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
         // leaving the kit reserved for this load ("starting up") for good.
         spawn_worker(
@@ -431,23 +431,23 @@ impl Baboon {
             return;
         }
         if self.open_kit_for(&path) {
-            self.status = format!("Switched to {}", path.display());
+            self.model.status = format!("Switched to {}", path.display());
             return;
         }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
+        let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
-        let ek_folder_aliases = self.prefs.ek_folder_aliases.clone();
+        let ek_folder_aliases = self.model.prefs.ek_folder_aliases.clone();
         let folder_info = match resolve_folder_root(&path, &ek_folder_aliases) {
             Ok(info) => info,
             Err(error) => {
                 self.release_source_load(kit);
-                self.status = error.to_string();
+                self.model.status = error.to_string();
                 return;
             }
         };
-        self.status = match folder_info.game {
+        self.model.status = match folder_info.game {
             Some(game) => format!("Indexing {} as {game}", folder_info.scan_root.display()),
             None => format!("Indexing {}", folder_info.scan_root.display()),
         };
@@ -478,7 +478,7 @@ impl Baboon {
     /// validated layouts already cached, so asking costs no disk access.
     pub(in crate::app) fn profile_using_chosen_tags_folder(&self, path: &Path) -> Option<CustomEditingKitProfile> {
         let path = canonical_or_clean(path);
-        self.prefs
+        self.model.prefs
             .custom_editing_kit_profiles
             .iter()
             .filter(|profile| profile.has_chosen_folders())
@@ -505,13 +505,13 @@ impl Baboon {
     /// Captured source identity prevents stale results from replacing newer state.
     pub(in crate::app) fn begin_load_monolithic_path(&mut self, path: PathBuf, ctx: egui::Context) {
         if self.open_kit_for(&path) {
-            self.status = format!("Switched to {}", path.display());
+            self.model.status = format!("Switched to {}", path.display());
             return;
         }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
-        self.status = format!("Opening {}", path.display());
+        let names = self.model.default_names.clone();
+        self.model.status = format!("Opening {}", path.display());
         let recent_path = clean_recent_path(path.clone());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
         // leaving the kit reserved for this load ("starting up") for good.
@@ -550,14 +550,14 @@ impl Baboon {
     /// install configured in Settings. `None` when neither is known, which is
     /// the only case where a container has to be mounted on its own.
     pub(in crate::app) fn campaign_evolved_pak_root(&self) -> Option<PathBuf> {
-        let mounted = self.kits.iter().find_map(|kit| {
+        let mounted = self.model.kits.iter().find_map(|kit| {
             match kit.source.as_ref().map(|source| &source.source) {
                 Some(TagSource::IoStoreContainerSet { root, .. }) => Some(root.clone()),
                 _ => None,
             }
         });
         mounted.or_else(|| {
-            self.prefs
+            self.model.prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .filter(|profile| profile.is_campaign_evolved())
@@ -569,18 +569,18 @@ impl Baboon {
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
     pub(in crate::app) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
         if self.open_kit_for(&path) {
-            self.status = format!("Switched to {}", path.display());
+            self.model.status = format!("Switched to {}", path.display());
             return;
         }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
+        let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         // Mount the container against the install's `Paks` directory. A mod
         // installed in `Paks/~mods` carries no directory index of its own, and
         // only the base containers it overrides can name its chunks.
         let pak_root = self.campaign_evolved_pak_root();
-        self.status = format!("Mounting {}", path.display());
+        self.model.status = format!("Mounting {}", path.display());
         let recent_path = clean_recent_path(path.clone());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
         // leaving the kit reserved for this load ("starting up") for good.
@@ -616,14 +616,14 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         if self.open_kit_for(&requested) {
-            self.status = format!("Switched to {}", requested.display());
+            self.model.status = format!("Switched to {}", requested.display());
             return;
         }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        let names = self.default_names.clone();
+        let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
-        self.status = format!("Mounting containers in {}", paks_dir.display());
+        self.model.status = format!("Mounting containers in {}", paks_dir.display());
         let recent_path = clean_recent_path(requested);
         // Through `spawn_worker`: a loader that panicked used to send nothing,
         // leaving the kit reserved for this load ("starting up") for good.
@@ -649,7 +649,7 @@ impl Baboon {
 
     pub(in crate::app) fn load_recent_folder(&mut self, path: PathBuf, ctx: egui::Context) {
         if !path.exists() {
-            self.status = format!("Folder not found: {}", path.display());
+            self.model.status = format!("Folder not found: {}", path.display());
             self.remove_recent_folder(&path);
             return;
         }
@@ -662,15 +662,15 @@ impl Baboon {
 
     pub(in crate::app) fn remember_recent_folder(&mut self, path: PathBuf) {
         let path = clean_recent_path(path);
-        self.prefs
+        self.model.prefs
             .recent_folders
             .retain(|existing| !same_recent_path(existing, &path));
-        self.prefs.recent_folders.insert(0, path);
-        self.prefs.recent_folders.truncate(MAX_RECENT_FOLDERS);
+        self.model.prefs.recent_folders.insert(0, path);
+        self.model.prefs.recent_folders.truncate(MAX_RECENT_FOLDERS);
     }
 
     pub(in crate::app) fn remove_recent_folder(&mut self, path: &Path) {
-        self.prefs
+        self.model.prefs
             .recent_folders
             .retain(|existing| !same_recent_path(existing, path));
     }
@@ -686,13 +686,13 @@ impl Baboon {
                 Ok(true) => return,
                 Ok(false) => {}
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
         }
 
-        self.status = if count == 1 {
+        self.model.status = if count == 1 {
             "Dropped file is not a supported tag".to_owned()
         } else {
             "No supported tag files were dropped".to_owned()
@@ -734,11 +734,11 @@ impl Baboon {
         };
 
         let key = entry.key.clone();
-        let folder_seeds = self.kits[self.active].folder_seeds();
+        let folder_seeds = self.model.kits[self.model.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             source.upsert_entry(entry, &folder_seeds);
         }
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         self.select_entry(key, ctx);
         Ok(true)
     }
@@ -775,7 +775,7 @@ impl Baboon {
         ctx: egui::Context,
         label: impl Into<String>,
     ) {
-        self.begin_scan_all_entries_in(self.active, ctx, label);
+        self.begin_scan_all_entries_in(self.model.active, ctx, label);
     }
 
     /// Scan `kit_index`'s folder, which need not be the focused kit: the Model
@@ -788,7 +788,7 @@ impl Baboon {
         ctx: egui::Context,
         label: impl Into<String>,
     ) {
-        let kit = &self.kits[kit_index];
+        let kit = &self.model.kits[kit_index];
         if kit.scanning_entries {
             return;
         }
@@ -801,7 +801,7 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         kit.index_jobs.refreshing = false;
         kit.generation = kit.generation.wrapping_add(1);
         kit.field_index.invalidate();
@@ -818,7 +818,7 @@ impl Baboon {
             matched: 0,
         });
         self.kit_tools.show_entry_index_wait_notice = true;
-        self.status = label;
+        self.model.status = label;
         let progress_ctx = ctx.clone();
         spawn_worker(
             &self.tx,
@@ -857,12 +857,12 @@ impl Baboon {
         label: String,
         ctx: egui::Context,
     ) {
-        let kit_index = self.active;
-        if self.kits[kit_index].scanning_entries {
-            self.status = "A folder scan is already running".to_owned();
+        let kit_index = self.model.active;
+        if self.model.kits[kit_index].scanning_entries {
+            self.model.status = "A folder scan is already running".to_owned();
             return;
         }
-        let Some(source) = self.kits[kit_index].source.as_ref() else {
+        let Some(source) = self.model.kits[kit_index].source.as_ref() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -877,14 +877,14 @@ impl Baboon {
                 .cloned()
                 .collect();
             self.install_folder_extractables(kit_index, &rel_path, entries);
-            self.status = format!("Loaded the entire {label} folder for extraction");
+            self.model.status = format!("Loaded the entire {label} folder for extraction");
             return;
         }
 
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         kit.generation = kit.generation.wrapping_add(1);
         let stamp = KitStamp {
             kit: kit.id,
@@ -898,7 +898,7 @@ impl Baboon {
             total: 0,
             matched: 0,
         });
-        self.status = progress_label;
+        self.model.status = progress_label;
         let progress_ctx = ctx.clone();
         let worker_path = rel_path.clone();
         let worker_label = label.clone();
@@ -945,7 +945,7 @@ impl Baboon {
         rel_path: &Path,
         scanned: Vec<TagEntry>,
     ) {
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         let Some(source) = kit.source.as_mut() else {
             return;
         };
@@ -976,14 +976,14 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(in crate::app) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.kits[self.active].scanning_entries
-            || self.kits[self.active].index_jobs.refreshing
-            || self.kits[self.active].index_jobs.building_references
+        if self.model.kits[self.model.active].scanning_entries
+            || self.model.kits[self.model.active].index_jobs.refreshing
+            || self.model.kits[self.model.active].index_jobs.building_references
         {
             return;
         }
         let now = ctx.input(|input| input.time);
-        if now < self.kits[self.active].index_jobs.next_refresh_at {
+        if now < self.model.kits[self.model.active].index_jobs.next_refresh_at {
             return;
         }
         let should_refresh = self.source().is_some_and(|source| {
@@ -994,12 +994,12 @@ impl Baboon {
         if should_refresh {
             self.begin_refresh_entry_index(ctx);
         } else {
-            self.schedule_next_entry_index_refresh(self.active, &ctx);
+            self.schedule_next_entry_index_refresh(self.model.active, &ctx);
         }
     }
 
     pub(in crate::app) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.kits[self.active].scanning_entries || self.kits[self.active].index_jobs.refreshing {
+        if self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
             return;
         }
         let Some(source) = self.source() else {
@@ -1015,7 +1015,7 @@ impl Baboon {
         let names = source.names.clone();
         let tag_source = source.source.clone();
         let stamp = self.kit_stamp();
-        self.kits[self.active].index_jobs.refreshing = true;
+        self.model.kits[self.model.active].index_jobs.refreshing = true;
         spawn_worker(
             &self.tx,
             &ctx,
@@ -1034,7 +1034,7 @@ impl Baboon {
 
     pub(in crate::app) fn schedule_next_entry_index_refresh(&mut self, kit: usize, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        self.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
+        self.model.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
     }
 
     pub(in crate::app) fn apply_entry_index_refresh(
@@ -1061,12 +1061,12 @@ impl Baboon {
         // rebuild after any change the refresh noticed, including the user's
         // own saves.
         for key in &removed_keys {
-            self.kits[kit_index].set_tag_references(key, None);
+            self.model.kits[kit_index].set_tag_references(key, None);
         }
         for (key, deps) in touched_dependencies {
-            self.kits[kit_index].set_tag_references(&key, Some(deps));
+            self.model.kits[kit_index].set_tag_references(&key, Some(deps));
         }
-        self.status = browser_refresh_error.map_or_else(
+        self.model.status = browser_refresh_error.map_or_else(
             || {
                 format!(
                     "Index updated: {n} tags ({added} added, {updated} changed, {removed} removed)"
@@ -1075,9 +1075,9 @@ impl Baboon {
             |error| format!("Index updated, but browser refresh failed: {error}"),
         );
         if let Some(first) = errors.first() {
-            self.status = format!(
+            self.model.status = format!(
                 "{}; {} tag(s) could not be indexed, first {first}",
-                self.status,
+                self.model.status,
                 errors.len()
             );
         }
@@ -1093,7 +1093,7 @@ impl Baboon {
         kit_index: usize,
         entries: Vec<TagEntry>,
     ) -> Option<String> {
-        let kit = &mut self.kits[kit_index];
+        let kit = &mut self.model.kits[kit_index];
         let source = kit.source.as_mut()?;
         source.group_tree = crate::core::source::build_group_tree(&entries);
         source.all_entries = entries;

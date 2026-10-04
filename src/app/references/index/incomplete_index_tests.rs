@@ -26,5 +26,5 @@ fn an_incomplete_reference_index_is_reported_as_such() {
 
     app.handle_reverse_dependencies_built(stamp, ReverseDependencyIndex::default(), 3);
 
-    assert!(app.status.contains("without 3 tag"), "{}", app.status);
+    assert!(app.model.status.contains("without 3 tag"), "{}", app.model.status);
 }

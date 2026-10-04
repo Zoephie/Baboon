@@ -15,7 +15,7 @@ impl Baboon {
 
     /// Applies `WorkerMessage::TerminalLogError` without changing receive-loop ordering.
     pub(in crate::app) fn handle_terminal_log_error(&mut self, error: String) -> bool {
-        self.status = error;
+        self.model.status = error;
         false
     }
 
@@ -515,20 +515,20 @@ impl Baboon {
     /// Starts the configured command without blocking frame rendering.
     /// Output and completion return through ordered worker messages for the active run id.
     pub(in crate::app) fn spawn_terminal_command(&mut self, command: String, ctx: egui::Context) {
-        if self.refuse_read_only_edit(self.active) {
+        if self.refuse_read_only_edit(self.model.active) {
             return;
         }
         if self.kit_tools.terminal.running {
-            self.status = "A command is already running".to_owned();
+            self.model.status = "A command is already running".to_owned();
             return;
         }
-        let Some(work_dir) = self.kits[self.active].terminal.work_dir.clone() else {
-            self.status = "Run requires a loaded editing-kit folder".to_owned();
+        let Some(work_dir) = self.model.kits[self.model.active].terminal.work_dir.clone() else {
+            self.model.status = "Run requires a loaded editing-kit folder".to_owned();
             return;
         };
         // Rewritten before it is echoed, so the terminal shows what really ran.
         let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
-        self.kits[self.active].terminal.open = true;
+        self.model.kits[self.model.active].terminal.open = true;
         self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));
@@ -546,7 +546,7 @@ impl Baboon {
                 Some(file)
             }
             Err(error) => {
-                self.status = format!("Terminal full log unavailable: {error}");
+                self.model.status = format!("Terminal full log unavailable: {error}");
                 self.kit_tools.terminal.last_log_path = None;
                 None
             }
@@ -640,11 +640,11 @@ impl Baboon {
 
     pub(in crate::app) fn stop_terminal_command(&mut self) {
         if !self.kit_tools.terminal.running {
-            self.status = "No terminal command is running".to_owned();
+            self.model.status = "No terminal command is running".to_owned();
             return;
         }
         let Some(process) = self.kit_tools.terminal.process.as_ref() else {
-            self.status = "No tracked terminal process to stop".to_owned();
+            self.model.status = "No tracked terminal process to stop".to_owned();
             return;
         };
 
@@ -666,11 +666,11 @@ impl Baboon {
                 self.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
                 trim_terminal_lines(&mut self.kit_tools.terminal.lines);
                 self.finish_stopped_terminal_command();
-                self.status = log_status.unwrap_or_else(|| "Terminal command stopped".to_owned());
+                self.model.status = log_status.unwrap_or_else(|| "Terminal command stopped".to_owned());
             }
             Ok(TerminalStopResult::AlreadyExited) => {
                 self.finish_stopped_terminal_command();
-                self.status = "Terminal command had already exited".to_owned();
+                self.model.status = "Terminal command had already exited".to_owned();
             }
             Err(error) => {
                 let line = format!("[error] could not stop terminal command: {error}");
@@ -683,7 +683,7 @@ impl Baboon {
                 self.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
                 trim_terminal_lines(&mut self.kit_tools.terminal.lines);
                 self.kit_tools.terminal.scroll_to_bottom = true;
-                self.status = log_status
+                self.model.status = log_status
                     .unwrap_or_else(|| format!("Could not stop terminal command: {error}"));
             }
         }
@@ -704,7 +704,7 @@ impl Baboon {
         let Some(game) = self.source().and_then(|s| s.game.clone()) else {
             return;
         };
-        if self.kits[self.active].terminal.open {
+        if self.model.kits[self.model.active].terminal.open {
             self.kit_tools.terminal_open_games.insert(game.as_str().to_owned());
         } else {
             self.kit_tools.terminal_open_games.remove(game.as_str());

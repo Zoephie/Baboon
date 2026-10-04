@@ -415,7 +415,7 @@ impl Baboon {
     /// cached (All Tags waiting on the tag index).
     fn find_results_key(&self) -> Option<String> {
         use std::fmt::Write as _;
-        let kit = &self.kits[self.active];
+        let kit = &self.model.kits[self.model.active];
         let mut key = format!(
             "{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}",
             kit.id,
@@ -460,12 +460,12 @@ impl Baboon {
 
     fn refresh_open_tag_find(&mut self) {
         let keys = match self.search.find.within {
-            FindWithin::CurrentTag => self.kits[self.active]
+            FindWithin::CurrentTag => self.model.kits[self.model.active]
                 .selected_key
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>(),
-            FindWithin::OpenTags => self.kits[self.active].open_tabs.clone(),
+            FindWithin::OpenTags => self.model.kits[self.model.active].open_tabs.clone(),
             FindWithin::AllTags => unreachable!(),
         };
         let mut occurrences = Vec::new();
@@ -476,8 +476,8 @@ impl Baboon {
             if !supports_field_search(&entry) {
                 continue;
             }
-            let docs = self.def_docs_for_entry(self.active, &entry);
-            let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
+            let docs = self.def_docs_for_entry(self.model.active, &entry);
+            let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) else {
                 continue;
             };
             occurrences.extend(collect_find_occurrences(
@@ -498,7 +498,7 @@ impl Baboon {
         self.search.find.active = old_active
             .and_then(|active| self.search.find.occurrences.iter().position(|hit| *hit == active))
             .or_else(|| (!self.search.find.occurrences.is_empty()).then_some(0));
-        let parsed_tags = &self.kits[self.active].parsed_tags;
+        let parsed_tags = &self.model.kits[self.model.active].parsed_tags;
         self.search.find.matching_cells = std::sync::Arc::new(
             self.search.find
                 .occurrences
@@ -528,11 +528,11 @@ impl Baboon {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
         });
         if needs_full_scan {
-            if !self.kits[self.active].scanning_entries {
+            if !self.model.kits[self.model.active].scanning_entries {
                 self.begin_scan_all_entries_with_label(ctx.clone(), "Indexing tags for Find...");
             }
             self.search.find.searching = true;
-            self.search.find.progress = self.kits[self.active]
+            self.search.find.progress = self.model.kits[self.model.active]
                 .index_jobs
                 .entry_progress
                 .as_ref()
@@ -544,7 +544,7 @@ impl Baboon {
             self.search.find.occurrences.clear();
             return;
         }
-        let mut open_keys = self.kits[self.active]
+        let mut open_keys = self.model.kits[self.model.active]
             .parsed_tags
             .keys()
             .cloned()
@@ -554,7 +554,7 @@ impl Baboon {
         // entry list is the whole kit. It used to be cloned, all of it, before
         // the signature said whether anything needed re-searching at all.
         let (signature, fresh) = {
-            let kit = &self.kits[self.active];
+            let kit = &self.model.kits[self.model.active];
             let source = kit.source.as_ref().expect("checked above");
             let entries = if source.all_entries.is_empty() {
                 &source.entries
@@ -595,7 +595,7 @@ impl Baboon {
 
         let mut by_key: HashMap<String, Vec<FindOccurrence>> = HashMap::new();
         for hit in &self.search.find.all_closed_occurrences {
-            if !self.kits[self.active]
+            if !self.model.kits[self.model.active]
                 .parsed_tags
                 .contains_key(&hit.tag_key)
             {
@@ -612,8 +612,8 @@ impl Baboon {
             if !supports_field_search(&entry) {
                 continue;
             }
-            let docs = self.def_docs_for_entry(self.active, &entry);
-            let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
+            let docs = self.def_docs_for_entry(self.model.active, &entry);
+            let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) else {
                 continue;
             };
             by_key.insert(
@@ -634,7 +634,7 @@ impl Baboon {
     }
 
     fn begin_all_tag_find(&mut self, ctx: egui::Context, entries: Vec<TagEntry>) {
-        let Some(source) = self.kits[self.active].source.as_ref() else {
+        let Some(source) = self.model.kits[self.model.active].source.as_ref() else {
             return;
         };
         self.search.find.all_request_id = self.search.find.all_request_id.wrapping_add(1);
@@ -742,10 +742,10 @@ impl Baboon {
 
     /// Select a Find result's tag and navigate immediately or after its load completes.
     pub(in crate::app) fn activate_find_occurrence(&mut self, ctx: &egui::Context, hit: FindOccurrence) {
-        if self.kits[self.active].selected_key.as_deref() != Some(hit.tag_key.as_str()) {
+        if self.model.kits[self.model.active].selected_key.as_deref() != Some(hit.tag_key.as_str()) {
             self.select_entry(hit.tag_key.clone(), ctx.clone());
         }
-        if !self.kits[self.active]
+        if !self.model.kits[self.model.active]
             .parsed_tags
             .contains_key(&hit.tag_key)
         {
@@ -753,12 +753,12 @@ impl Baboon {
             return;
         }
         if let Some(entry) = self.entry_for_key(&hit.tag_key) {
-            let source_game = self.kits[self.active]
+            let source_game = self.model.kits[self.model.active]
                 .source
                 .as_ref()
                 .and_then(|source| source.game);
             if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
-                self.kits[self.active]
+                self.model.kits[self.model.active]
                     .caches.model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()

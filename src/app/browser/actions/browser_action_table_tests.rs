@@ -123,8 +123,8 @@ fn ensure(condition: bool, what: impl Into<String>) -> Result<(), String> {
 
 fn status_is(app: &Baboon, expected: &str) -> Result<(), String> {
     ensure(
-        app.status == expected,
-        format!("status {:?}, expected {expected:?}", app.status),
+        app.model.status == expected,
+        format!("status {:?}, expected {expected:?}", app.model.status),
     )
 }
 
@@ -167,12 +167,12 @@ fn cases() -> Vec<Case> {
             },
             check: |app, kit, _| {
                 let pane = folder_pane_key(Path::new(FOLDER));
-                let state = app.kits[0].browser.folder_browsers.get(&pane).ok_or("no pane")?;
+                let state = app.model.kits[0].browser.folder_browsers.get(&pane).ok_or("no pane")?;
                 ensure(state.label == "props", "label")?;
                 ensure(state.rel_path == Path::new(FOLDER), "rel path")?;
-                ensure(app.kits[0].open_tabs.contains(&pane), "not a tab")?;
+                ensure(app.model.kits[0].open_tabs.contains(&pane), "not a tab")?;
                 ensure(
-                    app.kits[0].selected_key.as_deref() == Some(kit.key(BARREL).as_str()),
+                    app.model.kits[0].selected_key.as_deref() == Some(kit.key(BARREL).as_str()),
                     "a folder pane must not take the tag selection",
                 )
             },
@@ -183,12 +183,12 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, kit, _| {
                 status_is(app, "Added objects/props to Favorites")?;
-                let favorites = &app.prefs.editing_kit_favorites;
+                let favorites = &app.model.prefs.editing_kit_favorites;
                 ensure(favorites.len() == 1, "one kit's favorites")?;
                 ensure(same_recent_path(&favorites[0].tags_root, &kit.root), "tags root")?;
                 ensure(favorites[0].folders == vec![PathBuf::from(FOLDER)], "folders")?;
                 ensure(
-                    app.kits[0].browser.active_favorite_folders == vec![PathBuf::from(FOLDER)],
+                    app.model.kits[0].browser.active_favorite_folders == vec![PathBuf::from(FOLDER)],
                     "kit favorites",
                 )
             },
@@ -199,8 +199,8 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, kit, outcome| {
                 let key = kit.key(MODEL);
-                ensure(app.kits[0].selected_key.as_deref() == Some(key.as_str()), "selected")?;
-                ensure(app.kits[0].open_tabs.contains(&key), "opened as a tab")?;
+                ensure(app.model.kits[0].selected_key.as_deref() == Some(key.as_str()), "selected")?;
+                ensure(app.model.kits[0].open_tabs.contains(&key), "opened as a tab")?;
                 ensure(outcome.worker_answered, "a load was started")?;
                 status_is(app, &format!("Loading {MODEL}"))
             },
@@ -212,12 +212,12 @@ fn cases() -> Vec<Case> {
             check: |app, kit, _| {
                 status_is(app, &format!("Added {MODEL} to Favorites"))?;
                 ensure(
-                    app.prefs.editing_kit_favorites[0].tags == vec![PathBuf::from(MODEL)],
+                    app.model.prefs.editing_kit_favorites[0].tags == vec![PathBuf::from(MODEL)],
                     "favorite tags",
                 )?;
                 ensure(
-                    app.kits[0].browser.active_favorite_entries.len() == 1
-                        && app.kits[0].browser.active_favorite_entries[0].key == kit.key(MODEL),
+                    app.model.kits[0].browser.active_favorite_entries.len() == 1
+                        && app.model.kits[0].browser.active_favorite_entries[0].key == kit.key(MODEL),
                     "kit favorite entries",
                 )
             },
@@ -280,7 +280,7 @@ fn cases() -> Vec<Case> {
                 rel_path: PathBuf::from(FOLDER),
                 label: "props".to_owned(),
             },
-            setup: |app, _| app.kits[0].source = None,
+            setup: |app, _| app.model.kits[0].source = None,
             check: nothing_happened,
         },
         // 10
@@ -290,11 +290,11 @@ fn cases() -> Vec<Case> {
                 label: "props".to_owned(),
             },
             setup: |app, kit| {
-                app.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
+                app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, _, _| {
                 let state = app.tag_ops.loose_folder_rename.as_ref().ok_or("no dialog")?;
-                ensure(state.kit == app.kits[0].id, "kit")?;
+                ensure(state.kit == app.model.kits[0].id, "kit")?;
                 ensure(state.rel_path == Path::new(FOLDER), "rel path")?;
                 ensure(state.old_name == "props" && state.name_input == "props", "name")?;
                 ensure(state.parent_display == "objects", "parent")?;
@@ -423,11 +423,11 @@ fn cases() -> Vec<Case> {
                 rel_path: PathBuf::from(FOLDER),
                 label: "props".to_owned(),
             },
-            setup: |app, _| app.kits[0].source.as_mut().unwrap().entries.clear(),
+            setup: |app, _| app.model.kits[0].source.as_mut().unwrap().entries.clear(),
             check: |app, _, outcome| {
                 status_is(app, "Loaded the entire props folder for extraction")?;
                 ensure(!outcome.worker_answered, "no scan was needed")?;
-                let entries = &app.kits[0].source.as_ref().unwrap().entries;
+                let entries = &app.model.kits[0].source.as_ref().unwrap().entries;
                 ensure(entries.len() == 3, format!("{} entries loaded", entries.len()))
             },
         },
@@ -492,7 +492,7 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, _, _| {
                 let request = app.kit_tools.pending_tool_import.as_ref().ok_or_else(|| {
-                    format!("no tool import queued; status {:?}", app.status)
+                    format!("no tool import queued; status {:?}", app.model.status)
                 })?;
                 ensure(request.verb == "render", format!("verb {:?}", request.verb))?;
                 ensure(
@@ -529,7 +529,7 @@ fn cases() -> Vec<Case> {
         Case {
             action: |kit| A::FindReferences(kit.key(RENDER)),
             setup: |app, kit| {
-                app.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
+                app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, kit, _| {
                 let results = app.search.query_results.as_ref().ok_or("no results")?;
@@ -585,7 +585,7 @@ fn cases() -> Vec<Case> {
         Case {
             action: |kit| A::RenameTag(kit.key(RENDER)),
             setup: |app, kit| {
-                app.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
+                app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, kit, _| {
                 let state = app.tag_ops.rename_tag.as_ref().ok_or("no dialog")?;
@@ -660,7 +660,7 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, _, _| {
                 let dialog = app.tag_ops.container_folder_dialog.as_ref().ok_or("no dialog")?;
-                ensure(dialog.kit == app.kits[0].id, "kit")?;
+                ensure(dialog.kit == app.model.kits[0].id, "kit")?;
                 ensure(
                     dialog.parent_rel.as_deref() == Some(FOLDER),
                     format!("parent {:?}", dialog.parent_rel),
@@ -690,7 +690,7 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, kit, _| {
                 status_is(app, "Removed folder objects/props")?;
-                ensure(app.kits[0].pending_container_folders.is_empty(), "nothing pending")?;
+                ensure(app.model.kits[0].pending_container_folders.is_empty(), "nothing pending")?;
                 ensure(kit.root.join(FOLDER).is_dir(), "the folder on disk is untouched")
             },
         },
@@ -705,7 +705,7 @@ fn run(case: &Case, kit: &LooseKit) -> Result<(), String> {
     // Whatever the setup left in flight is settled before the dispatch, so
     // a worker answering afterwards is the arm's own.
     drain_messages(&mut app, Duration::from_millis(50));
-    app.status = "Ready".to_owned();
+    app.model.status = "Ready".to_owned();
     let mut action = Some((case.action)(kit));
     let ctx = egui::Context::default();
     let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
@@ -769,10 +769,10 @@ fn opening_a_folder_twice_reuses_its_pane_unless_asked_for_a_new_tab() {
     };
     open(&mut app, false);
     open(&mut app, false);
-    assert_eq!(app.kits[0].browser.folder_browsers.len(), 1);
+    assert_eq!(app.model.kits[0].browser.folder_browsers.len(), 1);
     open(&mut app, true);
     let base = folder_pane_key(Path::new(FOLDER));
-    let mut keys: Vec<_> = app.kits[0].browser.folder_browsers.keys().cloned().collect();
+    let mut keys: Vec<_> = app.model.kits[0].browser.folder_browsers.keys().cloned().collect();
     keys.sort();
     assert_eq!(keys, vec![base.clone(), format!("{base}#2")]);
 }
@@ -787,7 +787,7 @@ fn a_favorite_toggled_twice_is_gone() {
     for _ in 0..2 {
         app.handle_browser_action(BrowserAction::ToggleFavorite(kit.key(MODEL)), ctx());
     }
-    assert_eq!(app.status, format!("Removed {MODEL} from Favorites"));
-    assert!(app.prefs.editing_kit_favorites.is_empty());
-    assert!(app.kits[0].browser.active_favorite_entries.is_empty());
+    assert_eq!(app.model.status, format!("Removed {MODEL} from Favorites"));
+    assert!(app.model.prefs.editing_kit_favorites.is_empty());
+    assert!(app.model.kits[0].browser.active_favorite_entries.is_empty());
 }

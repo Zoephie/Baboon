@@ -7,7 +7,7 @@ fn a_chimp_checkpoint_waits_for_edits_to_pause() {
     let mut app = Baboon::for_test();
     let mut document = rename_fixture();
     document.checkpoint_due = Some(5.0);
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .insert("/Game/Test/Thing".to_owned(), document);
@@ -21,7 +21,7 @@ fn a_chimp_checkpoint_waits_for_edits_to_pause() {
             },
             |_| app.run_due_chimp_checkpoints(0, &ctx),
         );
-        app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due
+        app.model.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due
     };
 
     assert_eq!(
@@ -40,7 +40,7 @@ fn a_checkpoint_falls_due_while_the_window_is_hidden() {
     let mut app = Baboon::for_test();
     let mut document = rename_fixture();
     document.checkpoint_due = Some(5.0);
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .insert("/Game/Test/Thing".to_owned(), document);
@@ -59,7 +59,7 @@ fn a_checkpoint_falls_due_while_the_window_is_hidden() {
         .entry(egui::ViewportId::ROOT)
         .or_default()
         .minimized = Some(true);
-    let due = |app: &Baboon| app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due;
+    let due = |app: &Baboon| app.model.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due;
 
     // egui alone still reads 1.0, so nothing is due yet.
     let _ = ctx.run_logic(&hidden, |ctx| app.run_logic(ctx));
@@ -79,7 +79,7 @@ fn recovery_on_remount_leaves_open_documents_alone() {
     let mut open = rename_fixture();
     open.dirty = true;
     open.edits = 7;
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .insert("/Game/Test/Thing".to_owned(), open);
@@ -88,16 +88,16 @@ fn recovery_on_remount_leaves_open_documents_alone() {
         ("/Game/Test/Closed".to_owned(), "bbbb.uasset".to_owned()),
     ]);
 
-    let restoring = chimp_recovery_still_closed(&app.kits[0].chimp, manifest.clone());
+    let restoring = chimp_recovery_still_closed(&app.model.kits[0].chimp, manifest.clone());
     assert_eq!(
         restoring,
         [("/Game/Test/Closed".to_owned(), "bbbb.uasset".to_owned())]
     );
 
     // With nothing open, both come back.
-    app.kits[0].chimp.documents.clear();
+    app.model.kits[0].chimp.documents.clear();
     assert_eq!(
-        chimp_recovery_still_closed(&app.kits[0].chimp, manifest).len(),
+        chimp_recovery_still_closed(&app.model.kits[0].chimp, manifest).len(),
         2
     );
 }
@@ -160,8 +160,8 @@ fn compat_chimp_recovery_sample() {
 
 fn stamp(app: &Baboon) -> KitStamp {
     KitStamp {
-        kit: app.kits[0].id,
-        generation: app.kits[0].generation,
+        kit: app.model.kits[0].id,
+        generation: app.model.kits[0].generation,
     }
 }
 
@@ -175,7 +175,7 @@ fn int(document: &ChimpDocument, property: &str) -> i64 {
 /// Edit `Count` on `package` the way the pane does: dirty, counted, and
 /// due a checkpoint.
 fn edit_count(app: &mut Baboon, package: &str, value: i64) {
-    let document = app.kits[0].chimp.documents.get_mut(package).unwrap();
+    let document = app.model.kits[0].chimp.documents.get_mut(package).unwrap();
     set_first_value(document, "Count", PropValue::Int(value));
     document.dirty = true;
     document.edits += 1;
@@ -191,12 +191,12 @@ fn opening_a_package_decodes_it_into_a_clean_focused_pane() {
     let mut app = install.app_with_open(&[]);
     let ctx = egui::Context::default();
     app.begin_chimp_open_package(0, THING.to_owned(), ctx.clone());
-    assert!(app.kits[0].chimp.loading_packages.contains(THING));
-    assert_eq!(app.kits[0].chimp.selected_package.as_deref(), Some(THING));
+    assert!(app.model.kits[0].chimp.loading_packages.contains(THING));
+    assert_eq!(app.model.kits[0].chimp.selected_package.as_deref(), Some(THING));
     assert_eq!(app.chimp_activity(0), "loading a package");
 
     assert!(apply_next_worker_message(&mut app));
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert!(chimp.loading_packages.is_empty());
     assert_eq!(chimp.open_packages, [THING]);
     assert_eq!(chimp.selected_package.as_deref(), Some(THING));
@@ -217,7 +217,7 @@ fn opening_a_package_decodes_it_into_a_clean_focused_pane() {
     assert_eq!(app.chimp_activity(0), "mounted");
 
     app.begin_chimp_open_package(0, THING.to_owned(), ctx);
-    assert!(app.kits[0].chimp.loading_packages.is_empty());
+    assert!(app.model.kits[0].chimp.loading_packages.is_empty());
     assert!(app.rx.try_recv().is_err(), "nothing was read again");
 }
 
@@ -229,9 +229,9 @@ fn opening_a_missing_package_reports_it_and_stops_loading() {
     let mut app = install.app_with_open(&[]);
     app.begin_chimp_open_package(0, "/Game/Test/Missing".to_owned(), egui::Context::default());
     assert!(apply_next_worker_message(&mut app));
-    assert!(app.kits[0].chimp.loading_packages.is_empty());
-    assert!(app.kits[0].chimp.documents.is_empty());
-    assert_eq!(app.status, "/Game/Test/Missing is not mounted");
+    assert!(app.model.kits[0].chimp.loading_packages.is_empty());
+    assert!(app.model.kits[0].chimp.documents.is_empty());
+    assert_eq!(app.model.status, "/Game/Test/Missing is not mounted");
 }
 
 /// A checkpoint rebuilds the edited package, writes it under a name
@@ -251,7 +251,7 @@ fn a_checkpoint_writes_the_edited_package_and_names_it_in_the_manifest() {
         },
         |ui| app.run_due_chimp_checkpoints(0, ui.ctx()),
     );
-    assert_eq!(app.kits[0].chimp.documents[THING].checkpoint_due, None);
+    assert_eq!(app.model.kits[0].chimp.documents[THING].checkpoint_due, None);
 
     let directory = app.chimp_recovery_dir(0).unwrap();
     assert_eq!(directory, install.recovery_dir());
@@ -270,7 +270,7 @@ fn a_checkpoint_writes_the_edited_package_and_names_it_in_the_manifest() {
         HashMap::from([(THING.to_owned(), filename.clone())])
     );
     let written = fs::read(directory.join(&filename)).unwrap();
-    let document = &app.kits[0].chimp.documents[THING];
+    let document = &app.model.kits[0].chimp.documents[THING];
     assert_eq!(
         written,
         rebuild_chimp_document(&install.world, document).unwrap().0,
@@ -279,7 +279,7 @@ fn a_checkpoint_writes_the_edited_package_and_names_it_in_the_manifest() {
     let reread =
         decode_chimp_document(&install.world, document.provider.clone(), written).unwrap();
     assert_eq!(int(&reread, "Count"), 42);
-    assert_eq!(app.status, "Ready", "a checkpoint that worked says nothing");
+    assert_eq!(app.model.status, "Ready", "a checkpoint that worked says nothing");
 
     app.clear_chimp_recovery_packages(0, &[THING.to_owned()])
         .unwrap();
@@ -293,11 +293,11 @@ fn a_checkpoint_without_a_mount_is_quietly_skipped() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
     edit_count(&mut app, THING, 42);
-    app.kits[0].chimp.mount = ChimpMount::Idle;
+    app.model.kits[0].chimp.mount = ChimpMount::Idle;
     app.flush_all_chimp_checkpoints();
-    assert_eq!(app.kits[0].chimp.documents[THING].checkpoint_due, None);
+    assert_eq!(app.model.kits[0].chimp.documents[THING].checkpoint_due, None);
     assert!(!app.chimp_recovery_dir(0).unwrap().exists());
-    assert_eq!(app.status, "Ready");
+    assert_eq!(app.model.status, "Ready");
 }
 
 /// Mounting restores a checkpointed edit that nothing has open, against
@@ -311,14 +311,14 @@ fn a_mount_restores_a_closed_checkpoint_and_a_remount_keeps_the_open_one() {
     first.flush_all_chimp_checkpoints();
 
     let mut app = Baboon::for_test();
-    app.kits[0].source = Some(install.source());
+    app.model.kits[0].source = Some(install.source());
     let ctx = egui::Context::default();
     app.handle_chimp_mounted(stamp(&app), Ok(install.world.clone()), ctx.clone());
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Ready(_)));
-    assert!(app.kits[0].chimp.type_indexing);
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_)));
+    assert!(app.model.kits[0].chimp.type_indexing);
     assert_eq!(app.chimp_activity(0), "indexing package types");
-    assert_eq!(app.status, "Chimp recovered 1 unsaved package edit(s)");
-    let chimp = &app.kits[0].chimp;
+    assert_eq!(app.model.status, "Chimp recovered 1 unsaved package edit(s)");
+    let chimp = &app.model.kits[0].chimp;
     assert_eq!(chimp.open_packages, [THING]);
     let document = &chimp.documents[THING];
     assert!(document.dirty);
@@ -330,16 +330,16 @@ fn a_mount_restores_a_closed_checkpoint_and_a_remount_keeps_the_open_one() {
     );
 
     edit_count(&mut app, THING, 43);
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .get_mut(THING)
         .unwrap()
         .checkpoint_due = None;
     app.handle_chimp_mounted(stamp(&app), Ok(install.world.clone()), ctx);
-    assert_eq!(int(&app.kits[0].chimp.documents[THING], "Count"), 43);
+    assert_eq!(int(&app.model.kits[0].chimp.documents[THING], "Count"), 43);
     assert_eq!(
-        app.status, "Chimp indexed 2 Unreal packages and 0 pak files",
+        app.model.status, "Chimp indexed 2 Unreal packages and 0 pak files",
         "nothing was restored over the open document"
     );
     app.clear_chimp_recovery_packages(0, &[THING.to_owned()])
@@ -368,15 +368,15 @@ fn a_checkpoint_for_an_unmounted_package_is_reported_and_kept() {
     .unwrap();
 
     let mut app = Baboon::for_test();
-    app.kits[0].source = Some(install.source());
+    app.model.kits[0].source = Some(install.source());
     app.handle_chimp_mounted(
         stamp(&app),
         Ok(install.world.clone()),
         egui::Context::default(),
     );
-    assert!(app.kits[0].chimp.documents.is_empty());
+    assert!(app.model.kits[0].chimp.documents.is_empty());
     assert_eq!(
-        app.status,
+        app.model.status,
         "Chimp recovered 0 unsaved package edit(s); 1 could not be restored \
              (/Game/Test/Gone is no longer mounted)"
     );
@@ -390,14 +390,14 @@ fn a_checkpoint_for_an_unmounted_package_is_reported_and_kept() {
 fn a_failed_mount_is_recorded() {
     let install = SyntheticInstall::new();
     let mut app = Baboon::for_test();
-    app.kits[0].source = Some(install.source());
+    app.model.kits[0].source = Some(install.source());
     app.handle_chimp_mounted(
         stamp(&app),
         Err("no containers".to_owned()),
         egui::Context::default(),
     );
-    assert!(matches!(&app.kits[0].chimp.mount, ChimpMount::Failed(error) if error == "no containers"));
-    assert_eq!(app.status, "Chimp could not open: no containers");
+    assert!(matches!(&app.model.kits[0].chimp.mount, ChimpMount::Failed(error) if error == "no containers"));
+    assert_eq!(app.model.status, "Chimp could not open: no containers");
 }
 
 /// A mount re-resolves open documents' providers, and marks one the
@@ -410,11 +410,11 @@ fn a_remount_orphans_a_document_its_containers_no_longer_provide() {
     let mut stray = install.document(OTHER);
     stray.package = "/Game/Test/Gone".to_owned();
     stray.provider.container = 7;
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .insert("/Game/Test/Gone".to_owned(), stray);
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .get_mut(THING)
@@ -426,12 +426,12 @@ fn a_remount_orphans_a_document_its_containers_no_longer_provide() {
         Ok(install.world.clone()),
         egui::Context::default(),
     );
-    let documents = &app.kits[0].chimp.documents;
+    let documents = &app.model.kits[0].chimp.documents;
     assert!(!documents[THING].orphaned);
     assert_eq!(documents[THING].provider.container, 0);
     assert!(documents["/Game/Test/Gone"].orphaned);
     assert_eq!(
-        app.status,
+        app.model.status,
         "1 open Chimp package(s) are no longer in the mounted containers: /Game/Test/Gone"
     );
 }
@@ -443,33 +443,33 @@ fn a_remount_orphans_a_document_its_containers_no_longer_provide() {
 fn a_mount_reopens_the_saved_session_packages() {
     let install = SyntheticInstall::new();
     let mut app = Baboon::for_test();
-    app.kits[0].source = Some(install.source());
-    app.kits[0].restore.pending_restore_chimp_packages = vec![
+    app.model.kits[0].source = Some(install.source());
+    app.model.kits[0].restore.pending_restore_chimp_packages = vec![
         THING.to_owned(),
         "/Game/Test/Missing".to_owned(),
         OTHER.to_owned(),
     ];
-    app.kits[0].restore.pending_restore_active_chimp_package = Some(THING.to_owned());
+    app.model.kits[0].restore.pending_restore_active_chimp_package = Some(THING.to_owned());
     app.handle_chimp_mounted(
         stamp(&app),
         Ok(install.world.clone()),
         egui::Context::default(),
     );
     assert_eq!(
-        app.status,
+        app.model.status,
         "Reopening 2 Chimp package(s); 1 saved package(s) are missing"
     );
-    assert_eq!(app.kits[0].chimp.loading_packages.len(), 2);
-    apply_until(&mut app, |app| app.kits[0].chimp.loading_packages.is_empty());
-    let chimp = &app.kits[0].chimp;
+    assert_eq!(app.model.kits[0].chimp.loading_packages.len(), 2);
+    apply_until(&mut app, |app| app.model.kits[0].chimp.loading_packages.is_empty());
+    let chimp = &app.model.kits[0].chimp;
     assert!(chimp.loading_packages.is_empty());
     assert_eq!(chimp.documents.len(), 2);
     let mut open = chimp.open_packages.clone();
     open.sort();
     assert_eq!(open, [OTHER, THING]);
     assert_eq!(chimp.selected_package.as_deref(), Some(THING));
-    assert!(app.kits[0].restore.pending_restore_active_chimp_package.is_none());
-    assert!(app.kits[0].restore.pending_restore_chimp_packages.is_empty());
+    assert!(app.model.kits[0].restore.pending_restore_active_chimp_package.is_none());
+    assert!(app.model.kits[0].restore.pending_restore_chimp_packages.is_empty());
 }
 
 /// Changing the USMAP is refused while anything is modified, and
@@ -479,48 +479,48 @@ fn a_mount_reopens_the_saved_session_packages() {
 fn changing_the_usmap_remounts_unless_something_is_modified() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
-    app.prefs.enable_chimp = true;
+    app.model.prefs.enable_chimp = true;
     let ctx = egui::Context::default();
     edit_count(&mut app, THING, 42);
     app.apply_chimp_usmap_path(None, ctx.clone());
     assert_eq!(
-        app.status,
+        app.model.status,
         "Build or discard modified Chimp packages before changing the USMAP."
     );
-    assert!(app.kits[0].chimp.documents.contains_key(THING));
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Ready(_)));
+    assert!(app.model.kits[0].chimp.documents.contains_key(THING));
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_)));
 
-    app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = false;
+    app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = false;
     app.apply_chimp_usmap_path(None, ctx);
     assert_eq!(
-        app.status,
+        app.model.status,
         "Using the bundled Campaign Evolved USMAP; remounting Chimp"
     );
     assert!(
-        app.kits[0].chimp.documents.is_empty(),
+        app.model.kits[0].chimp.documents.is_empty(),
         "a remount starts the workspace over"
     );
-    assert!(matches!(app.kits[0].chimp.mount, ChimpMount::Loading));
+    assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
     assert_eq!(app.chimp_activity(0), "still mounting");
 
     // The mount and the type index behind it may land in one frame.
     apply_until(&mut app, |app| {
-        !matches!(app.kits[0].chimp.mount, ChimpMount::Loading) && !app.kits[0].chimp.type_indexing
+        !matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading) && !app.model.kits[0].chimp.type_indexing
     });
-    if let ChimpMount::Failed(error) = &app.kits[0].chimp.mount {
+    if let ChimpMount::Failed(error) = &app.model.kits[0].chimp.mount {
         panic!("the remount failed: {error}");
     }
-    let ChimpMount::Ready(world) = &app.kits[0].chimp.mount else {
+    let ChimpMount::Ready(world) = &app.model.kits[0].chimp.mount else {
         unreachable!()
     };
     assert_eq!(world.packages().len(), 2);
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert!(!chimp.type_indexing);
     // The synthetic class is a package import, which the type index does
     // not classify.
     assert_eq!(chimp.package_types, [None, None]);
     assert_eq!(
-        app.status,
+        app.model.status,
         "Chimp classified 0 packages into 0 Unreal file types"
     );
 }
@@ -532,7 +532,7 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING, OTHER]);
     edit_count(&mut app, THING, 42);
-    app.kits[0]
+    app.model.kits[0]
         .chimp
         .documents
         .get_mut(THING)
@@ -548,7 +548,7 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
         Ok(1),
         "only the modified package is restored"
     );
-    let document = &app.kits[0].chimp.documents[THING];
+    let document = &app.model.kits[0].chimp.documents[THING];
     assert!(!document.dirty);
     assert_eq!(document.edits, 0);
     assert_eq!(int(document, "Count"), 7);
@@ -565,20 +565,20 @@ fn a_discard_is_refused_while_saving_or_unmounted() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
     edit_count(&mut app, THING, 42);
-    let kit = app.kits[0].id;
+    let kit = app.model.kits[0].id;
     app.chimp.chimp_writes.insert(kit, None);
     assert_eq!(
         app.discard_chimp_packages(0, &[THING.to_owned()]),
         Err("A Chimp save is still running; discard once it finishes".to_owned())
     );
     app.chimp.chimp_writes.clear();
-    app.kits[0].chimp.mount = ChimpMount::Idle;
+    app.model.kits[0].chimp.mount = ChimpMount::Idle;
     assert_eq!(
         app.discard_chimp_packages(0, &[THING.to_owned()]),
         Err("Chimp is not mounted; the original package data is unavailable".to_owned())
     );
-    assert_eq!(int(&app.kits[0].chimp.documents[THING], "Count"), 42);
-    assert!(app.kits[0].chimp.documents[THING].dirty);
+    assert_eq!(int(&app.model.kits[0].chimp.documents[THING], "Count"), 42);
+    assert!(app.model.kits[0].chimp.documents[THING].dirty);
 }
 
 /// A modified package refuses to close; a clean one closes, taking its
@@ -589,9 +589,9 @@ fn a_modified_package_refuses_to_close() {
     let mut app = install.app_with_open(&[THING, OTHER]);
     edit_count(&mut app, THING, 42);
     assert!(!app.close_chimp_package(0, THING));
-    assert!(app.kits[0].chimp.documents.contains_key(THING));
+    assert!(app.model.kits[0].chimp.documents.contains_key(THING));
     assert!(app.close_chimp_package(0, OTHER));
-    let chimp = &app.kits[0].chimp;
+    let chimp = &app.model.kits[0].chimp;
     assert!(!chimp.documents.contains_key(OTHER));
     assert_eq!(chimp.open_packages, [THING]);
     assert_eq!(chimp.selected_package.as_deref(), Some(THING));
@@ -604,10 +604,10 @@ fn the_discard_prompt_opens_only_for_modified_packages() {
     let mut app = install.app_with_open(&[THING]);
     app.open_chimp_discard_prompt(0, Vec::new(), None, None);
     assert!(app.chimp.chimp_discard_prompt.is_none());
-    assert_eq!(app.status, "Chimp has no modified packages");
+    assert_eq!(app.model.status, "Chimp has no modified packages");
     app.open_chimp_discard_prompt(0, vec![THING.to_owned()], None, None);
     let prompt = app.chimp.chimp_discard_prompt.as_ref().unwrap();
-    assert_eq!(prompt.kit, app.kits[0].id);
+    assert_eq!(prompt.kit, app.model.kits[0].id);
     assert_eq!(prompt.packages, [THING]);
 }
 
@@ -619,11 +619,11 @@ fn a_referrer_scan_finds_the_packages_that_import_the_target() {
     let mut app = install.app_with_open(&[THING, OTHER]);
     app.begin_chimp_referrer_scan(0, OTHER.to_owned(), egui::Context::default());
     assert!(matches!(
-        app.kits[0].chimp.documents[OTHER].referrers,
+        app.model.kits[0].chimp.documents[OTHER].referrers,
         ChimpReferrerState::Scanning
     ));
     assert!(apply_next_worker_message(&mut app));
-    let ChimpReferrerState::Done(scan) = &app.kits[0].chimp.documents[OTHER].referrers else {
+    let ChimpReferrerState::Done(scan) = &app.model.kits[0].chimp.documents[OTHER].referrers else {
         panic!("the scan settled");
     };
     assert_eq!(scan.referrers, [THING]);
@@ -631,7 +631,7 @@ fn a_referrer_scan_finds_the_packages_that_import_the_target() {
 
     app.begin_chimp_referrer_scan(0, THING.to_owned(), egui::Context::default());
     assert!(apply_next_worker_message(&mut app));
-    let ChimpReferrerState::Done(scan) = &app.kits[0].chimp.documents[THING].referrers else {
+    let ChimpReferrerState::Done(scan) = &app.model.kits[0].chimp.documents[THING].referrers else {
         panic!("the scan settled");
     };
     assert!(scan.referrers.is_empty());

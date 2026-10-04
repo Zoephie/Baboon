@@ -31,8 +31,8 @@ fn a_second_source_in_a_kit_never_reuses_a_generation() {
         app.install_loaded_source(source(label));
         // The load handler moves the generation on once more after
         // installing; mirror it so the test sees what jobs see.
-        app.kits[app.active].generation = app.kits[app.active].generation.wrapping_add(1);
-        seen.push(app.kits[app.active].generation);
+        app.model.kits[app.model.active].generation = app.model.kits[app.model.active].generation.wrapping_add(1);
+        seen.push(app.model.kits[app.model.active].generation);
         stamps.push(app.kit_stamp());
     }
     let mut unique = seen.clone();
