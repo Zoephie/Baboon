@@ -1,5 +1,5 @@
 //! Blam! workspace surface: asset folder, per-pipeline tick boxes, and the import request.
-//! It owns immediate-mode presentation and request collection; folder detection lives in `app/blam.rs`, the workflow in `controller/blam_import.rs`, and the importers in `blam-tags`.
+//! It owns immediate-mode presentation and request collection; folder detection lives in `app/blam/mod.rs`, the workflow in `controller/blam_import/mod.rs`, and the importers in `blam-tags`.
 
 use super::*;
 

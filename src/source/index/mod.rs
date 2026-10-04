@@ -1,0 +1,1010 @@
+//! Persistent entry and reverse-dependency indexes.
+//! It owns source identity, discovery, indexing, and source-aware reads; editor presentation and application workflow state belong elsewhere.
+
+use super::*;
+
+/// Returns the legacy per-game JSON entry-index path used for migration.
+pub fn index_path(game: &str) -> PathBuf {
+    app_cache_path(&format!("{game}_index.json"), "Baboon", "baboon")
+}
+
+/// Legacy JSON reverse-dependency path. New saves use [`index_db_path`].
+pub fn reverse_dependency_index_path(game: &str) -> PathBuf {
+    app_cache_path(
+        &format!("{game}_reverse_dependencies.json"),
+        "Baboon",
+        "baboon",
+    )
+}
+
+/// Returns the shared SQLite index path used by current entry/dependency caches.
+pub fn index_db_path() -> PathBuf {
+    app_cache_path("indexes.sqlite3", "Baboon", "baboon")
+}
+
+/// Sidecar file storing user keywords for a game's tags (kept outside the tag
+/// binaries). Keyed by tag entry key → sorted unique keyword list.
+pub fn keywords_path(game: &str) -> PathBuf {
+    app_cache_path(&format!("{game}_keywords.json"), "Baboon", "baboon")
+}
+
+fn legacy_index_path(game: &str) -> PathBuf {
+    app_cache_path(&format!("{game}_index.json"), "Genesis", "genesis")
+}
+
+fn cache_root_key(root: &Path) -> String {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let key = canonical.display().to_string();
+    #[cfg(windows)]
+    {
+        key.replace('/', "\\").to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        key
+    }
+}
+
+fn cache_root_str_key(root: &str) -> String {
+    cache_root_key(Path::new(root))
+}
+
+fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
+    if windows_folder == "Baboon" && unix_folder == "baboon" {
+        return crate::storage::data_path(filename);
+    }
+    // The same root as installed-mode state (see `user_data_root`); this is
+    // only reached for the legacy Genesis files, which are read, not written.
+    crate::storage::user_data_root(windows_folder, unix_folder).join(filename)
+}
+
+/// Persist `entries` to the shared SQLite index DB. Called from the background
+/// worker after a full scan completes so it never blocks the UI thread.
+/// `root` is recorded so a stale index from a different folder for the same
+/// game is rejected on load.
+pub fn save_entry_index(game: &str, root: &Path, entries: &[TagEntry]) -> Result<()> {
+    save_entry_index_to_db(game, root, entries)
+}
+
+/// Record one tag in an index that already exists, replacing any row with the
+/// same key. Returns `false` without writing when `root` has no index yet: a
+/// single row would otherwise load back as a complete one-tag index.
+///
+/// This is what a single-file change on the UI thread should call —
+/// [`save_entry_index`] rewrites every row and stats every tag file.
+pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Result<bool> {
+    let conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    upsert_entry_row(&conn, source_id, root, entry)?;
+    Ok(true)
+}
+
+/// Record one tag's index row and its references together, in one
+/// transaction: [`upsert_entry_index_row`] and [`save_tag_dependencies`] at
+/// once. `references` is `None` to leave the tag's references as they are.
+///
+/// The row holds the file's fingerprint, which is what tells the next refresh
+/// the tag is up to date. Written apart, a failure between the two left the
+/// fingerprint current over references that were not, which no later refresh
+/// would notice. Together, a failure leaves both as they were, and the next
+/// refresh sees the change again. Whether it wrote (`false` when `root` has no
+/// index yet).
+pub fn upsert_entry_with_dependencies(
+    game: &str,
+    root: &Path,
+    entry: &TagEntry,
+    references: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let tx = conn
+        .transaction()
+        .context("begin entry and dependency transaction")?;
+    upsert_entry_row(&tx, source_id, root, entry)?;
+    if let Some(references) = references {
+        replace_tag_dependencies(&tx, source_id, &entry.key, Some(references))?;
+    }
+    tx.commit().context("commit entry and dependencies")?;
+    Ok(true)
+}
+
+/// Remove one tag's index row and its references in one transaction; see
+/// [`upsert_entry_with_dependencies`].
+pub fn delete_entry_with_dependencies(game: &str, root: &Path, key: &str) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let tx = conn
+        .transaction()
+        .context("begin entry and dependency removal")?;
+    tx.execute(
+        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+        params![source_id, key],
+    )
+    .context("delete entry index row")?;
+    replace_tag_dependencies(&tx, source_id, key, None)?;
+    tx.commit().context("commit entry and dependency removal")?;
+    Ok(true)
+}
+
+fn upsert_entry_row(
+    conn: &Connection,
+    source_id: i64,
+    root: &Path,
+    entry: &TagEntry,
+) -> Result<()> {
+    let mut upsert = conn
+        .prepare(
+            "INSERT INTO entries (
+                source_id, key, rel_path, display_path, group_tag, group_name,
+                size, modified_secs, modified_nanos
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(source_id, key) DO UPDATE SET
+                rel_path = excluded.rel_path,
+                display_path = excluded.display_path,
+                group_tag = excluded.group_tag,
+                group_name = excluded.group_name,
+                size = excluded.size,
+                modified_secs = excluded.modified_secs,
+                modified_nanos = excluded.modified_nanos",
+        )
+        .context("prepare entry index upsert")?;
+    execute_entry_row(&mut upsert, source_id, root, entry).context("upsert entry index row")?;
+    Ok(())
+}
+
+/// Remove one tag's row from an existing index. Like
+/// [`upsert_entry_index_row`], a folder with no index is left without one.
+pub fn delete_entry_index_row(game: &str, root: &Path, key: &str) -> Result<bool> {
+    let conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    conn.execute(
+        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+        params![source_id, key],
+    )
+    .context("delete entry index row")?;
+    Ok(true)
+}
+
+/// Drop every index row a test wrote under `game`.
+#[cfg(test)]
+pub(crate) fn remove_test_index_rows(game: &str) {
+    if let Ok(conn) = open_index_db() {
+        let _ = conn.execute("DELETE FROM sources WHERE game = ?1", params![game]);
+    }
+}
+
+/// Replace one tag's rows in an existing reverse-dependency index, or remove
+/// them (`deps: None`). Like [`upsert_entry_index_row`], it does nothing for a
+/// folder with no reference index, since a partial graph would load back as a
+/// complete one. Whether it wrote.
+///
+/// Only tests write references alone now: the app writes them with the tag's
+/// row, through [`upsert_entry_with_dependencies`].
+#[cfg(test)]
+pub fn save_tag_dependencies(
+    game: &str,
+    root: &Path,
+    tag_key: &str,
+    deps: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let tx = conn
+        .transaction()
+        .context("begin tag dependency transaction")?;
+    let wrote = replace_tag_dependencies(&tx, source_id, tag_key, deps)?;
+    tx.commit().context("commit tag dependencies")?;
+    Ok(wrote)
+}
+
+/// [`save_tag_dependencies`] inside a transaction the caller commits.
+fn replace_tag_dependencies(
+    tx: &Connection,
+    source_id: i64,
+    tag_key: &str,
+    deps: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let has_index: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM indexed_tags WHERE source_id = ?1)",
+            params![source_id],
+            |row| row.get(0),
+        )
+        .context("query reverse dependency index")?;
+    if !has_index {
+        return Ok(false);
+    }
+    tx.execute(
+        "DELETE FROM dependencies WHERE source_id = ?1 AND tag_key = ?2",
+        params![source_id, tag_key],
+    )
+    .context("clear tag dependency rows")?;
+    tx.execute(
+        "DELETE FROM indexed_tags WHERE source_id = ?1 AND tag_key = ?2",
+        params![source_id, tag_key],
+    )
+    .context("clear indexed tag row")?;
+    if let Some(deps) = deps {
+        tx.execute(
+            "INSERT OR IGNORE INTO indexed_tags (source_id, tag_key) VALUES (?1, ?2)",
+            params![source_id, tag_key],
+        )
+        .context("insert indexed tag row")?;
+        let mut insert = tx
+            .prepare(
+                "INSERT OR IGNORE INTO dependencies (
+                    source_id, tag_key, dep_group_tag, dep_rel_path
+                 ) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .context("prepare tag dependency insert")?;
+        for dep in deps {
+            insert
+                .execute(params![
+                    source_id,
+                    tag_key,
+                    i64::from(dep.group_tag),
+                    &dep.rel_path
+                ])
+                .context("insert tag dependency row")?;
+        }
+    }
+    Ok(true)
+}
+
+/// Run an `entries` insert (or upsert) statement for one tag, filling its
+/// nine columns in table order.
+fn execute_entry_row(
+    statement: &mut rusqlite::Statement<'_>,
+    source_id: i64,
+    root: &Path,
+    entry: &TagEntry,
+) -> rusqlite::Result<usize> {
+    let rel_path = entry_relative_path(root, entry)
+        .map(|path| path_to_display(&path))
+        .unwrap_or_default();
+    let fingerprint = entry_file_path(entry).and_then(|path| file_fingerprint(path).ok().flatten());
+    statement.execute(params![
+        source_id,
+        &entry.key,
+        rel_path,
+        &entry.display_path,
+        i64::from(entry.group_tag),
+        entry.group_name.as_deref(),
+        fingerprint.map(|fp| fp.size as i64),
+        fingerprint.map(|fp| fp.modified_secs as i64),
+        fingerprint.map(|fp| i64::from(fp.modified_nanos)),
+    ])
+}
+
+/// Load a previously saved index for `game`. Returns `None` if no file exists,
+/// it can't be parsed, or it was saved for a different `root` folder (the keys
+/// are absolute paths, so the index is only valid for its original root).
+pub fn load_entry_index(game: &str, root: &Path) -> Option<Vec<TagEntry>> {
+    if let Some((entries, _)) = load_entry_index_from_db(game, root) {
+        return (!entries.is_empty()).then_some(entries);
+    }
+    let value = load_legacy_entry_index_value(game)?;
+    let (entries, _) = parse_entry_index(root, &value)?;
+    let _ = save_entry_index_to_db(game, root, &entries);
+    (!entries.is_empty()).then_some(entries)
+}
+
+/// Reconciles cached fingerprints with disk without parsing unchanged tags.
+/// The returned entries remain sorted and keyed exactly like a full scan.
+pub fn refresh_entry_index(
+    game: &str,
+    root: &Path,
+    names: &TagNameIndex,
+) -> Result<EntryIndexRefresh> {
+    let (cached_entries, cached_fingerprints) = load_entry_index_from_db(game, root)
+        .or_else(|| {
+            let value = load_legacy_entry_index_value(game)?;
+            let parsed = parse_entry_index(root, &value)?;
+            let _ = save_entry_index_to_db(game, root, &parsed.0);
+            Some(parsed)
+        })
+        .unwrap_or_default();
+    refresh_entry_index_from_cache(root, names, &cached_entries, &cached_fingerprints)
+}
+
+fn load_legacy_entry_index_value(game: &str) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(index_path(game))
+        .or_else(|_| std::fs::read_to_string(legacy_index_path(game)))
+        .ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn parse_entry_index(
+    root: &Path,
+    value: &serde_json::Value,
+) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
+    let saved_root = value.get("root").and_then(|v| v.as_str())?;
+    if cache_root_str_key(saved_root) != cache_root_key(root) {
+        return None;
+    }
+
+    let items = value.get("entries")?.as_array()?;
+    let mut entries = Vec::with_capacity(items.len());
+    let mut fingerprints = HashMap::new();
+    for item in items {
+        let entry = entry_from_index_item(item)?;
+        if let Some(rel_path) = index_item_relative_path(root, item, &entry)
+            && let Some(fingerprint) = fingerprint_from_index_item(item)
+        {
+            fingerprints.insert(normalize_rel_path(&rel_path), fingerprint);
+        }
+        entries.push(entry);
+    }
+    Some((entries, fingerprints))
+}
+
+fn entry_from_index_item(item: &serde_json::Value) -> Option<TagEntry> {
+    let key = item.get("key")?.as_str()?.to_owned();
+    let display_path = item.get("display_path")?.as_str()?.to_owned();
+    let group_tag = item.get("group_tag")?.as_u64()? as u32;
+    let group_name = item
+        .get("group_name")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let location = if let Some(abs) = key.strip_prefix("file:") {
+        TagEntryLocation::LooseFile(PathBuf::from(abs))
+    } else {
+        return None;
+    };
+    Some(TagEntry {
+        key,
+        display_path,
+        group_tag,
+        group_name,
+        location,
+    })
+}
+
+fn fingerprint_from_index_item(item: &serde_json::Value) -> Option<EntryFingerprint> {
+    Some(EntryFingerprint {
+        size: item.get("size")?.as_u64()?,
+        modified_secs: item.get("modified_secs")?.as_u64()?,
+        modified_nanos: item.get("modified_nanos")?.as_u64()? as u32,
+    })
+}
+
+fn index_item_relative_path(
+    root: &Path,
+    item: &serde_json::Value,
+    entry: &TagEntry,
+) -> Option<PathBuf> {
+    item.get("rel_path")
+        .and_then(|value| value.as_str())
+        .filter(|rel| !rel.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| entry_relative_path(root, entry))
+}
+
+/// One worker's slice of a refresh: each file it looked at, by normalized
+/// relative path, and the entry it resolved to when the file is a tag.
+///
+/// The path is carried even for a non-tag, because "every file that is still
+/// there" is what decides which cached entries were removed.
+type ResolvedFiles = Vec<(PathBuf, Option<TagEntry>, bool)>;
+
+fn refresh_entry_index_from_cache(
+    root: &Path,
+    names: &TagNameIndex,
+    cached_entries: &[TagEntry],
+    cached_fingerprints: &HashMap<PathBuf, EntryFingerprint>,
+) -> Result<EntryIndexRefresh> {
+    let cached_by_rel = cached_entries
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                normalize_rel_path(&entry_relative_path(root, entry)?),
+                entry.clone(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    // Walking is one directory tree and stays sequential; deciding what each
+    // file is does not have to be.
+    //
+    // This runs on every open of every loose editing kit, and it is a `stat`
+    // per file plus a header read for anything that has changed — tens of
+    // thousands of round trips for a full MCC kit. A from-scratch scan has
+    // always fanned those out across every core (`scan_folder_subtree_entries_
+    // with_progress`); the incremental refresh, which is the one that runs far
+    // more often, did them one at a time.
+    let mut paths = Vec::new();
+    for item in WalkDir::new(root).follow_links(false) {
+        let Some(item) = crate::source::walk_item(item)? else {
+            continue;
+        };
+        if !item.file_type().is_file() {
+            continue;
+        }
+        paths.push(item.into_path());
+    }
+
+    let worker_count = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .clamp(1, paths.len().max(1));
+    let chunk_size = paths.len().div_ceil(worker_count).max(1);
+    let added = AtomicUsize::new(0);
+    let updated = AtomicUsize::new(0);
+
+    // Each worker returns its slice in the order it walked, so the merged list
+    // is deterministic before the sort below rather than dependent on which
+    // thread finished first.
+    let chunks: Vec<ResolvedFiles> = std::thread::scope(|scope| -> Result<Vec<ResolvedFiles>> {
+        let mut handles = Vec::new();
+        for chunk in paths.chunks(chunk_size) {
+            let cached_by_rel = &cached_by_rel;
+            let added = &added;
+            let updated = &updated;
+            handles.push(scope.spawn(move || -> Result<ResolvedFiles> {
+                let mut resolved = Vec::with_capacity(chunk.len());
+                for path in chunk {
+                    let rel = path.strip_prefix(root).unwrap_or(path.as_path());
+                    let rel_key = normalize_rel_path(rel);
+                    // A file that vanished since the walk, or is locked, is
+                    // left out rather than failing the refresh; seen-but-absent
+                    // counts it as removed, which is what it now is.
+                    let fingerprint = match file_fingerprint(path) {
+                        Ok(fingerprint) => fingerprint,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    if let (Some(cached), Some(current)) =
+                        (cached_by_rel.get(&rel_key), fingerprint.as_ref())
+                        && cached_fingerprints
+                            .get(&rel_key)
+                            .is_some_and(|cached_fp| cached_fp == current)
+                    {
+                        resolved.push((rel_key, Some(cached.clone()), false));
+                        continue;
+                    }
+                    let known = cached_by_rel.contains_key(&rel_key);
+                    let probed = match loose_file_entry(root, path, names) {
+                        Ok(probed) => probed,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    match probed {
+                        Some(entry) => {
+                            if known {
+                                updated.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                added.fetch_add(1, Ordering::Relaxed);
+                            }
+                            resolved.push((rel_key, Some(entry), true));
+                        }
+                        None => {
+                            if known {
+                                updated.fetch_add(1, Ordering::Relaxed);
+                            }
+                            resolved.push((rel_key, None, known));
+                        }
+                    }
+                }
+                Ok(resolved)
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("entry index refresh worker panicked"))?
+            })
+            .collect()
+    })?;
+
+    let mut seen = HashSet::with_capacity(paths.len());
+    let mut entries = Vec::with_capacity(paths.len());
+    let mut touched = Vec::new();
+    let mut removed_keys = Vec::new();
+    for chunk in chunks {
+        for (rel_key, entry, changed) in chunk {
+            match entry {
+                Some(entry) => {
+                    if changed {
+                        touched.push(entry.clone());
+                    }
+                    entries.push(entry);
+                }
+                // Was a tag, is not one now.
+                None if changed => {
+                    if let Some(cached) = cached_by_rel.get(&rel_key) {
+                        removed_keys.push(cached.key.clone());
+                    }
+                }
+                None => {}
+            }
+            seen.insert(rel_key);
+        }
+    }
+    let added = added.load(Ordering::Relaxed);
+    let updated = updated.load(Ordering::Relaxed);
+
+    // `removed` counts files that are gone, as it always has (a file that
+    // stopped being a tag is counted under `updated`); `removed_keys` carries
+    // both, since both lose their index rows.
+    let before = removed_keys.len();
+    removed_keys.extend(
+        cached_by_rel
+            .iter()
+            .filter(|(rel_path, _)| !seen.contains(*rel_path))
+            .map(|(_, entry)| entry.key.clone()),
+    );
+    let removed = removed_keys.len() - before;
+    entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
+    let changed = added > 0
+        || updated > 0
+        || removed > 0
+        || entries.len() != cached_entries.len()
+        || entries
+            .iter()
+            .zip(cached_entries.iter())
+            .any(|(a, b)| a.key != b.key || a.group_tag != b.group_tag);
+
+    Ok(EntryIndexRefresh {
+        entries,
+        changed,
+        added,
+        updated,
+        removed,
+        touched,
+        removed_keys,
+        touched_dependencies: Vec::new(),
+        errors: Vec::new(),
+    })
+}
+
+fn entry_file_path(entry: &TagEntry) -> Option<&Path> {
+    match &entry.location {
+        TagEntryLocation::LooseFile(path) => Some(path.as_path()),
+        TagEntryLocation::Monolithic { .. }
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => None,
+    }
+}
+
+fn entry_relative_path(root: &Path, entry: &TagEntry) -> Option<PathBuf> {
+    entry_file_path(entry)?
+        .strip_prefix(root)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+fn normalize_rel_path(path: &Path) -> PathBuf {
+    PathBuf::from(path_to_display(path).to_ascii_lowercase())
+}
+
+fn file_fingerprint(path: &Path) -> Result<Option<EntryFingerprint>> {
+    let metadata = std::fs::metadata(path)?;
+    let Ok(modified) = metadata.modified() else {
+        return Ok(None);
+    };
+    let Ok(duration) = modified.duration_since(UNIX_EPOCH) else {
+        return Ok(None);
+    };
+    Ok(Some(EntryFingerprint {
+        size: metadata.len(),
+        modified_secs: duration.as_secs(),
+        modified_nanos: duration.subsec_nanos(),
+    }))
+}
+
+/// Persists both directions of a source-scoped dependency index atomically.
+pub fn save_reverse_dependency_index(
+    game: &str,
+    root: &Path,
+    index: &ReverseDependencyIndex,
+) -> Result<()> {
+    save_reverse_dependency_index_to_db(game, root, index)
+}
+
+/// Loads a dependency index only when its canonical source root still matches.
+pub fn load_reverse_dependency_index(game: &str, root: &Path) -> Option<ReverseDependencyIndex> {
+    if let Some(index) = load_reverse_dependency_index_from_db(game, root) {
+        return Some(index);
+    }
+    let index = load_reverse_dependency_index_from_json(game, root)?;
+    let _ = save_reverse_dependency_index_to_db(game, root, &index);
+    Some(index)
+}
+
+fn load_reverse_dependency_index_from_json(
+    game: &str,
+    root: &Path,
+) -> Option<ReverseDependencyIndex> {
+    let text = std::fs::read_to_string(reverse_dependency_index_path(game)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if value.get("version").and_then(|v| v.as_u64())? != 1 {
+        return None;
+    }
+    let saved_root = value.get("root").and_then(|v| v.as_str())?;
+    if cache_root_str_key(saved_root) != cache_root_key(root) {
+        return None;
+    }
+    let mut index = ReverseDependencyIndex::default();
+    for item in value.get("tags")?.as_array()? {
+        let key = item.get("key")?.as_str()?.to_owned();
+        let deps = item
+            .get("dependencies")?
+            .as_array()?
+            .iter()
+            .filter_map(|dep| {
+                Some(DependencyRef {
+                    group_tag: dep.get("group_tag")?.as_u64()? as u32,
+                    rel_path: dep.get("rel_path")?.as_str()?.to_owned(),
+                })
+            })
+            .collect::<Vec<_>>();
+        index.set_tag_dependencies(key, deps);
+    }
+    Some(index)
+}
+
+pub(super) fn open_index_db() -> Result<Connection> {
+    let path = index_db_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create index db dir")?;
+    }
+    let conn =
+        Connection::open(&path).with_context(|| format!("open index db {}", path.display()))?;
+    // Switching to WAL needs the file to itself, and that request can fail at
+    // once with "database is locked", busy timeout or not, when another
+    // connection is using it; workers opening a fresh database together raced
+    // to do it. Its failures used to be dropped and are reported now. The
+    // switch is made under a process-wide lock, and only when the file is
+    // not in WAL mode already (it stays in WAL once switched).
+    static SWITCH_TO_WAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let switching = SWITCH_TO_WAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let journal_mode: String = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .context("read index db journal mode")?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .context("enable index db WAL mode")?;
+    }
+    drop(switching);
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .context("set index db synchronous mode")?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .context("enable index db foreign keys")?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS sources (
+            id INTEGER PRIMARY KEY,
+            game TEXT NOT NULL,
+            root_key TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(game, root_key)
+        );
+        CREATE TABLE IF NOT EXISTS entries (
+            source_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            rel_path TEXT NOT NULL,
+            display_path TEXT NOT NULL,
+            group_tag INTEGER NOT NULL,
+            group_name TEXT,
+            size INTEGER,
+            modified_secs INTEGER,
+            modified_nanos INTEGER,
+            PRIMARY KEY(source_id, key),
+            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS dependencies (
+            source_id INTEGER NOT NULL,
+            tag_key TEXT NOT NULL,
+            dep_group_tag INTEGER NOT NULL,
+            dep_rel_path TEXT NOT NULL,
+            PRIMARY KEY(source_id, tag_key, dep_group_tag, dep_rel_path),
+            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS indexed_tags (
+            source_id INTEGER NOT NULL,
+            tag_key TEXT NOT NULL,
+            PRIMARY KEY(source_id, tag_key),
+            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS entries_by_source_rel ON entries(source_id, rel_path);
+        CREATE INDEX IF NOT EXISTS deps_by_target ON dependencies(source_id, dep_group_tag, dep_rel_path);
+        CREATE INDEX IF NOT EXISTS deps_by_tag ON dependencies(source_id, tag_key);
+        "#,
+    )
+    .context("initialize index db schema")?;
+    Ok(conn)
+}
+
+fn source_id(conn: &Connection, game: &str, root: &Path) -> Result<Option<i64>> {
+    let root_key = cache_root_key(root);
+    conn.query_row(
+        "SELECT id FROM sources WHERE game = ?1 AND root_key = ?2",
+        params![game, root_key],
+        |row| row.get(0),
+    )
+    .optional()
+    .context("query index source")
+}
+
+fn ensure_source_id(conn: &Connection, game: &str, root: &Path) -> Result<i64> {
+    let root_key = cache_root_key(root);
+    conn.execute(
+        "INSERT INTO sources (game, root_key, schema_version, updated_at)
+         VALUES (?1, ?2, 1, unixepoch())
+         ON CONFLICT(game, root_key)
+         DO UPDATE SET schema_version = 1, updated_at = unixepoch()",
+        params![game, root_key],
+    )
+    .context("upsert index source")?;
+    source_id(conn, game, root)?.context("index source missing after upsert")
+}
+
+fn save_entry_index_to_db(game: &str, root: &Path, entries: &[TagEntry]) -> Result<()> {
+    let mut conn = open_index_db()?;
+    let tx = conn
+        .transaction()
+        .context("begin entry index transaction")?;
+    let source_id = ensure_source_id(&tx, game, root)?;
+    tx.execute(
+        "DELETE FROM entries WHERE source_id = ?1",
+        params![source_id],
+    )
+    .context("clear entry index rows")?;
+    {
+        let mut insert = tx
+            .prepare(
+                "INSERT INTO entries (
+                    source_id, key, rel_path, display_path, group_tag, group_name,
+                    size, modified_secs, modified_nanos
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .context("prepare entry index insert")?;
+        for entry in entries {
+            execute_entry_row(&mut insert, source_id, root, entry)
+                .context("insert entry index row")?;
+        }
+    }
+    tx.commit().context("commit entry index transaction")?;
+    Ok(())
+}
+
+fn load_entry_index_from_db(
+    game: &str,
+    root: &Path,
+) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
+    let conn = open_index_db().ok()?;
+    load_entry_index_from_conn(&conn, game, root)
+}
+
+/// The rows saved for `game` at `root` in an open index database.
+fn load_entry_index_from_conn(
+    conn: &Connection,
+    game: &str,
+    root: &Path,
+) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
+    let source_id = source_id(conn, game, root).ok().flatten()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT key, rel_path, display_path, group_tag, group_name,
+                    size, modified_secs, modified_nanos
+             FROM entries
+             WHERE source_id = ?1
+             ORDER BY display_path COLLATE NOCASE, key COLLATE NOCASE",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![source_id], |row| {
+            let key: String = row.get(0)?;
+            let rel_path: String = row.get(1)?;
+            let display_path: String = row.get(2)?;
+            let group_tag: i64 = row.get(3)?;
+            let group_name: Option<String> = row.get(4)?;
+            let size: Option<i64> = row.get(5)?;
+            let modified_secs: Option<i64> = row.get(6)?;
+            let modified_nanos: Option<i64> = row.get(7)?;
+            let location = key
+                .strip_prefix("file:")
+                .map(|abs| TagEntryLocation::LooseFile(PathBuf::from(abs)));
+            let fingerprint = match (size, modified_secs, modified_nanos) {
+                (Some(size), Some(modified_secs), Some(modified_nanos))
+                    if size >= 0 && modified_secs >= 0 && modified_nanos >= 0 =>
+                {
+                    Some(EntryFingerprint {
+                        size: size as u64,
+                        modified_secs: modified_secs as u64,
+                        modified_nanos: modified_nanos as u32,
+                    })
+                }
+                _ => None,
+            };
+            Ok((
+                location.map(|location| TagEntry {
+                    key,
+                    display_path,
+                    group_tag: group_tag as u32,
+                    group_name,
+                    location,
+                }),
+                rel_path,
+                fingerprint,
+            ))
+        })
+        .ok()?;
+    let mut entries = Vec::new();
+    let mut fingerprints = HashMap::new();
+    for row in rows {
+        let (entry, rel_path, fingerprint) = row.ok()?;
+        // A row whose key names no file (older New Tag / Blam Import wrote bare
+        // display paths) is skipped, not fatal: failing here threw the whole
+        // index away over one tag. Its file is still on disk, so the next
+        // refresh finds it as added and writes it back with a proper key.
+        let Some(entry) = entry else {
+            continue;
+        };
+        if !rel_path.is_empty()
+            && let Some(fingerprint) = fingerprint
+        {
+            fingerprints.insert(normalize_rel_path(Path::new(&rel_path)), fingerprint);
+        }
+        entries.push(entry);
+    }
+    Some((entries, fingerprints))
+}
+
+fn save_reverse_dependency_index_to_db(
+    game: &str,
+    root: &Path,
+    index: &ReverseDependencyIndex,
+) -> Result<()> {
+    let mut conn = open_index_db()?;
+    let tx = conn
+        .transaction()
+        .context("begin reverse dependency index transaction")?;
+    let source_id = ensure_source_id(&tx, game, root)?;
+    tx.execute(
+        "DELETE FROM dependencies WHERE source_id = ?1",
+        params![source_id],
+    )
+    .context("clear reverse dependency rows")?;
+    tx.execute(
+        "DELETE FROM indexed_tags WHERE source_id = ?1",
+        params![source_id],
+    )
+    .context("clear indexed tag rows")?;
+    {
+        let mut insert_tag = tx
+            .prepare(
+                "INSERT OR IGNORE INTO indexed_tags (source_id, tag_key)
+                 VALUES (?1, ?2)",
+            )
+            .context("prepare indexed tag insert")?;
+        let mut insert = tx
+            .prepare(
+                "INSERT OR IGNORE INTO dependencies (
+                    source_id, tag_key, dep_group_tag, dep_rel_path
+                 ) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .context("prepare reverse dependency insert")?;
+        for (tag_key, deps) in &index.by_tag {
+            insert_tag
+                .execute(params![source_id, tag_key])
+                .context("insert indexed tag row")?;
+            for dep in deps {
+                insert
+                    .execute(params![
+                        source_id,
+                        tag_key,
+                        i64::from(dep.group_tag),
+                        &dep.rel_path,
+                    ])
+                    .context("insert reverse dependency row")?;
+            }
+        }
+    }
+    tx.commit()
+        .context("commit reverse dependency index transaction")?;
+    Ok(())
+}
+
+fn load_reverse_dependency_index_from_db(
+    game: &str,
+    root: &Path,
+) -> Option<ReverseDependencyIndex> {
+    let conn = open_index_db().ok()?;
+    let source_id = source_id(&conn, game, root).ok().flatten()?;
+    let mut tags_stmt = conn
+        .prepare(
+            "SELECT tag_key
+             FROM indexed_tags
+             WHERE source_id = ?1
+             ORDER BY tag_key COLLATE NOCASE",
+        )
+        .ok()?;
+    let tag_rows = tags_stmt
+        .query_map(params![source_id], |row| row.get::<_, String>(0))
+        .ok()?;
+    let mut grouped: BTreeMap<String, Vec<DependencyRef>> = BTreeMap::new();
+    for row in tag_rows {
+        grouped.entry(row.ok()?).or_default();
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT tag_key, dep_group_tag, dep_rel_path
+             FROM dependencies
+             WHERE source_id = ?1
+             ORDER BY tag_key COLLATE NOCASE, dep_group_tag, dep_rel_path COLLATE NOCASE",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![source_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                DependencyRef {
+                    group_tag: row.get::<_, i64>(1)? as u32,
+                    rel_path: row.get(2)?,
+                },
+            ))
+        })
+        .ok()?;
+    for row in rows {
+        let (tag_key, dep) = row.ok()?;
+        grouped.entry(tag_key).or_default().push(dep);
+    }
+    if grouped.is_empty() {
+        return None;
+    }
+    let mut index = ReverseDependencyIndex::default();
+    for (tag_key, deps) in grouped {
+        index.set_tag_dependencies(tag_key, deps);
+    }
+    Some(index)
+}
+
+pub(crate) fn dependency_key(group_tag: u32, rel_path: &str) -> String {
+    format!("{group_tag:08x}\t{}", normalize_dependency_path(rel_path))
+}
+
+pub(crate) fn normalize_dependency_path(rel_path: &str) -> String {
+    rel_path.replace('/', "\\").to_ascii_lowercase()
+}
+
+#[cfg(test)]
+/// Produces bounded, stable field summaries for search indexing and reports.
+pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    for field in tag.root().fields().take(limit) {
+        let kind = if let Some(value) = field.value() {
+            crate::format::format_value(names, &value, false)
+        } else if let Some(block) = field.as_block() {
+            format!("block [{} elements]", block.len())
+        } else if let Some(array) = field.as_array() {
+            format!("array [{} elements]", array.len())
+        } else if field.as_struct().is_some() {
+            "struct".to_owned()
+        } else if let Some(resource) = field.as_resource() {
+            format!("resource {:?}", resource.kind())
+        } else {
+            "container".to_owned()
+        };
+        rows.push(format!("{}:{}={kind}", field.name(), field.type_name()));
+    }
+    rows
+}
+
+#[cfg(test)]
+mod compat_keys_tests;
