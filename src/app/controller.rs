@@ -9794,6 +9794,14 @@ mod chimp_surface_undo_tests;
 #[path = "tests/worker_panics.rs"]
 mod worker_panic_tests;
 
+#[cfg(test)]
+#[path = "tests/loose_fixture.rs"]
+mod loose_fixture;
+
+#[cfg(test)]
+#[path = "tests/save_close_session.rs"]
+mod save_close_session_tests;
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
