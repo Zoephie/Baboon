@@ -1,4 +1,4 @@
-//! Release lookup and version-comparison helpers for the controller.
+//! Release lookup and version-comparison helpers for the update check.
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;

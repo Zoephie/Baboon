@@ -1231,7 +1231,7 @@ fn draw_ce_unbound_note(ui: &mut Ui) {
 ///
 /// CE `sound` tags hold no sample data and — unlike Halo 4 — name no event
 /// either, so there is nothing in the tag to play from. The rows here come from
-/// the binding the controller already resolved by walking the tag's package
+/// the binding the app already resolved by walking the tag's package
 /// imports out to its Wwise event(s); each row is one `.wem` permutation.
 fn draw_ce_wwise_player(
     ui: &mut Ui,

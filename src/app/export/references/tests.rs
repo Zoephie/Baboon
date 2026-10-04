@@ -25,7 +25,7 @@ fn dep(path: &str, group: &[u8; 4]) -> DependencyRef {
     }
 }
 
-/// The lookup the controller builds once over the whole entry set. Keyed the
+/// The lookup the export builds once over the whole entry set. Keyed the
 /// same way, so the fixtures exercise the real resolution path.
 fn lookup(entries: &[TagEntry]) -> HashMap<String, TagEntry> {
     entries

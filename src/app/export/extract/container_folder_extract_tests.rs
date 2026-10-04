@@ -149,7 +149,7 @@ fn node(label: &str, entry_indices: &[usize], children: Vec<TagTreeNode>) -> Tag
 /// menu label counts; `container_dump_entries` is what the worker writes. If the
 /// collector let an authored tag through, the label would promise a file that
 /// the run then silently skips — the count would be wrong even though every
-/// controller-side gate above still passed.
+/// application-side gate above still passed.
 #[test]
 fn the_menu_count_excludes_a_tag_authored_this_session() {
     let entries = vec![

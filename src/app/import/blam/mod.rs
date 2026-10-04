@@ -1,5 +1,5 @@
 //! Blam! import-pipeline panel state and asset-folder detection.
-//! It owns this focused support concern; the panel's presentation lives in `ui/blam.rs`, the workflow in `controller/blam_import/mod.rs`, and the importers in `blam-tags`.
+//! It owns this focused support concern; the panel's presentation lives in `import::blam_pane`, the workflow in `import::blam_workflow`, and the importers in `blam-tags`.
 
 use super::*;
 

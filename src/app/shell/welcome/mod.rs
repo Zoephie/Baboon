@@ -1,5 +1,5 @@
 //! The empty-workspace welcome screen.
-//! It owns what an unloaded workspace offers the user; loading itself belongs to the controller.
+//! It owns what an unloaded workspace offers the user; loading itself is the `AppAction` it sends.
 
 use super::*;
 use super::recents::RecentAction;

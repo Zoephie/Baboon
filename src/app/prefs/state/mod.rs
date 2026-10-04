@@ -1,5 +1,5 @@
 //! prefs application state.
-//! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
+//! It owns state types only; drawing them and acting on them belong to the feature's other modules.
 
 use super::*;
 

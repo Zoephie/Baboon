@@ -100,7 +100,7 @@ pub(in crate::app) fn scenario_launch_context(
 /// The browser's row menus need this. Their drawing functions are free
 /// functions with no `&Baboon`, so they cannot run the per-entry validation
 /// `scenario_launch_context` does; they gate on the kit-wide half here and let
-/// the controller report anything that only the entry can rule out.
+/// the caller report anything that only the entry can rule out.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(in crate::app) struct ScenarioLaunchAvailability {
     /// This kit can launch scenarios at all: a supported MCC game, mounted as a

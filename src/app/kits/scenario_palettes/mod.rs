@@ -1,5 +1,5 @@
 //! Which scenario palette a tag group lands in, per game, read from that game's scenario definition.
-//! It owns the palette table only; how a tag reaches a palette (a Sapien drop, an edit) belongs to the controller.
+//! It owns the palette table only; how a tag reaches a palette (a Sapien drop, an edit) belongs to the code that delivers it.
 
 use super::*;
 

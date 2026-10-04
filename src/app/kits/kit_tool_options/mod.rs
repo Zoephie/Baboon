@@ -1,6 +1,6 @@
 //! The `-tags_dir`/`-data_dir` options a Halo CE or Halo 2 kit's tools are
 //! started with when the kit uses folders other than its root's own.
-//! It owns tool-option assembly; launching tools belongs to the controller.
+//! It owns tool-option assembly; launching tools belongs to `kits::tools`.
 
 use super::*;
 

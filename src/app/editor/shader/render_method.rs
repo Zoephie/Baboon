@@ -1,5 +1,5 @@
 //! Render-method lookup, cache access, and edit-target construction.
-//! It owns shader-specific models, edits, and presentation helpers; generic field editing and controller orchestration belong elsewhere.
+//! It owns shader-specific models, edits, and presentation helpers; generic field editing, and the commands that apply edits, belong elsewhere.
 
 use super::*;
 

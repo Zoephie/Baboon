@@ -1,6 +1,6 @@
 //! Outbound tag-reference reports: the whole tree a tag pulls in, as text.
 //! It owns the report's traversal and formatting; index construction, path
-//! normalization, and file output belong to the controller.
+//! normalization, and file output belong to the export that asks for it.
 
 use super::*;
 use crate::core::source::{DependencyRef, ReverseDependencyIndex, dependency_key};

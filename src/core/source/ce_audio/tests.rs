@@ -176,7 +176,7 @@ fn resolves_and_decodes_real_sound_tags() {
         containers.len()
     );
 
-    // The controller reaches a tag by its browser entry, which points at the
+    // The app reaches a tag by its browser entry, which points at the
     // `.ubulk` payload — so the `.ubulk` → package mapping must land on a
     // package that actually exists. Check it over every mounted sound tag.
     let mut sound_tags = 0usize;

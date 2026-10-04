@@ -1,5 +1,5 @@
 //! The recent-folders menu, shared by the File menu and the kit tab bar.
-//! It owns presentation and choice collection; opening and forgetting belong to the controller.
+//! It owns presentation and choice collection; opening and forgetting are `AppAction::Recent`'s.
 
 use crate::app::shell::workspace::recent_folder_menu_label;
 use super::*;

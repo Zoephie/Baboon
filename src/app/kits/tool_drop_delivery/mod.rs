@@ -1,5 +1,5 @@
 //! Dropping a tag dragged out of Baboon onto an editing-kit tool window (Sapien, Guerilla): finding the tool under the cursor and handing it the tag file the way Explorer would.
-//! It owns the Win32 side of the drop only; which palette a tag lands in belongs to `scenario_palettes`, and the drag's feedback and gating belong to the controller.
+//! It owns the Win32 side of the drop only; which palette a tag lands in belongs to `scenario_palettes`, and the drag's feedback and gating belong to `kits::tool_drop`.
 //!
 //! Explorer hands these MFC tools a `WM_DROPFILES` message (H3EK's `sapien.exe`
 //! and `guerilla.exe` import `DragAcceptFiles`/`DragQueryFile`; HREK's Sapien

@@ -1,5 +1,5 @@
 //! browser application state.
-//! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
+//! It owns state types only; drawing them and acting on them belong to the feature's other modules.
 
 use super::*;
 
@@ -314,7 +314,7 @@ pub(in crate::app) struct RefOccurrence {
 }
 
 /// A reference-jump awaiting its referrer tag to finish loading. Once that tag
-/// is the focused tab and parsed, the controller walks it for the exact field
+/// is the focused tab and parsed, the application walks it for the exact field
 /// referencing `(group_tag, rel_path)` and hands off to a [`FieldNav`].
 #[derive(Clone)]
 pub(in crate::app) struct PendingRefJump {
