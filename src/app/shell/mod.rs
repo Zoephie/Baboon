@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::runtime_poke::{LastPoke, PokePlan, PokeReport};
 use crate::core::document::value::extension_to_group_tag;
 use crate::app::editor::{
     DeferredFileAction, EditorCommand, EditorFeature, PaneInputs, apply_scroll_speed,

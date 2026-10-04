@@ -86,7 +86,7 @@ use editor::EditorFeature;
 mod audio;
 use audio::AudioCommand;
 mod runtime_poke;
-use runtime_poke::*;
+use runtime_poke::PokeFeature;
 mod chimp;
 use chimp::*;
 #[cfg(test)]

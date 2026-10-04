@@ -36,6 +36,7 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::runtime_poke::{PokeDialog, PokeDialogState};
 use crate::core::document::value::decode_hex;
 use crate::app::editor::{
     BlockConfirm, ColorPopupWindow, FunctionPopup, FunctionPopupWindow, FunctionView,
