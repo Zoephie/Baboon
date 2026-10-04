@@ -9,9 +9,13 @@ pub(in crate::app) use project::*;
 pub(in crate::app) mod container_write;
 pub(in crate::app) use container_write::*;
 pub(in crate::app) mod mod_export_window;
+pub(in crate::app) use mod_export_window::draw_mod_export_window;
 pub(in crate::app) mod exported_mod_window;
+pub(in crate::app) use exported_mod_window::draw_exported_mod_window;
 pub(in crate::app) mod overwrite_confirm;
+pub(in crate::app) use overwrite_confirm::draw_overwrite_confirm_window;
 pub(in crate::app) mod clear_stash_confirm;
+pub(in crate::app) use clear_stash_confirm::draw_clear_stash_confirm_window;
 pub(in crate::app) mod in_place;
 pub(in crate::app) mod export;
 pub(in crate::app) use export::*;
@@ -49,3 +53,79 @@ pub(in crate::app) struct ModsFeature {
     /// Review of a pending Export Mod, before anything is written.
     pub(in crate::app) mod_export: Option<ModExportDialog>,
 }
+
+/// What mods can be asked to do. Each names the workspace it was raised
+/// from: they all write through that kit's source, so the handler returns to
+/// it first and drops the request if it has closed — overwriting the game's
+/// paks in place is the last thing that should land on whichever game is
+/// focused by now.
+pub(in crate::app) enum ModsCommand {
+    /// Overwrite the tag at `key` in the game's containers. With
+    /// `stop_asking`, also stop confirming overwrites — applied only here,
+    /// when the user commits to one.
+    Overwrite {
+        kit: KitId,
+        key: String,
+        stop_asking: bool,
+    },
+    /// Export a mod instead of overwriting.
+    ExportInstead { kit: KitId },
+    /// Throw away the workspace's stashed project changes.
+    ClearStash { kit: KitId },
+    /// Write the reviewed changes as a mod at `output`.
+    WriteReviewedMod {
+        kit: KitId,
+        snapshot: CampaignProjectSnapshot,
+        included: HashSet<String>,
+        output: PathBuf,
+    },
+    /// Ask for a folder and save the open review's diagnostic into it.
+    SaveReviewDiagnostic,
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_mods_command(&mut self, command: ModsCommand) {
+        let ctx = self.egui_ctx.clone();
+        match command {
+            ModsCommand::Overwrite {
+                kit,
+                key,
+                stop_asking,
+            } => {
+                if stop_asking && self.model.prefs.confirm_container_overwrite {
+                    self.model.prefs.confirm_container_overwrite = false;
+                    self.persist_prefs_if_changed();
+                }
+                if self.focus_navigation_kit(kit) {
+                    self.begin_overwrite_current_tag_in_place(&key, &ctx);
+                }
+            }
+            ModsCommand::ExportInstead { kit } => {
+                if self.focus_navigation_kit(kit) {
+                    self.export_mod();
+                }
+            }
+            ModsCommand::ClearStash { kit } => {
+                // Resolved rather than assumed: the workspace may have been
+                // closed while the confirmation was up.
+                if let Some(index) = self.model.resolve_kit(kit) {
+                    self.clear_campaign_stash(index, &ctx);
+                }
+            }
+            ModsCommand::WriteReviewedMod {
+                kit,
+                snapshot,
+                included,
+                output,
+            } => {
+                if self.focus_navigation_kit(kit) {
+                    self.write_reviewed_mod(&snapshot, &included, output, &ctx);
+                }
+            }
+            ModsCommand::SaveReviewDiagnostic => self.save_review_diagnostic_to_picked_folder(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod command_tests;

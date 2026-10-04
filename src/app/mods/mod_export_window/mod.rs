@@ -562,418 +562,312 @@ impl Baboon {
         }
     }
 
-    /// Review what Export Mod is about to write, and where.
-    ///
-    /// The save dialog this replaces asked for one file name when the output is
-    /// three, which invited renaming -- and renaming is how a mod loses the
-    /// `_P` that gives it priority over the game's own containers. It also
-    /// guarded only the container, silently overwriting the `.ucas` and `.pak`
-    /// beside it.
-    pub(in crate::app) fn draw_mod_export_window(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = self.mods.mod_export.as_ref() else {
-            return;
-        };
-        let kit = dialog.kit;
-        let new_count = dialog
-            .rows
-            .iter()
-            .filter(|row| row.kind == ModExportChange::New)
-            .count();
-        let modified_count = dialog
-            .rows
-            .iter()
-            .filter(|row| row.kind == ModExportChange::Modified)
-            .count();
-        let unresolved_count = dialog
-            .rows
-            .iter()
-            .filter(|row| row.kind == ModExportChange::Unresolved)
-            .count();
-        let unchanged_count = dialog
-            .rows
-            .iter()
-            .filter(|row| row.kind == ModExportChange::Unchanged)
-            .count();
-        let stem = dialog.stem();
-        let destination = dialog.destination();
-        let existing = dialog.existing_files();
-        let in_game_folder = self
-            .model.kits
-            .iter()
-            .find(|k| k.id == kit)
-            .and_then(|k| k.source.as_ref())
-            .map(|source| destination.starts_with(source.source.root_path()))
-            .unwrap_or(false);
-        let included = dialog.included().count();
-        let name_ok = !dialog.name.trim().is_empty();
-        // The editor needs its source's naming and definitions to render values
-        // the way the editor does.
-        let kit_index = self.model.kits.iter().position(|k| k.id == kit);
-        let names = kit_index
-            .map(|index| self.model.kits[index].names.clone())
-            .unwrap_or_default();
-        let game = kit_index
-            .and_then(|index| self.model.kits[index].source.as_ref())
-            .and_then(|source| source.game.clone());
-        let definitions_root = kit_index
-            .and_then(|index| self.model.kits[index].source.as_ref())
-            .and_then(|source| match &source.source {
-                TagSource::LooseFolder {
-                    definitions_root, ..
-                } => Some(definitions_root.clone()),
-                _ => None,
-            });
-        let expert_mode = self.model.prefs.expert_mode;
-        // Mods installed under `Paks` are mounted like any other container, so
-        // they serve their tags in place of the game's. Both facts below follow
-        // from that and neither was visible: comparisons here are against the
-        // game's own packs, and the file this would write may be one of those
-        // mounts — which cannot be replaced while it is mapped.
-        let export_target = self
-            .mods.mod_export
-            .as_ref()
-            .filter(|dialog| !dialog.review_only)
-            .map(ModExportDialog::output_utoc);
-        let mounted_mods = kit_index
-            .map(|index| self.model.mounted_mod_labels(index))
-            .unwrap_or_default();
-        let replaces_mounted = export_target
-            .as_deref()
-            .zip(kit_index)
-            .map(|(target, index)| self.model.export_replaces_mounted(index, target))
-            .unwrap_or_default();
+}
 
-        let mut open = true;
-        let mut cancel = false;
-        let mut export = false;
-        let mut browse = false;
-        let mut save_diagnostic = false;
-        let mut acknowledge: Option<bool> = None;
-        let mut set_all: Option<bool> = None;
-        let mut toggled: Option<usize> = None;
-        let mut expand_toggled: Option<String> = None;
-        let mut measured_controls: Option<f32> = None;
-        let mut name_edit = dialog.name.clone();
+/// Review what Export Mod is about to write, and where.
+///
+/// The save dialog this replaces asked for one file name when the output is
+/// three, which invited renaming -- and renaming is how a mod loses the
+/// `_P` that gives it priority over the game's own containers. It also
+/// guarded only the container, silently overwriting the `.ucas` and `.pak`
+/// beside it.
+pub(in crate::app) fn draw_mod_export_window(cx: &Ctx, mods: &mut ModsFeature) {
+    let ctx = cx.egui;
+    let Some(dialog) = mods.mod_export.as_ref() else {
+        return;
+    };
+    let kit = dialog.kit;
+    let new_count = dialog
+        .rows
+        .iter()
+        .filter(|row| row.kind == ModExportChange::New)
+        .count();
+    let modified_count = dialog
+        .rows
+        .iter()
+        .filter(|row| row.kind == ModExportChange::Modified)
+        .count();
+    let unresolved_count = dialog
+        .rows
+        .iter()
+        .filter(|row| row.kind == ModExportChange::Unresolved)
+        .count();
+    let unchanged_count = dialog
+        .rows
+        .iter()
+        .filter(|row| row.kind == ModExportChange::Unchanged)
+        .count();
+    let stem = dialog.stem();
+    let destination = dialog.destination();
+    let existing = dialog.existing_files();
+    let in_game_folder = cx
+        .model.kits
+        .iter()
+        .find(|k| k.id == kit)
+        .and_then(|k| k.source.as_ref())
+        .map(|source| destination.starts_with(source.source.root_path()))
+        .unwrap_or(false);
+    let included = dialog.included().count();
+    let name_ok = !dialog.name.trim().is_empty();
+    // The editor needs its source's naming and definitions to render values
+    // the way the editor does.
+    let kit_index = cx.model.kits.iter().position(|k| k.id == kit);
+    let names = kit_index
+        .map(|index| cx.model.kits[index].names.clone())
+        .unwrap_or_default();
+    let game = kit_index
+        .and_then(|index| cx.model.kits[index].source.as_ref())
+        .and_then(|source| source.game.clone());
+    let definitions_root = kit_index
+        .and_then(|index| cx.model.kits[index].source.as_ref())
+        .and_then(|source| match &source.source {
+            TagSource::LooseFolder {
+                definitions_root, ..
+            } => Some(definitions_root.clone()),
+            _ => None,
+        });
+    let expert_mode = cx.model.prefs.expert_mode;
+    // Mods installed under `Paks` are mounted like any other container, so
+    // they serve their tags in place of the game's. Both facts below follow
+    // from that and neither was visible: comparisons here are against the
+    // game's own packs, and the file this would write may be one of those
+    // mounts — which cannot be replaced while it is mapped.
+    let export_target = mods
+        .mod_export
+        .as_ref()
+        .filter(|dialog| !dialog.review_only)
+        .map(ModExportDialog::output_utoc);
+    let mounted_mods = kit_index
+        .map(|index| cx.model.mounted_mod_labels(index))
+        .unwrap_or_default();
+    let replaces_mounted = export_target
+        .as_deref()
+        .zip(kit_index)
+        .map(|(target, index)| cx.model.export_replaces_mounted(index, target))
+        .unwrap_or_default();
 
-        let review_only = dialog.review_only;
-        egui::Window::new(if review_only {
-            "Unexported changes"
-        } else {
-            "Export Mod"
-        })
-            .id(egui::Id::new("mod_export"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(window_width(ctx, 1100.0))
-            .default_height(window_height(ctx, 640.0, true))
-            // Centred on first open, and draggable after that. `anchor` looks
-            // like the way to centre a window and is not: it calls
-            // `movable(false)` internally and re-pins the window every frame, so
-            // the review -- the one dialog a reader wants to slide aside to look
-            // at the tag underneath -- could be resized but never moved.
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
-                let Some(dialog) = self.mods.mod_export.as_ref() else {
-                    return;
-                };
-                ui.horizontal(|ui| {
+    let mut open = true;
+    let mut cancel = false;
+    let mut export = false;
+    let mut browse = false;
+    let mut save_diagnostic = false;
+    let mut acknowledge: Option<bool> = None;
+    let mut set_all: Option<bool> = None;
+    let mut toggled: Option<usize> = None;
+    let mut expand_toggled: Option<String> = None;
+    let mut measured_controls: Option<f32> = None;
+    let mut name_edit = dialog.name.clone();
+
+    let review_only = dialog.review_only;
+    egui::Window::new(if review_only {
+        "Unexported changes"
+    } else {
+        "Export Mod"
+    })
+        .id(egui::Id::new("mod_export"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(window_width(ctx, 1100.0))
+        .default_height(window_height(ctx, 640.0, true))
+        // Centred on first open, and draggable after that. `anchor` looks
+        // like the way to centre a window and is not: it calls
+        // `movable(false)` internally and re-pins the window every frame, so
+        // the review -- the one dialog a reader wants to slide aside to look
+        // at the tag underneath -- could be resized but never moved.
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
+        .show(ctx, |ui| {
+            let Some(dialog) = mods.mod_export.as_ref() else {
+                return;
+            };
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{new_count} new · {modified_count} modified"
+                    ))
+                    .color(text_dark()),
+                );
+                if unchanged_count > 0 {
+                    // Named rather than silently dropped: these are tags the
+                    // workspace still has stashed, and a user who remembers
+                    // touching one deserves to see that it came to nothing.
                     ui.label(
-                        RichText::new(format!(
-                            "{new_count} new · {modified_count} modified"
-                        ))
-                        .color(text_dark()),
-                    );
-                    if unchanged_count > 0 {
-                        // Named rather than silently dropped: these are tags the
-                        // workspace still has stashed, and a user who remembers
-                        // touching one deserves to see that it came to nothing.
-                        ui.label(
-                            RichText::new(format!("· {unchanged_count} unchanged"))
-                                .color(subtle_dark()),
-                        )
-                        .on_hover_text(
-                            "Byte-identical to the game's own copy, so there is nothing \
-                             to export. They stay stashed.",
-                        );
-                    }
-                    if unresolved_count > 0 {
-                        ui.label(
-                            RichText::new(format!("· {unresolved_count} excluded"))
-                                .color(egui::Color32::from_rgb(210, 120, 90)),
-                        );
-                    }
-                    if !review_only {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Include none").clicked() {
-                                set_all = Some(false);
-                            }
-                            if ui.button("Include all").clicked() {
-                                set_all = Some(true);
-                            }
-                        });
-                    }
-                });
-                if !mounted_mods.is_empty() {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "Mounted mod(s) in this install: {}. Changes are compared against the \
-                             game's own packs, so a tag one of these already provides still shows \
-                             what it changes.",
-                            mounted_mods.join(", ")
-                        ))
-                        .small()
-                        .color(subtle_dark()),
+                        RichText::new(format!("· {unchanged_count} unchanged"))
+                            .color(subtle_dark()),
+                    )
+                    .on_hover_text(
+                        "Byte-identical to the game's own copy, so there is nothing \
+                         to export. They stay stashed.",
                     );
                 }
-                ui.add_space(6.0);
-                // Grows with the window: the naming and buttons below keep the
-                // slice they measured last frame, and the list takes whatever is
-                // left, so making the dialog taller shows more of the diff
-                // rather than more empty space.
-                //
-                // The slice is measured rather than assumed. It was 120px, and
-                // the block below is 141px once the overwrite warning and the
-                // in-game-folder note are both showing -- so the contents came
-                // out 21px taller than the window, every frame, and a resizable
-                // egui window expands to fit its contents and never shrinks
-                // back. The dialog grew until it was larger than the screen,
-                // showing the extra height as empty list.
-                let reserve = if dialog.controls_height > 0.0 {
-                    dialog.controls_height
-                } else {
-                    // First frame, nothing measured yet. Over-reserving costs
-                    // one frame of a shorter list; under-reserving is the bug.
-                    160.0
-                };
-                let list_height = (ui.available_height() - reserve).max(120.0);
-                egui::ScrollArea::vertical()
-                    .max_height(list_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for (index, row) in dialog.rows.iter().enumerate() {
-                            // A new tag opens too: it has no counterpart to
-                            // compare against, so it shows what is in it.
-                            let expandable = row.kind != ModExportChange::Unresolved;
-                            let expanded = dialog.expanded.contains(&row.identity);
-                            ui.horizontal(|ui| {
-                                if expandable {
-                                    if ui
-                                        .small_button(if expanded { "v" } else { ">" })
-                                        .on_hover_text(if row.kind == ModExportChange::New {
-                                            "Show what this tag contains"
-                                        } else {
-                                            "Show what changed"
-                                        })
-                                        .clicked()
-                                    {
-                                        expand_toggled = Some(row.identity.clone());
-                                    }
-                                } else {
-                                    ui.add_space(18.0);
+                if unresolved_count > 0 {
+                    ui.label(
+                        RichText::new(format!("· {unresolved_count} excluded"))
+                            .color(egui::Color32::from_rgb(210, 120, 90)),
+                    );
+                }
+                if !review_only {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Include none").clicked() {
+                            set_all = Some(false);
+                        }
+                        if ui.button("Include all").clicked() {
+                            set_all = Some(true);
+                        }
+                    });
+                }
+            });
+            if !mounted_mods.is_empty() {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Mounted mod(s) in this install: {}. Changes are compared against the \
+                         game's own packs, so a tag one of these already provides still shows \
+                         what it changes.",
+                        mounted_mods.join(", ")
+                    ))
+                    .small()
+                    .color(subtle_dark()),
+                );
+            }
+            ui.add_space(6.0);
+            // Grows with the window: the naming and buttons below keep the
+            // slice they measured last frame, and the list takes whatever is
+            // left, so making the dialog taller shows more of the diff
+            // rather than more empty space.
+            //
+            // The slice is measured rather than assumed. It was 120px, and
+            // the block below is 141px once the overwrite warning and the
+            // in-game-folder note are both showing -- so the contents came
+            // out 21px taller than the window, every frame, and a resizable
+            // egui window expands to fit its contents and never shrinks
+            // back. The dialog grew until it was larger than the screen,
+            // showing the extra height as empty list.
+            let reserve = if dialog.controls_height > 0.0 {
+                dialog.controls_height
+            } else {
+                // First frame, nothing measured yet. Over-reserving costs
+                // one frame of a shorter list; under-reserving is the bug.
+                160.0
+            };
+            let list_height = (ui.available_height() - reserve).max(120.0);
+            egui::ScrollArea::vertical()
+                .max_height(list_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for (index, row) in dialog.rows.iter().enumerate() {
+                        // A new tag opens too: it has no counterpart to
+                        // compare against, so it shows what is in it.
+                        let expandable = row.kind != ModExportChange::Unresolved;
+                        let expanded = dialog.expanded.contains(&row.identity);
+                        ui.horizontal(|ui| {
+                            if expandable {
+                                if ui
+                                    .small_button(if expanded { "v" } else { ">" })
+                                    .on_hover_text(if row.kind == ModExportChange::New {
+                                        "Show what this tag contains"
+                                    } else {
+                                        "Show what changed"
+                                    })
+                                    .clicked()
+                                {
+                                    expand_toggled = Some(row.identity.clone());
                                 }
-                                if !review_only {
-                                    let mut include = row.include;
-                                    let enabled = row.kind != ModExportChange::Unresolved;
-                                    if ui
-                                        .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
-                                        .changed()
-                                    {
-                                        toggled = Some(index);
-                                    }
+                            } else {
+                                ui.add_space(18.0);
+                            }
+                            if !review_only {
+                                let mut include = row.include;
+                                let enabled = row.kind != ModExportChange::Unresolved;
+                                if ui
+                                    .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
+                                    .changed()
+                                {
+                                    toggled = Some(index);
                                 }
-                                let (marker, color) = match row.kind {
-                                    ModExportChange::New => ("+", added_text()),
-                                    ModExportChange::Modified => ("~", modified_text()),
-                                    ModExportChange::Unresolved => {
-                                        ("!", egui::Color32::from_rgb(210, 120, 90))
-                                    }
-                                    // Nothing to write, so nothing to mark.
-                                    ModExportChange::Unchanged => {
-                                        ("=", egui::Color32::from_gray(130))
-                                    }
-                                };
-                                // A marker as well as a colour: this is a
-                                // confirmation before writing files, and colour
-                                // alone excludes a good number of readers.
-                                ui.label(RichText::new(marker).color(color).monospace());
-                                ui.label(RichText::new(&row.display_path).color(color));
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
+                            }
+                            let (marker, color) = match row.kind {
+                                ModExportChange::New => ("+", added_text()),
+                                ModExportChange::Modified => ("~", modified_text()),
+                                ModExportChange::Unresolved => {
+                                    ("!", egui::Color32::from_rgb(210, 120, 90))
+                                }
+                                // Nothing to write, so nothing to mark.
+                                ModExportChange::Unchanged => {
+                                    ("=", egui::Color32::from_gray(130))
+                                }
+                            };
+                            // A marker as well as a colour: this is a
+                            // confirmation before writing files, and colour
+                            // alone excludes a good number of readers.
+                            ui.label(RichText::new(marker).color(color).monospace());
+                            ui.label(RichText::new(&row.display_path).color(color));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(format!("{} KB", row.bytes / 1024))
+                                            .color(subtle_dark())
+                                            .small(),
+                                    );
+                                    if let Some(reason) = row.reason.as_deref() {
                                         ui.label(
-                                            RichText::new(format!("{} KB", row.bytes / 1024))
+                                            RichText::new(reason).color(subtle_dark()).small(),
+                                        );
+                                    }
+                                    // The editor is showing this mod's values
+                                    // for this tag, which is why an edit can
+                                    // look like it was already there.
+                                    if let Some(mod_label) = row.overridden_by.as_deref() {
+                                        ui.label(
+                                            RichText::new(format!("in {mod_label}"))
+                                                .color(modified_text())
+                                                .small(),
+                                        )
+                                        .on_hover_text(format!(
+                                            "This install's {mod_label} already provides this \
+                                             tag, so the editor reads its values. The \
+                                             comparison below is against the game's own pack.",
+                                        ));
+                                    }
+                                },
+                            );
+                        });
+                        if expandable && expanded {
+                            ui.indent(("mod_export_diff", index), |ui| {
+                                match dialog.diffs.get(&row.identity) {
+                                    Some(diff) => Baboon::draw_mod_export_diff(
+                                        ui,
+                                        diff,
+                                        &names,
+                                        row.group_tag,
+                                        game,
+                                        definitions_root.as_deref(),
+                                        expert_mode,
+                                        &row.identity,
+                                    ),
+                                    None => {
+                                        ui.label(
+                                            RichText::new("Comparing...")
                                                 .color(subtle_dark())
                                                 .small(),
                                         );
-                                        if let Some(reason) = row.reason.as_deref() {
-                                            ui.label(
-                                                RichText::new(reason).color(subtle_dark()).small(),
-                                            );
-                                        }
-                                        // The editor is showing this mod's values
-                                        // for this tag, which is why an edit can
-                                        // look like it was already there.
-                                        if let Some(mod_label) = row.overridden_by.as_deref() {
-                                            ui.label(
-                                                RichText::new(format!("in {mod_label}"))
-                                                    .color(modified_text())
-                                                    .small(),
-                                            )
-                                            .on_hover_text(format!(
-                                                "This install's {mod_label} already provides this \
-                                                 tag, so the editor reads its values. The \
-                                                 comparison below is against the game's own pack.",
-                                            ));
-                                        }
-                                    },
-                                );
-                            });
-                            if expandable && expanded {
-                                ui.indent(("mod_export_diff", index), |ui| {
-                                    match dialog.diffs.get(&row.identity) {
-                                        Some(diff) => Self::draw_mod_export_diff(
-                                            ui,
-                                            diff,
-                                            &names,
-                                            row.group_tag,
-                                            game,
-                                            definitions_root.as_deref(),
-                                            expert_mode,
-                                            &row.identity,
-                                        ),
-                                        None => {
-                                            ui.label(
-                                                RichText::new("Comparing...")
-                                                    .color(subtle_dark())
-                                                    .small(),
-                                            );
-                                        }
                                     }
-                                });
-                            }
+                                }
+                            });
                         }
-                    });
-                // Everything from here down is what `reserve` covers. Taken from
-                // the list's own bottom rather than from the cursor, so the
-                // spacing between them is inside the figure -- a few pixels
-                // short is the same runaway, only slower.
-                let controls_top = ui.min_rect().bottom();
-                if review_only {
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Close").clicked() {
-                            cancel = true;
-                        }
-                        if ui
-                            .button("Save diagnostic...")
-                            .on_hover_text("Write both sides of every tag, and the computed differences, to a folder")
-                            .clicked()
-                        {
-                            save_diagnostic = true;
-                        }
-                    });
-                    measured_controls = Some(ui.min_rect().bottom() - controls_top);
-                    return;
-                }
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Mod name").color(text_dark()));
-                    ui.add(egui::TextEdit::singleline(&mut name_edit).desired_width(220.0));
-                    ui.label(
-                        RichText::new("names the files, not a folder")
-                            .color(subtle_dark())
-                            .small(),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Export folder").color(text_dark()));
-                    ui.label(
-                        RichText::new(destination.display().to_string())
-                            .color(subtle_dark())
-                            .monospace()
-                            .small(),
-                    );
-                    if ui.button("Browse...").clicked() {
-                        browse = true;
                     }
                 });
-                // Named in full rather than summarised: a mod is four files, the
-                // review is the last chance to notice one of them is about to
-                // land somewhere unintended, and "{stem}.utoc / .ucas / .pak"
-                // left the `.baboon` sidecar out of a list it was already
-                // writing.
-                ui.label(RichText::new("Writes").color(text_dark()));
-                for extension in MOD_FILE_EXTENSIONS {
-                    ui.label(
-                        RichText::new(format!("    {stem}.{extension}"))
-                            .color(subtle_dark())
-                            .monospace()
-                            .small(),
-                    );
-                }
-                if in_game_folder {
-                    ui.label(
-                        RichText::new(
-                            "This is under the game's own Paks folder — nothing to copy \
-                             afterwards.",
-                        )
-                        .color(subtle_dark())
-                        .small(),
-                    );
-                }
-                if !existing.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(format!("Overwrites: {}", existing.join(", ")))
-                            .color(egui::Color32::from_rgb(210, 120, 90)),
-                    );
-                    // Named and then confirmed. A mod is three files plus its
-                    // sidecar, and replacing someone's existing mod should take
-                    // more than not noticing a line of text.
-                    let mut acknowledged = dialog.overwrite_acknowledged;
-                    if ui
-                        .checkbox(&mut acknowledged, "Replace these files")
-                        .changed()
-                    {
-                        acknowledge = Some(acknowledged);
-                    }
-                }
-                // Said as the name is typed, because it is the difference between
-                // writing a new mod and replacing one this workspace is reading
-                // from. The export releases the mapping to do it, and the browser
-                // then shows what was just written.
-                if !replaces_mounted.is_empty() {
-                    ui.label(
-                        RichText::new(format!(
-                            "Replaces {}, which is mounted here — the browser will show what this \
-                             writes. Reload the source afterwards if the tag list changed.",
-                            replaces_mounted.join(", ")
-                        ))
-                        .small()
-                        .color(egui::Color32::from_rgb(210, 120, 90)),
-                    );
-                }
+            // Everything from here down is what `reserve` covers. Taken from
+            // the list's own bottom rather than from the cursor, so the
+            // spacing between them is inside the figure -- a few pixels
+            // short is the same runaway, only slower.
+            let controls_top = ui.min_rect().bottom();
+            if review_only {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    let overwrite_ok = existing.is_empty() || dialog.overwrite_acknowledged;
-                    let ready = name_ok && included > 0 && overwrite_ok;
-                    if ui
-                        .add_enabled(ready, egui::Button::new("Export"))
-                        .on_disabled_hover_text(if !name_ok {
-                            "Enter a name for the mod"
-                        } else if included == 0 {
-                            "Nothing is selected to export"
-                        } else {
-                            "Confirm that the existing files may be replaced"
-                        })
-                        .clicked()
-                    {
-                        export = true;
-                    }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("Close").clicked() {
                         cancel = true;
                     }
                     if ui
@@ -985,121 +879,234 @@ impl Baboon {
                     }
                 });
                 measured_controls = Some(ui.min_rect().bottom() - controls_top);
+                return;
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Mod name").color(text_dark()));
+                ui.add(egui::TextEdit::singleline(&mut name_edit).desired_width(220.0));
+                ui.label(
+                    RichText::new("names the files, not a folder")
+                        .color(subtle_dark())
+                        .small(),
+                );
             });
-
-        // Applied after the window closes its borrow of `self`.
-        if let Some(dialog) = self.mods.mod_export.as_mut() {
-            if dialog.name != name_edit {
-                // Kept verbatim. Folding the buffer on every keystroke ate the
-                // space in "My Mod" before the second word could be typed; the
-                // fold belongs to the file name, which `stem` produces and the
-                // dialog shows live beside the field.
-                dialog.name = name_edit;
-                dialog.overwrite_acknowledged = false;
-            }
-            if let Some(value) = acknowledge {
-                dialog.overwrite_acknowledged = value;
-            }
-            if let Some(value) = set_all {
-                for row in dialog.rows.iter_mut() {
-                    if row.kind != ModExportChange::Unresolved {
-                        row.include = value;
-                    }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Export folder").color(text_dark()));
+                ui.label(
+                    RichText::new(destination.display().to_string())
+                        .color(subtle_dark())
+                        .monospace()
+                        .small(),
+                );
+                if ui.button("Browse...").clicked() {
+                    browse = true;
                 }
+            });
+            // Named in full rather than summarised: a mod is four files, the
+            // review is the last chance to notice one of them is about to
+            // land somewhere unintended, and "{stem}.utoc / .ucas / .pak"
+            // left the `.baboon` sidecar out of a list it was already
+            // writing.
+            ui.label(RichText::new("Writes").color(text_dark()));
+            for extension in MOD_FILE_EXTENSIONS {
+                ui.label(
+                    RichText::new(format!("    {stem}.{extension}"))
+                        .color(subtle_dark())
+                        .monospace()
+                        .small(),
+                );
             }
-            if let Some(index) = toggled
-                && let Some(row) = dialog.rows.get_mut(index)
-            {
-                row.include = !row.include;
-            }
-            if let Some(identity) = expand_toggled.as_ref() {
-                if !dialog.expanded.remove(identity) {
-                    dialog.expanded.insert(identity.clone());
-                }
-            }
-            if let Some(height) = measured_controls {
-                // The tallest seen, not the latest. The overwrite warning comes
-                // and goes as the name is typed, and a reserve that tracked it
-                // downwards would under-reserve the frame it comes back --
-                // which, since the window cannot shrink, is a bump it keeps.
-                // Over-reserving only costs a few pixels of list.
-                dialog.controls_height = dialog.controls_height.max(height.max(0.0));
-            }
-        }
-        // Computed outside the window, and only for rows that are open and have
-        // no result yet: each one costs a container read and two parses.
-        let pending: Vec<String> = self
-            .mods.mod_export
-            .as_ref()
-            .map(|dialog| {
-                dialog
-                    .expanded
-                    .iter()
-                    .filter(|identity| !dialog.diffs.contains_key(*identity))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-        if !pending.is_empty()
-            && let Some(index) = self.model.resolve_kit(kit)
-        {
-            for identity in pending {
-                let diff = self.diff_reviewed_tag(index, &identity);
-                if let Some(dialog) = self.mods.mod_export.as_mut() {
-                    dialog.diffs.insert(identity, diff);
-                }
-            }
-        }
-        if save_diagnostic
-            && let Some(folder) = rfd::FileDialog::new()
-                .set_title("Save review diagnostic into folder")
-                .pick_folder()
-        {
-            self.model.status = match self.save_review_diagnostic(folder.clone()) {
-                Ok(count) => {
-                    format!(
-                        "Wrote a diagnostic for {count} tag(s) to {}",
-                        folder.display()
+            if in_game_folder {
+                ui.label(
+                    RichText::new(
+                        "This is under the game's own Paks folder — nothing to copy \
+                         afterwards.",
                     )
+                    .color(subtle_dark())
+                    .small(),
+                );
+            }
+            if !existing.is_empty() {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!("Overwrites: {}", existing.join(", ")))
+                        .color(egui::Color32::from_rgb(210, 120, 90)),
+                );
+                // Named and then confirmed. A mod is three files plus its
+                // sidecar, and replacing someone's existing mod should take
+                // more than not noticing a line of text.
+                let mut acknowledged = dialog.overwrite_acknowledged;
+                if ui
+                    .checkbox(&mut acknowledged, "Replace these files")
+                    .changed()
+                {
+                    acknowledge = Some(acknowledged);
                 }
-                Err(error) => error,
-            };
-        }
-        // Opens where the mod is currently going, rather than at whatever the
-        // OS last remembered — the common edit is "somewhere near here", and
-        // the default is already the game's own `~mods`.
-        if browse
-            && let Some(folder) = rfd::FileDialog::new()
-                .set_title("Export mod into folder")
-                .set_directory(&destination)
-                .pick_folder()
-            && let Some(dialog) = self.mods.mod_export.as_mut()
-        {
-            dialog.folder = folder;
+            }
+            // Said as the name is typed, because it is the difference between
+            // writing a new mod and replacing one this workspace is reading
+            // from. The export releases the mapping to do it, and the browser
+            // then shows what was just written.
+            if !replaces_mounted.is_empty() {
+                ui.label(
+                    RichText::new(format!(
+                        "Replaces {}, which is mounted here — the browser will show what this \
+                         writes. Reload the source afterwards if the tag list changed.",
+                        replaces_mounted.join(", ")
+                    ))
+                    .small()
+                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                );
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let overwrite_ok = existing.is_empty() || dialog.overwrite_acknowledged;
+                let ready = name_ok && included > 0 && overwrite_ok;
+                if ui
+                    .add_enabled(ready, egui::Button::new("Export"))
+                    .on_disabled_hover_text(if !name_ok {
+                        "Enter a name for the mod"
+                    } else if included == 0 {
+                        "Nothing is selected to export"
+                    } else {
+                        "Confirm that the existing files may be replaced"
+                    })
+                    .clicked()
+                {
+                    export = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+                if ui
+                    .button("Save diagnostic...")
+                    .on_hover_text("Write both sides of every tag, and the computed differences, to a folder")
+                    .clicked()
+                {
+                    save_diagnostic = true;
+                }
+            });
+            measured_controls = Some(ui.min_rect().bottom() - controls_top);
+        });
+
+    // Applied after the window closes its borrow of `self`.
+    if let Some(dialog) = mods.mod_export.as_mut() {
+        if dialog.name != name_edit {
+            // Kept verbatim. Folding the buffer on every keystroke ate the
+            // space in "My Mod" before the second word could be typed; the
+            // fold belongs to the file name, which `stem` produces and the
+            // dialog shows live beside the field.
+            dialog.name = name_edit;
             dialog.overwrite_acknowledged = false;
         }
-        if !open || cancel {
-            self.mods.mod_export = None;
-            return;
+        if let Some(value) = acknowledge {
+            dialog.overwrite_acknowledged = value;
         }
-        if export {
-            let Some(dialog) = self.mods.mod_export.as_ref() else {
-                return;
-            };
-            let included: HashSet<String> =
-                dialog.included().map(|row| row.identity.clone()).collect();
-            let output = dialog.destination().join(format!("{}.utoc", dialog.stem()));
-            // Kept for the next export in this session, so replacing a mod's
-            // files does not mean typing its name again.
-            let remembered = dialog.name.clone();
-            self.mods.last_mod_export_name = Some(remembered);
-            let snapshot = dialog.snapshot.clone();
-            // The workspace may have been closed while this was open.
-            if self.focus_navigation_kit(kit) {
-                self.write_reviewed_mod(&snapshot, &included, output, ctx);
+        if let Some(value) = set_all {
+            for row in dialog.rows.iter_mut() {
+                if row.kind != ModExportChange::Unresolved {
+                    row.include = value;
+                }
             }
-            self.mods.mod_export = None;
         }
+        if let Some(index) = toggled
+            && let Some(row) = dialog.rows.get_mut(index)
+        {
+            row.include = !row.include;
+        }
+        if let Some(identity) = expand_toggled.as_ref() {
+            if !dialog.expanded.remove(identity) {
+                dialog.expanded.insert(identity.clone());
+            }
+        }
+        if let Some(height) = measured_controls {
+            // The tallest seen, not the latest. The overwrite warning comes
+            // and goes as the name is typed, and a reserve that tracked it
+            // downwards would under-reserve the frame it comes back --
+            // which, since the window cannot shrink, is a bump it keeps.
+            // Over-reserving only costs a few pixels of list.
+            dialog.controls_height = dialog.controls_height.max(height.max(0.0));
+        }
+    }
+    if save_diagnostic {
+        cx.send(ModsCommand::SaveReviewDiagnostic);
+    }
+    // Opens where the mod is currently going, rather than at whatever the
+    // OS last remembered — the common edit is "somewhere near here", and
+    // the default is already the game's own `~mods`.
+    if browse
+        && let Some(folder) = rfd::FileDialog::new()
+            .set_title("Export mod into folder")
+            .set_directory(&destination)
+            .pick_folder()
+        && let Some(dialog) = mods.mod_export.as_mut()
+    {
+        dialog.folder = folder;
+        dialog.overwrite_acknowledged = false;
+    }
+    if !open || cancel {
+        mods.mod_export = None;
+        return;
+    }
+    if export {
+        let Some(dialog) = mods.mod_export.as_ref() else {
+            return;
+        };
+        let included: HashSet<String> =
+            dialog.included().map(|row| row.identity.clone()).collect();
+        let output = dialog.destination().join(format!("{}.utoc", dialog.stem()));
+        // Kept for the next export in this session, so replacing a mod's
+        // files does not mean typing its name again.
+        let remembered = dialog.name.clone();
+        mods.last_mod_export_name = Some(remembered);
+        cx.send(ModsCommand::WriteReviewedMod {
+            kit,
+            snapshot: dialog.snapshot.clone(),
+            included,
+            output,
+        });
+        mods.mod_export = None;
+    }
+}
+
+impl Baboon {
+    /// Diff the review's newly expanded rows, before the window draws them.
+    /// Only rows that are open and have no result yet: each one costs a
+    /// container read and two parses.
+    pub(in crate::app) fn diff_expanded_mod_export_rows(&mut self) {
+        let Some(dialog) = self.mods.mod_export.as_ref() else {
+            return;
+        };
+        let pending: Vec<String> = dialog
+            .expanded
+            .iter()
+            .filter(|identity| !dialog.diffs.contains_key(*identity))
+            .cloned()
+            .collect();
+        let Some(index) = self.model.resolve_kit(dialog.kit) else {
+            return;
+        };
+        for identity in pending {
+            let diff = self.diff_reviewed_tag(index, &identity);
+            if let Some(dialog) = self.mods.mod_export.as_mut() {
+                dialog.diffs.insert(identity, diff);
+            }
+        }
+    }
+
+    /// Ask for a folder and write the review's diagnostic into it.
+    pub(in crate::app) fn save_review_diagnostic_to_picked_folder(&mut self) {
+        let Some(folder) = rfd::FileDialog::new()
+            .set_title("Save review diagnostic into folder")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.model.status = match self.save_review_diagnostic(folder.clone()) {
+            Ok(count) => format!("Wrote a diagnostic for {count} tag(s) to {}", folder.display()),
+            Err(error) => error,
+        };
     }
 }
 

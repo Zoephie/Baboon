@@ -47,6 +47,15 @@ impl<'a> Ctx<'a> {
         self.commands.send(Command::Status(status.into()));
     }
 
+    /// Show `path` in the platform's file manager once this frame's drawing
+    /// is over.
+    pub(in crate::app) fn open_folder(&self, path: PathBuf, label: &str) {
+        self.commands.send(Command::OpenFolder {
+            path,
+            label: label.to_owned(),
+        });
+    }
+
     /// Run `job` in the background; its message comes back to the frame
     /// that receives worker messages, and `on_panic` stands in for it if the
     /// job panics. Starting work changes nothing a draw reads, so a draw may
@@ -103,12 +112,16 @@ impl CommandQueue {
 pub(in crate::app) enum Command {
     /// Replace the status line.
     Status(String),
+    /// Show a folder in the platform's file manager; `label` names it in the
+    /// status line if that fails.
+    OpenFolder { path: PathBuf, label: String },
     Help(HelpCommand),
     Poke(PokeCommand),
     Compare(CompareCommand),
     Search(SearchCommand),
     References(ReferencesCommand),
     Export(ExportCommand),
+    Mods(ModsCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -141,6 +154,12 @@ impl From<ExportCommand> for Command {
     }
 }
 
+impl From<ModsCommand> for Command {
+    fn from(command: ModsCommand) -> Self {
+        Command::Mods(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -167,12 +186,14 @@ impl Baboon {
     fn apply_command(&mut self, command: Command) {
         match command {
             Command::Status(status) => self.model.status = status,
+            Command::OpenFolder { path, label } => self.open_folder_in_explorer(path, &label),
             Command::Help(command) => self.apply_help_command(command),
             Command::Poke(command) => self.apply_poke_command(command),
             Command::Compare(command) => self.apply_compare_command(command),
             Command::Search(command) => self.apply_search_command(command),
             Command::References(command) => self.apply_references_command(command),
             Command::Export(command) => self.apply_export_command(command),
+            Command::Mods(command) => self.apply_mods_command(command),
         }
     }
 }
