@@ -262,3 +262,16 @@ pub(super) fn edit_field(app: &mut Baboon, key: &str, path: &str, input: &str) {
 pub(super) fn app() -> Baboon {
     Baboon::for_test()
 }
+
+impl LooseKit {
+    /// The reference index a full build over this kit makes.
+    pub(super) fn index(&self) -> ReverseDependencyIndex {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let source = TagSource::LooseFolder {
+            root: self.root.clone(),
+            game: Some(self.game.to_owned()),
+            definitions_root: locate_definitions_root(),
+        };
+        build_reverse_dependency_index(&self.root, &source, &self.entries(), "Indexing", &tx)
+    }
+}

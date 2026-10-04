@@ -9802,6 +9802,10 @@ mod loose_fixture;
 #[path = "tests/save_close_session.rs"]
 mod save_close_session_tests;
 
+#[cfg(test)]
+#[path = "tests/browser_action_table.rs"]
+mod browser_action_table_tests;
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
