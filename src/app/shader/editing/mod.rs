@@ -973,7 +973,7 @@ fn decode_shader_bitmap_thumbnail(
     let tag =
         crate::core::source::read_tag_at_path(
             &path,
-            edit.game.and_then(GameId::from_id),
+            edit.game,
             edit.definitions_root,
             group_tag,
         )
@@ -2118,13 +2118,13 @@ fn push_h2_template_reference_edit(
 /// pruned the parameters the new one lacks.
 fn h2_template_parameter_names_from_reference(
     tags_root: &std::path::Path,
-    game: Option<&str>,
+    game: Option<GameId>,
     definitions_root: Option<&std::path::Path>,
     reference: &str,
 ) -> Option<Vec<String>> {
     let source = TagSource::LooseFolder {
         root: tags_root.to_path_buf(),
-        game: Some(game.and_then(GameId::from_id).unwrap_or(GameId::Halo2)),
+        game: Some(game.unwrap_or(GameId::Halo2)),
         definitions_root: definitions_root
             .map(std::path::Path::to_path_buf)
             .unwrap_or_else(locate_definitions_root),

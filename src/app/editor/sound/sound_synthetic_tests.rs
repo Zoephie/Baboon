@@ -62,7 +62,7 @@ fn ce_sound(permutations: usize, frames: usize) -> TagFile {
 #[test]
 fn a_ce_sound_lists_each_inline_permutation() {
     let tag = ce_sound(3, SAMPLE_RATE);
-    let rows = sound_permutation_rows_for_game(&tag, None, Some("haloce_mcc"));
+    let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
     assert_eq!(rows.len(), 3);
     for (index, row) in rows.iter().enumerate() {
         // A Halo CE permutation's `name` is a 32-character `string`, not a
@@ -117,7 +117,7 @@ fn a_ce_sound_lists_each_inline_permutation() {
 #[test]
 fn a_bank_game_reads_every_row_as_a_bank_subsound() {
     let tag = ce_sound(2, 16);
-    let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+    let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|row| matches!(row.kind, RowKind::Bank)));
     let source = RowSource {
@@ -149,7 +149,7 @@ fn a_bank_game_reads_every_row_as_a_bank_subsound() {
 #[test]
 fn ce_extraction_writes_one_wav_per_permutation_flat() {
     let tag = ce_sound(2, 32);
-    let rows = sound_permutation_rows_for_game(&tag, None, Some("haloce_mcc"));
+    let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
     let source = RowSource {
         h2: None,
         language: None,
@@ -188,7 +188,7 @@ fn ce_extraction_writes_one_wav_per_permutation_flat() {
         &tag,
         &root.join("tags/sound/test/thing.sound"),
         &layout,
-        Some("haloce_mcc"),
+        Some(GameId::HaloCe),
         None,
         true,
         None,
@@ -234,7 +234,7 @@ fn run_drawing(
                 egui::CentralPanel::default().show(ui, |ui| {
                     let mut sinks = EditSinks::default();
                     let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
-                    edit.game = Some(game);
+                    edit.game = GameId::from_id(game);
                     edit.sound_play_request = SoundRequests::new(
                         queued,
                         Some(SoundOwner {
@@ -299,7 +299,7 @@ fn run_drawing(
 #[test]
 fn the_ce_player_previews_and_plays_the_selected_permutation() {
     let tag = ce_sound(3, SAMPLE_RATE);
-    let rows = sound_permutation_rows_for_game(&tag, None, Some("haloce_mcc"));
+    let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
     let (painted, queued) = run(&tag, &[]);
     for expected in [
         "Sound \u{2014} 3 permutations",

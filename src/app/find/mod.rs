@@ -756,7 +756,7 @@ impl Baboon {
             let source_game = self.kits[self.active]
                 .source
                 .as_ref()
-                .and_then(|source| source.game.map(GameId::as_str));
+                .and_then(|source| source.game);
             if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
                 self.kits[self.active]
                     .model_previews

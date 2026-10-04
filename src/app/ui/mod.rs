@@ -662,8 +662,8 @@ fn sidebar_source_path_label(source: &TagSource) -> String {
     }
 }
 
-fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
-    game.and_then(GameId::from_id)
+fn monitor_commands_for_game(game: Option<GameId>) -> &'static [&'static str] {
+    game
         .map_or(&[], GameFacts::monitor_commands)
 }
 
@@ -856,7 +856,7 @@ impl Baboon {
     }
 
     fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
-        let game = self.source().and_then(|source| source.game.map(GameId::as_str));
+        let game = self.source_game();
         let commands = monitor_commands_for_game(game);
         let enabled = !commands.is_empty();
         let ctx = ui.ctx().clone();

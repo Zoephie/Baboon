@@ -12,9 +12,9 @@ use super::*;
 /// relative to the folder they run in), and their kits can't choose folders.
 pub(super) fn kit_tool_folder_options(
     layout: &KitLayout,
-    game: Option<&str>,
+    game: Option<GameId>,
 ) -> Vec<(&'static str, PathBuf)> {
-    if !game.is_some_and(kit_folders_are_choosable) {
+    if !game.is_some_and(GameFacts::tools_take_folder_arguments) {
         return Vec::new();
     }
     let mut options = Vec::new();
@@ -86,7 +86,7 @@ impl Baboon {
         };
         kit_tool_folder_options(
             &layout,
-            self.source().and_then(|source| source.game.map(GameId::as_str)),
+            self.source().and_then(|source| source.game),
         )
     }
 }

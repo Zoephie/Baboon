@@ -59,7 +59,7 @@ mod tests {
 
         let mut sinks = EditSinks::default();
         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
-        edit.game = Some("halo3_mcc");
+        edit.game = Some(GameId::Halo3);
         edit.tags_root = Some(&tags);
         let choices = language_choices(&edit, None);
 
@@ -868,7 +868,7 @@ mod tests {
             return;
         }
         let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
-        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
         assert!(!rows.is_empty());
         let dir = std::env::temp_dir().join("baboon_bank_extract");
         let _ = std::fs::remove_dir_all(&dir);
@@ -966,7 +966,7 @@ mod tests {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let mut sinks = EditSinks::default();
                         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
-                        edit.game = Some("halo2_mcc");
+                        edit.game = Some(GameId::Halo2);
                         edit.sound_language = language;
                         draw_sound_player(ui, tag, &mut edit);
                     });
@@ -1285,7 +1285,7 @@ mod tests {
             &tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound"),
         )
         .expect("read sfx sound tag");
-        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
         let resolved = rows
             .iter()
             .filter(|r| banks.resolve(&r.name).is_some())
@@ -1305,7 +1305,7 @@ mod tests {
             return;
         }
         let tag = TagFile::read(&path).expect("read H3 sound tag");
-        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
         assert!(!rows.is_empty(), "sound tag has no permutations");
         assert!(
             rows.iter().all(|row| matches!(row.kind, RowKind::Bank)),
@@ -1372,7 +1372,7 @@ mod tests {
             return;
         }
         let tag = TagFile::read(&path).expect("read H3 sound tag");
-        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
         let sound_rel = sound_tag_rel(&path, &tags_root).unwrap();
         let out = std::env::temp_dir().join(format!(
             "baboon-h3-extract-{}",
@@ -1431,7 +1431,7 @@ mod tests {
             &tag,
             &path,
             &layout,
-            Some("halo3_mcc"),
+            Some(GameId::Halo3),
             None,
             true,
             Some(&shared_banks),
@@ -1466,7 +1466,7 @@ mod tests {
             &sfx_tag,
             &sfx_path,
             &layout,
-            Some("halo3_mcc"),
+            Some(GameId::Halo3),
             Some("french"),
             true,
             Some(&shared_banks),

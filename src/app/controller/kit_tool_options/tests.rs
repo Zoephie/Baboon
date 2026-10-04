@@ -13,20 +13,20 @@ fn only_folders_other_than_the_roots_own_become_options() {
     let stock = layout("/ek/tags", "/ek/data");
     let moda = layout("/ek/tags_moda", "/ek/data_moda");
     let tags_only = layout("/ek/tags_moda", "/ek/data");
-    assert!(kit_tool_folder_options(&stock, Some("halo2_mcc")).is_empty());
+    assert!(kit_tool_folder_options(&stock, Some(GameId::Halo2)).is_empty());
     assert_eq!(
-        kit_tool_folder_options(&moda, Some("haloce_mcc")),
+        kit_tool_folder_options(&moda, Some(GameId::HaloCe)),
         vec![
             ("-tags_dir", PathBuf::from("/ek/tags_moda")),
             ("-data_dir", PathBuf::from("/ek/data_moda")),
         ]
     );
     assert_eq!(
-        kit_tool_folder_options(&tags_only, Some("halo2_mcc")),
+        kit_tool_folder_options(&tags_only, Some(GameId::Halo2)),
         vec![("-tags_dir", PathBuf::from("/ek/tags_moda"))]
     );
     // The Halo 3-era tools can't take them, so they're never added there.
-    assert!(kit_tool_folder_options(&moda, Some("halo3_mcc")).is_empty());
+    assert!(kit_tool_folder_options(&moda, Some(GameId::Halo3)).is_empty());
     assert!(kit_tool_folder_options(&moda, None).is_empty());
 }
 

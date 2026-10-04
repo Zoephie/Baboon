@@ -18,6 +18,7 @@
 //! Skips silently when the corresponding tag set is absent.
 
 use std::path::PathBuf;
+use crate::core::game::GameId;
 
 use blam_tags::TagFile;
 
@@ -150,12 +151,12 @@ fn object_family_preview_is_halo_ce_only() {
         assert!(is_previewable_geometry_group_for_game(
             tag,
             &names,
-            Some("haloce_mcc")
+            Some(GameId::HaloCe)
         ));
         assert!(!is_previewable_geometry_group_for_game(
             tag,
             &names,
-            Some("halo3_mcc")
+            Some(GameId::Halo3)
         ));
         assert!(!is_previewable_geometry_group_for_game(tag, &names, None));
     }

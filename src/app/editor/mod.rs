@@ -29,7 +29,7 @@ pub(super) fn draw_tag(
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
-    source_game: Option<&str>,
+    source_game: Option<GameId>,
     rmdf_cache: &mut HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     rmop_cache: &mut HashMap<String, Option<Arc<RenderMethodOption>>>,
     h2_templates: &mut H2TemplateCache,

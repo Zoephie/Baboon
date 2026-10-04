@@ -260,7 +260,7 @@ fn halo2_structs_get_only_their_own_explanations() {
 #[test]
 fn the_group_hierarchy_expands_a_parent_to_its_descendants() {
     let hierarchy =
-        GroupHierarchy::load(&crate::core::bundled::locate_definitions_root(), "haloreach_mcc");
+        GroupHierarchy::load(&crate::core::bundled::locate_definitions_root(), GameId::HaloReach);
     let tag = |s: &str| blam_tags::parse_group_tag(s).unwrap();
     assert!(hierarchy.is_a(tag("bipd"), tag("unit")));
     assert!(hierarchy.is_a(tag("bipd"), tag("obje")), "two levels up");

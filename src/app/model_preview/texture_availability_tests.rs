@@ -1,17 +1,18 @@
 use super::model_preview_supports_textures;
+use crate::core::game::GameId;
 
 #[test]
 fn textured_shading_is_limited_to_supported_editing_kits() {
-    assert!(model_preview_supports_textures(Some("halo3_mcc")));
-    assert!(model_preview_supports_textures(Some("haloreach_mcc")));
-    assert!(model_preview_supports_textures(Some("halo2_mcc")));
-    assert!(model_preview_supports_textures(Some("haloce_mcc")));
+    assert!(model_preview_supports_textures(Some(GameId::Halo3)));
+    assert!(model_preview_supports_textures(Some(GameId::HaloReach)));
+    assert!(model_preview_supports_textures(Some(GameId::Halo2)));
+    assert!(model_preview_supports_textures(Some(GameId::HaloCe)));
     for game in [
         None,
-        Some("halo3odst_mcc"),
-        Some("halo4_mcc"),
-        Some("halo2amp_mcc"),
-        Some("haloce_evolved"),
+        Some(GameId::Halo3Odst),
+        Some(GameId::Halo4),
+        Some(GameId::Halo2Amp),
+        Some(GameId::CampaignEvolved),
     ] {
         assert!(!model_preview_supports_textures(game), "{game:?}");
     }

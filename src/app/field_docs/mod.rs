@@ -247,12 +247,12 @@ pub(in crate::app) struct GroupHierarchy {
 impl GroupHierarchy {
     /// Read each group's `tag` and `parent_tag` from the game's definitions.
     /// Both sit at the top of a definition file, so only its head is read.
-    fn load(definitions_root: &Path, game: &str) -> Self {
+    fn load(definitions_root: &Path, game: GameId) -> Self {
         use std::io::Read;
         let mut parents = HashMap::new();
         let mut by_name: HashMap<String, u32> = HashMap::new();
         let mut named_parents: Vec<(u32, String)> = Vec::new();
-        let Ok(dir) = std::fs::read_dir(definitions_root.join(game)) else {
+        let Ok(dir) = std::fs::read_dir(definitions_root.join(game.as_str())) else {
             return Self::default();
         };
         for entry in dir.flatten() {
@@ -337,10 +337,10 @@ impl GroupHierarchy {
 /// The game's group hierarchy, read once per definitions folder and game.
 pub(in crate::app) fn group_hierarchy(
     definitions_root: Option<&Path>,
-    game: Option<&str>,
+    game: Option<GameId>,
 ) -> std::sync::Arc<GroupHierarchy> {
     use std::sync::{Arc, Mutex, OnceLock};
-    type Cache = Mutex<HashMap<(std::path::PathBuf, String), Arc<GroupHierarchy>>>;
+    type Cache = Mutex<HashMap<(std::path::PathBuf, GameId), Arc<GroupHierarchy>>>;
     static CACHE: OnceLock<Cache> = OnceLock::new();
     let (Some(root), Some(game)) = (definitions_root, game) else {
         return Arc::default();
@@ -350,7 +350,7 @@ pub(in crate::app) fn group_hierarchy(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache
-        .entry((root.to_path_buf(), game.to_owned()))
+        .entry((root.to_path_buf(), game))
         .or_insert_with(|| Arc::new(GroupHierarchy::load(root, game)))
         .clone()
 }

@@ -252,7 +252,7 @@ pub(in crate::app) mod tests {
         let mut sinks = EditSinks::default();
         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
         edit.group_tag = parse_group_tag("jpt!").unwrap();
-        edit.game = Some("halo3_mcc");
+        edit.game = Some(GameId::Halo3);
         edit.definitions_root = Some(definitions_root.as_path());
         edit.editable = true;
         assertion(&mut edit);
@@ -452,7 +452,7 @@ pub(in crate::app) mod tests {
     /// neither anything goes.
     #[test]
     fn the_schema_not_the_current_target_decides_the_accepted_groups() {
-        let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some("haloreach_mcc"));
+        let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some(GameId::HaloReach));
         let object = parse_group_tag("obje").unwrap();
         let scenery = parse_group_tag("scen").unwrap();
         let weapon = parse_group_tag("weap").unwrap();
@@ -498,7 +498,7 @@ pub(in crate::app) mod tests {
     fn an_object_reference_takes_every_object_type() {
         let definitions_root = locate_definitions_root();
         let names = TagNameIndex::load_game(&definitions_root, GameId::HaloReach).unwrap();
-        let hierarchy = group_hierarchy(Some(&definitions_root), Some("haloreach_mcc"));
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some(GameId::HaloReach));
         let docs = crate::app::field_docs::build_def_docs(
             &definitions_root,
             GameId::HaloReach,

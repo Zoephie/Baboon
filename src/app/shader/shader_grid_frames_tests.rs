@@ -216,7 +216,7 @@ impl Grid {
                 let mut edit = FieldEditContext::read_only(&mut sinks, "test", TAG_KEY);
                 edit.group_tag = doc.tag.header.group_tag;
                 edit.root = Some(doc.tag.root());
-                edit.game = Some(GAME);
+                edit.game = GameId::from_id(GAME);
                 edit.definitions_root = Some(definitions_root.as_path());
                 edit.names = Some(names);
                 edit.editable = true;

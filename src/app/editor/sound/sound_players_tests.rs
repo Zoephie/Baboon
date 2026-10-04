@@ -60,7 +60,7 @@ fn run(
                 egui::CentralPanel::default().show(ui, |ui| {
                     let mut sinks = EditSinks::default();
                     let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
-                    edit.game = Some("halo3_mcc");
+                    edit.game = Some(GameId::Halo3);
                     edit.tags_root = Some(root);
                     edit.sound_play_request = SoundRequests::new(
                         queued,

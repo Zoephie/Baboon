@@ -11,7 +11,7 @@ pub(super) struct ScenarioLaunchContext {
     pub(super) kit_root: PathBuf,
     pub(super) scenario_file: PathBuf,
     pub(super) scenario_path: String,
-    pub(super) game: String,
+    pub(super) game: GameId,
     /// `-tags_dir`/`-data_dir` for a Halo CE or Halo 2 kit using folders other
     /// than its root's own; see [`kit_tool_folder_options`].
     pub(super) tool_options: Vec<(&'static str, PathBuf)>,
@@ -26,8 +26,8 @@ pub(super) fn scenario_launch_context(
     }
 
     let game = source
-        .game.map(GameId::as_str)
-        .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
+        .game
+        .filter(|game| game.launches_scenarios())
         .ok_or_else(|| "Scenario launching requires a supported MCC editing kit".to_owned())?;
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Err("Scenario launching requires a loaded loose editing-kit folder".to_owned());
@@ -38,7 +38,7 @@ pub(super) fn scenario_launch_context(
     // Sapien and tag_test open `tags\<scenario>` relative to the folder they
     // run in, so only the root's own tags folder can be launched from, unless
     // the tools can be told where it is.
-    if !layout.tags_is_root_tags_folder() && !kit_folders_are_choosable(game) {
+    if !layout.tags_is_root_tags_folder() && !game.tools_take_folder_arguments() {
         return Err("Scenario launching requires the editing kit's tags folder".to_owned());
     }
     let tool_options = kit_tool_folder_options(&layout, Some(game));
@@ -94,22 +94,6 @@ pub(super) fn scenario_launch_context(
     })
 }
 
-/// Whether this game's Sapien can be handed a scenario to open.
-///
-/// Two kits are out, for different reasons. Halo Combat Evolved's Sapien is the
-/// original tool and takes no scenario on its command line at all — there is no
-/// terminal route into it, so opening a scenario "in Sapien" is not a thing
-/// that kit can do rather than a thing that happens to be unconfigured. Campaign
-/// Evolved ships no Sapien whatsoever. Everywhere else the argument works, and
-/// only a missing `sapien.exe` can stop a launch.
-///
-/// This is also what decides whether the button is *shown*: an editing kit that
-/// can never do this should not offer a control for it, greyed out or
-/// otherwise.
-pub(super) fn sapien_supports_scenario_argument(game: &str) -> bool {
-    GameId::from_id(game).is_some_and(GameFacts::sapien_takes_scenario_argument)
-}
-
 /// What a kit can launch a scenario in, decided without reference to any one
 /// tag.
 ///
@@ -123,7 +107,7 @@ pub(in crate::app) struct ScenarioLaunchAvailability {
     /// loose `tags` folder. False for cache and container sources.
     pub(in crate::app) supported: bool,
     /// This kit's Sapien accepts a scenario on its command line — see
-    /// [`sapien_supports_scenario_argument`]. Decides whether the item is shown
+    /// [`GameFacts::sapien_takes_scenario_argument`]. Decides whether the item is shown
     /// at all, not whether it is enabled.
     pub(in crate::app) offers_sapien: bool,
     pub(in crate::app) sapien_present: bool,
@@ -143,29 +127,26 @@ pub(in crate::app) fn scenario_launch_availability_with(
     is_file: impl Fn(&Path) -> bool,
 ) -> ScenarioLaunchAvailability {
     let unsupported = ScenarioLaunchAvailability::default();
-    let Some(game) = source
-        .game.map(GameId::as_str)
-        .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
-    else {
+    let Some(game) = source.game.filter(|game| game.launches_scenarios()) else {
         return unsupported;
     };
     let Some(layout) = source
         .kit_layout()
-        .filter(|layout| layout.tags_is_root_tags_folder() || kit_folders_are_choosable(game))
+        .filter(|layout| layout.tags_is_root_tags_folder() || game.tools_take_folder_arguments())
     else {
         return unsupported;
     };
     let kit_root = layout.root.as_path();
     ScenarioLaunchAvailability {
         supported: true,
-        offers_sapien: sapien_supports_scenario_argument(game),
+        offers_sapien: game.sapien_takes_scenario_argument(),
         sapien_present: is_file(&kit_root.join("sapien.exe")),
         tag_test_present: is_file(&kit_root.join(tag_test_executable_for_game(Some(game)))),
     }
 }
 
-pub(super) fn scenario_startup_command(game: &str, scenario_path: &str) -> String {
-    let command = GameId::from_id(game).map_or("game_start", GameFacts::scenario_startup_command);
+pub(super) fn scenario_startup_command(game: GameId, scenario_path: &str) -> String {
+    let command = game.scenario_startup_command();
     let argument = if scenario_path.chars().any(char::is_whitespace) || scenario_path.contains(';')
     {
         format!("\"{scenario_path}\"")
@@ -175,9 +156,8 @@ pub(super) fn scenario_startup_command(game: &str, scenario_path: &str) -> Strin
     format!("{command} {argument}")
 }
 
-pub(super) fn tag_test_executable_for_game(game: Option<&str>) -> &'static str {
-    game.and_then(GameId::from_id)
-        .and_then(GameFacts::tag_test_executable)
+pub(super) fn tag_test_executable_for_game(game: Option<GameId>) -> &'static str {
+    game.and_then(GameFacts::tag_test_executable)
         .unwrap_or("tag_test.exe")
 }
 

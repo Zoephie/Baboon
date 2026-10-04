@@ -183,10 +183,10 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
 pub(in crate::app) fn is_previewable_geometry_group_for_game(
     group_tag: u32,
     names: &TagNameIndex,
-    source_game: Option<&str>,
+    source_game: Option<GameId>,
 ) -> bool {
     is_previewable_geometry_group(group_tag, names)
-        || (source_game == Some("haloce_mcc") && is_object_family_group(group_tag))
+        || (source_game == Some(GameId::HaloCe) && is_object_family_group(group_tag))
 }
 
 pub(in crate::app) fn format_reference_path(

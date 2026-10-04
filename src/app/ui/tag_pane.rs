@@ -173,7 +173,7 @@ impl Baboon {
             tag_key: &key,
             group_tag: entry.group_tag,
             root: Some(doc.tag.root()),
-            game: source.and_then(|source| source.game.map(GameId::as_str)),
+            game: source.and_then(|source| source.game),
             definitions_root: source.and_then(|source| match &source.source {
                 TagSource::LooseFolder {
                     definitions_root, ..
@@ -259,7 +259,7 @@ impl Baboon {
             let model_preview = if is_previewable_geometry_group_for_game(
                 entry.group_tag,
                 names,
-                source.and_then(|source| source.game.map(GameId::as_str)),
+                source.and_then(|source| source.game),
             ) {
                 kit.model_previews.entry(key.clone()).or_default()
             } else {
@@ -282,7 +282,7 @@ impl Baboon {
                 entry,
                 names,
                 source.map(|source| &source.source),
-                source.and_then(|source| source.game.map(GameId::as_str)),
+                source.and_then(|source| source.game),
                 &mut kit.rmdf_cache,
                 &mut kit.rmop_cache,
                 &mut kit.h2_templates,

@@ -433,7 +433,7 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// fields whose target block is an ancestor (not a sibling). `None` in
     /// read-only/secondary contexts where ancestor resolution isn't needed.
     pub(in crate::app) root: Option<blam_tags::TagStruct<'a>>,
-    pub(in crate::app) game: Option<&'a str>,
+    pub(in crate::app) game: Option<GameId>,
     pub(in crate::app) definitions_root: Option<&'a Path>,
     pub(in crate::app) names: Option<&'a TagNameIndex>,
     pub(in crate::app) tags_root: Option<&'a Path>,

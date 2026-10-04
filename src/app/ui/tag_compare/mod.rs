@@ -241,14 +241,14 @@ fn git_revision_comparison(
     tags_root: &Path,
     path: &Path,
     revision: &str,
-    game: Option<&str>,
+    game: Option<GameId>,
     definitions_root: Option<&Path>,
     group: u32,
 ) -> Result<TagDiffResults, String> {
     let load_tag = |revision: &str| -> Result<Option<TagFile>, String> {
         git_tag_bytes_if_present(tags_root, path, revision)?
             .map(|bytes| {
-                let tag = crate::core::source::read_tag_from_bytes(&bytes, game.and_then(GameId::from_id), definitions_root, group)
+                let tag = crate::core::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
                     .map_err(|error| {
                         format!("Could not load tag from commit {revision}: {error}")
                     })?;
@@ -729,10 +729,10 @@ pub(super) fn draw_tag_diff_list(
 }
 
 impl Baboon {
-    fn comparison_kits(&self, game: &str, current_root: &Path) -> Vec<ComparisonKit> {
+    fn comparison_kits(&self, game: GameId, current_root: &Path) -> Vec<ComparisonKit> {
         let mut kits = Vec::new();
         for profile in &self.prefs.custom_editing_kit_profiles {
-            if profile.game != game {
+            if profile.game != game.as_str() {
                 continue;
             }
             if let Ok(layout) = self.editing_kit_validation.custom(&profile.id) {
@@ -749,7 +749,7 @@ impl Baboon {
             }
         }
         for shortcut in EDITING_KIT_SHORTCUTS {
-            if shortcut.game != game {
+            if shortcut.game != game.as_str() {
                 continue;
             }
             if let Some(layout) = self.editing_kit_validation.builtin(shortcut).layout() {
@@ -759,7 +759,7 @@ impl Baboon {
                         .any(|kit| same_recent_path(&kit.tags, &layout.tags))
                 {
                     kits.push(ComparisonKit {
-                        name: game_display_name(game).to_owned(),
+                        name: game.display_name().to_owned(),
                         tags: layout.tags.clone(),
                     });
                 }
@@ -776,7 +776,7 @@ impl Baboon {
         let current = self.kits[diff_kit].parsed_tags.get(&state.a_key);
         let group = current.map(|doc| doc.tag.group().tag);
         let source = self.kits[diff_kit].source.as_ref();
-        let game = source.and_then(|source| source.game.map(GameId::as_str));
+        let game = source.and_then(|source| source.game);
         let (tags_root, definitions_root) = source
             .and_then(|source| match &source.source {
                 TagSource::LooseFolder {
@@ -834,7 +834,7 @@ impl Baboon {
             .filter_map(|kit| {
                 let other_source = kit.source.as_ref()?;
                 if game
-                    .zip(other_source.game.map(GameId::as_str))
+                    .zip(other_source.game)
                     .is_some_and(|(a, b)| a != b)
                 {
                     return None;
@@ -1687,14 +1687,13 @@ impl Baboon {
             } else if state.source == TagCompareSource::GitHead {
                 if let (Some(_), Some(path), Some(group)) = (a, current_path.clone(), group) {
                     let tags_root = tags_root.to_path_buf();
-                    let game = game.map(str::to_owned);
                     let definitions_root = definitions_root.map(Path::to_path_buf);
                     run_tag_compare_git(&self.tx, &mut state, ctx, move || {
                         TagCompareGitUpdate::Head(
                             git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
                                 crate::core::source::read_tag_from_bytes(
                                     &bytes,
-                                    game.as_deref().and_then(GameId::from_id),
+                                    game,
                                     definitions_root.as_deref(),
                                     group,
                                 )
@@ -1712,21 +1711,20 @@ impl Baboon {
                     state.git_history.selected.clone(),
                 ) {
                     let tags_root = tags_root.to_path_buf();
-                    let game = game.map(str::to_owned);
                     let definitions_root = definitions_root.map(Path::to_path_buf);
                     run_tag_compare_git(&self.tx, &mut state, ctx, move || {
                         TagCompareGitUpdate::Revision(git_revision_comparison(
                             &tags_root,
                             &path,
                             &revision,
-                            game.as_deref(),
+                            game,
                             definitions_root.as_deref(),
                             group,
                         ))
                     });
                 }
             } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
-                match crate::core::source::read_tag_at_path(&path, game.and_then(GameId::from_id), definitions_root, group) {
+                match crate::core::source::read_tag_at_path(&path, game, definitions_root, group) {
                     Ok(b) if b.group().tag == group => {
                         state.results = Some(comparison_results(&a.tag, &b));
                         state.error = None;

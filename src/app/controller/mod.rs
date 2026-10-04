@@ -4920,7 +4920,7 @@ impl Baboon {
                             &tag,
                             &abs,
                             &layout,
-                            game.map(GameId::as_str),
+                            game,
                             selected_language.as_deref(),
                             all_languages,
                             shared_fmod_banks.as_ref(),
@@ -8536,7 +8536,7 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game.map(GameId::as_str)))
+        tag_test_executable_for_game(self.source().and_then(|s| s.game))
     }
 
     pub(super) fn launch_tag_test(&mut self) {
@@ -8556,8 +8556,8 @@ impl Baboon {
         self.kits
             .get(kit)
             .and_then(|kit| kit.source.as_ref())
-            .and_then(|source| source.game.map(GameId::as_str))
-            .is_some_and(sapien_supports_scenario_argument)
+            .and_then(|source| source.game)
+            .is_some_and(GameFacts::sapien_takes_scenario_argument)
     }
 
     pub(super) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
@@ -8567,7 +8567,7 @@ impl Baboon {
         let Ok(context) = scenario_launch_context(source, entry) else {
             return false;
         };
-        sapien_supports_scenario_argument(&context.game)
+        context.game.sapien_takes_scenario_argument()
             && context.kit_root.join("sapien.exe").is_file()
     }
 
@@ -8589,7 +8589,7 @@ impl Baboon {
                 }
             }
         };
-        if !sapien_supports_scenario_argument(&context.game) {
+        if !context.game.sapien_takes_scenario_argument() {
             self.status =
                 "Opening a scenario directly in Sapien is not supported for this editing kit"
                     .to_owned();
@@ -8636,7 +8636,7 @@ impl Baboon {
         let Ok(context) = scenario_launch_context(source, entry) else {
             return false;
         };
-        let executable = tag_test_executable_for_game(Some(context.game.as_str()));
+        let executable = tag_test_executable_for_game(Some(context.game));
         context.kit_root.join(executable).is_file()
     }
 
@@ -8658,7 +8658,7 @@ impl Baboon {
                 }
             }
         };
-        let executable_name = tag_test_executable_for_game(Some(context.game.as_str()));
+        let executable_name = tag_test_executable_for_game(Some(context.game));
         let executable = context.kit_root.join(executable_name);
         if !executable.is_file() {
             self.status = format!("tag_test executable not found: {}", executable.display());
@@ -8677,7 +8677,7 @@ impl Baboon {
         }
 
         let startup_file = context.kit_root.join("init.txt");
-        let command = scenario_startup_command(&context.game, &context.scenario_path);
+        let command = scenario_startup_command(context.game, &context.scenario_path);
         if let Err(error) = update_scenario_startup_file(&startup_file, &command) {
             self.status = error;
             return;

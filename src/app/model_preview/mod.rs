@@ -40,8 +40,11 @@ use variants::*;
 // H3EK and HREK, Halo 2's template-and-parameters `shader`, and Halo CE's
 // model and environment shaders. Other kits may share a tag container
 // generation, but that alone does not make their texture path supported.
-fn model_preview_supports_textures(game: Option<&str>) -> bool {
-    matches!(game, Some("halo3_mcc" | "haloreach_mcc" | "halo2_mcc" | "haloce_mcc"))
+fn model_preview_supports_textures(game: Option<GameId>) -> bool {
+    matches!(
+        game,
+        Some(GameId::Halo3 | GameId::HaloReach | GameId::Halo2 | GameId::HaloCe)
+    )
 }
 
 #[cfg(test)]
@@ -347,7 +350,7 @@ pub(super) fn draw_model_preview_panel(
     tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
-    source_game: Option<&str>,
+    source_game: Option<GameId>,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
     edit: &mut FieldEditContext<'_>,
@@ -1041,7 +1044,7 @@ fn draw_model_view_settings_menu(
     model_preview_size: &mut f32,
     supports_textures: bool,
     is_campaign_evolved: bool,
-    source_game: Option<&str>,
+    source_game: Option<GameId>,
     has_armature: bool,
 ) {
     preview_header_menu(
@@ -1079,7 +1082,7 @@ fn draw_model_view_settings_menu(
             ui.separator();
 
             if (tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved)
-                || (source_game == Some("haloce_mcc")
+                || (source_game == Some(GameId::HaloCe)
                     && is_object_family_group(tag.header.group_tag))
             {
                 model_view_icon_checkbox(

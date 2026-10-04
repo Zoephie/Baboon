@@ -382,7 +382,7 @@ pub(super) fn language_choices(
             Vec::new()
         };
     }
-    if edit.game == Some("halo2_mcc") && edit.ce_sound.is_none() {
+    if edit.game == Some(GameId::Halo2) && edit.ce_sound.is_none() {
         return h2_choices(&mut H2_LANGUAGES.iter().copied());
     }
     let available_choices = |languages: Vec<String>| -> Vec<LanguageChoice> {
@@ -415,7 +415,7 @@ pub(super) fn language_choices(
     };
     if matches!(
         edit.game,
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach)
     ) {
         let installed = blam_tags::audio::SoundBanks::available_languages(root);
         let bank_dir = root.parent().unwrap_or(root).join("fmod").join("pc");
@@ -441,7 +441,7 @@ pub(super) fn language_choices(
             .collect();
     }
     available_choices(match edit.game {
-        Some("halo4_mcc") | Some("halo2amp_mcc") => {
+        Some(GameId::Halo4) | Some(GameId::Halo2Amp) => {
             blam_tags::audio::WwiseBanks::available_languages(root)
         }
         _ => blam_tags::audio::SoundBanks::available_languages(root),
@@ -587,7 +587,7 @@ pub(super) fn draw_sound_errors(ui: &mut Ui, edit: &FieldEditContext<'_>) {
     let error_status = sound_error_status(edit);
     let missing_fmod_languages = matches!(
         edit.game,
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach)
     )
     .then(|| edit.tags_root)
     .flatten()
@@ -647,11 +647,11 @@ pub(super) fn sound_permutation_rows(tag: &TagFile, h2: Option<&H2Sound>) -> Vec
 pub(super) fn sound_permutation_rows_for_game(
     tag: &TagFile,
     h2: Option<&H2Sound>,
-    game: Option<&str>,
+    game: Option<GameId>,
 ) -> Vec<SoundPermRow> {
     let bank_backed = matches!(
         game,
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach)
     );
     let root = tag.root();
     let Some(pitch_ranges) = find_block_field(&root, "pitch range") else {
@@ -725,8 +725,8 @@ pub(super) fn sound_permutation_rows_for_game(
 /// Halo 3-family tags can expose fields that resemble Halo 2's inline
 /// localization table. Only interpret that layout for an actual Halo 2 source;
 /// otherwise theoretical tag languages leak into FMOD bank extraction.
-fn h2_sound_for_game(tag: &TagFile, game: Option<&str>) -> Option<H2Sound> {
-    matches!(game, Some("halo2_mcc"))
+fn h2_sound_for_game(tag: &TagFile, game: Option<GameId>) -> Option<H2Sound> {
+    matches!(game, Some(GameId::Halo2))
         .then(|| H2Sound::read(tag))
         .flatten()
 }
@@ -753,10 +753,10 @@ fn row_bank_id(sound_rel: Option<&str>, multi_pr: bool, row: &SoundPermRow) -> O
     ))
 }
 
-fn is_fmod_language_game(game: Option<&str>) -> bool {
+fn is_fmod_language_game(game: Option<GameId>) -> bool {
     matches!(
         game,
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach)
     )
 }
 
@@ -1022,7 +1022,7 @@ pub(in crate::app) fn browser_sound_extract_items(
     tag: &TagFile,
     abs_tag_path: &std::path::Path,
     layout: &KitLayout,
-    game: Option<&str>,
+    game: Option<GameId>,
     selected_language: Option<&str>,
     all_languages: bool,
     shared_fmod_banks: Option<&blam_tags::audio::SoundBanks>,
@@ -1045,14 +1045,14 @@ pub(in crate::app) fn browser_sound_extract_items(
             } else {
                 h2.languages.iter().cloned().map(Some).collect()
             }
-        } else if matches!(game, Some("haloce_mcc") | Some("halo2_mcc")) {
+        } else if matches!(game, Some(GameId::HaloCe) | Some(GameId::Halo2)) {
             // Classic inline tags without H2's language table have exactly one
             // stream; repeating it into every bank language would fabricate
             // localizations that do not exist.
             vec![None]
         } else {
             let mut external = match game {
-                Some("halo4_mcc") | Some("halo2amp_mcc") => {
+                Some(GameId::Halo4) | Some(GameId::Halo2Amp) => {
                     blam_tags::audio::WwiseBanks::available_languages(tags_root)
                 }
                 _ => blam_tags::audio::SoundBanks::available_languages(tags_root),
@@ -1123,11 +1123,11 @@ fn h2_data_language(language: &str) -> Option<&str> {
 
 /// Per-game one-line note on the format `tool.exe` requires when reimporting the
 /// extracted files (RE-verified from each tool binary). Empty for Wwise games.
-fn sound_format_note(game: Option<&str>) -> &'static str {
+fn sound_format_note(game: Option<GameId>) -> &'static str {
     match game {
-        Some("haloce_mcc") => "16-bit WAV, 22050 or 44100 Hz, mono/stereo",
-        Some("halo2_mcc") => "16-bit WAV, 22050/32000/44100/48000 Hz (resampled), mono/stereo",
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc") => {
+        Some(GameId::HaloCe) => "16-bit WAV, 22050 or 44100 Hz, mono/stereo",
+        Some(GameId::Halo2) => "16-bit WAV, 22050/32000/44100/48000 Hz (resampled), mono/stereo",
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach) => {
             "16-bit WAV, 48000 Hz, mono/stereo"
         }
         _ => "",
@@ -1945,7 +1945,7 @@ fn draw_ref_cell(ui: &mut Ui, refs: &[(u32, String)]) -> Option<OpenTagRequest> 
 /// Load a referenced `.sound` tag (from a dialogue or looping container) so its
 /// audio can be auditioned/extracted like the primary tag. Classic-aware.
 fn load_referenced_sound(
-    game: Option<&str>,
+    game: Option<GameId>,
     tags_root: Option<&std::path::Path>,
     definitions_root: Option<&std::path::Path>,
     rel_path: &str,
@@ -1954,7 +1954,7 @@ fn load_referenced_sound(
     let tags_root = tags_root?;
     let abs = blam_tags::paths::resolve_tag_path(tags_root, rel_path, "sound");
     let tag =
-        crate::core::source::read_tag_at_path(&abs, game.and_then(GameId::from_id), definitions_root, group)
+        crate::core::source::read_tag_at_path(&abs, game, definitions_root, group)
             .ok()?;
     Some((tag, abs))
 }
@@ -1973,7 +1973,7 @@ fn language_for<'a>(h2: Option<&H2Sound>, language: Option<&'a str>) -> Option<&
 /// referenced tag's rel path, used to compute the FMOD subsound id.
 fn referenced_sound_play_action(
     tag: &TagFile,
-    game: Option<&str>,
+    game: Option<GameId>,
     sound_rel: Option<&str>,
     language: Option<&str>,
     tags_root: Option<&std::path::Path>,
@@ -2003,7 +2003,7 @@ fn referenced_sound_play_action(
 /// `sound_rel` is the referenced tag's rel path (for the FMOD subsound id).
 fn referenced_sound_extract_items(
     tag: &TagFile,
-    game: Option<&str>,
+    game: Option<GameId>,
     base: &std::path::Path,
     sound_rel: Option<&str>,
     language: Option<&str>,
@@ -2049,7 +2049,7 @@ fn referenced_clip(id: String, group: Option<String>, name: String) -> PlayerCli
 fn referenced_clip_play(
     group: u32,
     path: &str,
-    game: Option<&str>,
+    game: Option<GameId>,
     tags_root: Option<&std::path::Path>,
     definitions_root: Option<&std::path::Path>,
     language: Option<&str>,
@@ -2133,7 +2133,7 @@ fn draw_referenced_sound_cell(
     ui: &mut Ui,
     refs: &[(u32, String)],
     clips: Option<&[Option<usize>]>,
-    game: Option<&str>,
+    game: Option<GameId>,
     tags_root: Option<&std::path::Path>,
     kit_layout: Option<&KitLayout>,
     definitions_root: Option<&std::path::Path>,

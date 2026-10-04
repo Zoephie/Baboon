@@ -20,7 +20,7 @@ fn switching_a_template_reads_its_parameters() {
     let root: &'static std::path::Path = std::path::Path::new(crate::test_kits::leak(root));
     with_test_edit_context(|edit| {
         edit.tags_root = Some(root);
-        edit.game = Some("halo2_mcc");
+        edit.game = Some(GameId::Halo2);
         push_h2_template_reference_edit(edit, &row_edit, reference.to_owned());
         let names = edit.h2_shader_param_ops.iter().find_map(|op| match op {
             H2ShaderParamOp::SwitchTemplate {

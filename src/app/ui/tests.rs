@@ -462,7 +462,7 @@ fn terminal_line_visuals_are_distinct_by_severity() {
 #[test]
 fn monitor_commands_are_game_specific() {
     assert_eq!(
-        monitor_commands_for_game(Some("halo2_mcc")),
+        monitor_commands_for_game(Some(GameId::Halo2)),
         &[
             "monitor-bitmaps",
             "monitor-bitmaps-data-and-tags",
@@ -471,10 +471,10 @@ fn monitor_commands_are_game_specific() {
         ]
     );
     assert_eq!(
-        monitor_commands_for_game(Some("halo4_mcc")),
+        monitor_commands_for_game(Some(GameId::Halo4)),
         &["monitor-bitmaps", "monitor-strings"]
     );
-    assert!(monitor_commands_for_game(Some("haloce_mcc")).is_empty());
+    assert!(monitor_commands_for_game(Some(GameId::HaloCe)).is_empty());
     assert!(monitor_commands_for_game(None).is_empty());
 }
 

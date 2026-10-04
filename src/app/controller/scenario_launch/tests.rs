@@ -47,7 +47,7 @@ fn launch_context_builds_an_extensionless_engine_path() {
     assert_eq!(context.kit_root, kit_root);
     assert_eq!(context.scenario_file, scenario_file);
     assert_eq!(context.scenario_path, "levels\\test\\my map\\my map");
-    assert_eq!(context.game, "halo3_mcc");
+    assert_eq!(context.game, GameId::Halo3);
 }
 
 /// The browser's row menu gates on this rather than on the per-entry
@@ -114,8 +114,8 @@ fn launch_context_rejects_unsupported_sources_and_escaping_paths() {
 fn sapien_scenario_arguments_exclude_halo_ce() {
     // Combat Evolved's Sapien takes no scenario argument, and Campaign
     // Evolved has no Sapien. Both mean "no button", not "greyed out".
-    assert!(!sapien_supports_scenario_argument("haloce_mcc"));
-    assert!(!sapien_supports_scenario_argument("haloce_evolved"));
+    assert!(!GameId::HaloCe.sapien_takes_scenario_argument());
+    assert!(!GameId::CampaignEvolved.sapien_takes_scenario_argument());
     for game in [
         "halo2_mcc",
         "halo3_mcc",
@@ -124,7 +124,8 @@ fn sapien_scenario_arguments_exclude_halo_ce() {
         "halo4_mcc",
         "halo2amp_mcc",
     ] {
-        assert!(sapien_supports_scenario_argument(game), "{game}");
+        let game = GameId::from_id(game).unwrap();
+        assert!(game.sapien_takes_scenario_argument(), "{game}");
     }
 }
 
@@ -143,7 +144,10 @@ fn every_shipped_game_has_a_decision_about_the_sapien_button() {
     assert!(!games.is_empty(), "definitions/ has per-game folders");
     let without_sapien: Vec<&String> = games
         .iter()
-        .filter(|game| !sapien_supports_scenario_argument(game))
+        .filter(|game| {
+            let game = GameId::from_id(game).unwrap_or_else(|| panic!("definitions/{game} names no game"));
+            !game.sapien_takes_scenario_argument()
+        })
         .collect();
     assert_eq!(
         without_sapien.len(),
@@ -192,15 +196,16 @@ fn startup_commands_and_executables_match_supported_games() {
         ),
     ];
     for (game, command, executable) in cases {
+        let game = GameId::from_id(game).unwrap();
         assert_eq!(scenario_startup_command(game, "levels\\test\\map"), command);
         assert_eq!(tag_test_executable_for_game(Some(game)), executable);
     }
     assert_eq!(
-        scenario_startup_command("halo3_mcc", "levels\\my map\\my map"),
+        scenario_startup_command(GameId::Halo3, "levels\\my map\\my map"),
         "game_start \"levels\\my map\\my map\""
     );
     assert_eq!(
-        scenario_startup_command("halo3_mcc", "levels\\semi;colon"),
+        scenario_startup_command(GameId::Halo3, "levels\\semi;colon"),
         "game_start \"levels\\semi;colon\""
     );
 }

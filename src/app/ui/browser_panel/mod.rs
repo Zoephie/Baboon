@@ -168,10 +168,10 @@ impl Baboon {
                 set_browser_modified_tags(ui, modified_tags);
                 set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
                 set_browser_deletable_keys(ui, deletable_keys);
-                set_browser_sound_language(ui, game.map(GameId::as_str), sound_language.as_deref());
+                set_browser_sound_language(ui, game, sound_language.as_deref());
                 set_browser_sound_available_languages(
                     ui,
-                    game.map(GameId::as_str),
+                    game,
                     sound_tags_root.as_deref(),
                 );
                 set_browser_entries_scanning(ui, scanning);
@@ -471,13 +471,10 @@ impl Baboon {
             self.kits[kit_index]
                 .source
                 .as_ref()
-                .and_then(|source| source.game.map(GameId::as_str)),
+                .and_then(|source| source.game),
             self.audio.language.as_deref(),
         );
-        let browser_game = self.kits[kit_index]
-            .source
-            .as_ref()
-            .and_then(|source| source.game.map(GameId::as_str));
+        let browser_game = self.kits[kit_index].source.as_ref().and_then(|source| source.game);
         let browser_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 Some(root.as_path())

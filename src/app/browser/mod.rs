@@ -170,17 +170,17 @@ fn browser_sound_language_id() -> egui::Id {
 /// the implementation term "Default" in an extraction command.
 pub(in crate::app) fn set_browser_sound_language(
     ui: &Ui,
-    game: Option<&str>,
+    game: Option<GameId>,
     language: Option<&str>,
 ) {
     let label = sound_language_label(game, language);
     ui.data_mut(|data| data.insert_temp(browser_sound_language_id(), label));
 }
 
-fn sound_language_label(game: Option<&str>, language: Option<&str>) -> String {
+fn sound_language_label(game: Option<GameId>, language: Option<&str>) -> String {
     match language {
         Some(language) => crate::app::editor::language_label(language),
-        None if matches!(game, Some("halo4_mcc") | Some("halo2amp_mcc")) => {
+        None if matches!(game, Some(GameId::Halo4) | Some(GameId::Halo2Amp)) => {
             "English (US)".to_owned()
         }
         None => "English".to_owned(),
@@ -200,14 +200,14 @@ fn browser_sound_available_languages_id() -> egui::Id {
 /// the source does not use an external per-language bank family.
 pub(in crate::app) fn set_browser_sound_available_languages(
     ui: &Ui,
-    game: Option<&str>,
+    game: Option<GameId>,
     tags_root: Option<&Path>,
 ) {
     let count = tags_root.and_then(|root| match game {
-        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc") => {
+        Some(GameId::Halo3) | Some(GameId::Halo3Odst) | Some(GameId::HaloReach) => {
             Some(blam_tags::audio::SoundBanks::available_languages(root).len())
         }
-        Some("halo4_mcc") | Some("halo2amp_mcc") => {
+        Some(GameId::Halo4) | Some(GameId::Halo2Amp) => {
             Some(blam_tags::audio::WwiseBanks::available_languages(root).len())
         }
         _ => None,
