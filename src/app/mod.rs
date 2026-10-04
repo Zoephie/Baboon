@@ -91,6 +91,8 @@ mod chimp;
 use chimp::ChimpFeature;
 #[cfg(test)]
 mod loose_fixture;
+#[cfg(test)]
+mod source_scan;
 use crate::core::created_tags::{CreatedTagLedger, CreatedTagRecord};
 use mods::container_write::ContainerLeaseId;
 mod help;

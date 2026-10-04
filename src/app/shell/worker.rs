@@ -755,7 +755,7 @@ mod spawn_worker_tests {
     /// from a thread of its own, which is what let a panic skip the report.
     #[test]
     fn exports_report_only_through_spawn_export() {
-        let sources = crate::test_kits::app_product_sources();
+        let sources = crate::app::source_scan::app_product_sources();
         for (file, text) in &sources {
             assert!(
                 !text.contains("send(WorkerMessage::ExportFinished("),
@@ -817,7 +817,7 @@ mod spawn_worker_tests {
     /// whatever the UI had marked in flight stayed that way for the session.
     #[test]
     fn background_work_starts_only_through_the_panic_safe_spawns() {
-        let sources = crate::test_kits::app_product_sources();
+        let sources = crate::app::source_scan::app_product_sources();
         let bare: Vec<&str> = sources
             .iter()
             .filter(|(file, text)| file != "shell/worker.rs" && text.contains("thread::spawn("))

@@ -4114,7 +4114,7 @@ mod frame_smoke_tests {
     /// `dialog:Type`.
     fn baboon_fields() -> Vec<(String, String)> {
         let source = include_root_str!("src/app/mod.rs");
-        let sources = crate::test_kits::app_product_sources();
+        let sources = crate::app::source_scan::app_product_sources();
         let mut out = Vec::new();
         for (name, ty) in struct_fields(source, "pub struct Baboon {") {
             if ty.ends_with("Feature") {
@@ -4195,7 +4195,7 @@ mod frame_smoke_tests {
     /// Files under `src/app/` (relative, `/`-separated) whose product code
     /// calls `egui::Window::new`.
     fn window_sources() -> Vec<String> {
-        crate::test_kits::app_product_sources()
+        crate::app::source_scan::app_product_sources()
             .into_iter()
             .filter(|(_, text)| opens_a_window(text))
             .map(|(file, _)| file)

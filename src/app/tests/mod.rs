@@ -39,7 +39,7 @@ mod classic_h2;
 fn helper_programs_launch_through_background_command() {
     let mut bare = Vec::new();
     let mut routed = 0;
-    for (file, text) in crate::test_kits::app_product_sources() {
+    for (file, text) in crate::app::source_scan::app_product_sources() {
         let text = text.as_str();
         // Test code launches git to build fixtures; only what ships counts.
         let shipped = text.split("#[cfg(test)]").next().unwrap_or(text);
