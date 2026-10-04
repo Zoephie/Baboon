@@ -96,7 +96,6 @@ use mods::container_write::ContainerLeaseId;
 mod help;
 use help::{HelpDocsState, HelpFeature, TutorialsState};
 mod compare;
-use compare::*;
 mod search;
 use search::*;
 mod references;

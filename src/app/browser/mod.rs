@@ -4,6 +4,7 @@
 //! thumbnails.
 
 use super::*;
+use crate::app::compare::{CompareCommand, GIT_REVIEW_TITLE};
 use crate::app::editor::{
     build_bitmap_preview, format_tag_reference_input, geometry_import_verb_for_group_name,
     truncate_for_cell,

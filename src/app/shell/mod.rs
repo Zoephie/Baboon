@@ -3,6 +3,10 @@
 //! around the features.
 
 use super::*;
+use crate::app::compare::{
+    GIT_REVIEW_KEY, GIT_REVIEW_TITLE, GitHistoryState, GitReviewView, TagCompareSource,
+    TagDiffFilters, TagDiffState, draw_git_review,
+};
 use crate::app::help::{DefDocs, HelpCommand};
 use crate::app::chimp::{
     ChimpDocument, ChimpDocumentUi, ChimpFeature, ChimpLevelPhase, ChimpReferrerScan,

@@ -3,6 +3,7 @@
 //! review, and their windows.
 
 use super::*;
+use crate::app::compare::{TagFieldDiff, describe_tag, diff_tags};
 use crate::app::chimp::ChimpMount;
 use crate::app::editor::{
     EditSinks, FieldEditContext, FieldFilter, FieldFilterAction, draw_foundation_group,
