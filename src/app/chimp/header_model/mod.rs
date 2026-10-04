@@ -9,7 +9,8 @@ use super::*;
 /// bulk-data map is serialized at all, and the Zen version decides the header's
 /// own shape. That is why nothing here is applied without first writing the
 /// package and reading it back.
-pub(super) struct ChimpIdentityEdit {
+#[derive(Clone)]
+pub(in crate::app) struct ChimpIdentityEdit {
     /// Free hex, so an unnamed bit can be set without inventing a checkbox for
     /// every flag the engine defines.
     pub(super) package_flags: String,
@@ -21,7 +22,8 @@ pub(super) struct ChimpIdentityEdit {
 }
 
 /// A draft export-map entry.
-pub(super) struct ChimpExportEdit {
+#[derive(Clone)]
+pub(in crate::app) struct ChimpExportEdit {
     pub(super) index: usize,
     pub(super) object_name: String,
     pub(super) object_flags: u32,

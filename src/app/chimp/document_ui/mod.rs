@@ -365,7 +365,7 @@ impl Baboon {
         });
         ui.separator();
 
-        let changed = match pane.view {
+        let edit = match pane.view {
             ChimpDocumentView::Document => {
                 if pane.document_text_dirty {
                     refresh_chimp_document_text(document, pane);
@@ -378,11 +378,11 @@ impl Baboon {
                     &pane.document_text,
                     &mut pane.document_lines,
                 );
-                false
+                None
             }
             ChimpDocumentView::Texture => {
                 draw_chimp_texture_preview(ui, document, pane, &mut self.model.prefs.bitmap_preview_view);
-                false
+                None
             }
             ChimpDocumentView::Mesh => {
                 match pane.mesh_preview.as_ref() {
@@ -398,7 +398,7 @@ impl Baboon {
                         ui.label(RichText::new("No mesh geometry found.").color(subtle_dark()));
                     }
                 }
-                false
+                None
             }
             ChimpDocumentView::Properties => {
                 egui::Panel::left(egui::Id::new((
@@ -433,6 +433,7 @@ impl Baboon {
             }
             ChimpDocumentView::Header => {
                 draw_chimp_header_view(ui, document, pane, &world, expert, &mut scan_referrers)
+                    .map(ChimpEdit::Header)
             }
             ChimpDocumentView::Metadata => {
                 if pane.metadata_text_dirty {
@@ -446,19 +447,16 @@ impl Baboon {
                     &pane.metadata_text,
                     &mut pane.metadata_lines,
                 );
-                false
+                None
             }
         };
-        if changed {
-            document.dirty = true;
-            document.edits += 1;
-            pane.document_text_dirty = true;
-            pane.metadata_text_dirty = true;
-            // Reference counts are derived from the same header the metadata
-            // text is, so they go stale at exactly the same moment.
-            pane.header_usage = None;
-            document.checkpoint_due = Some(ui.input(|input| input.time) + CHIMP_CHECKPOINT_DELAY);
-        }
+        // Every frame, so a frame without an edit closes the run of edits
+        // coalescing into one undo step.
+        self.commands.send(ChimpCommand::PaneDrawn {
+            kit: kit.id,
+            package: package.clone(),
+            edit,
+        });
         if scan_referrers {
             let ctx = ui.ctx().clone();
             self.begin_chimp_referrer_scan(kit_index, package.clone(), ctx);

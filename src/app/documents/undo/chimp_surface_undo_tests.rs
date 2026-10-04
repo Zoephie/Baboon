@@ -2,7 +2,8 @@
 //!
 //! Ctrl+Z, Ctrl+Y and the Edit menu act on the selected tag. On the Chimp
 //! surface that tag is hidden, so they used to change it without the user
-//! seeing anything happen. Chimp has no undo yet, so there they do nothing.
+//! seeing anything happen. There they act on the selected package instead
+//! (see `chimp::edit`), and with none selected they do nothing.
 
 use super::*;
 

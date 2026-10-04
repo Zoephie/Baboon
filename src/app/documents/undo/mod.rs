@@ -1,5 +1,5 @@
-//! Undo and redo for the open tag, through its journal, and for Chimp's surface
-//! when it is the one in front.
+//! Undo and redo for the open tag, through its journal, or for the selected
+//! Chimp package when Chimp's surface is the one in front.
 
 use super::*;
 use anyhow::Context as _;
@@ -7,7 +7,7 @@ use anyhow::Context as _;
 impl Baboon {
     pub(in crate::app) fn undo_current_tag(&mut self) {
         if self.chimp_surface_is_active() {
-            self.model.status = "Chimp has no undo yet; undo applies to tags.".to_owned();
+            self.step_current_chimp_journal(false);
             return;
         }
         if self.refuse_read_only_edit(self.model.active) {
@@ -26,7 +26,7 @@ impl Baboon {
 
     pub(in crate::app) fn redo_current_tag(&mut self) {
         if self.chimp_surface_is_active() {
-            self.model.status = "Chimp has no redo yet; redo applies to tags.".to_owned();
+            self.step_current_chimp_journal(true);
             return;
         }
         if self.refuse_read_only_edit(self.model.active) {
@@ -92,7 +92,10 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_undo_current(&self) -> bool {
-        if self.chimp_surface_is_active() || self.model.editing_kit_is_read_only(self.model.active) {
+        if self.chimp_surface_is_active() {
+            return self.can_step_chimp_journal(false);
+        }
+        if self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
         self.model.kits[self.model.active]
@@ -103,7 +106,10 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_redo_current(&self) -> bool {
-        if self.chimp_surface_is_active() || self.model.editing_kit_is_read_only(self.model.active) {
+        if self.chimp_surface_is_active() {
+            return self.can_step_chimp_journal(true);
+        }
+        if self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
         self.model.kits[self.model.active]

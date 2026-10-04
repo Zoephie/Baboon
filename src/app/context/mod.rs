@@ -141,11 +141,18 @@ pub(in crate::app) enum Command {
     App(AppAction),
     Settings(SettingsCommand),
     FirstRun(FirstRunCommand),
+    Chimp(ChimpCommand),
 }
 
 impl From<HelpCommand> for Command {
     fn from(command: HelpCommand) -> Self {
         Command::Help(command)
+    }
+}
+
+impl From<ChimpCommand> for Command {
+    fn from(command: ChimpCommand) -> Self {
+        Command::Chimp(command)
     }
 }
 
@@ -284,6 +291,7 @@ impl Baboon {
             Command::App(action) => self.apply_app_action(action, ctx),
             Command::Settings(command) => self.apply_settings_command(command, ctx),
             Command::FirstRun(command) => self.apply_first_run_command(command),
+            Command::Chimp(command) => self.apply_chimp_command(command, ctx),
         }
     }
 }

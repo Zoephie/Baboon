@@ -108,6 +108,7 @@ pub(super) fn rename_fixture() -> ChimpDocument {
         orphaned: false,
         checkpoint_due: None,
         edits: 0,
+        journal: Default::default(),
     }
 }
 

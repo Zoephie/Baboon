@@ -5,6 +5,8 @@ fn draw_pane<'a>(app: &'a mut Baboon, package: &'a str) -> impl FnMut(&mut egui:
         egui::CentralPanel::default().show(ui, |ui| {
             app.draw_chimp_document_pane(ui, 0, package, "test");
         });
+        let ctx = ui.ctx().clone();
+        app.apply_commands(&ctx);
     }
 }
 
@@ -14,6 +16,7 @@ fn draw_tiles(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
         egui::CentralPanel::default().show(ui, |ui| {
             app.draw_chimp_tiles(ui, &ctx, 0);
         });
+        app.apply_commands(&ctx);
     }
 }
 

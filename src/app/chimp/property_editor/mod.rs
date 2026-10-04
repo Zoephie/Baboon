@@ -3,15 +3,17 @@
 
 use super::*;
 
+/// Draw the selected export's editor. It edits the pane's draft, and returns
+/// the draft as the edit to send whenever a value in it changed.
 pub(super) fn draw_chimp_export_editor(
     ui: &mut Ui,
-    document: &mut ChimpDocument,
-    pane: &ChimpDocumentUi,
+    document: &ChimpDocument,
+    pane: &mut ChimpDocumentUi,
     usmap: &Usmap,
-) -> bool {
-    let Some(export) = document.exports.get_mut(pane.selected_export) else {
+) -> Option<ChimpEdit> {
+    let Some(export) = document.exports.get(pane.selected_export) else {
         ui.label("This package has no exports.");
-        return false;
+        return None;
     };
     ui.heading(&export.object);
     ui.label(
@@ -19,9 +21,9 @@ pub(super) fn draw_chimp_export_editor(
     );
     ui.add_space(6.0);
     let class = export.class.clone().unwrap_or_default();
-    match &mut export.decoded {
-        Ok(decoded) => match &mut decoded.block {
-            ExportBlock::Reflected(block) => {
+    match &export.decoded {
+        Ok(decoded) => match &decoded.block {
+            ExportBlock::Reflected(_) => {
                 ui.label(
                     RichText::new(
                         "Filled circle = editable scalar; outlined values are preserved read-only.",
@@ -30,24 +32,33 @@ pub(super) fn draw_chimp_export_editor(
                     .color(subtle_dark()),
                 );
                 ui.separator();
-                egui::ScrollArea::vertical()
+                let draft = chimp_property_draft(document, pane, decoded);
+                let changed = egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        let ExportBlock::Reflected(block) = &mut draft.decoded.block else {
+                            return false;
+                        };
                         draw_chimp_property_block(
                             ui,
                             block,
                             &class,
-                            &mut document.header.name_map,
+                            &mut draft.name_map,
                             usmap,
                             0,
                         )
                     })
-                    .inner
+                    .inner;
+                changed.then(|| ChimpEdit::Properties {
+                    export: draft.export,
+                    decoded: draft.decoded.clone(),
+                    name_map: draft.name_map.clone(),
+                })
             }
             ExportBlock::NotSerialized => {
                 ui.label("This class has no reflected property block.");
                 ui.label("Its native payload is preserved byte-for-byte.");
-                false
+                None
             }
             ExportBlock::Unreflected(block) => {
                 ui.label("Reflection data for this class is not available.");
@@ -55,15 +66,37 @@ pub(super) fn draw_chimp_export_editor(
                     "{} untyped bytes are preserved byte-for-byte.",
                     block.rest.len()
                 ));
-                false
+                None
             }
         },
         Err(error) => {
             ui.colored_label(Color32::from_rgb(210, 120, 80), error);
             ui.label("The raw export remains available for extraction and is never rewritten.");
-            false
+            None
         }
     }
+}
+
+/// The pane's draft of the selected export, `decoded`, retaken if the
+/// document has moved on since it was last taken.
+fn chimp_property_draft<'a>(
+    document: &ChimpDocument,
+    pane: &'a mut ChimpDocumentUi,
+    decoded: &Export,
+) -> &'a mut ChimpPropertyDraft {
+    let current = pane
+        .property_draft
+        .as_ref()
+        .is_some_and(|draft| draft.export == pane.selected_export && draft.edits == document.edits);
+    if !current {
+        pane.property_draft = Some(ChimpPropertyDraft {
+            export: pane.selected_export,
+            edits: document.edits,
+            decoded: decoded.clone(),
+            name_map: document.header.name_map.clone(),
+        });
+    }
+    pane.property_draft.as_mut().expect("just taken")
 }
 
 fn draw_chimp_property_block(

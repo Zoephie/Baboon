@@ -240,16 +240,19 @@ impl Editor {
     /// whether any frame reported a change.
     fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&mut egui::Ui))) -> bool {
         let Self {
+            install,
             document,
             pane,
             usmap,
             changed,
             frames,
-            ..
         } = self;
+        let world = install.world.clone();
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                *changed |= draw_chimp_export_editor(ui, document, pane, usmap);
+                if let Some(edit) = draw_chimp_export_editor(ui, document, pane, usmap) {
+                    *changed |= apply_chimp_edit(&world, document, pane, edit, 0.0);
+                }
             });
         };
         act(frames, &mut draw);
@@ -760,4 +763,24 @@ fn delegate_field_path_and_raw_values() {
 
     let lone = Lone::new(PropValue::Raw(vec![0; 7]));
     assert!(lone.shows("7 untyped bytes · preserved read-only"));
+}
+
+/// After an undo the editor shows the document as it now is: its draft is
+/// retaken rather than left holding the value that was undone.
+#[test]
+fn the_editor_shows_an_undone_value() {
+    let mut editor = Editor::new();
+    assert!(editor.act(|frames, draw| frames.enter_value_of("Count", "42", draw)));
+    end_chimp_edit_run(&mut editor.document);
+    let world = editor.install.world.clone();
+    step_chimp_journal(&world, &mut editor.document, &mut editor.pane, false, 0.0).unwrap();
+    assert!(matches!(editor.value("Count"), PropValue::Int(7)));
+    editor.act(|frames, draw| {
+        frames.frame(Vec::new(), draw);
+    });
+    let draft = editor.pane.property_draft.as_ref().expect("drawn");
+    assert!(matches!(
+        draft.decoded.properties().and_then(|block| block.get("Count")),
+        Some(PropValue::Int(7))
+    ));
 }

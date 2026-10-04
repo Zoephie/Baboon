@@ -94,7 +94,14 @@ impl Header {
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut asked = false;
-                *changed |= draw_chimp_header_view(ui, document, pane, &world, *expert, &mut asked);
+                // Applied as the pane's command is, so a refused commit
+                // lands on the pane the way it does in the app.
+                if let Some(commit) =
+                    draw_chimp_header_view(ui, document, pane, &world, *expert, &mut asked)
+                {
+                    *changed |=
+                        apply_chimp_edit(&world, document, pane, ChimpEdit::Header(commit), 0.0);
+                }
                 *scan |= asked;
             });
         };

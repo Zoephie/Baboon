@@ -2,6 +2,7 @@
 //! It owns the types every Chimp view reads and writes; decoding, saving and drawing belong elsewhere.
 
 use super::*;
+use crate::core::document::journal::EditJournal;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) enum KitSurface {
@@ -216,6 +217,8 @@ pub(in crate::app) struct ChimpDocument {
     /// Counts edits. A save records it when it rebuilds the package and, when
     /// it finishes, clears `dirty` only if no edit landed while it ran.
     pub(super) edits: u64,
+    /// Undo and redo, as rebuilt packages. See the `edit` module.
+    pub(super) journal: EditJournal,
 }
 
 /// One open package's pane: which tab and export it shows, the text and
@@ -251,6 +254,23 @@ pub(in crate::app) struct ChimpDocumentUi {
     /// Who imports this package. Not derived at load: there is no reverse index
     /// in the paks, so answering it means reading every mounted header.
     pub(super) referrers: ChimpReferrerState,
+    /// The selected export as the property editor edits it. See
+    /// [`ChimpPropertyDraft`].
+    pub(super) property_draft: Option<ChimpPropertyDraft>,
+}
+
+/// One export's values and the name map they intern into, edited in place by
+/// the property editor and sent to the document whole when they change.
+///
+/// Taken afresh whenever the document has moved on since — an undo, a header
+/// commit, or this draft's own last edit landing — so what the editor shows
+/// is always the document as it stands.
+pub(super) struct ChimpPropertyDraft {
+    pub(super) export: usize,
+    /// The document's [`ChimpDocument::edits`] when this was taken.
+    pub(super) edits: u64,
+    pub(super) decoded: Export,
+    pub(super) name_map: blam_tags::iostore::package::name_map::FNameMap,
 }
 
 #[derive(Default)]

@@ -10,6 +10,9 @@ use super::*;
 /// exhaustive dump — this one is the part a person can act on, and the counts
 /// are what make an edit's blast radius visible before there is anything to
 /// edit.
+///
+/// Drafts live on the pane; committing one returns it, for the document to
+/// apply. A refused commit comes back as `header_error`, the draft kept.
 pub(super) fn draw_chimp_header_view(
     ui: &mut Ui,
     document: &mut ChimpDocument,
@@ -17,7 +20,7 @@ pub(super) fn draw_chimp_header_view(
     world: &World,
     expert_mode: bool,
     scan_referrers: &mut bool,
-) -> bool {
+) -> Option<ChimpHeaderCommit> {
     if pane.header_usage.is_none() {
         pane.header_usage = Some(chimp_header_usage(document));
     }
@@ -45,18 +48,9 @@ pub(super) fn draw_chimp_header_view(
         pane.header_error = None;
     }
     if edits.commit_identity
-        && let Some(edit) = pane.header_identity_edit.take()
+        && let Some(edit) = &pane.header_identity_edit
     {
-        match apply_chimp_identity_edit(document, &edit) {
-            Ok(()) => {
-                pane.header_error = None;
-                return true;
-            }
-            Err(error) => {
-                pane.header_error = Some(error);
-                pane.header_identity_edit = Some(edit);
-            }
-        }
+        return Some(ChimpHeaderCommit::Identity(edit.clone()));
     }
     if let Some(index) = edits.start_export {
         pane.header_name_edit = None;
@@ -82,18 +76,9 @@ pub(super) fn draw_chimp_header_view(
         pane.header_error = None;
     }
     if edits.commit_export
-        && let Some(edit) = pane.header_export_edit.take()
+        && let Some(edit) = &pane.header_export_edit
     {
-        match apply_chimp_export_edit(world, document, &edit) {
-            Ok(()) => {
-                pane.header_error = None;
-                return true;
-            }
-            Err(error) => {
-                pane.header_error = Some(error);
-                pane.header_export_edit = Some(edit);
-            }
-        }
+        return Some(ChimpHeaderCommit::Export(edit.clone()));
     }
     if let Some((index, text)) = edits.start_name {
         pane.header_import_edit = None;
@@ -117,26 +102,12 @@ pub(super) fn draw_chimp_header_view(
         pane.header_error = None;
     }
     if let Some((index, text)) = edits.commit_name {
-        match apply_chimp_name_rename(document, index, &text) {
-            Ok(()) => {
-                pane.header_name_edit = None;
-                pane.header_error = None;
-                return true;
-            }
-            Err(error) => pane.header_error = Some(error),
-        }
+        return Some(ChimpHeaderCommit::Name { index, text });
     }
     if let Some((index, slot)) = edits.commit_import {
-        match apply_chimp_import_slot(document, index, slot) {
-            Ok(()) => {
-                pane.header_import_edit = None;
-                pane.header_error = None;
-                return true;
-            }
-            Err(error) => pane.header_error = Some(error),
-        }
+        return Some(ChimpHeaderCommit::Import { index, slot });
     }
-    false
+    None
 }
 
 /// What one draw of the Header view asked for, applied once its borrows are

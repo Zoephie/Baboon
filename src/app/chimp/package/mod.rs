@@ -148,7 +148,7 @@ pub(super) fn chimp_mesh_kind(exports: &[ChimpExport]) -> Option<ChimpMeshKind> 
 }
 
 /// The shared front half of loading a package: header, payloads, exports.
-fn decode_chimp_exports(
+pub(super) fn decode_chimp_exports(
     world: &World,
     provider: &PackageProvider,
     bytes: &[u8],
@@ -236,6 +236,7 @@ pub(super) fn decode_chimp_document(
         orphaned: false,
         checkpoint_due: None,
         edits: 0,
+        journal: EditJournal::default(),
     })
 }
 
@@ -285,6 +286,7 @@ impl ChimpDocumentUi {
             header_identity_edit: None,
             header_error: None,
             referrers: ChimpReferrerState::Idle,
+            property_draft: None,
         };
         refresh_chimp_document_text(document, &mut ui);
         refresh_chimp_metadata_text(document, &mut ui, world);

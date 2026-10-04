@@ -57,6 +57,7 @@ use crate::app::mods::container_write::{
 
 mod browser_ui;
 mod document_ui;
+mod edit;
 mod extract;
 mod header_model;
 mod header_ui;
@@ -69,6 +70,7 @@ mod state;
 mod test_support;
 
 use document_ui::*;
+pub(in crate::app) use edit::*;
 pub(in crate::app) use extract::*;
 use header_model::*;
 use header_ui::*;
@@ -83,9 +85,9 @@ use test_support::*;
 impl Baboon {
     /// Whether the active kit is showing its Chimp surface rather than tags.
     ///
-    /// Undo and redo act on the selected tag, which is hidden there, and Chimp
-    /// has no undo of its own yet; so on that surface they do nothing rather
-    /// than silently changing a tag the user cannot see.
+    /// Undo and redo act on the selected package there, not on the selected
+    /// tag, which is hidden: changing it would change something the user
+    /// cannot see.
     pub(in crate::app) fn chimp_surface_is_active(&self) -> bool {
         self.model.prefs.enable_chimp && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp
     }
