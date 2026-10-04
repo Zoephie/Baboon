@@ -356,8 +356,6 @@ pub(in crate::app) struct KitBrowser {
     /// much to repeat for every frame the browser draws.
     pub(in crate::app) deletable_keys: std::sync::Arc<HashSet<String>>,
     pub(in crate::app) deletable_keys_generation: Option<u64>,
-    pub(in crate::app) active_favorite_entries: Vec<TagEntry>,
-    pub(in crate::app) active_favorite_folders: Vec<PathBuf>,
 }
 
 impl KitBrowser {

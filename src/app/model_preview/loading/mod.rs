@@ -53,7 +53,8 @@ impl Baboon {
         ctx: &egui::Context,
     ) {
         let kit = &self.model.kits[kit_index];
-        let Some(state) = kit.caches.model_previews.get(key) else {
+        let view = &self.views[kit.id];
+        let Some(state) = view.caches.model_previews.get(key) else {
             return;
         };
         if state.active_tab != ModelTagPanelTab::ModelPreview {
@@ -106,7 +107,7 @@ impl Baboon {
         let request_id =
             NEXT_MODEL_PREVIEW_LOAD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        let state = self.model.kits[kit_index]
+        let state = self.views[self.model.kits[kit_index].id]
             .caches.model_previews
             .get_mut(key)
             .expect("preview state checked above");
@@ -168,7 +169,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.model.kits[kit_index].caches.model_previews.get_mut(&key) else {
+        let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };
         if state.preview_load_id != Some(request_id) {

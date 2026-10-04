@@ -31,6 +31,7 @@ impl Baboon {
             return None;
         }
         let kit = &mut self.model.kits[kit_index];
+        let view = &mut self.views[kit.id];
         let doc = kit.parsed_tags.get_mut(tag_key)?;
         let applied = apply_deferred_ops(doc, ops, label);
         if step == UndoStep::Own {
@@ -39,10 +40,10 @@ impl Baboon {
         // Per-edit outcomes: a draft whose value applied cleanly is marked
         // clean, while one the parser rejected keeps the text the user typed
         // instead of snapping back to the old value.
-        kit.edit_buffers
+        view.edit_buffers
             .accept_successful_edits(tag_key, &applied.outcomes);
         if applied.model_variants_changed
-            && let Some(preview) = kit.caches.model_previews.get_mut(tag_key)
+            && let Some(preview) = view.caches.model_previews.get_mut(tag_key)
         {
             preview.invalidate_load();
         }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::kits::{KitMut, KitView};
 
 /// Two sources loaded one after another into the same kit must not share a
 /// generation, or a job stamped against the first resolves against the
@@ -48,23 +49,24 @@ fn a_second_source_in_a_kit_never_reuses_a_generation() {
 #[test]
 fn closing_tabs_drops_everything_kept_for_them() {
     let mut kit = Kit::empty(KitId(0), TagNameIndex::default());
+    let mut view = KitView::for_test(&kit);
     for key in ["kept", "closed"] {
-        kit.caches.model_previews
+        view.caches.model_previews
             .insert(key.to_owned(), ModelPreviewState::default());
-        kit.caches.bitmap_previews
+        view.caches.bitmap_previews
             .insert(key.to_owned(), BitmapPreviewState::default());
         kit.loading_tags.insert(key.to_owned());
-        kit.edit_buffers
+        view.edit_buffers
             .insert_clean(format!("{key}|name"), "x".to_owned());
     }
 
-    kit.drop_documents_except(Some("kept"));
-    assert_eq!(kit.caches.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
-    assert_eq!(kit.caches.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
+    KitMut::new(&mut kit, &mut view).drop_documents_except(Some("kept"));
+    assert_eq!(view.caches.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
+    assert_eq!(view.caches.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
     assert_eq!(kit.loading_tags.iter().collect::<Vec<_>>(), ["kept"]);
 
-    kit.drop_document("kept");
-    assert!(kit.caches.model_previews.is_empty());
-    assert!(kit.caches.bitmap_previews.is_empty());
+    KitMut::new(&mut kit, &mut view).drop_document("kept");
+    assert!(view.caches.model_previews.is_empty());
+    assert!(view.caches.bitmap_previews.is_empty());
     assert!(kit.loading_tags.is_empty());
 }

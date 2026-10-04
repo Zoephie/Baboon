@@ -27,12 +27,13 @@ impl Baboon {
         }
         let label = self.tag_path_label(key);
         let kit_state = &mut self.model.kits[kit];
+        let view = &mut self.views[kit_state.id];
         kit_state.parsed_tags.remove(key);
         kit_state.loading_tags.remove(key);
-        kit_state.caches.bitmap_previews.remove(key);
-        kit_state.caches.model_previews.remove(key);
-        kit_state.find_filter_applied.remove(key);
-        kit_state.edit_buffers.forget_tag(key);
+        view.caches.bitmap_previews.remove(key);
+        view.caches.model_previews.remove(key);
+        view.find_filter_applied.remove(key);
+        view.edit_buffers.forget_tag(key);
         // Persist the removal. The document is gone by now, so the capture
         // below cannot put the overlay straight back.
         if had_overlay {
@@ -72,15 +73,16 @@ impl Baboon {
         ) {
             return false;
         }
-        self.model.kits[kit].close_tag_pane(key);
+        self.kit_and_view(kit).close_tag_pane(key);
         let folder_seeds = self.model.kits[kit].folder_seeds();
         let kit_state = &mut self.model.kits[kit];
+        let view = &mut self.views[kit_state.id];
         kit_state.parsed_tags.remove(key);
         kit_state.loading_tags.remove(key);
-        kit_state.caches.bitmap_previews.remove(key);
-        kit_state.caches.model_previews.remove(key);
-        kit_state.find_filter_applied.remove(key);
-        kit_state.edit_buffers.forget_tag(key);
+        view.caches.bitmap_previews.remove(key);
+        view.caches.model_previews.remove(key);
+        view.find_filter_applied.remove(key);
+        view.edit_buffers.forget_tag(key);
         if kit_state.selected_key.as_deref() == Some(key) {
             kit_state.selected_key = None;
         }
@@ -105,7 +107,7 @@ impl Baboon {
     pub(in crate::app) fn close_tab(&mut self, key: &str) {
         // `close_tag_pane` re-derives the open set and moves the selection off
         // a removed tag, so there is nothing to fix up afterwards.
-        self.model.kits[self.model.active].close_tag_pane(key);
+        self.kit_and_view(self.model.active).close_tag_pane(key);
         self.unload_tag(key);
         self.editor.color_popup = None;
         self.editor.function_popup = None;
@@ -336,21 +338,21 @@ impl Baboon {
 
     pub(in crate::app) fn close_all_tabs(&mut self) {
         let id = self.model.kits[self.model.active].id;
-        self.model.kits[self.model.active].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
+        self.views[self.model.kits[self.model.active].id].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
         self.model.kits[self.model.active].open_tabs.clear();
-        self.model.kits[self.model.active].drop_documents_except(None);
+        self.kit_and_view(self.model.active).drop_documents_except(None);
         self.model.kits[self.model.active].selected_key = None;
         self.editor.color_popup = None;
         self.editor.function_popup = None;
     }
 
     pub(in crate::app) fn close_all_tabs_but(&mut self, key: &str) {
-        for open in self.model.kits[self.model.active].tabs_from_tree() {
+        for open in self.views[self.model.kits[self.model.active].id].tabs_from_tree() {
             if open != key {
-                self.model.kits[self.model.active].close_tag_pane(&open);
+                self.kit_and_view(self.model.active).close_tag_pane(&open);
             }
         }
-        self.model.kits[self.model.active].drop_documents_except(Some(key));
+        self.kit_and_view(self.model.active).drop_documents_except(Some(key));
         self.model.kits[self.model.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.editor.color_popup = None;
         self.editor.function_popup = None;
@@ -438,7 +440,7 @@ impl Baboon {
                     // without this "Don't Save" cleared a flag while the edited
                     // bytes stayed behind and came back on reopen.
                     self.forget_campaign_overlay(kit, tag_id);
-                    self.model.kits[kit].edit_buffers.forget_tag(tag_id);
+                    self.views[self.model.kits[kit].id].edit_buffers.forget_tag(tag_id);
                     // Declining to save a brand-new tag discards the tag, not
                     // just its edits: nothing backs it but the document the
                     // close is about to drop. Its browser entry goes with it.

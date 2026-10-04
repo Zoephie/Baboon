@@ -211,12 +211,12 @@ impl ThumbnailSource for Bitmaps {
     const MENU_ITEM: &'static str = "Extract bitmap images...";
     const CRASHED: &'static str = "bitmap decoder crashed";
 
-    fn library(kit: &Kit) -> &ThumbnailLibrary<Self> {
-        &kit.bitmap_browser
+    fn library(view: &KitView) -> &ThumbnailLibrary<Self> {
+        &view.bitmap_browser
     }
 
-    fn library_mut(kit: &mut Kit) -> &mut ThumbnailLibrary<Self> {
-        &mut kit.bitmap_browser
+    fn library_mut(view: &mut KitView) -> &mut ThumbnailLibrary<Self> {
+        &mut view.bitmap_browser
     }
 
     fn lists(entry: &TagEntry) -> bool {
@@ -262,7 +262,7 @@ impl Baboon {
             self.model.status = "Load an editing kit before browsing its bitmaps".to_owned();
             return;
         }
-        self.model.kits[kit].open_tag_pane(BITMAP_LIBRARY_KEY);
+        self.kit_and_view(kit).open_tag_pane(BITMAP_LIBRARY_KEY);
     }
 
     pub(in crate::app) fn queue_bitmap_hover_thumbnails(

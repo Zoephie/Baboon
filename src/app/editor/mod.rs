@@ -358,3 +358,19 @@ pub(in crate::app) struct EditorCaches {
     /// one walks several packages.
     pub(in crate::app) ce_sound_bindings: HashMap<String, Arc<crate::core::source::ce_audio::CeSoundBinding>>,
 }
+
+impl EditorCaches {
+    /// Drop every cached render-method definition and option, and move the
+    /// epoch on so open shader grids rebuild.
+    ///
+    /// The caches are keyed by the referenced path and never checked against
+    /// the file again, so saving a definition or option (or creating one that
+    /// was a cached miss) left the grid showing the old parameters until the
+    /// source was reloaded. They are pure caches: dropping them costs one
+    /// re-read each and cannot be wrong.
+    pub(in crate::app) fn forget_render_methods(&mut self) {
+        self.rmdf_cache.clear();
+        self.rmop_cache.clear();
+        self.render_method_epoch = self.render_method_epoch.wrapping_add(1);
+    }
+}

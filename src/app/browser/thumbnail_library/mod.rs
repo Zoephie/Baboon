@@ -168,8 +168,8 @@ pub(in crate::app) trait ThumbnailSource: Sized + 'static {
     /// Why a worker sent no thumbnail, when it panicked.
     const CRASHED: &'static str;
 
-    fn library(kit: &Kit) -> &ThumbnailLibrary<Self>;
-    fn library_mut(kit: &mut Kit) -> &mut ThumbnailLibrary<Self>;
+    fn library(view: &KitView) -> &ThumbnailLibrary<Self>;
+    fn library_mut(view: &mut KitView) -> &mut ThumbnailLibrary<Self>;
     /// Whether the library lists this tag.
     fn lists(entry: &TagEntry) -> bool;
     /// The group line under a cell's name.
@@ -272,7 +272,7 @@ impl Baboon {
     ) {
         self.refresh_thumbnail_library::<S>(kit_index, ctx);
 
-        let library = S::library(&self.model.kits[kit_index]);
+        let library = S::library(&self.views[self.model.kits[kit_index].id]);
         let cell = library.cell_size();
         let total = library.matches.len();
         let all = library.entries.len();
@@ -318,7 +318,7 @@ impl Baboon {
     ) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Search").color(subtle_dark()));
-            let library = S::library_mut(&mut self.model.kits[kit_index]);
+            let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
             ui.add(
                 egui::TextEdit::singleline(&mut library.filter)
                     .hint_text(placeholder_text(S::SEARCH_HINT))
@@ -424,7 +424,7 @@ impl Baboon {
         // Requested at twice the cell's point size, so the thumbnail still looks
         // right after the slider grows a little and on a high-DPI display.
         let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
-        let library = S::library(&self.model.kits[kit_index]);
+        let library = S::library(&self.views[self.model.kits[kit_index].id]);
         let entries = wanted
             .into_iter()
             .filter_map(|key| {
@@ -443,7 +443,7 @@ impl Baboon {
         // tab ever appeared. `draw_tag_tiles` drains these after the walk,
         // which is where every other pane mutation is applied for the same
         // reason.
-        let library = S::library_mut(&mut self.model.kits[kit_index]);
+        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
         match action {
             Some(CellAction::Open(key)) => library.pending_open = Some(key),
             Some(CellAction::MenuAction(key)) => library.pending_menu_action = Some(key),
@@ -460,7 +460,7 @@ impl Baboon {
         cell: f32,
         wanted: &mut Vec<String>,
     ) -> Option<CellAction> {
-        let library = S::library_mut(&mut self.model.kits[kit_index]);
+        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
         let entry_index = *library.matches.get(index)?;
         let entry = library.entries.get(entry_index)?;
         let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
@@ -611,7 +611,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) {
         let generation = self.model.kits[kit_index].generation;
-        let stale = S::library(&self.model.kits[kit_index]).entries_for != Some(generation);
+        let stale = S::library(&self.views[self.model.kits[kit_index].id]).entries_for != Some(generation);
         if stale {
             let entries: Vec<TagEntry> = self.model.kits[kit_index]
                 .source
@@ -622,7 +622,7 @@ impl Baboon {
                 .filter(|entry| S::lists(entry))
                 .cloned()
                 .collect();
-            let library = S::library_mut(&mut self.model.kits[kit_index]);
+            let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
             let listed: HashSet<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
             if let Ok(mut thumbnails) = library.thumbnails.lock() {
                 thumbnails.revalidate(|key| listed.contains(key));
@@ -645,13 +645,13 @@ impl Baboon {
             .as_ref()
             .is_some_and(|source| source.all_entries.is_empty())
             && !self.model.kits[kit_index].scanning_entries
-            && !S::library(&self.model.kits[kit_index]).requested_scan;
+            && !S::library(&self.views[self.model.kits[kit_index].id]).requested_scan;
         if needs_scan {
-            S::library_mut(&mut self.model.kits[kit_index]).requested_scan = true;
+            S::library_mut(&mut self.views[self.model.kits[kit_index].id]).requested_scan = true;
             self.begin_scan_all_entries_in(kit_index, ctx.clone(), "Indexing tags...");
         }
 
-        let library = S::library_mut(&mut self.model.kits[kit_index]);
+        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
         if library.matched_for.as_deref() != Some(library.filter.as_str()) {
             let filter = library.filter.trim().to_owned();
             library.matches = library
@@ -691,7 +691,7 @@ impl Baboon {
 
         for entry in entries {
             let key = entry.key.clone();
-            let library = S::library_mut(&mut self.model.kits[kit_index]);
+            let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
             let cached = library
                 .thumbnails
                 .lock()
@@ -736,7 +736,7 @@ impl Baboon {
         // Clear the in-flight marker before deciding whether the result is
         // stale. Returning first, as this did, left it set after any generation
         // bump that landed mid-job, so the work was never asked for again.
-        S::library_mut(&mut self.model.kits[kit_index])
+        S::library_mut(&mut self.views[self.model.kits[kit_index].id])
             .pending
             .remove(&key);
         if self.resolve_stamp(stamp).is_none() {
@@ -754,7 +754,7 @@ impl Baboon {
             )),
             Err(_) => None,
         };
-        let library = S::library_mut(&mut self.model.kits[kit_index]);
+        let library = S::library_mut(&mut self.views[self.model.kits[kit_index].id]);
         if let Ok(mut thumbnails) = library.thumbnails.lock() {
             thumbnails.insert(key, texture);
         }

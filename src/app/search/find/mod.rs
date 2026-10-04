@@ -758,7 +758,7 @@ impl Baboon {
                 .as_ref()
                 .and_then(|source| source.game);
             if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
-                self.model.kits[self.model.active]
+                self.views[self.model.kits[self.model.active].id]
                     .caches.model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()

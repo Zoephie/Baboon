@@ -14,7 +14,7 @@ fn a_library_scans_its_own_kit_not_the_focused_one() {
     std::fs::create_dir_all(&root).unwrap();
     let mut app = Baboon::for_test();
     let second = KitId(app.model.kits[0].id.0 + 1);
-    app.model.kits.push(Kit::empty(second, TagNameIndex::default()));
+    app.push_kit(Kit::empty(second, TagNameIndex::default()));
     app.model.active = 1;
     app.install_loaded_source(LoadedSourceData {
         label: "library kit".to_owned(),

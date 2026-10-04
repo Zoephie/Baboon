@@ -88,7 +88,7 @@ fn out_of_range_prefs_are_corrected_when_loaded() {
 fn a_changed_pref_is_what_gets_written() {
     let mut app = app_with(GuiPrefs::default());
     app.model.prefs.expert_mode = true;
-    app.model.kits[0].browser.mode = BrowserMode::Groups;
+    app.views[app.model.kits[0].id].browser.mode = BrowserMode::Groups;
     let written = app.current_prefs();
     assert!(written.expert_mode);
     assert_eq!(

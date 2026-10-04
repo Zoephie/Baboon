@@ -871,7 +871,7 @@ impl Baboon {
                 }
             } else {
                 for kit in &mut self.model.kits {
-                    kit.surface = KitSurface::Tags;
+                    self.views[kit.id].surface = KitSurface::Tags;
                     kit.chimp = ChimpState::default();
                 }
             }

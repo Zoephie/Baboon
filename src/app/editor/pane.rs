@@ -95,7 +95,7 @@ impl Baboon {
                 self.search.find.whole_word,
                 doc.content_stamp(),
             );
-            let cached = self.model.kits[kit_index]
+            let cached = self.views[self.model.kits[kit_index].id]
                 .find_filter_applied
                 .get(&key)
                 .filter(|applied| applied.signature == signature)
@@ -110,7 +110,7 @@ impl Baboon {
                     self.search.find.match_case,
                     self.search.find.whole_word,
                 ));
-                self.model.kits[kit_index].find_filter_applied.insert(
+                self.views[self.model.kits[kit_index].id].find_filter_applied.insert(
                     key.clone(),
                     AppliedFindFilter {
                         signature,
@@ -121,7 +121,7 @@ impl Baboon {
             });
             Some(FieldFilterAction::Apply(filter))
         } else {
-            self.model.kits[kit_index]
+            self.views[self.model.kits[kit_index].id]
                 .find_filter_applied
                 .remove(&key)
                 .map(|_| FieldFilterAction::RestoreDefaults)
@@ -131,9 +131,10 @@ impl Baboon {
         let sound_has_focus = self.model.active == kit_index
             && self.model.kits[kit_index].selected_key.as_deref() == Some(key.as_str());
         let kit = &mut self.model.kits[kit_index];
+        let view = &mut self.views[kit.id];
         let kit_id = kit.id;
         let bitmap_hover_requests =
-            begin_bitmap_hovers(ui, Arc::clone(&kit.bitmap_browser.thumbnails));
+            begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
         let source = kit.source.as_ref();
         let names = &kit.names;
 
@@ -154,7 +155,7 @@ impl Baboon {
         // Taken rather than read: it is a one-shot, and egui remembers the
         // state each container lands in, so forcing it for a single frame is
         // what makes it stick.
-        let expand_all = kit.pending_expand.remove(&key);
+        let expand_all = view.pending_expand.remove(&key);
         let sound_volume = self.audio.volume();
         let sound_speed = self.audio.speed();
         let sound_owner = crate::app::audio::SoundOwner {
@@ -201,7 +202,7 @@ impl Baboon {
             status: Some(&mut self.model.status),
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
             show_block_sizes: self.model.prefs.show_block_sizes,
-            buffers: &mut kit.edit_buffers,
+            buffers: &mut view.edit_buffers,
             pending: &mut ops.pending,
             block_ops: &mut ops.block_ops,
             block_confirm: &mut self.editor.block_confirm,
@@ -248,7 +249,7 @@ impl Baboon {
         };
 
         if is_bitmap_tag(entry) {
-            let preview = kit.caches.bitmap_previews.entry(key.clone()).or_default();
+            let preview = view.caches.bitmap_previews.entry(key.clone()).or_default();
             preview.apply_view_settings(bitmap_preview_view);
             draw_bitmap_tag(
                 ui,
@@ -269,7 +270,7 @@ impl Baboon {
                 names,
                 source.and_then(|source| source.game),
             ) {
-                kit.caches.model_previews.entry(key.clone()).or_default()
+                view.caches.model_previews.entry(key.clone()).or_default()
             } else {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
@@ -281,7 +282,7 @@ impl Baboon {
                 doc.id,
                 doc.dirty.revision(),
                 kit.generation,
-                kit.caches.render_method_epoch,
+                view.caches.render_method_epoch,
             );
             draw_tag(
                 ui,
@@ -291,9 +292,9 @@ impl Baboon {
                 names,
                 source.map(|source| &source.source),
                 source.and_then(|source| source.game),
-                &mut kit.caches.rmdf_cache,
-                &mut kit.caches.rmop_cache,
-                &mut kit.caches.h2_templates,
+                &mut view.caches.rmdf_cache,
+                &mut view.caches.rmop_cache,
+                &mut view.caches.h2_templates,
                 &mut grid_color_popup,
                 &mut grid_function_popup,
                 model_preview,
@@ -585,8 +586,7 @@ impl Baboon {
         entry: &TagEntry,
     ) {
         let key = entry.key.clone();
-        let is_favorite = self.model.kits[kit_index]
-            .browser.active_favorite_entries
+        let is_favorite = self.model.kits[kit_index].active_favorite_entries
             .iter()
             .any(|favorite| favorite.key == key);
         let favorite_enabled = matches!(entry.location, TagEntryLocation::LooseFile(_));

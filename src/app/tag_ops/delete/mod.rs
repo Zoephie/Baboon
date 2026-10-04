@@ -52,8 +52,9 @@ fn loose_trash_destination(
 /// The generation bump comes last, and is what makes the change visible: the
 /// browser's memoised filter and the field-value index are both keyed on it, so
 /// without it a search would keep answering with a tag that is gone.
-fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
-    kit.drop_document(key);
+fn forget_tag_in_kit(mut both: KitMut, key: &str) {
+    both.drop_document(key);
+    let kit = both.kit;
     if kit.selected_key.as_deref() == Some(key) {
         kit.selected_key = None;
     }
@@ -297,7 +298,7 @@ impl Baboon {
     /// since it was last resolved.
     pub(in crate::app) fn refresh_deletable_keys(&mut self, kit_index: usize) {
         let generation = self.model.kits[kit_index].generation;
-        if self.model.kits[kit_index].browser.deletable_keys_generation == Some(generation) {
+        if self.views[self.model.kits[kit_index].id].browser.deletable_keys_generation == Some(generation) {
             return;
         }
         let keys = self.model.kits[kit_index]
@@ -305,8 +306,8 @@ impl Baboon {
             .as_ref()
             .map(|source| deletable_container_keys(source, &self.tag_ops.created_tags))
             .unwrap_or_default();
-        self.model.kits[kit_index].browser.deletable_keys = Arc::new(keys);
-        self.model.kits[kit_index].browser.deletable_keys_generation = Some(generation);
+        self.views[self.model.kits[kit_index].id].browser.deletable_keys = Arc::new(keys);
+        self.views[self.model.kits[kit_index].id].browser.deletable_keys_generation = Some(generation);
     }
 
     /// Open the delete confirmation for `key`, resolving everything the dialog
@@ -672,8 +673,8 @@ impl Baboon {
         // First, while the entry is still resolvable: a stashed overlay for a
         // tag that no longer exists would resurrect it on the next project load.
         self.forget_campaign_overlay(kit_index, key);
-        self.model.kits[kit_index].close_tag_pane(key);
-        forget_tag_in_kit(&mut self.model.kits[kit_index], key);
+        self.kit_and_view(kit_index).close_tag_pane(key);
+        forget_tag_in_kit(self.kit_and_view(kit_index), key);
         // Navigation state names tags by key, and this key now names nothing.
         if self
             .browser.reveal_target

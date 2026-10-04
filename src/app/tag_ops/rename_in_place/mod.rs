@@ -230,8 +230,9 @@ fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
 /// Deliberately does **not** touch the source's entries, tree or indices; that
 /// is `apply_container_rename_source_state`, which runs against the mounted
 /// source and can fail on its own terms. Splitting them keeps this function
-/// total: given any kit and any two keys, it always leaves a consistent kit.
-pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
+/// total: given any kit, its view and any two keys, it always leaves both
+/// consistent.
+pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, view: &mut KitView, old: &str, new: &str) {
     if old == new {
         return;
     }
@@ -241,11 +242,11 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // to lose any of the three.
     move_key(&mut kit.parsed_tags, old, new);
     move_key(&mut kit.restore.pending_history, old, new);
-    move_key(&mut kit.caches.bitmap_previews, old, new);
-    move_key(&mut kit.caches.model_previews, old, new);
-    move_key(&mut kit.caches.ce_sound_bindings, old, new);
-    move_key(&mut kit.pending_expand, old, new);
-    move_key(&mut kit.find_filter_applied, old, new);
+    move_key(&mut view.caches.bitmap_previews, old, new);
+    move_key(&mut view.caches.model_previews, old, new);
+    move_key(&mut view.caches.ce_sound_bindings, old, new);
+    move_key(&mut view.pending_expand, old, new);
+    move_key(&mut view.find_filter_applied, old, new);
 
     if kit.loading_tags.remove(old) {
         kit.loading_tags.insert(new.to_owned());
@@ -255,7 +256,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // value the user is mid-way through typing into a specific document, and
     // re-applying one over a document that has just changed identity is a
     // silent edit nobody asked for.
-    kit.edit_buffers.forget_tag(old);
+    view.edit_buffers.forget_tag(old);
 
     kit.keywords.rekey_tag(old, new);
     kit.keywords.save_if_dirty();
@@ -271,7 +272,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // The pane payload *is* the key, so the tiles are edited in place. Closing
     // and reopening the tab would work and would also throw away wherever the
     // user had split or dragged it to.
-    let panes: Vec<egui_tiles::TileId> = kit
+    let panes: Vec<egui_tiles::TileId> = view
         .tag_tree
         .tiles
         .iter()
@@ -281,7 +282,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
         })
         .collect();
     for id in panes {
-        if let Some(egui_tiles::Tile::Pane(key)) = kit.tag_tree.tiles.get_mut(id) {
+        if let Some(egui_tiles::Tile::Pane(key)) = view.tag_tree.tiles.get_mut(id) {
             *key = new.to_owned();
         }
     }
@@ -295,12 +296,12 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // holding the reference — so a renamed render-method definition leaves a
     // cached hit under a path that no longer resolves. They are pure caches, so
     // dropping them costs one re-resolve and cannot be wrong.
-    kit.forget_render_methods();
-    kit.caches.h2_templates = H2TemplateCache::default();
+    view.caches.forget_render_methods();
+    view.caches.h2_templates = H2TemplateCache::default();
 
     // Forces `modified_tags` to be rebuilt: it maps keys to entries, and the
     // signature is what decides whether that is worth doing again.
-    kit.browser.modified_signature.clear();
+    view.browser.modified_signature.clear();
 
     // Last, and what makes the rest visible: the browser's memoised filter, the
     // deletable-key set and the field-value index are all keyed on the
@@ -768,7 +769,8 @@ impl Baboon {
         // The project stashes overlays under the tag's logical path, so the old
         // identity has to go or a checkpoint restores the tag at both paths.
         self.forget_campaign_overlay(kit_index, &result.old_key);
-        rekey_tag_in_kit(&mut self.model.kits[kit_index], &result.old_key, &new_key);
+        let KitMut { kit, view } = self.kit_and_view(kit_index);
+        rekey_tag_in_kit(kit, view, &result.old_key, &new_key);
         self.refresh_favorite_entries_for(kit_index);
         if self
             .browser.reveal_target

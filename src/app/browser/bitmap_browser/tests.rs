@@ -233,15 +233,16 @@ fn opening_a_bitmap_must_wait_until_the_tag_tree_is_back() {
 
     // What the draw does: take the tree, walk it, put it back.
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
+    let mut view = KitView::for_test(&kit);
     let taken = std::mem::replace(
-        &mut kit.tag_tree,
+        &mut view.tag_tree,
         egui_tiles::Tree::empty(tag_tree_id(kit.id)),
     );
 
     // The bug: opening during the walk lands in the placeholder.
-    kit.open_tag_pane(KEY);
-    kit.tag_tree = taken;
-    kit.sync_open_tabs();
+    KitMut::new(&mut kit, &mut view).open_tag_pane(KEY);
+    view.tag_tree = taken;
+    KitMut::new(&mut kit, &mut view).sync_open_tabs();
     assert!(
         kit.open_tabs.is_empty(),
         "a pane opened during the walk cannot survive the tree being restored"
@@ -249,20 +250,21 @@ fn opening_a_bitmap_must_wait_until_the_tag_tree_is_back() {
 
     // The fix: park it during the walk, open it once the tree is back.
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
+    let mut view = KitView::for_test(&kit);
     let taken = std::mem::replace(
-        &mut kit.tag_tree,
+        &mut view.tag_tree,
         egui_tiles::Tree::empty(tag_tree_id(kit.id)),
     );
-    kit.bitmap_browser.pending_open = Some(KEY.to_owned());
-    kit.tag_tree = taken;
-    if let Some(key) = kit.bitmap_browser.pending_open.take() {
-        kit.open_tag_pane(&key);
+    view.bitmap_browser.pending_open = Some(KEY.to_owned());
+    view.tag_tree = taken;
+    if let Some(key) = view.bitmap_browser.pending_open.take() {
+        KitMut::new(&mut kit, &mut view).open_tag_pane(&key);
     }
 
     assert_eq!(kit.open_tabs, vec![KEY.to_owned()]);
     assert_eq!(kit.selected_key.as_deref(), Some(KEY));
     assert!(
-        kit.bitmap_browser.pending_open.is_none(),
+        view.bitmap_browser.pending_open.is_none(),
         "the request is one-shot; leaving it set reopens the tab every frame"
     );
 }
@@ -276,9 +278,10 @@ fn opening_a_bitmap_must_wait_until_the_tag_tree_is_back() {
 #[test]
 fn an_open_bitmap_library_shows_up_in_the_kits_open_tabs() {
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
+    let mut view = KitView::for_test(&kit);
     assert!(!kit.open_tabs.iter().any(|key| key == BITMAP_LIBRARY_KEY));
 
-    kit.open_tag_pane(BITMAP_LIBRARY_KEY);
+    KitMut::new(&mut kit, &mut view).open_tag_pane(BITMAP_LIBRARY_KEY);
     assert!(
         kit.open_tabs.iter().any(|key| key == BITMAP_LIBRARY_KEY),
         "the session writer looks for exactly this: {:?}",
@@ -287,7 +290,7 @@ fn an_open_bitmap_library_shows_up_in_the_kits_open_tabs() {
 
     // And closing it takes the flag away again, so a library the user shut
     // does not reopen next launch.
-    kit.close_tag_pane(BITMAP_LIBRARY_KEY);
+    KitMut::new(&mut kit, &mut view).close_tag_pane(BITMAP_LIBRARY_KEY);
     assert!(!kit.open_tabs.iter().any(|key| key == BITMAP_LIBRARY_KEY));
 }
 

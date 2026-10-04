@@ -241,6 +241,9 @@ pub struct Baboon {
     /// The application model: open kits and the active one, the live
     /// preferences, the default tag names and the status line.
     pub(in crate::app) model: Model,
+    /// Each open kit's view state, apart from the model so a draw can change
+    /// its kit's view while it reads the model.
+    pub(in crate::app) views: KitViews,
     /// What this frame's draws have asked for, applied once drawing is over.
     commands: CommandQueue,
 }
@@ -548,14 +551,15 @@ impl Baboon {
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
             commands: CommandQueue::default(),
+            // The startup workspace is seeded like any other new kit; every
+            // later one goes through `Baboon::empty_kit`.
+            views: KitViews::startup(KitView::new(
+                KitId(0),
+                KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
+            )),
             model: Model {
                 default_names: names.clone(),
-                // The startup workspace is seeded like any other new kit; every
-                // later one goes through `Baboon::empty_kit`.
-                kits: vec![Kit {
-                    browser: KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
-                    ..Kit::empty(KitId(0), names.clone())
-                }],
+                kits: vec![Kit::empty(KitId(0), names.clone())],
                 active: 0,
                 next_kit_id: 1,
                 prefs: live_prefs,

@@ -628,11 +628,11 @@ fn apply_container_duplicate_source_state(
     Ok(())
 }
 
-fn register_clean_duplicate_document(kit: &mut Kit, entry: TagEntry, tag: TagFile) {
+fn register_clean_duplicate_document(mut kit: KitMut, entry: TagEntry, tag: TagFile) {
     let key = entry.key.clone();
-    kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
+    kit.kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
     kit.open_tag_pane(&key);
-    kit.selected_key = Some(key);
+    kit.kit.selected_key = Some(key);
 }
 
 fn lower_priority_container_indices(target: usize, count: usize) -> impl Iterator<Item = usize> {
@@ -1269,7 +1269,7 @@ impl Baboon {
         // The field-value index is keyed by entry, so it has to be rebuilt
         // before the next search can see the copy.
         self.model.kits[kit_index].field_index.invalidate();
-        register_clean_duplicate_document(&mut self.model.kits[kit_index], entry, result.tag);
+        register_clean_duplicate_document(self.kit_and_view(kit_index), entry, result.tag);
         // Expand and scroll to the copy, but only when its workspace is the one
         // on screen: revealing forces Folders mode and clears the filter, which
         // has no business happening in a workspace the user moved away from.

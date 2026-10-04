@@ -1603,7 +1603,7 @@ impl Baboon {
             signature.extend(project.overlays.keys().cloned());
         }
         signature.sort();
-        if signature == self.model.kits[kit].browser.modified_signature {
+        if signature == self.views[self.model.kits[kit].id].browser.modified_signature {
             return;
         }
         let mut modified = ModifiedTags::default();
@@ -1630,8 +1630,8 @@ impl Baboon {
                 modified.insert(&entry);
             }
         }
-        self.model.kits[kit].browser.modified_tags = std::sync::Arc::new(modified);
-        self.model.kits[kit].browser.modified_signature = signature;
+        self.views[self.model.kits[kit].id].browser.modified_tags = std::sync::Arc::new(modified);
+        self.views[self.model.kits[kit].id].browser.modified_signature = signature;
     }
 
     /// Forget one tag's stashed overlay, so the tag reads as its source has it
@@ -1705,12 +1705,13 @@ impl Baboon {
         // bytes, so keeping it would put the edits straight back.
         {
             let kit_state = &mut self.model.kits[kit];
+            let view = &mut self.views[kit_state.id];
             kit_state.parsed_tags.clear();
             kit_state.loading_tags.clear();
-            kit_state.caches.bitmap_previews.clear();
-            kit_state.caches.model_previews.clear();
-            kit_state.find_filter_applied.clear();
-            kit_state.edit_buffers.clear();
+            view.caches.bitmap_previews.clear();
+            view.caches.model_previews.clear();
+            view.find_filter_applied.clear();
+            view.edit_buffers.clear();
         }
         let now = ctx.input(|input| input.time);
         if let Err(error) = self.checkpoint_campaign_project(kit, now) {
@@ -2134,7 +2135,7 @@ impl Baboon {
         // Rebuild the kit's tag layout from the project, rather than the flat
         // tab list the rack used: the tiles tree owns which tags are open.
         let kit_id = self.model.kits[kit].id;
-        self.model.kits[kit].tag_tree = egui_tiles::Tree::empty(tag_tree_id(kit_id));
+        self.views[self.model.kits[kit].id].tag_tree = egui_tiles::Tree::empty(tag_tree_id(kit_id));
         self.model.kits[kit].open_tabs.clear();
         self.model.kits[kit].selected_key = None;
         for tab in &snapshot.tabs {
@@ -2158,7 +2159,7 @@ impl Baboon {
             } else {
                 self.ensure_tag_loading(key.clone(), ctx.clone());
             }
-            self.model.kits[kit].open_tag_pane(&key);
+            self.kit_and_view(kit).open_tag_pane(&key);
         }
         self.model.kits[kit].selected_key = snapshot
             .selected_identity
@@ -2169,7 +2170,7 @@ impl Baboon {
         // Tiles reveal the active tab themselves, so there is no scroll target
         // to remember; `open_tag_pane` already made each restored tag active.
         if let Some(key) = self.model.kits[kit].selected_key.clone() {
-            self.model.kits[kit].open_tag_pane(&key);
+            self.kit_and_view(kit).open_tag_pane(&key);
         }
         let root = self.model.kits[kit]
             .source

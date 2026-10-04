@@ -165,15 +165,16 @@ impl Baboon {
                 .as_ref()
                 .map(|(from, to)| (from.as_path(), to.as_path()));
             self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys, moved_folder);
-            self.model.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
+            self.kit_and_view(kit_index).remap_tag_keys(&done.old_to_new_keys);
         }
         let kit = &mut self.model.kits[kit_index];
+        let view = &mut self.views[kit.id];
         kit.parsed_tags.clear();
         kit.loading_tags.clear();
-        kit.caches.bitmap_previews.clear();
-        kit.caches.model_previews.clear();
-        kit.edit_buffers.clear();
-        kit.find_filter_applied.clear();
+        view.caches.bitmap_previews.clear();
+        view.caches.model_previews.clear();
+        view.edit_buffers.clear();
+        view.find_filter_applied.clear();
         kit.generation = kit.generation.wrapping_add(1);
         self.kit_tools.terminal
             .lines

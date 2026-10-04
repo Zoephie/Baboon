@@ -374,7 +374,8 @@ pub(super) mod fixture {
             chosen_kit_layout: None,
         });
         let kit = &mut app.model.kits[app.model.active];
-        kit.browser.mode = BrowserMode::Folders;
+        let view = &mut app.views[kit.id];
+        view.browser.mode = BrowserMode::Folders;
     }
 
     /// Open `tag` in a tab, as if it had just finished loading. Its entry
@@ -385,22 +386,22 @@ pub(super) mod fixture {
         tag: TagFile,
     ) -> String {
         let key = entry_key(display_path);
-        let kit = &mut app.model.kits[app.model.active];
-        kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
+        let mut kit = app.kit_and_view(app.model.active);
+        kit.kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
         kit.open_tag_pane(&key);
         key
     }
 
     /// The tag pane's "Expand all" for `key`, applied on its next draw.
     pub(in crate::app) fn expand_all(app: &mut Baboon, key: &str) {
-        app.model.kits[app.model.active]
+        app.views[app.model.kits[app.model.active].id]
             .pending_expand
             .insert(key.to_owned(), true);
     }
 
     /// The browser search box's contents, as if typed.
     pub(in crate::app) fn set_filter(app: &mut Baboon, text: &str) {
-        app.model.kits[app.model.active].browser.filter = text.to_owned();
+        app.views[app.model.kits[app.model.active].id].browser.filter = text.to_owned();
     }
 
     /// "Reveal in browser": opens the tag's folders and scrolls to it.
@@ -412,7 +413,7 @@ pub(super) mod fixture {
         app: &mut Baboon,
         lines: impl IntoIterator<Item = String>,
     ) {
-        app.model.kits[app.model.active].terminal.open = true;
+        app.views[app.model.kits[app.model.active].id].terminal.open = true;
         app.kit_tools.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
         app.kit_tools.terminal.scroll_to_bottom = true;
     }
@@ -577,6 +578,7 @@ pub(super) mod fixture {
     ) {
         let render_method = RenderMethod::from_tag(shader).expect("synthetic shader parses");
         let kit = &mut app.model.kits[app.model.active];
+        let view = &mut app.views[kit.id];
         let mut definition_categories = Vec::new();
         for category in 0..categories {
             let mut options = Vec::new();
@@ -616,7 +618,7 @@ pub(super) mod fixture {
                         help_text: String::new(),
                     })
                     .collect();
-                kit.caches.rmop_cache.insert(
+                view.caches.rmop_cache.insert(
                     format!("rmop:{option_path}"),
                     Some(Arc::new(RenderMethodOption {
                         parameters: option_parameters,
@@ -630,7 +632,7 @@ pub(super) mod fixture {
                 options,
             });
         }
-        kit.caches.rmdf_cache.insert(
+        view.caches.rmdf_cache.insert(
             format!("rmdf:{}", render_method.definition_path),
             Some(Arc::new(RenderMethodDefinition {
                 global_options_path: String::new(),

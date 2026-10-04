@@ -39,7 +39,7 @@ fn view_menu_toggles_keep_it_open_and_an_action_closes_it() {
 
     h.click("Tag Groups", 0);
     idle(&mut h);
-    assert_eq!(h.app.model.kits[h.app.model.active].browser.mode, BrowserMode::Groups);
+    assert_eq!(h.app.views[h.app.model.kits[h.app.model.active].id].browser.mode, BrowserMode::Groups);
     assert!(!view_menu_open(&h), "an action closes it");
 }
 

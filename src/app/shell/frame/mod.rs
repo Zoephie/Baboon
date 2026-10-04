@@ -895,8 +895,8 @@ impl Baboon {
                 "blam" => {
                     // Re-detect on every open: the data folder may have
                     // changed since the pane was last shown.
-                    self.model.kits[self.model.active].blam.scanned_path = None;
-                    self.model.kits[self.model.active].open_tag_pane(BLAM_KEY);
+                    self.views[self.model.kits[self.model.active].id].blam.scanned_path = None;
+                    self.kit_and_view(self.model.active).open_tag_pane(BLAM_KEY);
                 }
                 _ => {}
             }

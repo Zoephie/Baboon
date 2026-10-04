@@ -84,7 +84,7 @@ impl CeKit {
             app.model.kits[0]
                 .parsed_tags
                 .insert(entry.key.clone(), TagDocument::clean(tag));
-            app.model.kits[0].open_tag_pane(&entry.key);
+            app.kit_and_view(0).open_tag_pane(&entry.key);
         }
         app.model.kits[0].selected_key = Some(entries[0].key.clone());
         app

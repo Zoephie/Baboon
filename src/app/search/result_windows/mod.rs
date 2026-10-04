@@ -81,7 +81,7 @@ impl Baboon {
                     // `insert_clean` from upstream: the picked reference is
                     // now the document's value, so the draft starts
                     // unmodified rather than looking like an uncommitted edit.
-                    self.model.kits[kit]
+                    self.views[self.model.kits[kit].id]
                         .edit_buffers
                         .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
                     self.invalidate_tag_caches_in(kit, &picker.tag_key);

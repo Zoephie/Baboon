@@ -1,5 +1,6 @@
 use super::EditingKitProfileIdentity;
 use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
+use crate::app::kits::{KitMut, KitView};
 use crate::app::test_definition_path;
 use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
 use blam_tags::TagFile;
@@ -80,20 +81,22 @@ fn a_dirty_tag_that_can_never_be_saved_is_not_unsaved_work() {
 #[test]
 fn remapping_tag_keys_rewrites_the_layout_tree_itself() {
     let mut kit = Kit::empty(KitId(0), Default::default());
-    kit.open_tag_pane("file:/tags/objects/a.weapon");
-    kit.open_tag_pane("file:/tags/objects/b.weapon");
-    kit.selected_key = Some("file:/tags/objects/a.weapon".to_owned());
+    let mut view = KitView::for_test(&kit);
+    let mut both = KitMut::new(&mut kit, &mut view);
+    both.open_tag_pane("file:/tags/objects/a.weapon");
+    both.open_tag_pane("file:/tags/objects/b.weapon");
+    both.kit.selected_key = Some("file:/tags/objects/a.weapon".to_owned());
 
     let mut map = HashMap::new();
     map.insert(
         "file:/tags/objects/a.weapon".to_owned(),
         "file:/tags/moved/a.weapon".to_owned(),
     );
-    kit.remap_tag_keys(&map);
+    both.remap_tag_keys(&map);
 
     // Read back through the tree, not the cached list, so the assertion
     // fails if only the list was rewritten.
-    let panes = kit.tabs_from_tree();
+    let panes = view.tabs_from_tree();
     assert!(panes.contains(&"file:/tags/moved/a.weapon".to_owned()));
     assert!(!panes.contains(&"file:/tags/objects/a.weapon".to_owned()));
     assert!(panes.contains(&"file:/tags/objects/b.weapon".to_owned()));

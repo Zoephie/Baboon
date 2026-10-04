@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::kits::{KitMut, KitView};
 
 fn temp_fixture(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -297,8 +298,9 @@ fn duplicate_completion_failure_and_closed_kit_paths_clear_guard_without_phantom
                 &[],
             )
             .unwrap();
+            let mut view = KitView::for_test(&kit);
             register_clean_duplicate_document(
-                &mut kit,
+                KitMut::new(&mut kit, &mut view),
                 destination_entry.clone(),
                 destination_tag,
             );
@@ -344,7 +346,12 @@ fn duplicate_completion_success_adds_clean_destination_and_preserves_dirty_sourc
         &[],
     )
     .unwrap();
-    register_clean_duplicate_document(&mut kit, destination_entry.clone(), destination_tag);
+    let mut view = KitView::for_test(&kit);
+    register_clean_duplicate_document(
+        KitMut::new(&mut kit, &mut view),
+        destination_entry.clone(),
+        destination_tag,
+    );
 
     assert_eq!(source.entries.len(), 2);
     let TagSource::IoStoreContainerSet { index, .. } = &source.source else {

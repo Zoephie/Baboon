@@ -522,13 +522,13 @@ impl Baboon {
             self.model.status = "A command is already running".to_owned();
             return;
         }
-        let Some(work_dir) = self.model.kits[self.model.active].terminal.work_dir.clone() else {
+        let Some(work_dir) = self.views[self.model.kits[self.model.active].id].terminal.work_dir.clone() else {
             self.model.status = "Run requires a loaded editing-kit folder".to_owned();
             return;
         };
         // Rewritten before it is echoed, so the terminal shows what really ran.
         let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
-        self.model.kits[self.model.active].terminal.open = true;
+        self.views[self.model.kits[self.model.active].id].terminal.open = true;
         self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));
@@ -704,7 +704,7 @@ impl Baboon {
         let Some(game) = self.source().and_then(|s| s.game.clone()) else {
             return;
         };
-        if self.model.kits[self.model.active].terminal.open {
+        if self.views[self.model.kits[self.model.active].id].terminal.open {
             self.kit_tools.terminal_open_games.insert(game.as_str().to_owned());
         } else {
             self.kit_tools.terminal_open_games.remove(game.as_str());

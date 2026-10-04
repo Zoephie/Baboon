@@ -240,7 +240,7 @@ impl Baboon {
             };
             self.select_entry(key.clone(), ctx.clone());
             if req.float {
-                self.model.kits[self.model.active].open_tag_pane_beside(&key);
+                self.kit_and_view(self.model.active).open_tag_pane_beside(&key);
             }
             return;
         }
@@ -302,7 +302,7 @@ impl Baboon {
         // Alt-click asks for the tag beside the current one rather than as
         // another tab in the same group.
         if req.float {
-            self.model.kits[self.model.active].open_tag_pane_beside(&key);
+            self.kit_and_view(self.model.active).open_tag_pane_beside(&key);
         }
     }
 }

@@ -7,6 +7,7 @@
 //! though it worked. These tests are the cheapest place to catch that.
 
 use super::*;
+use crate::app::kits::KitView;
 use crate::app::browser::KitBrowser;
 use crate::app::editor::EditorCaches;
 use crate::app::shell::session::RestorePlan;
@@ -28,24 +29,25 @@ fn document() -> TagDocument {
     TagDocument::modified(tag)
 }
 
-/// A kit holding something for `OLD` in every map a rename has to carry, plus
-/// the same state for a bystander tag.
-fn kit_with_state() -> Kit {
+/// A kit and its view holding something for `OLD` in every map a rename has
+/// to carry, plus the same state for a bystander tag.
+fn kit_with_state() -> (Kit, KitView) {
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
+    let mut view = KitView::for_test(&kit);
     for key in [OLD, BYSTANDER] {
         kit.parsed_tags.insert(key.to_owned(), document());
         kit.restore.pending_history
             .insert(key.to_owned(), TagHistory::default());
-        kit.caches.bitmap_previews
+        view.caches.bitmap_previews
             .insert(key.to_owned(), BitmapPreviewState::default());
-        kit.caches.model_previews
+        view.caches.model_previews
             .insert(key.to_owned(), ModelPreviewState::default());
-        kit.caches.ce_sound_bindings.insert(
+        view.caches.ce_sound_bindings.insert(
             key.to_owned(),
             std::sync::Arc::new(crate::core::source::ce_audio::CeSoundBinding::default()),
         );
-        kit.pending_expand.insert(key.to_owned(), true);
-        kit.find_filter_applied.insert(
+        view.pending_expand.insert(key.to_owned(), true);
+        view.find_filter_applied.insert(
             key.to_owned(),
             AppliedFindFilter {
                 signature: "shield".to_owned(),
@@ -61,24 +63,24 @@ fn kit_with_state() -> Kit {
             group_tag: 0,
             path: None,
         });
-        kit.edit_buffers
+        view.edit_buffers
             .insert_clean(format!("{key}|name"), "typed".to_owned());
     }
     kit.selected_key = Some(OLD.to_owned());
-    kit.tag_tree = egui_tiles::Tree::new_tabs(
+    view.tag_tree = egui_tiles::Tree::new_tabs(
         tag_tree_id(kit.id),
         vec![OLD.to_owned(), BYSTANDER.to_owned()],
     );
-    kit.caches.rmdf_cache.insert("shaders/foo".to_owned(), None);
-    kit.caches.rmop_cache.insert("shaders/bar".to_owned(), None);
-    kit.browser.modified_signature = vec![OLD.to_owned()];
-    kit
+    view.caches.rmdf_cache.insert("shaders/foo".to_owned(), None);
+    view.caches.rmop_cache.insert("shaders/bar".to_owned(), None);
+    view.browser.modified_signature = vec![OLD.to_owned()];
+    (kit, view)
 }
 
 /// Sorted, because `Tiles::iter` is not in tab order — what matters here is
 /// which keys the panes carry, not where they sit.
-fn panes(kit: &Kit) -> Vec<String> {
-    let mut keys: Vec<String> = kit
+fn panes(view: &KitView) -> Vec<String> {
+    let mut keys: Vec<String> = view
         .tag_tree
         .tiles
         .iter()
@@ -93,19 +95,19 @@ fn panes(kit: &Kit) -> Vec<String> {
 
 #[test]
 fn a_rekey_carries_every_map_the_old_key_addressed() {
-    let mut kit = kit_with_state();
+    let (mut kit, mut view) = kit_with_state();
     let before = kit.generation;
-    rekey_tag_in_kit(&mut kit, OLD, NEW);
+    rekey_tag_in_kit(&mut kit, &mut view, OLD, NEW);
 
     assert!(!kit.parsed_tags.contains_key(OLD));
     assert!(kit.parsed_tags.contains_key(NEW));
     assert!(kit.restore.pending_history.contains_key(NEW));
-    assert!(kit.caches.bitmap_previews.contains_key(NEW));
-    assert!(kit.caches.model_previews.contains_key(NEW));
-    assert!(kit.caches.ce_sound_bindings.contains_key(NEW));
-    assert_eq!(kit.pending_expand.get(NEW), Some(&true));
+    assert!(view.caches.bitmap_previews.contains_key(NEW));
+    assert!(view.caches.model_previews.contains_key(NEW));
+    assert!(view.caches.ce_sound_bindings.contains_key(NEW));
+    assert_eq!(view.pending_expand.get(NEW), Some(&true));
     assert_eq!(
-        kit.find_filter_applied
+        view.find_filter_applied
             .get(NEW)
             .map(|applied| applied.signature.as_str()),
         Some("shield")
@@ -115,7 +117,7 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
     assert!(kit.keywords.keywords(OLD).is_empty());
     assert_eq!(kit.selected_key.as_deref(), Some(NEW));
     assert_eq!(kit.open_tabs, vec![NEW.to_owned(), BYSTANDER.to_owned()]);
-    assert_eq!(panes(&kit), vec![NEW.to_owned(), BYSTANDER.to_owned()]);
+    assert_eq!(panes(&view), vec![NEW.to_owned(), BYSTANDER.to_owned()]);
     assert!(
         kit.restore.pending_restore_tags
             .iter()
@@ -132,9 +134,9 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
 /// unsaved edits and the undo stack that made it worth keeping open.
 #[test]
 fn the_document_keeps_its_unsaved_state_across_the_rename() {
-    let mut kit = kit_with_state();
+    let (mut kit, mut view) = kit_with_state();
     assert!(kit.parsed_tags[OLD].dirty.is_set());
-    rekey_tag_in_kit(&mut kit, OLD, NEW);
+    rekey_tag_in_kit(&mut kit, &mut view, OLD, NEW);
     assert!(
         kit.parsed_tags[NEW].dirty.is_set(),
         "the renamed tag is still unsaved"
@@ -143,11 +145,11 @@ fn the_document_keeps_its_unsaved_state_across_the_rename() {
 
 #[test]
 fn nothing_belonging_to_another_tag_moves() {
-    let mut kit = kit_with_state();
-    rekey_tag_in_kit(&mut kit, OLD, NEW);
+    let (mut kit, mut view) = kit_with_state();
+    rekey_tag_in_kit(&mut kit, &mut view, OLD, NEW);
 
     assert!(kit.parsed_tags.contains_key(BYSTANDER));
-    assert!(kit.caches.bitmap_previews.contains_key(BYSTANDER));
+    assert!(view.caches.bitmap_previews.contains_key(BYSTANDER));
     assert!(kit.loading_tags.contains(BYSTANDER));
     assert_eq!(kit.keywords.keywords(BYSTANDER), ["vehicle".to_owned()]);
     assert!(kit.open_tabs.contains(&BYSTANDER.to_owned()));
@@ -157,9 +159,9 @@ fn nothing_belonging_to_another_tag_moves() {
 /// removes the key and then puts it back.
 #[test]
 fn rekeying_a_tag_onto_itself_changes_nothing() {
-    let mut kit = kit_with_state();
+    let (mut kit, mut view) = kit_with_state();
     let before = kit.generation;
-    rekey_tag_in_kit(&mut kit, OLD, OLD);
+    rekey_tag_in_kit(&mut kit, &mut view, OLD, OLD);
     assert!(kit.parsed_tags.contains_key(OLD));
     assert_eq!(kit.selected_key.as_deref(), Some(OLD));
     assert_eq!(kit.generation, before);
@@ -170,9 +172,9 @@ fn rekeying_a_tag_onto_itself_changes_nothing() {
 /// for. Stated as a test so the choice is deliberate and not a missed map.
 /// `EditDrafts` has no reader — `retain` visiting every entry is how a test
 /// sees what is in it without growing the type an accessor only tests use.
-fn draft_keys(kit: &mut Kit) -> Vec<String> {
+fn draft_keys(view: &mut KitView) -> Vec<String> {
     let mut keys = Vec::new();
-    kit.edit_buffers.retain(|key, _| {
+    view.edit_buffers.retain(|key, _| {
         keys.push(key.clone());
         true
     });
@@ -181,45 +183,36 @@ fn draft_keys(kit: &mut Kit) -> Vec<String> {
 
 #[test]
 fn in_progress_drafts_are_discarded_rather_than_followed() {
-    let mut kit = kit_with_state();
-    rekey_tag_in_kit(&mut kit, OLD, NEW);
+    let (mut kit, mut view) = kit_with_state();
+    rekey_tag_in_kit(&mut kit, &mut view, OLD, NEW);
     assert_eq!(
-        draft_keys(&mut kit),
+        draft_keys(&mut view),
         vec![format!("{BYSTANDER}|name")],
         "the renamed tag's draft is gone and the bystander is still mid-edit"
     );
 }
 
-/// Every field of `Kit` is either state a rename carries or state it does not
-/// reach. Destructured exhaustively, with no `..`, on purpose: adding a field
-/// to `Kit` breaks this test's compile, which is the only mechanism Rust offers
-/// to make that classification a decision rather than an oversight.
+/// Every field of `Kit` and of its `KitView` is either state a rename carries
+/// or state it does not reach. Destructured exhaustively, with no `..`, on
+/// purpose: adding a field to either breaks this test's compile, which is the
+/// only mechanism Rust offers to make that classification a decision rather
+/// than an oversight.
 #[test]
 fn every_field_of_a_kit_is_accounted_for() {
+    let kit = Kit::empty(KitId(9), TagNameIndex::default());
+    let view = KitView::for_test(&kit);
     let Kit {
         // Carried by `rekey_tag_in_kit`.
         parsed_tags: _,
-        pending_expand: _,
-        find_filter_applied: _,
         loading_tags: _,
         selected_key: _,
         open_tabs: _,
-        tag_tree: _,
         keywords: _,
 
         // Dropped or invalidated by it, deliberately.
-        edit_buffers: _,
         index_jobs: _,
         generation: _,
         field_index: _,
-
-        // Rebuilt from the generation the moment it moves.
-        // The Bitmap and Model Libraries' snapshots and thumbnail caches. Keyed
-        // on the kit generation, which a rename bumps, so both are rebuilt
-        // against the new key rather than carried across it.
-        bitmap_browser: _,
-        model_browser: _,
-        git_review: _,
 
         // The source's own entries, tree and indices, which the rename moves
         // through `apply_container_rename_source_state` rather than here: it
@@ -232,23 +225,49 @@ fn every_field_of_a_kit_is_accounted_for() {
         // `rekey_chimp_package` — the two key spaces do not convert into one
         // another and merging them here would guess.
         chimp: _,
-        surface: _,
+
+        // Re-derived by the caller once the source entries have moved, because
+        // it needs the tag's new `display_path` and this function only has keys.
+        active_favorite_entries: _,
+        active_favorite_folders: _,
 
         // Not addressed by a tag key at all.
-        blam: _,
         id: _,
         names: _,
         scanning_entries: _,
-        terminal: _,
         requested_path: _,
         profile: _,
         project: _,
         pending_container_folders: _,
         // Classified field by field below.
         restore: _,
+    } = kit;
+    let KitView {
+        // Carried by `rekey_tag_in_kit`.
+        tag_tree: _,
+        pending_expand: _,
+        find_filter_applied: _,
+
+        // Dropped by it, deliberately.
+        edit_buffers: _,
+
+        // The Bitmap and Model Libraries' snapshots and thumbnail caches. Keyed
+        // on the kit generation, which a rename bumps, so both are rebuilt
+        // against the new key rather than carried across it.
+        bitmap_browser: _,
+        model_browser: _,
+        git_review: _,
+
+        // Chimp's side of the surface switch; see `chimp` above.
+        surface: _,
+
+        // Not addressed by a tag key at all.
+        blam: _,
+        terminal: _,
+        // Classified field by field below.
         browser: _,
         caches: _,
-    } = Kit::empty(KitId(9), TagNameIndex::default());
+    } = view;
     let RestorePlan {
         // Carried by `rekey_tag_in_kit`.
         pending_history: _,
@@ -271,10 +290,6 @@ fn every_field_of_a_kit_is_accounted_for() {
         deletable_keys: _,
         deletable_keys_generation: _,
         folder_browsers: _,
-        // Re-derived by the caller once the source entries have moved, because
-        // it needs the tag's new `display_path` and this function only has keys.
-        active_favorite_entries: _,
-        active_favorite_folders: _,
         // Not addressed by a tag key at all.
         mode: _,
         sort: _,

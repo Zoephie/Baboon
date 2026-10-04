@@ -101,7 +101,7 @@ fn an_applied_edit_marks_its_draft_clean() {
     let mut app = app_with_open_tag();
     let draft_key = format!("{KEY}|{FIELD}");
     let shown = value(&app);
-    let draft = app.model.kits[0]
+    let draft = app.views[app.model.kits[0].id]
         .edit_buffers
         .draft_mut(draft_key.clone(), &shown);
     draft.text = "07".to_owned();
@@ -111,7 +111,7 @@ fn an_applied_edit_marks_its_draft_clean() {
 
     let shown = value(&app);
     assert_eq!(shown, "7");
-    let draft = app.model.kits[0].edit_buffers.take(&draft_key, &shown);
+    let draft = app.views[app.model.kits[0].id].edit_buffers.take(&draft_key, &shown);
     assert!(!draft.changed, "the applied draft still reads as unsaved");
     assert_eq!(draft.text, "7");
 }

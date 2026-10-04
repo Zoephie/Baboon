@@ -510,7 +510,7 @@ impl Baboon {
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
         if is_render_method_layout_group(entry.group_tag) {
-            self.model.kits[self.model.active].forget_render_methods();
+            self.views[self.model.kits[self.model.active].id].caches.forget_render_methods();
         }
         self.record_saved_tag_in_indexes(&entry, dependencies);
         Ok(output)

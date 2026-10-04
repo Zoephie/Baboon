@@ -327,7 +327,8 @@ fn cases() -> Vec<Case> {
                 let model = render_model_tag();
                 let key = fixture::open_document(&mut h.app, "objects/smoke.render_model", model);
                 let kit = &mut h.app.model.kits[h.app.model.active];
-                kit.caches.model_previews.entry(key).or_default().active_tab =
+                let view = &mut h.app.views[kit.id];
+                view.caches.model_previews.entry(key).or_default().active_tab =
                     ModelTagPanelTab::ModelPreview;
             },
             &["smoke.render_model", "Model Preview"],
@@ -365,7 +366,7 @@ fn cases() -> Vec<Case> {
             &[],
             &[],
             loose_kit,
-            |h| h.app.model.kits[h.app.model.active].open_tag_pane(GIT_REVIEW_KEY),
+            |h| h.app.kit_and_view(h.app.model.active).open_tag_pane(GIT_REVIEW_KEY),
             &["Git Review", "No Git repository found"],
         ),
         case(
@@ -373,7 +374,7 @@ fn cases() -> Vec<Case> {
             &[],
             &[],
             loose_kit,
-            |h| h.app.model.kits[h.app.model.active].open_tag_pane(BLAM_KEY),
+            |h| h.app.kit_and_view(h.app.model.active).open_tag_pane(BLAM_KEY),
             &["Blam!", "No import has run yet."],
         ),
         case(
@@ -414,9 +415,9 @@ fn cases() -> Vec<Case> {
                     "shaders/left.shader",
                     fixture::synthetic_shader(1),
                 );
-                let kit = &mut h.app.model.kits[h.app.model.active];
+                let mut kit = h.app.kit_and_view(h.app.model.active);
                 let key = fixture::entry_key("levels/right.scenario");
-                kit.parsed_tags.insert(key.clone(), TagDocument::clean(scenario_tag()));
+                kit.kit.parsed_tags.insert(key.clone(), TagDocument::clean(scenario_tag()));
                 kit.open_tag_pane_beside(&key);
             },
             &["left.shader", "right.scenario"],
@@ -459,7 +460,7 @@ fn cases() -> Vec<Case> {
                 h.app.model.prefs.enable_chimp = true;
                 container_kit(h);
             },
-            |h| h.app.model.kits[h.app.model.active].surface = KitSurface::Chimp,
+            |h| h.app.views[h.app.model.kits[h.app.model.active].id].surface = KitSurface::Chimp,
             &["The Unreal package index has not been started."],
         ),
         // --- windows over the shell ---

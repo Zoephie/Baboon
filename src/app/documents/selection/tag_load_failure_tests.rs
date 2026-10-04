@@ -6,7 +6,7 @@ use super::*;
 fn a_failed_tag_load_names_the_tag() {
     let mut app = Baboon::for_test();
     let kit = app.model.kits[0].id;
-    app.model.kits[0].open_tag_pane("objects/broken.model");
+    app.kit_and_view(0).open_tag_pane("objects/broken.model");
 
     app.handle_tag_loaded(
         kit,

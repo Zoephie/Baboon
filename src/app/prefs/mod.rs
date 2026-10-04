@@ -1168,8 +1168,8 @@ impl Baboon {
         GuiPrefs {
             // The focused workspace's view is what a new one is seeded with,
             // so a single-workspace session remembers its choice as before.
-            browser_mode: self.model.kits[self.model.active].browser.mode,
-            browser_sort: self.model.kits[self.model.active].browser.sort,
+            browser_mode: self.views[self.model.kits[self.model.active].id].browser.mode,
+            browser_sort: self.views[self.model.kits[self.model.active].id].browser.sort,
             ..self.model.prefs.clone()
         }
     }

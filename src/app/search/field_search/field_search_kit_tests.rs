@@ -12,7 +12,7 @@ fn field_search_results_belong_to_the_kit_that_ran_the_search() {
         generation: app.model.kits[0].generation,
     };
     let other = KitId(searched.0 + 1);
-    app.model.kits.push(Kit::empty(other, TagNameIndex::default()));
+    app.push_kit(Kit::empty(other, TagNameIndex::default()));
     app.model.active = 1;
 
     app.handle_field_value_search_finished(stamp, "grass".to_owned(), Ok(Vec::new()));

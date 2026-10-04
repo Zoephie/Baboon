@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::app::browser::KitBrowser;
-use crate::app::kits::terminal::KitTerminal;
 use crate::app::mods::project::KitProject;
 use crate::app::shell::session::RestorePlan;
 
@@ -61,49 +60,25 @@ pub(in crate::app) struct Kit {
     /// Active document key. Selection may temporarily precede parsing while a
     /// matching key is present in `loading_tags`.
     pub(in crate::app) selected_key: Option<String>,
-    /// Docked and floating tabs share this ordered set of open document keys.
+    /// The open document keys in tab order: re-derived from the view's
+    /// `tag_tree`, which owns the layout, by [`Baboon::sync_open_tabs`].
     pub(in crate::app) open_tabs: Vec<String>,
-    /// Layout of this kit's open tags: which panes exist, how they are split,
-    /// and which is active in each tab group. The tree is authoritative —
-    /// `open_tabs` is re-derived from it, never the other way round — so a
-    /// split or a drag survives instead of being overwritten by a mirror.
-    pub(in crate::app) tag_tree: egui_tiles::Tree<String>,
-    /// In-progress text edits keyed by stable widget/edit identifiers. Drafts
-    /// rather than bare strings so a value the user is still typing is not
-    /// overwritten by the document underneath it.
-    pub(in crate::app) edit_buffers: EditDrafts,
 
-    // --- Library tabs, repository review and index work ---
-    /// The Bitmap Library tab's state: its search, its grid size, and its
-    /// own bounded thumbnail cache — deliberately not `bitmap_previews`,
-    /// which is unbounded and holds full-resolution images.
-    pub(in crate::app) bitmap_browser: ThumbnailLibrary<Bitmaps>,
-    /// The Model Library tab's state, the same shape for the same reasons.
-    pub(in crate::app) model_browser: ThumbnailLibrary<Models>,
-    /// Read-only repository history and working-tree browser.
-    pub(in crate::app) git_review: GitReviewState,
+    // --- Source generation and index state ---
     /// This kit's background index work. It lived on the app, shared by every
     /// kit: loading one kit reset another's in-flight reference build, and one
     /// kit's build or refresh blocked every other kit's.
     pub(in crate::app) index_jobs: IndexJobs,
-
-    /// Pending expand/collapse-all requests, keyed by tag. Raised from the tag
-    /// tab's menu and consumed by the next draw of that tag's pane.
-    pub(in crate::app) pending_expand: HashMap<String, bool>,
-
-    // --- Per-tag Find filter state ---
-    /// Tracks panes that need their normal collapse defaults restored after
-    /// Find's visual filter stops applying to them, and caches the filter each
-    /// one last applied.
-    pub(in crate::app) find_filter_applied: HashMap<String, AppliedFindFilter>,
-
-    // --- Source generation and index state ---
     /// Bumped whenever this kit's source or its `all_entries` set is replaced,
     /// so caches and in-flight async results know to recompute or drop against
     /// fresh data. Per kit, so reloading one kit cannot invalidate another's.
     pub(in crate::app) generation: u64,
     pub(in crate::app) field_index: FieldValueIndex,
     pub(in crate::app) keywords: KeywordStore,
+    /// The favourites the browser lists, resolved against this kit's source:
+    /// tags as entries, folders as paths.
+    pub(in crate::app) active_favorite_entries: Vec<TagEntry>,
+    pub(in crate::app) active_favorite_folders: Vec<PathBuf>,
     /// True while a background full-scan of this loose-folder source is running.
     pub(in crate::app) scanning_entries: bool,
 
@@ -127,33 +102,17 @@ pub(in crate::app) struct Kit {
     /// because a site that forgets it silently deletes the user's folders.
     pub(in crate::app) pending_container_folders: std::collections::BTreeSet<String>,
 
-    /// CE-only nested surface. Chimp is not an editing kit and does not enter
-    /// the top-level kit registry; it lives beside the Tags surface here.
-    pub(in crate::app) surface: KitSurface,
+    /// Campaign Evolved only: Chimp, which edits the same containers' Unreal
+    /// packages on a surface beside the tags (the view's `surface`).
     pub(in crate::app) chimp: ChimpState,
-    /// Halo 3 only: state of this kit's Blam! import pane ([`BLAM_KEY`] in
-    /// `tag_tree`).
-    pub(in crate::app) blam: BlamUiState,
 
     /// What a restored session still has to put back once the kit's source
     /// loads: tags and folders, undo histories, Chimp packages, the libraries,
     /// and tags named on the command line.
     pub(in crate::app) restore: RestorePlan,
-    /// Where this kit's terminal is: whether its panel is open and the
-    /// directory its commands run in.
-    pub(in crate::app) terminal: KitTerminal,
     /// This kit's Campaign Evolved recovery/project database, and project
     /// contents staged until its source finishes mounting.
     pub(in crate::app) project: KitProject,
-    /// How this kit's browser lists its tags: mode, order and filter, the
-    /// docked folder browsers, and the modified, deletable and favourite sets
-    /// it marks, each with what it was built from.
-    pub(in crate::app) browser: KitBrowser,
-    /// What the editor derives from this kit's documents and keeps between
-    /// frames: bitmap and model previews, render-method definitions and options
-    /// with the epoch that invalidates the shader grid, Halo 2 templates, and
-    /// Campaign Evolved sound bindings.
-    pub(in crate::app) caches: EditorCaches,
 }
 
 impl Kit {
@@ -167,24 +126,17 @@ impl Kit {
             loading_tags: HashSet::new(),
             selected_key: None,
             open_tabs: Vec::new(),
-            tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
-            edit_buffers: EditDrafts::default(),
-            bitmap_browser: ThumbnailLibrary::default(),
-            model_browser: ThumbnailLibrary::default(),
-            git_review: GitReviewState::default(),
             index_jobs: IndexJobs::default(),
-            pending_expand: HashMap::new(),
-            find_filter_applied: HashMap::new(),
             generation: 0,
             field_index: FieldValueIndex::default(),
             keywords: KeywordStore::default(),
+            active_favorite_entries: Vec::new(),
+            active_favorite_folders: Vec::new(),
             scanning_entries: false,
             requested_path: None,
             profile: None,
             pending_container_folders: std::collections::BTreeSet::new(),
-            surface: KitSurface::Tags,
             chimp: ChimpState::default(),
-            blam: BlamUiState::default(),
             restore: RestorePlan {
                 pending_restore_tags: Vec::new(),
                 pending_restore_folders: Vec::new(),
@@ -195,10 +147,7 @@ impl Kit {
                 pending_restore_active_chimp_package: None,
                 pending_launch_tags: None,
             },
-            terminal: KitTerminal::default(),
             project: KitProject::default(),
-            browser: KitBrowser::default(),
-            caches: EditorCaches::default(),
         }
     }
 
@@ -370,25 +319,36 @@ impl Baboon {
         id
     }
 
-    /// Build an empty kit carrying a fresh id and the application defaults,
-    /// including the browser view a new workspace opens in. Every kit is made
-    /// here so no path can miss the seeding and open in the wrong view.
-    fn empty_kit(&mut self) -> Kit {
+    /// Add an empty kit carrying a fresh id and the application defaults,
+    /// with the view a new workspace opens in. Every kit is made here so no
+    /// path can miss the seeding and open in the wrong view.
+    fn push_empty_kit(&mut self) -> KitId {
         let id = self.next_kit_id();
-        Kit {
-            browser: KitBrowser::new(self.model.prefs.browser_mode, self.model.prefs.browser_sort),
-            ..Kit::empty(id, self.model.default_names.clone())
-        }
+        self.model.kits.push(Kit::empty(id, self.model.default_names.clone()));
+        self.views.insert(
+            id,
+            KitView::new(
+                id,
+                KitBrowser::new(self.model.prefs.browser_mode, self.model.prefs.browser_sort),
+            ),
+        );
+        id
     }
 
     /// Add an empty kit and make it active. The next load installs into it,
     /// so "open another game" is add-then-load rather than a separate path.
     pub(in crate::app) fn add_kit(&mut self) -> KitId {
-        let kit = self.empty_kit();
-        let id = kit.id;
-        self.model.kits.push(kit);
+        let id = self.push_empty_kit();
         self.model.active = self.model.kits.len() - 1;
         id
+    }
+
+    /// Add `kit` as it is, with the view a new workspace opens in, for tests
+    /// that build a kit by hand.
+    #[cfg(test)]
+    pub(in crate::app) fn push_kit(&mut self, kit: Kit) {
+        self.views.insert(kit.id, KitView::new(kit.id, KitBrowser::default()));
+        self.model.kits.push(kit);
     }
 
     /// Remove a kit, dropping its documents and caches. `kits` is never left
@@ -406,9 +366,9 @@ impl Baboon {
             self.reset_runtime_poke_source_state();
         }
         self.model.kits.remove(index);
+        self.views.remove(id);
         if self.model.kits.is_empty() {
-            let kit = self.empty_kit();
-            self.model.kits.push(kit);
+            self.push_empty_kit();
         }
         self.model.active = active_after_removal(self.model.active, index, self.model.kits.len());
     }
@@ -481,7 +441,10 @@ impl Baboon {
         // The browser view belongs to the workspace, not to the source in it:
         // reloading a kit — or restoring one, which stages the saved view
         // before the load lands — must not snap it back to the default.
-        let browser = KitBrowser::new(self.model.kits[index].browser.mode, self.model.kits[index].browser.sort);
+        // The rest of the view starts over with the source.
+        let browser = &self.views[id].browser;
+        let browser = KitBrowser::new(browser.mode, browser.sort);
+        self.views.insert(id, KitView::new(id, browser));
         // Carried, then moved on, never reset: a job stamped by the source
         // being replaced must not resolve against the new one. Rebuilding
         // from `Kit::empty` reset it to 0, and the load handler's bump then
@@ -494,7 +457,6 @@ impl Baboon {
             names,
             requested_path,
             profile,
-            browser,
             restore,
             project: KitProject {
                 active: None,
@@ -531,20 +493,6 @@ impl Kit {
                 .references_changed_during_build
                 .insert(key.to_owned(), references);
         }
-    }
-
-    /// Drop every cached render-method definition and option, and move the
-    /// epoch on so open shader grids rebuild.
-    ///
-    /// The caches are keyed by the referenced path and never checked against
-    /// the file again, so saving a definition or option (or creating one that
-    /// was a cached miss) left the grid showing the old parameters until the
-    /// source was reloaded. They are pure caches: dropping them costs one
-    /// re-read each and cannot be wrong.
-    pub(in crate::app) fn forget_render_methods(&mut self) {
-        self.caches.rmdf_cache.clear();
-        self.caches.rmop_cache.clear();
-        self.caches.render_method_epoch = self.caches.render_method_epoch.wrapping_add(1);
     }
 }
 
@@ -608,182 +556,16 @@ pub(in crate::app) fn tag_tree_id(id: KitId) -> egui::Id {
 }
 
 impl Kit {
-    /// Forget everything this kit holds for one open document: the parsed tag,
-    /// an in-flight load, its previews, Find filter, edit drafts and, for a
-    /// folder pane, its browser state.
-    ///
-    /// This used to be written out in four places (closing a tab, closing all,
-    /// closing all but one, deleting a tag), each clearing a different subset:
-    /// only the delete path dropped the model preview, whose geometry and
-    /// textures therefore outlived every closed tab.
-    pub(in crate::app) fn drop_document(&mut self, key: &str) {
-        self.parsed_tags.remove(key);
-        self.loading_tags.remove(key);
-        self.caches.bitmap_previews.remove(key);
-        self.caches.model_previews.remove(key);
-        self.find_filter_applied.remove(key);
-        self.edit_buffers.forget_tag(key);
-        self.browser.folder_browsers.remove(key);
-    }
-
-    /// [`Self::drop_document`] for every document except `keep`.
-    pub(in crate::app) fn drop_documents_except(&mut self, keep: Option<&str>) {
-        let keys: HashSet<String> = self
-            .parsed_tags
-            .keys()
-            .chain(self.loading_tags.iter())
-            .chain(self.caches.bitmap_previews.keys())
-            .chain(self.caches.model_previews.keys())
-            .chain(self.find_filter_applied.keys())
-            .chain(self.browser.folder_browsers.keys())
-            .filter(|key| Some(key.as_str()) != keep)
-            .cloned()
-            .collect();
-        for key in &keys {
-            self.drop_document(key);
-        }
-        // Drafts are keyed "<tag>|<field>", including ones for tags that were
-        // never loaded, so they are trimmed by prefix rather than by key.
-        match keep {
-            None => self.edit_buffers.clear(),
-            Some(keep) => {
-                let prefix = format!("{keep}|");
-                self.edit_buffers
-                    .retain(|draft, _| draft.starts_with(&prefix));
-            }
-        }
-    }
-
     /// This kit's browser entry for `key`, wherever it is listed: the visible
     /// entries, the full set a filtered browser hides, or a favorite pulled in
     /// from elsewhere.
     pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
         source.entry_for_key(key).or_else(|| {
-            self.browser.active_favorite_entries
+            self.active_favorite_entries
                 .iter()
                 .find(|entry| entry.key == key)
         })
-    }
-
-    /// Tag keys currently laid out, in tab order. Derived from the tree, which
-    /// owns the layout; callers treat `open_tabs` as a read-only view.
-    pub(in crate::app) fn tabs_from_tree(&self) -> Vec<String> {
-        self.tag_tree
-            .tiles
-            .tiles()
-            .filter_map(|tile| match tile {
-                egui_tiles::Tile::Pane(key) => Some(key.clone()),
-                egui_tiles::Tile::Container(_) => None,
-            })
-            .collect()
-    }
-
-    /// Rewrite every open tag key through `map`, after a move or rename has
-    /// changed the keys underneath them.
-    ///
-    /// The tree is where this has to land: `open_tabs` is re-derived from it
-    /// every frame, so remapping only the list is overwritten immediately and
-    /// the panes keep pointing at keys their source no longer has.
-    pub(in crate::app) fn remap_tag_keys(&mut self, map: &HashMap<String, String>) {
-        for (_, tile) in self.tag_tree.tiles.iter_mut() {
-            if let egui_tiles::Tile::Pane(key) = tile
-                && let Some(new_key) = map.get(key)
-            {
-                *key = new_key.clone();
-            }
-        }
-        if let Some(selected) = self.selected_key.as_ref()
-            && let Some(new_key) = map.get(selected)
-        {
-            self.selected_key = Some(new_key.clone());
-        }
-        self.sync_open_tabs();
-    }
-
-    /// Re-derive `open_tabs` from the tree. Called after anything that can
-    /// change the layout: a frame of `tree.ui`, an open, or a close.
-    pub(in crate::app) fn sync_open_tabs(&mut self) {
-        self.open_tabs = self.tabs_from_tree();
-        if self
-            .selected_key
-            .as_ref()
-            .is_some_and(|key| !self.open_tabs.contains(key))
-        {
-            self.selected_key = self
-                .open_tabs
-                .iter()
-                .find(|key| !is_folder_pane_key(key))
-                .cloned();
-        }
-    }
-
-    /// Add `key` as a pane if it is not already laid out, and select it.
-    pub(in crate::app) fn open_tag_pane(&mut self, key: &str) {
-        if let Some(tile_id) = self.tile_for_key(key) {
-            self.tag_tree.make_active(|id, _| id == tile_id);
-        } else {
-            let tile_id = self.tag_tree.tiles.insert_pane(key.to_owned());
-            match self.tag_tree.root() {
-                Some(root) => {
-                    if let Some(egui_tiles::Tile::Container(container)) =
-                        self.tag_tree.tiles.get_mut(root)
-                    {
-                        container.add_child(tile_id);
-                    } else {
-                        // A bare pane at the root: wrap both in a tab group.
-                        let tabs = self.tag_tree.tiles.insert_tab_tile(vec![root, tile_id]);
-                        self.tag_tree.root = Some(tabs);
-                    }
-                }
-                None => self.tag_tree.root = Some(tile_id),
-            }
-            self.tag_tree.make_active(|id, _| id == tile_id);
-        }
-        self.selected_key = Some(key.to_owned());
-        self.sync_open_tabs();
-    }
-
-    /// Open `key` as a pane split beside the existing layout, rather than as
-    /// another tab in the same group. This is what alt-click does — the
-    /// successor to tearing a tag out into its own window.
-    pub(in crate::app) fn open_tag_pane_beside(&mut self, key: &str) {
-        if self.tile_for_key(key).is_some() {
-            self.open_tag_pane(key);
-            return;
-        }
-        let tile_id = self.tag_tree.tiles.insert_pane(key.to_owned());
-        match self.tag_tree.root() {
-            Some(root) => {
-                let split = self
-                    .tag_tree
-                    .tiles
-                    .insert_horizontal_tile(vec![root, tile_id]);
-                self.tag_tree.root = Some(split);
-            }
-            None => self.tag_tree.root = Some(tile_id),
-        }
-        self.selected_key = Some(key.to_owned());
-        self.sync_open_tabs();
-    }
-
-    /// Remove `key`'s pane from the layout.
-    pub(in crate::app) fn close_tag_pane(&mut self, key: &str) {
-        if let Some(tile_id) = self.tile_for_key(key) {
-            self.tag_tree.remove_recursively(tile_id);
-        }
-        self.browser.folder_browsers.remove(key);
-        self.sync_open_tabs();
-    }
-
-    fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
-        self.tag_tree
-            .tiles
-            .iter()
-            .find_map(|(id, tile)| match tile {
-                egui_tiles::Tile::Pane(pane) if pane == key => Some(*id),
-                _ => None,
-            })
     }
 }
 

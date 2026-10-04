@@ -66,7 +66,7 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
         active_tab: ModelTagPanelTab::ModelPreview,
         ..ModelPreviewState::default()
     };
-    app.model.kits[0].caches.model_previews.insert(entry.key.clone(), preview);
+    app.views[app.model.kits[0].id].caches.model_previews.insert(entry.key.clone(), preview);
     Some(Fixture {
         app,
         key: entry.key,
@@ -76,11 +76,11 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
 
 impl Fixture {
     fn state(&self) -> &ModelPreviewState {
-        &self.app.model.kits[0].caches.model_previews[&self.key]
+        &self.app.views[self.app.model.kits[0].id].caches.model_previews[&self.key]
     }
 
     fn state_mut(&mut self) -> &mut ModelPreviewState {
-        self.app.model.kits[0].caches.model_previews.get_mut(&self.key).unwrap()
+        self.app.views[self.app.model.kits[0].id].caches.model_previews.get_mut(&self.key).unwrap()
     }
 
     /// One frame's worth of preview work: drain replies, then the post-draw hook.

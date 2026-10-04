@@ -272,7 +272,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        self.model.kits[self.model.active].open_tag_pane(key);
+        self.kit_and_view(self.model.active).open_tag_pane(key);
         self.model.kits[self.model.active].selected_key = Some(key.to_owned());
         self.model.kits[self.model.active]
             .parsed_tags

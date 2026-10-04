@@ -115,19 +115,21 @@ fn opening_a_model_must_wait_until_the_tag_tree_is_back() {
     const KEY: &str = "file:objects/warthog.model";
 
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
+
+    let mut view = KitView::for_test(&kit);
     let taken = std::mem::replace(
-        &mut kit.tag_tree,
+        &mut view.tag_tree,
         egui_tiles::Tree::empty(tag_tree_id(kit.id)),
     );
-    kit.model_browser.pending_open = Some(KEY.to_owned());
-    kit.tag_tree = taken;
-    if let Some(key) = kit.model_browser.pending_open.take() {
-        kit.open_tag_pane(&key);
+    view.model_browser.pending_open = Some(KEY.to_owned());
+    view.tag_tree = taken;
+    if let Some(key) = view.model_browser.pending_open.take() {
+        KitMut::new(&mut kit, &mut view).open_tag_pane(&key);
     }
 
     assert_eq!(kit.open_tabs, vec![KEY.to_owned()]);
     assert!(
-        kit.model_browser.pending_open.is_none(),
+        view.model_browser.pending_open.is_none(),
         "the request is one-shot; leaving it set reopens the tab every frame"
     );
 }
@@ -137,14 +139,15 @@ fn opening_a_model_must_wait_until_the_tag_tree_is_back() {
 #[test]
 fn an_open_model_library_shows_up_in_the_kits_open_tabs() {
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
-    kit.open_tag_pane(MODEL_LIBRARY_KEY);
+    let mut view = KitView::for_test(&kit);
+    KitMut::new(&mut kit, &mut view).open_tag_pane(MODEL_LIBRARY_KEY);
     assert!(
         kit.open_tabs.iter().any(|key| key == MODEL_LIBRARY_KEY),
         "the session writer looks for exactly this: {:?}",
         kit.open_tabs
     );
 
-    kit.close_tag_pane(MODEL_LIBRARY_KEY);
+    KitMut::new(&mut kit, &mut view).close_tag_pane(MODEL_LIBRARY_KEY);
     assert!(!kit.open_tabs.iter().any(|key| key == MODEL_LIBRARY_KEY));
 }
 

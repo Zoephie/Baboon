@@ -15,7 +15,7 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
     };
     let data = super::super::model_preview_data(key.clone(), key.clone(), preview, Vec::new());
     let (geometry_id, textures_id) = (data.geometry_id, data.textures_id);
-    let state = app.model.kits[0].caches.model_previews.entry(key.clone()).or_default();
+    let state = app.views[app.model.kits[0].id].caches.model_previews.entry(key.clone()).or_default();
     state.data = Some(Ok(data));
     state.textures_pending = true;
 
@@ -24,7 +24,7 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         ..Default::default()
     };
     app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None);
-    let state = &app.model.kits[0].caches.model_previews[&key];
+    let state = &app.views[app.model.kits[0].id].caches.model_previews[&key];
     assert!(
         state.textures_pending,
         "the resolve in flight is still awaited"
@@ -40,7 +40,7 @@ fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
         textures_id,
         vec![Default::default()],
     );
-    let Some(Ok(data)) = app.model.kits[0].caches.model_previews[&key].data.as_ref() else {
+    let Some(Ok(data)) = app.views[app.model.kits[0].id].caches.model_previews[&key].data.as_ref() else {
         panic!("preview data");
     };
     assert!(data.textures.is_some(), "and its result is kept");

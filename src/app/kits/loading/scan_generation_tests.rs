@@ -62,7 +62,7 @@ fn loading_one_kit_leaves_another_kits_index_build_running() {
     let mut app = Baboon::for_test();
     app.model.kits[0].index_jobs.building_references = true;
     let second = KitId(app.model.kits[0].id.0 + 1);
-    app.model.kits.push(Kit::empty(second, TagNameIndex::default()));
+    app.push_kit(Kit::empty(second, TagNameIndex::default()));
 
     app.handle_source_loaded(
         second,

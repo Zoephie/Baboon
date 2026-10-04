@@ -777,7 +777,7 @@ impl Baboon {
         match replace_scenario_scripts(&mut document.tag, &folder) {
             Ok(message) => {
                 document.dirty.touch();
-                self.model.kits[self.model.active].open_tag_pane(key);
+                self.kit_and_view(self.model.active).open_tag_pane(key);
                 self.model.kits[self.model.active].selected_key = Some(key.to_owned());
                 self.model.status = format!("{message} (unsaved)");
             }

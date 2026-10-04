@@ -18,6 +18,7 @@ impl Baboon {
 
     pub(in crate::app) fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
         let kit = &self.model.kits[kit_index];
+        let view = &self.views[kit.id];
         let was_active = kit_index == self.model.active;
         let source = kit.source.as_ref()?;
         let (source_kind, source_path) = match &source.source {
@@ -67,7 +68,7 @@ impl Baboon {
         }
         let folders = ordered_unique_keys(kit.open_tabs.iter())
             .into_iter()
-            .filter_map(|key| kit.browser.folder_browsers.get(&key))
+            .filter_map(|key| view.browser.folder_browsers.get(&key))
             .map(|folder| LastSessionFolder {
                 rel_path: folder.rel_path.clone(),
                 label: folder.label.clone(),
@@ -95,8 +96,8 @@ impl Baboon {
                 .as_ref()
                 .and_then(|project| project.project_path.clone()),
             has_project: kit.project.active.is_some(),
-            browser_mode: Some(kit.browser.mode),
-            browser_sort: Some(kit.browser.sort),
+            browser_mode: Some(view.browser.mode),
+            browser_sort: Some(view.browser.sort),
             tags,
             folders,
             chimp_packages,
@@ -189,10 +190,10 @@ impl Baboon {
             // carries it across the load rather than resetting it, so each
             // workspace comes back in the view it was left in.
             if let Some(mode) = browser_mode {
-                self.model.kits[self.model.active].browser.mode = mode;
+                self.views[self.model.kits[self.model.active].id].browser.mode = mode;
             }
             if let Some(sort) = browser_sort {
-                self.model.kits[self.model.active].browser.sort = sort;
+                self.views[self.model.kits[self.model.active].id].browser.sort = sort;
             }
             // The project file it had open is queued the same way, and is
             // attached as this workspace's save target once the source has

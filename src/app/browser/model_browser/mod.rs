@@ -227,7 +227,7 @@ impl Baboon {
             self.model.status = "Load an editing kit before browsing its models".to_owned();
             return;
         }
-        self.model.kits[kit].open_tag_pane(MODEL_LIBRARY_KEY);
+        self.kit_and_view(kit).open_tag_pane(MODEL_LIBRARY_KEY);
     }
 
     /// Resolve a double-clicked render model to the tag its cell should open:
@@ -259,12 +259,12 @@ impl ThumbnailSource for Models {
     const MENU_ITEM: &'static str = "Open render model tag";
     const CRASHED: &'static str = "render model crashed while parsing";
 
-    fn library(kit: &Kit) -> &ThumbnailLibrary<Self> {
-        &kit.model_browser
+    fn library(view: &KitView) -> &ThumbnailLibrary<Self> {
+        &view.model_browser
     }
 
-    fn library_mut(kit: &mut Kit) -> &mut ThumbnailLibrary<Self> {
-        &mut kit.model_browser
+    fn library_mut(view: &mut KitView) -> &mut ThumbnailLibrary<Self> {
+        &mut view.model_browser
     }
 
     fn lists(entry: &TagEntry) -> bool {

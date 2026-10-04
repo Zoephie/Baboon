@@ -7,7 +7,7 @@ use super::*;
 fn a_stale_thumbnail_still_frees_its_decode_slot() {
     let mut app = Baboon::for_test();
     let stamp = app.kit_stamp();
-    app.model.kits[0]
+    app.views[app.model.kits[0].id]
         .bitmap_browser
         .pending
         .insert("file:a.bitmap".to_owned());
@@ -20,8 +20,8 @@ fn a_stale_thumbnail_still_frees_its_decode_slot() {
         &egui::Context::default(),
     );
 
-    assert!(app.model.kits[0].bitmap_browser.pending.is_empty());
-    let cached = app.model.kits[0]
+    assert!(app.views[app.model.kits[0].id].bitmap_browser.pending.is_empty());
+    let cached = app.views[app.model.kits[0].id]
         .bitmap_browser
         .thumbnails
         .lock()
@@ -95,7 +95,7 @@ fn a_generation_bump_keeps_thumbnails_that_are_still_right() {
 fn a_stale_texture_resolve_clears_textures_pending() {
     let mut app = Baboon::for_test();
     let stamp = app.kit_stamp();
-    let state = app.model.kits[0]
+    let state = app.views[app.model.kits[0].id]
         .caches.model_previews
         .entry("file:a.model".to_owned())
         .or_default();
@@ -104,5 +104,5 @@ fn a_stale_texture_resolve_clears_textures_pending() {
 
     app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, Vec::new());
 
-    assert!(!app.model.kits[0].caches.model_previews["file:a.model"].textures_pending);
+    assert!(!app.views[app.model.kits[0].id].caches.model_previews["file:a.model"].textures_pending);
 }

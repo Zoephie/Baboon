@@ -167,7 +167,7 @@ fn cases() -> Vec<Case> {
             },
             check: |app, kit, _| {
                 let pane = folder_pane_key(Path::new(FOLDER));
-                let state = app.model.kits[0].browser.folder_browsers.get(&pane).ok_or("no pane")?;
+                let state = app.views[app.model.kits[0].id].browser.folder_browsers.get(&pane).ok_or("no pane")?;
                 ensure(state.label == "props", "label")?;
                 ensure(state.rel_path == Path::new(FOLDER), "rel path")?;
                 ensure(app.model.kits[0].open_tabs.contains(&pane), "not a tab")?;
@@ -188,7 +188,7 @@ fn cases() -> Vec<Case> {
                 ensure(same_recent_path(&favorites[0].tags_root, &kit.root), "tags root")?;
                 ensure(favorites[0].folders == vec![PathBuf::from(FOLDER)], "folders")?;
                 ensure(
-                    app.model.kits[0].browser.active_favorite_folders == vec![PathBuf::from(FOLDER)],
+                    app.model.kits[0].active_favorite_folders == vec![PathBuf::from(FOLDER)],
                     "kit favorites",
                 )
             },
@@ -216,8 +216,8 @@ fn cases() -> Vec<Case> {
                     "favorite tags",
                 )?;
                 ensure(
-                    app.model.kits[0].browser.active_favorite_entries.len() == 1
-                        && app.model.kits[0].browser.active_favorite_entries[0].key == kit.key(MODEL),
+                    app.model.kits[0].active_favorite_entries.len() == 1
+                        && app.model.kits[0].active_favorite_entries[0].key == kit.key(MODEL),
                     "kit favorite entries",
                 )
             },
@@ -769,10 +769,10 @@ fn opening_a_folder_twice_reuses_its_pane_unless_asked_for_a_new_tab() {
     };
     open(&mut app, false);
     open(&mut app, false);
-    assert_eq!(app.model.kits[0].browser.folder_browsers.len(), 1);
+    assert_eq!(app.views[app.model.kits[0].id].browser.folder_browsers.len(), 1);
     open(&mut app, true);
     let base = folder_pane_key(Path::new(FOLDER));
-    let mut keys: Vec<_> = app.model.kits[0].browser.folder_browsers.keys().cloned().collect();
+    let mut keys: Vec<_> = app.views[app.model.kits[0].id].browser.folder_browsers.keys().cloned().collect();
     keys.sort();
     assert_eq!(keys, vec![base.clone(), format!("{base}#2")]);
 }
@@ -789,5 +789,5 @@ fn a_favorite_toggled_twice_is_gone() {
     }
     assert_eq!(app.model.status, format!("Removed {MODEL} from Favorites"));
     assert!(app.model.prefs.editing_kit_favorites.is_empty());
-    assert!(app.model.kits[0].browser.active_favorite_entries.is_empty());
+    assert!(app.model.kits[0].active_favorite_entries.is_empty());
 }

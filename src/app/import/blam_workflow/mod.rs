@@ -35,10 +35,10 @@ impl Baboon {
         if self.refuse_read_only_edit(kit_index) {
             return;
         }
-        if self.model.kits[kit_index].blam.running {
+        if self.views[self.model.kits[kit_index].id].blam.running {
             return;
         }
-        let asset_rel = self.model.kits[kit_index]
+        let asset_rel = self.views[self.model.kits[kit_index].id]
             .blam
             .asset_path
             .trim()
@@ -46,16 +46,16 @@ impl Baboon {
             .trim_matches('/')
             .to_owned();
         if asset_rel.is_empty() {
-            self.model.kits[kit_index].blam.status = "Pick an asset data folder first".to_owned();
+            self.views[self.model.kits[kit_index].id].blam.status = "Pick an asset data folder first".to_owned();
             return;
         }
         let Some(layout) = self.kit_layout_for(kit_index) else {
-            self.model.kits[kit_index].blam.status =
+            self.views[self.model.kits[kit_index].id].blam.status =
                 "This workspace has no loose editing kit to import into".to_owned();
             return;
         };
         let Some(tags_root) = self.loaded_tags_root_for(kit_index) else {
-            self.model.kits[kit_index].blam.status =
+            self.views[self.model.kits[kit_index].id].blam.status =
                 "This workspace has no loose tags folder to import into".to_owned();
             return;
         };
@@ -64,7 +64,7 @@ impl Baboon {
             .as_ref()
             .and_then(|source| source.game.clone())
         else {
-            self.model.kits[kit_index].blam.status =
+            self.views[self.model.kits[kit_index].id].blam.status =
                 "This workspace's game is unknown, so no schemas can be chosen".to_owned();
             return;
         };
@@ -78,7 +78,7 @@ impl Baboon {
             .next()
             .unwrap_or(asset_rel.as_str())
             .to_owned();
-        let blam = &self.model.kits[kit_index].blam;
+        let blam = &self.views[self.model.kits[kit_index].id].blam;
         let job = BlamImportJob {
             data_dir: layout.data.join(&asset_rel),
             tags_root,
@@ -110,7 +110,7 @@ impl Baboon {
         if job.structure {
             ticked.push("structure");
         }
-        let blam = &mut self.model.kits[kit_index].blam;
+        let blam = &mut self.views[self.model.kits[kit_index].id].blam;
         blam.running = true;
         blam.status = "Importing…".to_owned();
         blam.log.clear();
@@ -149,7 +149,7 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        let blam = &mut self.model.kits[kit_index].blam;
+        let blam = &mut self.views[self.model.kits[kit_index].id].blam;
         if kind == BlamLogKind::Info {
             blam.status = message.clone();
         }
@@ -167,7 +167,7 @@ impl Baboon {
         let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        self.model.kits[kit_index].blam.running = false;
+        self.views[self.model.kits[kit_index].id].blam.running = false;
         let created_count = created.len();
         let folder_seeds = self.model.kits[kit_index].folder_seeds();
         for (entry, tag) in created {
@@ -193,7 +193,7 @@ impl Baboon {
         }
         let mut failures = 0usize;
         for (label, result) in &outcomes {
-            let blam = &mut self.model.kits[kit_index].blam;
+            let blam = &mut self.views[self.model.kits[kit_index].id].blam;
             match result {
                 Ok(summary) => blam.push_log(BlamLogKind::Good, format!("{label}: {summary}")),
                 Err(error) => {
@@ -209,7 +209,7 @@ impl Baboon {
         } else {
             format!("Imported {created_count} tag(s), {failures} pipeline(s) failed")
         };
-        let blam = &mut self.model.kits[kit_index].blam;
+        let blam = &mut self.views[self.model.kits[kit_index].id].blam;
         blam.push_log(
             if failures == 0 && created_count > 0 {
                 BlamLogKind::Good

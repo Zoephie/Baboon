@@ -7,6 +7,8 @@ use super::*;
 
 pub(in crate::app) mod kit;
 pub(in crate::app) use kit::*;
+pub(in crate::app) mod view;
+pub(in crate::app) use view::{KitMut, KitView, KitViews};
 pub(in crate::app) mod editing_kits;
 pub(in crate::app) use editing_kits::*;
 pub(in crate::app) mod tool_drop_delivery;

@@ -480,7 +480,7 @@ impl Baboon {
                     .to_owned();
             return;
         }
-        self.model.kits[kit].open_tag_pane(GIT_REVIEW_KEY);
+        self.kit_and_view(kit).open_tag_pane(GIT_REVIEW_KEY);
         self.run_git_review_job(kit, GitReviewJob::Refresh, ctx);
     }
 
@@ -508,7 +508,7 @@ impl Baboon {
                 _ => None,
             })
         else {
-            self.model.kits[kit_index].git_review.error =
+            self.views[self.model.kits[kit_index].id].git_review.error =
                 Some("Git Review requires a folder-based editing kit.".to_owned());
             return;
         };
@@ -518,7 +518,7 @@ impl Baboon {
             game,
         };
         let kit = self.model.kits[kit_index].id;
-        let state = &mut self.model.kits[kit_index].git_review;
+        let state = &mut self.views[self.model.kits[kit_index].id].git_review;
         state.request += 1;
         state.loading = true;
         let request = state.request;
@@ -552,7 +552,7 @@ impl Baboon {
         let Some(kit_index) = self.kit_index(kit) else {
             return false;
         };
-        let state = &mut self.model.kits[kit_index].git_review;
+        let state = &mut self.views[self.model.kits[kit_index].id].git_review;
         if state.request != request {
             return false;
         }
@@ -565,7 +565,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str) {
-        let Some(repo) = self.model.kits[kit].git_review.repo_root.as_ref() else {
+        let Some(repo) = self.views[self.model.kits[kit].id].git_review.repo_root.as_ref() else {
             return;
         };
         let absolute = git_worktree_path(repo, path);
@@ -600,7 +600,7 @@ impl Baboon {
             }
             self.model.kits[kit].generation = self.model.kits[kit].generation.wrapping_add(1);
         }
-        self.model.kits[kit].git_review.pending_open = Some(key);
+        self.views[self.model.kits[kit].id].git_review.pending_open = Some(key);
     }
 }
 

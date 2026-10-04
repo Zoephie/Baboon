@@ -11,7 +11,7 @@ fn two_kits() -> (Baboon, KitId, KitId) {
     let mut app = Baboon::for_test();
     let a = app.model.kits[0].id;
     let b = KitId(a.0 + 1);
-    app.model.kits.push(Kit::empty(b, TagNameIndex::default()));
+    app.push_kit(Kit::empty(b, TagNameIndex::default()));
     (app, a, b)
 }
 

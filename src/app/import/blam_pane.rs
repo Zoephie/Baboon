@@ -31,9 +31,9 @@ impl Baboon {
 
         // Re-detect when the asset path changes (or a rescan was forced), not
         // every frame — the ticks follow the typed path without hammering disk.
-        let trimmed = self.model.kits[kit_index].blam.asset_path.trim().to_owned();
-        if self.model.kits[kit_index].blam.scanned_path.as_deref() != Some(trimmed.as_str()) {
-            let blam = &mut self.model.kits[kit_index].blam;
+        let trimmed = self.views[self.model.kits[kit_index].id].blam.asset_path.trim().to_owned();
+        if self.views[self.model.kits[kit_index].id].blam.scanned_path.as_deref() != Some(trimmed.as_str()) {
+            let blam = &mut self.views[self.model.kits[kit_index].id].blam;
             if let Some(data_root) = data_root.as_ref().filter(|_| !trimmed.is_empty()) {
                 let asset_folder = data_root.join(trimmed.replace('\\', "/"));
                 blam.rescan(&asset_folder);
@@ -57,11 +57,11 @@ impl Baboon {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status:").color(subtle_dark()));
-                    if self.model.kits[kit_index].blam.running {
+                    if self.views[self.model.kits[kit_index].id].blam.running {
                         ui.spinner();
                     }
                     ui.label(
-                        RichText::new(&self.model.kits[kit_index].blam.status)
+                        RichText::new(&self.views[self.model.kits[kit_index].id].blam.status)
                             .color(text_dark())
                             .monospace(),
                     );
@@ -87,7 +87,7 @@ impl Baboon {
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
-                        let blam = &self.model.kits[kit_index].blam;
+                        let blam = &self.views[self.model.kits[kit_index].id].blam;
                         if blam.log.is_empty() {
                             ui.label(
                                 RichText::new("No import has run yet.")
@@ -139,7 +139,7 @@ impl Baboon {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(
-                                    &mut self.model.kits[kit_index].blam.asset_path,
+                                    &mut self.views[self.model.kits[kit_index].id].blam.asset_path,
                                 )
                                 .desired_width(320.0)
                                 .font(egui::TextStyle::Monospace)
@@ -167,8 +167,8 @@ impl Baboon {
                         ui.add_space(12.0);
 
                         ui.label(RichText::new("Pipelines").color(text_dark()).strong());
-                        let scan = self.model.kits[kit_index].blam.scan;
-                        let blam = &mut self.model.kits[kit_index].blam;
+                        let scan = self.views[self.model.kits[kit_index].id].blam.scan;
+                        let blam = &mut self.views[self.model.kits[kit_index].id].blam;
                         ui.add_enabled(
                             scan.render,
                             egui::Checkbox::new(&mut blam.import_render, "Render (render_model)"),
@@ -240,12 +240,12 @@ impl Baboon {
         if browse_clicked
             && let Some(path) = self.pick_tool_command_path(ToolCommandArgKind::PathData)
         {
-            let blam = &mut self.model.kits[kit_index].blam;
+            let blam = &mut self.views[self.model.kits[kit_index].id].blam;
             blam.asset_path = path;
             blam.scanned_path = None;
         }
         if rescan_clicked {
-            self.model.kits[kit_index].blam.scanned_path = None;
+            self.views[self.model.kits[kit_index].id].blam.scanned_path = None;
         }
         if import_clicked {
             self.begin_blam_import(kit_index, ui.ctx().clone());

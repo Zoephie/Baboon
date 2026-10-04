@@ -455,7 +455,7 @@ impl Baboon {
     pub(in crate::app) fn register_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
         self.stash_in_memory_tag(entry, tag);
-        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.kit_and_view(self.model.active).open_tag_pane(&key);
         self.model.kits[self.model.active].selected_key = Some(key);
     }
 
@@ -499,7 +499,7 @@ impl Baboon {
         self.model.kits[self.model.active]
             .parsed_tags
             .insert(key.clone(), TagDocument::clean(tag));
-        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.kit_and_view(self.model.active).open_tag_pane(&key);
         self.model.kits[self.model.active].selected_key = Some(key.clone());
     }
 

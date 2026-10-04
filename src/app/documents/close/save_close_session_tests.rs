@@ -515,7 +515,7 @@ fn discarding_reloads_the_tag_from_disk() {
 #[test]
 fn discarding_a_closed_tag_drops_its_document_without_reloading() {
     let (_kit, mut app, key, _other) = edited("discard-closed");
-    app.model.kits[0].close_tag_pane(&key);
+    app.kit_and_view(0).close_tag_pane(&key);
     let label = app.tag_path_label(&key);
 
     app.discard_tag_changes(0, &key, &ctx());
@@ -599,8 +599,8 @@ fn a_session_written_on_exit_restores_its_workspace() {
     let kit = kit("session");
     let mut app = app();
     kit.install(&mut app);
-    app.model.kits[0].browser.mode = BrowserMode::Groups;
-    app.model.kits[0].browser.sort = BrowserSort::Type;
+    app.views[app.model.kits[0].id].browser.mode = BrowserMode::Groups;
+    app.views[app.model.kits[0].id].browser.sort = BrowserSort::Type;
     let other = kit.open(&mut app, OTHER);
     let key = kit.open(&mut app, MODEL);
     app.handle_browser_action(
@@ -655,15 +655,16 @@ fn a_session_written_on_exit_restores_its_workspace() {
     });
 
     let restored = &next.model.kits[next.model.active];
+    let restored_view = &next.views[restored.id];
     assert!(restored.open_tabs.contains(&key) && restored.open_tabs.contains(&other));
     assert!(
-        restored
+        restored_view
             .browser.folder_browsers
             .values()
             .any(|folder| folder.rel_path == Path::new("objects/props"))
     );
-    assert_eq!(restored.browser.mode, BrowserMode::Groups);
-    assert_eq!(restored.browser.sort, BrowserSort::Type);
+    assert_eq!(restored_view.browser.mode, BrowserMode::Groups);
+    assert_eq!(restored_view.browser.sort, BrowserSort::Type);
     // The session does not record which tab was selected: each restored tag
     // is selected in turn, so the last one saved ends up selected.
     // QUIRK: with the saved order unstable, so is the restored selection.

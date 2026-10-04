@@ -217,7 +217,7 @@ impl Baboon {
         }
         ui.separator();
         let save_label =
-            if self.model.prefs.enable_chimp && self.model.kits[self.model.active].surface == KitSurface::Chimp {
+            if self.model.prefs.enable_chimp && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp {
                 "Save Chimp Changes...    Ctrl+S"
             } else {
                 "Save Current Tag    Ctrl+S"
@@ -619,30 +619,31 @@ impl Baboon {
         // menu shows and sets the focused kit's — matching the
         // Folders/Groups buttons in that kit's own toolbar.
         let kit = &mut self.model.kits[self.model.active];
+        let view = &mut self.views[kit.id];
         if ui
-            .selectable_label(kit.browser.mode == BrowserMode::Folders, "Folders")
+            .selectable_label(view.browser.mode == BrowserMode::Folders, "Folders")
             .clicked()
         {
-            kit.browser.mode = BrowserMode::Folders;
+            view.browser.mode = BrowserMode::Folders;
             close_menu(ui);
         }
         if ui
-            .selectable_label(kit.browser.mode == BrowserMode::Groups, "Tag Groups")
+            .selectable_label(view.browser.mode == BrowserMode::Groups, "Tag Groups")
             .clicked()
         {
-            kit.browser.mode = BrowserMode::Groups;
+            view.browser.mode = BrowserMode::Groups;
             close_menu(ui);
         }
         ui.separator();
         let selected_sort = right_opening_menu_button(
             ui,
-            format!("Sort by: {}", kit.browser.sort.label()),
+            format!("Sort by: {}", view.browser.sort.label()),
             220.0,
             |ui| {
                 style_list_menu(ui);
                 for option in BrowserSort::ALL {
                     if ui
-                        .selectable_label(kit.browser.sort == option, option.label())
+                        .selectable_label(view.browser.sort == option, option.label())
                         .clicked()
                     {
                         return Some(option);
@@ -654,7 +655,7 @@ impl Baboon {
         .inner
         .flatten();
         if let Some(option) = selected_sort {
-            kit.browser.sort = option;
+            view.browser.sort = option;
             close_menu(ui);
         }
         ui.separator();
@@ -672,15 +673,15 @@ impl Baboon {
         );
         ui.checkbox(&mut self.model.prefs.expert_mode, "Expert mode");
         ui.separator();
-        let terminal_enabled = self.model.kits[self.model.active].terminal.work_dir.is_some();
+        let terminal_enabled = self.views[self.model.kits[self.model.active].id].terminal.work_dir.is_some();
         if ui
             .add_enabled(
                 terminal_enabled,
-                egui::Button::selectable(self.model.kits[self.model.active].terminal.open, "Terminal"),
+                egui::Button::selectable(self.views[self.model.kits[self.model.active].id].terminal.open, "Terminal"),
             )
             .clicked()
         {
-            self.model.kits[self.model.active].terminal.open = !self.model.kits[self.model.active].terminal.open;
+            self.views[self.model.kits[self.model.active].id].terminal.open = !self.views[self.model.kits[self.model.active].id].terminal.open;
             self.remember_terminal_open_for_game();
             close_menu(ui);
         }
@@ -1058,8 +1059,8 @@ impl Baboon {
     /// The terminal panel, when the active kit has it open.
     fn draw_terminal_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
-        if self.model.kits[self.model.active].terminal.open {
-            let work_dir_label = self.model.kits[self.model.active]
+        if self.views[self.model.kits[self.model.active].id].terminal.open {
+            let work_dir_label = self.views[self.model.kits[self.model.active].id]
                 .terminal.work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
@@ -1098,7 +1099,7 @@ impl Baboon {
                                             .on_hover_text("Close terminal")
                                             .clicked()
                                         {
-                                            self.model.kits[self.model.active].terminal.open = false;
+                                            self.views[self.model.kits[self.model.active].id].terminal.open = false;
                                             self.remember_terminal_open_for_game();
                                         }
                                         if icon_button(
@@ -1434,7 +1435,7 @@ impl Baboon {
         match self.editor.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
                 if self.model.prefs.enable_chimp
-                    && self.model.kits[self.model.active].surface == KitSurface::Chimp =>
+                    && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp =>
             {
                 self.open_chimp_save_dialog(self.model.active)
             }
@@ -1455,7 +1456,7 @@ impl Baboon {
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             Some(DeferredFileAction::CloseCurrentTab)
                 if self.model.prefs.enable_chimp
-                    && self.model.kits[self.model.active].surface == KitSurface::Chimp =>
+                    && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp =>
             {
                 if let Some(package) = self.model.kits[self.model.active].chimp.selected_package.clone() {
                     let kit = self.model.active;

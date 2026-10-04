@@ -74,7 +74,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                         ui.separator();
                         for (surface, label, hover) in KitSurface::TABS {
                             ui.selectable_value(
-                                &mut self.app.model.kits[kit_index].surface,
+                                &mut self.app.views[self.app.model.kits[kit_index].id].surface,
                                 surface,
                                 label,
                             )
@@ -82,7 +82,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                         }
                     });
                 });
-            if self.app.model.kits[kit_index].surface == KitSurface::Chimp {
+            if self.app.views[self.app.model.kits[kit_index].id].surface == KitSurface::Chimp {
                 self.app.draw_chimp_workspace(ui, &self.ctx, kit_index);
                 return egui_tiles::UiResponse::None;
             }

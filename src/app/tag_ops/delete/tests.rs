@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::kits::{KitMut, KitView};
 
 fn record_at(utoc: &str, ubulk: &str) -> CreatedTagRecord {
     CreatedTagRecord {
@@ -203,7 +204,8 @@ fn forgetting_a_tag_clears_its_kit_state_and_bumps_the_generation() {
     kit.selected_key = Some(key.clone());
     let generation_before = kit.generation;
 
-    forget_tag_in_kit(&mut kit, &key);
+    let mut view = KitView::for_test(&kit);
+    forget_tag_in_kit(KitMut::new(&mut kit, &mut view), &key);
 
     let source = kit.source.as_ref().unwrap();
     assert_eq!(source.entries.len(), 1);

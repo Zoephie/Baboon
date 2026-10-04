@@ -71,8 +71,8 @@ impl Baboon {
         self.editor.function_popup = None;
         self.apply_loaded_source_identity(game);
         if let Some((key, tag)) = initial_tag {
-            let kit = &mut self.model.kits[self.model.active];
-            kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
+            let mut kit = self.kit_and_view(self.model.active);
+            kit.kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
             kit.open_tag_pane(&key);
         }
         let installed = self.model.active;
@@ -94,7 +94,7 @@ impl Baboon {
             // Tags is the primary Campaign Evolved workspace. Chimp still
             // mounts eagerly when enabled so it is ready if the user selects
             // it, but loading a project must not switch surfaces implicitly.
-            self.model.kits[installed].surface = campaign_evolved_surface_on_load();
+            self.views[self.model.kits[installed].id].surface = campaign_evolved_surface_on_load();
             if self.model.prefs.enable_chimp {
                 self.begin_chimp_mount(installed, ctx.clone());
             }
@@ -132,12 +132,13 @@ impl Baboon {
     fn apply_loaded_source_identity(&mut self, game: Option<GameId>) {
         let terminal_open = game.is_some_and(|game| self.kit_tools.terminal_open_games.contains(game.as_str()));
         let kit = &mut self.model.kits[self.model.active];
-        kit.terminal.work_dir = kit
+        let view = &mut self.views[kit.id];
+        view.terminal.work_dir = kit
             .source
             .as_ref()
             .and_then(LoadedSourceData::kit_layout)
             .map(|layout| layout.root);
-        kit.terminal.open = terminal_open;
+        view.terminal.open = terminal_open;
         kit.keywords.load_for_game(game.map(GameId::as_str));
     }
 
@@ -286,7 +287,7 @@ impl Baboon {
                 // save (a recompile, an import, a new file) reaches the
                 // shader grid here.
                 if refresh_touches_render_methods(&refresh) {
-                    self.model.kits[kit_index].forget_render_methods();
+                    self.views[self.model.kits[kit_index].id].caches.forget_render_methods();
                 }
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
             }
@@ -946,6 +947,7 @@ impl Baboon {
         scanned: Vec<TagEntry>,
     ) {
         let kit = &mut self.model.kits[kit_index];
+        let view = &mut self.views[kit.id];
         let Some(source) = kit.source.as_mut() else {
             return;
         };
@@ -962,7 +964,7 @@ impl Baboon {
         replace_loaded_tree_scope(&mut source.tree, Path::new(""), rel_path, &source.entries);
         source.group_tree = crate::core::source::build_group_tree(&source.entries);
         let new_generation = kit.generation.wrapping_add(1);
-        for pane in kit.browser.folder_browsers.values_mut() {
+        for pane in view.browser.folder_browsers.values_mut() {
             replace_loaded_tree_scope(&mut pane.tree, &pane.rel_path, rel_path, &source.entries);
             // Keep the materialized tree installed above. Marking it stale
             // caused the next frame to replace it with a direct-only lazy tree.

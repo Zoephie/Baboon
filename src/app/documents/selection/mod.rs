@@ -72,7 +72,7 @@ impl Baboon {
                     self.model.kits[index]
                         .parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
-                    self.model.kits[index].caches.bitmap_previews.remove(&key);
+                    self.views[self.model.kits[index].id].caches.bitmap_previews.remove(&key);
                 }
                 self.model.status = "Bitmap reimported and reloaded".to_owned();
             }
@@ -101,7 +101,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn select_entry(&mut self, key: String, ctx: egui::Context) {
-        self.model.kits[self.model.active].open_tag_pane(&key);
+        self.kit_and_view(self.model.active).open_tag_pane(&key);
         self.model.kits[self.model.active].selected_key = Some(key.clone());
         // A tag the project has an overlay for opens from the project, not from
         // disk — otherwise reopening it would silently discard its edits.
@@ -126,8 +126,7 @@ impl Baboon {
         let Some(entry) = source
             .entry_for_key(&key)
             .or_else(|| {
-                self.model.kits[self.model.active]
-                    .browser.active_favorite_entries
+                self.model.kits[self.model.active].active_favorite_entries
                     .iter()
                     .find(|e| e.key == key)
             })
@@ -185,17 +184,17 @@ impl Baboon {
     }
 
     pub(in crate::app) fn unload_tag(&mut self, key: &str) {
-        self.model.kits[self.model.active].drop_document(key);
+        self.kit_and_view(self.model.active).drop_document(key);
     }
 
     /// Drop cached previews derived from a tag's contents so they rebuild from
     /// the (newly restored) tag bytes after an undo/redo.
     /// Drop derived previews for `key` in `kit`, after its document changed.
     pub(in crate::app) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
-        if let Some(preview) = self.model.kits[kit].caches.model_previews.get_mut(key) {
+        if let Some(preview) = self.views[self.model.kits[kit].id].caches.model_previews.get_mut(key) {
             preview.invalidate_load();
         }
-        if let Some(bitmap) = self.model.kits[kit].caches.bitmap_previews.get_mut(key) {
+        if let Some(bitmap) = self.views[self.model.kits[kit].id].caches.bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
             bitmap.decoding = None;
             bitmap.texture = None;
