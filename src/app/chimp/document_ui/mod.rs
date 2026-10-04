@@ -3,9 +3,13 @@
 
 use super::*;
 
-struct ChimpPaneBehavior<'a> {
-    app: &'a mut Baboon,
+struct ChimpPaneBehavior<'a, 'c> {
+    cx: &'a Ctx<'c>,
+    /// The kit's view, its tile tree taken out while the tree draws.
+    view: &'a mut ChimpView,
     kit_index: usize,
+    /// A save is running for this kit, so another cannot start.
+    writing: bool,
     close_requests: Vec<String>,
     focused: Option<String>,
     close_all: bool,
@@ -15,7 +19,13 @@ struct ChimpPaneBehavior<'a> {
     export_level: Option<(String, ChimpLevelFormat)>,
 }
 
-impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
+impl ChimpPaneBehavior<'_, '_> {
+    fn document(&self, package: &str) -> Option<&ChimpDocument> {
+        self.cx.model.kits[self.kit_index].chimp.documents.get(package)
+    }
+}
+
+impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
     fn pane_ui(
         &mut self,
         ui: &mut Ui,
@@ -26,21 +36,20 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         {
             self.focused = Some(pane.clone());
         }
-        self.app.draw_chimp_document_pane(
+        draw_chimp_document_pane(
             ui,
+            self.cx,
+            self.view,
             self.kit_index,
             pane,
             &format!("chimp_tile_{}", tile_id.0),
+            self.writing,
         );
         egui_tiles::UiResponse::None
     }
 
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
-        let dirty = self.app.model.kits[self.kit_index]
-            .chimp
-            .documents
-            .get(pane)
-            .is_some_and(|document| document.dirty);
+        let dirty = self.document(pane).is_some_and(|document| document.dirty);
         let label = pane.rsplit('/').next().unwrap_or(pane);
         RichText::new(if dirty {
             format!("• {label}")
@@ -86,15 +95,13 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         if button_response.middle_clicked() {
             self.close_requests.push(package.clone());
         }
-        let has_texture = self.app.views[self.app.model.kits[self.kit_index].id]
-            .chimp
+        let has_texture = self
+            .view
             .documents
             .get(&package)
             .is_some_and(|pane| !pane.texture_previews.is_empty());
-        let has_mesh = self.app.model.kits[self.kit_index]
-            .chimp
-            .documents
-            .get(&package)
+        let has_mesh = self
+            .document(&package)
             .is_some_and(|document| document.mesh_kind.is_some());
         context_menu(&button_response, |ui| {
             if ui.button("Close").clicked() {
@@ -149,11 +156,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
             row_type()
         };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
-            if self.app.model.kits[self.kit_index]
-                .chimp
-                .documents
-                .get(package)
-                .is_some_and(|document| document.dirty));
+            if self.document(package).is_some_and(|document| document.dirty));
         if dirty {
             chimp_tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {
@@ -183,284 +186,280 @@ fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
     )
 }
 
-impl Baboon {
-    pub(super) fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        let Some(mut tree) = self.views[self.model.kits[kit_index].id].chimp.document_tree.take() else {
-            crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
-            return;
-        };
-        if tree.is_empty() {
-            self.views[self.model.kits[kit_index].id].chimp.document_tree = Some(tree);
-            crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
-            return;
-        }
-
-        let mut behavior = ChimpPaneBehavior {
-            app: self,
-            kit_index,
-            close_requests: Vec::new(),
-            focused: None,
-            close_all: false,
-            close_all_but: None,
-            extract_texture: None,
-            extract_mesh: None,
-            export_level: None,
-        };
-        tree.ui(&mut behavior, ui);
-        let close_requests = std::mem::take(&mut behavior.close_requests);
-        let focused = behavior.focused.take();
-        let close_all = behavior.close_all;
-        let close_all_but = behavior.close_all_but.take();
-        let extract_texture = behavior.extract_texture.take();
-        let extract_mesh = behavior.extract_mesh.take();
-        let export_level = behavior.export_level.take();
-        self.views[self.model.kits[kit_index].id].chimp.document_tree = Some(tree);
-        let kit = &mut self.model.kits[kit_index];
-        self.views[kit.id].chimp.sync_open_packages(&mut kit.chimp);
-        if let Some(package) = focused {
-            self.model.kits[kit_index].chimp.selected_package = Some(package);
-        }
-
-        let mut requested = if close_all {
-            self.model.kits[kit_index].chimp.open_packages.clone()
-        } else if let Some(keep) = close_all_but {
-            self.model.kits[kit_index]
-                .chimp
-                .open_packages
-                .iter()
-                .filter(|package| *package != &keep)
-                .cloned()
-                .collect()
-        } else {
-            close_requests
-        };
-        requested.sort();
-        requested.dedup();
-        let mut blocked = false;
-        for package in requested {
-            if !self.close_chimp_package(kit_index, &package) {
-                blocked = true;
-            }
-        }
-        if blocked {
-            self.model.status = "Save or discard modified Chimp packages before closing them.".to_owned();
-        }
-        if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture(kit_index, &package);
-        }
-        if let Some((package, format)) = extract_mesh {
-            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
-        }
-        if let Some((package, format)) = export_level {
-            self.begin_export_chimp_level(kit_index, &package, format);
-        }
+/// Draw a kit's open packages as tiles. What the tiles ask for — focus,
+/// closes, extractions — is sent as [`ChimpCommand`]s.
+pub(super) fn draw_chimp_tiles(
+    ui: &mut Ui,
+    cx: &Ctx,
+    view: &mut ChimpView,
+    kit_index: usize,
+    writing: bool,
+) {
+    let Some(mut tree) = view.document_tree.take() else {
+        crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
+        return;
+    };
+    if tree.is_empty() {
+        view.document_tree = Some(tree);
+        crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
+        return;
     }
 
-    fn draw_chimp_document_pane(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        package: &str,
-        scope: &str,
-    ) {
-        if !self.model.kits[kit_index].chimp.documents.contains_key(package) {
-            ui.label("This package is no longer loaded.");
-            return;
-        }
-        let package = package.to_owned();
+    let mut behavior = ChimpPaneBehavior {
+        cx,
+        view,
+        kit_index,
+        writing,
+        close_requests: Vec::new(),
+        focused: None,
+        close_all: false,
+        close_all_but: None,
+        extract_texture: None,
+        extract_mesh: None,
+        export_level: None,
+    };
+    tree.ui(&mut behavior, ui);
+    let ChimpPaneBehavior {
+        view,
+        close_requests,
+        focused,
+        close_all,
+        close_all_but,
+        extract_texture,
+        extract_mesh,
+        export_level,
+        ..
+    } = behavior;
+    view.document_tree = Some(tree);
 
-        let mut save_mod = false;
-        let mut extract_package = false;
-        let mut extract_json = false;
-        let mut extract_export = false;
-        {
-            let writing = self.chimp.chimp_writes.contains_key(&self.model.kits[kit_index].id);
-            let document = self.model.kits[kit_index]
-                .chimp
-                .documents
-                .get_mut(&package)
-                .expect("checked above");
-            ui.horizontal(|ui| {
-                ui.heading(&document.package);
-                ui.separator();
-                save_mod = ui
-                    .add_enabled(
-                        document.dirty && !writing,
-                        egui::Button::new("Save Chimp changes…"),
-                    )
-                    .on_hover_text("Save every modified Chimp package in one operation")
-                    .clicked();
-                extract_package = ui.button("Extract package…").clicked();
-                extract_json = ui.button("Export JSON…").clicked();
-                extract_export = ui.button("Extract selected export…").clicked();
-            });
-        }
-        if save_mod {
-            self.open_chimp_save_dialog(kit_index);
-        }
-        if extract_package {
-            self.extract_chimp_package(kit_index, &package);
-        }
-        if extract_json {
-            self.extract_chimp_json(kit_index, &package);
-        }
-        if extract_export {
-            self.extract_chimp_export(kit_index, &package);
-        }
+    let kit = cx.model.kits[kit_index].id;
+    cx.send(ChimpCommand::SyncOpenPackages { kit });
+    if let Some(package) = focused {
+        cx.send(ChimpCommand::Focus { kit, package });
+    }
+    let close = if close_all {
+        Some(ChimpClose::All)
+    } else if let Some(keep) = close_all_but {
+        Some(ChimpClose::AllBut(keep))
+    } else {
+        (!close_requests.is_empty()).then_some(ChimpClose::These(close_requests))
+    };
+    if let Some(which) = close {
+        cx.send(ChimpCommand::Close { kit, which });
+    }
+    let extractions = [
+        extract_texture.map(|package| (package, ChimpExtraction::Texture)),
+        extract_mesh.map(|(package, format)| (package, ChimpExtraction::Mesh(format))),
+        export_level.map(|(package, format)| (package, ChimpExtraction::Level(format))),
+    ];
+    for (package, what) in extractions.into_iter().flatten() {
+        cx.send(ChimpCommand::Extract { kit, package, what });
+    }
+}
 
-        // Read before the document borrow: `document` borrows this kit, and the
-        // preference lives on the application.
-        let expert = self.model.prefs.expert_mode;
-        let mut scan_referrers = false;
-        let world = match &self.model.kits[kit_index].chimp.mount {
-            ChimpMount::Ready(world) => world.clone(),
-            _ => return,
-        };
-        let kit = &mut self.model.kits[kit_index];
-        let document = kit.chimp.documents.get_mut(&package).expect("checked above");
-        let Some(pane) = self.views[kit.id].chimp.documents.get_mut(&package) else {
-            return;
-        };
-        let container = chimp_document_container_label(document, world.containers());
-        ui.label(
-            RichText::new(format!(
-                "{} exports • {} imports • {} bytes • {}",
-                document.header.export_map.len(),
-                document.header.import_map.len(),
-                document.original.len(),
-                container
-            ))
-            .color(subtle_dark()),
-        );
-        if document.orphaned {
-            ui.label(
-                RichText::new(
-                    "No mounted container provides this package any more. It can still be read and \
-                     extracted, but not written back.",
-                )
-                .color(Color32::from_rgb(170, 130, 60)),
-            );
-        }
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Document, "Document")
-                .on_hover_text("Readable JSON representation of the complete decoded package");
-            if !pane.texture_previews.is_empty() {
-                ui.selectable_value(&mut pane.view, ChimpDocumentView::Texture, "Texture")
-                    .on_hover_text("Decoded Texture2D image preview");
-            }
-            if document.mesh_kind.is_some() {
-                ui.selectable_value(&mut pane.view, ChimpDocumentView::Mesh, "Mesh")
-                    .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
-            }
-            ui.selectable_value(
-                &mut pane.view,
-                ChimpDocumentView::Properties,
-                "Properties",
-            )
-            .on_hover_text("Inspect exports and edit supported reflected scalar properties");
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Header, "Header")
-                .on_hover_text("The package's name map, imports and exports, and what uses each");
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Metadata, "Metadata")
-                .on_hover_text("Package dependencies and physical archive providers");
-        });
-        ui.separator();
-
-        let edit = match pane.view {
-            ChimpDocumentView::Document => {
-                if pane.document_text_dirty {
-                    refresh_chimp_document_text(document, pane);
-                }
-                draw_chimp_json_document(
-                    ui,
-                    ("chimp_document_text", scope.to_owned(), package.clone()),
-                    "Decoded Unreal package document",
-                    "Copy JSON",
-                    &pane.document_text,
-                    &mut pane.document_lines,
-                );
-                None
-            }
-            ChimpDocumentView::Texture => {
-                draw_chimp_texture_preview(ui, document, pane, &mut self.model.prefs.bitmap_preview_view);
-                None
-            }
-            ChimpDocumentView::Mesh => {
-                match pane.mesh_preview.as_ref() {
-                    Some(Ok(preview)) => model_preview::draw_standalone_mesh_preview(
-                        ui,
-                        preview,
-                        &mut pane.mesh_preview_state,
-                    ),
-                    Some(Err(error)) => {
-                        ui.colored_label(Color32::from_rgb(150, 56, 44), error);
-                    }
-                    None => {
-                        ui.label(RichText::new("No mesh geometry found.").color(subtle_dark()));
-                    }
-                }
-                None
-            }
-            ChimpDocumentView::Properties => {
-                egui::Panel::left(egui::Id::new((
-                    "chimp_exports",
-                    scope.to_owned(),
-                    package.clone(),
-                )))
-                .resizable(true)
-                .default_size(220.0)
-                .show(ui, |ui| {
-                    ui.label(RichText::new("Exports").strong());
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (index, export) in document.exports.iter().enumerate() {
-                            let supported = export.decoded.is_ok();
-                            let label =
-                                format!("{}  {}", if supported { "●" } else { "○" }, export.object);
-                            if ui
-                                .selectable_label(pane.selected_export == index, label)
-                                .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
-                                .clicked()
-                            {
-                                pane.selected_export = index;
-                            }
-                        }
-                    });
-                });
-                egui::CentralPanel::default()
-                    .show(ui, |ui| {
-                        draw_chimp_export_editor(ui, document, pane, world.usmap())
-                    })
-                    .inner
-            }
-            ChimpDocumentView::Header => {
-                draw_chimp_header_view(ui, document, pane, &world, expert, &mut scan_referrers)
-                    .map(ChimpEdit::Header)
-            }
-            ChimpDocumentView::Metadata => {
-                if pane.metadata_text_dirty {
-                    refresh_chimp_metadata_text(document, pane, &world);
-                }
-                draw_chimp_json_document(
-                    ui,
-                    ("chimp_metadata_text", scope.to_owned(), package.clone()),
-                    "Decoded package metadata",
-                    "Copy metadata JSON",
-                    &pane.metadata_text,
-                    &mut pane.metadata_lines,
-                );
-                None
-            }
-        };
-        // Every frame, so a frame without an edit closes the run of edits
-        // coalescing into one undo step.
-        self.commands.send(ChimpCommand::PaneDrawn {
+/// Draw one open package's pane: its header line, its views, and whichever
+/// view is chosen. Every frame it sends [`ChimpCommand::PaneDrawn`] with the
+/// edit it made, if any.
+fn draw_chimp_document_pane(
+    ui: &mut Ui,
+    cx: &Ctx,
+    view: &mut ChimpView,
+    kit_index: usize,
+    package: &str,
+    scope: &str,
+    writing: bool,
+) {
+    let kit = &cx.model.kits[kit_index];
+    let Some(document) = kit.chimp.documents.get(package) else {
+        ui.label("This package is no longer loaded.");
+        return;
+    };
+    let ChimpMount::Ready(world) = &kit.chimp.mount else {
+        return;
+    };
+    let Some(pane) = view.documents.get_mut(package) else {
+        return;
+    };
+    let package = package.to_owned();
+    let extract = |what| {
+        cx.send(ChimpCommand::Extract {
             kit: kit.id,
             package: package.clone(),
-            edit,
-        });
-        if scan_referrers {
-            let ctx = ui.ctx().clone();
-            self.begin_chimp_referrer_scan(kit_index, package.clone(), ctx);
+            what,
+        })
+    };
+    ui.horizontal(|ui| {
+        ui.heading(&document.package);
+        ui.separator();
+        if ui
+            .add_enabled(
+                document.dirty && !writing,
+                egui::Button::new("Save Chimp changes…"),
+            )
+            .on_hover_text("Save every modified Chimp package in one operation")
+            .clicked()
+        {
+            cx.send(ChimpCommand::OpenSaveDialog { kit: kit.id });
         }
+        if ui.button("Extract package…").clicked() {
+            extract(ChimpExtraction::Package);
+        }
+        if ui.button("Export JSON…").clicked() {
+            extract(ChimpExtraction::Json);
+        }
+        if ui.button("Extract selected export…").clicked() {
+            extract(ChimpExtraction::Export);
+        }
+    });
+
+    let expert = cx.model.prefs.expert_mode;
+    let mut scan_referrers = false;
+    let container = chimp_document_container_label(document, world.containers());
+    ui.label(
+        RichText::new(format!(
+            "{} exports • {} imports • {} bytes • {}",
+            document.header.export_map.len(),
+            document.header.import_map.len(),
+            document.original.len(),
+            container
+        ))
+        .color(subtle_dark()),
+    );
+    if document.orphaned {
+        ui.label(
+            RichText::new(
+                "No mounted container provides this package any more. It can still be read and \
+                 extracted, but not written back.",
+            )
+            .color(Color32::from_rgb(170, 130, 60)),
+        );
+    }
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut pane.view, ChimpDocumentView::Document, "Document")
+            .on_hover_text("Readable JSON representation of the complete decoded package");
+        if !pane.texture_previews.is_empty() {
+            ui.selectable_value(&mut pane.view, ChimpDocumentView::Texture, "Texture")
+                .on_hover_text("Decoded Texture2D image preview");
+        }
+        if document.mesh_kind.is_some() {
+            ui.selectable_value(&mut pane.view, ChimpDocumentView::Mesh, "Mesh")
+                .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
+        }
+        ui.selectable_value(
+            &mut pane.view,
+            ChimpDocumentView::Properties,
+            "Properties",
+        )
+        .on_hover_text("Inspect exports and edit supported reflected scalar properties");
+        ui.selectable_value(&mut pane.view, ChimpDocumentView::Header, "Header")
+            .on_hover_text("The package's name map, imports and exports, and what uses each");
+        ui.selectable_value(&mut pane.view, ChimpDocumentView::Metadata, "Metadata")
+            .on_hover_text("Package dependencies and physical archive providers");
+    });
+    ui.separator();
+
+    let edit = match pane.view {
+        ChimpDocumentView::Document => {
+            if pane.document_text_dirty {
+                refresh_chimp_document_text(document, pane);
+            }
+            draw_chimp_json_document(
+                ui,
+                ("chimp_document_text", scope.to_owned(), package.clone()),
+                "Decoded Unreal package document",
+                "Copy JSON",
+                &pane.document_text,
+                &mut pane.document_lines,
+            );
+            None
+        }
+        ChimpDocumentView::Texture => {
+            let settings = cx.model.prefs.bitmap_preview_view;
+            let mut edited = settings;
+            draw_chimp_texture_preview(ui, document, pane, &mut edited);
+            if edited != settings {
+                cx.edit_prefs(move |prefs| prefs.bitmap_preview_view = edited);
+            }
+            None
+        }
+        ChimpDocumentView::Mesh => {
+            match pane.mesh_preview.as_ref() {
+                Some(Ok(preview)) => model_preview::draw_standalone_mesh_preview(
+                    ui,
+                    preview,
+                    &mut pane.mesh_preview_state,
+                ),
+                Some(Err(error)) => {
+                    ui.colored_label(Color32::from_rgb(150, 56, 44), error);
+                }
+                None => {
+                    ui.label(RichText::new("No mesh geometry found.").color(subtle_dark()));
+                }
+            }
+            None
+        }
+        ChimpDocumentView::Properties => {
+            egui::Panel::left(egui::Id::new((
+                "chimp_exports",
+                scope.to_owned(),
+                package.clone(),
+            )))
+            .resizable(true)
+            .default_size(220.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Exports").strong());
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (index, export) in document.exports.iter().enumerate() {
+                        let supported = export.decoded.is_ok();
+                        let label =
+                            format!("{}  {}", if supported { "●" } else { "○" }, export.object);
+                        if ui
+                            .selectable_label(pane.selected_export == index, label)
+                            .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
+                            .clicked()
+                        {
+                            pane.selected_export = index;
+                        }
+                    }
+                });
+            });
+            egui::CentralPanel::default()
+                .show(ui, |ui| {
+                    draw_chimp_export_editor(ui, document, pane, world.usmap())
+                })
+                .inner
+        }
+        ChimpDocumentView::Header => {
+            draw_chimp_header_view(ui, document, pane, world, expert, &mut scan_referrers)
+                .map(ChimpEdit::Header)
+        }
+        ChimpDocumentView::Metadata => {
+            if pane.metadata_text_dirty {
+                refresh_chimp_metadata_text(document, pane, world);
+            }
+            draw_chimp_json_document(
+                ui,
+                ("chimp_metadata_text", scope.to_owned(), package.clone()),
+                "Decoded package metadata",
+                "Copy metadata JSON",
+                &pane.metadata_text,
+                &mut pane.metadata_lines,
+            );
+            None
+        }
+    };
+    // Every frame, so a frame without an edit closes the run of edits
+    // coalescing into one undo step.
+    cx.send(ChimpCommand::PaneDrawn {
+        kit: kit.id,
+        package: package.clone(),
+        edit,
+    });
+    if scan_referrers {
+        cx.send(ChimpCommand::ScanReferrers {
+            kit: kit.id,
+            package,
+        });
     }
 }
 

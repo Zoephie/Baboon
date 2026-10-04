@@ -122,6 +122,42 @@ pub(in crate::app) enum ChimpCommand {
         action: ChimpSaveAction,
         pending_close_action: Option<PendingCloseAction>,
     },
+    /// Open the save dialog for a kit's modified packages.
+    OpenSaveDialog { kit: KitId },
+    /// Write something out of an open package.
+    Extract {
+        kit: KitId,
+        package: String,
+        what: ChimpExtraction,
+    },
+    /// Find which mounted packages import `package`.
+    ScanReferrers { kit: KitId, package: String },
+    /// `package`'s pane took focus: it is the one undo and the menus act on.
+    Focus { kit: KitId, package: String },
+    /// Close open packages; modified ones refuse.
+    Close { kit: KitId, which: ChimpClose },
+    /// Bring the kit's open packages in line with the panes its tile tree
+    /// holds, which a drag or a close can have changed.
+    SyncOpenPackages { kit: KitId },
+}
+
+/// What [`ChimpCommand::Extract`] writes out of a package.
+pub(in crate::app) enum ChimpExtraction {
+    Package,
+    Json,
+    /// The pane's selected export.
+    Export,
+    Texture,
+    Mesh(ChimpMeshFormat),
+    Level(ChimpLevelFormat),
+}
+
+/// Which packages [`ChimpCommand::Close`] closes. Resolved when it is applied,
+/// against the open packages as they are then.
+pub(in crate::app) enum ChimpClose {
+    These(Vec<String>),
+    All,
+    AllBut(String),
 }
 
 impl Baboon {
@@ -142,6 +178,7 @@ impl Baboon {
                     }
                     None => end_chimp_edit_run(document),
                 }
+                refresh_chimp_header_usage(document, pane);
             }
             ChimpCommand::ExportMesh {
                 prompt,
@@ -156,6 +193,71 @@ impl Baboon {
                 action,
                 pending_close_action,
             } => self.save_chimp_changes(kit, action, pending_close_action, ctx),
+            ChimpCommand::OpenSaveDialog { kit } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.open_chimp_save_dialog(kit_index);
+                }
+            }
+            ChimpCommand::Extract { kit, package, what } => {
+                let Some(kit_index) = self.model.kit_index(kit) else {
+                    return;
+                };
+                match what {
+                    ChimpExtraction::Package => self.extract_chimp_package(kit_index, &package),
+                    ChimpExtraction::Json => self.extract_chimp_json(kit_index, &package),
+                    ChimpExtraction::Export => self.extract_chimp_export(kit_index, &package),
+                    ChimpExtraction::Texture => self.begin_extract_chimp_texture(kit_index, &package),
+                    ChimpExtraction::Mesh(format) => {
+                        self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone())
+                    }
+                    ChimpExtraction::Level(format) => {
+                        self.begin_export_chimp_level(kit_index, &package, format)
+                    }
+                }
+            }
+            ChimpCommand::ScanReferrers { kit, package } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.begin_chimp_referrer_scan(kit_index, package, ctx.clone());
+                }
+            }
+            ChimpCommand::Focus { kit, package } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.model.kits[kit_index].chimp.selected_package = Some(package);
+                }
+            }
+            ChimpCommand::Close { kit, which } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.close_chimp_packages(kit_index, which);
+                }
+            }
+            ChimpCommand::SyncOpenPackages { kit } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    let kit = &mut self.model.kits[kit_index];
+                    self.views[kit.id].chimp.sync_open_packages(&mut kit.chimp);
+                }
+            }
+        }
+    }
+
+    /// Close `which` of a kit's open packages, saying so if a modified one
+    /// refused.
+    fn close_chimp_packages(&mut self, kit_index: usize, which: ChimpClose) {
+        let open = &self.model.kits[kit_index].chimp.open_packages;
+        let mut requested = match which {
+            ChimpClose::These(packages) => packages,
+            ChimpClose::All => open.clone(),
+            ChimpClose::AllBut(keep) => open.iter().filter(|package| **package != keep).cloned().collect(),
+        };
+        requested.sort();
+        requested.dedup();
+        let mut blocked = false;
+        for package in requested {
+            if !self.close_chimp_package(kit_index, &package) {
+                blocked = true;
+            }
+        }
+        if blocked {
+            self.model.status = "Save or discard modified Chimp packages before closing them.".to_owned();
         }
     }
 }

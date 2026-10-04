@@ -63,7 +63,8 @@ impl Header {
     fn new() -> Self {
         let install = SyntheticInstall::new();
         let document = install.document(THING);
-        let pane = install.pane(&document);
+        let mut pane = install.pane(&document);
+        pane.view = ChimpDocumentView::Header;
         let mut header = Self {
             install,
             document,
@@ -73,7 +74,10 @@ impl Header {
             scan: false,
             frames: Frames::new(),
         };
+        // The first frame asks for the usage count, which the document's
+        // side fills in after it; the second shows it.
         header.act(|frames, draw| {
+            frames.frame(Vec::new(), draw);
             frames.frame(Vec::new(), draw);
         });
         header
@@ -102,6 +106,7 @@ impl Header {
                     *changed |=
                         apply_chimp_edit(&world, document, pane, ChimpEdit::Header(commit), 0.0);
                 }
+                refresh_chimp_header_usage(document, pane);
                 *scan |= asked;
             });
         };

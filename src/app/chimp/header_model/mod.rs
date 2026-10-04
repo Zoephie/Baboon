@@ -654,6 +654,16 @@ pub(super) fn chimp_export_hash_desyncs(
 }
 
 /// Who references each name-map entry and each import slot.
+/// Count the header's usage for `pane` if it shows the Header view and the
+/// count went stale. Done on the document's side rather than in the draw:
+/// the count walks every export's names, and the engine walks them only
+/// through `&mut`.
+pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument, pane: &mut ChimpDocumentUi) {
+    if pane.view == ChimpDocumentView::Header && pane.header_usage.is_none() {
+        pane.header_usage = Some(chimp_header_usage(document));
+    }
+}
+
 pub(super) fn chimp_header_usage(document: &mut ChimpDocument) -> ChimpHeaderUsage {
     let mut names = vec![ChimpNameUsage::default(); document.header.name_map.len()];
     let mut record = |mapped: FMappedName, site: &str| {

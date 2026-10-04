@@ -413,7 +413,7 @@ fn chimp_level_cells(world: &World, package: &str) -> Vec<String> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ChimpMeshFormat {
+pub(in crate::app) enum ChimpMeshFormat {
     Jms,
     Psk,
     Pskx,

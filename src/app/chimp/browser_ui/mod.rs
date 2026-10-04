@@ -34,6 +34,12 @@ impl ChimpPackageActions {
 }
 
 impl Baboon {
+    fn draw_chimp_document_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
+        let kit = self.model.kits[kit_index].id;
+        let writing = self.chimp.chimp_writes.contains_key(&kit);
+        draw_chimp_tiles(ui, &cx!(self, ctx), &mut self.views[kit].chimp, kit_index, writing);
+    }
+
     pub(in crate::app) fn draw_chimp_workspace(
         &mut self,
         ui: &mut Ui,
@@ -88,13 +94,13 @@ impl Baboon {
                         ChimpBrowser::Folders => {
                             match self.views[self.model.kits[kit_index].id].chimp.folder_selection {
                                 ChimpFolderSelection::Package => {
-                                    self.draw_chimp_tiles(ui, ctx, kit_index)
+                                    self.draw_chimp_document_tiles(ui, ctx, kit_index)
                                 }
                                 ChimpFolderSelection::File => self.draw_chimp_file(ui, kit_index),
                             }
                         }
-                        ChimpBrowser::Groups => self.draw_chimp_tiles(ui, ctx, kit_index),
-                        ChimpBrowser::Packages => self.draw_chimp_tiles(ui, ctx, kit_index),
+                        ChimpBrowser::Groups => self.draw_chimp_document_tiles(ui, ctx, kit_index),
+                        ChimpBrowser::Packages => self.draw_chimp_document_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Archives => {
                             crate::app::shell::frame::centered_empty_state(
                                 ui,

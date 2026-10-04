@@ -163,6 +163,7 @@ pub(super) fn apply_chimp_edit(
         }
     }
     note_chimp_change(document, pane, now);
+    refresh_chimp_header_usage(document, pane);
     true
 }
 
@@ -198,6 +199,7 @@ pub(super) fn step_chimp_journal(
     pane.header_identity_edit = None;
     pane.header_error = None;
     note_chimp_change(document, pane, now);
+    refresh_chimp_header_usage(document, pane);
     Ok(Some(label))
 }
 

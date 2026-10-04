@@ -1,20 +1,34 @@
 use super::*;
 
+/// Draw `package`'s pane and apply what it sent, as a frame does.
 fn draw_pane<'a>(app: &'a mut Baboon, package: &'a str) -> impl FnMut(&mut egui::Ui) + 'a {
     move |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            app.draw_chimp_document_pane(ui, 0, package, "test");
-        });
         let ctx = ui.ctx().clone();
+        let kit = app.model.kits[0].id;
+        let writing = app.chimp.chimp_writes.contains_key(&kit);
+        egui::CentralPanel::default().show(ui, |ui| {
+            draw_chimp_document_pane(
+                ui,
+                &cx!(app, &ctx),
+                &mut app.views[kit].chimp,
+                0,
+                package,
+                "test",
+                writing,
+            );
+        });
         app.apply_commands(&ctx);
     }
 }
 
+/// Draw the kit's tiles and apply what they sent, as a frame does.
 fn draw_tiles(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
     move |ui| {
         let ctx = ui.ctx().clone();
+        let kit = app.model.kits[0].id;
+        let writing = app.chimp.chimp_writes.contains_key(&kit);
         egui::CentralPanel::default().show(ui, |ui| {
-            app.draw_chimp_tiles(ui, &ctx, 0);
+            draw_chimp_tiles(ui, &cx!(app, &ctx), &mut app.views[kit].chimp, 0, writing);
         });
         app.apply_commands(&ctx);
     }

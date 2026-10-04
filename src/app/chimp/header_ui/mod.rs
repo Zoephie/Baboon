@@ -15,14 +15,18 @@ use super::*;
 /// apply. A refused commit comes back as `header_error`, the draft kept.
 pub(super) fn draw_chimp_header_view(
     ui: &mut Ui,
-    document: &mut ChimpDocument,
+    document: &ChimpDocument,
     pane: &mut ChimpDocumentUi,
     world: &World,
     expert_mode: bool,
     scan_referrers: &mut bool,
 ) -> Option<ChimpHeaderCommit> {
+    // Counted by the document's side, which can walk the exports; it fills
+    // this in at the end of the frame (`refresh_chimp_header_usage`).
     if pane.header_usage.is_none() {
-        pane.header_usage = Some(chimp_header_usage(document));
+        ui.label(RichText::new("Counting references…").color(subtle_dark()));
+        ui.ctx().request_repaint();
+        return None;
     }
     // Collected during the draw and applied after it: the rename needs `&mut`
     // access to the very header and exports the rows are reading from.
@@ -128,7 +132,7 @@ struct ChimpHeaderEdits {
 
 fn draw_chimp_header_sections(
     ui: &mut Ui,
-    document: &mut ChimpDocument,
+    document: &ChimpDocument,
     pane: &mut ChimpDocumentUi,
     world: &World,
     expert_mode: bool,
