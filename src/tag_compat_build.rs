@@ -14,10 +14,11 @@
 //! ## The two layers
 //!
 //! Everything here is *derived*: it is what the two schemas say, with no
-//! judgement applied. Judgement lives in `mappings/conversion_mappings.json`,
-//! which this reads and never writes. That separation is the one
-//! `docs/tag-conversion-mappings.md` describes, and it is what lets a reviewed
-//! rename show up as [`CompatVerdict::RenamedProvable`] instead of a field
+//! judgement applied. Judgement lives in the converter's own reviewed catalog,
+//! embedded in blam-tags and read here through
+//! `blam_tags::convert::conversion_mapping_catalog`, so the database and the
+//! converter cannot disagree about it; this reads it and never writes it. That
+//! separation is what lets a reviewed rename show up as [`CompatVerdict::RenamedProvable`] instead of a field
 //! dropped and an unrelated one gained.
 
 use rusqlite::{Connection, params};
@@ -190,11 +191,24 @@ fn scope_matches(games: &[String], game: &str) -> bool {
 }
 
 impl ReviewedCatalog {
-    fn load(path: &Path) -> Self {
-        fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    /// Parse a catalog. A catalog that does not parse is an error, never an
+    /// empty one: an empty catalog silently drops every reviewed refusal and
+    /// rename from the database, and every check built on it still agrees.
+    fn parse(text: &str, origin: &str) -> Result<Self, String> {
+        serde_json::from_str(text).map_err(|error| format!("{origin}: {error}"))
+    }
+
+    fn load(path: &Path) -> Result<Self, String> {
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        Self::parse(&text, &path.display().to_string())
+    }
+
+    fn embedded() -> Result<Self, String> {
+        Self::parse(
+            blam_tags::convert::conversion_mapping_catalog(),
+            "the converter's embedded mapping catalog",
+        )
     }
 
     fn refusal(&self, group: &str, source: &str, target: &str) -> Option<String> {
@@ -642,8 +656,22 @@ pub struct ReviewedCatalogHandle(ReviewedCatalog);
 pub struct PairReportHandle(PairReport);
 
 impl ReviewedCatalogHandle {
-    pub fn load(path: &Path) -> Self {
-        Self(ReviewedCatalog::load(path))
+    /// The catalog the converter itself applies, embedded in blam-tags.
+    pub fn embedded() -> Result<Self, String> {
+        ReviewedCatalog::embedded().map(Self)
+    }
+
+    /// A catalog from a file, for reviewing edits before they reach the engine.
+    pub fn load(path: &Path) -> Result<Self, String> {
+        ReviewedCatalog::load(path).map(Self)
+    }
+
+    /// `path` when given, otherwise the embedded catalog.
+    pub fn from_override(path: Option<&Path>) -> Result<Self, String> {
+        match path {
+            Some(path) => Self::load(path),
+            None => Self::embedded(),
+        }
     }
 }
 
@@ -720,11 +748,11 @@ pub fn create_schema(connection: &Connection) -> rusqlite::Result<()> {
 /// Build the database for `pairs` and write it to `output`.
 pub fn build_database(
     definitions: &Path,
-    mappings: &Path,
+    mappings: Option<&Path>,
     pairs: &[(String, String)],
     output: &Path,
 ) -> Result<Vec<PairReportHandle>, String> {
-    let catalog = ReviewedCatalogHandle::load(mappings);
+    let catalog = ReviewedCatalogHandle::from_override(mappings)?;
     let mut reports = Vec::new();
     for (source, target) in pairs {
         reports.push(analyze_pair(definitions, &catalog, source, target)?);
@@ -924,12 +952,13 @@ pub fn suggest_drops(reports: &[PairReportHandle], group_filter: Option<&str>) -
         .unwrap_or_default()
 }
 
-/// The repository paths a bare invocation uses.
-pub fn default_paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+/// The repository paths a bare invocation uses: definitions, the database,
+/// and the CSV. The reviewed catalog is the engine's embedded one unless a
+/// file is given with `--mappings`.
+pub fn default_paths() -> (PathBuf, PathBuf, PathBuf) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     (
         root.join("definitions"),
-        root.join("mappings/conversion_mappings.json"),
         root.join("docs/tag_compat.sqlite3"),
         root.join("docs/tag-compat-reach-ce.csv"),
     )

@@ -10,12 +10,12 @@ fn definitions() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions")
 }
 
-fn mappings() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mappings/conversion_mappings.json")
+fn catalog() -> ReviewedCatalogHandle {
+    ReviewedCatalogHandle::embedded().expect("the engine's mapping catalog parses")
 }
 
 fn reach_to_ce() -> Vec<PairReportHandle> {
-    let catalog = ReviewedCatalogHandle::load(&mappings());
+    let catalog = catalog();
     vec![
         analyze_pair(&definitions(), &catalog, "haloreach_mcc", "haloce_evolved")
             .expect("analyze Reach to Campaign Evolved"),
@@ -30,7 +30,7 @@ fn reach_to_ce() -> Vec<PairReportHandle> {
 /// fail for reasons that have nothing to do with the data.
 #[test]
 fn the_checked_in_database_matches_the_definitions_it_was_built_from() {
-    let (definitions, mappings, output, _) = default_paths();
+    let (definitions, output, _) = default_paths();
     if !output.exists() {
         eprintln!(
             "skipping: {} has not been generated yet — run `cargo run --bin build_tag_compat`",
@@ -42,7 +42,7 @@ fn the_checked_in_database_matches_the_definitions_it_was_built_from() {
         .iter()
         .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
         .collect();
-    let catalog = ReviewedCatalogHandle::load(&mappings);
+    let catalog = catalog();
     let reports: Vec<_> = pairs
         .iter()
         .map(|(source, target)| {
@@ -172,9 +172,11 @@ fn the_two_games_share_the_expected_number_of_groups() {
         .iter()
         .filter(|group| group.blocked_reason.is_none())
         .count();
+    // 131 groups exist in both games; the reviewed catalog refuses `sound`
+    // between every pair, which leaves 130 that can cross.
     assert_eq!(
-        shared, 131,
-        "Reach and Campaign Evolved share 131 tag groups"
+        shared, 130,
+        "Reach and Campaign Evolved share 130 tag groups that can cross"
     );
 }
 
@@ -183,7 +185,7 @@ fn the_two_games_share_the_expected_number_of_groups() {
 /// provides none.
 #[test]
 fn every_reviewed_rename_for_this_pair_matches_a_field() {
-    let catalog = ReviewedCatalogHandle::load(&mappings());
+    let catalog = catalog();
     let reports = reach_to_ce();
     let PairReportHandle(report) = &reports[0];
 
@@ -207,6 +209,51 @@ fn every_reviewed_rename_for_this_pair_matches_a_field() {
         stale.is_empty(),
         "reviewed renames that match nothing: {stale:?}"
     );
+}
+
+/// The reviewed layer must actually be read. It was silently empty once: the
+/// generator read a catalog file that had been deleted, turned the missing
+/// file into an empty catalog, and every test above still passed over zero
+/// rules — so the database said a sound tag crosses from Reach to Campaign
+/// Evolved. The catalog refuses `sound` between every pair of games (a sound
+/// tag is a header for audio that lives elsewhere); that refusal has to reach
+/// this pair.
+#[test]
+fn the_reviewed_sound_refusal_reaches_reach_to_campaign_evolved() {
+    let reports = reach_to_ce();
+    let PairReportHandle(report) = &reports[0];
+    let sound = report
+        .groups
+        .iter()
+        .find(|group| group.group == "sound")
+        .expect("both games define sound");
+    let reason = sound
+        .blocked_reason
+        .as_deref()
+        .expect("sound is refused by the reviewed catalog");
+    assert!(
+        reason.contains("A sound tag is a header"),
+        "sound is blocked, but not by the reviewed refusal: {reason}"
+    );
+}
+
+/// A catalog file that is missing or does not parse is an error, not an empty
+/// catalog.
+#[test]
+fn a_missing_or_malformed_catalog_file_is_an_error() {
+    let missing = std::env::temp_dir().join(format!(
+        "baboon-no-such-catalog-{}.json",
+        std::process::id()
+    ));
+    assert!(ReviewedCatalogHandle::load(&missing).is_err());
+    let malformed = std::env::temp_dir().join(format!(
+        "baboon-malformed-catalog-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&malformed, b"{ not json").expect("write the malformed catalog");
+    let result = ReviewedCatalogHandle::load(&malformed);
+    let _ = std::fs::remove_file(&malformed);
+    assert!(result.is_err());
 }
 
 /// `--suggest-drops` has to emit something a reviewer can paste, for the group

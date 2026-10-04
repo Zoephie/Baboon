@@ -4,7 +4,8 @@ mod tag_compat_build;
 use std::path::PathBuf;
 
 fn main() {
-    let (mut definitions, mut mappings, mut output, mut csv) = tag_compat_build::default_paths();
+    let (mut definitions, mut output, mut csv) = tag_compat_build::default_paths();
+    let mut mappings: Option<PathBuf> = None;
     let mut pairs: Vec<(String, String)> = tag_compat_build::DEFAULT_PAIRS
         .iter()
         .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
@@ -28,7 +29,7 @@ fn main() {
         };
         match flag.as_str() {
             "--definitions" => definitions = PathBuf::from(value()),
-            "--mappings" => mappings = PathBuf::from(value()),
+            "--mappings" => mappings = Some(PathBuf::from(value())),
             "--out" => output = PathBuf::from(value()),
             "--csv" => csv = PathBuf::from(value()),
             "--pairs" => {
@@ -66,7 +67,7 @@ fn main() {
         std::process::exit(2);
     }
 
-    let reports = match tag_compat_build::build_database(&definitions, &mappings, &pairs, &output) {
+    let reports = match tag_compat_build::build_database(&definitions, mappings.as_deref(), &pairs, &output) {
         Ok(reports) => reports,
         Err(error) => {
             eprintln!("tag compatibility build failed: {error}");
