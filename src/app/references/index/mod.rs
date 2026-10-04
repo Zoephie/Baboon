@@ -102,7 +102,7 @@ impl Baboon {
         &mut self,
         progress: FolderRefactorProgress,
     ) -> bool {
-        self.folder_refactor = Some(FolderRefactorUiState {
+        self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
             label: progress.label.clone(),
             phase: progress.phase.clone(),
             progress: progress.progress,
@@ -122,7 +122,7 @@ impl Baboon {
         stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
     ) -> bool {
-        self.folder_refactor = None;
+        self.tag_ops.folder_refactor = None;
         let done = match result {
             Ok(done) => done,
             Err(error) => {

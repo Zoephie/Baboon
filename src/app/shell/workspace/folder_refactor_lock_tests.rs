@@ -15,7 +15,7 @@ fn app(locked: bool) -> Baboon {
         None,
     );
     if locked {
-        app.folder_refactor = Some(FolderRefactorUiState {
+        app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
             label: "Renaming creep to shadow".to_owned(),
             phase: "Moving files".to_owned(),
             progress: Some(0.5),

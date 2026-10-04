@@ -13,7 +13,7 @@ impl Baboon {
         label: String,
         move_folder: bool,
     ) {
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             self.status = "A folder move/copy is already running".to_owned();
             return;
         }
@@ -83,7 +83,7 @@ impl Baboon {
         // whichever one is focused when it lands.
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
-        self.folder_refactor = Some(FolderRefactorUiState {
+        self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
             label: job_label.clone(),
             phase: "Preparing".to_owned(),
             progress: None,
@@ -151,10 +151,10 @@ impl Baboon {
                 // Two writers on one container's UTOC would race, and each
                 // validates against a handle the other is invalidating.
                 !self
-                    .container_duplicate_running
+                    .tag_ops.container_duplicate_running
                     .contains(&self.active_kit_id())
                     && !self
-                        .container_delete_running
+                        .tag_ops.container_delete_running
                         .contains(&self.active_kit_id())
                     && matches!(
                         entry.location,
@@ -205,7 +205,7 @@ impl Baboon {
         // ledger, which cannot change while the dialog is open.
         let in_place_pak = if operation == TagNameOperation::Rename {
             let containers = self.mounted_containers().unwrap_or_default();
-            rename_in_place::container_rename_eligibility(&entry, &containers, &self.created_tags)
+            rename_in_place::container_rename_eligibility(&entry, &containers, &self.tag_ops.created_tags)
                 .ok()
                 .and_then(|_| match &entry.location {
                     TagEntryLocation::Container { container, .. } => containers
@@ -235,7 +235,7 @@ impl Baboon {
             ),
             None => (Vec::new(), true),
         };
-        self.rename_tag = Some(RenameTagState {
+        self.tag_ops.rename_tag = Some(RenameTagState {
             kit: self.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
@@ -271,11 +271,11 @@ impl Baboon {
         // container set, so return to the workspace the dialog was opened for.
         // A closed workspace drops the rename rather than moving a file in
         // whichever game is focused now.
-        let Some(kit) = self.rename_tag.as_ref().map(|state| state.kit) else {
+        let Some(kit) = self.tag_ops.rename_tag.as_ref().map(|state| state.kit) else {
             return;
         };
         if !self.focus_navigation_kit(kit) {
-            self.rename_tag = None;
+            self.tag_ops.rename_tag = None;
             self.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
@@ -291,7 +291,7 @@ impl Baboon {
             is_new_container,
             whole_path_editable,
             in_place_pak,
-        )) = self.rename_tag.as_ref().map(|s| {
+        )) = self.tag_ops.rename_tag.as_ref().map(|s| {
             (
                 s.key.clone(),
                 s.old_display.clone(),
@@ -346,7 +346,7 @@ impl Baboon {
         // A brand-new tag has no container to override — it exists only as the
         // open document, so both rename and duplicate are in-memory edits.
         if is_new_container {
-            self.rename_tag = None;
+            self.tag_ops.rename_tag = None;
             match self.apply_new_container_rename(
                 &key,
                 &new_rel,
@@ -365,7 +365,7 @@ impl Baboon {
         // `container_rename_eligibility`. Everything else keeps the overlay
         // route, which copies rather than moves and so breaks nothing.
         if in_place_pak.is_some() {
-            self.rename_tag = None;
+            self.tag_ops.rename_tag = None;
             self.begin_container_rename_in_place(&key, &new_rel, ctx.clone());
             return;
         }
@@ -373,7 +373,7 @@ impl Baboon {
         // Container tags: write an override container (rename adds a redirect,
         // duplicate does not) instead of moving a loose file.
         if is_container {
-            self.rename_tag = None;
+            self.tag_ops.rename_tag = None;
             let redirect = matches!(operation, TagNameOperation::Rename);
             match self.export_container_override(&key, Some((new_rel, redirect))) {
                 Ok(Some(path)) => {
@@ -391,7 +391,7 @@ impl Baboon {
         }
 
         // Loose folder: move the file on disk + rewrite references.
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             self.status = "A move/rename is already running".to_owned();
             return;
         }
@@ -411,7 +411,7 @@ impl Baboon {
             self.status = "Tag no longer exists".to_owned();
             return;
         };
-        self.rename_tag = None;
+        self.tag_ops.rename_tag = None;
         self.start_tag_rename_job(root, entry, new_rel, "Renaming tag");
     }
 
@@ -431,7 +431,7 @@ impl Baboon {
             self.open_rename_tag(key);
             return;
         }
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             self.status = "A move/rename is already running".to_owned();
             return;
         }
@@ -510,7 +510,7 @@ impl Baboon {
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         let job_label = job_label.to_owned();
-        self.folder_refactor = Some(FolderRefactorUiState {
+        self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
             label: job_label.clone(),
             phase: "Preparing".to_owned(),
             progress: None,

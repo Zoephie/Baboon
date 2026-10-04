@@ -14,7 +14,7 @@ impl Baboon {
             .unwrap_or(GameId::Halo3)
             .as_str()
             .to_owned();
-        self.new_tag_dialog = NewTagDialog {
+        self.tag_ops.new_tag_dialog = NewTagDialog {
             kit: Some(self.active_kit_id()),
             game: default_game,
             rel_path: String::new(),
@@ -25,7 +25,7 @@ impl Baboon {
             authorability: None,
         };
         self.refresh_new_tag_groups();
-        self.new_tag_open = true;
+        self.tag_ops.new_tag_open = true;
     }
 
     /// Open the New Tag dialog pre-filled with a container folder (from a
@@ -34,7 +34,7 @@ impl Baboon {
         self.open_new_tag_dialog();
         if let Some(folder) = folder_rel.filter(|f| !f.is_empty()) {
             // Pre-fill the path field with the folder + a trailing slash.
-            self.new_tag_dialog.rel_path = format!("{}/", folder.trim_end_matches('/'));
+            self.tag_ops.new_tag_dialog.rel_path = format!("{}/", folder.trim_end_matches('/'));
         }
     }
 
@@ -44,48 +44,48 @@ impl Baboon {
     }
 
     pub(in crate::app) fn refresh_new_tag_groups_inner(&mut self) {
-        match load_new_tag_groups(&self.new_tag_dialog.game) {
+        match load_new_tag_groups(&self.tag_ops.new_tag_dialog.game) {
             Ok(groups) if groups.is_empty() => {
-                self.new_tag_dialog.groups = groups;
-                self.new_tag_dialog.selected_group = 0;
-                self.new_tag_dialog.error = Some(format!(
+                self.tag_ops.new_tag_dialog.groups = groups;
+                self.tag_ops.new_tag_dialog.selected_group = 0;
+                self.tag_ops.new_tag_dialog.error = Some(format!(
                     "No tag schemas found for {}",
-                    self.new_tag_dialog.game
+                    self.tag_ops.new_tag_dialog.game
                 ));
             }
             Ok(groups) => {
-                self.new_tag_dialog.groups = groups;
-                self.new_tag_dialog.selected_group = self
-                    .new_tag_dialog
+                self.tag_ops.new_tag_dialog.groups = groups;
+                self.tag_ops.new_tag_dialog.selected_group = self
+                    .tag_ops.new_tag_dialog
                     .selected_group
-                    .min(self.new_tag_dialog.groups.len() - 1);
-                self.new_tag_dialog.rel_path.clear();
-                self.new_tag_dialog.output_path = None;
-                self.new_tag_dialog.error = None;
+                    .min(self.tag_ops.new_tag_dialog.groups.len() - 1);
+                self.tag_ops.new_tag_dialog.rel_path.clear();
+                self.tag_ops.new_tag_dialog.output_path = None;
+                self.tag_ops.new_tag_dialog.error = None;
             }
             Err(error) => {
-                self.new_tag_dialog.groups.clear();
-                self.new_tag_dialog.selected_group = 0;
-                self.new_tag_dialog.rel_path.clear();
-                self.new_tag_dialog.output_path = None;
-                self.new_tag_dialog.error = Some(error);
+                self.tag_ops.new_tag_dialog.groups.clear();
+                self.tag_ops.new_tag_dialog.selected_group = 0;
+                self.tag_ops.new_tag_dialog.rel_path.clear();
+                self.tag_ops.new_tag_dialog.output_path = None;
+                self.tag_ops.new_tag_dialog.error = Some(error);
             }
         }
     }
 
     pub(in crate::app) fn choose_new_tag_output_path(&mut self) {
         let Some(root) = self.loaded_tags_root() else {
-            self.new_tag_dialog.error =
+            self.tag_ops.new_tag_dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
             return;
         };
         let Some(group) = self
-            .new_tag_dialog
+            .tag_ops.new_tag_dialog
             .groups
-            .get(self.new_tag_dialog.selected_group)
+            .get(self.tag_ops.new_tag_dialog.selected_group)
             .cloned()
         else {
-            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            self.tag_ops.new_tag_dialog.error = Some("Choose a tag group".to_owned());
             return;
         };
 
@@ -97,7 +97,7 @@ impl Baboon {
                 format!("{} tag", group.extension),
                 &[group.extension.as_str()],
             );
-        if let Some(output) = self.new_tag_dialog.output_path.as_ref()
+        if let Some(output) = self.tag_ops.new_tag_dialog.output_path.as_ref()
             && let Some(parent) = output.parent()
         {
             dialog = dialog.set_directory(parent);
@@ -107,14 +107,14 @@ impl Baboon {
         };
         match new_tag_output_path_from_dialog(&root, &picked, &group.extension) {
             Ok((output, rel_path)) => {
-                self.new_tag_dialog.output_path = Some(output);
-                self.new_tag_dialog.rel_path = rel_path;
-                self.new_tag_dialog.error = None;
+                self.tag_ops.new_tag_dialog.output_path = Some(output);
+                self.tag_ops.new_tag_dialog.rel_path = rel_path;
+                self.tag_ops.new_tag_dialog.error = None;
             }
             Err(error) => {
-                self.new_tag_dialog.output_path = None;
-                self.new_tag_dialog.rel_path.clear();
-                self.new_tag_dialog.error = Some(error);
+                self.tag_ops.new_tag_dialog.output_path = None;
+                self.tag_ops.new_tag_dialog.rel_path.clear();
+                self.tag_ops.new_tag_dialog.error = Some(error);
             }
         }
     }
@@ -124,9 +124,9 @@ impl Baboon {
         // names a workspace, so without this the tag is created in whichever
         // game was focused when Create was pressed rather than the one the
         // dialog was opened for.
-        let dialog_kit = self.new_tag_dialog.kit;
+        let dialog_kit = self.tag_ops.new_tag_dialog.kit;
         if !dialog_kit.is_some_and(|kit| self.focus_navigation_kit(kit)) {
-            self.new_tag_dialog.error =
+            self.tag_ops.new_tag_dialog.error =
                 Some("The workspace this tag was being created in is closed".to_owned());
             return;
         }
@@ -140,35 +140,35 @@ impl Baboon {
             return;
         }
         let Some(root) = self.loaded_tags_root() else {
-            self.new_tag_dialog.error =
+            self.tag_ops.new_tag_dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
             return;
         };
         let Some(group) = self
-            .new_tag_dialog
+            .tag_ops.new_tag_dialog
             .groups
-            .get(self.new_tag_dialog.selected_group)
+            .get(self.tag_ops.new_tag_dialog.selected_group)
             .cloned()
         else {
-            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            self.tag_ops.new_tag_dialog.error = Some("Choose a tag group".to_owned());
             return;
         };
-        let Some(output) = self.new_tag_dialog.output_path.clone() else {
-            self.new_tag_dialog.error = Some("Choose a tag name and location".to_owned());
+        let Some(output) = self.tag_ops.new_tag_dialog.output_path.clone() else {
+            self.tag_ops.new_tag_dialog.error = Some("Choose a tag name and location".to_owned());
             return;
         };
         let output = match new_tag_output_path_from_dialog(&root, &output, &group.extension) {
             Ok((output, rel_path)) => {
-                self.new_tag_dialog.rel_path = rel_path;
+                self.tag_ops.new_tag_dialog.rel_path = rel_path;
                 output
             }
             Err(error) => {
-                self.new_tag_dialog.error = Some(error);
+                self.tag_ops.new_tag_dialog.error = Some(error);
                 return;
             }
         };
         if output.exists() {
-            self.new_tag_dialog.error = Some(format!("{} already exists", output.display()));
+            self.tag_ops.new_tag_dialog.error = Some(format!("{} already exists", output.display()));
             return;
         }
         // `TagFile::new` can only build an MCC container — it hard-codes
@@ -176,41 +176,41 @@ impl Baboon {
         // 64-byte header. Writing one into an H1EK/H2EK tags tree produces a file
         // Guerilla cannot load, and one Baboon itself re-reads as MCC, so nothing
         // surfaces the mistake. Refuse until there is a classic constructor.
-        if CLASSIC_CONVERSION_GAMES.contains(&self.new_tag_dialog.game.as_str()) {
-            self.new_tag_dialog.error = Some(format!(
+        if CLASSIC_CONVERSION_GAMES.contains(&self.tag_ops.new_tag_dialog.game.as_str()) {
+            self.tag_ops.new_tag_dialog.error = Some(format!(
                 "Baboon cannot create a new {} tag: classic Halo CE and Halo 2 \
                  tags carry a 64-byte header it has no writer for, so the file \
                  would not load in the editing kit. Duplicate an existing tag \
                  instead.",
-                self.new_tag_dialog.game
+                self.tag_ops.new_tag_dialog.game
             ));
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
             Ok(mut tag) => {
-                if CONVERSION_PROFILES.contains(&self.new_tag_dialog.game.as_str())
+                if CONVERSION_PROFILES.contains(&self.tag_ops.new_tag_dialog.game.as_str())
                     && let Err(error) =
-                        apply_editing_kit_mcc_header(&mut tag, &self.new_tag_dialog.game)
+                        apply_editing_kit_mcc_header(&mut tag, &self.tag_ops.new_tag_dialog.game)
                 {
-                    self.new_tag_dialog.error = Some(error);
+                    self.tag_ops.new_tag_dialog.error = Some(error);
                     return;
                 }
                 tag
             }
             Err(error) => {
-                self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
+                self.tag_ops.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
                 return;
             }
         };
         if let Some(parent) = output.parent()
             && let Err(error) = fs::create_dir_all(parent)
         {
-            self.new_tag_dialog.error =
+            self.tag_ops.new_tag_dialog.error =
                 Some(format!("Could not create {}: {error}", parent.display()));
             return;
         }
         if let Err(error) = tag.write_atomic(&output) {
-            self.new_tag_dialog.error =
+            self.tag_ops.new_tag_dialog.error =
                 Some(format!("Could not write {}: {error}", output.display()));
             return;
         }
@@ -225,14 +225,14 @@ impl Baboon {
         let entry = match loose_file_entry(&root, &output, &names) {
             Ok(Some(entry)) => entry,
             Ok(None) => {
-                self.new_tag_dialog.error = Some(format!(
+                self.tag_ops.new_tag_dialog.error = Some(format!(
                     "Wrote {}, but it does not read back as a tag",
                     output.display()
                 ));
                 return;
             }
             Err(error) => {
-                self.new_tag_dialog.error = Some(format!(
+                self.tag_ops.new_tag_dialog.error = Some(format!(
                     "Wrote {}, but could not inspect it: {error:#}",
                     output.display()
                 ));
@@ -240,7 +240,7 @@ impl Baboon {
             }
         };
         self.register_created_tag(entry, tag);
-        self.new_tag_open = false;
+        self.tag_ops.new_tag_open = false;
         self.status = format!("Created {}", output.display());
     }
 
@@ -250,17 +250,17 @@ impl Baboon {
     /// it via `write_new_tag_container`.
     pub(in crate::app) fn create_new_container_tag(&mut self) {
         let Some(group) = self
-            .new_tag_dialog
+            .tag_ops.new_tag_dialog
             .groups
-            .get(self.new_tag_dialog.selected_group)
+            .get(self.tag_ops.new_tag_dialog.selected_group)
             .cloned()
         else {
-            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            self.tag_ops.new_tag_dialog.error = Some("Choose a tag group".to_owned());
             return;
         };
-        let rel = normalize_container_tag_rel(&self.new_tag_dialog.rel_path);
+        let rel = normalize_container_tag_rel(&self.tag_ops.new_tag_dialog.rel_path);
         if rel.is_empty() {
-            self.new_tag_dialog.error = Some("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+            self.tag_ops.new_tag_dialog.error = Some("Enter a tag path (e.g. objects/foo/bar)".to_owned());
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
@@ -268,23 +268,23 @@ impl Baboon {
                 // `TagFile::new` zeroes the whole file-header generation; the
                 // simulation expects Campaign Evolved's.
                 if let Err(error) = apply_editing_kit_mcc_header(&mut tag, GameId::CampaignEvolved.as_str()) {
-                    self.new_tag_dialog.error = Some(error);
+                    self.tag_ops.new_tag_dialog.error = Some(error);
                     return;
                 }
                 tag
             }
             Err(error) => {
-                self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
+                self.tag_ops.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
                 return;
             }
         };
         match self.add_new_container_tag(&rel, group.group_tag, &group.name, &group.extension, tag)
         {
             Ok(()) => {
-                self.new_tag_open = false;
+                self.tag_ops.new_tag_open = false;
                 self.status = format!("Created {rel}.{} (unsaved)", group.extension);
             }
-            Err(error) => self.new_tag_dialog.error = Some(error),
+            Err(error) => self.tag_ops.new_tag_dialog.error = Some(error),
         }
     }
 

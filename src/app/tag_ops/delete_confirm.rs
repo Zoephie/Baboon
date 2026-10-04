@@ -5,7 +5,7 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_delete_confirm_window(&mut self, ctx: &egui::Context) {
-        let Some(confirm) = self.delete_confirm.as_ref() else {
+        let Some(confirm) = self.tag_ops.delete_confirm.as_ref() else {
             return;
         };
         let display_path = confirm.display_path.clone();
@@ -108,7 +108,7 @@ impl Baboon {
         if delete {
             self.begin_delete_tag(ctx.clone());
         } else if cancel || !open {
-            self.delete_confirm = None;
+            self.tag_ops.delete_confirm = None;
         }
     }
 }

@@ -820,7 +820,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        let Some(state) = self.rename_tag.as_ref() else {
+        let Some(state) = self.tag_ops.rename_tag.as_ref() else {
             return;
         };
         let key = state.key.clone();
@@ -845,15 +845,15 @@ impl Baboon {
             };
         match entry.location {
             TagEntryLocation::LooseFile(_) => {
-                self.rename_tag = None;
+                self.tag_ops.rename_tag = None;
                 match self.duplicate_loose_tag(&entry, &new_leaf) {
                     Ok(()) => {}
                     Err(error) => self.status = error,
                 }
             }
             TagEntryLocation::Container { .. } => {
-                self.rename_tag = None;
-                self.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
+                self.tag_ops.rename_tag = None;
+                self.tag_ops.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
                     kit: self.active_kit_id(),
                     key,
                     destination_leaf: new_leaf,
@@ -931,12 +931,12 @@ impl Baboon {
             self.status = "The workspace this duplicate came from is closed".to_owned();
             return;
         }
-        if self.container_delete_running.contains(&kit) {
+        if self.tag_ops.container_delete_running.contains(&kit) {
             self.status =
                 "A Campaign Evolved delete is already running for this workspace".to_owned();
             return;
         }
-        if self.container_duplicate_running.contains(&kit) {
+        if self.tag_ops.container_duplicate_running.contains(&kit) {
             self.status =
                 "A Campaign Evolved duplicate is already running for this workspace".to_owned();
             return;
@@ -1110,7 +1110,7 @@ impl Baboon {
             kit,
             generation: self.kits[self.active].generation,
         };
-        self.container_duplicate_running.insert(kit);
+        self.tag_ops.container_duplicate_running.insert(kit);
         self.status = format!("Duplicating {} in {}…", entry.display_path, target_label);
         let input = ContainerDuplicateWorkerInput {
             root,
@@ -1170,7 +1170,7 @@ impl Baboon {
         let kit_index = self.kit_index(stamp.kit);
         let completion =
             classify_container_duplicate_completion(result.is_ok(), kit_index.is_some());
-        clear_container_duplicate_running(&mut self.container_duplicate_running, stamp.kit);
+        clear_container_duplicate_running(&mut self.tag_ops.container_duplicate_running, stamp.kit);
         if completion == ContainerDuplicateCompletion::Failed {
             if let Err(error) = &result {
                 self.status = error.clone();
@@ -1253,8 +1253,8 @@ impl Baboon {
         // that Baboon authored the copy, and without it the tag can never be
         // deleted again — nor recognised by an export as new content rather
         // than as an edit to whatever it was copied from.
-        self.created_tags.record(result.record);
-        let ledger_error = self.created_tags.save().err();
+        self.tag_ops.created_tags.record(result.record);
+        let ledger_error = self.tag_ops.created_tags.save().err();
         let entry = result.entry;
         let key = entry.key.clone();
         // Stashed straight away, so the copy is in the next Export Mod whether

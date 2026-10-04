@@ -9,7 +9,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) {
         let Some((kit, key, destination_leaf)) =
-            self.container_duplicate_confirm.as_ref().map(|confirm| {
+            self.tag_ops.container_duplicate_confirm.as_ref().map(|confirm| {
                 (
                     confirm.kit,
                     confirm.key.clone(),
@@ -118,10 +118,10 @@ impl Baboon {
                 });
             });
         if duplicate {
-            self.container_duplicate_confirm = None;
+            self.tag_ops.container_duplicate_confirm = None;
             self.start_container_duplicate(kit, key, destination_leaf, ctx.clone());
         } else if cancel || !open {
-            self.container_duplicate_confirm = None;
+            self.tag_ops.container_duplicate_confirm = None;
         }
     }
 }

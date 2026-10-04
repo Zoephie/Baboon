@@ -903,7 +903,7 @@ impl Baboon {
                         // whole of a multi-minute extraction.
                         ctx.request_repaint_after(PROGRESS_REPAINT);
                     }
-                    if let Some(progress) = &self.folder_refactor {
+                    if let Some(progress) = &self.tag_ops.folder_refactor {
                         ui.separator();
                         ui.label(RichText::new(&progress.label).strong());
                         let mut bar = if let Some(value) = progress.progress {
@@ -1513,7 +1513,7 @@ impl Baboon {
         // A folder move or rename is rewriting tags on disk. Nothing may edit,
         // save or open them until it lands, so no shortcut or dropped file is
         // taken, and no text field keeps the keyboard.
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             ctx.memory_mut(|memory| {
                 if let Some(focused) = memory.focused() {
                     memory.surrender_focus(focused);
@@ -1610,7 +1610,7 @@ impl Baboon {
     /// would race it. Drawn last and in the foreground so no window or panel
     /// sits above it.
     fn draw_folder_refactor_lock(&mut self, ctx: &egui::Context) {
-        let Some(progress) = &self.folder_refactor else {
+        let Some(progress) = &self.tag_ops.folder_refactor else {
             return;
         };
         let screen = ctx.content_rect();

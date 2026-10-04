@@ -96,7 +96,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             self.status = "A folder move/rename is already running".to_owned();
             return;
         }
@@ -164,7 +164,7 @@ impl Baboon {
             .parent()
             .map(|parent| parent.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        self.loose_folder_rename = Some(LooseFolderRenameState {
+        self.tag_ops.loose_folder_rename = Some(LooseFolderRenameState {
             kit: self.active_kit_id(),
             rel_path,
             parent_display,
@@ -180,7 +180,7 @@ impl Baboon {
     /// Apply the open Rename Folder dialog. Returns whether it should close:
     /// a rejected name keeps it open with the reason beside the field.
     pub(in crate::app) fn apply_loose_folder_rename(&mut self) -> bool {
-        let Some(state) = self.loose_folder_rename.as_ref() else {
+        let Some(state) = self.tag_ops.loose_folder_rename.as_ref() else {
             return true;
         };
         let kit = state.kit;
@@ -199,12 +199,12 @@ impl Baboon {
             return true;
         };
         let reject = |this: &mut Self, error: String| {
-            if let Some(state) = this.loose_folder_rename.as_mut() {
+            if let Some(state) = this.tag_ops.loose_folder_rename.as_mut() {
                 state.error = Some(error);
             }
             false
         };
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             return reject(self, "A folder move/rename is already running".to_owned());
         }
         if self.kits[self.active]

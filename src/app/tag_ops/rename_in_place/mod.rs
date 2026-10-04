@@ -515,9 +515,9 @@ impl Baboon {
         // All three in-place writers are mutually exclusive per workspace: two
         // of them on one `.utoc` would race, and each validates against a handle
         // the other is invalidating.
-        if self.container_duplicate_running.contains(&kit)
-            || self.container_delete_running.contains(&kit)
-            || self.container_rename_running.contains(&kit)
+        if self.tag_ops.container_duplicate_running.contains(&kit)
+            || self.tag_ops.container_delete_running.contains(&kit)
+            || self.tag_ops.container_rename_running.contains(&kit)
         {
             self.status = "Another container write is already running in this workspace".to_owned();
             return;
@@ -536,7 +536,7 @@ impl Baboon {
         };
 
         let containers = self.mounted_containers().unwrap_or_default();
-        let grounds = match container_rename_eligibility(&entry, &containers, &self.created_tags) {
+        let grounds = match container_rename_eligibility(&entry, &containers, &self.tag_ops.created_tags) {
             Ok(grounds) => grounds,
             Err(error) => {
                 self.status = error;
@@ -621,7 +621,7 @@ impl Baboon {
             kit,
             generation: self.kits[self.active].generation,
         };
-        self.container_rename_running.insert(kit);
+        self.tag_ops.container_rename_running.insert(kit);
         self.status = format!("Renaming {} → {}…", entry.display_path, destination.display);
         let input = ContainerRenameWorkerInput {
             root,
@@ -678,7 +678,7 @@ impl Baboon {
             };
             self.release_container_write_lease(lease, outcome, ctx);
         }
-        self.container_rename_running.remove(&stamp.kit);
+        self.tag_ops.container_rename_running.remove(&stamp.kit);
         let kit_index = self.kit_index(stamp.kit);
 
         let result = match result {
@@ -761,9 +761,9 @@ impl Baboon {
 
         // The ledger decides the origin itself from the row being replaced, so
         // a tag that was Baboon's stays Baboon's across any number of moves.
-        self.created_tags
+        self.tag_ops.created_tags
             .record_rename(&result.old_ubulk_path, result.record);
-        let ledger_error = self.created_tags.save().err();
+        let ledger_error = self.tag_ops.created_tags.save().err();
 
         // The project stashes overlays under the tag's logical path, so the old
         // identity has to go or a checkpoint restores the tag at both paths.

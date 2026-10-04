@@ -139,7 +139,7 @@ impl Baboon {
     /// Raise the New Folder dialog for `parent_rel` (`None` = container root).
     pub(in crate::app) fn open_new_container_folder(&mut self, parent_rel: Option<String>) {
         let kit = self.kits[self.active].id;
-        self.container_folder_dialog = Some(ContainerFolderDialog {
+        self.tag_ops.container_folder_dialog = Some(ContainerFolderDialog {
             kit,
             parent_rel: parent_rel.map(|rel| normalize_folder_rel(&rel)),
             renaming: None,
@@ -157,7 +157,7 @@ impl Baboon {
             None => (None, rel.clone()),
         };
         let kit = self.kits[self.active].id;
-        self.container_folder_dialog = Some(ContainerFolderDialog {
+        self.tag_ops.container_folder_dialog = Some(ContainerFolderDialog {
             kit,
             parent_rel,
             renaming: Some(rel),
@@ -170,7 +170,7 @@ impl Baboon {
     /// Apply the pending New/Rename Folder dialog. Returns `true` when the
     /// dialog should close.
     pub(in crate::app) fn apply_container_folder_dialog(&mut self) -> bool {
-        let Some(dialog) = self.container_folder_dialog.as_ref() else {
+        let Some(dialog) = self.tag_ops.container_folder_dialog.as_ref() else {
             return true;
         };
         let Some(kit_index) = self.kit_index(dialog.kit) else {
@@ -192,7 +192,7 @@ impl Baboon {
         let leaf = match validate_folder_leaf_name(&raw, &siblings) {
             Ok(leaf) => leaf,
             Err(error) => {
-                if let Some(dialog) = self.container_folder_dialog.as_mut() {
+                if let Some(dialog) = self.tag_ops.container_folder_dialog.as_mut() {
                     dialog.error = Some(error);
                 }
                 return false;

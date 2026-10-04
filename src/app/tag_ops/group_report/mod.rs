@@ -114,16 +114,16 @@ impl Baboon {
     /// answer can move — it parses the whole mapping table, so it must not run
     /// per frame.
     pub(in crate::app) fn refresh_group_authorability(&mut self) {
-        self.new_tag_dialog.authorability = None;
+        self.tag_ops.new_tag_dialog.authorability = None;
         // Only Campaign Evolved has native classes standing behind its groups.
         // Everywhere else a new tag is a file, and there is nothing to refuse.
-        if self.new_tag_dialog.game != GameId::CampaignEvolved.as_str() {
+        if self.tag_ops.new_tag_dialog.game != GameId::CampaignEvolved.as_str() {
             return;
         }
         let Some(group) = self
-            .new_tag_dialog
+            .tag_ops.new_tag_dialog
             .groups
-            .get(self.new_tag_dialog.selected_group)
+            .get(self.tag_ops.new_tag_dialog.selected_group)
         else {
             return;
         };
@@ -136,7 +136,7 @@ impl Baboon {
             .and_then(|counts| counts.get(&group.group_tag).copied())
             .unwrap_or(0);
         let verdict = group_authorability(&group.name, shipped, &usmap);
-        self.new_tag_dialog.authorability = Some((verdict.authorable(), verdict.summary()));
+        self.tag_ops.new_tag_dialog.authorability = Some((verdict.authorable(), verdict.summary()));
     }
 }
 

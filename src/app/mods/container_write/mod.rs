@@ -751,11 +751,11 @@ impl Baboon {
             ("a bulk tag extraction", self.container_dump_job.is_some()),
             (
                 "a tag duplicate",
-                self.container_duplicate_running.contains(&kit_id),
+                self.tag_ops.container_duplicate_running.contains(&kit_id),
             ),
             (
                 "a tag delete",
-                self.container_delete_running.contains(&kit_id),
+                self.tag_ops.container_delete_running.contains(&kit_id),
             ),
             ("a level export", self.chimp_level_job.is_some()),
             ("a Chimp save", self.chimp_writes.contains_key(&kit_id)),

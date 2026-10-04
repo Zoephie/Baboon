@@ -207,19 +207,8 @@ pub struct Baboon {
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
     settings_tab: SettingsTab,
-    new_tag_open: bool,
-    new_tag_dialog: NewTagDialog,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
     overwrite_confirm: Option<OverwriteConfirm>,
-    /// Mandatory confirmation for an in-place Campaign Evolved duplicate.
-    container_duplicate_confirm: Option<ContainerDuplicateConfirm>,
-    /// Kit ids with an in-place duplicate worker currently running.
-    container_duplicate_running: HashSet<KitId>,
-    /// Kit ids with an in-place rename worker currently running. Mutually
-    /// exclusive with the duplicate and delete sets for the same reason they are
-    /// with each other: two writers on one `.utoc` race, and each invalidates
-    /// the archive handle the other validates against.
-    container_rename_running: HashSet<KitId>,
     /// Container writes currently in flight, by lease id. A lease outlives the
     /// UI-thread call that took it exactly when the write runs on a worker, and
     /// the terminal `WorkerMessage` carries the id back so the completion
@@ -231,8 +220,6 @@ pub struct Baboon {
     /// and must start again. Queued rather than remounted in place because the
     /// release runs from paths that have no `egui::Context` to spawn with.
     pending_chimp_remounts: Vec<KitId>,
-    /// Mandatory confirmation for deleting a tag.
-    delete_confirm: Option<DeleteConfirm>,
     /// Mandatory confirmation for a bulk extraction of every shipped tag.
     container_dump_confirm: Option<ContainerDumpConfirm>,
     /// The one bulk container extraction allowed to run at a time.
@@ -250,14 +237,8 @@ pub struct Baboon {
     /// making the user retype it. Deliberately not persisted: it describes what
     /// this session has been working on, not a preference.
     last_mod_export_name: Option<String>,
-    /// Kit ids with an in-place delete worker currently running.
-    container_delete_running: HashSet<KitId>,
     /// Kits with a Chimp save running, and the close to run once it lands.
     chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
-    /// Every Campaign Evolved tag this installation created by duplicating
-    /// another. Deletion is limited to what is recorded here, because a copy is
-    /// otherwise indistinguishable from a tag the game shipped.
-    created_tags: CreatedTagLedger,
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
@@ -299,13 +280,8 @@ pub struct Baboon {
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     tsv_paste: Option<TsvPasteState>,
-    rename_tag: Option<RenameTagState>,
-    /// Rename Folder dialog for a loose tags folder, if one is open.
-    loose_folder_rename: Option<LooseFolderRenameState>,
     /// The Extract Geometry / Extract Animations target window, if open.
     extract_target: Option<ExtractTargetPrompt>,
-    /// New/Rename Folder dialog for a container source, if one is open.
-    container_folder_dialog: Option<ContainerFolderDialog>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
     kit_tool_drag: KitToolDragState,
     status: String,
@@ -315,7 +291,6 @@ pub struct Baboon {
     /// cannot be bypassed by a new assignment site.
     status_shown: String,
     status_changed_at: f64,
-    folder_refactor: Option<FolderRefactorUiState>,
     show_entry_index_wait_notice: bool,
     terminal: TerminalState,
     /// Game ids (`halo3_mcc`, saved as written) for which the user has chosen to
@@ -390,6 +365,10 @@ pub struct Baboon {
     /// Import: the Import Tags and cache import windows, single-tag import and
     /// its discard prompt, and the template cache conversions share.
     pub(in crate::app) import: ImportFeature,
+    /// Tag operations: New Tag, rename, folder rename and refactor, container
+    /// folders, delete and duplicate, the operations running per workspace, and
+    /// the ledger of tags Baboon created.
+    pub(in crate::app) tag_ops: TagOpsFeature,
 }
 
 impl Baboon {
@@ -541,16 +520,10 @@ impl Baboon {
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
-            new_tag_open: false,
-            new_tag_dialog: NewTagDialog::default(),
             overwrite_confirm: None,
-            container_duplicate_confirm: None,
-            container_duplicate_running: HashSet::new(),
-            container_rename_running: HashSet::new(),
             container_write_leases: HashMap::new(),
             next_container_lease: 0,
             pending_chimp_remounts: Vec::new(),
-            delete_confirm: None,
             container_dump_confirm: None,
             container_dump_job: None,
             operation_notice: None,
@@ -559,9 +532,7 @@ impl Baboon {
             chimp_level_export_prompt: None,
             chimp_level_job: None,
             last_mod_export_name: None,
-            container_delete_running: HashSet::new(),
             chimp_writes: HashMap::new(),
-            created_tags: CreatedTagLedger::load(),
             clear_stash_confirm: None,
             chimp_discard_prompt: None,
             exported_mod: None,
@@ -592,15 +563,11 @@ impl Baboon {
             keyword_chooser_open: false,
             reveal_target: None,
             tsv_paste: None,
-            rename_tag: None,
-            loose_folder_rename: None,
             extract_target: None,
-            container_folder_dialog: None,
             kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
-            folder_refactor: None,
             show_entry_index_wait_notice: false,
             terminal: TerminalState {
                 input: String::new(),
@@ -683,6 +650,20 @@ impl Baboon {
                 native_template_cache: None,
                 import_tag_dialog: None,
                 import_discard_confirm: None,
+            },
+            tag_ops: TagOpsFeature {
+                new_tag_open: false,
+                new_tag_dialog: NewTagDialog::default(),
+                container_duplicate_confirm: None,
+                container_duplicate_running: HashSet::new(),
+                container_rename_running: HashSet::new(),
+                delete_confirm: None,
+                container_delete_running: HashSet::new(),
+                created_tags: CreatedTagLedger::load(),
+                rename_tag: None,
+                loose_folder_rename: None,
+                container_folder_dialog: None,
+                folder_refactor: None,
             },
         }
     }

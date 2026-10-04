@@ -303,7 +303,7 @@ impl Baboon {
         let keys = self.kits[kit_index]
             .source
             .as_ref()
-            .map(|source| deletable_container_keys(source, &self.created_tags))
+            .map(|source| deletable_container_keys(source, &self.tag_ops.created_tags))
             .unwrap_or_default();
         self.kits[kit_index].deletable_keys = Arc::new(keys);
         self.kits[kit_index].deletable_keys_generation = Some(generation);
@@ -320,8 +320,8 @@ impl Baboon {
             return;
         };
         let kit = self.active_kit_id();
-        if self.container_delete_running.contains(&kit)
-            || self.container_duplicate_running.contains(&kit)
+        if self.tag_ops.container_delete_running.contains(&kit)
+            || self.tag_ops.container_duplicate_running.contains(&kit)
         {
             self.status =
                 "A Campaign Evolved write is already running for this workspace".to_owned();
@@ -329,7 +329,7 @@ impl Baboon {
         }
         let containers = self.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
-        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
+        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
             self.status = error;
             return;
@@ -367,7 +367,7 @@ impl Baboon {
             }
             _ => DeleteKind::Loose,
         };
-        self.delete_confirm = Some(DeleteConfirm {
+        self.tag_ops.delete_confirm = Some(DeleteConfirm {
             kit,
             key: key.to_owned(),
             display_path: entry.display_path.clone(),
@@ -388,7 +388,7 @@ impl Baboon {
     /// Apply the confirmed deletion. Loose tags are moved on the spot; container
     /// tags go to a worker, because rewriting a pak's TOC is not a UI-thread job.
     pub(in crate::app) fn begin_delete_tag(&mut self, ctx: egui::Context) {
-        let Some(confirm) = self.delete_confirm.take() else {
+        let Some(confirm) = self.tag_ops.delete_confirm.take() else {
             return;
         };
         if !self.focus_navigation_kit(confirm.kit) {
@@ -407,7 +407,7 @@ impl Baboon {
         };
         let containers = self.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
-        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
+        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
             self.status = error;
             return;
@@ -484,7 +484,7 @@ impl Baboon {
             &thresholds,
             target_container,
             &rel_path,
-            &self.created_tags,
+            &self.tag_ops.created_tags,
         ) {
             Ok(target) => target,
             Err(error) => {
@@ -512,7 +512,7 @@ impl Baboon {
             }
         };
         let lease_id = self.park_container_write_lease(lease);
-        self.container_delete_running.insert(kit);
+        self.tag_ops.container_delete_running.insert(kit);
         self.status = format!("Deleting {} from {target_label}…", entry.display_path);
         let input = ContainerDeleteWorkerInput {
             root,
@@ -560,7 +560,7 @@ impl Baboon {
             self.release_in_place_lease(lease, outcome);
         }
         let kit_index = self.kit_index(stamp.kit);
-        self.container_delete_running.remove(&stamp.kit);
+        self.tag_ops.container_delete_running.remove(&stamp.kit);
         let result = match result {
             Ok(result) => result,
             Err(error) => {
@@ -576,9 +576,9 @@ impl Baboon {
         // Recorded even if the workspace is gone: the bytes are out of the
         // container either way, and a ledger row pointing at a tag that no
         // longer exists would keep offering to delete it.
-        self.created_tags
+        self.tag_ops.created_tags
             .forget(&result.target_utoc, &result.ubulk_path);
-        let ledger_error = self.created_tags.save().err();
+        let ledger_error = self.tag_ops.created_tags.save().err();
         let Some(kit_index) = kit_index else {
             return true;
         };

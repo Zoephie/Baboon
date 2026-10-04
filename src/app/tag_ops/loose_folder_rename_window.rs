@@ -7,14 +7,14 @@ impl Baboon {
     /// Rename Folder for a loose folder: the new name, and what it will change
     /// counted before anything is touched.
     pub(in crate::app) fn draw_loose_folder_rename_window(&mut self, ctx: &egui::Context) {
-        if self.loose_folder_rename.is_none() {
+        if self.tag_ops.loose_folder_rename.is_none() {
             return;
         }
         let mut open = true;
         let mut do_apply = false;
         let mut cancel = false;
         {
-            let state = self.loose_folder_rename.as_mut().expect("checked above");
+            let state = self.tag_ops.loose_folder_rename.as_mut().expect("checked above");
             egui::Window::new("Rename Folder")
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("loose_folder_rename"))
@@ -161,10 +161,10 @@ impl Baboon {
             // Only closes once the job has started; a rejected name keeps the
             // dialog up with its reason attached.
             if self.apply_loose_folder_rename() {
-                self.loose_folder_rename = None;
+                self.tag_ops.loose_folder_rename = None;
             }
         } else if cancel || !open {
-            self.loose_folder_rename = None;
+            self.tag_ops.loose_folder_rename = None;
         }
     }
 }

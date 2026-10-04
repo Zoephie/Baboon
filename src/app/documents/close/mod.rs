@@ -211,7 +211,7 @@ impl Baboon {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         // Quitting would kill the worker partway through rewriting references,
         // leaving some tags pointing at a path that no longer exists.
-        if self.folder_refactor.is_some() {
+        if self.tag_ops.folder_refactor.is_some() {
             self.status = "Wait for the folder move/rename to finish before closing".to_owned();
             return;
         }

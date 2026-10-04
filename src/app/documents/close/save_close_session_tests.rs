@@ -355,7 +355,7 @@ fn the_app_close_is_two_step_and_writes_the_session() {
 #[test]
 fn the_app_does_not_close_while_a_folder_refactor_runs() {
     let mut app = app();
-    app.folder_refactor = Some(FolderRefactorUiState {
+    app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
         label: "Renaming".to_owned(),
         phase: "Moving files".to_owned(),
         progress: None,

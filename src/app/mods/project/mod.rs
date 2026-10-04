@@ -1133,7 +1133,7 @@ impl Baboon {
             return None;
         };
         let utoc = &containers.get(*container)?.utoc_path;
-        self.created_tags
+        self.tag_ops.created_tags
             .find(utoc, rel_path)
             .map(|record| record.package_path.clone())
     }

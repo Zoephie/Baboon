@@ -5,14 +5,14 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
-        if self.rename_tag.is_none() {
+        if self.tag_ops.rename_tag.is_none() {
             return;
         }
         let mut open = true;
         let mut do_apply = false;
         let mut cancel = false;
         {
-            let state = self.rename_tag.as_mut().expect("checked above");
+            let state = self.tag_ops.rename_tag.as_mut().expect("checked above");
             let title = match state.operation {
                 TagNameOperation::Duplicate => "Duplicate Tag",
                 TagNameOperation::Rename if state.is_new_container => "Rename / Move New Tag",
@@ -287,7 +287,7 @@ impl Baboon {
             self.begin_rename_tag(ctx);
         }
         if cancel || !open {
-            self.rename_tag = None;
+            self.tag_ops.rename_tag = None;
         }
     }
 }

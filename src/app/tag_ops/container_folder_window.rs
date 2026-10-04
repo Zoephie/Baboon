@@ -10,7 +10,7 @@ impl Baboon {
     /// in the container's directory index only once a tag is created, imported
     /// or moved into it, and until then it lives in the workspace.
     pub(in crate::app) fn draw_container_folder_window(&mut self, ctx: &egui::Context) {
-        if self.container_folder_dialog.is_none() {
+        if self.tag_ops.container_folder_dialog.is_none() {
             return;
         }
         let mut open = true;
@@ -18,7 +18,7 @@ impl Baboon {
         let mut cancel = false;
         {
             let state = self
-                .container_folder_dialog
+                .tag_ops.container_folder_dialog
                 .as_mut()
                 .expect("checked above");
             let renaming = state.renaming.is_some();
@@ -98,10 +98,10 @@ impl Baboon {
             // Only closes when the name was accepted; a rejection keeps the
             // dialog up with its reason attached.
             if self.apply_container_folder_dialog() {
-                self.container_folder_dialog = None;
+                self.tag_ops.container_folder_dialog = None;
             }
         } else if cancel || !open {
-            self.container_folder_dialog = None;
+            self.tag_ops.container_folder_dialog = None;
         }
     }
 }
