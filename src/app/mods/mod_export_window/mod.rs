@@ -1,5 +1,6 @@
 //! The Export Mod review window and its field-by-field diff view.
-//! It owns the review's presentation and the diff tree it draws; building the mod and writing the pak belong to the controller.
+//! It owns the review's presentation and the diff tree it draws; building the
+//! mod and writing the pak are [`ModsCommand::WriteReviewedMod`].
 
 use super::*;
 

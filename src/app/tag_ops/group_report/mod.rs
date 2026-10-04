@@ -106,39 +106,5 @@ pub(in crate::app) fn shipped_counts_by_group(source: &LoadedSourceData) -> Hash
     counts
 }
 
-impl Baboon {
-    /// Answer "can I make one of these?" for the group the New Tag dialog has
-    /// selected, and cache it.
-    ///
-    /// Called when the group or the game changes, which is the only time the
-    /// answer can move — it parses the whole mapping table, so it must not run
-    /// per frame.
-    pub(in crate::app) fn refresh_group_authorability(&mut self) {
-        self.tag_ops.new_tag_dialog.authorability = None;
-        // Only Campaign Evolved has native classes standing behind its groups.
-        // Everywhere else a new tag is a file, and there is nothing to refuse.
-        if self.tag_ops.new_tag_dialog.game != GameId::CampaignEvolved.as_str() {
-            return;
-        }
-        let Some(group) = self
-            .tag_ops.new_tag_dialog
-            .groups
-            .get(self.tag_ops.new_tag_dialog.selected_group)
-        else {
-            return;
-        };
-        let Ok(usmap) = blam_tags::iostore::object::usmap::Usmap::meteorite() else {
-            return;
-        };
-        let shipped = self
-            .model.source()
-            .map(shipped_counts_by_group)
-            .and_then(|counts| counts.get(&group.group_tag).copied())
-            .unwrap_or(0);
-        let verdict = group_authorability(&group.name, shipped, &usmap);
-        self.tag_ops.new_tag_dialog.authorability = Some((verdict.authorable(), verdict.summary()));
-    }
-}
-
 #[cfg(test)]
 mod group_report_tests;

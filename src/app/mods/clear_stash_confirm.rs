@@ -1,5 +1,6 @@
 //! The Campaign Evolved "clear modifications" confirmation.
-//! It owns presentation and the choice; clearing the stash belongs to the controller.
+//! It owns presentation and the choice; clearing the stash is
+//! [`ModsCommand::ClearStash`].
 
 use super::*;
 

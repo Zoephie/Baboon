@@ -1,5 +1,5 @@
 //! The window shown after Export Mod: where the mod went and what to copy.
-//! It owns presentation only; the export itself belongs to the controller.
+//! It owns presentation only; revealing the folder is a command.
 
 use super::*;
 

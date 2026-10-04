@@ -122,6 +122,7 @@ pub(in crate::app) enum Command {
     References(ReferencesCommand),
     Export(ExportCommand),
     Mods(ModsCommand),
+    TagOps(TagOpsCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -160,6 +161,12 @@ impl From<ModsCommand> for Command {
     }
 }
 
+impl From<TagOpsCommand> for Command {
+    fn from(command: TagOpsCommand) -> Self {
+        Command::TagOps(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -194,6 +201,7 @@ impl Baboon {
             Command::References(command) => self.apply_references_command(command),
             Command::Export(command) => self.apply_export_command(command),
             Command::Mods(command) => self.apply_mods_command(command),
+            Command::TagOps(command) => self.apply_tag_ops_command(command),
         }
     }
 }

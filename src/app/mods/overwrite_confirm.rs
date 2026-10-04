@@ -1,5 +1,6 @@
 //! The "Overwrite game files?" confirmation before a Campaign Evolved container tag is saved in place.
-//! It owns presentation and the choice; the save belongs to the controller.
+//! It owns presentation and the choice; the save is
+//! [`ModsCommand::Overwrite`] or [`ModsCommand::ExportInstead`].
 
 use super::*;
 
