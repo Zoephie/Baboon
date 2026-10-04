@@ -16,6 +16,7 @@ pub(in crate::app) mod frame;
 pub(in crate::app) use frame::{draw_keyword_bar, draw_scenario_launcher_buttons};
 pub(in crate::app) mod workspace;
 pub(in crate::app) mod welcome;
+pub(in crate::app) use welcome::draw_welcome_screen;
 pub(in crate::app) mod first_run;
 pub(in crate::app) mod settings;
 pub(in crate::app) use settings::{

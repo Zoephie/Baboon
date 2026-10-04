@@ -52,7 +52,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         // An unloaded workspace has no tags to browse or edit, so it offers
         // ways to open one instead of an empty browser and an empty editor.
         if self.app.model.kits[kit_index].is_empty_workspace() {
-            self.app.draw_welcome_screen(ui, &self.ctx, kit_index);
+            let app = &mut *self.app;
+            draw_welcome_screen(
+                &cx!(app, &self.ctx),
+                ui,
+                kit_index,
+                &mut app.shell,
+                &app.kit_tools.editing_kit_validation,
+            );
             return egui_tiles::UiResponse::None;
         }
         let campaign_evolved = self.app.model.kits[kit_index]
@@ -281,7 +288,13 @@ impl Baboon {
         // zero-height tab bar still leaves the "+" and the bar's own painting
         // behind, so the tree is skipped outright.
         if self.model.kits.len() == 1 && self.model.kits[0].is_empty_workspace() {
-            self.draw_welcome_screen(ui, ctx, 0);
+            draw_welcome_screen(
+                &cx!(self, ctx),
+                ui,
+                0,
+                &mut self.shell,
+                &self.kit_tools.editing_kit_validation,
+            );
             return;
         }
         let placeholder = egui_tiles::Tree::empty(egui::Id::new("kit_tree_placeholder"));

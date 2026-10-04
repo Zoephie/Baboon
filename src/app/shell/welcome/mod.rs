@@ -2,6 +2,7 @@
 //! It owns what an unloaded workspace offers the user; loading itself belongs to the controller.
 
 use super::*;
+use super::recents::RecentAction;
 use crate::app::shell::frame::editing_kit_title_text;
 use crate::app::shell::frame::EditingKitMenuEntry;
 use crate::app::shell::frame::visible_editing_kit_menu_entries;
@@ -31,8 +32,8 @@ mod welcome_column_tests;
 
 /// What the welcome screen asks the app to do once the frame is drawn.
 ///
-/// Collected rather than acted on inline: every one of these borrows `self`
-/// mutably, and the screen is drawn from inside a pane closure.
+/// Collected while drawing, and sent once the screen is drawn: each becomes an
+/// [`AppAction`] (or opens Help, or a link).
 enum WelcomeAction {
     LoadFolder,
     LoadTag,
@@ -48,496 +49,473 @@ enum WelcomeAction {
     OpenUrl(&'static str),
 }
 
-impl Baboon {
-    /// Draw the welcome screen shown in place of a browser and editor when a
-    /// workspace has nothing loaded.
-    ///
-    /// The previous empty state was an empty tag browser beside "No tag
-    /// selected" — two panels, neither of which could do anything about it.
-    /// Everything here is a way to open something.
-    /// `kit_index` is the empty workspace this screen is filling. Its actions
-    /// load into the active kit, and this pane's kit is the one being asked.
-    pub(in crate::app) fn draw_welcome_screen(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
-        // A load reserves the kit (`requested_path`) before its worker starts
-        // and installs the source only when it lands — that window is "this
-        // workspace is starting up". Replace the whole screen with a wait
-        // notice for its duration: a second click on H3EK while the first was
-        // still indexing queued a duplicate load, and nothing on this screen
-        // is safe to offer until the kit is in.
-        if self.model.kits[kit_index].source.is_none()
-            && let Some(path) = self.model.kits[kit_index].requested_path.clone()
-        {
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string());
-            centered_loading_state(
-                ui,
-                &format!("Please wait — {name} is starting up…"),
-                "Large editing kits can take a moment to index.",
-            );
-            return;
-        }
-
-        let mut action = None;
-        let recents = self.model.prefs.recent_folders.clone();
-        let editing_kits = visible_editing_kit_menu_entries(
-            &self.model.prefs.custom_editing_kit_profiles,
-            &self.kit_tools.editing_kit_validation,
+/// Draw the welcome screen shown in place of a browser and editor when a
+/// workspace has nothing loaded.
+///
+/// The previous empty state was an empty tag browser beside "No tag
+/// selected" — two panels, neither of which could do anything about it.
+/// Everything here is a way to open something.
+/// `kit_index` is the empty workspace this screen is filling. Its actions
+/// load into the active kit, and this pane's kit is the one being asked.
+pub(in crate::app) fn draw_welcome_screen(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    shell: &mut ShellFeature,
+    validation: &EditingKitValidationCache,
+) {
+    let ctx = cx.egui;
+    // A load reserves the kit (`requested_path`) before its worker starts
+    // and installs the source only when it lands — that window is "this
+    // workspace is starting up". Replace the whole screen with a wait
+    // notice for its duration: a second click on H3EK while the first was
+    // still indexing queued a duplicate load, and nothing on this screen
+    // is safe to offer until the kit is in.
+    if cx.model.kits[kit_index].source.is_none()
+        && let Some(path) = cx.model.kits[kit_index].requested_path.clone()
+    {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        centered_loading_state(
+            ui,
+            &format!("Please wait — {name} is starting up…"),
+            "Large editing kits can take a moment to index.",
         );
+        return;
+    }
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.add_space(32.0);
-                ui.vertical_centered(|ui| {
-                    const WELCOME_CARD_WIDTH: f32 = 820.0;
-                    const BANNER_ASPECT_RATIO: f32 = 1680.0 / 320.0;
+    let mut action = None;
+    let recents = cx.model.prefs.recent_folders.clone();
+    let editing_kits = visible_editing_kit_menu_entries(
+        &cx.model.prefs.custom_editing_kit_profiles,
+        validation,
+    );
 
-                    let card_width = WELCOME_CARD_WIDTH.min(ui.available_width());
-                    ui.set_width(card_width);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(32.0);
+            ui.vertical_centered(|ui| {
+                const WELCOME_CARD_WIDTH: f32 = 820.0;
+                const BANNER_ASPECT_RATIO: f32 = 1680.0 / 320.0;
 
-                    Frame::NONE
-                        .fill(foundation_group_bg())
-                        .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
-                        .show(ui, |ui| {
-                            let content_item_spacing_y = ui.spacing().item_spacing.y;
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            let banner_width = ui.available_width();
-                            let banner = ui.add(
-                                egui::Image::from_bytes(
-                                    "bytes://baboon_branding/welcome-banner.png",
-                                    include_root_bytes!("assets/branding/welcome-banner.png")
-                                        .as_slice(),
-                                )
-                                .fit_to_exact_size(Vec2::new(
-                                    banner_width,
-                                    banner_width / BANNER_ASPECT_RATIO,
-                                )),
-                            );
-                            let banner_scale = banner.rect.width() / WELCOME_CARD_WIDTH;
-                            ui.painter().text(
-                                banner.rect.left_top()
-                                    + Vec2::new(315.0 * banner_scale, 31.0 * banner_scale),
-                                egui::Align2::LEFT_TOP,
-                                format!("v{}", env!("CARGO_PKG_VERSION")),
-                                FontId::proportional(12.0 * banner_scale.max(0.8)),
-                                Color32::from_rgb(255, 190, 151),
-                            );
+                let card_width = WELCOME_CARD_WIDTH.min(ui.available_width());
+                ui.set_width(card_width);
 
-                            Frame::NONE
-                                .inner_margin(egui::Margin {
-                                    left: 0,
-                                    right: 0,
-                                    top: 0,
-                                    bottom: 0,
-                                })
-                                .show(ui, |ui| {
-                                    ui.spacing_mut().item_spacing.y = content_item_spacing_y;
-                                    draw_welcome_columns(ui, |columns| {
-                                        Frame::NONE.inner_margin(egui::Margin::same(28)).show(
-                                            &mut columns[0],
-                                            |ui| {
-                                                section_heading(ui, "Start", text_dark());
-                                                if welcome_icon_button(
+                Frame::NONE
+                    .fill(foundation_group_bg())
+                    .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
+                    .show(ui, |ui| {
+                        let content_item_spacing_y = ui.spacing().item_spacing.y;
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let banner_width = ui.available_width();
+                        let banner = ui.add(
+                            egui::Image::from_bytes(
+                                "bytes://baboon_branding/welcome-banner.png",
+                                include_root_bytes!("assets/branding/welcome-banner.png")
+                                    .as_slice(),
+                            )
+                            .fit_to_exact_size(Vec2::new(
+                                banner_width,
+                                banner_width / BANNER_ASPECT_RATIO,
+                            )),
+                        );
+                        let banner_scale = banner.rect.width() / WELCOME_CARD_WIDTH;
+                        ui.painter().text(
+                            banner.rect.left_top()
+                                + Vec2::new(315.0 * banner_scale, 31.0 * banner_scale),
+                            egui::Align2::LEFT_TOP,
+                            format!("v{}", env!("CARGO_PKG_VERSION")),
+                            FontId::proportional(12.0 * banner_scale.max(0.8)),
+                            Color32::from_rgb(255, 190, 151),
+                        );
+
+                        Frame::NONE
+                            .inner_margin(egui::Margin {
+                                left: 0,
+                                right: 0,
+                                top: 0,
+                                bottom: 0,
+                            })
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = content_item_spacing_y;
+                                draw_welcome_columns(ui, |columns| {
+                                    Frame::NONE.inner_margin(egui::Margin::same(28)).show(
+                                        &mut columns[0],
+                                        |ui| {
+                                            section_heading(ui, "Start", text_dark());
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::FolderOpen,
+                                                "Open a tags folder…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::LoadFolder);
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::Tag,
+                                                "Open a single tag…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::LoadTag);
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::Cache,
+                                                "Open a monolithic cache…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::LoadMonolithic);
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::Container,
+                                                "Open a Campaign Evolved container…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::LoadContainer);
+                                            }
+
+                                            if !editing_kits.is_empty() {
+                                                ui.add_space(24.0);
+                                                section_heading(
                                                     ui,
-                                                    ButtonIcon::FolderOpen,
-                                                    "Open a tags folder…",
+                                                    "Editing Kits",
                                                     text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::LoadFolder);
-                                                }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::Tag,
-                                                    "Open a single tag…",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::LoadTag);
-                                                }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::Cache,
-                                                    "Open a monolithic cache…",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::LoadMonolithic);
-                                                }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::Container,
-                                                    "Open a Campaign Evolved container…",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::LoadContainer);
-                                                }
-
-                                                if !editing_kits.is_empty() {
-                                                    ui.add_space(24.0);
-                                                    section_heading(
-                                                        ui,
-                                                        "Editing Kits",
-                                                        text_dark(),
-                                                    );
-                                                    for entry in &editing_kits {
-                                                        match entry {
-                                                            EditingKitMenuEntry::Custom(
+                                                );
+                                                for entry in &editing_kits {
+                                                    match entry {
+                                                        EditingKitMenuEntry::Custom(
+                                                            profile,
+                                                        ) => {
+                                                            let validation = validation.custom(&profile.id);
+                                                            let enabled = validation.is_ok();
+                                                            let tooltip = validation
+                                                        .as_ref()
+                                                        .map(|layout| {
+                                                            profile_location(
                                                                 profile,
-                                                            ) => {
-                                                                let validation = self
-                                                                    .kit_tools.editing_kit_validation
-                                                                    .custom(&profile.id);
-                                                                let enabled = validation.is_ok();
-                                                                let tooltip = validation
-                                                            .as_ref()
-                                                            .map(|layout| {
-                                                                profile_location(
-                                                                    profile,
-                                                                    Some(layout),
+                                                                Some(layout),
+                                                            )
+                                                            .display()
+                                                            .to_string()
+                                                        })
+                                                        .unwrap_or_else(|error| {
+                                                            format!(
+                                                                "{} is unavailable: {error}",
+                                                                profile.name
+                                                            )
+                                                        });
+                                                            let texture = shell.workspace_banner_texture(
+                                                                    ctx,
+                                                                    &cx.model.prefs.custom_editing_kit_profiles,
+                                                                    profile.game_id(),
+                                                                    Some(&profile.id),
+                                                                );
+                                                            let image = match texture {
+                                                        Some(texture) => egui::Image::new(
+                                                            egui::load::SizedTexture::new(
+                                                                texture.id(),
+                                                                Vec2::splat(16.0),
+                                                            ),
+                                                        ),
+                                                        None => button_icon_image(
+                                                            ui,
+                                                            ButtonIcon::FolderOpen,
+                                                            text_dark(),
+                                                            16.0,
+                                                        ),
+                                                    };
+                                                            let title = editing_kit_title_text(
+                                                                ui,
+                                                                &profile.name,
+                                                                profile.read_only
+                                                                    && !profile.is_campaign_evolved(),
+                                                                TextStyle::Button
+                                                                    .resolve(ui.style())
+                                                                    .size,
+                                                                false,
+                                                            );
+                                                            let response = welcome_image_button(
+                                                                ui,
+                                                                image,
+                                                                title,
+                                                                text_dark(),
+                                                                enabled,
+                                                            );
+                                                            let clicked = if enabled {
+                                                                response.on_hover_text(tooltip)
+                                                            } else {
+                                                                response.on_disabled_hover_text(
+                                                                    tooltip,
                                                                 )
-                                                                .display()
-                                                                .to_string()
-                                                            })
-                                                            .unwrap_or_else(|error| {
-                                                                format!(
-                                                                    "{} is unavailable: {error}",
-                                                                    profile.name
+                                                            }
+                                                            .clicked();
+                                                            if clicked {
+                                                                action =
+                                                            Some(WelcomeAction::LoadCustomKit(
+                                                                profile.clone(),
+                                                            ));
+                                                            }
+                                                        }
+                                                        EditingKitMenuEntry::BuiltIn(
+                                                            shortcut,
+                                                        ) => {
+                                                            let texture = shell.game_emblem_texture(
+                                                                    ctx,
+                                                                    shortcut.game,
                                                                 )
-                                                            });
-                                                                let texture = self
-                                                                    .shell
-                                                                    .workspace_banner_texture(
-                                                                        ctx,
-                                                                        &self.model.prefs.custom_editing_kit_profiles,
-                                                                        profile.game_id(),
-                                                                        Some(&profile.id),
-                                                                    );
-                                                                let image = match texture {
-                                                            Some(texture) => egui::Image::new(
+                                                                .cloned();
+                                                            let path = cx
+                                                                .model.prefs
+                                                                .editing_kit_paths
+                                                                .get(shortcut.game.as_str())
+                                                                .cloned();
+                                                            let image = texture.map_or_else(
+                                                                || {
+                                                                    button_icon_image(
+                                                                        ui,
+                                                                        ButtonIcon::FolderOpen,
+                                                                        text_dark(),
+                                                                        16.0,
+                                                                    )
+                                                                },
+                                                                |texture| {
+                                                                    egui::Image::new(
                                                                 egui::load::SizedTexture::new(
                                                                     texture.id(),
                                                                     Vec2::splat(16.0),
                                                                 ),
-                                                            ),
-                                                            None => button_icon_image(
+                                                            )
+                                                                },
+                                                            );
+                                                            let label = welcome_image_button(
                                                                 ui,
-                                                                ButtonIcon::FolderOpen,
+                                                                image,
+                                                                shortcut.game.display_name(),
                                                                 text_dark(),
-                                                                16.0,
-                                                            ),
-                                                        };
-                                                                let title = editing_kit_title_text(
-                                                                    ui,
-                                                                    &profile.name,
-                                                                    profile.read_only
-                                                                        && !profile.is_campaign_evolved(),
-                                                                    TextStyle::Button
-                                                                        .resolve(ui.style())
-                                                                        .size,
-                                                                    false,
-                                                                );
-                                                                let response = welcome_image_button(
-                                                                    ui,
-                                                                    image,
-                                                                    title,
-                                                                    text_dark(),
-                                                                    enabled,
-                                                                );
-                                                                let clicked = if enabled {
-                                                                    response.on_hover_text(tooltip)
-                                                                } else {
-                                                                    response.on_disabled_hover_text(
-                                                                        tooltip,
-                                                                    )
-                                                                }
-                                                                .clicked();
-                                                                if clicked {
-                                                                    action =
-                                                                Some(WelcomeAction::LoadCustomKit(
-                                                                    profile.clone(),
-                                                                ));
-                                                                }
-                                                            }
-                                                            EditingKitMenuEntry::BuiltIn(
-                                                                shortcut,
-                                                            ) => {
-                                                                let texture = self
-                                                                    .shell
-                                                                    .game_emblem_texture(
-                                                                        ctx,
-                                                                        shortcut.game,
-                                                                    )
-                                                                    .cloned();
-                                                                let path = self
-                                                                    .model.prefs
-                                                                    .editing_kit_paths
-                                                                    .get(shortcut.game.as_str())
-                                                                    .cloned();
-                                                                let image = texture.map_or_else(
-                                                                    || {
-                                                                        button_icon_image(
-                                                                            ui,
-                                                                            ButtonIcon::FolderOpen,
-                                                                            text_dark(),
-                                                                            16.0,
-                                                                        )
-                                                                    },
-                                                                    |texture| {
-                                                                        egui::Image::new(
-                                                                    egui::load::SizedTexture::new(
-                                                                        texture.id(),
-                                                                        Vec2::splat(16.0),
+                                                                true,
+                                                            );
+                                                            let clicked = match &path {
+                                                                Some(path) => label
+                                                                    .on_hover_text(
+                                                                        path.display()
+                                                                            .to_string(),
                                                                     ),
-                                                                )
-                                                                    },
+                                                                None => label,
+                                                            }
+                                                            .clicked();
+                                                            if clicked {
+                                                                action = Some(
+                                                                    WelcomeAction::LoadKit(
+                                                                        *shortcut,
+                                                                    ),
                                                                 );
-                                                                let label = welcome_image_button(
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    );
+
+                                    Frame::NONE.inner_margin(egui::Margin::same(28)).show(
+                                        &mut columns[1],
+                                        |ui| {
+                                            section_heading(ui, "Recent", text_dark());
+                                            if recents.is_empty() {
+                                                ui.label(
+                                                    RichText::new(
+                                                        "Folders you open will appear here.",
+                                                    )
+                                                    .color(subtle_dark()),
+                                                );
+                                            }
+                                            for path in &recents {
+                                                let name = path
+                                                    .file_name()
+                                                    .map(|name| {
+                                                        name.to_string_lossy().into_owned()
+                                                    })
+                                                    .unwrap_or_else(|| {
+                                                        path.display().to_string()
+                                                    });
+                                                let full_path = path.display().to_string();
+                                                let text_width =
+                                                    (ui.available_width() - 28.0).max(80.0);
+                                                let display_name =
+                                                    truncate_for_cell(&name, text_width);
+                                                let row_rect = egui::Rect::from_min_size(
+                                                    ui.cursor().min,
+                                                    Vec2::new(
+                                                        ui.available_width(),
+                                                        BUTTON_HEIGHT,
+                                                    ),
+                                                );
+                                                let row_hovered = ui.input(|input| {
+                                                    input.pointer.hover_pos().is_some_and(
+                                                        |pos| row_rect.contains(pos),
+                                                    )
+                                                });
+                                                ui.horizontal(|ui| {
+                                                    let remove_width = BUTTON_HEIGHT;
+                                                    let button_width = (ui.available_width()
+                                                        - remove_width
+                                                        - ui.spacing().item_spacing.x)
+                                                        .max(0.0);
+                                                    let image = welcome_recent_icon(ui, path);
+                                                    let open_clicked = ui
+                                                        .allocate_ui(
+                                                            Vec2::new(
+                                                                button_width,
+                                                                BUTTON_HEIGHT,
+                                                            ),
+                                                            |ui| {
+                                                                ui.set_width(button_width);
+                                                                welcome_image_button(
                                                                     ui,
                                                                     image,
-                                                                    shortcut.game.display_name(),
+                                                                    &display_name,
                                                                     text_dark(),
                                                                     true,
-                                                                );
-                                                                let clicked = match &path {
-                                                                    Some(path) => label
-                                                                        .on_hover_text(
-                                                                            path.display()
-                                                                                .to_string(),
-                                                                        ),
-                                                                    None => label,
-                                                                }
-                                                                .clicked();
-                                                                if clicked {
-                                                                    action = Some(
-                                                                        WelcomeAction::LoadKit(
-                                                                            *shortcut,
-                                                                        ),
-                                                                    );
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                        );
-
-                                        Frame::NONE.inner_margin(egui::Margin::same(28)).show(
-                                            &mut columns[1],
-                                            |ui| {
-                                                section_heading(ui, "Recent", text_dark());
-                                                if recents.is_empty() {
-                                                    ui.label(
-                                                        RichText::new(
-                                                            "Folders you open will appear here.",
-                                                        )
-                                                        .color(subtle_dark()),
-                                                    );
-                                                }
-                                                for path in &recents {
-                                                    let name = path
-                                                        .file_name()
-                                                        .map(|name| {
-                                                            name.to_string_lossy().into_owned()
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            path.display().to_string()
-                                                        });
-                                                    let full_path = path.display().to_string();
-                                                    let text_width =
-                                                        (ui.available_width() - 28.0).max(80.0);
-                                                    let display_name =
-                                                        truncate_for_cell(&name, text_width);
-                                                    let row_rect = egui::Rect::from_min_size(
-                                                        ui.cursor().min,
-                                                        Vec2::new(
-                                                            ui.available_width(),
-                                                            BUTTON_HEIGHT,
-                                                        ),
-                                                    );
-                                                    let row_hovered = ui.input(|input| {
-                                                        input.pointer.hover_pos().is_some_and(
-                                                            |pos| row_rect.contains(pos),
-                                                        )
-                                                    });
-                                                    ui.horizontal(|ui| {
-                                                        let remove_width = BUTTON_HEIGHT;
-                                                        let button_width = (ui.available_width()
-                                                            - remove_width
-                                                            - ui.spacing().item_spacing.x)
-                                                            .max(0.0);
-                                                        let image = welcome_recent_icon(ui, path);
-                                                        let open_clicked = ui
-                                                            .allocate_ui(
-                                                                Vec2::new(
-                                                                    button_width,
-                                                                    BUTTON_HEIGHT,
-                                                                ),
-                                                                |ui| {
-                                                                    ui.set_width(button_width);
-                                                                    welcome_image_button(
-                                                                        ui,
-                                                                        image,
-                                                                        &display_name,
-                                                                        text_dark(),
-                                                                        true,
-                                                                    )
-                                                                },
-                                                            )
-                                                            .inner
-                                                            .on_hover_text(&full_path)
-                                                            .clicked();
-                                                        if open_clicked {
-                                                            action =
-                                                                Some(WelcomeAction::LoadRecent(
-                                                                    path.clone(),
-                                                                ));
-                                                        }
-                                                        if row_hovered {
-                                                            if ui
-                                                                .add_sized(
-                                                                    Vec2::splat(remove_width),
-                                                                    egui::Button::new("×")
-                                                                        .frame(false),
                                                                 )
-                                                                .on_hover_text(
-                                                                    "Remove from recent folders",
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                action = Some(
-                                                                    WelcomeAction::ForgetRecent(
-                                                                        path.clone(),
-                                                                    ),
-                                                                );
-                                                            }
-                                                        } else {
-                                                            ui.allocate_space(Vec2::splat(
-                                                                remove_width,
-                                                            ));
-                                                        }
-                                                    });
-                                                    ui.add_space(3.0);
-                                                }
-                                                if !recents.is_empty() {
-                                                    ui.add_space(8.0);
-                                                    if welcome_icon_button(
-                                                        ui,
-                                                        ButtonIcon::Clear,
-                                                        "Clear Recent Folders",
-                                                        text_dark(),
-                                                    )
-                                                    .clicked()
-                                                    {
+                                                            },
+                                                        )
+                                                        .inner
+                                                        .on_hover_text(&full_path)
+                                                        .clicked();
+                                                    if open_clicked {
                                                         action =
-                                                            Some(WelcomeAction::ForgetAllRecents);
+                                                            Some(WelcomeAction::LoadRecent(
+                                                                path.clone(),
+                                                            ));
                                                     }
-                                                }
-                                                ui.add_space(24.0);
-                                                section_heading(ui, "Misc.", text_dark());
+                                                    if row_hovered {
+                                                        if ui
+                                                            .add_sized(
+                                                                Vec2::splat(remove_width),
+                                                                egui::Button::new("×")
+                                                                    .frame(false),
+                                                            )
+                                                            .on_hover_text(
+                                                                "Remove from recent folders",
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            action = Some(
+                                                                WelcomeAction::ForgetRecent(
+                                                                    path.clone(),
+                                                                ),
+                                                            );
+                                                        }
+                                                    } else {
+                                                        ui.allocate_space(Vec2::splat(
+                                                            remove_width,
+                                                        ));
+                                                    }
+                                                });
+                                                ui.add_space(3.0);
+                                            }
+                                            if !recents.is_empty() {
+                                                ui.add_space(8.0);
                                                 if welcome_icon_button(
                                                     ui,
-                                                    ButtonIcon::About,
-                                                    "About…",
+                                                    ButtonIcon::Clear,
+                                                    "Clear Recent Folders",
                                                     text_dark(),
                                                 )
                                                 .clicked()
                                                 {
-                                                    action = Some(WelcomeAction::OpenAbout);
+                                                    action =
+                                                        Some(WelcomeAction::ForgetAllRecents);
                                                 }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::Settings,
-                                                    "Settings…",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::OpenSettings);
-                                                }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::GitHub,
-                                                    "Baboon GitHub",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::OpenUrl(
-                                                        BABOON_GITHUB_URL,
-                                                    ));
-                                                }
-                                                if welcome_icon_button(
-                                                    ui,
-                                                    ButtonIcon::HaloMods,
-                                                    "Halo Mods Discord",
-                                                    text_dark(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    action = Some(WelcomeAction::OpenUrl(
-                                                        "https://discord.com/invite/4pKEpNW",
-                                                    ));
-                                                }
-                                            },
-                                        );
-                                    });
+                                            }
+                                            ui.add_space(24.0);
+                                            section_heading(ui, "Misc.", text_dark());
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::About,
+                                                "About…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::OpenAbout);
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::Settings,
+                                                "Settings…",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::OpenSettings);
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::GitHub,
+                                                "Baboon GitHub",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::OpenUrl(
+                                                    BABOON_GITHUB_URL,
+                                                ));
+                                            }
+                                            if welcome_icon_button(
+                                                ui,
+                                                ButtonIcon::HaloMods,
+                                                "Halo Mods Discord",
+                                                text_dark(),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = Some(WelcomeAction::OpenUrl(
+                                                    "https://discord.com/invite/4pKEpNW",
+                                                ));
+                                            }
+                                        },
+                                    );
                                 });
-                        });
-                });
+                            });
+                    });
             });
+        });
 
-        // `open_kit_for` reuses the active kit only when it is still an empty
-        // workspace; with another game active it would add a third kit and
-        // leave this pane empty. Press-activation normally beats the click by a
-        // frame, but not when a frame runs long.
-        if action.is_some() {
-            self.model.active = kit_index;
-        }
-        match action {
-            Some(WelcomeAction::LoadFolder) => self.begin_load_folder(ctx.clone()),
-            Some(WelcomeAction::LoadTag) => self.begin_load_single(ctx.clone()),
-            Some(WelcomeAction::LoadMonolithic) => self.begin_load_monolithic(ctx.clone()),
-            Some(WelcomeAction::LoadContainer) => self.begin_load_iostore_container(ctx.clone()),
-            Some(WelcomeAction::LoadRecent(path)) => self.load_recent_folder(path, ctx.clone()),
-            Some(WelcomeAction::ForgetRecent(path)) => {
-                self.remove_recent_folder(&path);
-                self.model.status = format!("Removed {} from recent folders", path.display());
-            }
-            Some(WelcomeAction::ForgetAllRecents) => {
-                self.model.prefs.recent_folders.clear();
-                self.model.status = "Cleared recent folders".to_owned();
-            }
-            Some(WelcomeAction::LoadKit(shortcut)) => {
-                self.load_editing_kit_shortcut(shortcut, ctx.clone())
-            }
-            Some(WelcomeAction::LoadCustomKit(profile)) => {
-                self.load_custom_editing_kit_profile(profile, ctx.clone());
-            }
-            Some(WelcomeAction::OpenAbout) => {
-                self.commands.send(HelpCommand::Open(HelpPanelTab::About));
-            }
-            Some(WelcomeAction::OpenSettings) => {
-                self.shell.settings_tab = SettingsTab::EditingKits;
-                self.shell.settings_open = true;
-            }
-            Some(WelcomeAction::OpenUrl(url)) => {
-                ctx.open_url(egui::OpenUrl::new_tab(url));
-            }
-            None => {}
-        }
+    let Some(action) = action else {
+        return;
+    };
+    // Its actions load into the active kit, and `open_kit_for` reuses the
+    // active kit only when it is still an empty workspace; with another
+    // game active it would add a third kit and leave this pane empty. So
+    // this pane's kit is made active first.
+    cx.send(AppAction::FocusKit(cx.model.kits[kit_index].id));
+    match action {
+        WelcomeAction::LoadFolder => cx.send(AppAction::LoadFolder),
+        WelcomeAction::LoadTag => cx.send(AppAction::LoadTag),
+        WelcomeAction::LoadMonolithic => cx.send(AppAction::LoadMonolithic),
+        WelcomeAction::LoadContainer => cx.send(AppAction::LoadContainer),
+        WelcomeAction::LoadRecent(path) => cx.send(AppAction::Recent(RecentAction::Open(path))),
+        WelcomeAction::ForgetRecent(path) => cx.send(AppAction::Recent(RecentAction::Forget(path))),
+        WelcomeAction::ForgetAllRecents => cx.send(AppAction::Recent(RecentAction::ForgetAll)),
+        WelcomeAction::LoadKit(shortcut) => cx.send(AppAction::LoadBuiltInEditingKit(shortcut)),
+        WelcomeAction::LoadCustomKit(profile) => cx.send(AppAction::LoadEditingKit(profile)),
+        WelcomeAction::OpenAbout => cx.send(HelpCommand::Open(HelpPanelTab::About)),
+        WelcomeAction::OpenSettings => cx.send(AppAction::OpenSettings(Some(SettingsTab::EditingKits))),
+        WelcomeAction::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
     }
 }
 

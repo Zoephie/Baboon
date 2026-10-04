@@ -11,6 +11,8 @@ use super::recents::RecentAction;
 
 /// An application-level action, carried out once the frame's drawing is over.
 pub(in crate::app) enum AppAction {
+    /// Make `kit`'s workspace the active one, for the actions sent after it.
+    FocusKit(KitId),
     /// Run a file action on the next frame, once any edit that was focused
     /// when the menu took focus has been committed.
     Defer(DeferredFileAction),
@@ -73,6 +75,11 @@ impl Baboon {
     pub(in crate::app) fn apply_app_action(&mut self, action: AppAction, ctx: &egui::Context) {
         let active = self.model.active;
         match action {
+            AppAction::FocusKit(kit) => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                }
+            }
             AppAction::Defer(action) => self.defer_file_action(action, ctx),
             AppAction::NewTag => self.open_new_tag_dialog(),
             AppAction::ImportTags => {
