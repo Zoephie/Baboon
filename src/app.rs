@@ -343,6 +343,7 @@ pub struct Baboon {
     /// JSON, keyed by definition file path. Built lazily during render.
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
+    block_table: Option<BlockTableState>,
     rename_tag: Option<RenameTagState>,
     /// Rename Folder dialog for a loose tags folder, if one is open.
     loose_folder_rename: Option<LooseFolderRenameState>,
@@ -396,8 +397,6 @@ pub struct Baboon {
     pending_tool_import: Option<ToolImportRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     blender_icon: Option<egui::TextureHandle>,
-    sapien_icon: Option<egui::TextureHandle>,
-    tag_test_icon: Option<egui::TextureHandle>,
     game_banner_textures: HashMap<String, egui::TextureHandle>,
     game_emblem_textures: HashMap<String, egui::TextureHandle>,
     custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
@@ -642,6 +641,7 @@ impl Baboon {
             field_value_searching: false,
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
+            block_table: None,
             rename_tag: None,
             loose_folder_rename: None,
             extract_target: None,
@@ -683,16 +683,6 @@ impl Baboon {
                 &ctx,
                 "blender_icon",
                 include_bytes!("../assets/Quick access/blender.ico"),
-            ),
-            sapien_icon: load_ico_texture(
-                &ctx,
-                "sapien_icon",
-                include_bytes!("../assets/Quick access/sapien.ico"),
-            ),
-            tag_test_icon: load_ico_texture(
-                &ctx,
-                "tag_test_icon",
-                include_bytes!("../assets/Quick access/tag_test.ico"),
             ),
             game_banner_textures: HashMap::new(),
             game_emblem_textures: HashMap::new(),
@@ -814,16 +804,6 @@ impl Baboon {
             ctx,
             "blender_icon",
             include_bytes!("../assets/Quick access/blender.ico"),
-        );
-        self.sapien_icon = load_ico_texture(
-            ctx,
-            "sapien_icon",
-            include_bytes!("../assets/Quick access/sapien.ico"),
-        );
-        self.tag_test_icon = load_ico_texture(
-            ctx,
-            "tag_test_icon",
-            include_bytes!("../assets/Quick access/tag_test.ico"),
         );
         self.game_banner_textures.clear();
         self.game_emblem_textures.clear();

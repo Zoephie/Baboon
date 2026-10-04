@@ -65,7 +65,6 @@ const BROWSER_SEARCH_RADIUS: f32 = BROWSER_SEARCH_HEIGHT * 0.5;
 const BROWSER_SEARCH_ICON_SIZE: f32 = 16.0;
 const BROWSER_SEARCH_LEFT_PADDING: f32 = 4.0;
 const BROWSER_SEARCH_ICON_TEXT_GAP: f32 = 8.0;
-const BROWSER_SEARCH_RIGHT_PADDING: f32 = 8.0;
 
 /// Width of the title column when pane actions can remain beside it. Returning
 /// `None` is the shared signal for tag and folder headers to put actions below
@@ -114,9 +113,20 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
         Sense::click(),
     );
 
+    let clear_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.right() - BROWSER_SEARCH_LEFT_PADDING - BROWSER_SEARCH_ICON_SIZE * 0.5,
+            rect.center().y,
+        ),
+        Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
+    );
+
     let edit_rect = egui::Rect::from_min_max(
         egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
-        egui::pos2(rect.right() - BROWSER_SEARCH_RIGHT_PADDING, rect.bottom()),
+        egui::pos2(
+            clear_rect.left() - BROWSER_SEARCH_ICON_TEXT_GAP,
+            rect.bottom(),
+        ),
     );
     let edit_response = ui.put(
         edit_rect,
@@ -131,9 +141,23 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
     if icon_response.clicked() {
         edit_response.request_focus();
     }
-    let response = background_response
+    let mut response = background_response
         .union(icon_response)
         .union(edit_response.clone());
+    if !value.is_empty() {
+        let clear = search_clear_control_at(
+            ui,
+            clear_rect,
+            edit_response.id.with("clear_search"),
+            BROWSER_SEARCH_ICON_SIZE * 0.5,
+        );
+        if clear.clicked() {
+            value.clear();
+            edit_response.request_focus();
+            response.mark_changed();
+        }
+        response = response.union(clear);
+    }
     ui.painter().rect_stroke(
         rect,
         BROWSER_SEARCH_RADIUS,
@@ -283,34 +307,6 @@ fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
     }
     let delta = ui.input(|input| input.smooth_scroll_delta);
     *scroll_offset -= delta.x + delta.y;
-}
-
-/// A toolbar launcher button: shows the decoded `.ico` icon when available,
-/// otherwise falls back to a single-letter label. Returns the response so the
-/// caller can attach a hover tooltip and read `.clicked()`.
-fn launcher_button(
-    ui: &mut Ui,
-    icon: Option<&egui::TextureHandle>,
-    fallback: &str,
-    enabled: bool,
-) -> egui::Response {
-    match icon {
-        Some(texture) => ui.add_enabled(
-            enabled,
-            egui::ImageButton::new(
-                egui::Image::new(egui::load::SizedTexture::new(
-                    texture.id(),
-                    Vec2::splat(20.0),
-                ))
-                .tint(Color32::WHITE),
-            ),
-        ),
-        None => ui.add_enabled(
-            enabled,
-            egui::Button::new(RichText::new(fallback).color(Color32::WHITE))
-                .min_size(Vec2::splat(22.0)),
-        ),
-    }
 }
 
 fn editing_kit_menu_shortcuts() -> impl Iterator<Item = EditingKitShortcut> {
@@ -835,33 +831,6 @@ impl Baboon {
 
     fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if launcher_button(ui, self.blender_icon.as_ref(), "B", true)
-                .on_hover_text("Launch Blender")
-                .clicked()
-            {
-                self.launch_blender();
-            }
-
-            let tag_test_ready = self
-                .kit_tool_path(self.tag_test_executable())
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
-                .on_hover_text("Launch tag_test without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_tag_test();
-            }
-
-            let sapien_ready = self
-                .kit_tool_path("sapien.exe")
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
-                .on_hover_text("Launch Sapien without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_sapien();
-            }
-
             // Campaign Evolved holds unsaved edits in a project rather than in
             // the game's files, so a workspace accumulates stashed
             // modifications across sessions. This is the way back to the
@@ -1185,4 +1154,77 @@ mod keyword_draft_tests {
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
+}
+
+/// Paint a path with a muted parent and a full-opacity name, preserving the name when space is tight.
+pub(in crate::app) fn paint_path_label(ui: &Ui, display_path: &str, text_rect: egui::Rect) -> bool {
+    let (prefix, name) = display_path
+        .rfind(['/', '\\'])
+        .map_or(("", display_path), |split| display_path.split_at(split + 1));
+    let font = TextStyle::Body.resolve(ui.style());
+    let text_pos = egui::pos2(text_rect.left(), text_rect.center().y);
+    let available = text_rect.width().max(0.0);
+    let name_width = ui
+        .painter()
+        .layout_no_wrap(name.to_owned(), font.clone(), text_dark())
+        .size()
+        .x;
+    let (shown_prefix, shown_name) = if name_width >= available {
+        (
+            String::new(),
+            truncate_path_start_to_width(ui, name, &font, text_dark(), available),
+        )
+    } else {
+        (
+            truncate_path_start_to_width(
+                ui,
+                prefix,
+                &font,
+                text_dark().gamma_multiply(0.5),
+                available - name_width,
+            ),
+            name.to_owned(),
+        )
+    };
+    let truncated = shown_prefix != prefix || shown_name != name;
+    let prefix_width = ui
+        .painter()
+        .layout_no_wrap(
+            shown_prefix.clone(),
+            font.clone(),
+            text_dark().gamma_multiply(0.5),
+        )
+        .size()
+        .x;
+    let painter = ui.painter().with_clip_rect(text_rect);
+    painter.text(
+        text_pos,
+        Align2::LEFT_CENTER,
+        shown_prefix,
+        font.clone(),
+        text_dark().gamma_multiply(0.5),
+    );
+    painter.text(
+        text_pos + egui::vec2(prefix_width, 0.0),
+        Align2::LEFT_CENTER,
+        shown_name,
+        font,
+        text_dark(),
+    );
+    truncated
+}
+
+fn truncate_path_start_to_width(
+    ui: &Ui,
+    text: &str,
+    font: &FontId,
+    color: Color32,
+    max_width: f32,
+) -> String {
+    tag_compare::truncate_start(text, max_width, |candidate| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), color)
+            .size()
+            .x
+    })
 }

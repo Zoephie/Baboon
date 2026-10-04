@@ -3374,7 +3374,19 @@ pub(in crate::app) fn draw_favorites(
 }
 
 fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -> egui::Response {
-    let id = ui.make_persistent_id("browser_favorites");
+    show_browser_navigation_section(ui, "browser_favorites", "Favorites",
+        ButtonIcon::FavouriteFilled, Color32::from_rgb(242, 196, 48), add_body)
+}
+
+pub(in crate::app) fn show_browser_navigation_section<R>(
+    ui: &mut Ui,
+    id_source: impl std::hash::Hash,
+    title: &str,
+    icon: ButtonIcon,
+    color: Color32,
+    add_body: impl FnOnce(&mut Ui) -> R,
+) -> egui::Response {
+    let id = ui.make_persistent_id(id_source);
     let mut state =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
     let (response, (toggle_clicked, guide_x)) =
@@ -3385,11 +3397,11 @@ fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -
                 ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
             paint_button_icon_at(
                 ui,
-                ButtonIcon::FavouriteFilled,
+                icon,
                 icon_rect,
-                Color32::from_rgb(242, 196, 48),
+                color,
             );
-            let label = ui.label(RichText::new("Favorites").color(Color32::from_rgb(242, 196, 48)));
+            let label = ui.label(RichText::new(title).color(color));
             (
                 toggle.union(icon_response).union(label),
                 (toggle_clicked, icon_rect.center().x),

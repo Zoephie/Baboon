@@ -247,6 +247,18 @@ fn draw_icon_window_header_impl(
         Vec2::new(ui.available_width(), HEADER_HEIGHT),
         Sense::hover(),
     );
+    let margin = ui.spacing().window_margin;
+    let mut background = rect;
+    background.min.x -= margin.left;
+    background.max.x += margin.right;
+    background.min.y -= margin.top;
+    background.max.y += ui.spacing().item_spacing.y * 0.5;
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(background.intersect(ui.ctx().screen_rect()));
+    let mut rounding = ui.visuals().window_rounding;
+    rounding.sw = 0.0;
+    rounding.se = 0.0;
+    painter.rect_filled(background, rounding, foundation_block_bar());
     let font = TextStyle::Heading.resolve(ui.style());
     let galley = ui
         .painter()

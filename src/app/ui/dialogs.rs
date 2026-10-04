@@ -4,6 +4,7 @@
 use super::*;
 
 mod cache_import;
+mod block_table;
 mod chimp_prompts;
 mod clear_stash_confirm;
 mod container_dump_confirm;

@@ -134,6 +134,7 @@ impl Baboon {
         let mut function_request = None;
         let mut block_clip_request = None;
         let mut tsv_paste_request = None;
+        let mut block_table_request = None;
         let mut ce_sound_ref_request = None;
 
         // Taken rather than read: it is a one-shot, and egui remembers the
@@ -216,6 +217,7 @@ impl Baboon {
             function_request: &mut function_request,
             docs: def_docs.as_deref(),
             tsv_paste_request: &mut tsv_paste_request,
+            block_table_request: &mut block_table_request,
             block_clipboard: self.block_clipboard.as_ref(),
             block_clip_request: &mut block_clip_request,
             field_filter: field_filter.as_ref(),
@@ -341,6 +343,9 @@ impl Baboon {
                 text: String::new(),
                 status: None,
             });
+        }
+        if let Some(request) = block_table_request {
+            self.open_block_table(kit_index, &key, request);
         }
 
         if find_filter_block_jump.is_some() {

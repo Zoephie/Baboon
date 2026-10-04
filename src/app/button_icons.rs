@@ -63,6 +63,7 @@ pub(super) enum ButtonIcon {
     Opened,
     Other,
     Pause,
+    Pin,
     Play,
     Remove,
     Refresh,
@@ -74,6 +75,7 @@ pub(super) enum ButtonIcon {
     Sort,
     Stop,
     Tag,
+    TableView,
     Bitmap,
     View,
     WindowMode,
@@ -148,6 +150,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Opened => include_str!("../../assets/Button Icons/Opened.svg"),
         ButtonIcon::Other => include_str!("../../assets/Button Icons/Other.svg"),
         ButtonIcon::Pause => include_str!("../../assets/Button Icons/Pause.svg"),
+        ButtonIcon::Pin => include_str!("../../assets/Button Icons/Pin.svg"),
         ButtonIcon::Play => include_str!("../../assets/Button Icons/Play.svg"),
         ButtonIcon::Remove => include_str!("../../assets/Button Icons/Remove.svg"),
         ButtonIcon::Refresh => include_str!("../../assets/Button Icons/Refresh.svg"),
@@ -159,6 +162,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Sort => include_str!("../../assets/Button Icons/Sort.svg"),
         ButtonIcon::Stop => include_str!("../../assets/Button Icons/Stop.svg"),
         ButtonIcon::Tag => include_str!("../../assets/Button Icons/Tag.svg"),
+        ButtonIcon::TableView => include_str!("../../assets/Button Icons/Table View.svg"),
         ButtonIcon::View => include_str!("../../assets/Button Icons/View.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
@@ -216,17 +220,16 @@ pub(super) fn icon_button(
     enabled: bool,
     color: Color32,
 ) -> egui::Response {
-    let size = ICON_BUTTON_SIZE;
-    let response = ui.add_enabled(enabled, egui::Button::new("").min_size(size));
-    let icon_color = if enabled {
-        icon_color(icon, color)
-    } else {
-        ui.visuals().widgets.noninteractive.fg_stroke.color
-    };
-    let icon_size = BUTTON_ICON_SIZE;
-    let icon_rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(icon_size));
-    paint_button_icon_at(ui, icon, icon_rect, icon_color);
-    response.on_hover_text(tooltip)
+    // Paint in the button's enabled scope so egui fades the whole SVG,
+    // including accent colors embedded in the asset itself.
+    ui.add_enabled_ui(enabled, |ui| {
+        let response = ui.add(egui::Button::new("").min_size(ICON_BUTTON_SIZE));
+        let icon_rect =
+            egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+        paint_button_icon_at(ui, icon, icon_rect, icon_color(icon, color));
+        response.on_hover_text(tooltip)
+    })
+    .inner
 }
 
 /// Repaint a native checkbox with its hovered visuals when an adjacent icon

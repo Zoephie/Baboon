@@ -2,6 +2,60 @@
 //! It owns test-only characterization and does not participate in runtime application behavior.
 
 use super::*;
+
+#[test]
+fn browser_search_clear_works_in_sidebar_and_folder_widths() {
+    for width in [220.0, 720.0] {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_style(foundation_style());
+        let mut filter = "brute".to_owned();
+        let frame = |filter: &mut String, events| {
+            let mut response = None;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.scope_builder(
+                            egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                Vec2::new(width, 100.0),
+                            )),
+                            |ui| {
+                                response = Some(browser_search_field(ui, filter, "Search tags"));
+                            },
+                        );
+                    });
+                },
+            );
+            response.unwrap()
+        };
+        let response = frame(&mut filter, Vec::new());
+        let pos = egui::pos2(response.rect.right() - 10.0, response.rect.center().y);
+        let pointer = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut filter,
+            vec![egui::Event::PointerMoved(pos), pointer(true)],
+        );
+        let cleared = frame(&mut filter, vec![pointer(false)]);
+        assert!(filter.is_empty());
+        assert!(cleared.changed(), "clearing must notify the filter cache");
+        assert!(ctx.memory(|memory| memory.focused()).is_some());
+        assert!((cleared.rect.width() - response.rect.width()).abs() < 0.1);
+    }
+}
 use std::collections::{HashMap, HashSet};
 
 #[test]

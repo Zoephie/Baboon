@@ -8510,7 +8510,12 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game.as_deref()))
+        self.tag_test_executable_for(self.active)
+    }
+
+    pub(super) fn tag_test_executable_for(&self, kit_index: usize) -> &'static str {
+        tag_test_executable_for_game(self.kits.get(kit_index)
+            .and_then(|kit| kit.source.as_ref()).and_then(|source| source.game.as_deref()))
     }
 
     pub(super) fn launch_tag_test(&mut self) {
@@ -9610,10 +9615,6 @@ impl Baboon {
         let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
         match action {
             LastOpenedWindowsAction::None => {}
-            LastOpenedWindowsAction::OpenSettings => {
-                self.last_opened_windows = None;
-                self.settings_open = true;
-            }
             LastOpenedWindowsAction::Cancel { remember } => {
                 if remember {
                     self.prefs.session_restore = SessionRestore::Never;
@@ -9892,7 +9893,6 @@ fn render_save_changes_prompt(
 
 enum LastOpenedWindowsAction {
     None,
-    OpenSettings,
     Restore {
         /// Each kit to reopen, with the tags checked for it.
         kits: Vec<RestoreKit>,
@@ -9932,6 +9932,116 @@ fn last_opened_workspace_heading(
     (heading, None)
 }
 
+/// A fixed-height, full-width restore row, sharing Git Review's path styling.
+fn restore_path_row(
+    ui: &mut Ui,
+    checked: &mut bool,
+    available: bool,
+    path: &str,
+    group_tag: Option<u32>,
+    folder: bool,
+) {
+    ui.add_enabled_ui(available, |ui| {
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
+        ui.allocate_new_ui(
+            egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(20.0, 0.0))),
+            |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.checkbox(checked, "");
+                    let (icon_rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(BUTTON_ICON_SIZE), Sense::hover());
+                    if folder {
+                        paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
+                    } else {
+                        paint_tag_icon_at(ui, group_tag, icon_rect);
+                    }
+                    let (text_rect, response) = ui
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
+                    super::ui::paint_path_label(ui, path, text_rect);
+                    response.on_hover_text(if available {
+                        path.to_owned()
+                    } else {
+                        format!("{path} (unavailable)")
+                    });
+                });
+            },
+        );
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0_f32, grid_line()),
+        );
+    });
+}
+
+/// Lay out both lines as one block so the entire heading is vertically centered.
+fn restore_workspace_row(ui: &mut Ui, kit: &mut LastOpenedWindowsKit) -> (egui::Rect, egui::Rect) {
+    let (heading, root) = last_opened_workspace_heading(
+        kit.profile_name.as_deref().zip(kit.profile_root.as_deref()),
+        kit.game.as_deref(),
+        &kit.source_path,
+        kit.project_path.as_deref(),
+    );
+    let root = root.unwrap_or_else(|| kit.source_path.display().to_string());
+    let text_width = (ui.available_width() - 40.0).max(0.0);
+    let heading = egui::WidgetText::from(RichText::new(heading).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        text_width,
+        TextStyle::Body,
+    );
+    let path = egui::WidgetText::from(RichText::new(&root).color(subtle_dark())).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        text_width,
+        TextStyle::Body,
+    );
+    let text_height = heading.size().y + 2.0 + path.size().y;
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), (text_height + 12.0).max(44.0)),
+        Sense::hover(),
+    );
+    let checkbox_size = ui.spacing().interact_size.y;
+    let checkbox_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 8.0 + checkbox_size * 0.5, rect.center().y),
+        Vec2::splat(checkbox_size),
+    );
+    // This row is already allocated. A child UI keeps the checkbox from
+    // advancing the parent cursor and adding spacing below the row.
+    let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox_rect));
+    if !kit.source_available {
+        checkbox_ui.disable();
+    }
+    checkbox_ui.put(
+        checkbox_rect,
+        egui::Checkbox::without_text(&mut kit.checked),
+    );
+    let text_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 32.0, rect.center().y - text_height * 0.5),
+        Vec2::new(text_width, text_height),
+    );
+    let painter = ui.painter().with_clip_rect(rect);
+    painter.galley(text_rect.min, heading.clone(), text_dark());
+    painter.galley(
+        text_rect.min + egui::vec2(0.0, heading.size().y + 2.0),
+        path,
+        subtle_dark(),
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0_f32, grid_line()),
+    );
+    response.on_hover_text(&root);
+    if !kit.source_available {
+        ui.label(
+            RichText::new(format!("Missing source: {root}")).color(Color32::from_rgb(180, 48, 40)),
+        );
+    }
+    (rect, text_rect)
+}
+
 fn render_last_opened_windows_prompt(
     ctx: &egui::Context,
     prompt: Option<&mut LastOpenedWindowsPrompt>,
@@ -9944,161 +10054,121 @@ fn render_last_opened_windows_prompt(
     }
 
     let mut action = LastOpenedWindowsAction::None;
-    egui::Window::new("Last Opened Windows")
+    egui::Window::new("Restore Last Opened Windows")
+        .id(egui::Id::new("last_opened_windows"))
         .collapsible(false)
-        .resizable(true)
+        .resizable([true, false])
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .default_width(520.0)
-        .default_height(300.0)
+        .min_width(420.0)
         .show(ctx, |ui| {
-            ui.label(
-                RichText::new("These windows were opened the last time you used Baboon.")
-                    .color(text_dark()),
+            Frame::none()
+                .inner_margin(egui::Margin { left: 22.0, right: 8.0, top: 4.0, bottom: 8.0 })
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.label("These windows were open the last time you used Baboon.");
+                    ui.label("Which of these would you like to reopen?");
+                });
+            // The list's height budget is independent of the window's previous
+            // size. Short sessions hug their contents; long sessions scroll.
+            let list_height = (ctx.screen_rect().height() - 160.0).clamp(64.0, 560.0);
+            let list_rect = egui::Rect::from_min_size(
+                ui.cursor().min, Vec2::new(ui.available_width(), list_height),
             );
-            ui.label(RichText::new("Which of these would you like to reopen?").color(text_dark()));
-            ui.add_space(8.0);
-            ScrollArea::both().max_height(260.0).show(ui, |ui| {
-                for (index, kit) in prompt.kits.iter_mut().enumerate() {
-                    if index > 0 {
-                        ui.add_space(10.0);
-                    }
-                    let displayed_source_path =
-                        kit.profile_root.as_deref().unwrap_or(&kit.source_path);
-                    let (heading, project_path) = last_opened_workspace_heading(
-                        kit.profile_name.as_deref().zip(kit.profile_root.as_deref()),
-                        kit.game.as_deref(),
-                        &kit.source_path,
-                        kit.project_path.as_deref(),
-                    );
-                    let heading_response =
-                        ui.label(RichText::new(heading).color(text_dark()).strong());
-                    if let Some(project_path) = project_path {
-                        heading_response.on_hover_text(&project_path);
-                        ui.label(RichText::new(project_path).color(subtle_dark()).small());
-                    } else {
-                        heading_response.on_hover_text(kit.source_path.display().to_string());
-                    }
-                    if !kit.source_available {
-                        ui.label(
-                            RichText::new(format!(
-                                "Missing source: {}",
-                                displayed_source_path.display()
-                            ))
-                            .color(Color32::from_rgb(180, 48, 40)),
-                        );
-                    }
-                    // Why a workspace is listed with nothing under it: its
-                    // session is its stash, which comes back from its own
-                    // recovery file rather than from a list of tabs.
-                    if kit.entries.is_empty() && kit.has_project {
-                        ui.horizontal(|ui| {
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new("Unsaved changes stashed in this workspace")
-                                    .color(subtle_dark())
-                                    .small(),
-                            );
-                        });
-                    }
-                    if !kit.entries.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("Tags").color(subtle_dark()).strong());
-                        });
-                    }
-                    for entry in &mut kit.entries {
-                        ui.add_enabled_ui(entry.available, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_space(10.0);
-                                ui.checkbox(&mut entry.checked, "");
-                                let label = if entry.available {
-                                    entry.tag.label.clone()
-                                } else {
-                                    format!("{} (missing)", entry.tag.label)
-                                };
-                                ui.label(RichText::new(label).color(text_dark()));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+            ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(list_height)
+                .min_scrolled_height(32.0)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.set_min_width(ui.available_width());
+                    for (index, kit) in prompt.kits.iter_mut().enumerate() {
+                        ui.push_id(index, |ui| {
+                            restore_workspace_row(ui, kit);
+                            if kit.entries.is_empty() && kit.has_project {
+                                ui.label(RichText::new("Unsaved changes stashed in this workspace").color(subtle_dark()).small());
+                            }
+                            ui.add_enabled_ui(kit.checked, |ui| {
+                            for entry in &mut kit.folder_entries {
+                                restore_path_row(ui, &mut entry.checked, entry.available,
+                                    &entry.folder.rel_path.display().to_string(), None, true);
+                            }
+                            for entry in &mut kit.entries {
+                                // Session labels include " - group name" for the old
+                                // plain-text list; the icon now communicates the group.
+                                let path = entry.tag.label.rsplit_once(" - ").map_or(entry.tag.label.as_str(), |(path, _)| path);
+                                restore_path_row(ui, &mut entry.checked, entry.available,
+                                    path, Some(entry.tag.group_tag), false);
+                            }
+                            for entry in &mut kit.chimp_entries {
+                                restore_path_row(ui, &mut entry.checked, entry.available,
+                                    &entry.package, None, false);
+                            }
                             });
                         });
                     }
-                    if !kit.folder_entries.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("Folders").color(subtle_dark()).strong());
-                        });
-                    }
-                    for entry in &mut kit.folder_entries {
-                        ui.add_enabled_ui(entry.available, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_space(10.0);
-                                ui.checkbox(&mut entry.checked, "");
-                                let label = if entry.available {
-                                    entry.folder.rel_path.display().to_string()
-                                } else {
-                                    format!("{} (missing source)", entry.folder.rel_path.display())
-                                };
-                                ui.label(RichText::new(label).color(text_dark()));
-                            });
-                        });
-                    }
-                    if !kit.chimp_entries.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("Chimp").color(subtle_dark()).strong());
-                        });
-                    }
-                    for entry in &mut kit.chimp_entries {
-                        ui.add_enabled_ui(entry.available, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_space(10.0);
-                                ui.checkbox(&mut entry.checked, "");
-                                let label = if entry.available {
-                                    entry.package.clone()
-                                } else {
-                                    format!("{} (missing source)", entry.package)
-                                };
-                                ui.label(RichText::new(label).color(text_dark()));
-                            });
-                        });
-                    }
-                }
+                });
             });
-            ui.add_space(6.0);
-            ui.checkbox(&mut prompt.dont_ask_again, "Don't ask again")
-                .on_hover_text(
-                    "Remember this choice: OK always reopens the last session, \
-                     Cancel never does. Change it later in File > Settings.",
-                );
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new("Options for this window available in")
-                        .color(subtle_dark())
-                        .small(),
-                );
-                if ui.link("File > Settings").clicked() {
-                    action = LastOpenedWindowsAction::OpenSettings;
-                }
+            // Paint behind the controls, extending through the window margins
+            // without changing their layout or the dialog's content height.
+            let window_margin = ui.spacing().window_margin;
+            let mut footer_painter = ui.painter().clone();
+            // with_clip_rect intersects the existing content clip, so it cannot
+            // expose the window margins. Replace the clip on this painter only.
+            footer_painter.set_clip_rect(
+                ui.clip_rect().expand(window_margin.sum().max_elem()).intersect(ctx.screen_rect()),
+            );
+            let footer_background = footer_painter.add(egui::Shape::Noop);
+            let footer = Frame::none()
+                // The fill includes the window's bottom margin. Balance that
+                // extra space above the controls to center them in the fill.
+                .inner_margin(egui::Margin {
+                    left: 8.0, right: 8.0,
+                    top: 6.0 + window_margin.bottom, bottom: 6.0,
+                })
+                .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), 24.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                ui.checkbox(&mut prompt.dont_ask_again, "Don't ask me again")
+                    .on_hover_text("Remember this choice: Restore Selected always reopens the last session; Close All never does. Change it later in File > Settings.");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new("Close All").min_size(Vec2::new(78.0, 24.0))).clicked() {
+                        action = LastOpenedWindowsAction::Cancel { remember: prompt.dont_ask_again };
+                    }
+                    if ui.add_enabled(prompt.has_reopenable_kits(),
+                        egui::Button::new("Restore Selected").min_size(Vec2::new(110.0, 24.0))).clicked() {
+                        action = LastOpenedWindowsAction::Restore {
+                            kits: prompt.checked_kits(), remember: prompt.dont_ask_again,
+                        };
+                    }
+                });
+                });
             });
-            ui.add_space(10.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(egui::Button::new("Cancel").min_size(Vec2::new(78.0, 24.0)))
-                    .clicked()
-                {
-                    action = LastOpenedWindowsAction::Cancel {
-                        remember: prompt.dont_ask_again,
-                    };
-                }
-                if ui
-                    .add(egui::Button::new("OK").min_size(Vec2::new(78.0, 24.0)))
-                    .clicked()
-                {
-                    action = LastOpenedWindowsAction::Restore {
-                        kits: prompt.checked_kits(),
-                        remember: prompt.dont_ask_again,
-                    };
-                }
-            });
+            let mut footer_rect = footer.response.rect;
+            footer_rect.min.x -= window_margin.left;
+            footer_rect.max.x += window_margin.right;
+            footer_rect.max.y += window_margin.bottom;
+            let mut rounding = ui.visuals().window_rounding;
+            rounding.nw = 0.0;
+            rounding.ne = 0.0;
+            let header_fill = if ui.visuals().window_highlight_topmost
+                && Some(ui.layer_id()) == ctx.top_layer_id()
+            {
+                ui.visuals().widgets.open.weak_bg_fill
+            } else {
+                ui.visuals().window_fill()
+            };
+            footer_painter.set(footer_background, egui::epaint::RectShape::filled(
+                footer_rect, rounding, header_fill,
+            ));
+            footer_painter.hline(
+                footer_rect.x_range(), footer_rect.top(),
+                Stroke::new(1.0_f32, grid_line()),
+            );
         });
     action
 }
@@ -10144,6 +10214,177 @@ mod tests {
             Some(entry.key.clone())
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn restore_test_prompt(folder_count: usize) -> LastOpenedWindowsPrompt {
+        LastOpenedWindowsPrompt::from_session(
+            LastSessionState {
+                kits: vec![LastSessionKit {
+                    source_kind: LastSessionSourceKind::LooseFolder,
+                    source_path: std::env::temp_dir(),
+                    game: None,
+                    profile_id: None,
+                    project_path: None,
+                    has_project: false,
+                    browser_mode: None,
+                    browser_sort: None,
+                    tags: Vec::new(),
+                    folders: (0..folder_count)
+                        .map(|index| LastSessionFolder {
+                            rel_path: PathBuf::from(format!(
+                                "objects/characters/brute/folder{index}"
+                            )),
+                            label: format!("folder{index}"),
+                        })
+                        .collect(),
+                    chimp_packages: Vec::new(),
+                    active_chimp_package: None,
+                    bitmap_library_open: false,
+                    model_library_open: false,
+                    was_active: false,
+                }],
+            },
+            &[],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn restore_dialog_hugs_contents_and_stays_stable_during_width_resizing() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(super::foundation_fonts());
+        ctx.set_style(super::foundation_style());
+        let mut prompt = restore_test_prompt(20);
+        let frame = |prompt: &mut LastOpenedWindowsPrompt, events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    super::render_last_opened_windows_prompt(ctx, Some(prompt));
+                },
+            );
+            ctx.memory(|memory| {
+                memory
+                    .area_rect(egui::Id::new("last_opened_windows"))
+                    .unwrap()
+            })
+        };
+        for _ in 0..5 {
+            frame(&mut prompt, Vec::new());
+        }
+        let initial = frame(&mut prompt, Vec::new());
+        assert!(
+            initial.height() < 700.0,
+            "long lists must be capped and scroll"
+        );
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for direction in [1.0, -1.0] {
+            let before = frame(&mut prompt, Vec::new());
+            let edge = egui::pos2(before.right() - 1.0, before.center().y);
+            frame(
+                &mut prompt,
+                vec![egui::Event::PointerMoved(edge), pointer(edge, true)],
+            );
+            for step in 1..=40 {
+                let pos = edge + egui::vec2(direction * step as f32 * 2.0, 0.0);
+                let during = frame(&mut prompt, vec![egui::Event::PointerMoved(pos)]);
+                assert!(
+                    (during.height() - initial.height()).abs() < 1.0,
+                    "width drag changed height from {} to {}",
+                    initial.height(),
+                    during.height()
+                );
+            }
+            let pos = edge + egui::vec2(direction * 80.0, 0.0);
+            frame(&mut prompt, vec![pointer(pos, false)]);
+            let after = frame(&mut prompt, Vec::new());
+            assert!(
+                (after.width() - before.width()).abs() > 20.0,
+                "the test must actually change the width"
+            );
+            for _ in 0..10 {
+                assert!((frame(&mut prompt, Vec::new()).height() - initial.height()).abs() < 1.0);
+            }
+        }
+        prompt.kits[0].folder_entries.truncate(2);
+        for _ in 0..5 {
+            frame(&mut prompt, Vec::new());
+        }
+        let short = frame(&mut prompt, Vec::new());
+        assert!(
+            short.height() < 270.0,
+            "short lists must hug all rows: {short:?}"
+        );
+        assert!(initial.height() - short.height() > 300.0);
+    }
+
+    #[test]
+    fn restore_footer_fill_reaches_window_edges_without_content_clipping() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(super::foundation_fonts());
+        ctx.set_style(super::foundation_style());
+        ctx.set_visuals(super::foundation_visuals());
+        let mut prompt = restore_test_prompt(2);
+        let mut output = None;
+        for _ in 0..6 {
+            output = Some(ctx.run(egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO, Vec2::new(1200.0, 800.0),
+                )),
+                ..Default::default()
+            }, |ctx| {
+                super::render_last_opened_windows_prompt(ctx, Some(&mut prompt));
+            }));
+        }
+        let window = ctx.memory(|memory| {
+            memory.area_rect(egui::Id::new("last_opened_windows")).unwrap()
+        });
+        let output = output.unwrap();
+        let (clip, footer) = output.shapes.iter().find_map(|clipped| {
+            match &clipped.shape {
+                egui::Shape::Rect(rect) if rect.rounding.nw == 0.0
+                    && rect.rounding.ne == 0.0 && rect.rounding.sw > 0.0
+                    && rect.rounding.se > 0.0 => Some((clipped.clip_rect, rect)),
+                _ => None,
+            }
+        }).expect("footer background with rounded bottom corners");
+        assert!((footer.rect.left() - window.left()).abs() < 1.0);
+        assert!((footer.rect.right() - window.right()).abs() < 1.0);
+        assert!((footer.rect.bottom() - window.bottom()).abs() < 1.0);
+        assert!(clip.contains_rect(footer.rect), "the content clip must not inset the footer fill");
+    }
+
+    #[test]
+    fn restore_workspace_heading_centers_both_lines_with_padding() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(super::foundation_fonts());
+        ctx.set_style(super::foundation_style());
+        let mut prompt = restore_test_prompt(0);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.scope(|ui| {
+                    let (row, text) = super::restore_workspace_row(ui, &mut prompt.kits[0]);
+                    assert!((row.center().y - text.center().y).abs() < 0.01);
+                    assert!(text.top() - row.top() >= 6.0);
+                    assert!(row.bottom() - text.bottom() >= 6.0);
+                    assert!(
+                        ui.min_rect().bottom() <= row.bottom() + 1.0,
+                        "heading widgets must not extend the allocated row"
+                    );
+                });
+            });
+        });
     }
 
     #[test]

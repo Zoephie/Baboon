@@ -631,6 +631,20 @@ fn apply_one_block_structure_op(tag: &mut TagFile, op: &BlockOp) -> Result<Strin
                 block.clear();
                 Ok(format!("Cleared {}", op.path))
             }
+            BlockOpKind::Reorder { order } => {
+                // Swap entries and raw regions together, retaining all child data.
+                let mut at_position: Vec<usize> = (0..order.len()).collect();
+                let mut position_of = at_position.clone();
+                for (new, &old) in order.iter().enumerate() {
+                    let from = position_of[old];
+                    block.swap_elements(new, from).map_err(|e| format!("{e:?}"))?;
+                    let displaced = at_position[new];
+                    at_position.swap(new, from);
+                    position_of[old] = new;
+                    position_of[displaced] = from;
+                }
+                Ok(format!("Reorganized {}", op.path))
+            }
             BlockOpKind::Paste { at, elements } => {
                 paste_elements(&mut block, *at, elements)?;
                 Ok(format!(
@@ -682,9 +696,8 @@ fn apply_one_block_structure_op(tag: &mut TagFile, op: &BlockOp) -> Result<Strin
 }
 
 /// An old block index to its new position. `None` means that the old element no
-/// longer exists. Keeping this as a general mapping (rather than baking insert
-/// and delete arithmetic into the walker) also gives a future block-table
-/// reorder operation exactly the primitive it will need.
+/// longer exists. The same mapping repairs references after insertions,
+/// deletions, and block-table reordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BlockElementRemap {
     old_to_new: Vec<Option<usize>>,
@@ -768,6 +781,21 @@ fn block_element_remap(tag: &TagFile, op: &BlockOp) -> Result<Option<BlockElemen
 
     let remap = match &op.kind {
         BlockOpKind::Add => None,
+        BlockOpKind::Reorder { order } => {
+            if order.len() != len {
+                return Err("Reorder must include every block entry exactly once".to_owned());
+            }
+            let mut old_to_new = vec![None; len];
+            for (new, &old) in order.iter().enumerate() {
+                if old >= len || old_to_new[old].replace(new).is_some() {
+                    return Err("Reorder contains a duplicate or invalid entry index".to_owned());
+                }
+            }
+            Some(BlockElementRemap {
+                old_to_new,
+                excluded_new_elements: None,
+            })
+        }
         BlockOpKind::Insert(at) => {
             if *at > len {
                 return Err(format!(
@@ -1137,20 +1165,18 @@ mod block_index_remap_tests {
     }
 
     #[test]
-    fn general_mapping_is_ready_for_future_reordering() {
+    fn reordering_repairs_external_indices_of_every_integer_width() {
         let mut tag = test_tag();
         add_basic_elements(&mut tag, 3);
         set_test_indices(&mut tag, 0, 1, 2);
 
-        // Future table reorder: old [0, 1, 2] becomes new [2, 0, 1].
-        let remap = BlockElementRemap {
-            old_to_new: vec![Some(2), Some(0), Some(1)],
-            excluded_new_elements: None,
-        };
-        assert_eq!(
-            remap_block_index_references(&mut tag, "basic block", &remap).unwrap(),
-            3
-        );
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Reorder { order: vec![1, 2, 0] },
+            },
+        ).unwrap();
         assert_eq!(test_indices(&tag), [2, 0, 1]);
     }
 

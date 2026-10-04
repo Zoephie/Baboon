@@ -3,6 +3,76 @@
 
 use super::*;
 
+/// Keep the popup's outer frame exactly as wide as its selector button.
+pub(in crate::app) fn picker_popup_width(ui: &mut Ui, response: &egui::Response) {
+    let margin = egui::Frame::popup(ui.style()).total_margin().sum().x;
+    ui.set_width((response.rect.width() - margin).max(1.0));
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+}
+
+/// Shared search field for entry pickers, with an inline clear control.
+pub(in crate::app) fn picker_search_field(
+    ui: &mut Ui,
+    filter: &mut String,
+    hint: &str,
+    just_opened: bool,
+) -> bool {
+    let search = ui.add(
+        egui::TextEdit::singleline(filter)
+            .hint_text(placeholder_text(hint))
+            .desired_width((ui.available_width() - 32.0).max(1.0))
+            .margin(egui::Margin {
+                left: 4.0,
+                right: 28.0,
+                top: 2.0,
+                bottom: 2.0,
+            }),
+    );
+    let mut changed = search.changed();
+    if just_opened {
+        search.request_focus();
+    }
+    if !filter.is_empty() {
+        let field_rect = search.rect
+            + egui::Margin {
+                left: 4.0,
+                right: 28.0,
+                top: 2.0,
+                bottom: 2.0,
+            };
+        let clear = search_clear_control(ui, field_rect, search.id.with("clear_search"));
+        if clear.clicked() {
+            filter.clear();
+            search.request_focus();
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Give results their own height budget instead of the popup's remembered
+/// height. This lets a filtered popup grow again as the search is cleared.
+pub(in crate::app) fn picker_results<R>(
+    ui: &mut Ui,
+    max_height: f32,
+    filter_changed: bool,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let height = max_height.min((ui.ctx().screen_rect().height() - 80.0).max(32.0));
+    let rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), height));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        let mut scroll = ScrollArea::vertical()
+            .id_salt("picker_results")
+            .auto_shrink([false, true])
+            .max_height(height);
+        if filter_changed {
+            scroll = scroll.vertical_scroll_offset(0.0);
+        }
+        scroll.show(ui, add_contents).inner
+    })
+    .inner
+}
+
 /// Paint text through the original painter path unless this cell has a Find match.
 pub(in crate::app) fn paint_findable_text(
     ui: &Ui,
@@ -879,4 +949,115 @@ pub(in crate::app) fn draw_resource(
             }
         },
     );
+}
+
+/// Shared picker button with a muted total beside the dropdown arrow.
+pub(in crate::app) fn picker_button(
+    ui: &mut Ui,
+    popup_id: egui::Id,
+    label: &str,
+    count: usize,
+    width: f32,
+    foreground: Color32,
+    enabled: bool,
+) -> egui::Response {
+    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let response = ui
+        .scope(|ui| {
+            if !enabled {
+                ui.disable();
+            }
+            if open {
+                ui.visuals_mut().widgets.inactive.weak_bg_fill =
+                    ui.visuals().widgets.open.weak_bg_fill;
+            }
+            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+        })
+        .inner;
+    let foreground = if !enabled || !ui.is_enabled() {
+        ui.visuals().widgets.noninteractive.fg_stroke.color
+    } else {
+        foreground
+    };
+    let count_label = format!("({count})");
+    let count_font = TextStyle::Small.resolve(ui.style());
+    let count_width = ui
+        .painter()
+        .layout_no_wrap(count_label.clone(), count_font.clone(), foreground)
+        .size()
+        .x;
+    ui.painter().text(
+        response.rect.left_center() + Vec2::new(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        truncate_for_cell(label, response.rect.width() - 42.0 - count_width),
+        TextStyle::Button.resolve(ui.style()),
+        foreground,
+    );
+    let arrow_rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - 12.0, response.rect.center().y),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, ButtonIcon::Down, arrow_rect, foreground);
+    let count_pos = egui::pos2(arrow_rect.left() - 5.0, response.rect.center().y);
+    ui.painter().text(
+        count_pos,
+        Align2::RIGHT_CENTER,
+        count_label,
+        count_font,
+        foreground.gamma_multiply(0.5),
+    );
+    ui.interact(
+        egui::Rect::from_center_size(
+            count_pos - egui::vec2(count_width * 0.5, 0.0),
+            Vec2::new(count_width, response.rect.height()),
+        ),
+        popup_id.with("entry_count"),
+        Sense::hover(),
+    )
+    .on_hover_text(format!("{count} entries"));
+    response
+}
+
+/// The same edge-aligned, muted clear control for custom search pills and pickers.
+pub(in crate::app) fn search_clear_control(
+    ui: &mut Ui,
+    field_rect: egui::Rect,
+    id: egui::Id,
+) -> egui::Response {
+    let clear_rect = egui::Rect::from_center_size(
+        egui::pos2(field_rect.right() - 10.0, field_rect.center().y),
+        Vec2::splat(20.0),
+    );
+    search_clear_control_at(ui, clear_rect, id, 2.0)
+}
+
+pub(in crate::app) fn search_clear_control_at(
+    ui: &mut Ui,
+    clear_rect: egui::Rect,
+    id: egui::Id,
+    corner_radius: f32,
+) -> egui::Response {
+    let clear = ui
+        .interact(clear_rect, id, Sense::click())
+        .on_hover_text("Clear search");
+    if clear.hovered() {
+        ui.painter().rect_filled(
+            clear_rect,
+            corner_radius,
+            ui.visuals().widgets.hovered.weak_bg_fill,
+        );
+    }
+    let color = if is_dark_mode() {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    }
+    .gamma_multiply(0.5);
+    let icon_rect = clear_rect.shrink((clear_rect.width() - 10.0) * 0.5);
+    let stroke = Stroke::new(1.5_f32, color);
+    ui.painter()
+        .line_segment([icon_rect.left_top(), icon_rect.right_bottom()], stroke);
+    ui.painter()
+        .line_segment([icon_rect.right_top(), icon_rect.left_bottom()], stroke);
+    clear
 }
