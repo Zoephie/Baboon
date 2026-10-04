@@ -4,9 +4,11 @@
 //! enforces that.
 
 pub(crate) mod bundled;
+pub(crate) mod created_tags;
 pub(crate) mod document;
 pub(crate) mod format;
 pub(crate) mod game;
+pub(crate) mod keywords;
 pub(crate) mod process;
 pub(crate) mod source;
 pub(crate) mod storage;

@@ -11,10 +11,11 @@
 //! files, so a game update or a reinstall never launders a shipped tag into a
 //! deletable one.
 
-use super::*;
+use std::fs;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use std::io::Write as _;
 
 const LEDGER_FILE: &str = "campaign_duplicates.json";
 const LEDGER_VERSION: u32 = 1;
@@ -33,7 +34,7 @@ const TOC_MAGIC: &[u8; 16] = b"-==--==--==--==-";
 /// cannot tell a copy Baboon made from a shipped tag Baboon moved. Both sit past
 /// the line. Only this field can separate them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(in crate::app) enum CreatedTagOrigin {
+pub(crate) enum CreatedTagOrigin {
     /// Baboon put this content in the container — a duplicate, or a tag created
     /// from scratch. Deleting it removes only what Baboon added.
     ///
@@ -86,21 +87,21 @@ impl<'de> Deserialize<'de> for CreatedTagOrigin {
 /// One tag Baboon duplicated into a container, identified by everything needed
 /// to prove the copy on disk is still the one that was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(in crate::app) struct CreatedTagRecord {
+pub(crate) struct CreatedTagRecord {
     /// The container the copy was written into, as an absolute path.
-    pub(in crate::app) utoc_path: String,
+    pub(crate) utoc_path: String,
     /// Pack label, e.g. `pakchunk240-WinGDK`. Half of the browser's tag key.
-    pub(in crate::app) chunk_label: String,
-    pub(in crate::app) package_path: String,
+    pub(crate) chunk_label: String,
+    pub(crate) package_path: String,
     /// `FPackageId` of `package_path`, stored so a record can be checked
     /// without re-deriving the hash.
-    pub(in crate::app) package_id: u64,
-    pub(in crate::app) uasset_path: String,
-    pub(in crate::app) ubulk_path: String,
-    pub(in crate::app) display_path: String,
-    pub(in crate::app) group_tag: u32,
+    pub(crate) package_id: u64,
+    pub(crate) uasset_path: String,
+    pub(crate) ubulk_path: String,
+    pub(crate) display_path: String,
+    pub(crate) group_tag: u32,
     /// The tag this one was copied from, for the confirmation dialog.
-    pub(in crate::app) source_display: String,
+    pub(crate) source_display: String,
     /// How many chunks the container held before this copy was written.
     ///
     /// The container itself records nothing about who wrote a chunk, so this is
@@ -108,7 +109,7 @@ pub(in crate::app) struct CreatedTagRecord {
     /// is one Baboon appended. `blam-tags` re-checks it before retiring
     /// anything, which is what keeps a delete off the game's own tags.
     #[serde(default)]
-    pub(in crate::app) container_entry_count_before: u32,
+    pub(crate) container_entry_count_before: u32,
     /// Whether deleting this tag would remove content Baboon added, or content
     /// the game shipped that Baboon merely moved. Defaulted rather than
     /// versioned: an older file has no `origin` and every row in it predates
@@ -116,8 +117,8 @@ pub(in crate::app) struct CreatedTagRecord {
     /// reading a newer file ignores the field, which is the safe direction —
     /// that build cannot rename, so it can never have written the other value.
     #[serde(default)]
-    pub(in crate::app) origin: CreatedTagOrigin,
-    pub(in crate::app) created_unix_secs: u64,
+    pub(crate) origin: CreatedTagOrigin,
+    pub(crate) created_unix_secs: u64,
 }
 
 impl CreatedTagRecord {
@@ -128,7 +129,7 @@ impl CreatedTagRecord {
 
 /// Every duplicate this installation has made, across every game folder.
 #[derive(Clone, Debug, Default)]
-pub(in crate::app) struct CreatedTagLedger {
+pub(crate) struct CreatedTagLedger {
     tags: Vec<CreatedTagRecord>,
     /// Rows this build could not read as a record (a newer build's shape),
     /// written back as they were so a save never drops them.
@@ -153,7 +154,7 @@ struct LedgerFileOut {
 }
 
 impl CreatedTagLedger {
-    pub(in crate::app) fn path() -> PathBuf {
+    pub(crate) fn path() -> PathBuf {
         crate::core::storage::data_path(LEDGER_FILE)
     }
 
@@ -163,11 +164,11 @@ impl CreatedTagLedger {
     /// refusing to start over a malformed sidecar would cost them the app. A
     /// file that exists but cannot be read is still loaded as empty, but
     /// remembered as such, so `save` leaves it alone.
-    pub(in crate::app) fn load() -> Self {
+    pub(crate) fn load() -> Self {
         Self::load_from(&Self::path())
     }
 
-    pub(in crate::app) fn load_from(path: &Path) -> Self {
+    pub(crate) fn load_from(path: &Path) -> Self {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
@@ -203,11 +204,11 @@ impl CreatedTagLedger {
         ledger
     }
 
-    pub(in crate::app) fn save(&self) -> Result<(), String> {
+    pub(crate) fn save(&self) -> Result<(), String> {
         self.save_to(&Self::path())
     }
 
-    pub(in crate::app) fn save_to(&self, path: &Path) -> Result<(), String> {
+    pub(crate) fn save_to(&self, path: &Path) -> Result<(), String> {
         if let Some(error) = &self.load_error {
             return Err(format!(
                 "The duplicate ledger {} was not updated: when Baboon started it {error}. \
@@ -243,7 +244,7 @@ impl CreatedTagLedger {
     /// Record a duplicate, replacing any earlier record for the same container
     /// path. A path can be reused after a delete, and the newer copy is the one
     /// that exists.
-    pub(in crate::app) fn record(&mut self, record: CreatedTagRecord) {
+    pub(crate) fn record(&mut self, record: CreatedTagRecord) {
         let utoc = PathBuf::from(&record.utoc_path);
         self.tags
             .retain(|existing| !existing.addresses(&utoc, &record.ubulk_path));
@@ -264,7 +265,7 @@ impl CreatedTagLedger {
     /// as shipped never launders itself back — including by being renamed to a
     /// path some earlier copy once used, since any record at the destination is
     /// dropped rather than inherited.
-    pub(in crate::app) fn record_rename(&mut self, old_ubulk_path: &str, moved: CreatedTagRecord) {
+    pub(crate) fn record_rename(&mut self, old_ubulk_path: &str, moved: CreatedTagRecord) {
         let utoc = PathBuf::from(&moved.utoc_path);
         let previous = self
             .tags
@@ -303,14 +304,14 @@ impl CreatedTagLedger {
     }
 
     /// Drop the record for one copy. Returns whether anything was recorded.
-    pub(in crate::app) fn forget(&mut self, utoc_path: &Path, ubulk_path: &str) -> bool {
+    pub(crate) fn forget(&mut self, utoc_path: &Path, ubulk_path: &str) -> bool {
         let before = self.tags.len();
         self.tags
             .retain(|existing| !existing.addresses(utoc_path, ubulk_path));
         self.tags.len() != before
     }
 
-    pub(in crate::app) fn find(
+    pub(crate) fn find(
         &self,
         utoc_path: &Path,
         ubulk_path: &str,
@@ -320,7 +321,7 @@ impl CreatedTagLedger {
             .find(|existing| existing.addresses(utoc_path, ubulk_path))
     }
 
-    pub(in crate::app) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.tags.is_empty()
     }
 }
@@ -338,7 +339,7 @@ impl CreatedTagLedger {
 ///
 /// Only the 144-byte TOC header is read, and only after checking the magic, so
 /// this stays cheap enough to run for every mounted container.
-pub(in crate::app) fn container_original_entry_count(utoc: &Path) -> Option<u32> {
+pub(crate) fn container_original_entry_count(utoc: &Path) -> Option<u32> {
     let directory = utoc.parent()?;
     let stem = utoc.file_name()?.to_string_lossy().into_owned();
     let prefix = format!("{stem}{DUPLICATE_BACKUP_SUFFIX}");
@@ -367,7 +368,7 @@ fn toc_entry_count(path: &Path) -> Option<u32> {
 }
 
 /// Hash a package path to the identity the runtime uses for it.
-pub(in crate::app) fn package_id_for(package_path: &str) -> u64 {
+pub(crate) fn package_id_for(package_path: &str) -> u64 {
     blam_tags::iostore::package::ue_types::FPackageId::from_name(package_path).0
 }
 

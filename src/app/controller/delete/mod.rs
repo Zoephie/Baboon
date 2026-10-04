@@ -121,7 +121,7 @@ pub(in crate::app) fn container_appended_thresholds(
 ) -> Vec<Option<u32>> {
     containers
         .iter()
-        .map(|container| created_tags::container_original_entry_count(&container.utoc_path))
+        .map(|container| crate::core::created_tags::container_original_entry_count(&container.utoc_path))
         .collect()
 }
 

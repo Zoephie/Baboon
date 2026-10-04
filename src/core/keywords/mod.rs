@@ -1,5 +1,4 @@
 //! User keyword tags, stored in a per-game sidecar JSON (outside the tag
-//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! binaries). Keyed by tag entry key → sorted, unique, lowercased keywords.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// map as this kit loaded it, which dropped every other kit's changes made
 /// since.
 #[derive(Default)]
-pub(super) struct KeywordStore {
+pub(crate) struct KeywordStore {
     /// The game's sidecar file; `None` for a source with no game.
     path: Option<std::path::PathBuf>,
     by_tag: BTreeMap<String, Vec<String>>,
@@ -24,12 +23,12 @@ pub(super) struct KeywordStore {
 
 impl KeywordStore {
     /// Load the sidecar for `game` (clears state for `None` / non-folder sources).
-    pub(super) fn load_for_game(&mut self, game: Option<&str>) {
+    pub(crate) fn load_for_game(&mut self, game: Option<&str>) {
         self.load_at(game.map(crate::core::source::keywords_path));
     }
 
     /// Load the sidecar at `path`; `None` leaves the store empty.
-    pub(super) fn load_at(&mut self, path: Option<std::path::PathBuf>) {
+    pub(crate) fn load_at(&mut self, path: Option<std::path::PathBuf>) {
         self.touched.clear();
         self.by_tag = match path.as_deref().map(read_sidecar) {
             Some(Ok(by_tag)) => by_tag,
@@ -43,15 +42,15 @@ impl KeywordStore {
     }
 
     /// The latest sidecar problem, once; the shell shows it in the status line.
-    pub(super) fn take_notice(&mut self) -> Option<String> {
+    pub(crate) fn take_notice(&mut self) -> Option<String> {
         self.notice.take()
     }
 
-    pub(super) fn keywords(&self, tag_key: &str) -> &[String] {
+    pub(crate) fn keywords(&self, tag_key: &str) -> &[String] {
         self.by_tag.get(tag_key).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    pub(super) fn add(&mut self, tag_key: &str, keyword: &str) {
+    pub(crate) fn add(&mut self, tag_key: &str, keyword: &str) {
         let keyword = keyword.trim().to_ascii_lowercase();
         if keyword.is_empty() {
             return;
@@ -64,7 +63,7 @@ impl KeywordStore {
         }
     }
 
-    pub(super) fn remove(&mut self, tag_key: &str, keyword: &str) {
+    pub(crate) fn remove(&mut self, tag_key: &str, keyword: &str) {
         if let Some(list) = self.by_tag.get_mut(tag_key) {
             let before = list.len();
             list.retain(|existing| existing != keyword);
@@ -80,7 +79,7 @@ impl KeywordStore {
 
     /// Drop every keyword attached to a tag that no longer exists, so a deleted
     /// tag stops appearing in keyword browsing and its rows leave the sidecar.
-    pub(super) fn forget_tag(&mut self, tag_key: &str) {
+    pub(crate) fn forget_tag(&mut self, tag_key: &str) {
         if self.by_tag.remove(tag_key).is_some() {
             self.touched.insert(tag_key.to_owned());
         }
@@ -93,7 +92,7 @@ impl KeywordStore {
     /// would silently lose them, and keyword browsing would list a path that no
     /// longer exists. Any keywords already at `new_key` are merged rather than
     /// replaced, because the destination may be a path that was in use before.
-    pub(super) fn rekey_tag(&mut self, old_key: &str, new_key: &str) {
+    pub(crate) fn rekey_tag(&mut self, old_key: &str, new_key: &str) {
         if old_key == new_key {
             return;
         }
@@ -112,7 +111,7 @@ impl KeywordStore {
     }
 
     /// All keywords with how many tags carry each, sorted by name.
-    pub(super) fn all_keywords(&self) -> Vec<(String, usize)> {
+    pub(crate) fn all_keywords(&self) -> Vec<(String, usize)> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for keywords in self.by_tag.values() {
             for keyword in keywords {
@@ -123,7 +122,7 @@ impl KeywordStore {
     }
 
     /// Tag keys carrying `keyword`.
-    pub(super) fn tags_with(&self, keyword: &str) -> Vec<String> {
+    pub(crate) fn tags_with(&self, keyword: &str) -> Vec<String> {
         self.by_tag
             .iter()
             .filter(|(_, kws)| kws.iter().any(|k| k == keyword))
@@ -140,7 +139,7 @@ impl KeywordStore {
     /// for the game. Now a sidecar that cannot be read leaves the changes
     /// pending, and one that cannot be parsed is moved aside, kept, before a
     /// fresh one is written.
-    pub(super) fn save_if_dirty(&mut self) {
+    pub(crate) fn save_if_dirty(&mut self) {
         if self.touched.is_empty() {
             return;
         }

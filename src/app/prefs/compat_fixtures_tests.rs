@@ -457,7 +457,7 @@ fn compat_duplicate_ledger() {
 
 #[test]
 fn compat_keyword_sidecars() {
-    let mut store = crate::app::keywords::KeywordStore::default();
+    let mut store = crate::core::keywords::KeywordStore::default();
     store.load_at(Some(samples().join("keywords/haloce_evolved_keywords.json")));
     let keys = json("tag_keys.json");
     let key = |kind: &str| keys[kind].as_str().unwrap().to_owned();
