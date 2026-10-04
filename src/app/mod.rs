@@ -68,13 +68,6 @@ pub(super) const BABOON_RELEASES_URL: &str = "https://github.com/Zoephie/Baboon/
 /// working tree had uncommitted changes.
 pub(super) const BABOON_BUILD_COMMIT: &str = env!("BABOON_BUILD_COMMIT");
 
-mod game_assets;
-use game_assets::*;
-mod launch;
-use launch::{CommandLineLaunch, resolve_launch_tag_entries};
-pub(crate) use launch::{StartupArguments, parse_startup_arguments};
-mod style;
-use style::*;
 use crate::core::document::journal::*;
 use crate::core::document::ops::*;
 use crate::core::document::TagDocument;
@@ -89,10 +82,6 @@ mod export;
 use export::*;
 pub(in crate::app) mod model_preview;
 use model_preview::*;
-mod tag_icons;
-use tag_icons::*;
-mod button_icons;
-use button_icons::*;
 mod editor;
 use editor::*;
 mod audio;
@@ -124,6 +113,9 @@ pub(in crate::app) mod documents;
 use documents::*;
 pub(in crate::app) mod shell;
 use shell::*;
+mod ui_kit;
+use ui_kit::*;
+pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

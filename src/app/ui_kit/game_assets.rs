@@ -4,7 +4,7 @@
 use crate::core::game::{GameFacts, GameId};
 
 /// The banner for a game, or Halo CE's for a game id this build does not know.
-pub(super) fn get_game_banner_bytes(game: Option<GameId>) -> &'static [u8] {
+pub(in crate::app) fn get_game_banner_bytes(game: Option<GameId>) -> &'static [u8] {
     let Some(game) = game else {
         return include_root_bytes!("assets/Game Icons/ce.png");
     };
@@ -24,7 +24,7 @@ pub(super) fn get_game_banner_bytes(game: Option<GameId>) -> &'static [u8] {
 
 /// Compact engine emblems used by editing-kit links on the welcome screen.
 /// These intentionally remain separate from the larger game banner artwork.
-pub(super) fn get_game_emblem_bytes(game: GameId) -> &'static [u8] {
+pub(in crate::app) fn get_game_emblem_bytes(game: GameId) -> &'static [u8] {
     match game {
         GameId::HaloCe => include_root_bytes!("assets/Game Icons/emblems/h1.png"),
         GameId::Halo2 => include_root_bytes!("assets/Game Icons/emblems/h2.png"),
@@ -39,12 +39,12 @@ pub(super) fn get_game_emblem_bytes(game: GameId) -> &'static [u8] {
 
 /// The display name for a saved game id, which may be one this build does not
 /// know; a [`GameId`] in hand has [`GameFacts::display_name`].
-pub(super) fn game_display_name(game: &str) -> &'static str {
+pub(in crate::app) fn game_display_name(game: &str) -> &'static str {
     GameId::from_id(game).map_or("Unknown Game", GameFacts::display_name)
 }
 
 /// Platform/edition suffix shown after the game name (e.g. "MCC", "PC").
-pub(super) fn game_platform_label(game: GameId) -> &'static str {
+pub(in crate::app) fn game_platform_label(game: GameId) -> &'static str {
     if game.is_campaign_evolved() {
         "PC"
     } else {

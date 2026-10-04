@@ -18,7 +18,7 @@ pub(crate) enum StartupArguments {
 }
 
 impl StartupArguments {
-    pub(super) fn suppresses_startup_popups(&self) -> bool {
+    pub(in crate::app) fn suppresses_startup_popups(&self) -> bool {
         !matches!(self, Self::Normal)
     }
 }
@@ -56,17 +56,17 @@ fn command_line_kit(flag: &str) -> Option<(GameId, &'static str)> {
     Some((game, game.kit_name()?))
 }
 
-pub(super) struct ResolvedLaunchPaths {
-    pub(super) paths: Vec<PathBuf>,
-    pub(super) errors: Vec<String>,
+pub(in crate::app) struct ResolvedLaunchPaths {
+    pub(in crate::app) paths: Vec<PathBuf>,
+    pub(in crate::app) errors: Vec<String>,
 }
 
-pub(super) struct ResolvedLaunchEntries {
-    pub(super) entries: Vec<TagEntry>,
-    pub(super) errors: Vec<String>,
+pub(in crate::app) struct ResolvedLaunchEntries {
+    pub(in crate::app) entries: Vec<TagEntry>,
+    pub(in crate::app) errors: Vec<String>,
 }
 
-pub(super) fn resolve_launch_tag_paths(
+pub(in crate::app) fn resolve_launch_tag_paths(
     tags_root: &Path,
     requested: &[PathBuf],
 ) -> Result<ResolvedLaunchPaths, String> {
@@ -114,7 +114,7 @@ pub(super) fn resolve_launch_tag_paths(
     Ok(ResolvedLaunchPaths { paths, errors })
 }
 
-pub(super) fn resolve_launch_tag_entries(
+pub(in crate::app) fn resolve_launch_tag_entries(
     tags_root: &Path,
     requested: &[PathBuf],
     names: &TagNameIndex,

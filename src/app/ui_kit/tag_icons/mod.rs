@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
+pub(in crate::app) fn get_icon_svg(group_tag: &str) -> &'static str {
     match group_tag {
         "actr" => include_root_str!("assets/icons/actor.svg"),
         "actv" => include_root_str!("assets/icons/actor_variant.svg"),
@@ -47,12 +47,12 @@ pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
 }
 
 #[allow(dead_code)]
-pub(super) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
+pub(in crate::app) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
     let group = format_group_tag(group_tag);
     draw_tag_icon_svg(ui, &group, size);
 }
 
-pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rect) {
+pub(in crate::app) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rect) {
     let group = group_tag
         .map(format_group_tag)
         .unwrap_or_else(|| "default".to_owned());
@@ -72,7 +72,7 @@ fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
     );
 }
 
-pub(super) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
+pub(in crate::app) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
     tag_icon_uri_for_pixels_per_point_and_size(group, ctx.pixels_per_point(), 16.0)
 }
 

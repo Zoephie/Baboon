@@ -5,7 +5,7 @@ use super::*;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ButtonIcon {
+pub(in crate::app) enum ButtonIcon {
     Add,
     About,
     Browse,
@@ -80,7 +80,7 @@ pub(super) enum ButtonIcon {
     FolderOpen,
 }
 
-pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
+pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
         ButtonIcon::Add => include_root_str!("assets/Button Icons/Add.svg"),
         ButtonIcon::About => include_root_str!("assets/Button Icons/About.svg"),
@@ -171,7 +171,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     }
 }
 
-pub(super) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
+pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
     let svg = colorized_icon_svg(icon, color);
     let uri = button_icon_uri(ui.ctx(), icon, color, rect.width());
     egui::Image::from_bytes(uri, svg.into_bytes())
@@ -180,7 +180,7 @@ pub(super) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, 
         .paint_at(ui, rect);
 }
 
-pub(super) fn button_icon_image(
+pub(in crate::app) fn button_icon_image(
     ui: &Ui,
     icon: ButtonIcon,
     color: Color32,
@@ -194,7 +194,7 @@ pub(super) fn button_icon_image(
         .tint(Color32::WHITE)
 }
 
-pub(super) fn icon_text_button(
+pub(in crate::app) fn icon_text_button(
     ui: &mut Ui,
     icon: ButtonIcon,
     label: impl Into<egui::WidgetText>,
@@ -207,7 +207,7 @@ pub(super) fn icon_text_button(
     )
 }
 
-pub(super) fn icon_button(
+pub(in crate::app) fn icon_button(
     ui: &mut Ui,
     icon: ButtonIcon,
     tooltip: &str,
@@ -230,7 +230,7 @@ pub(super) fn icon_button(
 /// Repaint a native checkbox with its hovered visuals when an adjacent icon
 /// or label owns the pointer. Icon checkbox rows are assembled from multiple
 /// widgets, while a normal text checkbox has one response spanning the row.
-pub(super) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, checked: bool) {
+pub(in crate::app) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, checked: bool) {
     if !ui.is_enabled() {
         return;
     }
@@ -255,7 +255,7 @@ pub(super) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, check
     }
 }
 
-pub(super) fn icon_for_foundation_button(label: &str) -> Option<ButtonIcon> {
+pub(in crate::app) fn icon_for_foundation_button(label: &str) -> Option<ButtonIcon> {
     match label {
         "Add" => Some(ButtonIcon::Add),
         "..." => Some(ButtonIcon::Browse),
@@ -302,7 +302,7 @@ fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32, size: 
     button_icon_uri_for_pixels_per_point_and_size(icon, color, ctx.pixels_per_point(), size)
 }
 
-pub(super) fn selectable_icon_text_button(
+pub(in crate::app) fn selectable_icon_text_button(
     ui: &mut Ui,
     icon: ButtonIcon,
     label: impl Into<egui::WidgetText>,
@@ -337,7 +337,7 @@ pub(super) fn selectable_icon_text_button(
     .inner
 }
 
-pub(super) fn selectable_icon_button(
+pub(in crate::app) fn selectable_icon_button(
     ui: &mut Ui,
     icon: ButtonIcon,
     tooltip: &str,
@@ -358,7 +358,7 @@ pub(super) fn selectable_icon_button(
     .inner
 }
 
-pub(super) fn selectable_text_button(
+pub(in crate::app) fn selectable_text_button(
     ui: &mut Ui,
     label: impl Into<egui::WidgetText>,
     selected: bool,
@@ -421,7 +421,7 @@ fn aligned_menu_custom_button<R>(
 /// on a click outside it, as egui 0.29 closed menus. egui 0.36 closes a menu
 /// on any click inside it by default, so ticking a checkbox in one shut it.
 /// Submenus inherit it from the menu they open in.
-pub(super) fn menu_config() -> egui::containers::menu::MenuConfig {
+pub(in crate::app) fn menu_config() -> egui::containers::menu::MenuConfig {
     egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
 }
@@ -430,14 +430,14 @@ pub(super) fn menu_config() -> egui::containers::menu::MenuConfig {
 /// menu it does nothing. egui 0.36's `Ui::close` instead closes the nearest
 /// closable container, which outside a menu is a collapsing header or the
 /// window the code sits in.
-pub(super) fn close_menu(ui: &Ui) {
+pub(in crate::app) fn close_menu(ui: &Ui) {
     if egui::containers::menu::is_in_menu(ui) {
         ui.close_kind(egui::UiKind::Menu);
     }
 }
 
 /// `response`'s right-click menu, closing as [`menu_config`] describes.
-pub(super) fn context_menu(
+pub(in crate::app) fn context_menu(
     response: &egui::Response,
     add_contents: impl FnOnce(&mut Ui),
 ) -> Option<egui::InnerResponse<()>> {
@@ -446,7 +446,7 @@ pub(super) fn context_menu(
         .show(add_contents)
 }
 
-pub(super) fn aligned_menu_button<R>(
+pub(in crate::app) fn aligned_menu_button<R>(
     ui: &mut Ui,
     title: impl Into<egui::WidgetText>,
     add_contents: impl FnOnce(&mut Ui) -> R,
@@ -458,7 +458,7 @@ pub(super) fn aligned_menu_button<R>(
     menu
 }
 
-pub(super) fn right_aligned_menu_button<R>(
+pub(in crate::app) fn right_aligned_menu_button<R>(
     ui: &mut Ui,
     title: impl Into<egui::WidgetText>,
     popup_width: f32,
@@ -479,7 +479,7 @@ pub(super) fn right_aligned_menu_button<R>(
 /// A menu trigger with the same fixed square geometry as the app's other
 /// icon-only buttons. `Ui::menu_image_button` derives its size from theme
 /// padding, which allowed these controls to drift away from 24×24.
-pub(super) fn icon_menu_button<R>(
+pub(in crate::app) fn icon_menu_button<R>(
     ui: &mut Ui,
     icon: ButtonIcon,
     tooltip: &str,
@@ -497,7 +497,7 @@ pub(super) fn icon_menu_button<R>(
     menu.response.on_hover_text(tooltip)
 }
 
-pub(super) fn icon_text_dropdown_button<R>(
+pub(in crate::app) fn icon_text_dropdown_button<R>(
     ui: &mut Ui,
     icon: ButtonIcon,
     label: &str,
@@ -528,7 +528,7 @@ pub(super) fn icon_text_dropdown_button<R>(
 
 /// An icon-and-text dropdown whose popup is anchored to the trigger's right
 /// edge. Preview headers use this when their actions sit against the pane edge.
-pub(super) fn right_aligned_icon_text_dropdown_button<R>(
+pub(in crate::app) fn right_aligned_icon_text_dropdown_button<R>(
     ui: &mut Ui,
     icon: ButtonIcon,
     label: &str,
@@ -568,7 +568,7 @@ pub(super) fn right_aligned_icon_text_dropdown_button<R>(
 /// Header action menus sit against the right edge of their pane. Align their
 /// popup's outer right edge to the trigger instead of using the usual left
 /// edge anchor.
-pub(super) fn right_aligned_icon_menu_button<R>(
+pub(in crate::app) fn right_aligned_icon_menu_button<R>(
     ui: &mut Ui,
     icon: ButtonIcon,
     tooltip: &str,
@@ -587,7 +587,7 @@ pub(super) fn right_aligned_icon_menu_button<R>(
     menu.response.on_hover_text(tooltip)
 }
 
-pub(super) fn paint_submenu_icon(ui: &Ui, response: &egui::Response, opens_left: bool) {
+pub(in crate::app) fn paint_submenu_icon(ui: &Ui, response: &egui::Response, opens_left: bool) {
     let color = if ui.is_enabled() {
         text_dark()
     } else {
@@ -606,7 +606,7 @@ pub(super) fn paint_submenu_icon(ui: &Ui, response: &egui::Response, opens_left:
     image.paint_at(ui, rect);
 }
 
-pub(super) fn right_opening_menu_button<R>(
+pub(in crate::app) fn right_opening_menu_button<R>(
     ui: &mut Ui,
     label: impl Into<egui::WidgetText>,
     popup_width: f32,
@@ -615,7 +615,7 @@ pub(super) fn right_opening_menu_button<R>(
     nested_menu_button(ui, label.into().text(), popup_width, false, add_contents)
 }
 
-pub(super) fn left_opening_menu_button<R>(
+pub(in crate::app) fn left_opening_menu_button<R>(
     ui: &mut Ui,
     label: &str,
     popup_width: f32,

@@ -22,3 +22,6 @@ pub(in crate::app) mod operation_notice;
 pub(in crate::app) use operation_notice::OperationNotice;
 pub(in crate::app) mod worker;
 pub(in crate::app) use worker::*;
+pub(in crate::app) mod launch;
+pub(in crate::app) use launch::{CommandLineLaunch, resolve_launch_tag_entries};
+pub(crate) use launch::{StartupArguments, parse_startup_arguments};

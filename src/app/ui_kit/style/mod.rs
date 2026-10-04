@@ -5,20 +5,20 @@ use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Shared dimensions for ordinary, single-line application buttons.
-pub(super) const BUTTON_HEIGHT: f32 = 24.0;
-pub(super) const BUTTON_ICON_SIZE: f32 = 16.0;
-pub(super) const ICON_BUTTON_SIZE: Vec2 = Vec2::new(24.0, 24.0);
+pub(in crate::app) const BUTTON_HEIGHT: f32 = 24.0;
+pub(in crate::app) const BUTTON_ICON_SIZE: f32 = 16.0;
+pub(in crate::app) const ICON_BUTTON_SIZE: Vec2 = Vec2::new(24.0, 24.0);
 /// Horizontal inset for text-only buttons. Icon-only buttons use their fixed
 /// 24×24 frame, leaving four points around the 16×16 glyph.
-pub(super) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
+pub(in crate::app) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
 /// Visual separation between an icon and its label: two points of spacing
 /// plus the label's four-point inner inset from the design specification.
-pub(super) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;
-pub(super) const ALPHA_CHECKER_TILE_SIZE: usize = 4;
-pub(super) const ALPHA_CHECKER_LIGHT_RGBA: [u8; 4] = [255, 255, 255, 13];
-pub(super) const ALPHA_CHECKER_DARK_RGBA: [u8; 4] = [0, 0, 0, 13];
+pub(in crate::app) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;
+pub(in crate::app) const ALPHA_CHECKER_TILE_SIZE: usize = 4;
+pub(in crate::app) const ALPHA_CHECKER_LIGHT_RGBA: [u8; 4] = [255, 255, 255, 13];
+pub(in crate::app) const ALPHA_CHECKER_DARK_RGBA: [u8; 4] = [0, 0, 0, 13];
 
-pub(super) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
+pub(in crate::app) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
     let tile = ALPHA_CHECKER_TILE_SIZE as f32;
     painter.rect_filled(rect, 0.0, editor_bg());
     let clipped = painter.with_clip_rect(rect);
@@ -43,7 +43,7 @@ pub(super) fn paint_alpha_checkerboard(painter: &egui::Painter, rect: egui::Rect
     }
 }
 
-pub(super) fn foundation_visuals() -> egui::Visuals {
+pub(in crate::app) fn foundation_visuals() -> egui::Visuals {
     let mut visuals = if is_dark_mode() {
         egui::Visuals::dark()
     } else {
@@ -122,18 +122,18 @@ mod neutral_button_tests;
 
 /// Consistent styling for empty text-input prompts without changing egui's
 /// general weak-text color, which is also used by unrelated disabled UI.
-pub(super) fn placeholder_text(text: impl Into<String>) -> RichText {
+pub(in crate::app) fn placeholder_text(text: impl Into<String>) -> RichText {
     RichText::new(text).color(text_dark().gamma_multiply(0.5))
 }
 
 /// Named family used for bold headers (egui has no font-weight API — bold is a
 /// separate font). Falls back to the regular family when no bold font is found.
-pub(super) const FOUNDATION_BOLD: &str = "foundation_bold";
+pub(in crate::app) const FOUNDATION_BOLD: &str = "foundation_bold";
 
 /// Name of the last-resort face appended to every family for glyph coverage.
 const GLYPH_FALLBACK: &str = "glyph_fallback";
 
-pub(super) fn foundation_fonts() -> FontDefinitions {
+pub(in crate::app) fn foundation_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     for path in [
         r"C:\Windows\Fonts\micross.ttf",
@@ -232,11 +232,11 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
 
 /// A bold [`FontId`] at `size`, for headers. Renders bold where a system bold
 /// font was found, otherwise regular weight.
-pub(super) fn bold_font(size: f32) -> FontId {
+pub(in crate::app) fn bold_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FOUNDATION_BOLD.into()))
 }
 
-pub(super) fn foundation_style() -> egui::Style {
+pub(in crate::app) fn foundation_style() -> egui::Style {
     let mut style = egui::Style::default();
     style
         .text_styles
@@ -290,17 +290,17 @@ fn window_chrome(ctx: &egui::Context, title_bar: bool) -> Vec2 {
 }
 
 /// The outer size egui 0.36 wants for a window whose content is `content`.
-pub(super) fn window_size(ctx: &egui::Context, content: Vec2, title_bar: bool) -> Vec2 {
+pub(in crate::app) fn window_size(ctx: &egui::Context, content: Vec2, title_bar: bool) -> Vec2 {
     content + window_chrome(ctx, title_bar)
 }
 
 /// The outer width for a window whose content is `content` wide.
-pub(super) fn window_width(ctx: &egui::Context, content: f32) -> f32 {
+pub(in crate::app) fn window_width(ctx: &egui::Context, content: f32) -> f32 {
     content + window_chrome(ctx, false).x
 }
 
 /// The outer height for a window whose content is `content` tall.
-pub(super) fn window_height(ctx: &egui::Context, content: f32, title_bar: bool) -> f32 {
+pub(in crate::app) fn window_height(ctx: &egui::Context, content: f32, title_bar: bool) -> f32 {
     content + window_chrome(ctx, title_bar).y
 }
 
@@ -310,7 +310,7 @@ fn window_work_area_id() -> egui::Id {
     egui::Id::new("baboon_window_work_area")
 }
 
-pub(super) fn set_window_work_area(ctx: &egui::Context, rect: egui::Rect) {
+pub(in crate::app) fn set_window_work_area(ctx: &egui::Context, rect: egui::Rect) {
     ctx.data_mut(|data| data.insert_temp(window_work_area_id(), rect));
 }
 
@@ -318,22 +318,22 @@ pub(super) fn set_window_work_area(ctx: &egui::Context, rect: egui::Rect) {
 /// egui 0.29 placed such a window below the app's panels; egui 0.36 places it
 /// at the top of its constrain rect, which is the whole screen unless set,
 /// so it opened over the menu bar.
-pub(super) fn window_work_area(ctx: &egui::Context) -> egui::Rect {
+pub(in crate::app) fn window_work_area(ctx: &egui::Context) -> egui::Rect {
     ctx.data(|data| data.get_temp(window_work_area_id()))
         .unwrap_or_else(|| ctx.content_rect())
 }
 
 static DARK_MODE_ENABLED: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn set_dark_mode(enabled: bool) {
+pub(in crate::app) fn set_dark_mode(enabled: bool) {
     DARK_MODE_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
-pub(super) fn is_dark_mode() -> bool {
+pub(in crate::app) fn is_dark_mode() -> bool {
     DARK_MODE_ENABLED.load(Ordering::Relaxed)
 }
 
-pub(super) fn menu_bar() -> Color32 {
+pub(in crate::app) fn menu_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(50, 50, 50)
     } else {
@@ -344,7 +344,7 @@ pub(super) fn menu_bar() -> Color32 {
 /// Fill for the selected tab in every tiled tab rack. In dark mode this must
 /// sit visibly above the surrounding 31-55 gray fills; the old menu-bar gray
 /// was actually darker than document tabs, which hid the active selection.
-pub(super) fn active_tab() -> Color32 {
+pub(in crate::app) fn active_tab() -> Color32 {
     active_tab_for(is_dark_mode())
 }
 
@@ -356,7 +356,7 @@ fn active_tab_for(dark_mode: bool) -> Color32 {
     }
 }
 
-pub(super) fn foundation_blue() -> Color32 {
+pub(in crate::app) fn foundation_blue() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(134, 184, 213)
     } else {
@@ -364,7 +364,7 @@ pub(super) fn foundation_blue() -> Color32 {
     }
 }
 
-pub(super) fn left_panel() -> Color32 {
+pub(in crate::app) fn left_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 31)
     } else {
@@ -372,7 +372,7 @@ pub(super) fn left_panel() -> Color32 {
     }
 }
 
-pub(super) fn editor_bg() -> Color32 {
+pub(in crate::app) fn editor_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(40, 40, 40)
     } else {
@@ -380,7 +380,7 @@ pub(super) fn editor_bg() -> Color32 {
     }
 }
 
-pub(super) fn row_type() -> Color32 {
+pub(in crate::app) fn row_type() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(55, 55, 55)
     } else {
@@ -388,7 +388,7 @@ pub(super) fn row_type() -> Color32 {
     }
 }
 
-pub(super) fn grid_line() -> Color32 {
+pub(in crate::app) fn grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
@@ -396,7 +396,7 @@ pub(super) fn grid_line() -> Color32 {
     }
 }
 
-pub(super) fn foundation_group_bg() -> Color32 {
+pub(in crate::app) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 43, 43)
     } else {
@@ -404,7 +404,7 @@ pub(super) fn foundation_group_bg() -> Color32 {
     }
 }
 
-pub(super) fn foundation_documentation_bg() -> Color32 {
+pub(in crate::app) fn foundation_documentation_bg() -> Color32 {
     if is_dark_mode() {
         // Use an explicitly premultiplied sRGB overlay. `from_white_alpha`
         // gamma-expands this value, which makes a nominal 5% white look much
@@ -415,7 +415,7 @@ pub(super) fn foundation_documentation_bg() -> Color32 {
     }
 }
 
-pub(super) fn foundation_group_edge() -> Color32 {
+pub(in crate::app) fn foundation_group_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
@@ -423,7 +423,7 @@ pub(super) fn foundation_group_edge() -> Color32 {
     }
 }
 
-pub(super) fn foundation_section_bar() -> Color32 {
+pub(in crate::app) fn foundation_section_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
@@ -431,7 +431,7 @@ pub(super) fn foundation_section_bar() -> Color32 {
     }
 }
 
-pub(super) fn foundation_block_bar() -> Color32 {
+pub(in crate::app) fn foundation_block_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(72, 72, 72)
     } else {
@@ -441,18 +441,18 @@ pub(super) fn foundation_block_bar() -> Color32 {
     }
 }
 
-pub(super) fn foundation_block_text() -> Color32 {
+pub(in crate::app) fn foundation_block_text() -> Color32 {
     text_dark()
 }
 
 /// High-visibility navigation accent used by the filtered block jump. Block
 /// headers are mid-gray in both themes, so one bright cyan works cleanly on
 /// each without colliding with the green structural-edit controls.
-pub(super) fn foundation_jump_cyan() -> Color32 {
+pub(in crate::app) fn foundation_jump_cyan() -> Color32 {
     Color32::from_rgb(77, 208, 225)
 }
 
-pub(super) fn foundation_input() -> Color32 {
+pub(in crate::app) fn foundation_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(31, 31, 31)
     } else {
@@ -460,7 +460,7 @@ pub(super) fn foundation_input() -> Color32 {
     }
 }
 
-pub(super) fn foundation_input_edge() -> Color32 {
+pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)
     } else {
@@ -468,7 +468,7 @@ pub(super) fn foundation_input_edge() -> Color32 {
     }
 }
 
-pub(super) fn text_dark() -> Color32 {
+pub(in crate::app) fn text_dark() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(242, 242, 242)
     } else {
@@ -476,7 +476,7 @@ pub(super) fn text_dark() -> Color32 {
     }
 }
 
-pub(super) fn subtle_dark() -> Color32 {
+pub(in crate::app) fn subtle_dark() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(164, 164, 164)
     } else {
@@ -487,7 +487,7 @@ pub(super) fn subtle_dark() -> Color32 {
 /// Green for good news worth noticing in passing — an available update sitting
 /// in the status bar. Darkened for the light theme so it stays legible against
 /// a pale background.
-pub(super) fn good_news() -> Color32 {
+pub(in crate::app) fn good_news() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(126, 205, 133)
     } else {
@@ -495,7 +495,7 @@ pub(super) fn good_news() -> Color32 {
     }
 }
 
-pub(super) fn function_plot_bg() -> Color32 {
+pub(in crate::app) fn function_plot_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(64, 64, 62)
     } else {
@@ -503,7 +503,7 @@ pub(super) fn function_plot_bg() -> Color32 {
     }
 }
 
-pub(super) fn function_grid_line() -> Color32 {
+pub(in crate::app) fn function_grid_line() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(132, 132, 126)
     } else {
@@ -511,7 +511,7 @@ pub(super) fn function_grid_line() -> Color32 {
     }
 }
 
-pub(super) fn foundation_flag_hover() -> Color32 {
+pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 58, 56)
     } else {
@@ -519,7 +519,7 @@ pub(super) fn foundation_flag_hover() -> Color32 {
     }
 }
 
-pub(super) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
+pub(in crate::app) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
     if !enabled {
         return if is_dark_mode() {
             Color32::from_rgb(44, 44, 42)
@@ -530,14 +530,14 @@ pub(super) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
     foundation_input()
 }
 
-pub(super) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);
-pub(super) const MATERIAL_PANEL_EDGE: Color32 = Color32::from_rgb(168, 168, 162);
+pub(in crate::app) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);
+pub(in crate::app) const MATERIAL_PANEL_EDGE: Color32 = Color32::from_rgb(168, 168, 162);
 
 /// The material/shader pane's backing fill. The light constant above bled
 /// through every 1-2px gap between the dark grid's rows and cells in dark
 /// mode, outlining the whole editor in near-white; dark mode gets a soft grey
 /// in the same family as the grid lines instead.
-pub(super) fn material_panel() -> Color32 {
+pub(in crate::app) fn material_panel() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 60, 56)
     } else {
@@ -545,30 +545,30 @@ pub(super) fn material_panel() -> Color32 {
     }
 }
 
-pub(super) fn material_panel_edge() -> Color32 {
+pub(in crate::app) fn material_panel_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(72, 74, 70)
     } else {
         MATERIAL_PANEL_EDGE
     }
 }
-pub(super) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205, 166);
-pub(super) const MATERIAL_NUMERIC_ROW: Color32 = Color32::from_rgb(232, 191, 171);
-pub(super) const MATERIAL_DATA_ROW: Color32 = Color32::from_rgb(216, 216, 216);
-pub(super) const MATERIAL_GRID: Color32 = Color32::from_rgb(92, 92, 92);
-pub(super) const MATERIAL_GRID_LIGHT: Color32 = Color32::from_rgb(198, 198, 192);
-pub(super) const MATERIAL_INPUT_EDGE: Color32 = Color32::from_rgb(112, 112, 112);
-pub(super) const MATERIAL_DEFAULT_BOX: Color32 = Color32::from_rgb(224, 224, 224);
-pub(super) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
-pub(super) const MATERIAL_MUTED_TEXT: Color32 = Color32::from_rgb(96, 96, 96);
-pub(super) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 137);
-pub(super) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
+pub(in crate::app) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205, 166);
+pub(in crate::app) const MATERIAL_NUMERIC_ROW: Color32 = Color32::from_rgb(232, 191, 171);
+pub(in crate::app) const MATERIAL_DATA_ROW: Color32 = Color32::from_rgb(216, 216, 216);
+pub(in crate::app) const MATERIAL_GRID: Color32 = Color32::from_rgb(92, 92, 92);
+pub(in crate::app) const MATERIAL_GRID_LIGHT: Color32 = Color32::from_rgb(198, 198, 192);
+pub(in crate::app) const MATERIAL_INPUT_EDGE: Color32 = Color32::from_rgb(112, 112, 112);
+pub(in crate::app) const MATERIAL_DEFAULT_BOX: Color32 = Color32::from_rgb(224, 224, 224);
+pub(in crate::app) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
+pub(in crate::app) const MATERIAL_MUTED_TEXT: Color32 = Color32::from_rgb(96, 96, 96);
+pub(in crate::app) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 137);
+pub(in crate::app) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
 
-pub(super) fn disclosure_triangle_green() -> Color32 {
+pub(in crate::app) fn disclosure_triangle_green() -> Color32 {
     Color32::from_rgb(34, 205, 84)
 }
 
-pub(super) fn foundation_block_edge() -> Color32 {
+pub(in crate::app) fn foundation_block_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(94, 94, 94)
     } else {
@@ -576,7 +576,7 @@ pub(super) fn foundation_block_edge() -> Color32 {
     }
 }
 
-pub(super) fn browser_search_bg() -> Color32 {
+pub(in crate::app) fn browser_search_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(23, 23, 23)
     } else {
@@ -584,7 +584,7 @@ pub(super) fn browser_search_bg() -> Color32 {
     }
 }
 
-pub(super) fn browser_toolbar_bg() -> Color32 {
+pub(in crate::app) fn browser_toolbar_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
     } else {
@@ -592,7 +592,7 @@ pub(super) fn browser_toolbar_bg() -> Color32 {
     }
 }
 
-pub(super) fn browser_toolbar_active() -> Color32 {
+pub(in crate::app) fn browser_toolbar_active() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(73, 112, 136)
     } else {
@@ -600,7 +600,7 @@ pub(super) fn browser_toolbar_active() -> Color32 {
     }
 }
 
-pub(super) fn context_menu_hover() -> Color32 {
+pub(in crate::app) fn context_menu_hover() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(70, 70, 70)
     } else {
@@ -608,11 +608,11 @@ pub(super) fn context_menu_hover() -> Color32 {
     }
 }
 
-pub(super) fn disclosure_triangle_blue() -> Color32 {
+pub(in crate::app) fn disclosure_triangle_blue() -> Color32 {
     Color32::from_rgb(24, 111, 205)
 }
 
-pub(super) fn material_ref_row() -> Color32 {
+pub(in crate::app) fn material_ref_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(30, 58, 40)
     } else {
@@ -620,7 +620,7 @@ pub(super) fn material_ref_row() -> Color32 {
     }
 }
 
-pub(super) fn material_numeric_row() -> Color32 {
+pub(in crate::app) fn material_numeric_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(62, 45, 39)
     } else {
@@ -628,7 +628,7 @@ pub(super) fn material_numeric_row() -> Color32 {
     }
 }
 
-pub(super) fn material_data_row() -> Color32 {
+pub(in crate::app) fn material_data_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(42, 43, 41)
     } else {
@@ -636,7 +636,7 @@ pub(super) fn material_data_row() -> Color32 {
     }
 }
 
-pub(super) fn material_grid_light() -> Color32 {
+pub(in crate::app) fn material_grid_light() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(54, 56, 52)
     } else {
@@ -644,7 +644,7 @@ pub(super) fn material_grid_light() -> Color32 {
     }
 }
 
-pub(super) fn material_input_edge() -> Color32 {
+pub(in crate::app) fn material_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 86, 78)
     } else {
@@ -652,7 +652,7 @@ pub(super) fn material_input_edge() -> Color32 {
     }
 }
 
-pub(super) fn material_default_box() -> Color32 {
+pub(in crate::app) fn material_default_box() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(38, 39, 37)
     } else {
@@ -660,7 +660,7 @@ pub(super) fn material_default_box() -> Color32 {
     }
 }
 
-pub(super) fn material_text() -> Color32 {
+pub(in crate::app) fn material_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(231, 232, 226)
     } else {
@@ -668,7 +668,7 @@ pub(super) fn material_text() -> Color32 {
     }
 }
 
-pub(super) fn material_text_for_bg(bg: Color32) -> Color32 {
+pub(in crate::app) fn material_text_for_bg(bg: Color32) -> Color32 {
     let luminance = 0.2126 * bg.r() as f32 + 0.7152 * bg.g() as f32 + 0.0722 * bg.b() as f32;
     if luminance < 128.0 {
         Color32::from_gray(232)
@@ -677,7 +677,7 @@ pub(super) fn material_text_for_bg(bg: Color32) -> Color32 {
     }
 }
 
-pub(super) fn material_muted_text() -> Color32 {
+pub(in crate::app) fn material_muted_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(155, 158, 150)
     } else {
@@ -685,7 +685,7 @@ pub(super) fn material_muted_text() -> Color32 {
     }
 }
 
-pub(super) fn material_function_row() -> Color32 {
+pub(in crate::app) fn material_function_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(58, 47, 32)
     } else {
@@ -693,7 +693,7 @@ pub(super) fn material_function_row() -> Color32 {
     }
 }
 
-pub(super) fn material_section_header() -> Color32 {
+pub(in crate::app) fn material_section_header() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(42, 58, 48)
     } else {
@@ -701,7 +701,7 @@ pub(super) fn material_section_header() -> Color32 {
     }
 }
 
-pub(super) fn material_input() -> Color32 {
+pub(in crate::app) fn material_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(27, 28, 27)
     } else {
@@ -709,7 +709,7 @@ pub(super) fn material_input() -> Color32 {
     }
 }
 
-pub(super) fn material_disabled_input() -> Color32 {
+pub(in crate::app) fn material_disabled_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(36, 37, 35)
     } else {
@@ -717,7 +717,7 @@ pub(super) fn material_disabled_input() -> Color32 {
     }
 }
 
-pub(super) fn material_default_input() -> Color32 {
+pub(in crate::app) fn material_default_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(39, 40, 38)
     } else {
@@ -725,7 +725,7 @@ pub(super) fn material_default_input() -> Color32 {
     }
 }
 
-pub(super) fn material_checkbox_disabled() -> Color32 {
+pub(in crate::app) fn material_checkbox_disabled() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(34, 35, 33)
     } else {
@@ -733,7 +733,7 @@ pub(super) fn material_checkbox_disabled() -> Color32 {
     }
 }
 
-pub(super) fn material_hover() -> Color32 {
+pub(in crate::app) fn material_hover() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(46, 58, 62)
     } else {
@@ -741,7 +741,7 @@ pub(super) fn material_hover() -> Color32 {
     }
 }
 
-pub(super) fn material_pending_input() -> Color32 {
+pub(in crate::app) fn material_pending_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(43, 37, 31)
     } else {
@@ -749,7 +749,7 @@ pub(super) fn material_pending_input() -> Color32 {
     }
 }
 
-pub(super) fn material_delete_text() -> Color32 {
+pub(in crate::app) fn material_delete_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(226, 92, 92)
     } else {
@@ -757,7 +757,7 @@ pub(super) fn material_delete_text() -> Color32 {
     }
 }
 
-pub(super) fn material_color_swatch_edge(color: Color32) -> Color32 {
+pub(in crate::app) fn material_color_swatch_edge(color: Color32) -> Color32 {
     let luminance =
         0.2126 * color.r() as f32 + 0.7152 * color.g() as f32 + 0.0722 * color.b() as f32;
     if luminance < 80.0 {
@@ -769,7 +769,7 @@ pub(super) fn material_color_swatch_edge(color: Color32) -> Color32 {
     }
 }
 
-pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
+pub(in crate::app) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "ALBEDO",
     "BUMP_MAPPING",
     "MATERIAL_MODEL",
@@ -781,8 +781,8 @@ pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
 /// How long a status message stays on the status line before it clears.
 /// Without this the last thing that happened sits there indefinitely, which
 /// reads as current state long after it stopped being true.
-pub(super) const STATUS_LINGER_SECS: f64 = 5.0;
+pub(in crate::app) const STATUS_LINGER_SECS: f64 = 5.0;
 
 #[cfg(test)]
 mod tests;
-pub(super) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;
+pub(in crate::app) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;
