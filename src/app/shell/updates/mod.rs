@@ -40,14 +40,6 @@ impl Baboon {
         false
     }
 
-    /// One sentence on where this build stands: the last check's verdict when
-    /// there has been one, otherwise a description of what is running.
-    pub(in crate::app) fn update_check_summary(&self) -> String {
-        match self.shell.last_update_check.as_ref() {
-            Some(result) => update_check_status(result),
-            None => format!("This build: {}", running_build_description()),
-        }
-    }
 }
 
 /// Names the running build the way the active channel identifies builds — by
@@ -358,5 +350,16 @@ impl Model {
     /// Whether the automatic startup check should run.
     pub(in crate::app) fn should_check_updates_on_startup(&self) -> bool {
         self.prefs.check_updates_on_startup
+    }
+}
+
+impl ShellFeature {
+    /// One sentence on where this build stands: the last check's verdict when
+    /// there has been one, otherwise a description of what is running.
+    pub(in crate::app) fn update_check_summary(&self) -> String {
+        match self.last_update_check.as_ref() {
+            Some(result) => update_check_status(result),
+            None => format!("This build: {}", running_build_description()),
+        }
     }
 }

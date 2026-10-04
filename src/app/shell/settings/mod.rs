@@ -13,7 +13,7 @@ mod editing_kit_card_tests;
 struct EditingKitDrag(String);
 
 #[derive(Clone)]
-struct EditingKitReorderRequest {
+pub(in crate::app) struct EditingKitReorderRequest {
     source: String,
     target: String,
     after: bool,
@@ -697,39 +697,6 @@ fn settings_window_body(
 }
 
 impl Baboon {
-    pub(in crate::app) fn draw_settings_window(&mut self, ctx: &egui::Context) {
-        if !self.shell.settings_open {
-            return;
-        }
-
-        let mut open = self.shell.settings_open;
-        egui::Window::new("Settings")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("app_settings"))
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(window_width(ctx, 760.0))
-            .default_height(window_height(ctx, 640.0, false))
-            .show(ctx, |ui| {
-                let mut selected = self.shell.settings_tab;
-                settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
-                    SettingsTab::Startup => self.draw_settings_startup_tab(ui),
-                    SettingsTab::Browser => self.draw_settings_browser_tab(ui),
-                    SettingsTab::EditingKits => self.draw_settings_editing_kits_tab(ui),
-                    SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
-                    SettingsTab::Tools => self.draw_settings_tools_tab(ui),
-                });
-                self.shell.settings_tab = selected;
-            });
-        if !open {
-            self.shell.pending_ui_scale = self.model.prefs.ui_scale;
-        }
-        self.shell.settings_open = open;
-        self.draw_custom_editing_kit_dialog(ctx);
-        self.draw_custom_editing_kit_removal_dialog(ctx);
-    }
-
     pub(in crate::app) fn set_editing_kit_path_input(
         &mut self,
         shortcut: EditingKitShortcut,
@@ -750,387 +717,6 @@ impl Baboon {
             self.kit_tools.editing_kit_path_attention = None;
         }
         self.refresh_builtin_editing_kit_validation(shortcut);
-    }
-
-    pub(in crate::app) fn draw_settings_startup_tab(&mut self, ui: &mut Ui) {
-        ui.label(
-            RichText::new("When reopening Baboon with a previous session:").color(text_dark()),
-        );
-        ui.add_space(2.0);
-        ui.radio_value(
-            &mut self.model.prefs.session_restore,
-            SessionRestore::Ask,
-            "Ask which windows to reopen",
-        );
-        ui.radio_value(
-            &mut self.model.prefs.session_restore,
-            SessionRestore::Always,
-            "Reopen the last session automatically",
-        );
-        ui.radio_value(
-            &mut self.model.prefs.session_restore,
-            SessionRestore::Never,
-            "Start fresh (never reopen)",
-        );
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.label(RichText::new("Saving").color(text_dark()).strong());
-        ui.add_space(4.0);
-        if self.model.prefs.expert_mode {
-            ui.checkbox(
-                &mut self.model.prefs.confirm_container_overwrite,
-                "Confirm before Save overwrites Campaign Evolved game files",
-            );
-            ui.label(
-                RichText::new(
-                    "Expert mode lets Save write a tag straight back into the game's own pak files. That edits the installed game in place; File \u{2192} Export Mod\u{2026} bundles the same changes into a separate mod instead.",
-                )
-                .color(subtle_dark())
-                .small(),
-            );
-        } else {
-            // The setting guards a route that is not reachable outside expert
-            // mode, and a checkbox for something that cannot happen is worse
-            // than no checkbox.
-            ui.label(
-                RichText::new(
-                    "Saving a tag loaded from a Campaign Evolved container keeps the change in this workspace and offers to export it as a mod; the game's own pak files are never written. Turn on expert mode below to allow overwriting them in place.",
-                )
-                .color(subtle_dark())
-                .small(),
-            );
-        }
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.label(
-            RichText::new("Chimp — Unreal packages")
-                .color(text_dark())
-                .strong(),
-        );
-        ui.add_space(4.0);
-        let chimp_changed = ui
-            .checkbox(
-                &mut self.model.prefs.enable_chimp,
-                "Enable Chimp workspace for Campaign Evolved",
-            )
-            .changed();
-        ui.label(
-            RichText::new(
-                "Chimp shares Campaign Evolved's configured path and writes supported property edits to a separate _P mod container.",
-            )
-            .color(subtle_dark())
-            .small(),
-        );
-        ui.horizontal(|ui| {
-            let output = self
-                .model.prefs
-                .chimp_output_dir
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "Default: Paks/~mods/Chimp".to_owned());
-            ui.label(RichText::new(output).color(subtle_dark()).small());
-            if ui.button("Output folder…").clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_title("Choose Chimp mod output folder")
-                    .pick_folder()
-            {
-                self.model.prefs.chimp_output_dir = Some(path);
-            }
-            if self.model.prefs.chimp_output_dir.is_some() && ui.button("Use default").clicked() {
-                self.model.prefs.chimp_output_dir = None;
-            }
-        });
-        if chimp_changed {
-            let dirty = self
-                .model.kits
-                .iter()
-                .any(|kit| kit.chimp.documents.values().any(|document| document.dirty));
-            if !self.model.prefs.enable_chimp && dirty {
-                self.model.prefs.enable_chimp = true;
-                self.model.status =
-                    "Build the Chimp mod before disabling a workspace with recovered edits."
-                        .to_owned();
-                return;
-            }
-            if self.model.prefs.enable_chimp {
-                let indices: Vec<usize> = self
-                    .model.kits
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, kit)| {
-                        kit.source.as_ref().is_some_and(|source| {
-                            matches!(&source.source, TagSource::IoStoreContainerSet { .. })
-                        })
-                    })
-                    .map(|(index, _)| index)
-                    .collect();
-                for index in indices {
-                    self.begin_chimp_mount(index, ui.ctx().clone());
-                }
-            } else {
-                for kit in &mut self.model.kits {
-                    self.views[kit.id].surface = KitSurface::Tags;
-                    kit.chimp = ChimpState::default();
-                }
-            }
-        }
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.label(RichText::new("Runtime poking").color(text_dark()).strong());
-        ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.model.prefs.confirm_runtime_poke,
-            "Confirm before poking the running game",
-        );
-        ui.label(
-            RichText::new(
-                "File \u{2192} Poke Current Tag\u{2026} (Ctrl+P) shows the preflight plan and waits for confirmation. Turn this off to write to the running game as soon as the poke is requested.",
-            )
-            .color(subtle_dark())
-            .small(),
-        );
-
-        ui.add_space(10.0);
-        ui.separator();
-        ui.label(RichText::new("Updates").color(text_dark()).strong());
-        ui.add_space(4.0);
-        self.draw_update_channel_picker(ui);
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.button("Check now").clicked() {
-                let ctx = ui.ctx().clone();
-                self.begin_check_for_updates(ctx, false);
-            }
-            self.draw_update_check_result(ui);
-        });
-    }
-
-    /// Radio rows for which build track update checks follow, plus whether the
-    /// check runs at startup.
-    /// Shared by Settings and the first-run wizard so the two cannot drift.
-    pub(in crate::app) fn draw_update_channel_picker(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Check for updates on").color(text_dark()));
-        for option in UpdateChannel::ALL {
-            if ui
-                .radio_value(&mut self.model.prefs.update_channel, option, option.label())
-                .on_hover_text(option.help())
-                .changed()
-            {
-                // The previous channel's verdict says nothing about this one.
-                self.shell.available_update = None;
-                self.shell.last_update_check = None;
-            }
-        }
-        ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.model.prefs.check_updates_on_startup,
-            "Check for updates when Baboon starts",
-        );
-    }
-
-    /// One line describing what the last check concluded, with a link when
-    /// there is something to go and get.
-    fn draw_update_check_result(&self, ui: &mut Ui) {
-        if let Some(update) = self.shell.available_update.as_ref() {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("Update available:")
-                        .color(text_dark())
-                        .strong(),
-                );
-                ui.hyperlink_to(update.short_name(), &update.release_url);
-            });
-            return;
-        }
-        ui.label(
-            RichText::new(self.update_check_summary())
-                .color(subtle_dark())
-                .small(),
-        );
-    }
-
-    /// Radio row for how nested containers in the tag editor start out.
-    /// Shared by Settings and the first-run wizard so the two cannot drift.
-    pub(in crate::app) fn draw_nested_default_picker(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
-        ui.horizontal(|ui| {
-            for option in NestedDefault::ALL {
-                ui.radio_value(&mut self.model.prefs.nested_default, option, option.label())
-                    .on_hover_text(option.help());
-            }
-        });
-        ui.label(
-            RichText::new(
-                "Applies to tags opened from now on. A group you open or close yourself keeps \
-                 the state you chose.",
-            )
-            .color(subtle_dark())
-            .small(),
-        );
-    }
-
-    pub(in crate::app) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {
-        ui.checkbox(
-            &mut self.model.prefs.double_click_to_open_tags,
-            "Double-click to open tags",
-        );
-        ui.checkbox(
-            &mut self.model.prefs.folders_before_tags,
-            "List subfolders before tags in browser",
-        );
-        ui.add_space(12.0);
-        ui.label(RichText::new("Tag editor").color(text_dark()).strong());
-        ui.add_space(4.0);
-        self.draw_nested_default_picker(ui);
-    }
-
-    pub(in crate::app) fn draw_settings_editing_kits_tab(&mut self, ui: &mut Ui) {
-        ui.label(
-            RichText::new(
-                "Add editing kits for quick loading, or auto-detect supported Steam installations.",
-            )
-            .color(subtle_dark()),
-        );
-        ui.horizontal(|ui| {
-            if icon_text_button(ui, ButtonIcon::Add, "Add Editing Kit", true).clicked() {
-                self.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
-            }
-            if ui.button("Auto Detect").clicked() {
-                self.auto_detect_editing_kit_paths();
-            }
-            if ui.button("Refresh Status").clicked() {
-                self.refresh_editing_kit_validation();
-                self.model.status = "Editing-kit status refreshed".to_owned();
-            }
-        });
-        ui.add_space(6.0);
-
-        if self.model.prefs.custom_editing_kit_profiles.is_empty() {
-            ui.label(RichText::new("No editing kits configured").color(subtle_dark()));
-        }
-        for profile in self.model.prefs.custom_editing_kit_profiles.clone() {
-            let validation = self.kit_tools.editing_kit_validation.custom(&profile.id);
-            let warning = self
-                .kit_tools.editing_kit_validation
-                .custom_icon_error(&profile.id)
-                .map(str::to_owned);
-            let texture = self.shell.workspace_banner_texture(
-                ui.ctx(),
-                &self.model.prefs.custom_editing_kit_profiles,
-                profile.game_id(),
-                Some(&profile.id),
-            );
-            let (load, edit, remove) = ui
-                .push_id(&profile.id, |ui| {
-                    editing_kit_card_with_read_only(
-                        ui,
-                        &profile.name,
-                        profile_location(&profile, validation.as_ref().ok()),
-                        texture.as_ref(),
-                        validation.as_ref().err().map(String::as_str),
-                        warning.as_deref(),
-                        Some(&profile.id),
-                        profile.read_only && !profile.is_campaign_evolved(),
-                    )
-                })
-                .inner;
-            if load {
-                self.load_custom_editing_kit_profile(profile.clone(), ui.ctx().clone());
-            }
-            if edit {
-                self.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::from_profile(&profile));
-            }
-            if remove {
-                self.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
-                    id: profile.id.clone(),
-                    name: profile.name.clone(),
-                });
-            }
-        }
-        let reorder = ui.ctx().data_mut(|data| {
-            let key = egui::Id::new("editing_kit_reorder_request");
-            let request = data.get_temp::<EditingKitReorderRequest>(key);
-            data.remove::<EditingKitReorderRequest>(key);
-            request
-        });
-        if let Some(request) = reorder {
-            let previous = self.model.prefs.custom_editing_kit_profiles.clone();
-            if reorder_editing_kit_profiles(&mut self.model.prefs.custom_editing_kit_profiles, &request) {
-                let prefs = self.current_prefs();
-                if let Err(error) = save_gui_prefs(
-                    &prefs,
-                    &self.kit_tools.terminal_open_games,
-                    self.shell.first_run_wizard.is_none(),
-                ) {
-                    self.model.prefs.custom_editing_kit_profiles = previous;
-                    self.model.status = error;
-                } else {
-                    self.saved_prefs = prefs;
-                    self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-                    self.model.status = "Editing kit order saved".to_owned();
-                }
-            }
-        }
-    }
-
-    fn draw_custom_editing_kit_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut draft) = self.kit_tools.custom_editing_kit_draft.take() else {
-            return;
-        };
-        let title = if draft.editing_id.is_some() {
-            "Edit Editing Kit"
-        } else {
-            "Add Editing Kit"
-        };
-        let mut open = true;
-        let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
-        let texture =
-            custom_texture.or_else(|| self.shell.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
-        let mut actions = EditingKitFormActions::default();
-        egui::Window::new(title)
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("custom_editing_kit_dialog"))
-            .title_bar(false)
-            .collapsible(false)
-            .auto_sized()
-            .default_width(window_width(ctx, 580.0))
-            .max_width(window_width(ctx, 580.0))
-            .max_height(window_height(ctx, (ctx.content_rect().height() - 32.0).max(0.0), false))
-            .scroll([false, true])
-            .show(ctx, |ui| {
-                crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
-                ui.separator();
-                egui::Frame::NONE
-                    .inner_margin(ui.spacing().window_margin)
-                    .show(ui, |ui| {
-                        actions = draw_editing_kit_form(ui, &mut draft, texture.as_ref());
-                    });
-            });
-        let EditingKitFormActions {
-            save,
-            cancel,
-            remove,
-        } = actions;
-
-        if remove {
-            self.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
-                id: draft.editing_id.clone().unwrap(),
-                name: draft.name.clone(),
-            });
-            open = false;
-        }
-        if save && self.commit_custom_editing_kit_draft(&mut draft) {
-            open = false;
-        }
-        if cancel {
-            open = false;
-        }
-        if open {
-            self.kit_tools.custom_editing_kit_draft = Some(draft);
-        }
     }
 
     fn commit_custom_editing_kit_draft(&mut self, draft: &mut CustomEditingKitDraft) -> bool {
@@ -1287,41 +873,6 @@ impl Baboon {
         true
     }
 
-    fn draw_custom_editing_kit_removal_dialog(&mut self, ctx: &egui::Context) {
-        let Some(removal) = self.kit_tools.custom_editing_kit_removal.clone() else {
-            return;
-        };
-        let mut open = true;
-        let mut confirm = false;
-        let mut cancel = false;
-        egui::Window::new("Remove Editing Kit?")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("remove_custom_editing_kit"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(format!(
-                    "Remove “{}” from Baboon? Its editing-kit files will not be deleted.",
-                    removal.name
-                ));
-                ui.horizontal(|ui| {
-                    confirm = ui.button("Remove").clicked();
-                    cancel = ui.button("Cancel").clicked();
-                });
-            });
-        if confirm {
-            self.remove_custom_editing_kit_profile(&removal);
-            open = false;
-        }
-        if cancel {
-            open = false;
-        }
-        if !open {
-            self.kit_tools.custom_editing_kit_removal = None;
-        }
-    }
-
     fn remove_custom_editing_kit_profile(&mut self, removal: &CustomEditingKitRemoval) {
         let previous_profiles = self.model.prefs.custom_editing_kit_profiles.clone();
         let removed = self
@@ -1362,141 +913,684 @@ impl Baboon {
         }
         self.model.status = format!("Removed editing kit {}", removal.name);
     }
+}
 
-    pub(in crate::app) fn draw_settings_appearance_tab(&mut self, ui: &mut Ui) {
-        ui.checkbox(&mut self.model.prefs.dark_mode, "Dark mode");
-        ui.checkbox(&mut self.model.prefs.angles_in_degrees, "Angles in degrees")
-            .on_hover_text(
-                "Angle fields hold radians on disk. Guerilla and the other Halo tools show them \
-                 in degrees, and so does Baboon — turn this off to read and type the stored \
-                 radians instead. Field search, TSV copy/paste and the tag diff follow the same \
-                 setting.",
-            );
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("UI scale").color(subtle_dark()));
-            ui.add(
-                egui::Slider::new(&mut self.shell.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
-                    .show_value(false)
-                    .clamping(egui::SliderClamping::Always),
-            );
-            draw_ui_scale_input(ui, &mut self.shell.pending_ui_scale);
-            if ui.button("Apply").clicked() {
-                self.model.prefs.ui_scale = self.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
-                self.model.status = "UI scale applied".to_owned();
+/// What Settings draws on: a draft of the preferences, the state it owns
+/// (the shell's, the kits feature's and Chimp's usmap path being typed), and
+/// what it asked for, held until the draft has been sent.
+struct SettingsDraw<'a> {
+    prefs: GuiPrefs,
+    shell: &'a mut ShellFeature,
+    kit_tools: &'a mut KitsFeature,
+    usmap_input: &'a mut String,
+    effects: Vec<SettingsCommand>,
+}
+
+/// What Settings asks for beyond the preferences it edits.
+pub(in crate::app) enum SettingsCommand {
+    /// Chimp was turned on: mount it in every Campaign Evolved workspace.
+    MountChimpEverywhere,
+    /// Chimp was turned off: every workspace back to its tags, Chimp's state
+    /// dropped.
+    DropChimpEverywhere,
+    CheckForUpdates,
+    AutoDetectEditingKits,
+    RefreshEditingKitStatus,
+    LoadEditingKit(CustomEditingKitProfile),
+    ReorderEditingKits(EditingKitReorderRequest),
+    /// Save the editing kit the dialog describes; one the commit refuses
+    /// goes back to the dialog with its reason.
+    CommitEditingKitDraft(CustomEditingKitDraft),
+    RemoveEditingKit(CustomEditingKitRemoval),
+    ChooseBlenderPath,
+    CommitChimpUsmapInput,
+    ChooseChimpUsmap,
+    UseBundledUsmap,
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_settings_command(&mut self, command: SettingsCommand, ctx: &egui::Context) {
+        match command {
+            SettingsCommand::MountChimpEverywhere => {
+                let indices: Vec<usize> = self
+                    .model
+                    .kits
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, kit)| {
+                        kit.source.as_ref().is_some_and(|source| {
+                            matches!(&source.source, TagSource::IoStoreContainerSet { .. })
+                        })
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                for index in indices {
+                    self.begin_chimp_mount(index, ctx.clone());
+                }
             }
-            if ui.button("Reset").clicked() {
-                self.shell.pending_ui_scale = DEFAULT_UI_SCALE;
+            SettingsCommand::DropChimpEverywhere => {
+                for kit in &mut self.model.kits {
+                    self.views[kit.id].surface = KitSurface::Tags;
+                    kit.chimp = ChimpState::default();
+                }
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Model viewport").color(subtle_dark()));
-            ui.add(
-                egui::Slider::new(
-                    &mut self.model.prefs.model_preview_size,
-                    MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
-                )
-                .show_value(false)
-                .clamping(egui::SliderClamping::Always),
-            );
-            draw_model_viewport_size_input(ui, &mut self.model.prefs.model_preview_size);
-            if ui.button("Reset").clicked() {
-                self.model.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
+            SettingsCommand::CheckForUpdates => self.begin_check_for_updates(ctx.clone(), false),
+            SettingsCommand::AutoDetectEditingKits => self.auto_detect_editing_kit_paths(),
+            SettingsCommand::RefreshEditingKitStatus => {
+                self.refresh_editing_kit_validation();
+                self.model.status = "Editing-kit status refreshed".to_owned();
             }
-        });
-        draw_speed_row(
-            ui,
-            "Scroll speed",
-            "How far the mouse wheel or trackpad scrolls lists and panels. \
-             100% is the original speed.",
-            &mut self.model.prefs.scroll_speed,
-            MIN_SCROLL_SPEED..=MAX_SCROLL_SPEED,
-            DEFAULT_SCROLL_SPEED,
-        );
-        draw_speed_row(
-            ui,
-            "Zoom speed",
-            "How fast the mouse wheel zooms the model and bitmap viewports. \
-             100% is the original speed.",
-            &mut self.model.prefs.zoom_speed,
-            MIN_ZOOM_SPEED..=MAX_ZOOM_SPEED,
-            DEFAULT_ZOOM_SPEED,
-        );
+            SettingsCommand::LoadEditingKit(profile) => {
+                self.load_custom_editing_kit_profile(profile, ctx.clone());
+            }
+            SettingsCommand::ReorderEditingKits(request) => self.reorder_editing_kits(&request),
+            SettingsCommand::CommitEditingKitDraft(mut draft) => {
+                if !self.commit_custom_editing_kit_draft(&mut draft) {
+                    self.kit_tools.custom_editing_kit_draft = Some(draft);
+                }
+            }
+            SettingsCommand::RemoveEditingKit(removal) => self.remove_custom_editing_kit_profile(&removal),
+            SettingsCommand::ChooseBlenderPath => self.choose_blender_path(),
+            SettingsCommand::CommitChimpUsmapInput => self.commit_chimp_usmap_path_input(ctx.clone()),
+            SettingsCommand::ChooseChimpUsmap => self.choose_chimp_usmap_path(ctx.clone()),
+            SettingsCommand::UseBundledUsmap => self.apply_chimp_usmap_path(None, ctx.clone()),
+        }
     }
 
-    pub(in crate::app) fn draw_settings_tools_tab(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Blender").color(text_dark()).strong());
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Path").color(subtle_dark()));
-            let path_response = ui
-                .add(egui::TextEdit::singleline(&mut self.kit_tools.blender_path_input).desired_width(360.0));
-            if lost_focus_once(&path_response)
-                && ui.input(|input| input.key_pressed(egui::Key::Enter))
-            {
-                let trimmed = self.kit_tools.blender_path_input.trim();
-                self.model.prefs.blender_path = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(trimmed))
-                };
-                self.model.status = if let Some(path) = &self.model.prefs.blender_path {
-                    format!("Blender path set to {}", path.display())
-                } else {
-                    "Blender path cleared".to_owned()
-                };
+    /// Move an editing kit in the list as dragged, and save the order.
+    fn reorder_editing_kits(&mut self, request: &EditingKitReorderRequest) {
+        let previous = self.model.prefs.custom_editing_kit_profiles.clone();
+        if reorder_editing_kit_profiles(&mut self.model.prefs.custom_editing_kit_profiles, request) {
+            let prefs = self.current_prefs();
+            if let Err(error) = save_gui_prefs(
+                &prefs,
+                &self.kit_tools.terminal_open_games,
+                self.shell.first_run_wizard.is_none(),
+            ) {
+                self.model.prefs.custom_editing_kit_profiles = previous;
+                self.model.status = error;
+            } else {
+                self.saved_prefs = prefs;
+                self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
+                self.model.status = "Editing kit order saved".to_owned();
             }
-            if icon_text_button(ui, ButtonIcon::Browse, "Browse...", true).clicked() {
-                self.choose_blender_path();
-            }
-            if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
-                self.model.prefs.blender_path = None;
-                self.kit_tools.blender_path_input.clear();
-                self.model.status = "Blender path cleared".to_owned();
-            }
-        });
+        }
+    }
+}
 
-        ui.add_space(10.0);
-        ui.separator();
-        ui.label(
-            RichText::new("Chimp — Unreal mappings")
-                .color(text_dark())
-                .strong(),
+/// The Settings window, while it is open, with its editing-kit dialogs.
+/// It edits a draft of the preferences; once drawn, a changed draft is
+/// sent first and then whatever the window asked for, so those see the
+/// preferences as the user just set them.
+pub(in crate::app) fn draw_settings_window(
+    cx: &Ctx,
+    shell: &mut ShellFeature,
+    kit_tools: &mut KitsFeature,
+    usmap_input: &mut String,
+) {
+    if !shell.settings_open {
+        return;
+    }
+    let ctx = cx.egui;
+    let mut s = SettingsDraw {
+        prefs: cx.model.prefs.clone(),
+        shell,
+        kit_tools,
+        usmap_input,
+        effects: Vec::new(),
+    };
+
+    let mut open = s.shell.settings_open;
+    egui::Window::new("Settings")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("app_settings"))
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(window_width(ctx, 760.0))
+        .default_height(window_height(ctx, 640.0, false))
+        .show(ctx, |ui| {
+            let mut selected = s.shell.settings_tab;
+            settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
+                SettingsTab::Startup => draw_settings_startup_tab(cx, ui, &mut s),
+                SettingsTab::Browser => draw_settings_browser_tab(ui, &mut s),
+                SettingsTab::EditingKits => draw_settings_editing_kits_tab(cx, ui, &mut s),
+                SettingsTab::Appearance => draw_settings_appearance_tab(cx, ui, &mut s),
+                SettingsTab::Tools => draw_settings_tools_tab(cx, ui, &mut s),
+            });
+            s.shell.settings_tab = selected;
+        });
+    if !open {
+        s.shell.pending_ui_scale = s.prefs.ui_scale;
+    }
+    s.shell.settings_open = open;
+    draw_custom_editing_kit_dialog(ctx, &mut s);
+    draw_custom_editing_kit_removal_dialog(ctx, &mut s);
+    let SettingsDraw { prefs, effects, .. } = s;
+    if prefs != cx.model.prefs {
+        cx.edit_prefs(move |live| *live = prefs);
+    }
+    for effect in effects {
+        cx.send(effect);
+    }
+}
+
+fn draw_settings_startup_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    ui.label(
+        RichText::new("When reopening Baboon with a previous session:").color(text_dark()),
+    );
+    ui.add_space(2.0);
+    ui.radio_value(
+        &mut s.prefs.session_restore,
+        SessionRestore::Ask,
+        "Ask which windows to reopen",
+    );
+    ui.radio_value(
+        &mut s.prefs.session_restore,
+        SessionRestore::Always,
+        "Reopen the last session automatically",
+    );
+    ui.radio_value(
+        &mut s.prefs.session_restore,
+        SessionRestore::Never,
+        "Start fresh (never reopen)",
+    );
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(RichText::new("Saving").color(text_dark()).strong());
+    ui.add_space(4.0);
+    if s.prefs.expert_mode {
+        ui.checkbox(
+            &mut s.prefs.confirm_container_overwrite,
+            "Confirm before Save overwrites Campaign Evolved game files",
         );
-        ui.add_space(4.0);
         ui.label(
             RichText::new(
-                "USMAP files describe cooked Unreal classes and properties so Chimp can name and decode package data. Leave this blank to use Baboon's bundled Campaign Evolved mappings.",
+                "Expert mode lets Save write a tag straight back into the game's own pak files. That edits the installed game in place; File \u{2192} Export Mod\u{2026} bundles the same changes into a separate mod instead.",
             )
             .color(subtle_dark())
             .small(),
         );
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Path").color(subtle_dark()));
-            let path_response = ui.add(
-                egui::TextEdit::singleline(&mut self.chimp.chimp_usmap_path_input)
-                    .desired_width(360.0)
-                    .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
-            );
-            if lost_focus_once(&path_response)
-                && ui.input(|input| input.key_pressed(egui::Key::Enter))
-            {
-                self.commit_chimp_usmap_path_input(ui.ctx().clone());
-            }
-            if ui.button("Browse...").clicked() {
-                self.choose_chimp_usmap_path(ui.ctx().clone());
-            }
-        });
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(ui.available_width(), BUTTON_HEIGHT),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                if self.model.prefs.chimp_usmap_path.is_some() && ui.button("Use bundled").clicked() {
-                    self.apply_chimp_usmap_path(None, ui.ctx().clone());
-                }
-            },
+    } else {
+        // The setting guards a route that is not reachable outside expert
+        // mode, and a checkbox for something that cannot happen is worse
+        // than no checkbox.
+        ui.label(
+            RichText::new(
+                "Saving a tag loaded from a Campaign Evolved container keeps the change in this workspace and offers to export it as a mod; the game's own pak files are never written. Turn on expert mode below to allow overwriting them in place.",
+            )
+            .color(subtle_dark())
+            .small(),
         );
     }
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(
+        RichText::new("Chimp — Unreal packages")
+            .color(text_dark())
+            .strong(),
+    );
+    ui.add_space(4.0);
+    let chimp_changed = ui
+        .checkbox(
+            &mut s.prefs.enable_chimp,
+            "Enable Chimp workspace for Campaign Evolved",
+        )
+        .changed();
+    ui.label(
+        RichText::new(
+            "Chimp shares Campaign Evolved's configured path and writes supported property edits to a separate _P mod container.",
+        )
+        .color(subtle_dark())
+        .small(),
+    );
+    ui.horizontal(|ui| {
+        let output = s
+            .prefs
+            .chimp_output_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "Default: Paks/~mods/Chimp".to_owned());
+        ui.label(RichText::new(output).color(subtle_dark()).small());
+        if ui.button("Output folder…").clicked()
+            && let Some(path) = rfd::FileDialog::new()
+                .set_title("Choose Chimp mod output folder")
+                .pick_folder()
+        {
+            s.prefs.chimp_output_dir = Some(path);
+        }
+        if s.prefs.chimp_output_dir.is_some() && ui.button("Use default").clicked() {
+            s.prefs.chimp_output_dir = None;
+        }
+    });
+    if chimp_changed {
+        let dirty = cx
+            .model
+            .kits
+            .iter()
+            .any(|kit| kit.chimp.documents.values().any(|document| document.dirty));
+        if !s.prefs.enable_chimp && dirty {
+            s.prefs.enable_chimp = true;
+            cx.set_status("Build the Chimp mod before disabling a workspace with recovered edits.");
+            return;
+        }
+        s.effects.push(if s.prefs.enable_chimp {
+            SettingsCommand::MountChimpEverywhere
+        } else {
+            SettingsCommand::DropChimpEverywhere
+        });
+    }
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(RichText::new("Runtime poking").color(text_dark()).strong());
+    ui.add_space(4.0);
+    ui.checkbox(
+        &mut s.prefs.confirm_runtime_poke,
+        "Confirm before poking the running game",
+    );
+    ui.label(
+        RichText::new(
+            "File \u{2192} Poke Current Tag\u{2026} (Ctrl+P) shows the preflight plan and waits for confirmation. Turn this off to write to the running game as soon as the poke is requested.",
+        )
+        .color(subtle_dark())
+        .small(),
+    );
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(RichText::new("Updates").color(text_dark()).strong());
+    ui.add_space(4.0);
+    draw_update_channel_picker(ui, &mut s.prefs, s.shell);
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui.button("Check now").clicked() {
+            s.effects.push(SettingsCommand::CheckForUpdates);
+        }
+        draw_update_check_result(ui, s.shell);
+    });
+}
+
+/// Radio rows for which build track update checks follow, plus whether the
+/// check runs at startup.
+/// Shared by Settings and the first-run wizard so the two cannot drift.
+pub(in crate::app) fn draw_update_channel_picker(ui: &mut Ui, prefs: &mut GuiPrefs, shell: &mut ShellFeature) {
+    ui.label(RichText::new("Check for updates on").color(text_dark()));
+    for option in UpdateChannel::ALL {
+        if ui
+            .radio_value(&mut prefs.update_channel, option, option.label())
+            .on_hover_text(option.help())
+            .changed()
+        {
+            // The previous channel's verdict says nothing about this one.
+            shell.available_update = None;
+            shell.last_update_check = None;
+        }
+    }
+    ui.add_space(4.0);
+    ui.checkbox(
+        &mut prefs.check_updates_on_startup,
+        "Check for updates when Baboon starts",
+    );
+}
+
+/// One line describing what the last check concluded, with a link when
+/// there is something to go and get.
+fn draw_update_check_result(ui: &mut Ui, shell: &ShellFeature) {
+    if let Some(update) = shell.available_update.as_ref() {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Update available:")
+                    .color(text_dark())
+                    .strong(),
+            );
+            ui.hyperlink_to(update.short_name(), &update.release_url);
+        });
+        return;
+    }
+    ui.label(
+        RichText::new(shell.update_check_summary())
+            .color(subtle_dark())
+            .small(),
+    );
+}
+
+/// Radio row for how nested containers in the tag editor start out.
+/// Shared by Settings and the first-run wizard so the two cannot drift.
+pub(in crate::app) fn draw_nested_default_picker(ui: &mut Ui, nested_default: &mut NestedDefault) {
+    ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
+    ui.horizontal(|ui| {
+        for option in NestedDefault::ALL {
+            ui.radio_value(nested_default, option, option.label())
+                .on_hover_text(option.help());
+        }
+    });
+    ui.label(
+        RichText::new(
+            "Applies to tags opened from now on. A group you open or close yourself keeps \
+             the state you chose.",
+        )
+        .color(subtle_dark())
+        .small(),
+    );
+}
+
+fn draw_settings_browser_tab(ui: &mut Ui, s: &mut SettingsDraw) {
+    ui.checkbox(
+        &mut s.prefs.double_click_to_open_tags,
+        "Double-click to open tags",
+    );
+    ui.checkbox(
+        &mut s.prefs.folders_before_tags,
+        "List subfolders before tags in browser",
+    );
+    ui.add_space(12.0);
+    ui.label(RichText::new("Tag editor").color(text_dark()).strong());
+    ui.add_space(4.0);
+    draw_nested_default_picker(ui, &mut s.prefs.nested_default);
+}
+
+fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    ui.label(
+        RichText::new(
+            "Add editing kits for quick loading, or auto-detect supported Steam installations.",
+        )
+        .color(subtle_dark()),
+    );
+    ui.horizontal(|ui| {
+        if icon_text_button(ui, ButtonIcon::Add, "Add Editing Kit", true).clicked() {
+            s.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
+        }
+        if ui.button("Auto Detect").clicked() {
+            s.effects.push(SettingsCommand::AutoDetectEditingKits);
+        }
+        if ui.button("Refresh Status").clicked() {
+            s.effects.push(SettingsCommand::RefreshEditingKitStatus);
+        }
+    });
+    ui.add_space(6.0);
+
+    if s.prefs.custom_editing_kit_profiles.is_empty() {
+        ui.label(RichText::new("No editing kits configured").color(subtle_dark()));
+    }
+    for profile in s.prefs.custom_editing_kit_profiles.clone() {
+        let validation = s.kit_tools.editing_kit_validation.custom(&profile.id);
+        let warning = s
+            .kit_tools.editing_kit_validation
+            .custom_icon_error(&profile.id)
+            .map(str::to_owned);
+        let texture = s.shell.workspace_banner_texture(
+            ui.ctx(),
+            &cx.model.prefs.custom_editing_kit_profiles,
+            profile.game_id(),
+            Some(&profile.id),
+        );
+        let (load, edit, remove) = ui
+            .push_id(&profile.id, |ui| {
+                editing_kit_card_with_read_only(
+                    ui,
+                    &profile.name,
+                    profile_location(&profile, validation.as_ref().ok()),
+                    texture.as_ref(),
+                    validation.as_ref().err().map(String::as_str),
+                    warning.as_deref(),
+                    Some(&profile.id),
+                    profile.read_only && !profile.is_campaign_evolved(),
+                )
+            })
+            .inner;
+        if load {
+            s.effects.push(SettingsCommand::LoadEditingKit(profile.clone()));
+        }
+        if edit {
+            s.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::from_profile(&profile));
+        }
+        if remove {
+            s.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+            });
+        }
+    }
+    let reorder = ui.ctx().data_mut(|data| {
+        let key = egui::Id::new("editing_kit_reorder_request");
+        let request = data.get_temp::<EditingKitReorderRequest>(key);
+        data.remove::<EditingKitReorderRequest>(key);
+        request
+    });
+    if let Some(request) = reorder {
+        s.effects.push(SettingsCommand::ReorderEditingKits(request));
+    }
+}
+
+fn draw_custom_editing_kit_dialog(ctx: &egui::Context, s: &mut SettingsDraw) {
+    let Some(mut draft) = s.kit_tools.custom_editing_kit_draft.take() else {
+        return;
+    };
+    let title = if draft.editing_id.is_some() {
+        "Edit Editing Kit"
+    } else {
+        "Add Editing Kit"
+    };
+    let mut open = true;
+    let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
+    let texture =
+        custom_texture.or_else(|| s.shell.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
+    let mut actions = EditingKitFormActions::default();
+    egui::Window::new(title)
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("custom_editing_kit_dialog"))
+        .title_bar(false)
+        .collapsible(false)
+        .auto_sized()
+        .default_width(window_width(ctx, 580.0))
+        .max_width(window_width(ctx, 580.0))
+        .max_height(window_height(ctx, (ctx.content_rect().height() - 32.0).max(0.0), false))
+        .scroll([false, true])
+        .show(ctx, |ui| {
+            crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
+            ui.separator();
+            egui::Frame::NONE
+                .inner_margin(ui.spacing().window_margin)
+                .show(ui, |ui| {
+                    actions = draw_editing_kit_form(ui, &mut draft, texture.as_ref());
+                });
+        });
+    let EditingKitFormActions {
+        save,
+        cancel,
+        remove,
+    } = actions;
+
+    if remove {
+        s.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+            id: draft.editing_id.clone().unwrap(),
+            name: draft.name.clone(),
+        });
+        open = false;
+    }
+    if cancel {
+        open = false;
+    }
+    if save && open {
+        // Committed once drawn; a draft the commit refuses comes back with
+        // its reason, keeping the dialog up.
+        s.effects.push(SettingsCommand::CommitEditingKitDraft(draft));
+    } else if open {
+        s.kit_tools.custom_editing_kit_draft = Some(draft);
+    }
+}
+
+fn draw_custom_editing_kit_removal_dialog(ctx: &egui::Context, s: &mut SettingsDraw) {
+    let Some(removal) = s.kit_tools.custom_editing_kit_removal.clone() else {
+        return;
+    };
+    let mut open = true;
+    let mut confirm = false;
+    let mut cancel = false;
+    egui::Window::new("Remove Editing Kit?")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("remove_custom_editing_kit"))
+        .collapsible(false)
+        .resizable(false)
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "Remove “{}” from Baboon? Its editing-kit files will not be deleted.",
+                removal.name
+            ));
+            ui.horizontal(|ui| {
+                confirm = ui.button("Remove").clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+    if confirm {
+        s.effects.push(SettingsCommand::RemoveEditingKit(removal));
+        open = false;
+    }
+    if cancel {
+        open = false;
+    }
+    if !open {
+        s.kit_tools.custom_editing_kit_removal = None;
+    }
+}
+
+fn draw_settings_appearance_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    ui.checkbox(&mut s.prefs.dark_mode, "Dark mode");
+    ui.checkbox(&mut s.prefs.angles_in_degrees, "Angles in degrees")
+        .on_hover_text(
+            "Angle fields hold radians on disk. Guerilla and the other Halo tools show them \
+             in degrees, and so does Baboon — turn this off to read and type the stored \
+             radians instead. Field search, TSV copy/paste and the tag diff follow the same \
+             setting.",
+        );
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("UI scale").color(subtle_dark()));
+        ui.add(
+            egui::Slider::new(&mut s.shell.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+        );
+        draw_ui_scale_input(ui, &mut s.shell.pending_ui_scale);
+        if ui.button("Apply").clicked() {
+            s.prefs.ui_scale = s.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+            cx.set_status("UI scale applied");
+        }
+        if ui.button("Reset").clicked() {
+            s.shell.pending_ui_scale = DEFAULT_UI_SCALE;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Model viewport").color(subtle_dark()));
+        ui.add(
+            egui::Slider::new(
+                &mut s.prefs.model_preview_size,
+                MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
+            )
+            .show_value(false)
+            .clamping(egui::SliderClamping::Always),
+        );
+        draw_model_viewport_size_input(ui, &mut s.prefs.model_preview_size);
+        if ui.button("Reset").clicked() {
+            s.prefs.model_preview_size = DEFAULT_MODEL_PREVIEW_SIZE;
+        }
+    });
+    draw_speed_row(
+        ui,
+        "Scroll speed",
+        "How far the mouse wheel or trackpad scrolls lists and panels. \
+         100% is the original speed.",
+        &mut s.prefs.scroll_speed,
+        MIN_SCROLL_SPEED..=MAX_SCROLL_SPEED,
+        DEFAULT_SCROLL_SPEED,
+    );
+    draw_speed_row(
+        ui,
+        "Zoom speed",
+        "How fast the mouse wheel zooms the model and bitmap viewports. \
+         100% is the original speed.",
+        &mut s.prefs.zoom_speed,
+        MIN_ZOOM_SPEED..=MAX_ZOOM_SPEED,
+        DEFAULT_ZOOM_SPEED,
+    );
+}
+
+fn draw_settings_tools_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
+    ui.label(RichText::new("Blender").color(text_dark()).strong());
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Path").color(subtle_dark()));
+        let path_response = ui
+            .add(egui::TextEdit::singleline(&mut s.kit_tools.blender_path_input).desired_width(360.0));
+        if lost_focus_once(&path_response)
+            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+        {
+            let trimmed = s.kit_tools.blender_path_input.trim();
+            s.prefs.blender_path = if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed))
+            };
+            cx.set_status(if let Some(path) = &s.prefs.blender_path {
+                format!("Blender path set to {}", path.display())
+            } else {
+                "Blender path cleared".to_owned()
+            });
+        }
+        if icon_text_button(ui, ButtonIcon::Browse, "Browse...", true).clicked() {
+            s.effects.push(SettingsCommand::ChooseBlenderPath);
+        }
+        if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
+            s.prefs.blender_path = None;
+            s.kit_tools.blender_path_input.clear();
+            cx.set_status("Blender path cleared");
+        }
+    });
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(
+        RichText::new("Chimp — Unreal mappings")
+            .color(text_dark())
+            .strong(),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "USMAP files describe cooked Unreal classes and properties so Chimp can name and decode package data. Leave this blank to use Baboon's bundled Campaign Evolved mappings.",
+        )
+        .color(subtle_dark())
+        .small(),
+    );
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Path").color(subtle_dark()));
+        let path_response = ui.add(
+            egui::TextEdit::singleline(s.usmap_input)
+                .desired_width(360.0)
+                .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
+        );
+        if lost_focus_once(&path_response)
+            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+        {
+            s.effects.push(SettingsCommand::CommitChimpUsmapInput);
+        }
+        if ui.button("Browse...").clicked() {
+            s.effects.push(SettingsCommand::ChooseChimpUsmap);
+        }
+    });
+    ui.add_space(8.0);
+    ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            if s.prefs.chimp_usmap_path.is_some() && ui.button("Use bundled").clicked() {
+                s.effects.push(SettingsCommand::UseBundledUsmap);
+            }
+        },
+    );
 }
 
 fn draw_ui_scale_input(ui: &mut Ui, ui_scale: &mut f32) {

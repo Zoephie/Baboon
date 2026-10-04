@@ -113,7 +113,7 @@ impl Baboon {
         ui.label("Blender is optional. You can change any of these settings later.");
         ui.add_space(10.0);
         ui.label(RichText::new("Updates").strong());
-        self.draw_update_channel_picker(ui);
+        draw_update_channel_picker(ui, &mut self.model.prefs, &mut self.shell);
         ui.add_space(12.0);
         ui.label(RichText::new("Blender executable").strong());
         ui.horizontal(|ui| {
@@ -134,7 +134,7 @@ impl Baboon {
         });
         ui.add_space(12.0);
         ui.label(RichText::new("Tag editor").strong());
-        self.draw_nested_default_picker(ui);
+        draw_nested_default_picker(ui, &mut self.model.prefs.nested_default);
         ui.add_space(12.0);
         ui.label(RichText::new("Appearance").strong());
         ui.checkbox(&mut self.model.prefs.dark_mode, "Dark mode");

@@ -653,6 +653,8 @@ mod help_menu_tests;
 mod pane_undo_window_tests;
 #[cfg(test)]
 mod lazy_reveal_tests;
+#[cfg(test)]
+mod settings_draft_tests;
 
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
