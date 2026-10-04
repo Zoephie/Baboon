@@ -105,7 +105,7 @@ use import::ImportFeature;
 pub(in crate::app) mod mods;
 use mods::ModsFeature;
 pub(in crate::app) mod tag_ops;
-use tag_ops::*;
+use tag_ops::TagOpsFeature;
 pub(in crate::app) mod kits;
 use kits::*;
 pub(in crate::app) mod documents;

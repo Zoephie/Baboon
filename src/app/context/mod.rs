@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::tag_ops::TagOpsCommand;
 use crate::app::mods::ModsCommand;
 use crate::app::import::ImportCommand;
 use crate::app::references::ReferencesCommand;

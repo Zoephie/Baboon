@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::tag_ops::{DuplicateBackupPaths, install_root_for_paks};
 use crate::app::mods::{ClearStashConfirm, TagHistory};
 use crate::app::import::{
     BLAM_KEY, BLAM_TITLE, BlamLogKind, FolderConversionReport, ImportAnalysis, ImportSourceFacts,
