@@ -711,31 +711,39 @@ pub(in crate::app) fn is_material_shader_tag(entry: &TagEntry) -> bool {
             .ends_with(".material_shader")
 }
 
+/// Whether a tag is drawn as a shader grid: Halo 2's `shad`, or a render-method
+/// shader from Halo 3 on (`rmsh`, `rmtr`, `rmgl`, …). Decided by group tag, not
+/// by name: Halo CE's `shader_*` groups and Halo 2's `shader_template`,
+/// `shader_pass` and `shader_light_response` share the prefix but have no grid,
+/// and routing them here showed "Shader editor unavailable" over their fields
+/// and turned off Find's field filter for them.
 pub(in crate::app) fn is_shader_tag(entry: &TagEntry) -> bool {
+    let fourcc = entry.group_tag.to_be_bytes();
+    if &fourcc == b"shad" {
+        return true;
+    }
+    if !fourcc.starts_with(b"rm") {
+        return false;
+    }
     let group_name = entry.group_name.as_deref().unwrap_or_default();
-    if group_name == "render_method" || group_name.starts_with("shader") {
-        return true;
-    }
-    let display_path = entry.display_path.to_ascii_lowercase();
-    if display_path.ends_with(".shader") || display_path.contains(".shader_") {
-        return true;
-    }
-    matches!(
-        entry.group_tag,
-        tag if tag == u32::from_be_bytes(*b"rmsh")
-            || tag == u32::from_be_bytes(*b"rmtr")
-            || tag == u32::from_be_bytes(*b"rmw ")
-            || tag == u32::from_be_bytes(*b"rmfl")
-            || tag == u32::from_be_bytes(*b"rmd ")
-            || tag == u32::from_be_bytes(*b"rmhg")
-            || tag == u32::from_be_bytes(*b"rmsk")
-            || tag == u32::from_be_bytes(*b"rmct")
-            || tag == u32::from_be_bytes(*b"rmcs")
-            || tag == u32::from_be_bytes(*b"rmp ")
-            || tag == u32::from_be_bytes(*b"rmb ")
-            || tag == u32::from_be_bytes(*b"rmco")
-            || tag == u32::from_be_bytes(*b"rmlv")
-    )
+    group_name == "render_method"
+        || group_name.starts_with("shader")
+        || matches!(
+            &fourcc,
+            b"rmsh"
+                | b"rmtr"
+                | b"rmw "
+                | b"rmfl"
+                | b"rmd "
+                | b"rmhg"
+                | b"rmsk"
+                | b"rmct"
+                | b"rmcs"
+                | b"rmp "
+                | b"rmb "
+                | b"rmco"
+                | b"rmlv"
+        )
 }
 
 pub(in crate::app) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
@@ -810,3 +818,47 @@ pub(in crate::app) fn material_value_kind(value: &TagFieldData) -> &'static str 
 
 #[cfg(test)]
 mod shader_model_memo_tests;
+
+#[cfg(test)]
+mod shader_routing_tests {
+    use super::*;
+
+    fn entry(fourcc: &[u8; 4], group_name: &str) -> TagEntry {
+        TagEntry {
+            key: format!("file:a.{group_name}"),
+            display_path: format!("a.{group_name}"),
+            group_tag: u32::from_be_bytes(*fourcc),
+            group_name: Some(group_name.to_owned()),
+            location: TagEntryLocation::LooseFile(format!("a.{group_name}").into()),
+        }
+    }
+
+    /// Only groups a shader grid can be built for are routed to it. Halo CE's
+    /// shaders and Halo 2's template and pass groups are field trees, and Find
+    /// filters them like any other tag.
+    #[test]
+    fn only_grid_shaders_are_routed_to_the_shader_grid() {
+        for (fourcc, name) in [
+            (b"shad", "shader"),
+            (b"rmsh", "shader"),
+            (b"rmgl", "shader_glass"),
+            (b"rm  ", "render_method"),
+        ] {
+            assert!(is_shader_tag(&entry(fourcc, name)), "{name}");
+        }
+        for (fourcc, name) in [
+            (b"shdr", "shader"),
+            (b"soso", "shader_model"),
+            (b"senv", "shader_environment"),
+            (b"swat", "shader_transparent_water"),
+            (b"stem", "shader_template"),
+            (b"spas", "shader_pass"),
+            (b"slit", "shader_light_response"),
+            (b"rmbl", "rumble"),
+        ] {
+            let entry = entry(fourcc, name);
+            assert!(!is_shader_tag(&entry), "{name}");
+            assert!(supports_field_search(&entry), "{name}");
+        }
+    }
+}
