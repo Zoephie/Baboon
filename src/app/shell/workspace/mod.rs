@@ -444,7 +444,7 @@ impl Baboon {
         style_list_menu(ui);
         if ui.button("Run Tool...").clicked() {
             close_menu(ui);
-            self.tool_commands.open = true;
+            self.kit_tools.tool_commands.open = true;
         }
         self.draw_monitor_tools_menu(ui);
         self.draw_assets_tools_menu(ui);
@@ -731,13 +731,13 @@ impl Baboon {
         ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
         let entries = visible_editing_kit_menu_entries(
             &self.prefs.custom_editing_kit_profiles,
-            &self.editing_kit_validation,
+            &self.kit_tools.editing_kit_validation,
         );
         let total_rows = entries.len();
         for (index, entry) in entries.into_iter().enumerate() {
             match entry {
                 EditingKitMenuEntry::Custom(profile) => {
-                    let validation = self.editing_kit_validation.custom(&profile.id);
+                    let validation = self.kit_tools.editing_kit_validation.custom(&profile.id);
                     let enabled = validation.is_ok();
                     let tooltip = validation
                         .as_ref()
@@ -989,11 +989,11 @@ impl Baboon {
 
     /// The "please wait" window shown while the active kit is still indexing.
     fn draw_entry_index_wait_notice(&mut self, ctx: &egui::Context) {
-        if self.show_entry_index_wait_notice
+        if self.kit_tools.show_entry_index_wait_notice
             && (self.kits[self.active].scanning_entries
                 || self.kits[self.active].index_jobs.references_for_entry_index)
         {
-            let mut open = self.show_entry_index_wait_notice;
+            let mut open = self.kit_tools.show_entry_index_wait_notice;
             let mut hide_notice = false;
             egui::Window::new("Indexing")
                 .collapsible(false)
@@ -1054,7 +1054,7 @@ impl Baboon {
                         hide_notice = true;
                     }
                 });
-            self.show_entry_index_wait_notice = open && !hide_notice;
+            self.kit_tools.show_entry_index_wait_notice = open && !hide_notice;
         }
     }
 
@@ -1113,34 +1113,34 @@ impl Baboon {
                                         )
                                         .clicked()
                                         {
-                                            self.terminal.lines.clear();
+                                            self.kit_tools.terminal.lines.clear();
                                         }
                                         let open_log_enabled =
-                                            self.terminal.last_log_path.is_some();
+                                            self.kit_tools.terminal.last_log_path.is_some();
                                         let mut open_log_button = ui.add_enabled(
                                             open_log_enabled,
                                             egui::Button::new(
                                                 RichText::new("Open full log").small(),
                                             ),
                                         );
-                                        if let Some(path) = self.terminal.last_log_path.as_ref() {
+                                        if let Some(path) = self.kit_tools.terminal.last_log_path.as_ref() {
                                             open_log_button = open_log_button
                                                 .on_hover_text(path.display().to_string());
                                         }
                                         if open_log_button.clicked()
-                                            && let Some(path) = self.terminal.last_log_path.clone()
+                                            && let Some(path) = self.kit_tools.terminal.last_log_path.clone()
                                             && let Err(error) = open_terminal_log(&path)
                                         {
                                             self.status = error;
                                         }
-                                        if self.terminal.running {
-                                            if self.terminal.process.is_some()
+                                        if self.kit_tools.terminal.running {
+                                            if self.kit_tools.terminal.process.is_some()
                                                 && ui.small_button("Stop").clicked()
                                             {
                                                 self.stop_terminal_command();
                                             }
                                             let running_label = self
-                                                .terminal
+                                                .kit_tools.terminal
                                                 .running_command
                                                 .as_deref()
                                                 .unwrap_or("running...");
@@ -1171,22 +1171,22 @@ impl Baboon {
                                 let button_w = 52.0;
                                 let text_w = (ui.available_width() - button_w - 8.0).max(40.0);
                                 let resp = ui.add_enabled(
-                                    !self.terminal.running,
-                                    egui::TextEdit::singleline(&mut self.terminal.input)
+                                    !self.kit_tools.terminal.running,
+                                    egui::TextEdit::singleline(&mut self.kit_tools.terminal.input)
                                         .desired_width(text_w)
                                         .font(egui::TextStyle::Monospace)
                                         .hint_text(placeholder_text("tool <command> …")),
                                 );
-                                if self.terminal.refocus_input && !self.terminal.running {
+                                if self.kit_tools.terminal.refocus_input && !self.kit_tools.terminal.running {
                                     resp.request_focus();
-                                    self.terminal.refocus_input = false;
+                                    self.kit_tools.terminal.refocus_input = false;
                                 }
                                 let run_clicked = ui
-                                    .add_enabled(!self.terminal.running, egui::Button::new("Run"))
+                                    .add_enabled(!self.kit_tools.terminal.running, egui::Button::new("Run"))
                                     .clicked();
                                 let enter = lost_focus_once(&resp)
                                     && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                if resp.has_focus() && !self.terminal.running {
+                                if resp.has_focus() && !self.kit_tools.terminal.running {
                                     let recall = ui.input(|i| {
                                         if i.key_pressed(egui::Key::ArrowUp) {
                                             -1
@@ -1224,9 +1224,9 @@ impl Baboon {
                                 }),
                         )
                         .show(ui, |ui| {
-                            let want_scroll_bottom = self.terminal.scroll_to_bottom;
-                            self.terminal.scroll_to_bottom = false;
-                            draw_terminal_output(ui, &self.terminal.lines, want_scroll_bottom);
+                            let want_scroll_bottom = self.kit_tools.terminal.scroll_to_bottom;
+                            self.kit_tools.terminal.scroll_to_bottom = false;
+                            draw_terminal_output(ui, &self.kit_tools.terminal.lines, want_scroll_bottom);
                         });
                 });
         }

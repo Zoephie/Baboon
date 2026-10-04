@@ -250,7 +250,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "terminal",
-            &["terminal"],
+            &["kit_tools.terminal"],
             &[],
             memory_kit,
             |h| fixture::open_terminal(&mut h.app, (0..50).map(fixture::terminal_line)),
@@ -621,25 +621,25 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "settings_custom_kit_draft",
-            &["custom_editing_kit_draft"],
+            &["kit_tools.custom_editing_kit_draft"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
                 h.app.settings_tab = SettingsTab::EditingKits;
-                h.app.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
+                h.app.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
             },
             &["Editing Kit Root Folder"],
         ),
         case(
             "settings_custom_kit_removal",
-            &["custom_editing_kit_removal"],
+            &["kit_tools.custom_editing_kit_removal"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
                 h.app.settings_open = true;
                 h.app.settings_tab = SettingsTab::EditingKits;
-                h.app.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+                h.app.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
                     id: "smoke".to_owned(),
                     name: "Smoke Kit".to_owned(),
                 });
@@ -662,10 +662,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tool_commands",
-            &["tool_commands"],
+            &["kit_tools.tool_commands"],
             &["kits/tool_commands_window.rs"],
             loose_kit,
-            |h| h.app.tool_commands.open = true,
+            |h| h.app.kit_tools.tool_commands.open = true,
             &["Tool Commands"],
         ),
         case(
@@ -876,11 +876,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "entry_index_wait_notice",
-            &["show_entry_index_wait_notice"],
+            &["kit_tools.show_entry_index_wait_notice"],
             &["shell/workspace/mod.rs"],
             memory_kit,
             |h| {
-                h.app.show_entry_index_wait_notice = true;
+                h.app.kit_tools.show_entry_index_wait_notice = true;
                 h.app.kits[h.app.active].scanning_entries = true;
             },
             &["Indexing"],
@@ -1402,17 +1402,17 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("poke.last_poke", "undo record"),
     ("poke.poke_direct_running", "running flag"),
     ("poke.poke_undo_running", "running flag"),
-    ("editing_kit_path_attention", "highlights a row of the Settings window"),
+    ("kit_tools.editing_kit_path_attention", "highlights a row of the Settings window"),
     ("deferred_file_action", "a queued action"),
     ("restored_active_kit", "session restore bookkeeping"),
     ("reveal_target", "a one-shot browser request"),
     ("search.field_value_searching", "running flag of the field value search"),
-    ("kit_tool_drag", "drag-and-drop tracker"),
+    ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),
     ("export.pending_sound_extract", "a queued request"),
     ("pending_ce_sound_ref", "a queued request"),
     ("pending_open", "a queued request"),
-    ("pending_tool_import", "a queued request"),
+    ("kit_tools.pending_tool_import", "a queued request"),
     ("blender_icon", "texture"),
     ("sapien_icon", "texture"),
     ("tag_test_icon", "texture"),

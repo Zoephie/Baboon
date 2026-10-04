@@ -5,7 +5,7 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_tool_commands_window(&mut self, ctx: &egui::Context) {
-        if !self.tool_commands.open {
+        if !self.kit_tools.tool_commands.open {
             return;
         }
         let game = self.source_game();
@@ -13,7 +13,7 @@ impl Baboon {
             self.ensure_tool_commands_loaded(game);
         }
 
-        let mut open = self.tool_commands.open;
+        let mut open = self.kit_tools.tool_commands.open;
         let window_size = self
             .prefs
             .tool_commands_window_size
@@ -84,11 +84,11 @@ impl Baboon {
                 );
                 return;
             }
-            if let Some(error) = self.tool_commands.error.as_ref() {
+            if let Some(error) = self.kit_tools.tool_commands.error.as_ref() {
                 ui.label(RichText::new(error).color(material_delete_text()));
                 return;
             }
-            if self.tool_commands.commands.is_empty() {
+            if self.kit_tools.tool_commands.commands.is_empty() {
                 ui.label(
                     RichText::new("No tool commands documented for this game").color(subtle_dark()),
                 );
@@ -162,38 +162,38 @@ impl Baboon {
         if close_requested {
             open = false;
         }
-        self.tool_commands.open = open;
+        self.kit_tools.tool_commands.open = open;
     }
 
     pub(in crate::app) fn ensure_tool_commands_loaded(&mut self, game: GameId) {
-        if self.tool_commands.catalog_game == Some(game) {
+        if self.kit_tools.tool_commands.catalog_game == Some(game) {
             return;
         }
-        self.tool_commands.catalog_game = Some(game);
+        self.kit_tools.tool_commands.catalog_game = Some(game);
         match load_tool_commands(game) {
             Ok(commands) => {
-                self.tool_commands.error = None;
-                self.tool_commands.commands = commands;
-                self.tool_commands.selected = self
-                    .tool_commands
+                self.kit_tools.tool_commands.error = None;
+                self.kit_tools.tool_commands.commands = commands;
+                self.kit_tools.tool_commands.selected = self
+                    .kit_tools.tool_commands
                     .commands
                     .first()
                     .map(|command| command.name.clone());
-                self.tool_commands.values.clear();
-                self.tool_commands.optional_open = false;
+                self.kit_tools.tool_commands.values.clear();
+                self.kit_tools.tool_commands.optional_open = false;
             }
             Err(error) => {
-                self.tool_commands.commands.clear();
-                self.tool_commands.selected = None;
-                self.tool_commands.values.clear();
-                self.tool_commands.error = Some(error);
+                self.kit_tools.tool_commands.commands.clear();
+                self.kit_tools.tool_commands.selected = None;
+                self.kit_tools.tool_commands.values.clear();
+                self.kit_tools.tool_commands.error = Some(error);
             }
         }
     }
 
     pub(in crate::app) fn draw_tool_command_list(&mut self, ui: &mut Ui) {
         let mut categories = Vec::<String>::new();
-        for command in &self.tool_commands.commands {
+        for command in &self.kit_tools.tool_commands.commands {
             if !categories
                 .iter()
                 .any(|category| category == &command.category)
@@ -262,7 +262,7 @@ impl Baboon {
                 continue;
             }
             let commands = self
-                .tool_commands
+                .kit_tools.tool_commands
                 .commands
                 .iter()
                 .filter(|command| command.category == category)
@@ -271,11 +271,11 @@ impl Baboon {
             ui.indent(("tool_command_category", &category), |ui| {
                 for command_name in commands {
                     let selected =
-                        self.tool_commands.selected.as_deref() == Some(command_name.as_str());
+                        self.kit_tools.tool_commands.selected.as_deref() == Some(command_name.as_str());
                     if ui.selectable_label(selected, &command_name).clicked() {
-                        self.tool_commands.selected = Some(command_name);
-                        self.tool_commands.values.clear();
-                        self.tool_commands.optional_open = false;
+                        self.kit_tools.tool_commands.selected = Some(command_name);
+                        self.kit_tools.tool_commands.values.clear();
+                        self.kit_tools.tool_commands.optional_open = false;
                     }
                 }
             });
@@ -314,9 +314,9 @@ impl Baboon {
         if !optional.is_empty() {
             ui.add_space(4.0);
             egui::CollapsingHeader::new("Optional arguments")
-                .default_open(self.tool_commands.optional_open)
+                .default_open(self.kit_tools.tool_commands.optional_open)
                 .show(ui, |ui| {
-                    self.tool_commands.optional_open = true;
+                    self.kit_tools.tool_commands.optional_open = true;
                     for arg in optional {
                         self.draw_tool_command_arg(ui, &command, arg);
                     }
@@ -324,7 +324,7 @@ impl Baboon {
         }
 
         ui.add_space(12.0);
-        let preview = tool_command_preview(&command, &self.tool_commands.values);
+        let preview = tool_command_preview(&command, &self.kit_tools.tool_commands.values);
         ui.label(RichText::new("Preview").color(text_dark()).strong());
         let mut preview_text = preview.clone();
         ui.add(
@@ -334,17 +334,17 @@ impl Baboon {
                 .interactive(false),
         );
         ui.add_space(8.0);
-        let missing = tool_command_missing_required(&command, &self.tool_commands.values);
+        let missing = tool_command_missing_required(&command, &self.kit_tools.tool_commands.values);
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    missing.is_none() && !self.terminal.running,
+                    missing.is_none() && !self.kit_tools.terminal.running,
                     egui::Button::new("Run").min_size(Vec2::new(80.0, 24.0)),
                 )
                 .clicked()
             {
                 self.submit_terminal_command(preview.clone(), ctx.clone());
-                self.tool_commands.open = false;
+                self.kit_tools.tool_commands.open = false;
             }
             if let Some(missing) = missing {
                 ui.label(
@@ -356,8 +356,8 @@ impl Baboon {
     }
 
     pub(in crate::app) fn selected_tool_command(&self) -> Option<&ToolCommand> {
-        let selected = self.tool_commands.selected.as_deref()?;
-        self.tool_commands
+        let selected = self.kit_tools.tool_commands.selected.as_deref()?;
+        self.kit_tools.tool_commands
             .commands
             .iter()
             .find(|command| command.name == selected)
@@ -371,7 +371,7 @@ impl Baboon {
     ) {
         let key = tool_arg_key("", arg);
         let mut value = self
-            .tool_commands
+            .kit_tools.tool_commands
             .values
             .get(&key)
             .cloned()
@@ -456,7 +456,7 @@ impl Baboon {
         if browse_clicked && let Some(path) = self.pick_tool_command_path(arg.kind) {
             value = path;
         }
-        self.tool_commands.values.insert(key, value);
+        self.kit_tools.tool_commands.values.insert(key, value);
         if !arg.description.is_empty() {
             ui.label(RichText::new(&arg.description).color(subtle_dark()));
         }

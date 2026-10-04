@@ -14,7 +14,7 @@ fn a_failed_tag_load_names_the_tag() {
         Err("truncated".to_owned()),
     );
 
-    let line = &app.terminal.lines.last().expect("a terminal line").text;
+    let line = &app.kit_tools.terminal.lines.last().expect("a terminal line").text;
     assert_eq!(line, "Could not load objects/broken.model: truncated");
     assert_eq!(app.status, *line);
 }

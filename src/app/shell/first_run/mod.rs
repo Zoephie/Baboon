@@ -118,10 +118,10 @@ impl Baboon {
         ui.label(RichText::new("Blender executable").strong());
         ui.horizontal(|ui| {
             if ui
-                .add(egui::TextEdit::singleline(&mut self.blender_path_input).desired_width(470.0))
+                .add(egui::TextEdit::singleline(&mut self.kit_tools.blender_path_input).desired_width(470.0))
                 .changed()
             {
-                let value = self.blender_path_input.trim();
+                let value = self.kit_tools.blender_path_input.trim();
                 self.prefs.blender_path = (!value.is_empty()).then(|| PathBuf::from(value));
             }
             if ui.button("Browse...").clicked() {
@@ -129,7 +129,7 @@ impl Baboon {
             }
             if ui.button("Clear").clicked() {
                 self.prefs.blender_path = None;
-                self.blender_path_input.clear();
+                self.kit_tools.blender_path_input.clear();
             }
         });
         ui.add_space(12.0);
@@ -209,7 +209,7 @@ impl Baboon {
             .show(ui, |ui| {
                 for shortcut in EDITING_KIT_SHORTCUTS {
                     let mut input = self
-                        .editing_kit_path_inputs
+                        .kit_tools.editing_kit_path_inputs
                         .get(shortcut.game.as_str())
                         .cloned()
                         .unwrap_or_default();
@@ -269,9 +269,9 @@ impl Baboon {
 
     fn save_first_run_checkpoint(&mut self, complete: bool) -> Result<(), String> {
         let prefs = self.current_prefs();
-        save_gui_prefs(&prefs, &self.terminal_open_games, complete)?;
+        save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, complete)?;
         self.saved_prefs = prefs;
-        self.saved_terminal_open_games = self.terminal_open_games.clone();
+        self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
         Ok(())
     }
 }

@@ -735,7 +735,7 @@ impl Baboon {
             if profile.game != game.as_str() {
                 continue;
             }
-            if let Ok(layout) = self.editing_kit_validation.custom(&profile.id) {
+            if let Ok(layout) = self.kit_tools.editing_kit_validation.custom(&profile.id) {
                 if !same_recent_path(&layout.tags, current_root)
                     && !kits
                         .iter()
@@ -752,7 +752,7 @@ impl Baboon {
             if shortcut.game != game {
                 continue;
             }
-            if let Some(layout) = self.editing_kit_validation.builtin(shortcut).layout() {
+            if let Some(layout) = self.kit_tools.editing_kit_validation.builtin(shortcut).layout() {
                 if !same_recent_path(&layout.tags, current_root)
                     && !kits
                         .iter()

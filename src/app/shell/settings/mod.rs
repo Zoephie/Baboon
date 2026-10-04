@@ -743,11 +743,11 @@ impl Baboon {
                 .editing_kit_paths
                 .insert(shortcut.game.as_str().to_owned(), PathBuf::from(&trimmed));
         }
-        self.editing_kit_path_inputs
+        self.kit_tools.editing_kit_path_inputs
             .insert(shortcut.game.as_str().to_owned(), input);
-        if self.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) && !trimmed.is_empty()
+        if self.kit_tools.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) && !trimmed.is_empty()
         {
-            self.editing_kit_path_attention = None;
+            self.kit_tools.editing_kit_path_attention = None;
         }
         self.refresh_builtin_editing_kit_validation(shortcut);
     }
@@ -996,7 +996,7 @@ impl Baboon {
         );
         ui.horizontal(|ui| {
             if icon_text_button(ui, ButtonIcon::Add, "Add Editing Kit", true).clicked() {
-                self.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
+                self.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
             }
             if ui.button("Auto Detect").clicked() {
                 self.auto_detect_editing_kit_paths();
@@ -1012,9 +1012,9 @@ impl Baboon {
             ui.label(RichText::new("No editing kits configured").color(subtle_dark()));
         }
         for profile in self.prefs.custom_editing_kit_profiles.clone() {
-            let validation = self.editing_kit_validation.custom(&profile.id);
+            let validation = self.kit_tools.editing_kit_validation.custom(&profile.id);
             let warning = self
-                .editing_kit_validation
+                .kit_tools.editing_kit_validation
                 .custom_icon_error(&profile.id)
                 .map(str::to_owned);
             let texture = self.workspace_banner_texture(ui.ctx(), profile.game_id(), Some(&profile.id));
@@ -1036,10 +1036,10 @@ impl Baboon {
                 self.load_custom_editing_kit_profile(profile.clone(), ui.ctx().clone());
             }
             if edit {
-                self.custom_editing_kit_draft = Some(CustomEditingKitDraft::from_profile(&profile));
+                self.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::from_profile(&profile));
             }
             if remove {
-                self.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+                self.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
                     id: profile.id.clone(),
                     name: profile.name.clone(),
                 });
@@ -1057,14 +1057,14 @@ impl Baboon {
                 let prefs = self.current_prefs();
                 if let Err(error) = save_gui_prefs(
                     &prefs,
-                    &self.terminal_open_games,
+                    &self.kit_tools.terminal_open_games,
                     self.first_run_wizard.is_none(),
                 ) {
                     self.prefs.custom_editing_kit_profiles = previous;
                     self.status = error;
                 } else {
                     self.saved_prefs = prefs;
-                    self.saved_terminal_open_games = self.terminal_open_games.clone();
+                    self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
                     self.status = "Editing kit order saved".to_owned();
                 }
             }
@@ -1072,7 +1072,7 @@ impl Baboon {
     }
 
     fn draw_custom_editing_kit_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut draft) = self.custom_editing_kit_draft.take() else {
+        let Some(mut draft) = self.kit_tools.custom_editing_kit_draft.take() else {
             return;
         };
         let title = if draft.editing_id.is_some() {
@@ -1111,7 +1111,7 @@ impl Baboon {
         } = actions;
 
         if remove {
-            self.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+            self.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
                 id: draft.editing_id.clone().unwrap(),
                 name: draft.name.clone(),
             });
@@ -1124,7 +1124,7 @@ impl Baboon {
             open = false;
         }
         if open {
-            self.custom_editing_kit_draft = Some(draft);
+            self.kit_tools.custom_editing_kit_draft = Some(draft);
         }
     }
 
@@ -1232,7 +1232,7 @@ impl Baboon {
             self.prefs.custom_editing_kit_profiles.push(profile.clone());
         }
         let prefs = self.current_prefs();
-        if let Err(error) = save_gui_prefs(&prefs, &self.terminal_open_games, true) {
+        if let Err(error) = save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, true) {
             self.prefs.custom_editing_kit_profiles = previous_profiles;
             if previous.as_ref().and_then(|profile| profile.icon.as_ref()) != profile.icon.as_ref()
                 && let Some(icon) = &profile.icon
@@ -1244,7 +1244,7 @@ impl Baboon {
             return false;
         }
         self.saved_prefs = prefs;
-        self.saved_terminal_open_games = self.terminal_open_games.clone();
+        self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
         self.custom_editing_kit_textures.remove(&id);
         self.custom_editing_kit_texture_failures.remove(&id);
         self.refresh_editing_kit_validation();
@@ -1283,7 +1283,7 @@ impl Baboon {
     }
 
     fn draw_custom_editing_kit_removal_dialog(&mut self, ctx: &egui::Context) {
-        let Some(removal) = self.custom_editing_kit_removal.clone() else {
+        let Some(removal) = self.kit_tools.custom_editing_kit_removal.clone() else {
             return;
         };
         let mut open = true;
@@ -1313,7 +1313,7 @@ impl Baboon {
             open = false;
         }
         if !open {
-            self.custom_editing_kit_removal = None;
+            self.kit_tools.custom_editing_kit_removal = None;
         }
     }
 
@@ -1329,13 +1329,13 @@ impl Baboon {
             .custom_editing_kit_profiles
             .retain(|profile| profile.id != removal.id);
         let prefs = self.current_prefs();
-        if let Err(error) = save_gui_prefs(&prefs, &self.terminal_open_games, true) {
+        if let Err(error) = save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, true) {
             self.prefs.custom_editing_kit_profiles = previous_profiles;
             self.status = error;
             return;
         }
         self.saved_prefs = prefs;
-        self.saved_terminal_open_games = self.terminal_open_games.clone();
+        self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
         self.custom_editing_kit_textures.remove(&removal.id);
         self.custom_editing_kit_texture_failures.remove(&removal.id);
         self.refresh_editing_kit_validation();
@@ -1424,11 +1424,11 @@ impl Baboon {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Path").color(subtle_dark()));
             let path_response = ui
-                .add(egui::TextEdit::singleline(&mut self.blender_path_input).desired_width(360.0));
+                .add(egui::TextEdit::singleline(&mut self.kit_tools.blender_path_input).desired_width(360.0));
             if lost_focus_once(&path_response)
                 && ui.input(|input| input.key_pressed(egui::Key::Enter))
             {
-                let trimmed = self.blender_path_input.trim();
+                let trimmed = self.kit_tools.blender_path_input.trim();
                 self.prefs.blender_path = if trimmed.is_empty() {
                     None
                 } else {
@@ -1445,7 +1445,7 @@ impl Baboon {
             }
             if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
                 self.prefs.blender_path = None;
-                self.blender_path_input.clear();
+                self.kit_tools.blender_path_input.clear();
                 self.status = "Blender path cleared".to_owned();
             }
         });

@@ -413,23 +413,23 @@ pub(super) mod fixture {
         lines: impl IntoIterator<Item = String>,
     ) {
         app.kits[app.active].terminal_open = true;
-        app.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
-        app.terminal.scroll_to_bottom = true;
+        app.kit_tools.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
+        app.kit_tools.terminal.scroll_to_bottom = true;
     }
 
     /// One line of tool output arriving, with the app's own cap and
     /// autoscroll (see `push_terminal_line`).
     pub(in crate::app) fn push_terminal_line(app: &mut Baboon, line: String) {
-        app.terminal.lines.push(TerminalLineEntry::new(line));
-        if app.terminal.lines.len() > 20_000 {
-            let remove = app.terminal.lines.len() - 18_000;
-            app.terminal.lines.drain(..remove);
+        app.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
+        if app.kit_tools.terminal.lines.len() > 20_000 {
+            let remove = app.kit_tools.terminal.lines.len() - 18_000;
+            app.kit_tools.terminal.lines.drain(..remove);
         }
-        app.terminal.scroll_to_bottom = true;
+        app.kit_tools.terminal.scroll_to_bottom = true;
     }
 
     pub(in crate::app) fn last_terminal_line(app: &Baboon) -> Option<String> {
-        app.terminal.lines.last().map(|line| line.text.clone())
+        app.kit_tools.terminal.lines.last().map(|line| line.text.clone())
     }
 
     pub(in crate::app) fn terminal_line(index: usize) -> String {

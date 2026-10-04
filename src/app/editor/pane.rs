@@ -222,7 +222,7 @@ impl Baboon {
             ce_sound: ce_sound.as_deref(),
             ce_sound_ref_request: &mut ce_sound_ref_request,
             ce_paks_root,
-            tool_import: &mut self.pending_tool_import,
+            tool_import: &mut self.kit_tools.pending_tool_import,
             shader_ops: &mut ops.shader_ops,
             shader_param_ops: &mut ops.shader_param_ops,
             h2_shader_param_ops: &mut ops.h2_shader_param_ops,

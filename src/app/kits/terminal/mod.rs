@@ -21,15 +21,15 @@ impl Baboon {
 
     /// Applies `WorkerMessage::TerminalDone`; stale run IDs skip the rest of that loop iteration.
     pub(in crate::app) fn handle_terminal_done(&mut self, run_id: u64) -> bool {
-        if self.terminal.running_id != Some(run_id) {
+        if self.kit_tools.terminal.running_id != Some(run_id) {
             return true;
         }
-        self.terminal.running = false;
-        self.terminal.running_id = None;
-        self.terminal.running_command = None;
-        self.terminal.process = None;
-        self.terminal.scroll_to_bottom = true;
-        self.terminal.refocus_input = true;
+        self.kit_tools.terminal.running = false;
+        self.kit_tools.terminal.running_id = None;
+        self.kit_tools.terminal.running_command = None;
+        self.kit_tools.terminal.process = None;
+        self.kit_tools.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.refocus_input = true;
         false
     }
 }
@@ -462,13 +462,13 @@ mod tests;
 
 impl Baboon {
     pub(in crate::app) fn push_terminal_line(&mut self, line: String) {
-        self.terminal.lines.push(TerminalLineEntry::new(line));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
+        trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+        self.kit_tools.terminal.scroll_to_bottom = true;
     }
 
     pub(in crate::app) fn begin_terminal_command(&mut self, ctx: egui::Context) {
-        let command = self.terminal.input.trim().to_owned();
+        let command = self.kit_tools.terminal.input.trim().to_owned();
         if command.is_empty() {
             return;
         }
@@ -476,37 +476,37 @@ impl Baboon {
     }
 
     pub(in crate::app) fn submit_terminal_command(&mut self, command: String, ctx: egui::Context) {
-        if self.terminal.history.last() != Some(&command) {
-            self.terminal.history.push(command.clone());
+        if self.kit_tools.terminal.history.last() != Some(&command) {
+            self.kit_tools.terminal.history.push(command.clone());
         }
-        self.terminal.history_cursor = None;
-        self.terminal.input.clear();
-        self.terminal.refocus_input = true;
+        self.kit_tools.terminal.history_cursor = None;
+        self.kit_tools.terminal.input.clear();
+        self.kit_tools.terminal.refocus_input = true;
         self.spawn_terminal_command(command, ctx);
     }
 
     pub(in crate::app) fn recall_terminal_history(&mut self, delta: i32) {
-        let len = self.terminal.history.len();
+        let len = self.kit_tools.terminal.history.len();
         if len == 0 {
             return;
         }
 
-        let next = match self.terminal.history_cursor {
+        let next = match self.kit_tools.terminal.history_cursor {
             Some(index) => index as i32 + delta,
             None if delta < 0 => len as i32 - 1,
             None => return,
         };
 
         if next < 0 {
-            self.terminal.history_cursor = Some(0);
-            self.terminal.input = self.terminal.history[0].clone();
+            self.kit_tools.terminal.history_cursor = Some(0);
+            self.kit_tools.terminal.input = self.kit_tools.terminal.history[0].clone();
         } else if next >= len as i32 {
-            self.terminal.history_cursor = None;
-            self.terminal.input.clear();
+            self.kit_tools.terminal.history_cursor = None;
+            self.kit_tools.terminal.input.clear();
         } else {
             let next = next as usize;
-            self.terminal.history_cursor = Some(next);
-            self.terminal.input = self.terminal.history[next].clone();
+            self.kit_tools.terminal.history_cursor = Some(next);
+            self.kit_tools.terminal.input = self.kit_tools.terminal.history[next].clone();
         }
     }
 
@@ -518,7 +518,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        if self.terminal.running {
+        if self.kit_tools.terminal.running {
             self.status = "A command is already running".to_owned();
             return;
         }
@@ -529,32 +529,32 @@ impl Baboon {
         // Rewritten before it is echoed, so the terminal shows what really ran.
         let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
         self.kits[self.active].terminal_open = true;
-        self.terminal
+        self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
-        self.terminal.refocus_input = true;
-        self.terminal.running = true;
-        let run_id = self.terminal.next_run_id;
-        self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
-        self.terminal.running_id = Some(run_id);
-        self.terminal.running_command = Some(command.clone());
+        trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+        self.kit_tools.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.refocus_input = true;
+        self.kit_tools.terminal.running = true;
+        let run_id = self.kit_tools.terminal.next_run_id;
+        self.kit_tools.terminal.next_run_id = self.kit_tools.terminal.next_run_id.wrapping_add(1).max(1);
+        self.kit_tools.terminal.running_id = Some(run_id);
+        self.kit_tools.terminal.running_command = Some(command.clone());
         let mut log_file = match create_terminal_log_file(run_id, &command) {
             Ok((path, file)) => {
-                self.terminal.last_log_path = Some(path);
+                self.kit_tools.terminal.last_log_path = Some(path);
                 Some(file)
             }
             Err(error) => {
                 self.status = format!("Terminal full log unavailable: {error}");
-                self.terminal.last_log_path = None;
+                self.kit_tools.terminal.last_log_path = None;
                 None
             }
         };
         let tx = self.tx.clone();
         let child_slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
         let stop_requested = Arc::new(AtomicBool::new(false));
-        self.terminal.process = Some(TerminalProcess {
+        self.kit_tools.terminal.process = Some(TerminalProcess {
             child: Arc::clone(&child_slot),
             stop_requested: Arc::clone(&stop_requested),
         });
@@ -639,18 +639,18 @@ impl Baboon {
     }
 
     pub(in crate::app) fn stop_terminal_command(&mut self) {
-        if !self.terminal.running {
+        if !self.kit_tools.terminal.running {
             self.status = "No terminal command is running".to_owned();
             return;
         }
-        let Some(process) = self.terminal.process.as_ref() else {
+        let Some(process) = self.kit_tools.terminal.process.as_ref() else {
             self.status = "No tracked terminal process to stop".to_owned();
             return;
         };
 
         process.stop_requested.store(true, Ordering::SeqCst);
         let command = self
-            .terminal
+            .kit_tools.terminal
             .running_command
             .clone()
             .unwrap_or_else(|| "command".to_owned());
@@ -658,13 +658,13 @@ impl Baboon {
             Ok(TerminalStopResult::Stopped) => {
                 let line = format!("[stopped] {command} stopped by user");
                 let mut log_status = None;
-                if let Some(path) = self.terminal.last_log_path.as_ref()
+                if let Some(path) = self.kit_tools.terminal.last_log_path.as_ref()
                     && let Err(error) = append_terminal_log_path(path, &line)
                 {
                     log_status = Some(error);
                 }
-                self.terminal.lines.push(TerminalLineEntry::new(line));
-                trim_terminal_lines(&mut self.terminal.lines);
+                self.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.kit_tools.terminal.lines);
                 self.finish_stopped_terminal_command();
                 self.status = log_status.unwrap_or_else(|| "Terminal command stopped".to_owned());
             }
@@ -675,14 +675,14 @@ impl Baboon {
             Err(error) => {
                 let line = format!("[error] could not stop terminal command: {error}");
                 let mut log_status = None;
-                if let Some(path) = self.terminal.last_log_path.as_ref()
+                if let Some(path) = self.kit_tools.terminal.last_log_path.as_ref()
                     && let Err(log_error) = append_terminal_log_path(path, &line)
                 {
                     log_status = Some(log_error);
                 }
-                self.terminal.lines.push(TerminalLineEntry::new(line));
-                trim_terminal_lines(&mut self.terminal.lines);
-                self.terminal.scroll_to_bottom = true;
+                self.kit_tools.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+                self.kit_tools.terminal.scroll_to_bottom = true;
                 self.status = log_status
                     .unwrap_or_else(|| format!("Could not stop terminal command: {error}"));
             }
@@ -690,12 +690,12 @@ impl Baboon {
     }
 
     pub(in crate::app) fn finish_stopped_terminal_command(&mut self) {
-        self.terminal.running = false;
-        self.terminal.running_id = None;
-        self.terminal.running_command = None;
-        self.terminal.process = None;
-        self.terminal.scroll_to_bottom = true;
-        self.terminal.refocus_input = true;
+        self.kit_tools.terminal.running = false;
+        self.kit_tools.terminal.running_id = None;
+        self.kit_tools.terminal.running_command = None;
+        self.kit_tools.terminal.process = None;
+        self.kit_tools.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.refocus_input = true;
     }
 
     /// Record the current terminal-open state against the loaded game so it
@@ -705,9 +705,9 @@ impl Baboon {
             return;
         };
         if self.kits[self.active].terminal_open {
-            self.terminal_open_games.insert(game.as_str().to_owned());
+            self.kit_tools.terminal_open_games.insert(game.as_str().to_owned());
         } else {
-            self.terminal_open_games.remove(game.as_str());
+            self.kit_tools.terminal_open_games.remove(game.as_str());
         }
     }
 }

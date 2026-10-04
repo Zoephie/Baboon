@@ -88,7 +88,7 @@ impl Baboon {
         let recents = self.prefs.recent_folders.clone();
         let editing_kits = visible_editing_kit_menu_entries(
             &self.prefs.custom_editing_kit_profiles,
-            &self.editing_kit_validation,
+            &self.kit_tools.editing_kit_validation,
         );
 
         egui::ScrollArea::vertical()
@@ -198,7 +198,7 @@ impl Baboon {
                                                                 profile,
                                                             ) => {
                                                                 let validation = self
-                                                                    .editing_kit_validation
+                                                                    .kit_tools.editing_kit_validation
                                                                     .custom(&profile.id);
                                                                 let enabled = validation.is_ok();
                                                                 let tooltip = validation

@@ -37,11 +37,11 @@ impl Baboon {
                     .map(|entry| entry.display_path.clone())
                     .unwrap_or_else(|| key.clone());
                 let message = format!("Could not load {name}: {error}");
-                self.terminal
+                self.kit_tools.terminal
                     .lines
                     .push(TerminalLineEntry::new(message.clone()));
-                trim_terminal_lines(&mut self.terminal.lines);
-                self.terminal.scroll_to_bottom = true;
+                trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+                self.kit_tools.terminal.scroll_to_bottom = true;
                 self.status = message;
             }
         }
@@ -57,12 +57,12 @@ impl Baboon {
     ) -> bool {
         // The terminal reset is global and must run even when the owning kit
         // has closed, so it happens before the routing check.
-        self.terminal.running = false;
-        self.terminal.running_id = None;
-        self.terminal.running_command = None;
-        self.terminal.process = None;
-        self.terminal.scroll_to_bottom = true;
-        self.terminal.refocus_input = true;
+        self.kit_tools.terminal.running = false;
+        self.kit_tools.terminal.running_id = None;
+        self.kit_tools.terminal.running_command = None;
+        self.kit_tools.terminal.process = None;
+        self.kit_tools.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.refocus_input = true;
         let Some(index) = self.resolve_kit(kit) else {
             return true;
         };

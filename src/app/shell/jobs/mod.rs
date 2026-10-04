@@ -28,7 +28,7 @@ impl Baboon {
                 } => self.handle_field_value_search_finished(stamp, query, result),
                 WorkerMessage::ScenarioPalettesRead { game, palettes } => {
                     let table = palettes.map_or(PaletteTable::Unreadable, PaletteTable::Ready);
-                    self.kit_tool_drag.palettes.insert(game, table);
+                    self.kit_tools.kit_tool_drag.palettes.insert(game, table);
                     // A drag hovering Sapien with the mouse held still gets
                     // no event of its own to redraw the palette name with.
                     ctx.request_repaint();

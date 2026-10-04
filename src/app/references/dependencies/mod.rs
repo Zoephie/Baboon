@@ -50,11 +50,11 @@ impl Baboon {
             doc.dirty.touch();
         }
         let status = report.status();
-        self.terminal
+        self.kit_tools.terminal
             .lines
             .extend(report.lines.into_iter().map(TerminalLineEntry::new));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
+        trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+        self.kit_tools.terminal.scroll_to_bottom = true;
         self.status = status;
     }
 
@@ -215,7 +215,7 @@ impl Baboon {
             total: entries.len(),
         });
         if paired_entry_index_build {
-            self.show_entry_index_wait_notice = true;
+            self.kit_tools.show_entry_index_wait_notice = true;
         }
         self.status = "Building reference index…".to_owned();
         // A build that panicked used to send nothing and leave the index

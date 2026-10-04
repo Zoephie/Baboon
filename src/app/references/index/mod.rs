@@ -25,7 +25,7 @@ impl Baboon {
                 .index_jobs
                 .references_changed_during_build,
         );
-        self.show_entry_index_wait_notice = false;
+        self.kit_tools.show_entry_index_wait_notice = false;
         if self.resolve_stamp(stamp).is_none() {
             return true;
         }
@@ -175,11 +175,11 @@ impl Baboon {
         kit.edit_buffers.clear();
         kit.find_filter_applied.clear();
         kit.generation = kit.generation.wrapping_add(1);
-        self.terminal
+        self.kit_tools.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
+        trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+        self.kit_tools.terminal.scroll_to_bottom = true;
         self.status = done.status;
         false
     }

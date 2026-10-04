@@ -40,7 +40,7 @@ fn render_reference(kit: &LooseKit, rel: &str) -> Option<String> {
 
 /// The terminal's text, one line each.
 fn terminal(app: &Baboon) -> Vec<String> {
-    app.terminal.lines.iter().map(|line| line.text.clone()).collect()
+    app.kit_tools.terminal.lines.iter().map(|line| line.text.clone()).collect()
 }
 
 fn settle(app: &mut Baboon, what: &str) {

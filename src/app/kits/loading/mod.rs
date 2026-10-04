@@ -130,7 +130,7 @@ impl Baboon {
     /// source: where its terminal runs, whether the terminal starts open for
     /// this game, and which keyword sidecar it uses.
     fn apply_loaded_source_identity(&mut self, game: Option<GameId>) {
-        let terminal_open = game.is_some_and(|game| self.terminal_open_games.contains(game.as_str()));
+        let terminal_open = game.is_some_and(|game| self.kit_tools.terminal_open_games.contains(game.as_str()));
         let kit = &mut self.kits[self.active];
         kit.terminal_work_dir = kit
             .source
@@ -203,11 +203,11 @@ impl Baboon {
                 if build_reference_index {
                     self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
                 } else {
-                    self.show_entry_index_wait_notice = false;
+                    self.kit_tools.show_entry_index_wait_notice = false;
                 }
             }
             Err(e) => {
-                self.show_entry_index_wait_notice = false;
+                self.kit_tools.show_entry_index_wait_notice = false;
                 self.status = format!("Scan failed: {e}");
             }
         }
@@ -483,7 +483,7 @@ impl Baboon {
             .iter()
             .filter(|profile| profile.has_chosen_folders())
             .find(|profile| {
-                self.editing_kit_validation
+                self.kit_tools.editing_kit_validation
                     .custom(&profile.id)
                     .is_ok_and(|layout| same_recent_path(&layout.tags, &path))
             })
@@ -817,7 +817,7 @@ impl Baboon {
             total: 0,
             matched: 0,
         });
-        self.show_entry_index_wait_notice = true;
+        self.kit_tools.show_entry_index_wait_notice = true;
         self.status = label;
         let progress_ctx = ctx.clone();
         spawn_worker(

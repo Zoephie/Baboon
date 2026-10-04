@@ -193,9 +193,6 @@ pub struct Baboon {
     /// the outcome after the status line has expired.
     last_update_check: Option<UpdateCheckResult>,
     pending_ui_scale: f32,
-    editing_kit_validation: EditingKitValidationCache,
-    custom_editing_kit_draft: Option<CustomEditingKitDraft>,
-    custom_editing_kit_removal: Option<CustomEditingKitRemoval>,
     /// The live preferences: what Settings edits and every reader consults.
     /// `browser_mode` / `browser_sort` here are only the seed a new workspace
     /// starts from — each kit keeps its own — and [`Baboon::current_prefs`]
@@ -208,10 +205,6 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
-    tool_commands: ToolCommandsUiState,
-    blender_path_input: String,
-    editing_kit_path_inputs: HashMap<String, String>,
-    editing_kit_path_attention: Option<String>,
     /// One cross-frame edit popup at a time; its embedded tag/path identity
     /// prevents applying a delayed confirmation to the newly selected tag.
     /// File-menu actions run after the editor has rendered, so an edit being
@@ -239,8 +232,6 @@ pub struct Baboon {
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     tsv_paste: Option<TsvPasteState>,
-    /// A browser drag hovering Sapien's or Guerilla's window, if one is.
-    kit_tool_drag: KitToolDragState,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -248,12 +239,6 @@ pub struct Baboon {
     /// cannot be bypassed by a new assignment site.
     status_shown: String,
     status_changed_at: f64,
-    show_entry_index_wait_notice: bool,
-    terminal: TerminalState,
-    /// Game ids (`halo3_mcc`, saved as written) for which the user has chosen to
-    /// keep the terminal open. Persisted in prefs.json and restored per kit.
-    terminal_open_games: HashSet<String>,
-    saved_terminal_open_games: HashSet<String>,
     /// When the per-frame prefs check next runs (egui time).
     prefs_next_check_at: f64,
     /// Modal close transaction; the pending action is executed only after every
@@ -278,8 +263,6 @@ pub struct Baboon {
     pending_open: Option<OpenTagRequest>,
     /// Movable Campaign Evolved tag-reference picker, when one is open.
     tag_reference_picker: Option<TagReferencePickerState>,
-    /// Pending "import geometry via tool" request from an Import button.
-    pending_tool_import: Option<ToolImportRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     blender_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
@@ -335,6 +318,10 @@ pub struct Baboon {
     /// level export prompts, the level job, writes in flight, the discard
     /// prompt and the usmap path being typed.
     pub(in crate::app) chimp: ChimpFeature,
+    /// Editing kits beyond any one workspace: their validation, the profile
+    /// being edited or removed, paths being typed, tool commands, dragging a
+    /// tag to a tool, the terminal, and a tool import waiting to start.
+    pub(in crate::app) kit_tools: KitsFeature,
 }
 
 impl Baboon {
@@ -473,23 +460,12 @@ impl Baboon {
             available_update: None,
             last_update_check: None,
             pending_ui_scale: prefs.ui_scale,
-            editing_kit_validation,
-            custom_editing_kit_draft: None,
-            custom_editing_kit_removal: None,
             saved_prefs: prefs.clone(),
             prefs: live_prefs,
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
             operation_notice: None,
-            tool_commands: ToolCommandsUiState::default(),
-            editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
-            editing_kit_path_attention: None,
-            blender_path_input: prefs
-                .blender_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
             deferred_file_action: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
@@ -508,28 +484,10 @@ impl Baboon {
             keyword_chooser_open: false,
             reveal_target: None,
             tsv_paste: None,
-            kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
-            show_entry_index_wait_notice: false,
-            terminal: TerminalState {
-                input: String::new(),
-                lines: Vec::new(),
-                history: Vec::new(),
-                history_cursor: None,
-                refocus_input: false,
-                running: false,
-                running_id: None,
-                next_run_id: 1,
-                running_command: None,
-                last_log_path: None,
-                process: None,
-                scroll_to_bottom: false,
-            },
-            saved_terminal_open_games: terminal_open_games.clone(),
             prefs_next_check_at: 0.0,
-            terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,
             block_confirm: None,
@@ -538,7 +496,6 @@ impl Baboon {
             pending_ce_sound_ref: None,
             pending_open: None,
             tag_reference_picker: None,
-            pending_tool_import: None,
             blender_icon: load_ico_texture(
                 &ctx,
                 "blender_icon",
@@ -636,6 +593,38 @@ impl Baboon {
                 chimp_level_job: None,
                 chimp_writes: HashMap::new(),
                 chimp_discard_prompt: None,
+            },
+            kit_tools: KitsFeature {
+                editing_kit_validation,
+                custom_editing_kit_draft: None,
+                custom_editing_kit_removal: None,
+                tool_commands: ToolCommandsUiState::default(),
+                editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
+                editing_kit_path_attention: None,
+                blender_path_input: prefs
+                    .blender_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                kit_tool_drag: KitToolDragState::default(),
+                show_entry_index_wait_notice: false,
+                terminal: TerminalState {
+                    input: String::new(),
+                    lines: Vec::new(),
+                    history: Vec::new(),
+                    history_cursor: None,
+                    refocus_input: false,
+                    running: false,
+                    running_id: None,
+                    next_run_id: 1,
+                    running_command: None,
+                    last_log_path: None,
+                    process: None,
+                    scroll_to_bottom: false,
+                },
+                saved_terminal_open_games: terminal_open_games.clone(),
+                terminal_open_games,
+                pending_tool_import: None,
             },
         }
     }

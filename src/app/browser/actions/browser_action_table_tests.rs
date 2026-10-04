@@ -146,7 +146,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
             && app.import.tag_import_dialog.is_none()
             && app.import.cache_import_dialog.is_none()
             && app.tag_ops.container_folder_dialog.is_none()
-            && app.pending_tool_import.is_none()
+            && app.kit_tools.pending_tool_import.is_none()
             && app.export.pending_sound_extract.is_none(),
         "a dialog opened",
     )
@@ -491,7 +491,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ReimportGeometry(kit.key(RENDER)),
             setup: no_setup,
             check: |app, _, _| {
-                let request = app.pending_tool_import.as_ref().ok_or_else(|| {
+                let request = app.kit_tools.pending_tool_import.as_ref().ok_or_else(|| {
                     format!("no tool import queued; status {:?}", app.status)
                 })?;
                 ensure(request.verb == "render", format!("verb {:?}", request.verb))?;

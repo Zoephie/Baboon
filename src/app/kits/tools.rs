@@ -97,7 +97,7 @@ impl Baboon {
         }
         if let Some(path) = dialog.pick_file() {
             self.prefs.blender_path = Some(path.clone());
-            self.blender_path_input = path.display().to_string();
+            self.kit_tools.blender_path_input = path.display().to_string();
             self.status = format!("Blender path set to {}", path.display());
         }
     }
@@ -166,11 +166,11 @@ impl Baboon {
     /// streamed to the terminal panel.
     pub(in crate::app) fn process_pending_tool_import(&mut self, ctx: &egui::Context) {
         if self.editing_kit_is_read_only(self.active) {
-            self.pending_tool_import = None;
+            self.kit_tools.pending_tool_import = None;
             self.refuse_read_only_edit(self.active);
             return;
         }
-        let Some(req) = self.pending_tool_import.take() else {
+        let Some(req) = self.kit_tools.pending_tool_import.take() else {
             return;
         };
         if self.editing_kit_root().is_none() {
@@ -199,7 +199,7 @@ impl Baboon {
             self.status = "This tag type does not support reimport".to_owned();
             return;
         };
-        self.pending_tool_import = Some(ToolImportRequest {
+        self.kit_tools.pending_tool_import = Some(ToolImportRequest {
             verb,
             source_dir: model_source_dir(&entry_rel_path(&entry)),
         });
@@ -211,7 +211,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        if self.terminal.running {
+        if self.kit_tools.terminal.running {
             self.status = "A command is already running".to_owned();
             return;
         }
@@ -243,24 +243,24 @@ impl Baboon {
             &self.active_kit_tool_folder_options(),
         );
         self.kits[self.active].terminal_open = true;
-        self.terminal
+        self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
-        self.terminal.refocus_input = true;
-        self.terminal.running = true;
+        trim_terminal_lines(&mut self.kit_tools.terminal.lines);
+        self.kit_tools.terminal.scroll_to_bottom = true;
+        self.kit_tools.terminal.refocus_input = true;
+        self.kit_tools.terminal.running = true;
         self.status = format!("Reimporting bitmap {}", entry.display_path);
-        let run_id = self.terminal.next_run_id;
-        self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
+        let run_id = self.kit_tools.terminal.next_run_id;
+        self.kit_tools.terminal.next_run_id = self.kit_tools.terminal.next_run_id.wrapping_add(1).max(1);
         let log_file = match create_terminal_log_file(run_id, &command) {
             Ok((path, file)) => {
-                self.terminal.last_log_path = Some(path);
+                self.kit_tools.terminal.last_log_path = Some(path);
                 Some(file)
             }
             Err(error) => {
                 self.status = format!("Terminal full log unavailable: {error}");
-                self.terminal.last_log_path = None;
+                self.kit_tools.terminal.last_log_path = None;
                 None
             }
         };

@@ -27,7 +27,7 @@ impl Baboon {
             return;
         };
         let status = self
-            .editing_kit_validation
+            .kit_tools.editing_kit_validation
             .refresh_builtin(shortcut, Some(&path));
         let Some(layout) = status.layout().cloned() else {
             self.prompt_for_editing_kit_path(shortcut, status.message());
@@ -103,7 +103,7 @@ impl Baboon {
             return;
         };
         let status = self
-            .editing_kit_validation
+            .kit_tools.editing_kit_validation
             .refresh_builtin(shortcut, Some(&path));
         let Some(layout) = status.layout().cloned() else {
             self.status = format!("Command line: {}", status.message());
@@ -126,7 +126,7 @@ impl Baboon {
         };
         // Command-line startup deliberately remains popup-free. Indexing still
         // runs in the background and remains visible in the status bar.
-        self.show_entry_index_wait_notice = false;
+        self.kit_tools.show_entry_index_wait_notice = false;
         let Some(source) = self.source() else {
             self.status = "Command line: the editing-kit source did not load".to_owned();
             return;
@@ -171,7 +171,7 @@ impl Baboon {
         profile: CustomEditingKitProfile,
         ctx: egui::Context,
     ) -> bool {
-        let layout = match self.editing_kit_validation.refresh_custom(&profile) {
+        let layout = match self.kit_tools.editing_kit_validation.refresh_custom(&profile) {
             Ok(layout) => layout,
             Err(error) => {
                 self.status = format!("{} is unavailable: {error}", profile.name);
@@ -330,10 +330,10 @@ impl Baboon {
             self.prefs
                 .editing_kit_paths
                 .insert(shortcut.game.as_str().to_owned(), path.clone());
-            self.editing_kit_path_inputs
+            self.kit_tools.editing_kit_path_inputs
                 .insert(shortcut.game.as_str().to_owned(), path.display().to_string());
-            if self.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) {
-                self.editing_kit_path_attention = None;
+            if self.kit_tools.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) {
+                self.kit_tools.editing_kit_path_attention = None;
             }
             self.status = format!("{} path set to {}", shortcut.label, path.display());
             self.refresh_builtin_editing_kit_validation(shortcut);
@@ -351,7 +351,7 @@ impl Baboon {
             let prefs = self.current_prefs();
             if let Err(error) = save_gui_prefs(
                 &prefs,
-                &self.terminal_open_games,
+                &self.kit_tools.terminal_open_games,
                 self.first_run_wizard.is_none(),
             ) {
                 self.prefs.custom_editing_kit_profiles = previous;
@@ -359,7 +359,7 @@ impl Baboon {
                 return;
             }
             self.saved_prefs = prefs;
-            self.saved_terminal_open_games = self.terminal_open_games.clone();
+            self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
         }
         self.refresh_editing_kit_validation();
         self.status = if added == 0 {
@@ -372,8 +372,8 @@ impl Baboon {
     pub(in crate::app) fn prompt_for_editing_kit_path(&mut self, shortcut: EditingKitShortcut, status: String) {
         self.settings_open = true;
         self.settings_tab = SettingsTab::EditingKits;
-        self.editing_kit_path_attention = Some(shortcut.game.as_str().to_owned());
-        self.editing_kit_path_inputs
+        self.kit_tools.editing_kit_path_attention = Some(shortcut.game.as_str().to_owned());
+        self.kit_tools.editing_kit_path_inputs
             .entry(shortcut.game.as_str().to_owned())
             .or_default();
         self.status = status;

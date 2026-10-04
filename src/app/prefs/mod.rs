@@ -1181,13 +1181,13 @@ impl Baboon {
     /// Write prefs if they changed; whether a write failed.
     pub(in crate::app) fn try_persist_prefs(&mut self) -> bool {
         let prefs = self.current_prefs();
-        if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
+        if prefs == self.saved_prefs && self.kit_tools.terminal_open_games == self.kit_tools.saved_terminal_open_games {
             return false;
         }
-        match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
+        match save_gui_prefs(&prefs, &self.kit_tools.terminal_open_games, true) {
             Ok(()) => {
                 self.saved_prefs = prefs;
-                self.saved_terminal_open_games = self.terminal_open_games.clone();
+                self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
                 false
             }
             Err(error) => {

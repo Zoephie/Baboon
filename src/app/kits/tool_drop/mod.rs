@@ -30,12 +30,12 @@ impl Baboon {
         // the pointer is released in, which is the frame the drop happens.
         let target = payload
             .as_ref()
-            .and_then(|_| kit_tool_under_cursor(&mut self.kit_tool_drag.executables));
+            .and_then(|_| kit_tool_under_cursor(&mut self.kit_tools.kit_tool_drag.executables));
         let cursor_id = egui::Id::new(KIT_TOOL_DROP_CURSOR);
         let (Some(payload), Some(target)) = (payload, target) else {
             ctx.data_mut(|data| data.remove_temp::<egui::CursorIcon>(cursor_id));
             if !egui::DragAndDrop::has_any_payload(ctx) {
-                self.kit_tool_drag.executables.clear();
+                self.kit_tools.kit_tool_drag.executables.clear();
             }
             self.end_kit_tool_hover(ctx);
             return;
@@ -68,13 +68,13 @@ impl Baboon {
             Ok(plan) => hover_message(target.tool, plan),
             Err(objection) => objection.clone(),
         };
-        if self.kit_tool_drag.hover.is_none() {
+        if self.kit_tools.kit_tool_drag.hover.is_none() {
             // The first frame over a tool: keep the status the drag interrupted
             // so it can come back if the drag leaves without dropping.
             let interrupted = std::mem::take(&mut self.status);
-            self.kit_tool_drag.saved_status = Some((interrupted, self.status_changed_at));
+            self.kit_tools.kit_tool_drag.saved_status = Some((interrupted, self.status_changed_at));
         }
-        self.kit_tool_drag.hover = Some(target);
+        self.kit_tools.kit_tool_drag.hover = Some(target);
         self.status = message;
     }
 
@@ -82,8 +82,8 @@ impl Baboon {
     /// somewhere else, or is about to drop. The interrupted status comes back
     /// only if it would still be showing had nothing interrupted it.
     fn end_kit_tool_hover(&mut self, ctx: &egui::Context) {
-        let left_a_tool = self.kit_tool_drag.hover.take().is_some();
-        if let Some((saved, shown_at)) = self.kit_tool_drag.saved_status.take()
+        let left_a_tool = self.kit_tools.kit_tool_drag.hover.take().is_some();
+        if let Some((saved, shown_at)) = self.kit_tools.kit_tool_drag.saved_status.take()
             && left_a_tool
             && ctx.input(|input| input.time) - shown_at < STATUS_LINGER_SECS
         {
@@ -191,8 +191,8 @@ impl Baboon {
         game: GameId,
         ctx: &egui::Context,
     ) -> Option<&[ScenarioPalette]> {
-        if !self.kit_tool_drag.palettes.contains_key(&game) {
-            self.kit_tool_drag
+        if !self.kit_tools.kit_tool_drag.palettes.contains_key(&game) {
+            self.kit_tools.kit_tool_drag
                 .palettes
                 .insert(game, PaletteTable::Loading);
             // A read that panicked used to leave the table `Loading` for the
@@ -210,7 +210,7 @@ impl Baboon {
                 },
             );
         }
-        match self.kit_tool_drag.palettes.get(&game) {
+        match self.kit_tools.kit_tool_drag.palettes.get(&game) {
             Some(PaletteTable::Ready(palettes)) => Some(palettes.as_slice()),
             _ => None,
         }

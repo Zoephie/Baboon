@@ -146,13 +146,13 @@ fn a_palette_read_that_panics_is_unreadable_not_loading() {
     let ctx = egui::Context::default();
     with_panicking_workers(|| app.scenario_palettes_for_game(GameId::Halo3, &ctx).is_none());
     assert!(matches!(
-        app.kit_tool_drag.palettes.get(&GameId::Halo3),
+        app.kit_tools.kit_tool_drag.palettes.get(&GameId::Halo3),
         Some(PaletteTable::Loading)
     ));
 
     assert!(apply_next_worker_message(&mut app), "the read answered");
     assert!(matches!(
-        app.kit_tool_drag.palettes.get(&GameId::Halo3),
+        app.kit_tools.kit_tool_drag.palettes.get(&GameId::Halo3),
         Some(PaletteTable::Unreadable)
     ));
 }

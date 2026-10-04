@@ -116,7 +116,7 @@ impl EditingKitValidationCache {
 
 impl Baboon {
     pub(in crate::app) fn refresh_editing_kit_validation(&mut self) {
-        self.editing_kit_validation.refresh(
+        self.kit_tools.editing_kit_validation.refresh(
             &self.prefs.editing_kit_paths,
             &self.prefs.custom_editing_kit_profiles,
         );
@@ -127,7 +127,7 @@ impl Baboon {
         &mut self,
         shortcut: EditingKitShortcut,
     ) -> EditingKitPathStatus {
-        self.editing_kit_validation.refresh_builtin(
+        self.kit_tools.editing_kit_validation.refresh_builtin(
             shortcut,
             self.prefs
                 .editing_kit_paths
