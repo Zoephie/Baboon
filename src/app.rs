@@ -433,26 +433,7 @@ impl Baboon {
         startup_arguments: StartupArguments,
     ) -> Self {
         let storage = crate::storage::initialize();
-        cc.egui_ctx.set_fonts(foundation_fonts());
-        cc.egui_ctx.set_style(foundation_style());
-        egui_extras::install_image_loaders(&cc.egui_ctx);
-        // A drag hovering Sapien's window asks for a copy or not-allowed
-        // cursor (see `track_kit_tool_drop`). egui's own drag-and-drop hook
-        // forces the grabbing hand at the end of every pass, so the request
-        // has to be applied from a hook registered after it, which runs later.
-        cc.egui_ctx.on_end_pass(
-            "kit_tool_drop_cursor",
-            Arc::new(|ctx| {
-                let cursor = ctx.data(|data| {
-                    data.get_temp::<egui::CursorIcon>(egui::Id::new(
-                        controller::KIT_TOOL_DROP_CURSOR,
-                    ))
-                });
-                if let Some(cursor) = cursor {
-                    ctx.set_cursor_icon(cursor);
-                }
-            }),
-        );
+        Self::configure_context(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
         let suppress_startup_popups = startup_arguments.suppresses_startup_popups();
@@ -503,6 +484,33 @@ impl Baboon {
             app.begin_check_for_updates(cc.egui_ctx.clone(), true);
         }
         app
+    }
+
+    /// Fonts, style, image loaders and end-of-pass hooks: everything the app
+    /// installs on its egui context before the first frame. Split from
+    /// [`Baboon::new`] so a headless context is set up exactly as the
+    /// window's is.
+    pub(crate) fn configure_context(ctx: &egui::Context) {
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_style(foundation_style());
+        egui_extras::install_image_loaders(ctx);
+        // A drag hovering Sapien's window asks for a copy or not-allowed
+        // cursor (see `track_kit_tool_drop`). egui's own drag-and-drop hook
+        // forces the grabbing hand at the end of every pass, so the request
+        // has to be applied from a hook registered after it, which runs later.
+        ctx.on_end_pass(
+            "kit_tool_drop_cursor",
+            Arc::new(|ctx| {
+                let cursor = ctx.data(|data| {
+                    data.get_temp::<egui::CursorIcon>(egui::Id::new(
+                        controller::KIT_TOOL_DROP_CURSOR,
+                    ))
+                });
+                if let Some(cursor) = cursor {
+                    ctx.set_cursor_icon(cursor);
+                }
+            }),
+        );
     }
 
     /// The app built from state already loaded. Split from [`Baboon::new`],

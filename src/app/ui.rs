@@ -1117,9 +1117,30 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
 }
 
 impl eframe::App for Baboon {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.run_frame(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // A quit that never asks the window to close (macOS Cmd+Q) skips the
+        // close request, which is where waiting checkpoints are otherwise flushed.
+        self.flush_all_chimp_checkpoints();
+        // The per-frame prefs write is throttled; whatever changed in the last
+        // second would otherwise be lost.
+        self.persist_prefs_if_changed();
+        self.window_state.persist_now();
+        self.persist_session_on_exit();
+    }
+}
+
+impl Baboon {
+    /// One whole application frame: everything `eframe::App::update` does.
+    /// Split out because an `eframe::Frame` cannot be built outside eframe,
+    /// and nothing here needs one — so headless tests drive exactly the
+    /// frame the window does.
+    pub(crate) fn run_frame(&mut self, ctx: &egui::Context) {
         self.window_state.observe(ctx);
-        self.draw_root_ui(ctx, frame);
+        self.draw_root_ui(ctx);
         self.run_deferred_file_action(ctx);
         // A container write whose workspace closed while it was in flight left
         // a mapping released and an Unreal package mount idle. Nothing else
@@ -1132,17 +1153,6 @@ impl eframe::App for Baboon {
         for kit_index in 0..self.kits.len() {
             self.run_due_chimp_checkpoints(kit_index, ctx);
         }
-    }
-
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // A quit that never asks the window to close (macOS Cmd+Q) skips the
-        // close request, which is where waiting checkpoints are otherwise flushed.
-        self.flush_all_chimp_checkpoints();
-        // The per-frame prefs write is throttled; whatever changed in the last
-        // second would otherwise be lost.
-        self.persist_prefs_if_changed();
-        self.window_state.persist_now();
-        self.persist_session_on_exit();
     }
 }
 

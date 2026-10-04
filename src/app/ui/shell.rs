@@ -8,7 +8,7 @@ use super::*;
 const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(200);
 
 impl Baboon {
-    pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context) {
         if self.first_run_wizard.is_some() {
             ctx.set_zoom_factor(self.prefs.ui_scale);
             set_dark_mode(self.prefs.dark_mode);
