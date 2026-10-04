@@ -429,9 +429,7 @@ impl Baboon {
                 last_mod_export_name: None,
             },
             export: ExportFeature {
-                container_dump_confirm: None,
                 container_dump_job: None,
-                extract_target: None,
                 pending_sound_extract: None,
             },
             chimp: ChimpFeature {

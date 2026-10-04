@@ -1111,11 +1111,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "container_dump_confirm",
-            &["export.container_dump_confirm"],
+            &["dialog:ContainerDumpConfirm"],
             &["export/container_dump_confirm.rs"],
             container_kit,
             |h| {
-                h.app.export.container_dump_confirm = Some(ContainerDumpConfirm {
+                h.app.dialogs.open(ContainerDumpConfirm {
                     kit: active_id(h),
                     output: PathBuf::from("/no/such/smoke-out"),
                     total: 2,
@@ -1273,11 +1273,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "extract_target",
-            &["export.extract_target"],
+            &["dialog:ExtractTargetPrompt"],
             &["export/extract_target_window/mod.rs"],
             memory_kit,
             |h| {
-                h.app.export.extract_target = Some(ExtractTargetPrompt {
+                h.app.dialogs.open(ExtractTargetPrompt {
                     key: biped_key(),
                     display_path: "objects/smoke.render_model".to_owned(),
                     kind: ExtractKind::Geometry,

@@ -138,7 +138,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
     ensure(
         app.dialogs.get::<RenameTagState>().is_none()
             && app.dialogs.get::<DeleteConfirm>().is_none()
-            && app.export.extract_target.is_none()
+            && app.dialogs.get::<ExtractTargetPrompt>().is_none()
             && app.search.query_results.is_none()
             && app.references.content_explorer.is_none()
             && app.tag_ops.folder_refactor.is_none()
@@ -439,7 +439,10 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ExtractGeometry(kit.key(MODEL)),
             setup: no_setup,
             check: |app, kit, _| {
-                let prompt = app.export.extract_target.as_ref().ok_or("no prompt")?;
+                let prompt = app
+                    .dialogs
+                    .get::<ExtractTargetPrompt>()
+                    .ok_or("no prompt")?;
                 ensure(prompt.key == kit.key(MODEL), "key")?;
                 ensure(prompt.display_path == MODEL, "display path")?;
                 ensure(matches!(prompt.kind, ExtractKind::Geometry), "kind")?;
@@ -461,7 +464,10 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ExtractAnimation(kit.key(MODEL)),
             setup: no_setup,
             check: |app, _, _| {
-                let prompt = app.export.extract_target.as_ref().ok_or("no prompt")?;
+                let prompt = app
+                    .dialogs
+                    .get::<ExtractTargetPrompt>()
+                    .ok_or("no prompt")?;
                 ensure(matches!(prompt.kind, ExtractKind::Animation), "kind")
             },
         },

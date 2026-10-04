@@ -466,7 +466,7 @@ impl Baboon {
             );
             return;
         }
-        self.export.container_dump_confirm = Some(ContainerDumpConfirm {
+        self.dialogs.open(ContainerDumpConfirm {
             kit: self.model.active_kit_id(),
             output,
             total,
@@ -557,7 +557,7 @@ impl Baboon {
         };
         let display_path = entry.display_path.clone();
         let source = self.model.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
-        self.export.extract_target = Some(ExtractTargetPrompt {
+        self.dialogs.open(ExtractTargetPrompt {
             key,
             display_path,
             kind,

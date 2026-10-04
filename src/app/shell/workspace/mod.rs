@@ -317,7 +317,6 @@ impl Baboon {
         draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
         draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
-        draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);
         draw_chimp_mesh_texture_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_texture_export_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_level_export_prompt(&cx!(self, ctx), &mut self.chimp);
@@ -341,7 +340,6 @@ impl Baboon {
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
-        draw_extract_target_window(&cx!(self, ctx), &mut self.export);
         self.dialogs.draw(&cx!(self, ctx));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
         end_wheel_gesture(ctx);

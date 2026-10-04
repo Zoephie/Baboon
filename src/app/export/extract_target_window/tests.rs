@@ -43,7 +43,7 @@ fn frame(
             events,
             ..Default::default()
         },
-        |_| draw_extract_target_window(&cx!(app, ctx), &mut app.export),
+        |_| app.dialogs.draw(&cx!(app, ctx)),
     );
     output
         .shapes
@@ -89,7 +89,7 @@ fn the_kit_s_game_is_the_default_and_marked() {
         assert_eq!(GameId::from_id(id).unwrap().generation(), Game::Halo3, "{id}");
     }
     let mut app = app();
-    app.export.extract_target = Some(prompt(Game::Halo2));
+    app.dialogs.open(prompt(Game::Halo2));
     let ctx = egui::Context::default();
     // A window lays itself out unseen on its first frame.
     frame(&mut app, &ctx, Vec::new());
@@ -103,13 +103,16 @@ fn the_kit_s_game_is_the_default_and_marked() {
 #[test]
 fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
     let mut app = app();
-    app.export.extract_target = Some(prompt(Game::Halo2));
+    app.dialogs.open(prompt(Game::Halo2));
     let ctx = egui::Context::default();
     // A window lays itself out unseen on its first frame.
     frame(&mut app, &ctx, Vec::new());
     let labels = frame(&mut app, &ctx, Vec::new());
     click(&mut app, &ctx, &labels, "Halo: Combat Evolved");
-    let state = app.export.extract_target.as_ref().expect("still open");
+    let state = app
+        .dialogs
+        .get::<ExtractTargetPrompt>()
+        .expect("still open");
     assert_eq!(state.target, Game::Halo1);
     assert_eq!(
         state.source,
@@ -127,7 +130,7 @@ fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
     );
 
     click(&mut app, &ctx, &labels, "Cancel");
-    assert!(app.export.extract_target.is_none());
+    assert!(app.dialogs.get::<ExtractTargetPrompt>().is_none());
 }
 
 /// Choosing a folder hands the extraction on as a command and closes the
@@ -136,13 +139,13 @@ fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
 fn choose_folder_sends_the_extraction_and_closes_the_window() {
     let ctx = egui::Context::default();
     let mut app = Baboon::for_test();
-    app.export.extract_target = Some(prompt(Game::Halo3));
+    app.dialogs.open(prompt(Game::Halo3));
     let mut labels = frame(&mut app, &ctx, Vec::new());
     for _ in 0..3 {
         labels = frame(&mut app, &ctx, Vec::new());
     }
     assert_eq!(app.commands.len(), 0);
     click(&mut app, &ctx, &labels, "Choose Folder…");
-    assert!(app.export.extract_target.is_none());
+    assert!(app.dialogs.get::<ExtractTargetPrompt>().is_none());
     assert_eq!(app.commands.len(), 1);
 }

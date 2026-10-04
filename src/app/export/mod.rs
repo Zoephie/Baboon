@@ -15,9 +15,7 @@ pub(super) mod scripts;
 pub(super) mod shader_source;
 pub(in crate::app) mod sound_extract;
 pub(in crate::app) mod extract_target_window;
-pub(in crate::app) use extract_target_window::draw_extract_target_window;
 pub(in crate::app) mod container_dump_confirm;
-pub(in crate::app) use container_dump_confirm::draw_container_dump_confirm_window;
 pub(in crate::app) mod extract;
 
 pub(super) use bitmap::*;
@@ -126,12 +124,8 @@ pub(in crate::app) use state::*;
 /// Export: the container dump and its confirmation, the extract target window,
 /// and a sound extraction waiting to start.
 pub(in crate::app) struct ExportFeature {
-    /// Mandatory confirmation for a bulk extraction of every shipped tag.
-    pub(in crate::app) container_dump_confirm: Option<ContainerDumpConfirm>,
     /// The one bulk container extraction allowed to run at a time.
     pub(in crate::app) container_dump_job: Option<ContainerDumpJob>,
-    /// The Extract Geometry / Extract Animations target window, if open.
-    pub(in crate::app) extract_target: Option<ExtractTargetPrompt>,
     /// Pending sound-extraction batch (decode + write), drained by the audio layer.
     pub(in crate::app) pending_sound_extract: Option<ExtractRequest>,
 }

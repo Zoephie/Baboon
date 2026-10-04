@@ -22,6 +22,7 @@ pub(in crate::app) struct ContainerDumpConfirm {
 /// a folder's membership is a snapshot of the tree the user right-clicked: making
 /// the run re-walk the workspace on accept would let an import or a delete in
 /// between silently change what gets written.
+#[derive(Clone)]
 pub(in crate::app) enum ContainerDumpScope {
     /// Every `Container` entry in the workspace — the File menu action.
     AllShipped,
