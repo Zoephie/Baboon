@@ -565,6 +565,10 @@ pub(super) fn first_block(document: &ChimpDocument) -> &PropertyBlock {
         .expect("reflected")
 }
 
+/// Just inside the right edge of a default central panel on a [`Frames`]
+/// screen: where a right-aligned value widget sits.
+pub(super) const VALUE_X: f32 = 1600.0 - 8.0 - 6.0;
+
 /// Headless frames with a clock that advances and a pointer that moves the
 /// way a hand does: onto a target over several frames, so hover and hit
 /// tests (which read the previous frame) have settled before it presses.
@@ -574,6 +578,9 @@ pub(super) struct Frames {
     pointer: egui::Pos2,
     /// Where each painted text landed on the last frame.
     pub(super) labels: Vec<(String, egui::Rect)>,
+    /// Where [`Frames::click_value_of`] clicks across: [`VALUE_X`] unless
+    /// the panel is nested deeper.
+    pub(super) value_x: f32,
 }
 
 impl Frames {
@@ -583,7 +590,13 @@ impl Frames {
             time: 0.0,
             pointer: egui::Pos2::ZERO,
             labels: Vec::new(),
+            value_x: VALUE_X,
         }
+    }
+
+    /// The clock the next frame will run at.
+    pub(super) fn time(&self) -> f64 {
+        self.time
     }
 
     /// One frame of `events`, drawn by `draw`.
@@ -592,7 +605,9 @@ impl Frames {
         events: Vec<egui::Event>,
         draw: &mut dyn FnMut(&egui::Context),
     ) -> &[(String, egui::Rect)] {
-        self.time += 1.0 / 30.0;
+        // A tenth of a second, so two clicks a press apart are not a
+        // double click.
+        self.time += 0.1;
         let output = self.ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -633,10 +648,20 @@ impl Frames {
         nth: usize,
         draw: &mut dyn FnMut(&egui::Context),
     ) -> egui::Rect {
+        self.find_by(&|label| label.starts_with(text), text, nth, draw)
+    }
+
+    fn find_by(
+        &mut self,
+        matches: &dyn Fn(&str) -> bool,
+        text: &str,
+        nth: usize,
+        draw: &mut dyn FnMut(&egui::Context),
+    ) -> egui::Rect {
         let located = |labels: &[(String, egui::Rect)]| {
             labels
                 .iter()
-                .filter(|(label, _)| label.starts_with(text))
+                .filter(|(label, _)| matches(label))
                 .nth(nth)
                 .map(|(_, rect)| *rect)
         };
@@ -649,6 +674,46 @@ impl Frames {
             previous = current;
         }
         panic!("no settled `{text}` #{nth} drawn; drew {:?}", self.labels);
+    }
+
+    /// Click the `nth` painted text that is exactly `text`.
+    pub(super) fn click_exact(
+        &mut self,
+        text: &str,
+        nth: usize,
+        draw: &mut dyn FnMut(&egui::Context),
+    ) {
+        let rect = self.find_by(&|label| label == text, text, nth, draw);
+        self.slide_to(rect.center(), draw);
+        self.press(egui::PointerButton::Primary, draw);
+    }
+
+    /// Right-click the first painted text that is exactly `text`.
+    pub(super) fn right_click_exact(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+        let rect = self.find_by(&|label| label == text, text, 0, draw);
+        self.slide_to(rect.center(), draw);
+        self.press(egui::PointerButton::Secondary, draw);
+    }
+
+    /// Click the value widget on the row labelled exactly `label`, which a
+    /// property row right-aligns against the panel's edge.
+    pub(super) fn click_value_of(&mut self, label: &str, draw: &mut dyn FnMut(&egui::Context)) {
+        let rect = self.find_by(&|text| text == label, label, 0, draw);
+        self.slide_to(egui::pos2(self.value_x, rect.center().y), draw);
+        self.press(egui::PointerButton::Primary, draw);
+    }
+
+    /// Type over the value on the row labelled `label` and press Enter.
+    pub(super) fn enter_value_of(
+        &mut self,
+        label: &str,
+        text: &str,
+        draw: &mut dyn FnMut(&egui::Context),
+    ) {
+        self.click_value_of(label, draw);
+        self.replace_text(text, draw);
+        self.key(egui::Key::Enter, egui::Modifiers::NONE, draw);
+        self.frame(Vec::new(), draw);
     }
 
     /// Move onto `target` over three frames.
@@ -684,6 +749,41 @@ impl Frames {
 
     pub(super) fn click(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
         self.click_nth(text, 0, draw);
+    }
+
+    /// Click at `pos`, which need not be on any text.
+    pub(super) fn click_at(&mut self, pos: egui::Pos2, draw: &mut dyn FnMut(&egui::Context)) {
+        self.slide_to(pos, draw);
+        self.press(egui::PointerButton::Primary, draw);
+    }
+
+    /// Type `text` into whatever has focus.
+    pub(super) fn type_text(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+        self.frame(vec![egui::Event::Text(text.to_owned())], draw);
+    }
+
+    pub(super) fn key(
+        &mut self,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+        draw: &mut dyn FnMut(&egui::Context),
+    ) {
+        self.frame(
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            draw,
+        );
+    }
+
+    /// Select everything in the focused text box and replace it with `text`.
+    pub(super) fn replace_text(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+        self.key(egui::Key::A, egui::Modifiers::COMMAND, draw);
+        self.type_text(text, draw);
     }
 }
 

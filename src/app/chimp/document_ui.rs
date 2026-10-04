@@ -849,6 +849,203 @@ fn draw_chimp_json_document(
 mod tests {
     use super::*;
 
+    fn draw_pane<'a>(app: &'a mut Baboon, package: &'a str) -> impl FnMut(&egui::Context) + 'a {
+        move |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.draw_chimp_document_pane(ui, 0, package, "test");
+            });
+        }
+    }
+
+    fn draw_tiles(app: &mut Baboon) -> impl FnMut(&egui::Context) + '_ {
+        move |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.draw_chimp_tiles(ui, ctx, 0);
+            });
+        }
+    }
+
+    /// A clean package's pane: what it is, where it lives, its views, and a
+    /// save button that does nothing until something changes.
+    #[test]
+    fn a_clean_pane_describes_the_package_and_offers_its_views() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let bytes = app.kits[0].chimp.documents[THING].original.len();
+        let mut frames = Frames::new();
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
+        let utoc = install.root.join("Paks").join("pakchunk0-Windows.utoc");
+        for text in [
+            THING.to_owned(),
+            format!("1 exports • 2 imports • {bytes} bytes • {}", utoc.display()),
+            "Document".to_owned(),
+            "Properties".to_owned(),
+            "Header".to_owned(),
+            "Metadata".to_owned(),
+            "Decoded Unreal package document".to_owned(),
+            "Copy JSON".to_owned(),
+        ] {
+            assert!(frames.shows(&text), "{text}");
+        }
+        assert!(!frames.shows("Texture") && !frames.shows("Mesh"));
+        frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
+        assert!(!app.has_chimp_save_dialog(), "disabled while clean");
+        assert_eq!(app.kits[0].chimp.documents[THING].edits, 0);
+    }
+
+    /// An edit made in the pane marks the document modified, counts it,
+    /// stales the derived views, and schedules a checkpoint a second out —
+    /// pushed back by the next edit.
+    #[test]
+    fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let mut frames = Frames::new();
+        frames.click_exact("Properties", 0, &mut draw_pane(&mut app, THING));
+        assert_eq!(
+            app.kits[0].chimp.documents[THING].view,
+            ChimpDocumentView::Properties
+        );
+        assert!(frames.shows("●  Thing"));
+        assert!(!app.kits[0].chimp.documents[THING].dirty);
+
+        // The editor sits in a panel nested inside the pane's own.
+        frames.value_x = VALUE_X - 8.0;
+        let before = frames.time();
+        frames.enter_value_of("Count", "42", &mut draw_pane(&mut app, THING));
+        let document = &app.kits[0].chimp.documents[THING];
+        assert!(matches!(first_value(document, "Count"), PropValue::Int(42)));
+        assert!(document.dirty);
+        assert_eq!(document.edits, 1);
+        assert!(document.document_text_dirty && document.metadata_text_dirty);
+        assert!(document.header_usage.is_none());
+        let first = document.checkpoint_due.expect("a checkpoint is scheduled");
+        assert!(
+            first > before + CHIMP_CHECKPOINT_DELAY && first <= frames.time() + CHIMP_CHECKPOINT_DELAY,
+            "{first} is a second after the edit"
+        );
+
+        frames.enter_value_of("Count", "43", &mut draw_pane(&mut app, THING));
+        let document = &app.kits[0].chimp.documents[THING];
+        assert_eq!(document.edits, 2);
+        assert!(document.checkpoint_due.unwrap() > first, "pushed back");
+
+        frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
+        assert!(app.has_chimp_save_dialog());
+    }
+
+    /// The Header view through the pane: a rename counts as an edit, and the
+    /// referrer button starts the sweep on a worker.
+    #[test]
+    fn the_header_view_edits_and_scans_through_the_pane() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let mut frames = Frames::new();
+        frames.click_exact("Header", 0, &mut draw_pane(&mut app, THING));
+        assert_eq!(
+            app.kits[0].chimp.documents[THING].view,
+            ChimpDocumentView::Header
+        );
+        frames.click_exact("Rocket", 0, &mut draw_pane(&mut app, THING));
+        frames.replace_text("Comet", &mut draw_pane(&mut app, THING));
+        frames.key(
+            egui::Key::Enter,
+            egui::Modifiers::NONE,
+            &mut draw_pane(&mut app, THING),
+        );
+        let document = &app.kits[0].chimp.documents[THING];
+        assert_eq!(document.header.name_map.names()[2], "Comet");
+        assert!(document.dirty);
+        assert_eq!(document.edits, 1);
+
+        frames.click("Referenced by", &mut draw_pane(&mut app, THING));
+        frames.click(
+            "Find packages that import this",
+            &mut draw_pane(&mut app, THING),
+        );
+        assert!(matches!(
+            app.kits[0].chimp.documents[THING].referrers,
+            ChimpReferrerState::Scanning
+        ));
+        apply_until(&mut app, |app| {
+            matches!(
+                app.kits[0].chimp.documents[THING].referrers,
+                ChimpReferrerState::Done(_)
+            )
+        });
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
+        assert!(frames.shows("No hard import, of 1 packages read"));
+    }
+
+    /// The Metadata view renders the header dump; an orphaned document says
+    /// it cannot be written back; an unloaded package says so.
+    #[test]
+    fn the_metadata_view_and_the_orphaned_and_unloaded_states() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let mut frames = Frames::new();
+        frames.click_exact("Metadata", 0, &mut draw_pane(&mut app, THING));
+        assert_eq!(
+            app.kits[0].chimp.documents[THING].view,
+            ChimpDocumentView::Metadata
+        );
+        assert!(frames.shows("Decoded package metadata"));
+        assert!(frames.shows("Copy metadata JSON"));
+
+        app.kits[0]
+            .chimp
+            .documents
+            .get_mut(THING)
+            .unwrap()
+            .orphaned = true;
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
+        assert!(frames.shows("No mounted container provides this package any more."));
+        assert!(frames.shows("1 exports • 2 imports •"));
+        assert!(
+            frames
+                .labels
+                .iter()
+                .any(|(label, _)| label.ends_with("• (no container)"))
+        );
+
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, "/Game/Test/Missing"));
+        assert!(frames.shows("This package is no longer loaded."));
+    }
+
+    /// The tab strip marks a modified package, and its menu closes what it
+    /// can: a modified package stays and the status says why.
+    #[test]
+    fn the_tab_menu_closes_clean_packages_and_keeps_modified_ones() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING, OTHER]);
+        app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
+        let mut frames = Frames::new();
+        frames.frame(Vec::new(), &mut draw_tiles(&mut app));
+        assert!(frames.shows("• Thing"));
+        assert!(frames.shows("Other"));
+
+        frames.right_click_exact("• Thing", &mut draw_tiles(&mut app));
+        frames.click_exact("Close", 0, &mut draw_tiles(&mut app));
+        assert!(app.kits[0].chimp.documents.contains_key(THING));
+        assert_eq!(
+            app.status,
+            "Save or discard modified Chimp packages before closing them."
+        );
+
+        frames.right_click_exact("• Thing", &mut draw_tiles(&mut app));
+        frames.click("Close all but this", &mut draw_tiles(&mut app));
+        assert!(!app.kits[0].chimp.documents.contains_key(OTHER));
+        assert_eq!(app.kits[0].chimp.open_packages, [THING]);
+
+        app.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = false;
+        frames.right_click_exact("Thing", &mut draw_tiles(&mut app));
+        frames.click_exact("Close all", 0, &mut draw_tiles(&mut app));
+        assert!(app.kits[0].chimp.documents.is_empty());
+        assert!(app.kits[0].chimp.open_packages.is_empty());
+        frames.frame(Vec::new(), &mut draw_tiles(&mut app));
+        assert!(frames.shows("Select a package to inspect it."));
+    }
+
     /// Frame time of the JSON pane on a 100,000-line document. Run with
     /// `--release --ignored --nocapture`. The single-label pane took 18 ms a
     /// frame; the row-virtualized one takes about 60 µs.
