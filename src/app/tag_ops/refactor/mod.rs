@@ -235,7 +235,7 @@ impl Baboon {
             ),
             None => (Vec::new(), true),
         };
-        self.tag_ops.rename_tag = Some(RenameTagState {
+        self.dialogs.open(RenameTagState {
             kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
@@ -271,11 +271,11 @@ impl Baboon {
         // container set, so return to the workspace the dialog was opened for.
         // A closed workspace drops the rename rather than moving a file in
         // whichever game is focused now.
-        let Some(kit) = self.tag_ops.rename_tag.as_ref().map(|state| state.kit) else {
+        let Some(kit) = self.dialogs.get::<RenameTagState>().map(|state| state.kit) else {
             return;
         };
         if !self.focus_navigation_kit(kit) {
-            self.tag_ops.rename_tag = None;
+            self.dialogs.close::<RenameTagState>();
             self.model.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
@@ -291,7 +291,7 @@ impl Baboon {
             is_new_container,
             whole_path_editable,
             in_place_pak,
-        )) = self.tag_ops.rename_tag.as_ref().map(|s| {
+        )) = self.dialogs.get::<RenameTagState>().map(|s| {
             (
                 s.key.clone(),
                 s.old_display.clone(),
@@ -346,7 +346,7 @@ impl Baboon {
         // A brand-new tag has no container to override — it exists only as the
         // open document, so both rename and duplicate are in-memory edits.
         if is_new_container {
-            self.tag_ops.rename_tag = None;
+            self.dialogs.close::<RenameTagState>();
             match self.apply_new_container_rename(
                 &key,
                 &new_rel,
@@ -365,7 +365,7 @@ impl Baboon {
         // `container_rename_eligibility`. Everything else keeps the overlay
         // route, which copies rather than moves and so breaks nothing.
         if in_place_pak.is_some() {
-            self.tag_ops.rename_tag = None;
+            self.dialogs.close::<RenameTagState>();
             self.begin_container_rename_in_place(&key, &new_rel, ctx.clone());
             return;
         }
@@ -373,7 +373,7 @@ impl Baboon {
         // Container tags: write an override container (rename adds a redirect,
         // duplicate does not) instead of moving a loose file.
         if is_container {
-            self.tag_ops.rename_tag = None;
+            self.dialogs.close::<RenameTagState>();
             let redirect = matches!(operation, TagNameOperation::Rename);
             match self.export_container_override(&key, Some((new_rel, redirect))) {
                 Ok(Some(path)) => {
@@ -411,7 +411,7 @@ impl Baboon {
             self.model.status = "Tag no longer exists".to_owned();
             return;
         };
-        self.tag_ops.rename_tag = None;
+        self.dialogs.close::<RenameTagState>();
         self.start_tag_rename_job(root, entry, new_rel, "Renaming tag");
     }
 

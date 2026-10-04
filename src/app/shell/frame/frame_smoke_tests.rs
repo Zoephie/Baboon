@@ -903,7 +903,7 @@ fn cases() -> Vec<Case> {
         // --- ui/dialogs/ ---
         case(
             "new_tag",
-            &["tag_ops.new_tag_open", "tag_ops.new_tag_dialog"],
+            &["dialog:NewTagDialog"],
             &["tag_ops/new_tag_window.rs"],
             loose_kit,
             |h| h.app.open_new_tag_dialog(),
@@ -911,12 +911,12 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "delete_confirm_loose",
-            &["tag_ops.delete_confirm"],
+            &["dialog:DeleteConfirm"],
             &["tag_ops/delete_confirm.rs"],
             loose_kit,
             |h| {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
-                h.app.tag_ops.delete_confirm = Some(DeleteConfirm {
+                h.app.dialogs.open(DeleteConfirm {
                     kit: active_id(h),
                     key: file_entry_key(&path),
                     display_path: "objects/weapons/rifle/rifle.biped".to_owned(),
@@ -930,11 +930,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "delete_confirm_container",
-            &["tag_ops.delete_confirm"],
+            &["dialog:DeleteConfirm"],
             &["tag_ops/delete_confirm.rs"],
             container_kit,
             |h| {
-                h.app.tag_ops.delete_confirm = Some(DeleteConfirm {
+                h.app.dialogs.open(DeleteConfirm {
                     kit: active_id(h),
                     key: ce_key(),
                     display_path: CE_TAG.to_owned(),
@@ -950,12 +950,12 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "rename_tag",
-            &["tag_ops.rename_tag"],
+            &["dialog:RenameTagState"],
             &["tag_ops/rename_tag_window.rs"],
             loose_kit,
             |h| {
                 let path = loose_root(h).join("objects/weapons/rifle/rifle.biped");
-                h.app.tag_ops.rename_tag = Some(RenameTagState {
+                h.app.dialogs.open(RenameTagState {
                     kit: active_id(h),
                     key: file_entry_key(&path),
                     old_display: "objects/weapons/rifle/rifle.biped".to_owned(),
@@ -976,11 +976,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "duplicate_tag",
-            &["tag_ops.rename_tag"],
+            &["dialog:RenameTagState"],
             &["tag_ops/rename_tag_window.rs"],
             container_kit,
             |h| {
-                h.app.tag_ops.rename_tag = Some(RenameTagState {
+                h.app.dialogs.open(RenameTagState {
                     kit: active_id(h),
                     key: ce_key(),
                     old_display: CE_TAG.to_owned(),
@@ -1126,11 +1126,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "container_duplicate_confirm",
-            &["tag_ops.container_duplicate_confirm"],
+            &["dialog:ContainerDuplicateConfirm"],
             &["tag_ops/container_duplicate_confirm.rs"],
             container_kit,
             |h| {
-                h.app.tag_ops.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
+                h.app.dialogs.open(ContainerDuplicateConfirm {
                     kit: active_id(h),
                     key: ce_key(),
                     destination_leaf: "rifle_copy".to_owned(),
@@ -1140,11 +1140,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "container_folder",
-            &["tag_ops.container_folder_dialog"],
+            &["dialog:ContainerFolderDialog"],
             &["tag_ops/container_folder_window.rs"],
             container_kit,
             |h| {
-                h.app.tag_ops.container_folder_dialog = Some(ContainerFolderDialog {
+                h.app.dialogs.open(ContainerFolderDialog {
                     kit: active_id(h),
                     parent_rel: Some("objects".to_owned()),
                     renaming: None,
@@ -1157,11 +1157,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "loose_folder_rename",
-            &["tag_ops.loose_folder_rename"],
+            &["dialog:LooseFolderRenameState"],
             &["tag_ops/loose_folder_rename_window.rs"],
             loose_kit,
             |h| {
-                h.app.tag_ops.loose_folder_rename = Some(LooseFolderRenameState {
+                h.app.dialogs.open(LooseFolderRenameState {
                     kit: active_id(h),
                     rel_path: PathBuf::from("objects/weapons/rifle"),
                     parent_display: "objects/weapons".to_owned(),
@@ -1723,7 +1723,10 @@ fn registry_problems(
 fn every_window_has_a_smoke_case() {
     let fields = baboon_fields();
     assert!(
-        fields.len() > 50 && fields.iter().any(|(name, _)| name == "tag_ops.delete_confirm"),
+        fields.len() > 50
+            && fields
+                .iter()
+                .any(|(name, _)| name == "dialog:DeleteConfirm"),
         "the field scan found {} fields; it no longer reads the struct",
         fields.len()
     );

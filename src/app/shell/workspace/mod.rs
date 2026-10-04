@@ -313,14 +313,11 @@ impl Baboon {
             &mut self.chimp.chimp_usmap_path_input,
         );
         draw_tool_commands_window(&cx!(self, ctx), &mut self.kit_tools);
-        draw_new_tag_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_import_tag_window(&cx!(self, ctx), &mut self.import);
         draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
         draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
-        draw_container_duplicate_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);
-        draw_delete_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_chimp_mesh_texture_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_texture_export_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_level_export_prompt(&cx!(self, ctx), &mut self.chimp);
@@ -344,9 +341,6 @@ impl Baboon {
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
-        draw_rename_tag_window(&cx!(self, ctx), &mut self.tag_ops);
-        draw_container_folder_window(&cx!(self, ctx), &mut self.tag_ops);
-        draw_loose_folder_rename_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_extract_target_window(&cx!(self, ctx), &mut self.export);
         self.dialogs.draw(&cx!(self, ctx));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());

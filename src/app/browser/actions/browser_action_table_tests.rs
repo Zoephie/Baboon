@@ -136,16 +136,16 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
     ensure(!outcome.worker_answered, "a worker was started")?;
     ensure(outcome.copied_text.is_empty(), "something was copied")?;
     ensure(
-        app.tag_ops.rename_tag.is_none()
-            && app.tag_ops.delete_confirm.is_none()
+        app.dialogs.get::<RenameTagState>().is_none()
+            && app.dialogs.get::<DeleteConfirm>().is_none()
             && app.export.extract_target.is_none()
             && app.search.query_results.is_none()
             && app.references.content_explorer.is_none()
             && app.tag_ops.folder_refactor.is_none()
-            && app.tag_ops.loose_folder_rename.is_none()
+            && app.dialogs.get::<LooseFolderRenameState>().is_none()
             && app.import.tag_import_dialog.is_none()
             && app.import.cache_import_dialog.is_none()
-            && app.tag_ops.container_folder_dialog.is_none()
+            && app.dialogs.get::<ContainerFolderDialog>().is_none()
             && app.kit_tools.pending_tool_import.is_none()
             && app.export.pending_sound_extract.is_none(),
         "a dialog opened",
@@ -293,7 +293,10 @@ fn cases() -> Vec<Case> {
                 app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, _, _| {
-                let state = app.tag_ops.loose_folder_rename.as_ref().ok_or("no dialog")?;
+                let state = app
+                    .dialogs
+                    .get::<LooseFolderRenameState>()
+                    .ok_or("no dialog")?;
                 ensure(state.kit == app.model.kits[0].id, "kit")?;
                 ensure(state.rel_path == Path::new(FOLDER), "rel path")?;
                 ensure(state.old_name == "props" && state.name_input == "props", "name")?;
@@ -588,7 +591,7 @@ fn cases() -> Vec<Case> {
                 app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, kit, _| {
-                let state = app.tag_ops.rename_tag.as_ref().ok_or("no dialog")?;
+                let state = app.dialogs.get::<RenameTagState>().ok_or("no dialog")?;
                 ensure(state.key == kit.key(RENDER), "key")?;
                 ensure(state.operation == TagNameOperation::Rename, "operation")?;
                 ensure(state.old_display == RENDER, "old display")?;
@@ -605,7 +608,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::DuplicateTag(kit.key(MODEL)),
             setup: no_setup,
             check: |app, _, _| {
-                let state = app.tag_ops.rename_tag.as_ref().ok_or("no dialog")?;
+                let state = app.dialogs.get::<RenameTagState>().ok_or("no dialog")?;
                 ensure(state.operation == TagNameOperation::Duplicate, "operation")?;
                 ensure(state.focus_input, "the name field takes focus")?;
                 ensure(state.referrers_unavailable, "no index")
@@ -616,7 +619,10 @@ fn cases() -> Vec<Case> {
             action: |kit| A::DeleteTag(kit.key(MODEL)),
             setup: dirty_model,
             check: |app, kit, _| {
-                let confirm = app.tag_ops.delete_confirm.as_ref().ok_or("no confirmation")?;
+                let confirm = app
+                    .dialogs
+                    .get::<DeleteConfirm>()
+                    .ok_or("no confirmation")?;
                 ensure(confirm.key == kit.key(MODEL), "key")?;
                 ensure(confirm.display_path == MODEL, "display path")?;
                 ensure(matches!(confirm.kind, DeleteKind::Loose), "loose")?;
@@ -645,10 +651,12 @@ fn cases() -> Vec<Case> {
             },
             setup: no_setup,
             check: |app, _, _| {
-                ensure(app.tag_ops.new_tag_open, "the dialog opened")?;
+                let Some(dialog) = app.dialogs.get::<NewTagDialog>() else {
+                    return ensure(false, "the dialog opened");
+                };
                 ensure(
-                    app.tag_ops.new_tag_dialog.rel_path == format!("{FOLDER}/"),
-                    format!("path {:?}", app.tag_ops.new_tag_dialog.rel_path),
+                    dialog.rel_path == format!("{FOLDER}/"),
+                    format!("path {:?}", dialog.rel_path),
                 )
             },
         },
@@ -659,7 +667,10 @@ fn cases() -> Vec<Case> {
             },
             setup: no_setup,
             check: |app, _, _| {
-                let dialog = app.tag_ops.container_folder_dialog.as_ref().ok_or("no dialog")?;
+                let dialog = app
+                    .dialogs
+                    .get::<ContainerFolderDialog>()
+                    .ok_or("no dialog")?;
                 ensure(dialog.kit == app.model.kits[0].id, "kit")?;
                 ensure(
                     dialog.parent_rel.as_deref() == Some(FOLDER),
@@ -675,7 +686,10 @@ fn cases() -> Vec<Case> {
             },
             setup: no_setup,
             check: |app, _, _| {
-                let dialog = app.tag_ops.container_folder_dialog.as_ref().ok_or("no dialog")?;
+                let dialog = app
+                    .dialogs
+                    .get::<ContainerFolderDialog>()
+                    .ok_or("no dialog")?;
                 ensure(dialog.parent_rel.as_deref() == Some("objects"), "parent")?;
                 ensure(dialog.renaming.as_deref() == Some(FOLDER), "renaming")?;
                 ensure(dialog.name_input == "props", "prefilled leaf")

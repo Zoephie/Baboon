@@ -53,6 +53,25 @@ fn opening_replaces_the_same_type_and_instance() {
     assert_eq!(host.open.len(), 3);
 }
 
+/// A dialog is taken back out of the host by its type.
+#[test]
+fn closing_hands_the_dialog_back() {
+    let mut host = DialogHost::default();
+    host.open(Other);
+    host.open(Countdown {
+        instance: 0,
+        frames: 3,
+    });
+    host.get_mut::<Countdown>().unwrap().frames = 9;
+    assert_eq!(
+        host.close::<Countdown>().map(|dialog| dialog.frames),
+        Some(9)
+    );
+    assert!(host.get::<Countdown>().is_none());
+    assert!(host.get::<Other>().is_some());
+    assert!(host.close::<Countdown>().is_none());
+}
+
 /// A dialog is found and changed by its type.
 #[test]
 fn dialogs_are_found_by_type() {

@@ -60,6 +60,16 @@ impl DialogHost {
             .find_map(|dialog| (&mut **dialog as &mut dyn Any).downcast_mut::<T>())
     }
 
+    /// Close the first open dialog of type `T`, handing it back.
+    pub(in crate::app) fn close<T: Dialog>(&mut self) -> Option<T> {
+        let index = self
+            .open
+            .iter()
+            .position(|dialog| (&**dialog as &dyn Any).is::<T>())?;
+        let dialog: Box<dyn Any> = self.open.remove(index);
+        dialog.downcast::<T>().ok().map(|dialog| *dialog)
+    }
+
     /// Draw every open dialog, dropping the ones that closed.
     pub(in crate::app) fn draw(&mut self, cx: &Ctx) {
         self.open.retain_mut(|dialog| dialog.show(cx));

@@ -368,7 +368,7 @@ impl Baboon {
             }
             _ => DeleteKind::Loose,
         };
-        self.tag_ops.delete_confirm = Some(DeleteConfirm {
+        self.dialogs.open(DeleteConfirm {
             kit,
             key: key.to_owned(),
             display_path: entry.display_path.clone(),
@@ -384,7 +384,7 @@ impl Baboon {
     /// Apply the confirmed deletion. Loose tags are moved on the spot; container
     /// tags go to a worker, because rewriting a pak's TOC is not a UI-thread job.
     pub(in crate::app) fn begin_delete_tag(&mut self, ctx: egui::Context) {
-        let Some(confirm) = self.tag_ops.delete_confirm.take() else {
+        let Some(confirm) = self.dialogs.close::<DeleteConfirm>() else {
             return;
         };
         if !self.focus_navigation_kit(confirm.kit) {

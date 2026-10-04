@@ -53,9 +53,8 @@ pub(in crate::app) struct NewTagGroup {
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct NewTagDialog {
-    /// Workspace the dialog was opened for. `None` before it is first
-    /// opened, since this dialog is always resident rather than optional.
-    pub(in crate::app) kit: Option<KitId>,
+    /// Workspace the dialog was opened for.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) game: String,
     pub(in crate::app) rel_path: String,
     pub(in crate::app) output_path: Option<PathBuf>,
@@ -71,19 +70,4 @@ pub(in crate::app) struct NewTagDialog {
     /// game's whole mapping table; it is refreshed when the group or the game
     /// changes, which is the only time it can move.
     pub(in crate::app) authorability: Option<(bool, String)>,
-}
-
-impl Default for NewTagDialog {
-    fn default() -> Self {
-        Self {
-            kit: None,
-            game: GameId::Halo3.as_str().to_owned(),
-            rel_path: String::new(),
-            output_path: None,
-            groups: Vec::new(),
-            selected_group: 0,
-            error: None,
-            authorability: None,
-        }
-    }
 }

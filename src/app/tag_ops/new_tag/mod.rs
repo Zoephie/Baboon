@@ -9,14 +9,19 @@ use crate::app::documents::saving::load_new_tag_groups;
 
 impl Baboon {
     pub(in crate::app) fn open_new_tag_dialog(&mut self) {
+        self.dialogs.open(self.new_tag_dialog());
+    }
+
+    /// A fresh New Tag dialog for the active workspace.
+    fn new_tag_dialog(&self) -> NewTagDialog {
         let default_game = self
             .model.source()
             .and_then(|source| source.game)
             .unwrap_or(GameId::Halo3)
             .as_str()
             .to_owned();
-        self.tag_ops.new_tag_dialog = NewTagDialog {
-            kit: Some(self.model.active_kit_id()),
+        let mut dialog = NewTagDialog {
+            kit: self.model.active_kit_id(),
             game: default_game,
             rel_path: String::new(),
             output_path: None,
@@ -25,117 +30,120 @@ impl Baboon {
             error: None,
             authorability: None,
         };
-        self.tag_ops.new_tag_dialog.refresh_groups(&self.model);
-        self.tag_ops.new_tag_open = true;
+        dialog.refresh_groups(&self.model);
+        dialog
     }
 
     /// Open the New Tag dialog pre-filled with a container folder (from a
     /// right-clicked folder node), leaving the leaf name for the user to type.
     pub(in crate::app) fn open_new_tag_dialog_in_folder(&mut self, folder_rel: Option<String>) {
-        self.open_new_tag_dialog();
+        let mut dialog = self.new_tag_dialog();
         if let Some(folder) = folder_rel.filter(|f| !f.is_empty()) {
             // Pre-fill the path field with the folder + a trailing slash.
-            self.tag_ops.new_tag_dialog.rel_path = format!("{}/", folder.trim_end_matches('/'));
+            dialog.rel_path = format!("{}/", folder.trim_end_matches('/'));
         }
+        self.dialogs.open(dialog);
     }
 
 
 
 
+    /// Create the tag the New Tag dialog describes. The dialog is taken out of
+    /// the host while it is, and put back — carrying the reason — when the
+    /// tag cannot be made.
     pub(in crate::app) fn create_new_tag(&mut self) {
+        let Some(mut dialog) = self.dialogs.close::<NewTagDialog>() else {
+            return;
+        };
+        if !self.create_tag_from(&mut dialog) {
+            self.dialogs.open(dialog);
+        }
+    }
+
+    /// Whether the tag `dialog` describes was created.
+    fn create_tag_from(&mut self, dialog: &mut NewTagDialog) -> bool {
         // The tag is written into the active kit's source, and nothing below
         // names a workspace, so without this the tag is created in whichever
         // game was focused when Create was pressed rather than the one the
         // dialog was opened for.
-        let dialog_kit = self.tag_ops.new_tag_dialog.kit;
-        if !dialog_kit.is_some_and(|kit| self.focus_navigation_kit(kit)) {
-            self.tag_ops.new_tag_dialog.error =
-                Some("The workspace this tag was being created in is closed".to_owned());
-            return;
+        if !self.focus_navigation_kit(dialog.kit) {
+            dialog.error = Some("The workspace this tag was being created in is closed".to_owned());
+            return false;
         }
         // Campaign Evolved containers have no loose tags folder to write into —
         if self.refuse_read_only_edit(self.model.active) {
-            return;
+            return false;
         }
         // create the tag purely in memory and let Save / Export Mod write it.
         if self.model.current_source_is_container() {
-            self.create_new_container_tag();
-            return;
+            return self.create_new_container_tag(dialog);
         }
         let Some(root) = self.model.loaded_tags_root() else {
-            self.tag_ops.new_tag_dialog.error =
+            dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
-            return;
+            return false;
         };
-        let Some(group) = self
-            .tag_ops.new_tag_dialog
-            .groups
-            .get(self.tag_ops.new_tag_dialog.selected_group)
-            .cloned()
-        else {
-            self.tag_ops.new_tag_dialog.error = Some("Choose a tag group".to_owned());
-            return;
+        let Some(group) = dialog.groups.get(dialog.selected_group).cloned() else {
+            dialog.error = Some("Choose a tag group".to_owned());
+            return false;
         };
-        let Some(output) = self.tag_ops.new_tag_dialog.output_path.clone() else {
-            self.tag_ops.new_tag_dialog.error = Some("Choose a tag name and location".to_owned());
-            return;
+        let Some(output) = dialog.output_path.clone() else {
+            dialog.error = Some("Choose a tag name and location".to_owned());
+            return false;
         };
         let output = match new_tag_output_path_from_dialog(&root, &output, &group.extension) {
             Ok((output, rel_path)) => {
-                self.tag_ops.new_tag_dialog.rel_path = rel_path;
+                dialog.rel_path = rel_path;
                 output
             }
             Err(error) => {
-                self.tag_ops.new_tag_dialog.error = Some(error);
-                return;
+                dialog.error = Some(error);
+                return false;
             }
         };
         if output.exists() {
-            self.tag_ops.new_tag_dialog.error = Some(format!("{} already exists", output.display()));
-            return;
+            dialog.error = Some(format!("{} already exists", output.display()));
+            return false;
         }
         // `TagFile::new` can only build an MCC container — it hard-codes
         // `TagContainer::Mcc` and `Endian::Le`, and nothing synthesizes a classic
         // 64-byte header. Writing one into an H1EK/H2EK tags tree produces a file
         // Guerilla cannot load, and one Baboon itself re-reads as MCC, so nothing
         // surfaces the mistake. Refuse until there is a classic constructor.
-        if CLASSIC_CONVERSION_GAMES.contains(&self.tag_ops.new_tag_dialog.game.as_str()) {
-            self.tag_ops.new_tag_dialog.error = Some(format!(
+        if CLASSIC_CONVERSION_GAMES.contains(&dialog.game.as_str()) {
+            dialog.error = Some(format!(
                 "Baboon cannot create a new {} tag: classic Halo CE and Halo 2 \
                  tags carry a 64-byte header it has no writer for, so the file \
                  would not load in the editing kit. Duplicate an existing tag \
                  instead.",
-                self.tag_ops.new_tag_dialog.game
+                dialog.game
             ));
-            return;
+            return false;
         }
         let tag = match TagFile::new(&group.schema_path) {
             Ok(mut tag) => {
-                if CONVERSION_PROFILES.contains(&self.tag_ops.new_tag_dialog.game.as_str())
-                    && let Err(error) =
-                        apply_editing_kit_mcc_header(&mut tag, &self.tag_ops.new_tag_dialog.game)
+                if CONVERSION_PROFILES.contains(&dialog.game.as_str())
+                    && let Err(error) = apply_editing_kit_mcc_header(&mut tag, &dialog.game)
                 {
-                    self.tag_ops.new_tag_dialog.error = Some(error);
-                    return;
+                    dialog.error = Some(error);
+                    return false;
                 }
                 tag
             }
             Err(error) => {
-                self.tag_ops.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
-                return;
+                dialog.error = Some(format!("Could not create tag: {error}"));
+                return false;
             }
         };
         if let Some(parent) = output.parent()
             && let Err(error) = fs::create_dir_all(parent)
         {
-            self.tag_ops.new_tag_dialog.error =
-                Some(format!("Could not create {}: {error}", parent.display()));
-            return;
+            dialog.error = Some(format!("Could not create {}: {error}", parent.display()));
+            return false;
         }
         if let Err(error) = tag.write_atomic(&output) {
-            self.tag_ops.new_tag_dialog.error =
-                Some(format!("Could not write {}: {error}", output.display()));
-            return;
+            dialog.error = Some(format!("Could not write {}: {error}", output.display()));
+            return false;
         }
 
         // Built the way the folder scan builds it, so the key is the scan's
@@ -148,66 +156,64 @@ impl Baboon {
         let entry = match loose_file_entry(&root, &output, &names) {
             Ok(Some(entry)) => entry,
             Ok(None) => {
-                self.tag_ops.new_tag_dialog.error = Some(format!(
+                dialog.error = Some(format!(
                     "Wrote {}, but it does not read back as a tag",
                     output.display()
                 ));
-                return;
+                return false;
             }
             Err(error) => {
-                self.tag_ops.new_tag_dialog.error = Some(format!(
+                dialog.error = Some(format!(
                     "Wrote {}, but could not inspect it: {error:#}",
                     output.display()
                 ));
-                return;
+                return false;
             }
         };
         self.register_created_tag(entry, tag);
-        self.tag_ops.new_tag_open = false;
         self.model.status = format!("Created {}", output.display());
+        true
     }
 
     /// Create a brand-new Campaign Evolved tag in memory (no pak write). The tag
     /// is a defaults-initialized `TagFile::new` from the group schema, registered
     /// dirty at the dialog's container-relative path; Save / Export Mod then write
     /// it via `write_new_tag_container`.
-    pub(in crate::app) fn create_new_container_tag(&mut self) {
-        let Some(group) = self
-            .tag_ops.new_tag_dialog
-            .groups
-            .get(self.tag_ops.new_tag_dialog.selected_group)
-            .cloned()
-        else {
-            self.tag_ops.new_tag_dialog.error = Some("Choose a tag group".to_owned());
-            return;
+    fn create_new_container_tag(&mut self, dialog: &mut NewTagDialog) -> bool {
+        let Some(group) = dialog.groups.get(dialog.selected_group).cloned() else {
+            dialog.error = Some("Choose a tag group".to_owned());
+            return false;
         };
-        let rel = normalize_container_tag_rel(&self.tag_ops.new_tag_dialog.rel_path);
+        let rel = normalize_container_tag_rel(&dialog.rel_path);
         if rel.is_empty() {
-            self.tag_ops.new_tag_dialog.error = Some("Enter a tag path (e.g. objects/foo/bar)".to_owned());
-            return;
+            dialog.error = Some("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+            return false;
         }
         let tag = match TagFile::new(&group.schema_path) {
             Ok(mut tag) => {
                 // `TagFile::new` zeroes the whole file-header generation; the
                 // simulation expects Campaign Evolved's.
                 if let Err(error) = apply_editing_kit_mcc_header(&mut tag, GameId::CampaignEvolved.as_str()) {
-                    self.tag_ops.new_tag_dialog.error = Some(error);
-                    return;
+                    dialog.error = Some(error);
+                    return false;
                 }
                 tag
             }
             Err(error) => {
-                self.tag_ops.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
-                return;
+                dialog.error = Some(format!("Could not create tag: {error}"));
+                return false;
             }
         };
         match self.add_new_container_tag(&rel, group.group_tag, &group.name, &group.extension, tag)
         {
             Ok(()) => {
-                self.tag_ops.new_tag_open = false;
                 self.model.status = format!("Created {rel}.{} (unsaved)", group.extension);
+                true
             }
-            Err(error) => self.tag_ops.new_tag_dialog.error = Some(error),
+            Err(error) => {
+                dialog.error = Some(error);
+                false
+            }
         }
     }
 
@@ -664,6 +670,8 @@ mod campaign_new_tag_tests;
 
 #[cfg(test)]
 mod container_path_tests;
+#[cfg(test)]
+mod dialog_tests;
 
 impl NewTagDialog {
     /// Reload the groups for the selected game, and what the selected one

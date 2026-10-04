@@ -164,7 +164,7 @@ impl Baboon {
             .parent()
             .map(|parent| parent.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        self.tag_ops.loose_folder_rename = Some(LooseFolderRenameState {
+        self.dialogs.open(LooseFolderRenameState {
             kit: self.model.active_kit_id(),
             rel_path,
             parent_display,
@@ -180,7 +180,7 @@ impl Baboon {
     /// Apply the open Rename Folder dialog. Returns whether it should close:
     /// a rejected name keeps it open with the reason beside the field.
     pub(in crate::app) fn apply_loose_folder_rename(&mut self) -> bool {
-        let Some(state) = self.tag_ops.loose_folder_rename.as_ref() else {
+        let Some(state) = self.dialogs.get::<LooseFolderRenameState>() else {
             return true;
         };
         let kit = state.kit;
@@ -199,7 +199,7 @@ impl Baboon {
             return true;
         };
         let reject = |this: &mut Self, error: String| {
-            if let Some(state) = this.tag_ops.loose_folder_rename.as_mut() {
+            if let Some(state) = this.dialogs.get_mut::<LooseFolderRenameState>() {
                 state.error = Some(error);
             }
             false

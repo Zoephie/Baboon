@@ -416,17 +416,10 @@ impl Baboon {
                 import_discard_confirm: None,
             },
             tag_ops: TagOpsFeature {
-                new_tag_open: false,
-                new_tag_dialog: NewTagDialog::default(),
-                container_duplicate_confirm: None,
                 container_duplicate_running: HashSet::new(),
                 container_rename_running: HashSet::new(),
-                delete_confirm: None,
                 container_delete_running: HashSet::new(),
                 created_tags: CreatedTagLedger::load(),
-                rename_tag: None,
-                loose_folder_rename: None,
-                container_folder_dialog: None,
                 folder_refactor: None,
             },
             mods: ModsFeature {

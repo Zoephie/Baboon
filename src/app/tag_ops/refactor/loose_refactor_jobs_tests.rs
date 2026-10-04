@@ -79,13 +79,22 @@ fn renaming_a_tag_moves_it_and_rewrites_every_referrer() {
 
     app.handle_browser_action(BrowserAction::RenameTag(old_key.clone()), ctx());
     {
-        let state = app.tag_ops.rename_tag.as_mut().expect("the dialog opened");
+        let state = app
+            .dialogs
+            .get_mut::<RenameTagState>()
+            .expect("the dialog opened");
         assert_eq!(state.referrers, vec![USER.to_owned(), MODEL.to_owned()]);
         state.new_path_input = "crate_renamed".to_owned();
     }
     app.begin_rename_tag(&ctx());
-    assert!(app.tag_ops.rename_tag.is_none(), "the dialog closed");
-    assert!(app.tag_ops.folder_refactor.is_some(), "the app is locked while it runs");
+    assert!(
+        app.dialogs.get::<RenameTagState>().is_none(),
+        "the dialog closed"
+    );
+    assert!(
+        app.tag_ops.folder_refactor.is_some(),
+        "the app is locked while it runs"
+    );
     settle(&mut app, "the rename");
 
     let new_rel = "objects/props/crate_renamed.render_model";
@@ -143,10 +152,16 @@ fn a_rename_waits_for_unsaved_edits_and_for_a_running_refactor() {
     edit_field(&mut app, &key, "disappear distance", "4");
 
     app.handle_browser_action(BrowserAction::RenameTag(kit.key(BARREL)), ctx());
-    app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = "keg".to_owned();
+    app.dialogs
+        .get_mut::<RenameTagState>()
+        .unwrap()
+        .new_path_input = "keg".to_owned();
     app.begin_rename_tag(&ctx());
     assert_eq!(app.model.status, "Save or close dirty tags before renaming");
-    assert!(app.tag_ops.rename_tag.is_some(), "the dialog stays open");
+    assert!(
+        app.dialogs.get::<RenameTagState>().is_some(),
+        "the dialog stays open"
+    );
     assert!(kit.root.join(BARREL).is_file());
 
     app.model.kits[0].parsed_tags.get_mut(&key).unwrap().dirty.clear();
@@ -165,7 +180,10 @@ fn a_rename_waits_for_unsaved_edits_and_for_a_running_refactor() {
         ("sub/keg", "Enter a name only; use Move to choose a folder"),
         ("keg.model", "Enter a name without an extension"),
     ] {
-        app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = input.to_owned();
+        app.dialogs
+            .get_mut::<RenameTagState>()
+            .unwrap()
+            .new_path_input = input.to_owned();
         app.begin_rename_tag(&ctx());
         assert_eq!(app.model.status, refusal, "{input:?}");
     }
@@ -349,17 +367,27 @@ fn renaming_a_folder_moves_its_tags_and_rewrites_referrers_outside_it() {
         ctx(),
     );
     {
-        let state = app.tag_ops.loose_folder_rename.as_mut().expect("the dialog opened");
+        let state = app
+            .dialogs
+            .get_mut::<LooseFolderRenameState>()
+            .expect("the dialog opened");
         assert_eq!(state.tag_count, 3);
         assert_eq!(state.outside_referrers.as_deref(), Some(&[USER.to_owned()][..]));
         state.name_input = "Props".to_owned();
     }
     assert!(!app.apply_loose_folder_rename(), "a case-only rename keeps the dialog open");
     assert_eq!(
-        app.tag_ops.loose_folder_rename.as_ref().unwrap().error.as_deref(),
+        app.dialogs
+            .get::<LooseFolderRenameState>()
+            .unwrap()
+            .error
+            .as_deref(),
         Some("Tag paths ignore case, so changing only the case would not change any reference")
     );
-    app.tag_ops.loose_folder_rename.as_mut().unwrap().name_input = "crates".to_owned();
+    app.dialogs
+        .get_mut::<LooseFolderRenameState>()
+        .unwrap()
+        .name_input = "crates".to_owned();
     assert!(app.apply_loose_folder_rename(), "accepted");
     assert!(app.tag_ops.folder_refactor.is_some());
     settle(&mut app, "the folder rename");
@@ -505,7 +533,10 @@ fn duplicating_a_tag_copies_its_bytes_beside_it() {
     let key = kit.key(MODEL);
 
     app.handle_browser_action(BrowserAction::DuplicateTag(key.clone()), ctx());
-    app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = "crate_copy".to_owned();
+    app.dialogs
+        .get_mut::<RenameTagState>()
+        .unwrap()
+        .new_path_input = "crate_copy".to_owned();
     app.begin_rename_tag(&ctx());
 
     let copy = kit.root.join("objects/props/crate_copy.model");
@@ -518,14 +549,20 @@ fn duplicating_a_tag_copies_its_bytes_beside_it() {
     assert!(app.model.entry_for_key(&copy_key).is_some(), "registered in the browser");
     assert!(app.model.kits[0].parsed_tags.contains_key(&copy_key), "and opened clean");
     assert!(!app.model.kits[0].parsed_tags[&copy_key].dirty.is_set());
-    assert!(app.tag_ops.rename_tag.is_none());
+    assert!(app.dialogs.get::<RenameTagState>().is_none());
 
     // A name already taken is refused, and nothing is written.
     let barrel = fs::read(kit.root.join(BARREL)).unwrap();
     app.handle_browser_action(BrowserAction::DuplicateTag(key.clone()), ctx());
-    app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = "barrel".to_owned();
+    app.dialogs
+        .get_mut::<RenameTagState>()
+        .unwrap()
+        .new_path_input = "barrel".to_owned();
     app.begin_rename_tag(&ctx());
-    assert!(app.tag_ops.rename_tag.is_some(), "the dialog stays open");
+    assert!(
+        app.dialogs.get::<RenameTagState>().is_some(),
+        "the dialog stays open"
+    );
     assert_eq!(fs::read(kit.root.join(BARREL)).unwrap(), barrel);
     assert_eq!(app.model.status, "A tag with that name already exists in this source");
 }
@@ -541,7 +578,10 @@ fn duplicating_an_edited_tag_copies_the_edit_not_the_file() {
     let original = fs::read(kit.root.join(MODEL)).unwrap();
 
     app.handle_browser_action(BrowserAction::DuplicateTag(key.clone()), ctx());
-    app.tag_ops.rename_tag.as_mut().unwrap().new_path_input = "crate_edited".to_owned();
+    app.dialogs
+        .get_mut::<RenameTagState>()
+        .unwrap()
+        .new_path_input = "crate_edited".to_owned();
     app.begin_rename_tag(&ctx());
 
     let copy = TagFile::read(kit.root.join("objects/props/crate_edited.model")).unwrap();
@@ -564,7 +604,7 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
     let generation = app.model.kits[0].generation;
 
     app.handle_browser_action(BrowserAction::DeleteTag(key.clone()), ctx());
-    assert!(app.tag_ops.delete_confirm.is_some());
+    assert!(app.dialogs.get::<DeleteConfirm>().is_some());
     app.begin_delete_tag(ctx());
 
     assert!(!kit.root.join(doomed).exists());
@@ -586,6 +626,6 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
     assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
     assert_eq!(app.model.kits[0].selected_key, None);
     assert_ne!(app.model.kits[0].generation, generation);
-    assert!(app.tag_ops.delete_confirm.is_none());
+    assert!(app.dialogs.get::<DeleteConfirm>().is_none());
     let _ = fs::remove_file(destination);
 }

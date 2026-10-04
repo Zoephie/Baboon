@@ -820,7 +820,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(state) = self.tag_ops.rename_tag.as_ref() else {
+        let Some(state) = self.dialogs.get::<RenameTagState>() else {
             return;
         };
         let key = state.key.clone();
@@ -845,15 +845,15 @@ impl Baboon {
             };
         match entry.location {
             TagEntryLocation::LooseFile(_) => {
-                self.tag_ops.rename_tag = None;
+                self.dialogs.close::<RenameTagState>();
                 match self.duplicate_loose_tag(&entry, &new_leaf) {
                     Ok(()) => {}
                     Err(error) => self.model.status = error,
                 }
             }
             TagEntryLocation::Container { .. } => {
-                self.tag_ops.rename_tag = None;
-                self.tag_ops.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
+                self.dialogs.close::<RenameTagState>();
+                self.dialogs.open(ContainerDuplicateConfirm {
                     kit: self.model.active_kit_id(),
                     key,
                     destination_leaf: new_leaf,
