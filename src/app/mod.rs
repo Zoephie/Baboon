@@ -479,7 +479,6 @@ impl Baboon {
                 restoring_kits: HashSet::new(),
                 restored_active_kit: None,
                 prefs_next_check_at: 0.0,
-                last_opened_windows,
                 blender_icon: load_ico_texture(
                     &ctx,
                     "blender_icon",
@@ -502,7 +501,7 @@ impl Baboon {
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
             commands: CommandQueue::default(),
-            dialogs: DialogHost::default(),
+            dialogs: DialogHost::with_open(last_opened_windows),
             // The startup workspace is seeded like any other new kit; every
             // later one goes through `Baboon::empty_kit`.
             views: KitViews::startup(KitView::new(

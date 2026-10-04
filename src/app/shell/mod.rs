@@ -12,7 +12,6 @@ pub(in crate::app) use menus::draw_menu_bar;
 pub(in crate::app) mod jobs;
 pub(in crate::app) mod session;
 pub(in crate::app) use session::state::*;
-pub(in crate::app) use session::draw_last_opened_windows_prompt;
 pub(in crate::app) mod frame;
 pub(in crate::app) use frame::{draw_keyword_bar, draw_scenario_launcher_buttons};
 pub(in crate::app) mod workspace;
@@ -55,8 +54,6 @@ pub(in crate::app) struct ShellFeature {
     /// The most recent successful check, update or not, so Settings can report
     /// the outcome after the status line has expired.
     pub(in crate::app) last_update_check: Option<UpdateCheckResult>,
-    /// Startup-only prompt reconstructed from the prior session file.
-    pub(in crate::app) last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Kits whose session-restore load has not landed yet, and the one the
     /// session named as focused. Every load ends by making its own kit active,
     /// so the focus can only be honoured once none are outstanding.

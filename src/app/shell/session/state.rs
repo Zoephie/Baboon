@@ -173,7 +173,6 @@ pub(in crate::app) struct LastOpenedWindowsKit {
 /// folder panes are reopened through their normal paths. Restores are independent,
 /// so the kits can finish loading in any order.
 pub(in crate::app) struct LastOpenedWindowsPrompt {
-    pub(in crate::app) visible: bool,
     pub(in crate::app) kits: Vec<LastOpenedWindowsKit>,
     /// "Don't ask again": on OK, remember as Always; on Cancel, as Never.
     pub(in crate::app) dont_ask_again: bool,
@@ -305,7 +304,6 @@ impl LastOpenedWindowsPrompt {
             return None;
         }
         Some(Self {
-            visible: true,
             kits,
             dont_ask_again: false,
         })

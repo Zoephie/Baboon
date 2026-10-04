@@ -833,12 +833,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "last_opened_windows",
-            &["shell.last_opened_windows"],
+            &["dialog:LastOpenedWindowsPrompt"],
             &["shell/session/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.last_opened_windows = Some(LastOpenedWindowsPrompt {
-                    visible: true,
+                h.app.dialogs.open(LastOpenedWindowsPrompt {
                     kits: vec![LastOpenedWindowsKit {
                         source_kind: LastSessionSourceKind::LooseFolder,
                         source_path: PathBuf::from("/no/such/smoke/tags"),

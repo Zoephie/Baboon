@@ -55,6 +55,16 @@ fn key_of(dialog: &dyn Dialog) -> (TypeId, u64) {
 }
 
 impl DialogHost {
+    /// A host with `dialog` open, if there is one: what the application starts
+    /// with.
+    pub(in crate::app) fn with_open(dialog: Option<impl Dialog>) -> Self {
+        let mut host = Self::default();
+        if let Some(dialog) = dialog {
+            host.open(dialog);
+        }
+        host
+    }
+
     /// Open `dialog`, replacing an open one with the same type and instance
     /// where it stands.
     pub(in crate::app) fn open(&mut self, dialog: impl Dialog) {
