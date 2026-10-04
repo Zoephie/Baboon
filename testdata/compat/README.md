@@ -11,7 +11,7 @@ The tests feed each sample through the real reader:
   Campaign Evolved identities, the duplicate ledger, keyword sidecars
 - `src/app/tests/compat_keys.rs`: entry key spellings, index root keys, the
   index database, legacy JSON indexes
-- `src/window_state.rs` (`compat_window_state_sample`) and `src/app/chimp/session.rs`
+- `src/app/shell/window_state.rs` (`compat_window_state_sample`) and `src/app/chimp/session.rs`
   (`compat_chimp_recovery_sample`): window state, Chimp recovery
 
 Run them with `cargo test compat_`. They need no environment variables.
@@ -34,7 +34,7 @@ still load.
 | --- | --- |
 | `prefs/` | `prefs.json`: `src/app/prefs.rs` (`prefs_from_value`, `prefs_to_value`) |
 | `last_session/` | `last_session.json` v1 to v6: `parse_last_session`. `v2_kits_8f30d04.json` is a shape one commit wrote and today refuses; `v99_unknown_version.json` is refused |
-| `window_state/` | `window-state.json`: `src/window_state.rs`, `schema_version` must be 1 |
+| `window_state/` | `window-state.json`: `src/app/shell/window_state.rs`, `schema_version` must be 1 |
 | `index/` | `indexes.sqlite3`: `src/source/index.rs` |
 | `legacy_index/` | `{game}_index.json`, `{game}_reverse_dependencies.json`: migration reads in `src/source/index.rs` |
 | `keywords/` | `{game}_keywords.json`: `src/app/keywords.rs`; `*.corrupt.json` is cut short mid-write |

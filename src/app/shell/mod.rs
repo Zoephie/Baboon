@@ -46,7 +46,9 @@ use crate::app::browser::{
 };
 use std::cell::RefCell;
 
+pub(in crate::app) mod startup;
 pub(in crate::app) mod updates;
+pub(in crate::app) mod window_state;
 pub(in crate::app) mod actions;
 pub(in crate::app) use actions::AppAction;
 pub(in crate::app) mod menus;

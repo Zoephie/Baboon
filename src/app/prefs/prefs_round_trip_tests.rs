@@ -7,7 +7,7 @@ use super::*;
 fn app_with(prefs: GuiPrefs) -> Baboon {
     Baboon::assemble(
         &egui::Context::default(),
-        crate::window_state::WindowStateTracker::for_test(),
+        crate::app::shell::window_state::WindowStateTracker::for_test(),
         prefs,
         HashSet::new(),
         None,

@@ -513,7 +513,7 @@ mod folder_refactor_lock_tests {
     fn app(locked: bool) -> Baboon {
         let mut app = Baboon::assemble(
             &egui::Context::default(),
-            crate::window_state::WindowStateTracker::for_test(),
+            crate::app::shell::window_state::WindowStateTracker::for_test(),
             GuiPrefs::default(),
             HashSet::new(),
             None,

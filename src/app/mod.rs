@@ -120,7 +120,8 @@ mod context;
 use context::{CommandQueue, Ctx, cx};
 mod dialogs;
 use dialogs::{AppReads, Dialog, DialogHost, app_reads};
-pub(crate) use shell::{StartupArguments, parse_startup_arguments};
+pub(crate) use shell::startup::run;
+use shell::StartupArguments;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no
@@ -160,7 +161,7 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
 /// Subsystem modules implement focused operations on this state; this type is
 /// intentionally the composition root rather than a domain model.
 pub struct Baboon {
-    window_state: crate::window_state::WindowStateTracker,
+    window_state: crate::app::shell::window_state::WindowStateTracker,
     /// The clock eframe stamped on the latest input, kept for
     /// [`Baboon::run_logic`]: while the window is hidden eframe runs no egui
     /// pass, so egui's own clock stays at the last frame shown.
@@ -253,7 +254,7 @@ pub struct Baboon {
 impl Baboon {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        window_state: crate::window_state::WindowStateTracker,
+        window_state: crate::app::shell::window_state::WindowStateTracker,
         startup_arguments: StartupArguments,
     ) -> Self {
         let storage = crate::core::storage::initialize();
@@ -345,7 +346,7 @@ impl Baboon {
     #[allow(clippy::too_many_arguments)]
     fn assemble(
         ctx: &egui::Context,
-        window_state: crate::window_state::WindowStateTracker,
+        window_state: crate::app::shell::window_state::WindowStateTracker,
         prefs: GuiPrefs,
         terminal_open_games: HashSet<String>,
         first_run_wizard: Option<FirstRunWizardState>,
@@ -513,7 +514,7 @@ impl Baboon {
     pub(crate) fn for_test() -> Self {
         Self::assemble(
             &egui::Context::default(),
-            crate::window_state::WindowStateTracker::for_test(),
+            crate::app::shell::window_state::WindowStateTracker::for_test(),
             GuiPrefs::default(),
             HashSet::new(),
             None,

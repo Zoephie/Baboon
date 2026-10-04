@@ -1523,7 +1523,7 @@ mod perf_baseline_tests {
             prefs.scroll_to_cycle_dropdowns = false;
             let app = Baboon::assemble(
                 &ctx,
-                crate::window_state::WindowStateTracker::for_test(),
+                crate::app::shell::window_state::WindowStateTracker::for_test(),
                 prefs,
                 HashSet::new(),
                 None,

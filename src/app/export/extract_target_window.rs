@@ -122,7 +122,7 @@ mod tests {
     fn app() -> Baboon {
         Baboon::assemble(
             &egui::Context::default(),
-            crate::window_state::WindowStateTracker::for_test(),
+            crate::app::shell::window_state::WindowStateTracker::for_test(),
             GuiPrefs::default(),
             HashSet::new(),
             None,
