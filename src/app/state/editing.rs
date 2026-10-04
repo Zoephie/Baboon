@@ -275,6 +275,10 @@ pub(in crate::app) struct CeSoundRefRequest {
     pub(in crate::app) label: String,
     /// Extract every permutation to a chosen folder instead of playing one.
     pub(in crate::app) extract: bool,
+    /// The player clip a play is for, carried to the play it becomes.
+    pub(in crate::app) clip: Option<String>,
+    /// Decode it for the clip's waveform rather than play it.
+    pub(in crate::app) preview: bool,
 }
 
 /// Read-only tag catalog exposed to reference pickers for sources whose tags do
@@ -457,12 +461,25 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) open_request: &'a mut Option<OpenTagRequest>,
     /// Set when the user clicks a Play/Stop control in the sound-player panel;
     /// the app drains it after rendering to drive FMOD bank playback.
-    pub(in crate::app) sound_play_request:
-        &'a mut std::collections::VecDeque<super::audio::SoundAction>,
+    /// Each action is stamped with this pane's tab.
+    pub(in crate::app) sound_play_request: super::audio::SoundRequests<'a>,
     /// Last sound-player status line (bank/resolve/playback result), for display.
     pub(in crate::app) sound_status: Option<&'a str>,
     /// Current playback volume (linear, 0.0..=1.0), for the sound-player slider.
     pub(in crate::app) sound_volume: f32,
+    /// Playback speed (a multiple of the recorded rate), for its slider.
+    pub(in crate::app) sound_speed: f32,
+    /// The sound this pane's tab has loaded (playing, paused or finished), for
+    /// the transport; `None` while the loaded sound, if any, is another tab's.
+    pub(in crate::app) sound_playback: Option<super::audio::PlaybackView>,
+    /// Whether sounds loop, for the transport's loop toggle.
+    pub(in crate::app) sound_looping: bool,
+    /// This tab's preview of its selected clip, for the waveform before it
+    /// plays.
+    pub(in crate::app) sound_preview: Option<super::audio::Preview>,
+    /// Whether this pane is the focused tab, which is where the player's
+    /// keyboard shortcuts act.
+    pub(in crate::app) sound_has_focus: bool,
     /// Set when the user extracts sound audio to disk (per-perm or whole-tag);
     /// the app drains it to decode + write the files.
     pub(in crate::app) sound_extract_request: &'a mut Option<super::sound_extract::ExtractRequest>,
@@ -536,7 +553,7 @@ pub(in crate::app) struct EditSinks {
     block_ops: Vec<BlockOp>,
     block_confirm: Option<BlockConfirm>,
     open_request: Option<OpenTagRequest>,
-    sound_play_request: std::collections::VecDeque<super::audio::SoundAction>,
+    sound_play_request: std::collections::VecDeque<super::audio::SoundRequest>,
     sound_extract_request: Option<super::sound_extract::ExtractRequest>,
     ce_sound_ref_request: Option<CeSoundRefRequest>,
     tool_import: Option<ToolImportRequest>,
@@ -582,9 +599,17 @@ impl<'a> FieldEditContext<'a> {
             block_ops: &mut sinks.block_ops,
             block_confirm: &mut sinks.block_confirm,
             open_request: &mut sinks.open_request,
-            sound_play_request: &mut sinks.sound_play_request,
+            sound_play_request: super::audio::SoundRequests::new(
+                &mut sinks.sound_play_request,
+                None,
+            ),
             sound_status: None,
             sound_volume: 1.0,
+            sound_speed: 1.0,
+            sound_playback: None,
+            sound_looping: false,
+            sound_preview: None,
+            sound_has_focus: false,
             sound_extract_request: &mut sinks.sound_extract_request,
             sound_language: None,
             ce_sound: None,

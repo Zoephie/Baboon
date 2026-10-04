@@ -346,6 +346,8 @@ pub struct Baboon {
     rename_tag: Option<RenameTagState>,
     /// Rename Folder dialog for a loose tags folder, if one is open.
     loose_folder_rename: Option<LooseFolderRenameState>,
+    /// The Extract Geometry / Extract Animations target window, if open.
+    extract_target: Option<ExtractTargetPrompt>,
     /// New/Rename Folder dialog for a container source, if one is open.
     container_folder_dialog: Option<ContainerFolderDialog>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
@@ -383,7 +385,9 @@ pub struct Baboon {
     /// Pending play/extract of a `.sound` a container-source tag only refers to,
     /// stamped with the kit that raised it. Resolved after rendering, since the
     /// referenced tag's audio has to be walked out to Wwise first.
-    pending_ce_sound_ref: Option<(KitId, CeSoundRefRequest)>,
+    /// A referenced sound to resolve, with the kit whose containers resolve it
+    /// and the tab whose player asked (which owns the playback).
+    pending_ce_sound_ref: Option<(KitId, String, CeSoundRefRequest)>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
     /// Movable Campaign Evolved tag-reference picker, when one is open.
@@ -640,6 +644,7 @@ impl Baboon {
             tsv_paste: None,
             rename_tag: None,
             loose_folder_rename: None,
+            extract_target: None,
             container_folder_dialog: None,
             kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),

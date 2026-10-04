@@ -395,6 +395,25 @@ pub(in crate::app) enum PaletteTable {
     Ready(Vec<ScenarioPalette>),
 }
 
+/// What an extraction that asks for its target game will extract.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::app) enum ExtractKind {
+    Geometry,
+    Animation,
+}
+
+/// The window that asks which game's tools an extraction is for, before the
+/// folder is picked: the JMS, ASS and JMA versions follow it.
+pub(in crate::app) struct ExtractTargetPrompt {
+    pub(in crate::app) key: String,
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) kind: ExtractKind,
+    /// The generation the tag comes from: the default, and the option marked
+    /// current.
+    pub(in crate::app) source: blam_tags::game::Game,
+    pub(in crate::app) target: blam_tags::game::Game,
+}
+
 /// A one-shot "reveal in browser tree" request: force-open the folder nodes in
 /// `ancestors` (root→parent labels) and scroll the entry `key` into view.
 /// Consumed (taken) during the browser draw.

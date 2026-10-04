@@ -13,6 +13,11 @@ fn root(var: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(format!("<set {var}>")))
 }
 
+/// A Halo: Combat Evolved (MCC) editing kit's `tags` folder.
+pub(crate) fn hceek_tags() -> PathBuf {
+    root("BLAM_TEST_HCEEK")
+}
+
 /// A Halo 2 (MCC) editing kit's `tags` folder.
 pub(crate) fn h2ek_tags() -> PathBuf {
     root("BLAM_TEST_H2EK")
