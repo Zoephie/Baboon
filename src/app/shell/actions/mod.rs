@@ -122,7 +122,7 @@ impl Baboon {
                 }
             }
             AppAction::ConfirmClearModifications { kit, stashed, unsaved } => {
-                self.mods.clear_stash_confirm = Some(ClearStashConfirm { kit, stashed, unsaved });
+                self.dialogs.open(ClearStashConfirm { kit, stashed, unsaved });
             }
             AppAction::OpenSettings(tab) => {
                 if let Some(tab) = tab {

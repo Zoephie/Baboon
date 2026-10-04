@@ -584,12 +584,12 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
         );
 
     app.review_changes();
-    let review = app.mods.mod_export.as_ref().expect("the review opened");
+    let review = app.dialogs.get::<ModExportDialog>().expect("the review opened");
     assert!(review.review_only);
     assert!(!kit.root.join("~mods").exists(), "a review creates nothing");
 
     app.export_mod();
-    let dialog = app.mods.mod_export.as_ref().expect("the export opened");
+    let dialog = app.dialogs.get::<ModExportDialog>().expect("the export opened");
     assert!(!dialog.review_only);
     assert_eq!(dialog.name, "mymod");
     assert_eq!(dialog.folder, kit.root.join("~mods"));
@@ -610,7 +610,7 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
     assert_eq!(gone.reason.as_deref(), Some("not in this source"));
     assert_eq!(dialog.rows.len(), 2);
 
-    let snapshot = app.mods.mod_export.as_ref().unwrap().snapshot.clone();
+    let snapshot = app.dialogs.get::<ModExportDialog>().unwrap().snapshot.clone();
     let output = kit.root.join("~mods/mymod_P.utoc");
     let write = |app: &mut Baboon, included: &[&str], output: &Path| {
         let included = included.iter().map(|id| (*id).to_owned()).collect();
@@ -641,6 +641,6 @@ fn the_export_review_lists_the_stash_and_refuses_what_it_cannot_write() {
         "Export Mod is only for Campaign Evolved containers"
     );
     app.export_mod();
-    assert!(app.mods.mod_export.is_none());
+    assert!(app.dialogs.get::<ModExportDialog>().is_none());
     assert_eq!(app.model.status, "Export Mod is only for Campaign Evolved containers");
 }

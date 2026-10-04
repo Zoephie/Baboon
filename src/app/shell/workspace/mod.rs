@@ -316,10 +316,8 @@ impl Baboon {
         draw_new_tag_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_import_tag_window(&cx!(self, ctx), &mut self.import);
         draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
-        draw_overwrite_confirm_window(&cx!(self, ctx), &mut self.mods);
         draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
-        draw_clear_stash_confirm_window(&cx!(self, ctx), &mut self.mods);
         draw_container_duplicate_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);
         draw_delete_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
@@ -328,8 +326,6 @@ impl Baboon {
         draw_chimp_level_export_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
-        draw_mod_export_window(&cx!(self, ctx), &mut self.mods);
-        draw_exported_mod_window(&cx!(self, ctx), &mut self.mods);
         draw_poke_window(&cx!(self, ctx), &mut self.poke);
         draw_tag_import_window(&cx!(self, ctx), &mut self.import);
         draw_cache_import_window(&cx!(self, ctx), &mut self.import);
@@ -352,6 +348,7 @@ impl Baboon {
         draw_container_folder_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_loose_folder_rename_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_extract_target_window(&cx!(self, ctx), &mut self.export);
+        self.dialogs.draw(&cx!(self, ctx));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
         end_wheel_gesture(ctx);
     }

@@ -119,6 +119,8 @@ mod model;
 use model::Model;
 mod context;
 use context::{CommandQueue, Ctx, cx};
+mod dialogs;
+use dialogs::{Dialog, DialogHost};
 pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
@@ -247,6 +249,8 @@ pub struct Baboon {
     pub(in crate::app) views: KitViews,
     /// What this frame's draws have asked for, applied once drawing is over.
     commands: CommandQueue,
+    /// The windows open over the workspaces.
+    pub(in crate::app) dialogs: DialogHost,
 }
 
 impl Baboon {
@@ -426,14 +430,10 @@ impl Baboon {
                 folder_refactor: None,
             },
             mods: ModsFeature {
-                overwrite_confirm: None,
                 container_write_leases: HashMap::new(),
                 next_container_lease: 0,
                 pending_chimp_remounts: Vec::new(),
                 last_mod_export_name: None,
-                clear_stash_confirm: None,
-                exported_mod: None,
-                mod_export: None,
             },
             export: ExportFeature {
                 container_dump_confirm: None,
@@ -552,6 +552,7 @@ impl Baboon {
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
             commands: CommandQueue::default(),
+            dialogs: DialogHost::default(),
             // The startup workspace is seeded like any other new kit; every
             // later one goes through `Baboon::empty_kit`.
             views: KitViews::startup(KitView::new(

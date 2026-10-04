@@ -341,7 +341,7 @@ impl Baboon {
                 // Written straight into the game's own folder: there is nothing
                 // to copy, so the instructions would only be noise.
                 if !in_place {
-                    self.mods.exported_mod = Some(ExportedMod {
+                    self.dialogs.open(ExportedMod {
                         stem,
                         directory,
                         count,

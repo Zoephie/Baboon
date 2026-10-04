@@ -1084,11 +1084,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "overwrite_confirm",
-            &["mods.overwrite_confirm"],
+            &["dialog:OverwriteConfirm"],
             &["mods/overwrite_confirm.rs"],
             container_kit,
             |h| {
-                h.app.mods.overwrite_confirm = Some(OverwriteConfirm {
+                h.app.dialogs.open(OverwriteConfirm {
                     kit: active_id(h),
                     key: ce_key(),
                 });
@@ -1097,11 +1097,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "clear_stash_confirm",
-            &["mods.clear_stash_confirm"],
+            &["dialog:ClearStashConfirm"],
             &["mods/clear_stash_confirm.rs"],
             container_kit,
             |h| {
-                h.app.mods.clear_stash_confirm = Some(ClearStashConfirm {
+                h.app.dialogs.open(ClearStashConfirm {
                     kit: active_id(h),
                     stashed: vec![CE_TAG.to_owned()],
                     unsaved: 1,
@@ -1177,11 +1177,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "exported_mod",
-            &["mods.exported_mod"],
+            &["dialog:ExportedMod"],
             &["mods/exported_mod_window.rs"],
             container_kit,
             |h| {
-                h.app.mods.exported_mod = Some(ExportedMod {
+                h.app.dialogs.open(ExportedMod {
                     stem: "Smoke_P".to_owned(),
                     directory: PathBuf::from("/no/such/Paks/~mods"),
                     count: 2,
@@ -1192,11 +1192,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "mod_export",
-            &["mods.mod_export"],
+            &["dialog:ModExportDialog"],
             &["mods/mod_export_window/mod.rs"],
             container_kit,
             |h| {
-                h.app.mods.mod_export = Some(ModExportDialog {
+                h.app.dialogs.open(ModExportDialog {
                     kit: active_id(h),
                     review_only: false,
                     snapshot: CampaignProjectSnapshot {
@@ -1548,7 +1548,9 @@ smoke_shards!(
 
 /// The `Baboon` struct's fields and their types, read from `src/app/mod.rs`.
 /// A field holding one feature's state (a `…Feature` struct) stands for that
-/// struct's fields, named `field.inner`: they are where its windows live.
+/// struct's fields, named `field.inner`: they are where its windows live. Each
+/// dialog the host can hold (an `impl Dialog`) is listed too, as
+/// `dialog:Type`.
 fn baboon_fields() -> Vec<(String, String)> {
     let source = include_root_str!("src/app/mod.rs");
     let sources = crate::test_kits::app_product_sources();
@@ -1568,6 +1570,17 @@ fn baboon_fields() -> Vec<(String, String)> {
             );
         } else {
             out.push((name, ty));
+        }
+    }
+    // The dialog host's windows are not fields: each `impl Dialog` is one,
+    // named `dialog:Type`.
+    for (_, text) in &sources {
+        for rest in product_code(text).split("impl Dialog for ").skip(1) {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            out.push((format!("dialog:{name}"), "Dialog".to_owned()));
         }
     }
     out
@@ -1732,9 +1745,11 @@ fn the_registry_check_notices_a_window_without_a_case() {
     let mut sources = window_sources();
     assert!(registry_problems(&cases(), &fields, &sources).is_empty());
     fields.push(("smoke_dialog".to_owned(), "Option<SmokeDialog>".to_owned()));
+    fields.push(("dialog:SmokeHosted".to_owned(), "Dialog".to_owned()));
     sources.push("shell/frame/dialogs/smoke.rs".to_owned());
     let problems = registry_problems(&cases(), &fields, &sources);
     assert!(problems.iter().any(|p| p.contains("Baboon::smoke_dialog")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("dialog:SmokeHosted")), "{problems:?}");
     assert!(problems.iter().any(|p| p.contains("shell/frame/dialogs/smoke.rs")), "{problems:?}");
-    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert_eq!(problems.len(), 3, "{problems:?}");
 }

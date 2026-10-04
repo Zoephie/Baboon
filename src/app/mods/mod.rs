@@ -9,13 +9,9 @@ pub(in crate::app) use project::*;
 pub(in crate::app) mod container_write;
 pub(in crate::app) use container_write::*;
 pub(in crate::app) mod mod_export_window;
-pub(in crate::app) use mod_export_window::draw_mod_export_window;
 pub(in crate::app) mod exported_mod_window;
-pub(in crate::app) use exported_mod_window::draw_exported_mod_window;
 pub(in crate::app) mod overwrite_confirm;
-pub(in crate::app) use overwrite_confirm::draw_overwrite_confirm_window;
 pub(in crate::app) mod clear_stash_confirm;
-pub(in crate::app) use clear_stash_confirm::draw_clear_stash_confirm_window;
 pub(in crate::app) mod in_place;
 pub(in crate::app) mod export;
 pub(in crate::app) use export::*;
@@ -24,11 +20,9 @@ pub(in crate::app) use review::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 
-/// Campaign Evolved mods: the overwrite and clear-stash prompts, container
-/// write leases and the remounts they leave, and Export Mod with its review.
+/// Campaign Evolved mods: container write leases and the remounts they leave,
+/// and Export Mod with its review. Their prompts are dialogs in the host.
 pub(in crate::app) struct ModsFeature {
-    /// Pending in-place overwrite confirmation (the tag key) for a container tag.
-    pub(in crate::app) overwrite_confirm: Option<OverwriteConfirm>,
     /// Container writes currently in flight, by lease id. A lease outlives the
     /// UI-thread call that took it exactly when the write runs on a worker, and
     /// the terminal `WorkerMessage` carries the id back so the completion
@@ -45,13 +39,6 @@ pub(in crate::app) struct ModsFeature {
     /// making the user retype it. Deliberately not persisted: it describes what
     /// this session has been working on, not a preference.
     pub(in crate::app) last_mod_export_name: Option<String>,
-    /// Pending confirmation for the Campaign Evolved "clear modifications"
-    /// toolbar action, which is irreversible.
-    pub(in crate::app) clear_stash_confirm: Option<ClearStashConfirm>,
-    /// Shown after Export Mod, explaining what to do with the files.
-    pub(in crate::app) exported_mod: Option<ExportedMod>,
-    /// Review of a pending Export Mod, before anything is written.
-    pub(in crate::app) mod_export: Option<ModExportDialog>,
 }
 
 /// What mods can be asked to do. Each names the workspace it was raised
@@ -75,6 +62,8 @@ pub(in crate::app) enum ModsCommand {
     /// Write the reviewed changes as a mod at `output`.
     WriteReviewedMod {
         kit: KitId,
+        /// The name the mod was given, offered again by the next export.
+        name: String,
         snapshot: CampaignProjectSnapshot,
         included: HashSet<String>,
         output: PathBuf,
@@ -113,10 +102,14 @@ impl Baboon {
             }
             ModsCommand::WriteReviewedMod {
                 kit,
+                name,
                 snapshot,
                 included,
                 output,
             } => {
+                // Kept for the next export in this session, so replacing a
+                // mod's files does not mean typing its name again.
+                self.mods.last_mod_export_name = Some(name);
                 if self.focus_navigation_kit(kit) {
                     self.write_reviewed_mod(&snapshot, &included, output, &ctx);
                 }
