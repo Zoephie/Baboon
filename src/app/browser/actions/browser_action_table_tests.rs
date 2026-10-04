@@ -143,8 +143,8 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
             && app.references.content_explorer.is_none()
             && app.tag_ops.folder_refactor.is_none()
             && app.dialogs.get::<LooseFolderRenameState>().is_none()
-            && app.import.tag_import_dialog.is_none()
-            && app.import.cache_import_dialog.is_none()
+            && app.dialogs.get::<TagImportDialog>().is_none()
+            && app.dialogs.get::<CacheImportDialog>().is_none()
             && app.dialogs.get::<ContainerFolderDialog>().is_none()
             && app.kit_tools.pending_tool_import.is_none()
             && app.export.pending_sound_extract.is_none(),
@@ -339,7 +339,7 @@ fn cases() -> Vec<Case> {
             },
             setup: no_setup,
             check: |app, kit, _| {
-                let dialog = app.import.tag_import_dialog.as_ref().ok_or("no dialog")?;
+                let dialog = app.dialogs.get::<TagImportDialog>().ok_or("no dialog")?;
                 ensure(dialog.target_game == "halo3_mcc", "target game")?;
                 ensure(dialog.target_tags_root == kit.root, "tags root")?;
                 ensure(dialog.destination_rel == FOLDER, format!("{:?}", dialog.destination_rel))?;

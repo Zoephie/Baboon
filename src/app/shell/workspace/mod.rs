@@ -313,8 +313,6 @@ impl Baboon {
             &mut self.chimp.chimp_usmap_path_input,
         );
         draw_tool_commands_window(&cx!(self, ctx), &mut self.kit_tools);
-        draw_import_tag_window(&cx!(self, ctx), &mut self.import);
-        draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
         draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
         draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
         draw_chimp_mesh_texture_prompt(&cx!(self, ctx), &mut self.chimp);
@@ -323,8 +321,6 @@ impl Baboon {
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_poke_window(&cx!(self, ctx), &mut self.poke);
-        draw_tag_import_window(&cx!(self, ctx), &mut self.import);
-        draw_cache_import_window(&cx!(self, ctx), &mut self.import);
         draw_help_window(&cx!(self, ctx), &mut self.help);
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.

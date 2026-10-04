@@ -532,74 +532,63 @@ fn draw_cache_import_body(
 /// A run of this can reach thousands of tags — following references out of
 /// a folder is the point — so the outcome is a document to read, not a
 /// status-bar line to catch.
-pub(in crate::app) fn draw_cache_import_window(cx: &Ctx, import: &mut ImportFeature) {
-    let ctx = cx.egui;
-    if import.cache_import_dialog.is_none() {
-        return;
-    }
-    let mut open = true;
-    let mut action = None;
-    egui::Window::new("Import Cache Folder")
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("cache_import"))
-        .open(&mut open)
-        .resizable(true)
-        .default_width(window_width(ctx, 560.0))
-        .show(ctx, |ui| {
-            if let Some(dialog) = import.cache_import_dialog.as_mut() {
-                action = draw_cache_import_body(ui, ctx, dialog);
-            }
-        });
+impl Dialog for CacheImportDialog {
+    fn show(&mut self, cx: &Ctx) -> bool {
+        let ctx = cx.egui;
+        let mut open = true;
+        let mut action = None;
+        egui::Window::new("Import Cache Folder")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("cache_import"))
+            .open(&mut open)
+            .resizable(true)
+            .default_width(window_width(ctx, 560.0))
+            .show(ctx, |ui| {
+                action = draw_cache_import_body(ui, ctx, self);
+            });
 
-    match action {
-        Some(CacheImportAction::Start) => cx.send(ImportCommand::StartCacheImport { only: None }),
-        Some(CacheImportAction::ImportOutside) => {
-            let picked = import
-                .cache_import_dialog
-                .as_ref()
-                .map(|dialog| {
-                    dialog
-                        .report
-                        .as_ref()
-                        .map(|report| {
-                            report
-                                .outside_references
-                                .iter()
-                                .filter(|reference| {
-                                    dialog
-                                        .outside_picked
-                                        .get(&reference.key)
-                                        .copied()
-                                        .unwrap_or(false)
-                                })
-                                .map(|reference| reference.key.clone())
-                                .collect::<HashSet<String>>()
-                        })
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default();
-            if !picked.is_empty() {
-                cx.send(ImportCommand::StartCacheImport { only: Some(picked) });
+        match action {
+            Some(CacheImportAction::Start) => {
+                cx.send(ImportCommand::StartCacheImport { only: None })
             }
-        }
-        Some(CacheImportAction::ScanConflicts) => cx.send(ImportCommand::ScanCacheConflicts),
-        Some(CacheImportAction::Cancel) => {
-            if let Some(dialog) = import.cache_import_dialog.as_ref() {
-                dialog.cancel.store(true, Ordering::Relaxed);
+            Some(CacheImportAction::ImportOutside) => {
+                let picked = Some(&*self)
+                    .map(|dialog| {
+                        dialog
+                            .report
+                            .as_ref()
+                            .map(|report| {
+                                report
+                                    .outside_references
+                                    .iter()
+                                    .filter(|reference| {
+                                        dialog
+                                            .outside_picked
+                                            .get(&reference.key)
+                                            .copied()
+                                            .unwrap_or(false)
+                                    })
+                                    .map(|reference| reference.key.clone())
+                                    .collect::<HashSet<String>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
+                if !picked.is_empty() {
+                    cx.send(ImportCommand::StartCacheImport { only: Some(picked) });
+                }
             }
-            cx.set_status("Stopping the cache import");
+            Some(CacheImportAction::ScanConflicts) => cx.send(ImportCommand::ScanCacheConflicts),
+            Some(CacheImportAction::Cancel) => {
+                self.cancel.store(true, Ordering::Relaxed);
+                cx.set_status("Stopping the cache import");
+            }
+            Some(CacheImportAction::Close) => return false,
+            None => {}
         }
-        Some(CacheImportAction::Close) => import.cache_import_dialog = None,
-        None => {}
-    }
-    // A run owns its window: closing it would leave a worker writing into a
-    // kit with nothing left to report to.
-    let running = import
-        .cache_import_dialog
-        .as_ref()
-        .is_some_and(|dialog| dialog.running);
-    if !open && !running {
-        import.cache_import_dialog = None;
+        // A run owns its window: closing it would leave a worker writing into a
+        // kit with nothing left to report to.
+        open || self.running
     }
 }
 

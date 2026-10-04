@@ -467,8 +467,8 @@ impl Baboon {
 
     fn refuse_read_only_tag_import(&mut self) -> bool {
         let index = self
-            .import.tag_import_dialog
-            .as_ref()
+            .dialogs
+            .get::<TagImportDialog>()
             .and_then(|dialog| self.model.kit_index(dialog.kit));
         index.is_some_and(|index| self.refuse_read_only_edit(index))
     }
@@ -495,7 +495,7 @@ impl Baboon {
         let base = destination_rel
             .map(|rel| normalize_import_rel(&rel))
             .unwrap_or_default();
-        self.import.tag_import_dialog = Some(TagImportDialog {
+        self.dialogs.open(TagImportDialog {
             kit: self.model.active_kit_id(),
             target_game,
             target_tags_root,
@@ -555,7 +555,7 @@ impl Baboon {
     /// a picker that opens somewhere different each time is worse than one that
     /// opens somewhere merely unhelpful.
     fn import_picker_directory(&self) -> Option<PathBuf> {
-        let dialog = self.import.tag_import_dialog.as_ref()?;
+        let dialog = self.dialogs.get::<TagImportDialog>()?;
         let current = normalize_import_input(&dialog.source_input);
         if !current.is_empty() {
             let path = PathBuf::from(&current);
@@ -590,7 +590,7 @@ impl Baboon {
     }
 
     fn set_import_source(&mut self, path: PathBuf, ctx: &egui::Context) {
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.source_input = path.display().to_string();
             dialog.facts = None;
             dialog.invalidate_analysis();
@@ -604,7 +604,7 @@ impl Baboon {
     /// counting what is in there means opening every file's header, and 97,000
     /// of those is not something to do between frames.
     pub(in crate::app) fn resolve_import_source(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = self.import.tag_import_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.get::<TagImportDialog>() else {
             return;
         };
         if dialog.resolving {
@@ -612,7 +612,7 @@ impl Baboon {
         }
         let input = normalize_import_input(&dialog.source_input);
         if input.is_empty() {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.facts = None;
                 dialog.resolved_input = String::new();
                 dialog.invalidate_analysis();
@@ -630,7 +630,7 @@ impl Baboon {
             .model.source()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| TagNameIndex::load_from_definitions(&definitions_root));
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.resolving = true;
             dialog.error = None;
         }
@@ -656,7 +656,7 @@ impl Baboon {
         input: String,
         result: Result<ImportSourceFacts, String>,
     ) -> bool {
-        let Some(dialog) = self.import.tag_import_dialog.as_mut() else {
+        let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() else {
             return false;
         };
         dialog.resolving = false;
@@ -702,7 +702,7 @@ impl Baboon {
     /// exists because the code has two phases. The report still appears — after,
     /// beside the result, which is where the folder import already puts it.
     pub(in crate::app) fn analyze_tag_import(&mut self, write_when_done: bool) {
-        let Some(dialog) = self.import.tag_import_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.get::<TagImportDialog>() else {
             return;
         };
         if dialog.analyzing || dialog.running {
@@ -715,7 +715,7 @@ impl Baboon {
             return;
         };
         if dialog.source_game == dialog.target_game {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.error = Some(format!(
                     "This is already a {} tag. Copy the file into the kit instead — there is                      nothing to convert.",
                     dialog.target_game
@@ -741,7 +741,7 @@ impl Baboon {
         // The destination kit is the one that is definitely open, whether or not
         // it is the one configured in Settings.
         kit_roots.insert(target_game.clone(), target_tags_root.clone());
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.analyzing = true;
             dialog.write_when_analyzed = write_when_done;
             dialog.invalidate_analysis();
@@ -796,7 +796,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) -> bool {
         self.import.native_template_cache = Some(templates);
-        let Some(dialog) = self.import.tag_import_dialog.as_mut() else {
+        let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() else {
             return false;
         };
         dialog.analyzing = false;
@@ -827,7 +827,7 @@ impl Baboon {
 
     /// Write the tag the user was shown the cost of, having accepted it.
     pub(in crate::app) fn accept_import_losses(&mut self, ctx: &egui::Context) {
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.pending_losses.clear();
             dialog.pending_refusal = None;
         }
@@ -841,7 +841,7 @@ impl Baboon {
     /// own worker. Both report back through the receive loop, which is where the
     /// browser refresh gets its context.
     pub(in crate::app) fn begin_tag_import(&mut self) {
-        let Some(dialog) = self.import.tag_import_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.get::<TagImportDialog>() else {
             return;
         };
         if dialog.running || dialog.analyzing || dialog.resolving {
@@ -860,14 +860,14 @@ impl Baboon {
         if self.refuse_read_only_tag_import() {
             return;
         }
-        let Some(dialog) = self.import.tag_import_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.get::<TagImportDialog>() else {
             return;
         };
         let Some(facts) = dialog.facts.as_ref() else {
             return;
         };
         if dialog.draft.is_none() {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.error = Some("Analyze the conversion first".to_owned());
             }
             return;
@@ -875,7 +875,7 @@ impl Baboon {
         // The preview was built from bytes on disk; those bytes are not ours and
         // may have moved on. Refuse rather than write from a stale reading.
         if source_stamp(&facts.path) != dialog.draft_stamp {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.invalidate_analysis();
                 dialog.error = Some(
                     "The source file changed after it was analyzed. Analyze the conversion again."
@@ -885,7 +885,7 @@ impl Baboon {
             return;
         }
         let Some(output) = dialog.single_output() else {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.error = Some("Enter a destination path for the imported tag".to_owned());
             }
             return;
@@ -894,7 +894,7 @@ impl Baboon {
         if !normalize_conversion_path(&output)
             .starts_with(normalize_conversion_path(&target_tags_root))
         {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.error = Some("The destination escapes this kit's tags folder".to_owned());
             }
             return;
@@ -904,8 +904,8 @@ impl Baboon {
             .join("tag_dependency_list.json");
         let result = (|| {
             let dialog = self
-                .import.tag_import_dialog
-                .as_mut()
+                .dialogs
+                .get_mut::<TagImportDialog>()
                 .expect("import dialog checked above");
             let draft = dialog.draft.as_mut().expect("draft checked above");
             let companion_outputs =
@@ -940,8 +940,11 @@ impl Baboon {
                     )
                 };
                 self.model.status = summary.clone();
-                let kit = self.import.tag_import_dialog.as_ref().map(|dialog| dialog.kit);
-                if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+                let kit = self
+                    .dialogs
+                    .get::<TagImportDialog>()
+                    .map(|dialog| dialog.kit);
+                if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                     dialog.written = Some(summary);
                     dialog.error = None;
                 }
@@ -950,7 +953,7 @@ impl Baboon {
                 }
             }
             Err(error) => {
-                if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+                if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                     dialog.error = Some(error);
                 }
             }
@@ -968,8 +971,8 @@ impl Baboon {
     /// reach the same bytes.
     pub(in crate::app) fn accept_held_back_imports(&mut self) {
         let held = self
-            .import.tag_import_dialog
-            .as_ref()
+            .dialogs
+            .get::<TagImportDialog>()
             .and_then(|dialog| dialog.report.as_ref())
             .map(|report| {
                 report
@@ -989,14 +992,14 @@ impl Baboon {
         if self.refuse_read_only_tag_import() {
             return;
         }
-        let Some(dialog) = self.import.tag_import_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.get::<TagImportDialog>() else {
             return;
         };
         let Some(facts) = dialog.facts.as_ref().filter(|facts| facts.is_folder) else {
             return;
         };
         if dialog.source_game == dialog.target_game {
-            if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+            if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                 dialog.error = Some(format!(
                     "These are already {} tags. Copy the folder into the kit instead — there is \
                      nothing to convert.",
@@ -1012,7 +1015,7 @@ impl Baboon {
         ) {
             Ok(plan) => plan,
             Err(error) => {
-                if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+                if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
                     dialog.error = Some(error);
                 }
                 return;
@@ -1054,7 +1057,7 @@ impl Baboon {
             cancel: Arc::new(AtomicBool::new(false)),
         };
         let tx = self.tx.clone();
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.running = true;
             dialog.progress = Some(FolderConversionProgress {
                 phase: "Preparing".to_owned(),
@@ -1079,7 +1082,7 @@ impl Baboon {
         progress: FolderConversionProgress,
     ) -> bool {
         self.model.status = format!("Importing tags: {}", progress.phase);
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.progress = Some(progress);
         }
         false
@@ -1091,7 +1094,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) -> bool {
         let mut imported = false;
-        if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
+        if let Some(dialog) = self.dialogs.get_mut::<TagImportDialog>() {
             dialog.running = false;
             dialog.progress = None;
             match result {
@@ -1112,7 +1115,11 @@ impl Baboon {
             }
         }
         if imported {
-            if let Some(kit) = self.import.tag_import_dialog.as_ref().map(|dialog| dialog.kit) {
+            if let Some(kit) = self
+                .dialogs
+                .get::<TagImportDialog>()
+                .map(|dialog| dialog.kit)
+            {
                 self.refresh_after_import(kit, ctx);
             }
         }

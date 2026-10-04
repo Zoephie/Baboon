@@ -1001,11 +1001,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "import_tag",
-            &["import.import_tag_dialog"],
+            &["dialog:ImportTagDialog"],
             &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
-                h.app.import.import_tag_dialog = Some(ImportTagDialog {
+                h.app.dialogs.open(ImportTagDialog {
                     kit: active_id(h),
                     source_path: PathBuf::from("/no/such/smoke.weapon"),
                     folder_rel: "objects/weapons".to_owned(),
@@ -1026,11 +1026,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "import_discard_confirm",
-            &["import.import_discard_confirm"],
+            &["dialog:PendingImport"],
             &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
-                h.app.import.import_discard_confirm = Some(PendingImport {
+                h.app.dialogs.open(PendingImport {
                     kit: active_id(h),
                     tag: fixture::new_tag_for("haloce_evolved", "weapon"),
                     target_key: ce_key(),
@@ -1040,7 +1040,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tag_import",
-            &["import.tag_import_dialog"],
+            &["dialog:TagImportDialog"],
             &["import/tags_window.rs"],
             loose_kit,
             |h| h.app.open_tag_import_dialog(Some("objects".to_owned())),
@@ -1048,7 +1048,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "cache_import",
-            &["import.cache_import_dialog"],
+            &["dialog:CacheImportDialog"],
             &["import/cache_window/mod.rs"],
             loose_kit,
             |h| {
@@ -1058,7 +1058,7 @@ fn cases() -> Vec<Case> {
                     game: GameId::from_id(fixture::GAME).unwrap(),
                     tags_root: loose_root(h),
                 };
-                h.app.import.cache_import_dialog = Some(CacheImportDialog {
+                h.app.dialogs.open(CacheImportDialog {
                     kit: active_id(h),
                     prefix: "objects/weapons".to_owned(),
                     selected: 2,

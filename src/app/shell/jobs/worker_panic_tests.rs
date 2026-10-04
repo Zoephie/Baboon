@@ -125,14 +125,17 @@ fn an_import_source_check_that_panics_stops_spinning() {
     let mut app = Baboon::for_test();
     loose_kit(&mut app, &root.join("tags"));
     app.open_tag_import_dialog(None);
-    let dialog = app.import.tag_import_dialog.as_mut().expect("the dialog opened");
+    let dialog = app
+        .dialogs
+        .get_mut::<TagImportDialog>()
+        .expect("the dialog opened");
     dialog.source_input = root.join("elsewhere").display().to_string();
     let ctx = egui::Context::default();
     with_panicking_workers(|| app.resolve_import_source(&ctx));
-    assert!(app.import.tag_import_dialog.as_ref().unwrap().resolving);
+    assert!(app.dialogs.get::<TagImportDialog>().unwrap().resolving);
 
     assert!(apply_next_worker_message(&mut app), "the check answered");
-    let dialog = app.import.tag_import_dialog.as_ref().unwrap();
+    let dialog = app.dialogs.get::<TagImportDialog>().unwrap();
     let _ = std::fs::remove_dir_all(&root);
     assert!(!dialog.resolving, "no longer spinning");
     assert!(dialog.error.as_deref().is_some_and(|error| error.contains("crashed")));

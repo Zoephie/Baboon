@@ -409,11 +409,7 @@ impl Baboon {
                 def_docs_cache: HashMap::new(),
             },
             import: ImportFeature {
-                tag_import_dialog: None,
-                cache_import_dialog: None,
                 native_template_cache: None,
-                import_tag_dialog: None,
-                import_discard_confirm: None,
             },
             tag_ops: TagOpsFeature {
                 container_duplicate_running: HashSet::new(),
