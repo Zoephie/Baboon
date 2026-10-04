@@ -19,7 +19,7 @@ const TARGETS: [(Game, &str, &str); 3] = [
 impl Baboon {
     /// Which game's tools a geometry or animation extraction is for. Choosing
     /// one goes on to the folder picker.
-    pub(in crate::app::ui) fn draw_extract_target_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_extract_target_window(&mut self, ctx: &egui::Context) {
         let Some(state) = self.extract_target.as_mut() else {
             return;
         };

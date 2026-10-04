@@ -88,7 +88,7 @@ mod tests {
     #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
     fn ce_extract_writes_a_valid_wav() {
         use crate::app::audio::AudioState;
-        use crate::app::sound_extract::{ExtractItem, ExtractRequest, ExtractSource};
+        use crate::app::export::sound_extract::{ExtractItem, ExtractRequest, ExtractSource};
         use crate::core::source::ce_audio::{CeSoundMedia, resolve_sound_binding};
         use crate::core::source::{ContainerPackageIndex, MountedContainer, container_package_name};
         use blam_tags::iostore::{IoStoreArchive, usmap::Usmap};
@@ -1412,7 +1412,7 @@ mod tests {
     #[test]
     #[ignore]
     fn h3_all_language_extraction_reads_the_explicit_english_bank() {
-        use crate::app::sound_extract::ExtractSource;
+        use crate::app::export::sound_extract::ExtractSource;
 
         let tags_root = crate::test_kits::h3ek_tags();
         let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");

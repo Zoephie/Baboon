@@ -12,7 +12,7 @@ impl Baboon {
     /// people — that a mod mounted over the game is ignored, because this
     /// extracts what the game *ships*, not what it currently loads. That last
     /// point holds for a folder too, so it is said unconditionally.
-    pub(in crate::app::ui) fn draw_container_dump_confirm_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_container_dump_confirm_window(&mut self, ctx: &egui::Context) {
         let Some((kit, output, total, folder)) =
             self.container_dump_confirm.as_ref().map(|confirm| {
                 let folder = match &confirm.scope {

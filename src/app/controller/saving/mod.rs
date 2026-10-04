@@ -272,7 +272,7 @@ pub(super) fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
     }
 }
 
-pub(super) fn entries_for_keys(source: &LoadedSourceData, keys: &[String]) -> Vec<TagEntry> {
+pub(in crate::app) fn entries_for_keys(source: &LoadedSourceData, keys: &[String]) -> Vec<TagEntry> {
     let key_set = keys.iter().map(String::as_str).collect::<HashSet<_>>();
     let mut seen = HashSet::new();
     source

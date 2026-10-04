@@ -5,12 +5,10 @@ use super::*;
 
 mod chimp_prompts;
 mod clear_stash_confirm;
-mod container_dump_confirm;
 mod container_duplicate_confirm;
 mod container_folder;
 mod delete_confirm;
 mod exported_mod;
-mod extract_target;
 mod keyword_chooser;
 mod loose_folder_rename;
 mod mod_export;

@@ -1111,7 +1111,7 @@ fn cases() -> Vec<Case> {
         case(
             "container_dump_confirm",
             &["container_dump_confirm"],
-            &["ui/dialogs/container_dump_confirm.rs"],
+            &["export/container_dump_confirm.rs"],
             container_kit,
             |h| {
                 h.app.container_dump_confirm = Some(ContainerDumpConfirm {
@@ -1273,7 +1273,7 @@ fn cases() -> Vec<Case> {
         case(
             "extract_target",
             &["extract_target"],
-            &["ui/dialogs/extract_target/mod.rs"],
+            &["export/extract_target_window/mod.rs"],
             memory_kit,
             |h| {
                 h.app.extract_target = Some(ExtractTargetPrompt {

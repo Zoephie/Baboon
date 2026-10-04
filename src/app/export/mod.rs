@@ -1,5 +1,7 @@
-//! Tag, bitmap, geometry, animation, and source-code export operations.
-//! It owns export transformation and file-output preparation; interactive UI and document lifecycle management belong elsewhere.
+//! Getting things out of tags: raw tags, bitmaps and their source images,
+//! sounds, geometry, animations, import info, shader and script sources,
+//! JSON and reference dumps, one tag at a time or a whole folder or
+//! container, and the windows that choose what and where.
 
 use super::*;
 
@@ -11,6 +13,10 @@ pub(super) mod json;
 pub(super) mod references;
 pub(super) mod scripts;
 pub(super) mod shader_source;
+pub(in crate::app) mod sound_extract;
+pub(in crate::app) mod extract_target_window;
+pub(in crate::app) mod container_dump_confirm;
+pub(in crate::app) mod extract;
 
 pub(super) use bitmap::*;
 pub(super) use container_dump::*;
@@ -20,6 +26,8 @@ pub(super) use json::*;
 pub(super) use references::*;
 pub(super) use scripts::*;
 pub(super) use shader_source::*;
+pub(in crate::app) use sound_extract::*;
+pub(in crate::app) use extract::*;
 
 /// What a batch export over many tags managed.
 pub(super) struct BatchExport {

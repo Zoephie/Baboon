@@ -23,13 +23,13 @@ use super::audio::InlineCodec;
 use crate::core::source::KitLayout;
 
 /// One file to write during an extraction.
-pub(super) struct ExtractItem {
-    pub(super) out_path: PathBuf,
-    pub(super) source: ExtractSource,
+pub(in crate::app) struct ExtractItem {
+    pub(in crate::app) out_path: PathBuf,
+    pub(in crate::app) source: ExtractSource,
 }
 
 /// Where an item's audio comes from and how to turn it into a file.
-pub(super) enum ExtractSource {
+pub(in crate::app) enum ExtractSource {
     /// Write these bytes verbatim (CE inline Ogg passthrough → near-lossless).
     Raw(Vec<u8>),
     /// Decode inline classic audio (CE/H2), then write 16-bit PCM WAV.
@@ -66,12 +66,12 @@ pub(super) enum ExtractSource {
 
 /// A batch of files to extract, queued by the sound-player UI and drained by
 /// the audio layer.
-pub(super) struct ExtractRequest {
-    pub(super) items: Vec<ExtractItem>,
+pub(in crate::app) struct ExtractRequest {
+    pub(in crate::app) items: Vec<ExtractItem>,
     /// Tags root of the current source, needed to open FMOD/Wwise banks.
-    pub(super) tags_root: Option<PathBuf>,
+    pub(in crate::app) tags_root: Option<PathBuf>,
     /// Human label for the resulting status line (tag or permutation name).
-    pub(super) label: String,
+    pub(in crate::app) label: String,
 }
 
 /// Turn a filesystem-unsafe permutation/pitch-range string-id into a clean file
@@ -80,7 +80,7 @@ pub(super) struct ExtractRequest {
 /// A name Windows reserves for a device (`con`, `nul`, `com1`, ...) gets a
 /// leading underscore: as a file stem it names the device, so writing
 /// `nul.wav` there writes nowhere and `con.wav` fails.
-pub(super) fn sanitize_component(name: &str) -> String {
+pub(in crate::app) fn sanitize_component(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -103,7 +103,7 @@ pub(super) fn sanitize_component(name: &str) -> String {
 /// [`KitLayout::data_for_language`]); the tool exports and imports non-default
 /// languages from `data_<language>\`. `abs_tag_path` is the loose `.sound` file,
 /// which must be under the kit's tags folder.
-pub(super) fn reimport_base_dir_lang(
+pub(in crate::app) fn reimport_base_dir_lang(
     layout: &KitLayout,
     abs_tag_path: &Path,
     language: Option<&str>,
@@ -119,7 +119,7 @@ pub(super) fn reimport_base_dir_lang(
 /// Write interleaved 16-bit PCM as a canonical little-endian WAV, creating
 /// parent directories. Channel count and sample rate are preserved verbatim so
 /// a reimport sees the original geometry.
-pub(super) fn write_wav_pcm16(
+pub(in crate::app) fn write_wav_pcm16(
     path: &Path,
     samples: &[i16],
     channels: u16,

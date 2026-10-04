@@ -121,8 +121,6 @@ use bitmap_browser::*;
 mod model_browser;
 use model_browser::*;
 mod audio;
-mod sound_extract;
-use sound_extract::*;
 mod runtime_poke;
 use runtime_poke::*;
 mod kit_tool_drop;
