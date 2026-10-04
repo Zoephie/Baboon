@@ -336,3 +336,25 @@ pub(in crate::app) struct EditorFeature {
     /// committed by focus loss is applied before its save/export snapshot.
     pub(in crate::app) deferred_file_action: Option<DeferredFileAction>,
 }
+
+/// What the editor derives from this kit's documents and keeps between frames:
+/// bitmap and model previews, render-method definitions and options with the
+/// epoch that invalidates the shader grid, Halo 2 templates, and Campaign
+/// Evolved sound bindings.
+#[derive(Default)]
+pub(in crate::app) struct EditorCaches {
+    pub(in crate::app) bitmap_previews: HashMap<String, BitmapPreviewState>,
+    pub(in crate::app) model_previews: HashMap<String, ModelPreviewState>,
+    /// Source-local render-method definition cache; `None` is a cached miss.
+    pub(in crate::app) rmdf_cache: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+    /// Source-local render-method option cache; `None` is a cached miss.
+    pub(in crate::app) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
+    /// Moves on whenever `rmdf_cache` and `rmop_cache` are cleared, so the
+    /// shader grid, which memoises its model per document revision, rebuilds
+    /// from the definitions as they are now.
+    pub(in crate::app) render_method_epoch: u64,
+    pub(in crate::app) h2_templates: H2TemplateCache,
+    /// Campaign Evolved Wwise bindings, cached per tag key because resolving
+    /// one walks several packages.
+    pub(in crate::app) ce_sound_bindings: HashMap<String, Arc<crate::core::source::ce_audio::CeSoundBinding>>,
+}

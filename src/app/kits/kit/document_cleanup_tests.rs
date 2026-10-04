@@ -49,9 +49,9 @@ fn a_second_source_in_a_kit_never_reuses_a_generation() {
 fn closing_tabs_drops_everything_kept_for_them() {
     let mut kit = Kit::empty(KitId(0), TagNameIndex::default());
     for key in ["kept", "closed"] {
-        kit.model_previews
+        kit.caches.model_previews
             .insert(key.to_owned(), ModelPreviewState::default());
-        kit.bitmap_previews
+        kit.caches.bitmap_previews
             .insert(key.to_owned(), BitmapPreviewState::default());
         kit.loading_tags.insert(key.to_owned());
         kit.edit_buffers
@@ -59,12 +59,12 @@ fn closing_tabs_drops_everything_kept_for_them() {
     }
 
     kit.drop_documents_except(Some("kept"));
-    assert_eq!(kit.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
-    assert_eq!(kit.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
+    assert_eq!(kit.caches.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
+    assert_eq!(kit.caches.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
     assert_eq!(kit.loading_tags.iter().collect::<Vec<_>>(), ["kept"]);
 
     kit.drop_document("kept");
-    assert!(kit.model_previews.is_empty());
-    assert!(kit.bitmap_previews.is_empty());
+    assert!(kit.caches.model_previews.is_empty());
+    assert!(kit.caches.bitmap_previews.is_empty());
     assert!(kit.loading_tags.is_empty());
 }

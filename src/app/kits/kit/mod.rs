@@ -73,8 +73,7 @@ pub(in crate::app) struct Kit {
     /// overwritten by the document underneath it.
     pub(in crate::app) edit_buffers: EditDrafts,
 
-    // --- Per-document derived caches ---
-    pub(in crate::app) bitmap_previews: HashMap<String, BitmapPreviewState>,
+    // --- Library tabs, repository review and index work ---
     /// The Bitmap Library tab's state: its search, its grid size, and its
     /// own bounded thumbnail cache — deliberately not `bitmap_previews`,
     /// which is unbounded and holds full-resolution images.
@@ -83,23 +82,10 @@ pub(in crate::app) struct Kit {
     pub(in crate::app) model_browser: ThumbnailLibrary<Models>,
     /// Read-only repository history and working-tree browser.
     pub(in crate::app) git_review: GitReviewState,
-    pub(in crate::app) model_previews: HashMap<String, ModelPreviewState>,
-    /// Source-local render-method definition cache; `None` is a cached miss.
-    pub(in crate::app) rmdf_cache: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
-    pub(in crate::app) h2_templates: H2TemplateCache,
     /// This kit's background index work. It lived on the app, shared by every
     /// kit: loading one kit reset another's in-flight reference build, and one
     /// kit's build or refresh blocked every other kit's.
     pub(in crate::app) index_jobs: IndexJobs,
-    /// Source-local render-method option cache; `None` is a cached miss.
-    pub(in crate::app) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
-    /// Moves on whenever `rmdf_cache` and `rmop_cache` are cleared, so the
-    /// shader grid, which memoises its model per document revision, rebuilds
-    /// from the definitions as they are now.
-    pub(in crate::app) render_method_epoch: u64,
-    /// Campaign Evolved Wwise bindings, cached per tag key because resolving
-    /// one walks several packages.
-    pub(in crate::app) ce_sound_bindings: HashMap<String, Arc<crate::core::source::ce_audio::CeSoundBinding>>,
 
     /// Pending expand/collapse-all requests, keyed by tag. Raised from the tag
     /// tab's menu and consumed by the next draw of that tag's pane.
@@ -163,6 +149,11 @@ pub(in crate::app) struct Kit {
     /// docked folder browsers, and the modified, deletable and favourite sets
     /// it marks, each with what it was built from.
     pub(in crate::app) browser: KitBrowser,
+    /// What the editor derives from this kit's documents and keeps between
+    /// frames: bitmap and model previews, render-method definitions and options
+    /// with the epoch that invalidates the shader grid, Halo 2 templates, and
+    /// Campaign Evolved sound bindings.
+    pub(in crate::app) caches: EditorCaches,
 }
 
 impl Kit {
@@ -178,17 +169,10 @@ impl Kit {
             open_tabs: Vec::new(),
             tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
             edit_buffers: EditDrafts::default(),
-            bitmap_previews: HashMap::new(),
             bitmap_browser: ThumbnailLibrary::default(),
             model_browser: ThumbnailLibrary::default(),
             git_review: GitReviewState::default(),
-            model_previews: HashMap::new(),
-            rmdf_cache: HashMap::new(),
-            h2_templates: H2TemplateCache::default(),
             index_jobs: IndexJobs::default(),
-            rmop_cache: HashMap::new(),
-            render_method_epoch: 0,
-            ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
             find_filter_applied: HashMap::new(),
             generation: 0,
@@ -214,6 +198,7 @@ impl Kit {
             terminal: KitTerminal::default(),
             project: KitProject::default(),
             browser: KitBrowser::default(),
+            caches: EditorCaches::default(),
         }
     }
 
@@ -557,9 +542,9 @@ impl Kit {
     /// source was reloaded. They are pure caches: dropping them costs one
     /// re-read each and cannot be wrong.
     pub(in crate::app) fn forget_render_methods(&mut self) {
-        self.rmdf_cache.clear();
-        self.rmop_cache.clear();
-        self.render_method_epoch = self.render_method_epoch.wrapping_add(1);
+        self.caches.rmdf_cache.clear();
+        self.caches.rmop_cache.clear();
+        self.caches.render_method_epoch = self.caches.render_method_epoch.wrapping_add(1);
     }
 }
 
@@ -634,8 +619,8 @@ impl Kit {
     pub(in crate::app) fn drop_document(&mut self, key: &str) {
         self.parsed_tags.remove(key);
         self.loading_tags.remove(key);
-        self.bitmap_previews.remove(key);
-        self.model_previews.remove(key);
+        self.caches.bitmap_previews.remove(key);
+        self.caches.model_previews.remove(key);
         self.find_filter_applied.remove(key);
         self.edit_buffers.forget_tag(key);
         self.browser.folder_browsers.remove(key);
@@ -647,8 +632,8 @@ impl Kit {
             .parsed_tags
             .keys()
             .chain(self.loading_tags.iter())
-            .chain(self.bitmap_previews.keys())
-            .chain(self.model_previews.keys())
+            .chain(self.caches.bitmap_previews.keys())
+            .chain(self.caches.model_previews.keys())
             .chain(self.find_filter_applied.keys())
             .chain(self.browser.folder_browsers.keys())
             .filter(|key| Some(key.as_str()) != keep)

@@ -72,7 +72,7 @@ impl Baboon {
                     self.kits[index]
                         .parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
-                    self.kits[index].bitmap_previews.remove(&key);
+                    self.kits[index].caches.bitmap_previews.remove(&key);
                 }
                 self.status = "Bitmap reimported and reloaded".to_owned();
             }
@@ -192,10 +192,10 @@ impl Baboon {
     /// the (newly restored) tag bytes after an undo/redo.
     /// Drop derived previews for `key` in `kit`, after its document changed.
     pub(in crate::app) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
-        if let Some(preview) = self.kits[kit].model_previews.get_mut(key) {
+        if let Some(preview) = self.kits[kit].caches.model_previews.get_mut(key) {
             preview.invalidate_load();
         }
-        if let Some(bitmap) = self.kits[kit].bitmap_previews.get_mut(key) {
+        if let Some(bitmap) = self.kits[kit].caches.bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
             bitmap.decoding = None;
             bitmap.texture = None;

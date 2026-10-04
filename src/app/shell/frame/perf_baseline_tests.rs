@@ -616,7 +616,7 @@ pub(super) mod fixture {
                         help_text: String::new(),
                     })
                     .collect();
-                kit.rmop_cache.insert(
+                kit.caches.rmop_cache.insert(
                     format!("rmop:{option_path}"),
                     Some(Arc::new(RenderMethodOption {
                         parameters: option_parameters,
@@ -630,7 +630,7 @@ pub(super) mod fixture {
                 options,
             });
         }
-        kit.rmdf_cache.insert(
+        kit.caches.rmdf_cache.insert(
             format!("rmdf:{}", render_method.definition_path),
             Some(Arc::new(RenderMethodDefinition {
                 global_options_path: String::new(),

@@ -241,9 +241,9 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // to lose any of the three.
     move_key(&mut kit.parsed_tags, old, new);
     move_key(&mut kit.restore.pending_history, old, new);
-    move_key(&mut kit.bitmap_previews, old, new);
-    move_key(&mut kit.model_previews, old, new);
-    move_key(&mut kit.ce_sound_bindings, old, new);
+    move_key(&mut kit.caches.bitmap_previews, old, new);
+    move_key(&mut kit.caches.model_previews, old, new);
+    move_key(&mut kit.caches.ce_sound_bindings, old, new);
     move_key(&mut kit.pending_expand, old, new);
     move_key(&mut kit.find_filter_applied, old, new);
 
@@ -296,7 +296,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // cached hit under a path that no longer resolves. They are pure caches, so
     // dropping them costs one re-resolve and cannot be wrong.
     kit.forget_render_methods();
-    kit.h2_templates = H2TemplateCache::default();
+    kit.caches.h2_templates = H2TemplateCache::default();
 
     // Forces `modified_tags` to be rebuilt: it maps keys to entries, and the
     // signature is what decides whether that is worth doing again.

@@ -759,7 +759,7 @@ impl Baboon {
                 .and_then(|source| source.game);
             if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
                 self.kits[self.active]
-                    .model_previews
+                    .caches.model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()
                     .active_tab = ModelTagPanelTab::Fields;

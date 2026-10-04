@@ -170,8 +170,8 @@ impl Baboon {
         let kit = &mut self.kits[kit_index];
         kit.parsed_tags.clear();
         kit.loading_tags.clear();
-        kit.bitmap_previews.clear();
-        kit.model_previews.clear();
+        kit.caches.bitmap_previews.clear();
+        kit.caches.model_previews.clear();
         kit.edit_buffers.clear();
         kit.find_filter_applied.clear();
         kit.generation = kit.generation.wrapping_add(1);

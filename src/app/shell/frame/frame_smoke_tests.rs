@@ -327,7 +327,7 @@ fn cases() -> Vec<Case> {
                 let model = render_model_tag();
                 let key = fixture::open_document(&mut h.app, "objects/smoke.render_model", model);
                 let kit = &mut h.app.kits[h.app.active];
-                kit.model_previews.entry(key).or_default().active_tab =
+                kit.caches.model_previews.entry(key).or_default().active_tab =
                     ModelTagPanelTab::ModelPreview;
             },
             &["smoke.render_model", "Model Preview"],

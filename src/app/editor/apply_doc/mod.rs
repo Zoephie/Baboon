@@ -42,7 +42,7 @@ impl Baboon {
         kit.edit_buffers
             .accept_successful_edits(tag_key, &applied.outcomes);
         if applied.model_variants_changed
-            && let Some(preview) = kit.model_previews.get_mut(tag_key)
+            && let Some(preview) = kit.caches.model_previews.get_mut(tag_key)
         {
             preview.invalidate_load();
         }

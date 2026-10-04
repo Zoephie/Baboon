@@ -266,14 +266,14 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
             .parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
         app.kits[0]
-            .rmop_cache
+            .caches.rmop_cache
             .insert("rmop:shaders\\bump".to_owned(), None);
-        let epoch = app.kits[0].render_method_epoch;
+        let epoch = app.kits[0].caches.render_method_epoch;
         let saved = app.save_tag_by_key(key);
         assert!(saved.is_ok(), "{saved:?}");
         (
-            app.kits[0].rmop_cache.is_empty(),
-            app.kits[0].render_method_epoch != epoch,
+            app.kits[0].caches.rmop_cache.is_empty(),
+            app.kits[0].caches.render_method_epoch != epoch,
         )
     };
 

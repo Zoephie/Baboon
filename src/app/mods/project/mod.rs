@@ -1707,8 +1707,8 @@ impl Baboon {
             let kit_state = &mut self.kits[kit];
             kit_state.parsed_tags.clear();
             kit_state.loading_tags.clear();
-            kit_state.bitmap_previews.clear();
-            kit_state.model_previews.clear();
+            kit_state.caches.bitmap_previews.clear();
+            kit_state.caches.model_previews.clear();
             kit_state.find_filter_applied.clear();
             kit_state.edit_buffers.clear();
         }

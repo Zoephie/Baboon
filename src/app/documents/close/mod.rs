@@ -29,8 +29,8 @@ impl Baboon {
         let kit_state = &mut self.kits[kit];
         kit_state.parsed_tags.remove(key);
         kit_state.loading_tags.remove(key);
-        kit_state.bitmap_previews.remove(key);
-        kit_state.model_previews.remove(key);
+        kit_state.caches.bitmap_previews.remove(key);
+        kit_state.caches.model_previews.remove(key);
         kit_state.find_filter_applied.remove(key);
         kit_state.edit_buffers.forget_tag(key);
         // Persist the removal. The document is gone by now, so the capture
@@ -77,8 +77,8 @@ impl Baboon {
         let kit_state = &mut self.kits[kit];
         kit_state.parsed_tags.remove(key);
         kit_state.loading_tags.remove(key);
-        kit_state.bitmap_previews.remove(key);
-        kit_state.model_previews.remove(key);
+        kit_state.caches.bitmap_previews.remove(key);
+        kit_state.caches.model_previews.remove(key);
         kit_state.find_filter_applied.remove(key);
         kit_state.edit_buffers.forget_tag(key);
         if kit_state.selected_key.as_deref() == Some(key) {

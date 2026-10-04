@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::app::browser::KitBrowser;
+use crate::app::editor::EditorCaches;
 use crate::app::shell::session::RestorePlan;
 
 const OLD: &str = "ublock:pakchunk0:objects/vehicles/warthog";
@@ -35,11 +36,11 @@ fn kit_with_state() -> Kit {
         kit.parsed_tags.insert(key.to_owned(), document());
         kit.restore.pending_history
             .insert(key.to_owned(), TagHistory::default());
-        kit.bitmap_previews
+        kit.caches.bitmap_previews
             .insert(key.to_owned(), BitmapPreviewState::default());
-        kit.model_previews
+        kit.caches.model_previews
             .insert(key.to_owned(), ModelPreviewState::default());
-        kit.ce_sound_bindings.insert(
+        kit.caches.ce_sound_bindings.insert(
             key.to_owned(),
             std::sync::Arc::new(crate::core::source::ce_audio::CeSoundBinding::default()),
         );
@@ -68,8 +69,8 @@ fn kit_with_state() -> Kit {
         tag_tree_id(kit.id),
         vec![OLD.to_owned(), BYSTANDER.to_owned()],
     );
-    kit.rmdf_cache.insert("shaders/foo".to_owned(), None);
-    kit.rmop_cache.insert("shaders/bar".to_owned(), None);
+    kit.caches.rmdf_cache.insert("shaders/foo".to_owned(), None);
+    kit.caches.rmop_cache.insert("shaders/bar".to_owned(), None);
     kit.browser.modified_signature = vec![OLD.to_owned()];
     kit
 }
@@ -99,9 +100,9 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
     assert!(!kit.parsed_tags.contains_key(OLD));
     assert!(kit.parsed_tags.contains_key(NEW));
     assert!(kit.restore.pending_history.contains_key(NEW));
-    assert!(kit.bitmap_previews.contains_key(NEW));
-    assert!(kit.model_previews.contains_key(NEW));
-    assert!(kit.ce_sound_bindings.contains_key(NEW));
+    assert!(kit.caches.bitmap_previews.contains_key(NEW));
+    assert!(kit.caches.model_previews.contains_key(NEW));
+    assert!(kit.caches.ce_sound_bindings.contains_key(NEW));
     assert_eq!(kit.pending_expand.get(NEW), Some(&true));
     assert_eq!(
         kit.find_filter_applied
@@ -146,7 +147,7 @@ fn nothing_belonging_to_another_tag_moves() {
     rekey_tag_in_kit(&mut kit, OLD, NEW);
 
     assert!(kit.parsed_tags.contains_key(BYSTANDER));
-    assert!(kit.bitmap_previews.contains_key(BYSTANDER));
+    assert!(kit.caches.bitmap_previews.contains_key(BYSTANDER));
     assert!(kit.loading_tags.contains(BYSTANDER));
     assert_eq!(kit.keywords.keywords(BYSTANDER), ["vehicle".to_owned()]);
     assert!(kit.open_tabs.contains(&BYSTANDER.to_owned()));
@@ -198,9 +199,6 @@ fn every_field_of_a_kit_is_accounted_for() {
     let Kit {
         // Carried by `rekey_tag_in_kit`.
         parsed_tags: _,
-        bitmap_previews: _,
-        model_previews: _,
-        ce_sound_bindings: _,
         pending_expand: _,
         find_filter_applied: _,
         loading_tags: _,
@@ -211,10 +209,6 @@ fn every_field_of_a_kit_is_accounted_for() {
 
         // Dropped or invalidated by it, deliberately.
         edit_buffers: _,
-        rmdf_cache: _,
-        rmop_cache: _,
-        render_method_epoch: _,
-        h2_templates: _,
         index_jobs: _,
         generation: _,
         field_index: _,
@@ -253,6 +247,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         // Classified field by field below.
         restore: _,
         browser: _,
+        caches: _,
     } = Kit::empty(KitId(9), TagNameIndex::default());
     let RestorePlan {
         // Carried by `rekey_tag_in_kit`.
@@ -285,4 +280,15 @@ fn every_field_of_a_kit_is_accounted_for() {
         sort: _,
         filter: _,
     } = KitBrowser::default();
+    let EditorCaches {
+        // Carried by `rekey_tag_in_kit`.
+        bitmap_previews: _,
+        model_previews: _,
+        ce_sound_bindings: _,
+        // Dropped or invalidated by it, deliberately.
+        rmdf_cache: _,
+        rmop_cache: _,
+        render_method_epoch: _,
+        h2_templates: _,
+    } = EditorCaches::default();
 }

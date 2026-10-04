@@ -248,7 +248,7 @@ impl Baboon {
         };
 
         if is_bitmap_tag(entry) {
-            let preview = kit.bitmap_previews.entry(key.clone()).or_default();
+            let preview = kit.caches.bitmap_previews.entry(key.clone()).or_default();
             preview.apply_view_settings(bitmap_preview_view);
             draw_bitmap_tag(
                 ui,
@@ -269,7 +269,7 @@ impl Baboon {
                 names,
                 source.and_then(|source| source.game),
             ) {
-                kit.model_previews.entry(key.clone()).or_default()
+                kit.caches.model_previews.entry(key.clone()).or_default()
             } else {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
@@ -281,7 +281,7 @@ impl Baboon {
                 doc.id,
                 doc.dirty.revision(),
                 kit.generation,
-                kit.render_method_epoch,
+                kit.caches.render_method_epoch,
             );
             draw_tag(
                 ui,
@@ -291,9 +291,9 @@ impl Baboon {
                 names,
                 source.map(|source| &source.source),
                 source.and_then(|source| source.game),
-                &mut kit.rmdf_cache,
-                &mut kit.rmop_cache,
-                &mut kit.h2_templates,
+                &mut kit.caches.rmdf_cache,
+                &mut kit.caches.rmop_cache,
+                &mut kit.caches.h2_templates,
                 &mut grid_color_popup,
                 &mut grid_function_popup,
                 model_preview,

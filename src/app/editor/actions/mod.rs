@@ -22,7 +22,7 @@ impl Baboon {
         if !crate::app::editor::is_sound_group(entry.group_tag) {
             return None;
         }
-        if let Some(hit) = self.kits[kit_index].ce_sound_bindings.get(tag_key) {
+        if let Some(hit) = self.kits[kit_index].caches.ce_sound_bindings.get(tag_key) {
             return Some(hit.clone());
         }
 
@@ -66,7 +66,7 @@ impl Baboon {
     ) -> Option<std::sync::Arc<crate::core::source::ce_audio::CeSoundBinding>> {
         use crate::core::source::ce_audio;
 
-        if let Some(hit) = self.kits[kit_index].ce_sound_bindings.get(cache_key) {
+        if let Some(hit) = self.kits[kit_index].caches.ce_sound_bindings.get(cache_key) {
             return Some(hit.clone());
         }
 
@@ -116,7 +116,7 @@ impl Baboon {
             Some((root.as_path(), &mut store)),
         ));
         self.kits[kit_index]
-            .ce_sound_bindings
+            .caches.ce_sound_bindings
             .insert(cache_key.to_owned(), binding.clone());
         Some(binding)
     }
@@ -209,7 +209,7 @@ impl Baboon {
         key: &str,
         ctx: &egui::Context,
     ) {
-        let Some(state) = self.kits[kit_index].model_previews.get(key) else {
+        let Some(state) = self.kits[kit_index].caches.model_previews.get(key) else {
             return;
         };
         if !state.render_mode.uses_textures() || state.textures_pending {
@@ -234,7 +234,7 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
         };
-        if let Some(state) = self.kits[kit_index].model_previews.get_mut(key) {
+        if let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(key) {
             state.textures_pending = true;
         }
 
@@ -269,7 +269,7 @@ impl Baboon {
             return true;
         };
         let stale = self.resolve_stamp(stamp).is_none();
-        let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
+        let Some(state) = self.kits[kit_index].caches.model_previews.get_mut(&key) else {
             return true;
         };
         // The in-flight marker is cleared before the staleness check: a result
@@ -503,7 +503,7 @@ impl Baboon {
                     && applied.is_some_and(|applied| applied.status.is_some());
                 if refresh_model_preview
                     && let Some(preview) = self.kits[self.active]
-                        .model_previews
+                        .caches.model_previews
                         .get_mut(&confirm.tag_key)
                 {
                     preview.selected_variant = None;

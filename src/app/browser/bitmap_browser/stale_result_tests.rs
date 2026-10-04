@@ -96,7 +96,7 @@ fn a_stale_texture_resolve_clears_textures_pending() {
     let mut app = Baboon::for_test();
     let stamp = app.kit_stamp();
     let state = app.kits[0]
-        .model_previews
+        .caches.model_previews
         .entry("file:a.model".to_owned())
         .or_default();
     state.textures_pending = true;
@@ -104,5 +104,5 @@ fn a_stale_texture_resolve_clears_textures_pending() {
 
     app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, Vec::new());
 
-    assert!(!app.kits[0].model_previews["file:a.model"].textures_pending);
+    assert!(!app.kits[0].caches.model_previews["file:a.model"].textures_pending);
 }
