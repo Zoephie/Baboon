@@ -119,6 +119,19 @@ pub(super) fn sound_class_distance_row(element: &TagStruct) -> SoundClassDistanc
     }
 }
 
+/// A name field's text, whichever way the game stores it: a string id in
+/// Halo 2 onward, a fixed 32-character `string` in Halo CE (permutation and
+/// pitch-range names), or a long string. Reading only string ids named every
+/// Halo CE row by its index (`#0`, `pitch range 0`), and extraction wrote
+/// `#0.wav`, losing the names the tag holds.
+pub(in crate::app) fn read_name_text(element: &TagStruct<'_>, full: &str) -> Option<String> {
+    element
+        .read_string_id(full)
+        .or_else(|| element.read_string(full))
+        .or_else(|| element.read_long_string(full))
+        .filter(|name| !name.is_empty())
+}
+
 /// Resolve a field by its cleaned (display) name — the engine stores names with
 /// `:units#tooltip` / `{alias}` suffixes, so a direct `read_*(clean_name)` call
 /// would never match. Returns the full stored name to pass to typed readers.
@@ -293,7 +306,7 @@ pub(super) fn h4_event_names(tag: &TagFile) -> Vec<(&'static str, String)> {
         ("Fallback event", "fallback event name"),
     ] {
         if let Some(name) = find_full_field_name(&root, field)
-            .and_then(|full| root.read_string_id(full))
+            .and_then(|full| read_name_text(&root, full))
             .filter(|name| !name.is_empty())
         {
             out.push((label, name));
@@ -654,7 +667,7 @@ pub(super) fn sound_permutation_rows_for_game(
             continue;
         };
         let pr_name = find_full_field_name(&pitch_range, "name")
-            .and_then(|full| pitch_range.read_string_id(full))
+            .and_then(|full| read_name_text(&pitch_range, full))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| format!("pitch range {pr_index}"));
         let Some(permutations) = find_block_field(&pitch_range, "permutation") else {
@@ -668,7 +681,7 @@ pub(super) fn sound_permutation_rows_for_game(
                 continue;
             };
             let name = find_full_field_name(&perm, "name")
-                .and_then(|full| perm.read_string_id(full))
+                .and_then(|full| read_name_text(&perm, full))
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| format!("#{perm_index}"));
             let inline_bytes = find_full_field_name(&perm, "samples")
@@ -2219,7 +2232,7 @@ pub(in crate::app) fn draw_dialogue_summary(
             continue;
         };
         let name = find_field_name_containing(&vocal, "vocali")
-            .and_then(|full| vocal.read_string_id(full))
+            .and_then(|full| read_name_text(&vocal, full))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| format!("#{index}"));
         let mut sounds = Vec::new();
@@ -2380,7 +2393,7 @@ fn sound_looping_refs(tag: &TagFile) -> Vec<(String, u32, String)> {
                 continue;
             };
             let track_name = find_full_field_name(&track, "name")
-                .and_then(|full| track.read_string_id(full))
+                .and_then(|full| read_name_text(&track, full))
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| format!("track {index}"));
             for (label, group, path) in struct_tag_refs_labeled(&track) {
@@ -2568,7 +2581,7 @@ pub(in crate::app) fn draw_material_effects_summary(
                     continue;
                 };
                 let name = find_field_name_containing(&material, "material name")
-                    .and_then(|full| material.read_string_id(full))
+                    .and_then(|full| read_name_text(&material, full))
                     .filter(|name| !name.is_empty())
                     .unwrap_or_else(|| format!("#{material_index}"));
 

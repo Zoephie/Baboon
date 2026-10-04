@@ -65,12 +65,10 @@ fn a_ce_sound_lists_each_inline_permutation() {
     let rows = sound_permutation_rows_for_game(&tag, None, Some("haloce_mcc"));
     assert_eq!(rows.len(), 3);
     for (index, row) in rows.iter().enumerate() {
-        // BUG: a Halo CE permutation's `name` (and a pitch range's) is a
-        // 32-character `string`, but the row model reads names only as string
-        // ids, so every CE row is named by its index (`#0`, `#1`…) and every
-        // pitch range `pitch range 0`. The player lists those, and extraction
-        // writes `#0.wav` — the names the tag holds are lost on reimport.
-        // Names are deliberately not pinned here.
+        // A Halo CE permutation's `name` is a 32-character `string`, not a
+        // string id; the row carries it. (Rows used to be named by index,
+        // `#0`, `#1`…, and extraction wrote `#0.wav`.)
+        assert_eq!(row.name, format!("perm_{index}"));
         assert_eq!((row.pr_index, row.perm_index), (0, index));
         assert_eq!(row.inline_bytes, SAMPLE_RATE * 2);
         match row.kind {
@@ -130,7 +128,7 @@ fn a_bank_game_reads_every_row_as_a_bank_subsound() {
     };
     match row_play_action(&tag, &rows[0], source, None) {
         Some(SoundAction::Play { id, key, label, .. }) => {
-            // Keyed by the row's name (see the CE name BUG above).
+            // Keyed by the row's name.
             assert_eq!(key, rows[0].name);
             assert_eq!(label, rows[0].name);
             assert_eq!(
@@ -160,13 +158,9 @@ fn ce_extraction_writes_one_wav_per_permutation_flat() {
     };
     let base = std::path::Path::new("data/sound/test");
     let items = build_extract_items(&tag, &rows, source, base, true);
-    // One `<row name>.wav` per row, flat under `base` (the names are the
-    // CE BUG above).
+    // One `<permutation name>.wav` per row, flat under `base`.
     let paths: Vec<_> = items.iter().map(|item| item.out_path.clone()).collect();
-    let expected: Vec<_> = rows
-        .iter()
-        .map(|row| base.join(format!("{}.wav", row.name)))
-        .collect();
+    let expected = vec![base.join("perm_0.wav"), base.join("perm_1.wav")];
     assert_eq!(paths, expected);
     for (index, item) in items.iter().enumerate() {
         match &item.source {
