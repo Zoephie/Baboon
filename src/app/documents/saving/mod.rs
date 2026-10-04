@@ -83,7 +83,7 @@ impl Baboon {
             return true;
         }
         let Some(job) = self
-            .container_dump_job
+            .export.container_dump_job
             .as_mut()
             .filter(|job| job.kit == stamp.kit)
         else {
@@ -107,11 +107,11 @@ impl Baboon {
         result: Result<ContainerDumpReport, String>,
     ) -> bool {
         if self
-            .container_dump_job
+            .export.container_dump_job
             .as_ref()
             .is_some_and(|job| job.kit == stamp.kit)
         {
-            self.container_dump_job = None;
+            self.export.container_dump_job = None;
         }
         // Deliberately not gated on `resolve_stamp`: the files were written
         // whatever became of the workspace, and silently dropping the outcome of

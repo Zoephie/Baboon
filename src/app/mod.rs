@@ -207,10 +207,6 @@ pub struct Baboon {
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
     settings_tab: SettingsTab,
-    /// Mandatory confirmation for a bulk extraction of every shipped tag.
-    container_dump_confirm: Option<ContainerDumpConfirm>,
-    /// The one bulk container extraction allowed to run at a time.
-    container_dump_job: Option<ContainerDumpJob>,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
     /// A Chimp mesh export waiting on the choice to export its textures too.
@@ -255,8 +251,6 @@ pub struct Baboon {
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     tsv_paste: Option<TsvPasteState>,
-    /// The Extract Geometry / Extract Animations target window, if open.
-    extract_target: Option<ExtractTargetPrompt>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
     kit_tool_drag: KitToolDragState,
     status: String,
@@ -286,8 +280,6 @@ pub struct Baboon {
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
-    /// Pending sound-extraction batch (decode + write), drained by the audio layer.
-    pending_sound_extract: Option<ExtractRequest>,
     /// Pending play/extract of a `.sound` a container-source tag only refers to,
     /// stamped with the kit that raised it. Resolved after rendering, since the
     /// referenced tag's audio has to be walked out to Wwise first.
@@ -348,6 +340,9 @@ pub struct Baboon {
     /// write leases and the remounts they leave, and Export Mod with its
     /// review.
     pub(in crate::app) mods: ModsFeature,
+    /// Export: the container dump and its confirmation, the extract target
+    /// window, and a sound extraction waiting to start.
+    pub(in crate::app) export: ExportFeature,
 }
 
 impl Baboon {
@@ -499,8 +494,6 @@ impl Baboon {
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
-            container_dump_confirm: None,
-            container_dump_job: None,
             operation_notice: None,
             chimp_mesh_texture_prompt: None,
             chimp_texture_export_prompt: None,
@@ -534,7 +527,6 @@ impl Baboon {
             keyword_chooser_open: false,
             reveal_target: None,
             tsv_paste: None,
-            extract_target: None,
             kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
             status_shown: String::new(),
@@ -562,7 +554,6 @@ impl Baboon {
             block_confirm: None,
             audio: audio::AudioState::default(),
             ce_usmap: None,
-            pending_sound_extract: None,
             pending_ce_sound_ref: None,
             pending_open: None,
             tag_reference_picker: None,
@@ -645,6 +636,12 @@ impl Baboon {
                 clear_stash_confirm: None,
                 exported_mod: None,
                 mod_export: None,
+            },
+            export: ExportFeature {
+                container_dump_confirm: None,
+                container_dump_job: None,
+                extract_target: None,
+                pending_sound_extract: None,
             },
         }
     }

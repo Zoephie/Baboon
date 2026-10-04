@@ -20,7 +20,7 @@ impl Baboon {
     /// Which game's tools a geometry or animation extraction is for. Choosing
     /// one goes on to the folder picker.
     pub(in crate::app) fn draw_extract_target_window(&mut self, ctx: &egui::Context) {
-        let Some(state) = self.extract_target.as_mut() else {
+        let Some(state) = self.export.extract_target.as_mut() else {
             return;
         };
         let title = match state.kind {
@@ -83,7 +83,7 @@ impl Baboon {
                 });
             });
         if extract {
-            let state = self.extract_target.take().expect("checked above");
+            let state = self.export.extract_target.take().expect("checked above");
             match state.kind {
                 ExtractKind::Geometry => {
                     self.begin_extract_geometry(state.key, state.target, ctx.clone())
@@ -93,7 +93,7 @@ impl Baboon {
                 }
             }
         } else if cancel || !open {
-            self.extract_target = None;
+            self.export.extract_target = None;
         }
     }
 }

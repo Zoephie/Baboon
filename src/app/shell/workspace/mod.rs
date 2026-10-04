@@ -305,7 +305,7 @@ impl Baboon {
             if self.prefs.expert_mode
                 && ui
                     .add_enabled(
-                        self.container_dump_job.is_none(),
+                        self.export.container_dump_job.is_none(),
                         egui::Button::new("Extract All Tags to Folder\u{2026}"),
                     )
                     .on_hover_text(
@@ -873,7 +873,7 @@ impl Baboon {
                     // Additive rather than part of the chain above: the
                     // extraction outlives whatever the user does next, and its
                     // bar is the only place a cancel is reachable from.
-                    if let Some(job) = &self.container_dump_job {
+                    if let Some(job) = &self.export.container_dump_job {
                         let (fraction, done, total) = (job.fraction(), job.done, job.total);
                         let remaining = job.remaining();
                         ui.separator();
@@ -1397,7 +1397,7 @@ impl Baboon {
         }
         // Drain a queued sound extraction (decode + write files off the render
         // hot loop) and a reimport hand-off (opens the tool runner pre-filled).
-        if let Some(request) = self.pending_sound_extract.take() {
+        if let Some(request) = self.export.pending_sound_extract.take() {
             self.audio.run_extract(request, ctx);
             if let Some(status) = self.audio.status.clone() {
                 self.status = status;

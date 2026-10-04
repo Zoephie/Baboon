@@ -217,7 +217,7 @@ impl Baboon {
             sound_looping,
             sound_preview,
             sound_has_focus,
-            sound_extract_request: &mut self.pending_sound_extract,
+            sound_extract_request: &mut self.export.pending_sound_extract,
             sound_language: self.audio.language.as_deref(),
             ce_sound: ce_sound.as_deref(),
             ce_sound_ref_request: &mut ce_sound_ref_request,

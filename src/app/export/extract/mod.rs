@@ -319,7 +319,7 @@ impl Baboon {
                     return;
                 }
                 let count = entries.len();
-                self.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
+                self.export.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
                     items,
                     tags_root: Some(root),
                     label: if all_languages {
@@ -384,7 +384,7 @@ impl Baboon {
                     self.status = "The selected sound tags have no audio bound".to_owned();
                     return;
                 }
-                self.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
+                self.export.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
                     items,
                     tags_root: None,
                     label: format!("{} sound tag(s)", entries.len()),
@@ -427,7 +427,7 @@ impl Baboon {
     /// require a container mount, count what the scope actually covers, pick a
     /// destination, and keep that destination out of the game's own Paks folder.
     pub(in crate::app) fn raise_container_dump_confirm(&mut self, scope: ContainerDumpScope, dialog_title: &str) {
-        if self.container_dump_job.is_some() {
+        if self.export.container_dump_job.is_some() {
             self.status = "An extraction is already running".to_owned();
             return;
         }
@@ -466,7 +466,7 @@ impl Baboon {
             );
             return;
         }
-        self.container_dump_confirm = Some(ContainerDumpConfirm {
+        self.export.container_dump_confirm = Some(ContainerDumpConfirm {
             kit: self.active_kit_id(),
             output,
             total,
@@ -482,7 +482,7 @@ impl Baboon {
         scope: ContainerDumpScope,
         ctx: egui::Context,
     ) {
-        if self.container_dump_job.is_some() {
+        if self.export.container_dump_job.is_some() {
             self.status = "An extraction is already running".to_owned();
             return;
         }
@@ -519,7 +519,7 @@ impl Baboon {
             generation: self.kits[index].generation,
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        self.container_dump_job = Some(ContainerDumpJob {
+        self.export.container_dump_job = Some(ContainerDumpJob {
             kit,
             output: output.clone(),
             done: 0,
@@ -557,7 +557,7 @@ impl Baboon {
         };
         let display_path = entry.display_path.clone();
         let source = self.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
-        self.extract_target = Some(ExtractTargetPrompt {
+        self.export.extract_target = Some(ExtractTargetPrompt {
             key,
             display_path,
             kind,

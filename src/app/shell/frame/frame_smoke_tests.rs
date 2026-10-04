@@ -1110,11 +1110,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "container_dump_confirm",
-            &["container_dump_confirm"],
+            &["export.container_dump_confirm"],
             &["export/container_dump_confirm.rs"],
             container_kit,
             |h| {
-                h.app.container_dump_confirm = Some(ContainerDumpConfirm {
+                h.app.export.container_dump_confirm = Some(ContainerDumpConfirm {
                     kit: active_id(h),
                     output: PathBuf::from("/no/such/smoke-out"),
                     total: 2,
@@ -1272,11 +1272,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "extract_target",
-            &["extract_target"],
+            &["export.extract_target"],
             &["export/extract_target_window/mod.rs"],
             memory_kit,
             |h| {
-                h.app.extract_target = Some(ExtractTargetPrompt {
+                h.app.export.extract_target = Some(ExtractTargetPrompt {
                     key: biped_key(),
                     display_path: "objects/smoke.render_model".to_owned(),
                     kind: ExtractKind::Geometry,
@@ -1394,7 +1394,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("import.native_template_cache", "import cache"),
     ("available_update", "data shown in Settings and the status bar"),
     ("last_update_check", "data shown in Settings"),
-    ("container_dump_job", "a running job; its progress is in the status bar"),
+    ("export.container_dump_job", "a running job; its progress is in the status bar"),
     ("chimp_level_job", "a running job; its progress is in the status bar"),
     ("mods.last_mod_export_name", "remembered text"),
     ("chimp_writes", "running saves"),
@@ -1409,7 +1409,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("search.field_value_searching", "running flag of the field value search"),
     ("kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),
-    ("pending_sound_extract", "a queued request"),
+    ("export.pending_sound_extract", "a queued request"),
     ("pending_ce_sound_ref", "a queued request"),
     ("pending_open", "a queued request"),
     ("pending_tool_import", "a queued request"),

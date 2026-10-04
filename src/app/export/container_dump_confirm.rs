@@ -14,7 +14,7 @@ impl Baboon {
     /// point holds for a folder too, so it is said unconditionally.
     pub(in crate::app) fn draw_container_dump_confirm_window(&mut self, ctx: &egui::Context) {
         let Some((kit, output, total, folder)) =
-            self.container_dump_confirm.as_ref().map(|confirm| {
+            self.export.container_dump_confirm.as_ref().map(|confirm| {
                 let folder = match &confirm.scope {
                     ContainerDumpScope::AllShipped => None,
                     ContainerDumpScope::Folder { label, .. } => Some(label.clone()),
@@ -123,12 +123,12 @@ impl Baboon {
                 });
             });
         if !open || cancel {
-            self.container_dump_confirm = None;
+            self.export.container_dump_confirm = None;
         } else if do_extract {
             // Taken rather than cleared: the scope captured at right-click is
             // what the run covers, and it moves into the job here.
             let scope = self
-                .container_dump_confirm
+                .export.container_dump_confirm
                 .take()
                 .map(|confirm| confirm.scope);
             // The extraction reads the active kit's source, so return to the

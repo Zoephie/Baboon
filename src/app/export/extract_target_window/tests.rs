@@ -89,7 +89,7 @@ fn the_kit_s_game_is_the_default_and_marked() {
         assert_eq!(GameId::from_id(id).unwrap().generation(), Game::Halo3, "{id}");
     }
     let mut app = app();
-    app.extract_target = Some(prompt(Game::Halo2));
+    app.export.extract_target = Some(prompt(Game::Halo2));
     let ctx = egui::Context::default();
     // A window lays itself out unseen on its first frame.
     frame(&mut app, &ctx, Vec::new());
@@ -103,13 +103,13 @@ fn the_kit_s_game_is_the_default_and_marked() {
 #[test]
 fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
     let mut app = app();
-    app.extract_target = Some(prompt(Game::Halo2));
+    app.export.extract_target = Some(prompt(Game::Halo2));
     let ctx = egui::Context::default();
     // A window lays itself out unseen on its first frame.
     frame(&mut app, &ctx, Vec::new());
     let labels = frame(&mut app, &ctx, Vec::new());
     click(&mut app, &ctx, &labels, "Halo: Combat Evolved");
-    let state = app.extract_target.as_ref().expect("still open");
+    let state = app.export.extract_target.as_ref().expect("still open");
     assert_eq!(state.target, Game::Halo1);
     assert_eq!(
         state.source,
@@ -127,5 +127,5 @@ fn choosing_another_game_sets_the_target_and_cancel_drops_it() {
     );
 
     click(&mut app, &ctx, &labels, "Cancel");
-    assert!(app.extract_target.is_none());
+    assert!(app.export.extract_target.is_none());
 }

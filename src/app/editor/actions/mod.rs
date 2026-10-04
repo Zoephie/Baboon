@@ -191,7 +191,7 @@ impl Baboon {
                 },
             })
             .collect();
-        self.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
+        self.export.pending_sound_extract = Some(crate::app::export::sound_extract::ExtractRequest {
             items,
             tags_root: None,
             label: request.label,

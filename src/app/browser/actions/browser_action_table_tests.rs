@@ -138,7 +138,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
     ensure(
         app.tag_ops.rename_tag.is_none()
             && app.tag_ops.delete_confirm.is_none()
-            && app.extract_target.is_none()
+            && app.export.extract_target.is_none()
             && app.search.query_results.is_none()
             && app.content_explorer.is_none()
             && app.tag_ops.folder_refactor.is_none()
@@ -147,7 +147,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
             && app.import.cache_import_dialog.is_none()
             && app.tag_ops.container_folder_dialog.is_none()
             && app.pending_tool_import.is_none()
-            && app.pending_sound_extract.is_none(),
+            && app.export.pending_sound_extract.is_none(),
         "a dialog opened",
     )
 }
@@ -414,7 +414,7 @@ fn cases() -> Vec<Case> {
             setup: no_setup,
             check: |app, _, _| {
                 status_is(app, "No loaded sound tags found")?;
-                ensure(app.pending_sound_extract.is_none(), "an extraction was queued")
+                ensure(app.export.pending_sound_extract.is_none(), "an extraction was queued")
             },
         },
         // 23: the whole scan is in memory, so the folder loads at once.
@@ -436,7 +436,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ExtractGeometry(kit.key(MODEL)),
             setup: no_setup,
             check: |app, kit, _| {
-                let prompt = app.extract_target.as_ref().ok_or("no prompt")?;
+                let prompt = app.export.extract_target.as_ref().ok_or("no prompt")?;
                 ensure(prompt.key == kit.key(MODEL), "key")?;
                 ensure(prompt.display_path == MODEL, "display path")?;
                 ensure(matches!(prompt.kind, ExtractKind::Geometry), "kind")?;
@@ -458,7 +458,7 @@ fn cases() -> Vec<Case> {
             action: |kit| A::ExtractAnimation(kit.key(MODEL)),
             setup: no_setup,
             check: |app, _, _| {
-                let prompt = app.extract_target.as_ref().ok_or("no prompt")?;
+                let prompt = app.export.extract_target.as_ref().ok_or("no prompt")?;
                 ensure(matches!(prompt.kind, ExtractKind::Animation), "kind")
             },
         },
