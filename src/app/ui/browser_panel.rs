@@ -210,9 +210,8 @@ impl Baboon {
                     is_container,
                     &mut action,
                 );
-                ui.add_space(8.0);
+                ui.add_space(PANE_HEADER_BOTTOM_SPACE);
                 ui.separator();
-                ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     if view_tab_button(ui, ButtonIcon::FolderOpen, "Folder View", !pane.assets_view)
@@ -220,13 +219,18 @@ impl Baboon {
                     {
                         pane.assets_view = false;
                     }
-                    if view_tab_button(ui, ButtonIcon::Group, "Asset Browser", pane.assets_view)
-                        .clicked()
+                    if view_tab_button(
+                        ui,
+                        ButtonIcon::AssetBrowser,
+                        "Asset Browser",
+                        pane.assets_view,
+                    )
+                    .clicked()
                     {
                         pane.assets_view = true;
                     }
                 });
-                ui.add_space(10.0);
+                ui.add_space(6.0);
 
                 let search_response = if folder_browser_search_stacks(ui.available_width()) {
                     let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
@@ -1167,38 +1171,57 @@ fn draw_folder_header_common_actions(
             CONTEXT_MENU_WIDTH,
             |ui| {
                 style_tag_context_menu(ui);
-                if is_loose {
-                    if let Some(menu_action) =
-                        loose_folder_transfer_menu_items(ui, &pane.rel_path, &pane.label)
-                    {
-                        action.replace(menu_action);
-                    }
-                    context_menu_separator(ui);
-                }
-                if context_menu_button(ui, "Copy Folder Path").clicked() {
-                    action.replace(BrowserAction::CopyFolderPath(pane.rel_path.clone()));
-                    ui.close_menu();
-                }
-                context_menu_separator(ui);
                 let extract_label = pane.rel_path.to_string_lossy().replace('\\', "/");
                 let extract_label = if extract_label.is_empty() {
                     pane.label.clone()
                 } else {
                     extract_label
                 };
-                if let Some(menu_action) = folder_tree_extract_menu_button(
-                    ui,
-                    &pane.tree,
-                    entries,
-                    extract_label,
-                    pane.rel_path.clone(),
-                    is_container,
-                    is_loose,
-                    true,
-                ) {
-                    action.replace(menu_action);
+                if is_loose {
+                    if let Some(menu_action) = loose_folder_primary_menu_items(
+                        ui,
+                        &pane.rel_path,
+                        &pane.label,
+                        Some(is_favorite),
+                        false,
+                        |ui| {
+                            folder_tree_extract_menu_button(
+                                ui,
+                                &pane.tree,
+                                entries,
+                                extract_label.clone(),
+                                pane.rel_path.clone(),
+                                is_container,
+                                is_loose,
+                                true,
+                            )
+                        },
+                    ) {
+                        action.replace(menu_action);
+                    }
+                }
+                if context_menu_button(ui, "Copy Folder Path").clicked() {
+                    action.replace(BrowserAction::CopyFolderPath(pane.rel_path.clone()));
+                    ui.close_menu();
                 }
                 context_menu_separator(ui);
+                if !is_loose
+                    && let Some(menu_action) = folder_tree_extract_menu_button(
+                        ui,
+                        &pane.tree,
+                        entries,
+                        extract_label,
+                        pane.rel_path.clone(),
+                        is_container,
+                        is_loose,
+                        true,
+                    )
+                {
+                    action.replace(menu_action);
+                }
+                if !is_loose {
+                    context_menu_separator(ui);
+                }
                 if context_menu_button(ui, "Dump folder to JSON...").clicked() {
                     action.replace(BrowserAction::DumpLooseFolderJson {
                         rel_path: pane.rel_path.clone(),

@@ -29,6 +29,7 @@ mod tool_commands;
 mod welcome;
 
 const PANE_HEADER_ICON_SIZE: f32 = 32.0;
+const PANE_HEADER_BOTTOM_SPACE: f32 = 20.0;
 const PANE_HEADER_SECTION_GAP: f32 = 20.0;
 const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
 

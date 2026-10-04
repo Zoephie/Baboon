@@ -8,6 +8,7 @@ fn button_icon_lookup_uses_expected_assets() {
     let icons = [
         ButtonIcon::Add,
         ButtonIcon::About,
+        ButtonIcon::AssetBrowser,
         ButtonIcon::Browse,
         ButtonIcon::Cache,
         ButtonIcon::ChannelAlpha,

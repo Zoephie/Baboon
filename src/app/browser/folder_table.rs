@@ -362,7 +362,7 @@ fn format_file_size(bytes: u64) -> String {
     }
     let mut value = bytes as f64;
     let mut unit = "B";
-    for next in ["KiB", "MiB", "GiB", "TiB"] {
+    for next in ["KB", "MB", "GB", "TB"] {
         if value < 1024.0 {
             break;
         }
@@ -659,8 +659,10 @@ mod tests {
             });
         });
         assert_eq!(format_file_size(0), "0 B");
-        assert_eq!(format_file_size(1024), "1.0 KiB");
-        assert_eq!(format_file_size(1_048_576), "1.0 MiB");
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1_048_576), "1.0 MB");
+        assert_eq!(format_file_size(1_073_741_824), "1.0 GB");
+        assert_eq!(format_file_size(1_099_511_627_776), "1.0 TB");
     }
 
     #[test]

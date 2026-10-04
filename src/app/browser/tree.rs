@@ -266,6 +266,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Duplicate" => Some(ButtonIcon::Duplicate),
         "Delete" => Some(ButtonIcon::Garbage),
         "Move" => Some(ButtonIcon::Move),
+        "Copy To" => Some(ButtonIcon::Copy),
         "Open with File Explorer" => Some(ButtonIcon::FileExplorer),
         "Add to Favorites" | "Remove from Favorites" => Some(ButtonIcon::Favourite),
         "Copy Tag Path" => Some(ButtonIcon::CopyPath),
@@ -1189,9 +1190,14 @@ fn draw_tree_node_lazy_block(
                 .iter()
                 .any(|path| paths_match_case_insensitive(path, &node.rel_path))
         });
-        if let Some(action) =
-            loose_folder_primary_menu_items(ui, &node.rel_path, &node.label, favorited, false)
-        {
+        if let Some(action) = loose_folder_primary_menu_items(
+            ui,
+            &node.rel_path,
+            &node.label,
+            favorited,
+            false,
+            |ui| folder_extract_menu_button(ui, node, entries, false, true),
+        ) {
             clicked = Some(action);
         }
         // The same action the tag menu offers, aimed at the folder rather than a
@@ -1214,9 +1220,6 @@ fn draw_tree_node_lazy_block(
                 label: node.label.clone(),
             });
             ui.close_menu();
-        }
-        if let Some(action) = folder_extract_menu_button(ui, node, entries, false, true) {
-            clicked = Some(action);
         }
     });
     if response.double_clicked() {
@@ -1429,6 +1432,7 @@ fn draw_tree_node_block(
                 &node.label,
                 favorited,
                 browser_is_folder_pane(ui),
+                |ui| folder_extract_menu_button(ui, node, entries, false, false),
             ) {
                 clicked = Some(action);
             }
@@ -1515,8 +1519,9 @@ fn draw_tree_node_block(
         // A group node is not a real folder, so only Folders mode may offer a
         // raw container-folder extraction. Type-specific bulk exports remain
         // valid in either view, matching their previous availability.
-        if let Some(action) =
-            folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false)
+        if (groups_mode || favorite_keys.is_none())
+            && let Some(action) =
+                folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false)
         {
             clicked = Some(action);
         }
@@ -1937,14 +1942,15 @@ fn folder_extract_menu_from_keys(
 /// The leading actions shared by loose folders wherever they appear. Keeping
 /// this sequence in one place prevents Favorites, the sidebar, and folder tabs
 /// from silently losing different commands as the menu evolves.
-fn loose_folder_primary_menu_items(
+pub(in crate::app) fn loose_folder_primary_menu_items(
     ui: &mut Ui,
     rel_path: &Path,
     label: &str,
     favorited: Option<bool>,
     open_in_new_tab: bool,
+    extract: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
 ) -> Option<BrowserAction> {
-    let mut action = None;
+    let mut action = loose_folder_transfer_menu_items(ui, rel_path, label);
     if let Some(favorited) = favorited {
         if context_menu_button(
             ui,
@@ -1959,10 +1965,6 @@ fn loose_folder_primary_menu_items(
             action = Some(BrowserAction::ToggleFolderFavorite(rel_path.to_path_buf()));
             ui.close_menu();
         }
-        context_menu_separator(ui);
-    }
-    if let Some(transfer) = loose_folder_transfer_menu_items(ui, rel_path, label) {
-        action = Some(transfer);
     }
     if open_in_new_tab {
         if context_menu_button(ui, "Open in new tab").clicked() {
@@ -1974,8 +1976,15 @@ fn loose_folder_primary_menu_items(
             ui.close_menu();
         }
     }
-    // Explorer and clipboard-path commands form the next section at every
-    // right-click entry point that consumes this shared primary block.
+    if favorited.is_some() || open_in_new_tab {
+        context_menu_separator(ui);
+    }
+    if let Some(import) = loose_folder_import_menu_item(ui, rel_path) {
+        action = Some(import);
+    }
+    if let Some(extract) = extract(ui) {
+        action = Some(extract);
+    }
     context_menu_separator(ui);
     action
 }
@@ -1987,30 +1996,42 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     rel_path: &Path,
     label: &str,
 ) -> Option<BrowserAction> {
-    if context_menu_button(ui, "Rename...")
-        .on_hover_text("Rename this folder and update every reference to the tags inside it")
-        .clicked()
-    {
+    const GAP: f32 = 4.0;
+    let width = (ui.available_width() - GAP * 2.0) / 3.0;
+    let enabled = !rel_path.as_os_str().is_empty();
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        if context_menu_primary_button(ui, "Rename", enabled, width)
+            .on_hover_text("Rename this folder and update every reference to the tags inside it")
+            .clicked()
+        {
+            action = Some(BrowserAction::RenameLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+        if context_menu_primary_button(ui, "Move", enabled, width).clicked() {
+            action = Some(BrowserAction::MoveLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+        if context_menu_primary_button(ui, "Copy To", enabled, width).clicked() {
+            action = Some(BrowserAction::CopyLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+    });
+    if action.is_some() {
         ui.close_menu();
-        return Some(BrowserAction::RenameLooseFolder {
-            rel_path: rel_path.to_path_buf(),
-            label: label.to_owned(),
-        });
     }
-    if context_menu_button(ui, "Move to...").clicked() {
-        ui.close_menu();
-        return Some(BrowserAction::MoveLooseFolder {
-            rel_path: rel_path.to_path_buf(),
-            label: label.to_owned(),
-        });
-    }
-    if context_menu_button(ui, "Copy to...").clicked() {
-        ui.close_menu();
-        return Some(BrowserAction::CopyLooseFolder {
-            rel_path: rel_path.to_path_buf(),
-            label: label.to_owned(),
-        });
-    }
+    context_menu_separator(ui);
+    action
+}
+
+fn loose_folder_import_menu_item(ui: &mut Ui, rel_path: &Path) -> Option<BrowserAction> {
     // Import is intentionally not Expert-gated: converting content from
     // another game is a primary folder operation and confirms before writing.
     if context_menu_button(ui, "Import tags here...")
@@ -2025,6 +2046,149 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         });
     }
     None
+}
+
+#[cfg(test)]
+mod folder_primary_action_tests {
+    use super::*;
+
+    #[test]
+    fn favorite_precedes_import_and_extract_without_duplicate_dividers() {
+        for open_in_new_tab in [false, true] {
+            let ctx = egui::Context::default();
+            let output = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    style_tag_context_menu(ui);
+                    loose_folder_primary_menu_items(
+                        ui,
+                        Path::new("objects/brute"),
+                        "brute",
+                        Some(false),
+                        open_in_new_tab,
+                        |ui| {
+                            context_menu_button(ui, "Extract >");
+                            None
+                        },
+                    );
+                    context_menu_button(ui, "Copy Folder Path");
+                });
+            });
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.job.text.as_str(), text.pos.y)),
+                    _ => None,
+                })
+                .collect();
+            let y = |label| labels.iter().find(|(text, _)| *text == label).unwrap().1;
+            assert!(y("Add to Favorites") < y("Import tags here..."));
+            assert!(y("Import tags here...") < y("Extract >"));
+            let separators: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y => {
+                        Some(points[0].y)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(separators.len(), 3, "one divider between each section");
+            assert!(
+                separators
+                    .iter()
+                    .any(|s| *s > y("Add to Favorites") && *s < y("Import tags here..."))
+            );
+            assert!(
+                !separators
+                    .iter()
+                    .any(|s| *s > y("Import tags here...") && *s < y("Extract >"))
+            );
+        }
+    }
+
+    #[test]
+    fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
+        for header in [false, true] {
+            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
+                let ctx = egui::Context::default();
+                let row_width = std::cell::Cell::new(0.0);
+                let frame = |events| {
+                    let mut action = None;
+                    let output = ctx.run(
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                style_tag_context_menu(ui);
+                                ui.set_width(CONTEXT_MENU_WIDTH);
+                                row_width.set(ui.available_width());
+                                action = if header {
+                                    loose_folder_transfer_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                    )
+                                } else {
+                                    loose_folder_primary_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                        Some(false),
+                                        true,
+                                        |_| None,
+                                    )
+                                };
+                            });
+                        },
+                    );
+                    (output, action)
+                };
+                let (output, _) = frame(Vec::new());
+                let buttons: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.height() > 40.0 && rect.rect.height() < 70.0 =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(buttons.len(), 3);
+                for button in &buttons {
+                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
+                    assert_eq!(button.top(), buttons[0].top());
+                }
+                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
+                let pos = buttons[index].center();
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                let event = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(vec![event(true)]);
+                let (_, action) = frame(vec![event(false)]);
+                assert!(
+                    match (label, action) {
+                        ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
+                        | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
+                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
+                            rel_path == Path::new("objects/brute"),
+                        _ => false,
+                    },
+                    "{label} did not dispatch (header={header})"
+                );
+            }
+        }
+    }
 }
 
 /// Colour for a folder row: marked when anything beneath it carries edits that
@@ -3157,6 +3321,19 @@ pub(in crate::app) fn draw_favorites(
                     &label,
                     Some(true),
                     browser_is_folder_pane(ui),
+                    |ui| {
+                        let subtree = crate::source::build_tree_beneath(folder_entries, folder);
+                        let folder_node = TagTreeNode {
+                            label: label.clone(),
+                            rel_path: folder.clone(),
+                            children: subtree.children,
+                            children_loaded: true,
+                            entries: subtree.entries,
+                            entries_loaded: true,
+                            pending: false,
+                        };
+                        folder_extract_menu_button(ui, &folder_node, folder_entries, false, true)
+                    },
                 ) {
                     action = Some(folder_action);
                 }
@@ -3174,26 +3351,6 @@ pub(in crate::app) fn draw_favorites(
                 if context_menu_button(ui, "Copy Folder Path").clicked() {
                     action = Some(BrowserAction::CopyFolderPath(folder.clone()));
                     ui.close_menu();
-                }
-                context_menu_separator(ui);
-                // Favorite folders do not own a tree node in this section.
-                // Rebuild only their loaded subtree while the menu is open so
-                // the shared extraction menu can collect the same keys as a
-                // manually navigated folder without doing I/O on right-click.
-                let subtree = crate::source::build_tree_beneath(folder_entries, folder);
-                let folder_node = TagTreeNode {
-                    label: label.clone(),
-                    rel_path: folder.clone(),
-                    children: subtree.children,
-                    children_loaded: true,
-                    entries: subtree.entries,
-                    entries_loaded: true,
-                    pending: false,
-                };
-                if let Some(folder_action) =
-                    folder_extract_menu_button(ui, &folder_node, folder_entries, false, true)
-                {
-                    action = Some(folder_action);
                 }
                 context_menu_separator(ui);
                 if context_menu_button(ui, "Dump folder to JSON...").clicked() {
@@ -4008,6 +4165,8 @@ mod tests {
 
     #[test]
     fn folder_context_commands_have_matching_icons() {
+        assert_eq!(context_menu_icon("Rename"), Some(ButtonIcon::Rename));
+        assert_eq!(context_menu_icon("Copy To"), Some(ButtonIcon::Copy));
         assert_eq!(context_menu_icon("Move to..."), Some(ButtonIcon::Move));
         assert_eq!(context_menu_icon("Copy to..."), Some(ButtonIcon::Copy));
         assert_eq!(

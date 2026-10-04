@@ -503,7 +503,7 @@ impl Baboon {
                 |ui| self.draw_tag_header_common_actions(ui, ctx, kit_index, entry),
             );
         }
-        ui.add_space(20.0);
+        ui.add_space(PANE_HEADER_BOTTOM_SPACE);
         ui.separator();
         breadcrumb_navigation.map(|(rel_path, label)| BrowserAction::OpenFolderBrowser {
             rel_path,
