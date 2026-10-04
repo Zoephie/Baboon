@@ -8,8 +8,6 @@ mod blam;
 mod browser_panel;
 mod dialogs;
 pub(in crate::app) use dialogs::DiffNode;
-mod find;
-pub(in crate::app) use find::{draw_icon_window_header, draw_icon_window_header_without_close};
 mod first_run;
 mod kit_tiles;
 mod loading;
@@ -17,7 +15,6 @@ pub(in crate::app) use loading::{
     centered_loading_state, paint_loading_rings, paint_loading_rings_sized,
 };
 mod recents;
-mod search_windows;
 mod settings;
 mod shell;
 mod tag_pane;
@@ -686,7 +683,7 @@ mod external_links_tests;
 mod menu_close_tests;
 
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
-fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
+pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(
         egui::Label::new(RichText::new(entry.display_path.replace('\\', "/")).color(text_dark()))
             .sense(Sense::click()),

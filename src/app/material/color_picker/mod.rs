@@ -366,7 +366,7 @@ pub(in crate::app) fn draw_color_popup(
         .resizable(false)
         .default_size(window_size(ctx, Vec2::new(560.0, 480.0), false))
         .show(ctx, |ui| {
-            super::super::ui::draw_icon_window_header_without_close(
+            crate::app::search::draw_icon_window_header_without_close(
                 ui,
                 &window_title,
                 ButtonIcon::ColorPicker,
@@ -1057,7 +1057,7 @@ fn draw_save_palette_format_dialog(
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .fixed_size(window_size(ctx, Vec2::new(420.0, 225.0), false))
         .show(ctx, |ui| {
-            super::super::ui::draw_icon_window_header(
+            crate::app::search::draw_icon_window_header(
                 ui,
                 "Save Palette",
                 ButtonIcon::Save,

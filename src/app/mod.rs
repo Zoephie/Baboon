@@ -90,10 +90,6 @@ use crate::core::document::apply::{BlockIndexTarget, block_index_value};
 mod project;
 use project::*;
 use crate::core::keywords::*;
-mod field_index;
-use field_index::*;
-mod find;
-use find::*;
 mod prefs;
 use prefs::*;
 mod browser;
@@ -149,6 +145,8 @@ mod help;
 use help::*;
 mod compare;
 use compare::*;
+mod search;
+use search::*;
 mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a

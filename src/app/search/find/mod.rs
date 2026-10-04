@@ -385,7 +385,7 @@ impl Baboon {
     /// Called every frame. The walk behind the results is far slower than a
     /// frame on a large tag, so it reruns only when [`Self::find_results_key`]
     /// changes; otherwise only the cheap render snapshot is republished.
-    pub(super) fn refresh_find(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn refresh_find(&mut self, ctx: &egui::Context) {
         if !self.find.open || self.find.query.is_empty() || self.find.look_in.is_empty() {
             self.find.occurrences.clear();
             self.find.active = None;
@@ -726,7 +726,7 @@ impl Baboon {
     }
 
     /// Move the active Find occurrence with wraparound and reveal its field.
-    pub(super) fn step_find(&mut self, ctx: &egui::Context, delta: isize) {
+    pub(in crate::app) fn step_find(&mut self, ctx: &egui::Context, delta: isize) {
         let len = self.find.occurrences.len();
         if len == 0 {
             self.find.active = None;
@@ -741,7 +741,7 @@ impl Baboon {
     }
 
     /// Select a Find result's tag and navigate immediately or after its load completes.
-    pub(super) fn activate_find_occurrence(&mut self, ctx: &egui::Context, hit: FindOccurrence) {
+    pub(in crate::app) fn activate_find_occurrence(&mut self, ctx: &egui::Context, hit: FindOccurrence) {
         if self.kits[self.active].selected_key.as_deref() != Some(hit.tag_key.as_str()) {
             self.select_entry(hit.tag_key.clone(), ctx.clone());
         }

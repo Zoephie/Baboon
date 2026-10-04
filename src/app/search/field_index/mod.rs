@@ -5,7 +5,7 @@
 //! Not persisted to disk yet — that's a safe follow-up.
 
 #[derive(Default)]
-pub(super) struct FieldValueIndex {
+pub(in crate::app) struct FieldValueIndex {
     generation: u64,
     ready: bool,
     building: bool,
@@ -14,20 +14,20 @@ pub(super) struct FieldValueIndex {
 }
 
 impl FieldValueIndex {
-    pub(super) fn is_ready_for(&self, generation: u64) -> bool {
+    pub(in crate::app) fn is_ready_for(&self, generation: u64) -> bool {
         self.ready && self.generation == generation
     }
 
-    pub(super) fn is_building(&self) -> bool {
+    pub(in crate::app) fn is_building(&self) -> bool {
         self.building
     }
 
-    pub(super) fn mark_building(&mut self) {
+    pub(in crate::app) fn mark_building(&mut self) {
         self.building = true;
     }
 
     /// Install freshly-built blobs from the worker.
-    pub(super) fn install(&mut self, generation: u64, blobs: Vec<(String, String)>) {
+    pub(in crate::app) fn install(&mut self, generation: u64, blobs: Vec<(String, String)>) {
         self.generation = generation;
         self.blobs = blobs;
         self.ready = true;
@@ -35,7 +35,7 @@ impl FieldValueIndex {
     }
 
     /// Drop the index (called on source reload).
-    pub(super) fn invalidate(&mut self) {
+    pub(in crate::app) fn invalidate(&mut self) {
         self.ready = false;
         self.building = false;
         self.blobs.clear();
@@ -43,7 +43,7 @@ impl FieldValueIndex {
 
     /// Substring query over the cached blobs → (entry key, snippet) pairs, up to
     /// `cap`. `query_lower` must already be lowercased.
-    pub(super) fn query(&self, query_lower: &str, cap: usize) -> Vec<(String, String)> {
+    pub(in crate::app) fn query(&self, query_lower: &str, cap: usize) -> Vec<(String, String)> {
         let mut out = Vec::new();
         for (key, blob) in &self.blobs {
             if let Some(byte_pos) = blob.find(query_lower) {

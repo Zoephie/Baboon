@@ -4,7 +4,7 @@ use super::*;
 
 impl Baboon {
     /// Draw the modeless Find window and dispatch query or navigation changes.
-    pub(super) fn draw_find_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_find_window(&mut self, ctx: &egui::Context) {
         if !self.find.open {
             return;
         }

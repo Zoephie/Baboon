@@ -2,9 +2,10 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use crate::app::ui::explorer_entry_row;
 
 impl Baboon {
-    pub(super) fn draw_tag_reference_picker_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_tag_reference_picker_window(&mut self, ctx: &egui::Context) {
         if self.tag_reference_picker.is_none() {
             return;
         }
@@ -93,7 +94,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn draw_content_explorer_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_content_explorer_window(&mut self, ctx: &egui::Context) {
         if self.content_explorer.is_none() {
             return;
         }
@@ -286,7 +287,7 @@ impl Baboon {
         })
     }
 
-    pub(super) fn draw_query_results_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_query_results_window(&mut self, ctx: &egui::Context) {
         // Walk any expanded-but-uncached referrer rows before we take the results
         // (this reads `self.query_results`).
         self.refresh_ref_jump_occurrences(ctx);
@@ -501,7 +502,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn draw_field_value_search_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_field_value_search_window(&mut self, ctx: &egui::Context) {
         if !self.field_value_search_open {
             return;
         }

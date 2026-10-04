@@ -965,7 +965,7 @@ impl Baboon {
             .default_width(window_width(ctx, 620.0))
             .resizable(true)
             .show(ctx, |ui| {
-                crate::app::ui::draw_icon_window_header(
+                crate::app::search::draw_icon_window_header(
                     ui,
                     "Compare Tags",
                     ButtonIcon::Compare,

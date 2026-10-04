@@ -651,7 +651,7 @@ fn settings_window_body(
     // Establish the requested height before drawing. Calling set_min_height
     // after drawing adds that height at the current cursor, doubling the body.
     ui.set_min_height(ui.available_height());
-    super::find::draw_icon_window_header(ui, "Settings", ButtonIcon::Settings, open);
+    crate::app::search::draw_icon_window_header(ui, "Settings", ButtonIcon::Settings, open);
     ui.separator();
     ScrollArea::horizontal()
         .id_salt("settings_tabs_scroll")
@@ -1093,7 +1093,7 @@ impl Baboon {
             .max_height(window_height(ctx, (ctx.content_rect().height() - 32.0).max(0.0), false))
             .scroll([false, true])
             .show(ctx, |ui| {
-                super::find::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
+                crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
                 ui.separator();
                 egui::Frame::NONE
                     .inner_margin(ui.spacing().window_margin)

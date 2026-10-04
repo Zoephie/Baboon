@@ -649,7 +649,7 @@ fn cases() -> Vec<Case> {
         case(
             "find",
             &["find"],
-            &["ui/find/mod.rs"],
+            &["search/find_window/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
@@ -698,7 +698,7 @@ fn cases() -> Vec<Case> {
         case(
             "content_explorer",
             &["content_explorer"],
-            &["ui/search_windows/mod.rs"],
+            &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
                 let focus = h.app.kits[h.app.active]
@@ -723,7 +723,7 @@ fn cases() -> Vec<Case> {
         case(
             "query_results",
             &["query_results"],
-            &["ui/search_windows/mod.rs"],
+            &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
                 let entries = h.app.kits[h.app.active].source.as_ref().unwrap().entries[..3]
@@ -742,7 +742,7 @@ fn cases() -> Vec<Case> {
         case(
             "field_value_search",
             &["field_value_search_open"],
-            &["ui/search_windows/mod.rs"],
+            &["search/result_windows/mod.rs"],
             loose_kit,
             |h| h.app.field_value_search_open = true,
             &["Search Field Values"],
@@ -750,7 +750,7 @@ fn cases() -> Vec<Case> {
         case(
             "tag_reference_picker",
             &["tag_reference_picker", "tag_reference_picker_kit"],
-            &["ui/search_windows/mod.rs"],
+            &["search/result_windows/mod.rs"],
             container_kit,
             |h| {
                 h.app.tag_reference_picker = Some(TagReferencePickerState {
