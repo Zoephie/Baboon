@@ -5,7 +5,7 @@
 use super::*;
 
 impl Dialog for RenameTagState {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         let mut do_apply = false;

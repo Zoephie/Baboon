@@ -573,7 +573,7 @@ impl Baboon {
 /// guarded only the container, silently overwriting the `.ucas` and `.pak`
 /// beside it.
 impl Dialog for ModExportDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let dialog = &*self;
         let kit = dialog.kit;

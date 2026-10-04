@@ -5,7 +5,7 @@
 use super::*;
 
 impl Dialog for ContainerDuplicateConfirm {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let (kit, key, destination_leaf) =
             (self.kit, self.key.clone(), self.destination_leaf.clone());

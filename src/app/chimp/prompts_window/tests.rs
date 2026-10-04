@@ -5,7 +5,7 @@ use super::*;
 fn draw_prompt(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
     move |ui| {
         let ctx = ui.ctx().clone();
-        app.dialogs.draw(&cx!(app, &ctx));
+        app.dialogs.draw(&cx!(app, &ctx), &app_reads!(app));
     }
 }
 

@@ -20,7 +20,7 @@ const TARGETS: [(Game, &str, &str); 3] = [
 /// Which game's tools a geometry or animation extraction is for. Choosing
 /// one goes on to the folder picker.
 impl Dialog for ExtractTargetPrompt {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let state = &mut *self;
         let title = match state.kind {

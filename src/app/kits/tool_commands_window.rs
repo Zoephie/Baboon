@@ -6,177 +6,181 @@ use super::*;
 /// The Tool Commands window, while it is open. Its layout (list width,
 /// position, size, collapsed categories) is kept in the preferences: the
 /// window edits copies and sends any change with `edit_prefs`.
-pub(in crate::app) fn draw_tool_commands_window(cx: &Ctx, kit_tools: &mut KitsFeature) {
-    if !kit_tools.tool_commands.open {
-        return;
-    }
-    let ctx = cx.egui;
-    let game = cx.model.source_game();
-    if let Some(game) = game {
-        kit_tools.tool_commands.ensure_loaded(game);
-    }
-    let prefs = &cx.model.prefs;
-    let mut left_width = prefs.tool_commands_left_width;
-    let mut collapsed = prefs.tool_commands_collapsed_categories.clone();
-    let mut saved_pos = prefs.tool_commands_window_pos;
-    let mut saved_size = prefs.tool_commands_window_size;
+impl Dialog for ToolCommandsUiState {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let game = cx.model.source_game();
+        if let Some(game) = game {
+            self.ensure_loaded(game);
+        }
+        let prefs = &cx.model.prefs;
+        let mut left_width = prefs.tool_commands_left_width;
+        let mut collapsed = prefs.tool_commands_collapsed_categories.clone();
+        let mut saved_pos = prefs.tool_commands_window_pos;
+        let mut saved_size = prefs.tool_commands_window_size;
 
-    let mut open = kit_tools.tool_commands.open;
-    let window_size = saved_size.unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
-    let mut window_pos = saved_pos.unwrap_or_else(|| {
-        let available = ctx.content_rect();
-        egui::pos2(
-            available.center().x - window_size.x * 0.5,
-            available.center().y - window_size.y * 0.5,
-        )
-    });
-    let mut dragged_window_pos = None;
-    let mut close_requested = false;
-    let window = egui::Window::new("Tool Commands")
-        .id(egui::Id::new("tool_commands"))
-        .collapsible(false)
-        .title_bar(false)
-        .movable(false)
-        .resizable(true)
-        .drag_to_scroll(egui::containers::scroll_area::DragScroll::Never)
-        .constrain(false)
-        .open(&mut open)
-        .current_pos(window_pos)
-        .min_size(crate::app::window_size(ctx, MIN_TOOL_COMMANDS_WINDOW_SIZE, false))
-        // The saved size is the window's outer size, which is what egui
-        // now sizes a window by, so it comes back unchanged.
-        .default_size(window_size);
-    let response = window.show(ctx, |ui| {
-        let title_height = 28.0;
-        let (title_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), title_height),
-            Sense::hover(),
-        );
-        let close_width = 28.0;
-        let close_rect = egui::Rect::from_min_max(
-            egui::pos2(title_rect.right() - close_width, title_rect.top()),
-            title_rect.right_bottom(),
-        );
-        let drag_rect = egui::Rect::from_min_max(
-            title_rect.min,
-            egui::pos2(close_rect.left() - 4.0, title_rect.bottom()),
-        );
-        let title_response = ui.interact(drag_rect, ui.id().with("title_bar"), Sense::drag());
-        if title_response.dragged() {
-            window_pos += ui.input(|input| input.pointer.delta());
-            dragged_window_pos = Some(window_pos);
-            ctx.request_repaint();
-        }
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(title_rect.shrink2(Vec2::new(4.0, 2.0))),
-            |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Tool Commands").color(text_dark()).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("×").clicked() {
-                            close_requested = true;
-                        }
-                    });
-                });
-            },
-        );
-        ui.separator();
-
-        if game.is_none() {
-            ui.label(
-                RichText::new("Load an editing-kit folder first to view tool commands.")
-                    .color(subtle_dark()),
+        let mut open = true;
+        let window_size = saved_size.unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
+        let mut window_pos = saved_pos.unwrap_or_else(|| {
+            let available = ctx.content_rect();
+            egui::pos2(
+                available.center().x - window_size.x * 0.5,
+                available.center().y - window_size.y * 0.5,
+            )
+        });
+        let mut dragged_window_pos = None;
+        let mut close_requested = false;
+        let mut ran = false;
+        let window = egui::Window::new("Tool Commands")
+            .id(egui::Id::new("tool_commands"))
+            .collapsible(false)
+            .title_bar(false)
+            .movable(false)
+            .resizable(true)
+            .drag_to_scroll(egui::containers::scroll_area::DragScroll::Never)
+            .constrain(false)
+            .open(&mut open)
+            .current_pos(window_pos)
+            .min_size(crate::app::window_size(
+                ctx,
+                MIN_TOOL_COMMANDS_WINDOW_SIZE,
+                false,
+            ))
+            // The saved size is the window's outer size, which is what egui
+            // now sizes a window by, so it comes back unchanged.
+            .default_size(window_size);
+        let response = window.show(ctx, |ui| {
+            let title_height = 28.0;
+            let (title_rect, _) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width(), title_height),
+                Sense::hover(),
             );
-            return;
-        }
-        if let Some(error) = kit_tools.tool_commands.error.as_ref() {
-            ui.label(RichText::new(error).color(material_delete_text()));
-            return;
-        }
-        if kit_tools.tool_commands.commands.is_empty() {
-            ui.label(
-                RichText::new("No tool commands documented for this game").color(subtle_dark()),
+            let close_width = 28.0;
+            let close_rect = egui::Rect::from_min_max(
+                egui::pos2(title_rect.right() - close_width, title_rect.top()),
+                title_rect.right_bottom(),
             );
-            return;
-        }
-
-        let available_width = ui.available_width();
-        let available_height = ui
-            .available_height()
-            .max(MIN_TOOL_COMMANDS_WINDOW_SIZE.y - 80.0);
-        let max_left_width = (available_width - 320.0).max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
-        left_width = left_width
-            .clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
-        ui.horizontal(|ui| {
-            ui.set_height(available_height);
-            ui.allocate_ui_with_layout(
-                Vec2::new(left_width, available_height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(left_width);
-                    ui.label(RichText::new("Commands").color(text_dark()).strong());
-                    ui.separator();
-                    let list_height = ui.available_height().max(120.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("tool_command_list")
-                        .max_height(list_height)
-                        .show(ui, |ui| {
-                            draw_tool_command_list(ui, &mut kit_tools.tool_commands, &mut collapsed);
-                        });
-                },
+            let drag_rect = egui::Rect::from_min_max(
+                title_rect.min,
+                egui::pos2(close_rect.left() - 4.0, title_rect.bottom()),
             );
-            let (handle_rect, handle_response) =
-                ui.allocate_exact_size(Vec2::new(7.0, available_height), Sense::drag());
-            let handle_color = if handle_response.hovered() || handle_response.dragged() {
-                material_grid_light()
-            } else {
-                material_input_edge()
-            };
-            ui.painter().line_segment(
-                [handle_rect.center_top(), handle_rect.center_bottom()],
-                Stroke::new(2.0_f32, handle_color),
-            );
-            if handle_response.dragged() {
-                left_width = (left_width
-                    + ui.input(|input| input.pointer.delta().x))
-                .clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
+            let title_response = ui.interact(drag_rect, ui.id().with("title_bar"), Sense::drag());
+            if title_response.dragged() {
+                window_pos += ui.input(|input| input.pointer.delta());
+                dragged_window_pos = Some(window_pos);
+                ctx.request_repaint();
             }
-            let right_width = ui.available_width().max(300.0);
-            ui.allocate_ui_with_layout(
-                Vec2::new(right_width, available_height),
-                egui::Layout::top_down(egui::Align::Min),
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(title_rect.shrink2(Vec2::new(4.0, 2.0))),
                 |ui| {
-                    ui.set_min_width(300.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("tool_command_detail")
-                        .max_height(available_height)
-                        .show(ui, |ui| {
-                            draw_selected_tool_command(cx, ui, kit_tools);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Tool Commands").color(text_dark()).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("×").clicked() {
+                                close_requested = true;
+                            }
                         });
+                    });
                 },
             );
+            ui.separator();
+
+            if game.is_none() {
+                ui.label(
+                    RichText::new("Load an editing-kit folder first to view tool commands.")
+                        .color(subtle_dark()),
+                );
+                return;
+            }
+            if let Some(error) = self.error.as_ref() {
+                ui.label(RichText::new(error).color(material_delete_text()));
+                return;
+            }
+            if self.commands.is_empty() {
+                ui.label(
+                    RichText::new("No tool commands documented for this game").color(subtle_dark()),
+                );
+                return;
+            }
+
+            let available_width = ui.available_width();
+            let available_height = ui
+                .available_height()
+                .max(MIN_TOOL_COMMANDS_WINDOW_SIZE.y - 80.0);
+            let max_left_width = (available_width - 320.0).max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
+            left_width = left_width.clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
+            ui.horizontal(|ui| {
+                ui.set_height(available_height);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(left_width, available_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(left_width);
+                        ui.label(RichText::new("Commands").color(text_dark()).strong());
+                        ui.separator();
+                        let list_height = ui.available_height().max(120.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("tool_command_list")
+                            .max_height(list_height)
+                            .show(ui, |ui| {
+                                draw_tool_command_list(ui, self, &mut collapsed);
+                            });
+                    },
+                );
+                let (handle_rect, handle_response) =
+                    ui.allocate_exact_size(Vec2::new(7.0, available_height), Sense::drag());
+                let handle_color = if handle_response.hovered() || handle_response.dragged() {
+                    material_grid_light()
+                } else {
+                    material_input_edge()
+                };
+                ui.painter().line_segment(
+                    [handle_rect.center_top(), handle_rect.center_bottom()],
+                    Stroke::new(2.0_f32, handle_color),
+                );
+                if handle_response.dragged() {
+                    left_width = (left_width + ui.input(|input| input.pointer.delta().x))
+                        .clamp(MIN_TOOL_COMMANDS_LEFT_WIDTH, max_left_width);
+                }
+                let right_width = ui.available_width().max(300.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(right_width, available_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_width(300.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("tool_command_detail")
+                            .max_height(available_height)
+                            .show(ui, |ui| {
+                                ran |= draw_selected_tool_command(
+                                    cx,
+                                    ui,
+                                    &mut *self,
+                                    app.kit_tools.terminal.running,
+                                );
+                            });
+                    },
+                );
+            });
         });
-    });
-    if let Some(response) = response {
-        let rect = response.response.rect;
-        saved_pos = dragged_window_pos.or(Some(rect.min));
-        saved_size = Some(rect.size());
-    }
-    if close_requested {
-        open = false;
-    }
-    kit_tools.tool_commands.open = open;
-    if left_width != prefs.tool_commands_left_width
-        || collapsed != prefs.tool_commands_collapsed_categories
-        || saved_pos != prefs.tool_commands_window_pos
-        || saved_size != prefs.tool_commands_window_size
-    {
-        cx.edit_prefs(move |prefs| {
-            prefs.tool_commands_left_width = left_width;
-            prefs.tool_commands_collapsed_categories = collapsed;
-            prefs.tool_commands_window_pos = saved_pos;
-            prefs.tool_commands_window_size = saved_size;
-        });
+        if let Some(response) = response {
+            let rect = response.response.rect;
+            saved_pos = dragged_window_pos.or(Some(rect.min));
+            saved_size = Some(rect.size());
+        }
+        if left_width != prefs.tool_commands_left_width
+            || collapsed != prefs.tool_commands_collapsed_categories
+            || saved_pos != prefs.tool_commands_window_pos
+            || saved_size != prefs.tool_commands_window_size
+        {
+            cx.edit_prefs(move |prefs| {
+                prefs.tool_commands_left_width = left_width;
+                prefs.tool_commands_collapsed_categories = collapsed;
+                prefs.tool_commands_window_pos = saved_pos;
+                prefs.tool_commands_window_size = saved_size;
+            });
+        }
+        open && !close_requested && !ran
     }
 }
 
@@ -264,10 +268,18 @@ fn draw_tool_command_list(ui: &mut Ui, state: &mut ToolCommandsUiState, collapse
     }
 }
 
-fn draw_selected_tool_command(cx: &Ctx, ui: &mut Ui, kit_tools: &mut KitsFeature) {
-    let Some(command) = kit_tools.tool_commands.selected_command().cloned() else {
+/// The selected command's arguments, preview and Run. Returns whether it was
+/// run, which closes the window.
+fn draw_selected_tool_command(
+    cx: &Ctx,
+    ui: &mut Ui,
+    state: &mut ToolCommandsUiState,
+    terminal_running: bool,
+) -> bool {
+    let mut ran = false;
+    let Some(command) = state.selected_command().cloned() else {
         ui.label(RichText::new("Select a command").color(subtle_dark()));
-        return;
+        return false;
     };
     ui.heading(RichText::new(&command.name).color(text_dark()));
     ui.label(RichText::new(&command.category).color(subtle_dark()));
@@ -290,23 +302,23 @@ fn draw_selected_tool_command(cx: &Ctx, ui: &mut Ui, kit_tools: &mut KitsFeature
         ui.label(RichText::new("Arguments").color(text_dark()).strong());
         ui.add_space(3.0);
         for arg in required {
-            draw_tool_command_arg(cx, ui, &mut kit_tools.tool_commands, &command, arg);
+            draw_tool_command_arg(cx, ui, state, &command, arg);
         }
     }
     if !optional.is_empty() {
         ui.add_space(4.0);
         egui::CollapsingHeader::new("Optional arguments")
-            .default_open(kit_tools.tool_commands.optional_open)
+            .default_open(state.optional_open)
             .show(ui, |ui| {
-                kit_tools.tool_commands.optional_open = true;
+                state.optional_open = true;
                 for arg in optional {
-                    draw_tool_command_arg(cx, ui, &mut kit_tools.tool_commands, &command, arg);
+                    draw_tool_command_arg(cx, ui, state, &command, arg);
                 }
             });
     }
 
     ui.add_space(12.0);
-    let preview = tool_command_preview(&command, &kit_tools.tool_commands.values);
+    let preview = tool_command_preview(&command, &state.values);
     ui.label(RichText::new("Preview").color(text_dark()).strong());
     let mut preview_text = preview.clone();
     ui.add(
@@ -316,17 +328,17 @@ fn draw_selected_tool_command(cx: &Ctx, ui: &mut Ui, kit_tools: &mut KitsFeature
             .interactive(false),
     );
     ui.add_space(8.0);
-    let missing = tool_command_missing_required(&command, &kit_tools.tool_commands.values);
+    let missing = tool_command_missing_required(&command, &state.values);
     ui.horizontal(|ui| {
         if ui
             .add_enabled(
-                missing.is_none() && !kit_tools.terminal.running,
+                missing.is_none() && !terminal_running,
                 egui::Button::new("Run").min_size(Vec2::new(80.0, 24.0)),
             )
             .clicked()
         {
             cx.send(KitsCommand::RunToolCommand(preview.clone()));
-            kit_tools.tool_commands.open = false;
+            ran = true;
         }
         if let Some(missing) = missing {
             ui.label(
@@ -335,6 +347,7 @@ fn draw_selected_tool_command(cx: &Ctx, ui: &mut Ui, kit_tools: &mut KitsFeature
             );
         }
     });
+    ran
 }
 
 

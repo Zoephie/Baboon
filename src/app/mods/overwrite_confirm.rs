@@ -5,7 +5,7 @@
 use super::*;
 
 impl Dialog for OverwriteConfirm {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let (kit, key) = (self.kit, self.key.clone());
         let mut open = true;

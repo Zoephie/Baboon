@@ -669,10 +669,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tool_commands",
-            &["kit_tools.tool_commands"],
+            &["dialog:ToolCommandsUiState"],
             &["kits/tool_commands_window.rs"],
             loose_kit,
-            |h| h.app.kit_tools.tool_commands.open = true,
+            |h| h.app.dialogs.open(ToolCommandsUiState::default()),
             &["Tool Commands"],
         ),
         case(
@@ -1236,10 +1236,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "keyword_chooser",
-            &["browser.keyword_chooser_open"],
+            &["dialog:KeywordChooser"],
             &["browser/keyword_chooser.rs"],
             memory_kit,
-            |h| h.app.browser.keyword_chooser_open = true,
+            |h| h.app.dialogs.open(KeywordChooser),
             &["Keywords"],
         ),
         case(

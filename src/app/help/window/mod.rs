@@ -33,7 +33,7 @@ impl HelpWindow {
 }
 
 impl Dialog for HelpWindow {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         egui::Window::new("Baboon Help")

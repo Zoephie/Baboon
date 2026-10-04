@@ -130,7 +130,11 @@ impl Baboon {
                 }
                 self.shell.settings_open = true;
             }
-            AppAction::OpenToolCommands => self.kit_tools.tool_commands.open = true,
+            AppAction::OpenToolCommands => {
+                if self.dialogs.get::<ToolCommandsUiState>().is_none() {
+                    self.dialogs.open(ToolCommandsUiState::default());
+                }
+            }
             AppAction::FindReferences(key) => self.show_references_for(&key),
             AppAction::ExploreReferences(key) => self.open_content_explorer(&key),
             AppAction::CompareTags { kit, key } => {
@@ -152,7 +156,7 @@ impl Baboon {
             }
             AppAction::FixDependencies => self.fix_current_tag_dependencies(),
             AppAction::OpenFieldValueSearch => self.search.field_value_search_open = true,
-            AppAction::OpenKeywordChooser => self.browser.keyword_chooser_open = true,
+            AppAction::OpenKeywordChooser => self.dialogs.open(KeywordChooser),
             AppAction::FindUnreferencedTags => self.show_unreferenced_tags(),
             AppAction::ListMapIds => self.show_map_ids(ctx),
             AppAction::ListSoundsByClass => self.show_sounds_by_class(ctx),

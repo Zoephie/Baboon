@@ -9,7 +9,7 @@ use super::*;
 /// It is irreversible and can drop work stashed in earlier sessions, so it
 /// lists exactly what is about to go rather than asking in the abstract.
 impl Dialog for ClearStashConfirm {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let kit = self.kit;
         let stashed = &self.stashed;

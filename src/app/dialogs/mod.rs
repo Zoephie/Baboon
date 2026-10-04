@@ -7,14 +7,14 @@ use std::any::{Any, TypeId};
 /// A window the [`DialogHost`] owns and draws.
 ///
 /// A dialog holds its own state — its draft, its choices, what it was opened
-/// on — and reaches the rest of the application only through the [`Ctx`] it
-/// is drawn with: it reads the model, and what it decides is sent as a
-/// command. Anything that has to change an open dialog afterwards, such as a
-/// handler reporting why a confirmed action was refused, finds it in the host
-/// by type.
+/// on — and reaches the rest of the application only through what it is drawn
+/// with: the [`Ctx`], to read the model and send what it decides as commands,
+/// and [`AppReads`], to read other features' state. Anything that has to
+/// change an open dialog afterwards, such as a handler reporting why a
+/// confirmed action was refused, finds it in the host by type.
 pub(in crate::app) trait Dialog: Any {
     /// Draw the dialog for this frame. Returns whether it stays open.
-    fn show(&mut self, cx: &Ctx) -> bool;
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool;
 
     /// Tells apart open dialogs of one type. Opening a dialog whose type and
     /// instance match an open one replaces it, so by default a type is open
@@ -23,6 +23,23 @@ pub(in crate::app) trait Dialog: Any {
         0
     }
 }
+
+/// Other features' state a dialog may read while it draws, lent by the
+/// application for the frame. Read-only: a dialog changes only its own state,
+/// and asks for anything else with a command.
+pub(in crate::app) struct AppReads<'a> {
+    pub(in crate::app) kit_tools: &'a KitsFeature,
+}
+
+/// The [`AppReads`] of an application, borrowed beside its dialogs.
+macro_rules! app_reads {
+    ($app:expr) => {
+        $crate::app::dialogs::AppReads {
+            kit_tools: &$app.kit_tools,
+        }
+    };
+}
+pub(in crate::app) use app_reads;
 
 /// Every open dialog, in the order they were opened.
 #[derive(Default)]
@@ -74,8 +91,8 @@ impl DialogHost {
     }
 
     /// Draw every open dialog, dropping the ones that closed.
-    pub(in crate::app) fn draw(&mut self, cx: &Ctx) {
-        self.open.retain_mut(|dialog| dialog.show(cx));
+    pub(in crate::app) fn draw(&mut self, cx: &Ctx, app: &AppReads) {
+        self.open.retain_mut(|dialog| dialog.show(cx, app));
     }
 }
 

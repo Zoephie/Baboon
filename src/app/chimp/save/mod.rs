@@ -701,7 +701,7 @@ fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> 
 }
 
 impl Dialog for ChimpDiscardPrompt {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let prompt = &*self;
         let packages = &prompt.packages;
@@ -777,7 +777,7 @@ impl Dialog for ChimpDiscardPrompt {
 }
 
 impl Dialog for ChimpSaveDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let model = cx.model;
         let Some(kit_index) = model.kit_index(self.kit) else {

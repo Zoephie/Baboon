@@ -533,7 +533,7 @@ fn draw_cache_import_body(
 /// a folder is the point — so the outcome is a document to read, not a
 /// status-bar line to catch.
 impl Dialog for CacheImportDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         let mut action = None;

@@ -312,7 +312,6 @@ impl Baboon {
             &mut self.kit_tools,
             &mut self.chimp.chimp_usmap_path_input,
         );
-        draw_tool_commands_window(&cx!(self, ctx), &mut self.kit_tools);
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_poke_window(&cx!(self, ctx), &mut self.poke);
@@ -326,11 +325,10 @@ impl Baboon {
             &self.kit_tools.editing_kit_validation,
         );
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
-        draw_keyword_chooser_window(&cx!(self, ctx), &mut self.browser);
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
-        self.dialogs.draw(&cx!(self, ctx));
+        self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
         end_wheel_gesture(ctx);
     }

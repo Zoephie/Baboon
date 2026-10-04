@@ -13,7 +13,7 @@ use super::*;
 /// extracts what the game *ships*, not what it currently loads. That last
 /// point holds for a folder too, so it is said unconditionally.
 impl Dialog for ContainerDumpConfirm {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let folder = match &self.scope {
             ContainerDumpScope::AllShipped => None,

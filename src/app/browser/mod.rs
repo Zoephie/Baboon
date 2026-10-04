@@ -320,11 +320,10 @@ pub(in crate::app) use thumbnail_library::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod keyword_chooser;
-pub(in crate::app) use keyword_chooser::draw_keyword_chooser_window;
+pub(in crate::app) use keyword_chooser::KeywordChooser;
 
-/// The browser: the keyword chooser and a tag waiting to be revealed.
+/// The browser: a tag waiting to be revealed.
 pub(in crate::app) struct BrowserFeature {
-    pub(in crate::app) keyword_chooser_open: bool,
     pub(in crate::app) reveal_target: Option<RevealRequest>,
 }
 

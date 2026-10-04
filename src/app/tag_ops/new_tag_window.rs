@@ -8,7 +8,7 @@ use super::*;
 /// [`TagOpsCommand::CreateNewTag`], which takes the dialog back from the host
 /// and returns it with the reason if the tag cannot be made.
 impl Dialog for NewTagDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         let mut refresh_groups = false;

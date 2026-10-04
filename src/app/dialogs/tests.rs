@@ -7,7 +7,7 @@ struct Countdown {
 }
 
 impl Dialog for Countdown {
-    fn show(&mut self, _cx: &Ctx) -> bool {
+    fn show(&mut self, _cx: &Ctx, _: &AppReads) -> bool {
         self.frames = self.frames.saturating_sub(1);
         self.frames > 0
     }
@@ -20,7 +20,7 @@ impl Dialog for Countdown {
 struct Other;
 
 impl Dialog for Other {
-    fn show(&mut self, _cx: &Ctx) -> bool {
+    fn show(&mut self, _cx: &Ctx, _: &AppReads) -> bool {
         true
     }
 }
@@ -102,9 +102,9 @@ fn drawing_drops_the_dialogs_that_close() {
         frames: 2,
     });
     host.open(Other);
-    host.draw(&cx!(app, &ctx));
+    host.draw(&cx!(app, &ctx), &app_reads!(app));
     assert_eq!(host.open.len(), 2);
-    host.draw(&cx!(app, &ctx));
+    host.draw(&cx!(app, &ctx), &app_reads!(app));
     assert_eq!(host.open.len(), 1);
     assert!(host.get::<Other>().is_some());
 }

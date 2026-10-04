@@ -32,7 +32,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) mod terminal_state;
 pub(in crate::app) use terminal_state::*;
 pub(in crate::app) mod tool_commands_window;
-pub(in crate::app) use tool_commands_window::{draw_tool_commands_window, pick_tool_command_path};
+pub(in crate::app) use tool_commands_window::pick_tool_command_path;
 pub(in crate::app) mod tools;
 pub(in crate::app) mod profiles;
 
@@ -46,7 +46,6 @@ pub(in crate::app) struct KitsFeature {
     pub(in crate::app) blender_path_input: String,
     pub(in crate::app) editing_kit_path_inputs: HashMap<String, String>,
     pub(in crate::app) editing_kit_path_attention: Option<String>,
-    pub(in crate::app) tool_commands: ToolCommandsUiState,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.
     pub(in crate::app) kit_tool_drag: KitToolDragState,
     pub(in crate::app) terminal: TerminalState,

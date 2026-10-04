@@ -11,7 +11,7 @@ use super::*;
 /// line, was lost when exports moved onto projects, and the status line now
 /// clears itself after a few seconds besides.
 impl Dialog for ExportedMod {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let exported = &*self;
         let stem = exported.stem.clone();

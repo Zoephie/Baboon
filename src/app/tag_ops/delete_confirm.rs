@@ -5,7 +5,7 @@
 use super::*;
 
 impl Dialog for DeleteConfirm {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let confirm = &*self;
         let display_path = confirm.display_path.clone();

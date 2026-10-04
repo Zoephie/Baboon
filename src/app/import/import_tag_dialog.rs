@@ -5,7 +5,7 @@
 use super::*;
 
 impl Dialog for PendingImport {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let pending = &*self;
         let label = cx.model.tag_path_label(&pending.target_key);
@@ -39,7 +39,7 @@ impl Dialog for PendingImport {
 }
 
 impl Dialog for ImportTagDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         // Snapshot fields for the immutable overwrite lookup before borrowing the
         // dialog mutably for rendering (the banner lags edits by one frame).

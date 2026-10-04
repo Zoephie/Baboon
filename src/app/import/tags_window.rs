@@ -34,7 +34,7 @@ enum ImportDialogAction {
 /// slow parts — measuring the source and building the preview — run on
 /// workers, so a path naming a whole kit's tag tree does not stall a frame.
 impl Dialog for TagImportDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         // Resolved before the dialog is borrowed mutably, so the banner lags an
         // edit by one frame. That is the same bargain the Campaign Evolved

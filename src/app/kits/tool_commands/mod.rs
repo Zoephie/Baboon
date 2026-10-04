@@ -33,7 +33,6 @@ pub(in crate::app) enum ToolCommandArgKind {
 
 #[derive(Default)]
 pub(in crate::app) struct ToolCommandsUiState {
-    pub(in crate::app) open: bool,
     pub(in crate::app) catalog_game: Option<GameId>,
     pub(in crate::app) commands: Vec<ToolCommand>,
     pub(in crate::app) error: Option<String>,

@@ -10,7 +10,7 @@ use super::*;
 /// in the container's directory index only once a tag is created, imported
 /// or moved into it, and until then it lives in the workspace.
 impl Dialog for ContainerFolderDialog {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         let mut do_apply = false;

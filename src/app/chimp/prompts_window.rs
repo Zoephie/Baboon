@@ -5,7 +5,7 @@ use super::*;
 
 /// Ask whether a mesh export should bring the textures its materials use.
 impl Dialog for ChimpMeshTexturePrompt {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let prompt = &*self;
         let package = prompt.package.clone();
@@ -139,7 +139,7 @@ impl Dialog for ChimpMeshTexturePrompt {
 
 /// Ask what format to write a texture in before choosing where.
 impl Dialog for ChimpTextureExportPrompt {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let prompt = &*self;
         let name = prompt.name().to_owned();
@@ -216,7 +216,7 @@ impl Dialog for ChimpTextureExportPrompt {
 /// shared library has to travel with the segments — is invisible from the
 /// files alone.
 impl Dialog for ChimpLevelExportPrompt {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let prompt = &*self;
         let package = prompt.package.clone();

@@ -120,7 +120,7 @@ use model::Model;
 mod context;
 use context::{CommandQueue, Ctx, cx};
 mod dialogs;
-use dialogs::{Dialog, DialogHost};
+use dialogs::{AppReads, Dialog, DialogHost, app_reads};
 pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
@@ -434,7 +434,6 @@ impl Baboon {
                 editing_kit_validation,
                 custom_editing_kit_draft: None,
                 custom_editing_kit_removal: None,
-                tool_commands: ToolCommandsUiState::default(),
                 editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
                 editing_kit_path_attention: None,
                 blender_path_input: prefs
@@ -488,7 +487,6 @@ impl Baboon {
                 tag_diff: None,
             },
             browser: BrowserFeature {
-                keyword_chooser_open: false,
                 reveal_target: None,
             },
             documents: DocumentsFeature {

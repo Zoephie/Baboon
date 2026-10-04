@@ -7,7 +7,7 @@ use super::*;
 /// Rename Folder for a loose folder: the new name, and what it will change
 /// counted before anything is touched.
 impl Dialog for LooseFolderRenameState {
-    fn show(&mut self, cx: &Ctx) -> bool {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let mut open = true;
         let mut do_apply = false;

@@ -43,7 +43,7 @@ fn frame(
             events,
             ..Default::default()
         },
-        |_| app.dialogs.draw(&cx!(app, ctx)),
+        |_| app.dialogs.draw(&cx!(app, ctx), &app_reads!(app)),
     );
     output
         .shapes
