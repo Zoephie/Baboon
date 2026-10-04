@@ -267,13 +267,23 @@ impl Baboon {
 
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
-        thread::spawn(move || {
-            let result =
-                run_terminal_command_for_reimport(&command, &work_dir, &tx, &ctx, log_file)
-                    .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
-            let _ = tx.send(WorkerMessage::BitmapReimportFinished { kit, key, result });
-            ctx.request_repaint();
-        });
+        let panic_key = key.clone();
+        let worker_ctx = ctx.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result =
+                    run_terminal_command_for_reimport(&command, &work_dir, &tx, &worker_ctx, log_file)
+                        .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
+                WorkerMessage::BitmapReimportFinished { kit, key, result }
+            },
+            move |error| WorkerMessage::BitmapReimportFinished {
+                kit,
+                key: panic_key,
+                result: Err(format!("The reimport crashed: {error}")),
+            },
+        );
     }
 }
 

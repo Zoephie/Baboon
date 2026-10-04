@@ -409,15 +409,21 @@ impl Baboon {
             state.animation.requested_list = true;
         }
 
-        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                list_model_animations(&source, &entry)
-            }))
-            .unwrap_or_else(|_| Err("the animation graph crashed the reader".to_owned()));
-            let _ = tx.send(WorkerMessage::ModelAnimationsListed { stamp, key, result });
-            ctx.request_repaint();
-        });
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ModelAnimationsListed {
+                stamp,
+                key,
+                result: list_model_animations(&source, &entry),
+            },
+            move |_| WorkerMessage::ModelAnimationsListed {
+                stamp,
+                key: panic_key,
+                result: Err("the animation graph crashed the reader".to_owned()),
+            },
+        );
     }
 
     /// Start decoding the animation the panel selected, if it is not the one
@@ -470,20 +476,23 @@ impl Baboon {
             state.animation.error = None;
         }
 
-        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                decode_model_animation(&source, &entry, selected)
-            }))
-            .unwrap_or_else(|_| Err("this animation crashed the decoder".to_owned()));
-            let _ = tx.send(WorkerMessage::ModelAnimationDecoded {
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ModelAnimationDecoded {
                 stamp,
                 key,
                 animation_index: selected,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: decode_model_animation(&source, &entry, selected),
+            },
+            move |_| WorkerMessage::ModelAnimationDecoded {
+                stamp,
+                key: panic_key,
+                animation_index: selected,
+                result: Err("this animation crashed the decoder".to_owned()),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_model_animations_listed(

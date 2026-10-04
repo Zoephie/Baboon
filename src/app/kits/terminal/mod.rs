@@ -558,7 +558,11 @@ impl Baboon {
             child: Arc::clone(&child_slot),
             stop_requested: Arc::clone(&stop_requested),
         });
-        thread::spawn(move || {
+        // The run settles with `TerminalDone` however it ends, a panic
+        // included, so the terminal never stays "running".
+        let (worker_tx, worker_ctx) = (tx.clone(), ctx.clone());
+        spawn_worker(&tx, &ctx, move || {
+            let (tx, ctx) = (worker_tx, worker_ctx);
             let mut log_error_reported = false;
             let mut cmd = terminal_shell_command(&command, &work_dir);
             match cmd.spawn() {
@@ -570,8 +574,7 @@ impl Baboon {
                         &mut log_error_reported,
                         format!("[error] {e}"),
                     );
-                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
-                    ctx.request_repaint();
+                    WorkerMessage::TerminalDone { run_id }
                 }
                 Ok(child) => {
                     let stdout = match child_slot.lock() {
@@ -587,9 +590,7 @@ impl Baboon {
                                 &mut log_error_reported,
                                 "[error] terminal process lock was poisoned".to_owned(),
                             );
-                            let _ = tx.send(WorkerMessage::TerminalDone { run_id });
-                            ctx.request_repaint();
-                            return;
+                            return WorkerMessage::TerminalDone { run_id };
                         }
                     };
                     if let Some(stdout) = stdout {
@@ -631,11 +632,10 @@ impl Baboon {
                             format!("[exit {code}]"),
                         );
                     }
-                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
-                    ctx.request_repaint();
+                    WorkerMessage::TerminalDone { run_id }
                 }
             }
-        });
+        }, move |_| WorkerMessage::TerminalDone { run_id });
     }
 
     pub(in crate::app) fn stop_terminal_command(&mut self) {

@@ -50,7 +50,7 @@ impl Baboon {
             {
                 let root = root.clone();
                 let to_save = index.clone();
-                thread::spawn(move || {
+                spawn_background("reverse-dependency index save", move || {
                     if let Err(e) =
                         crate::core::source::save_reverse_dependency_index(game.as_str(), &root, &to_save)
                     {

@@ -124,9 +124,8 @@ impl Baboon {
         state.textures_pending = false;
         state.animation = PreviewAnimationPlayback::default();
 
-        let (tx, ctx, worker_key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (worker_key, panic_key) = (key.to_owned(), key.to_owned());
+        let load = move || -> Result<_, String> {
                 let model_tag = match edited_model_bytes {
                     Some(Ok(bytes)) => crate::core::source::read_tag_from_bytes(
                         &bytes,
@@ -139,17 +138,23 @@ impl Baboon {
                     None => read_entry(&source, &entry).map_err(|error| error.to_string())?,
                 };
                 load_model_preview(&model_tag, &entry, &names, Some(&source), &settings)
-            }))
-            .map_err(|_| "Render model preview crashed while parsing this tag.".to_owned())
-            .and_then(|result| result);
-            let _ = tx.send(WorkerMessage::ModelPreviewLoaded {
+        };
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ModelPreviewLoaded {
                 stamp,
                 key: worker_key,
                 request_id,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: load(),
+            },
+            move |_| WorkerMessage::ModelPreviewLoaded {
+                stamp,
+                key: panic_key,
+                request_id,
+                result: Err("Render model preview crashed while parsing this tag.".to_owned()),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_model_preview_loaded(
@@ -1165,11 +1170,9 @@ fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
 /// frozen. Built here, the first preview finds it ready (or waits on this
 /// build rather than starting its own).
 pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
-    std::thread::spawn(move || {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            ce_path_index(&containers);
-            ce_mesh_sync_index(&containers);
-        }));
+    spawn_background("Campaign Evolved mesh index prewarm", move || {
+        ce_path_index(&containers);
+        ce_mesh_sync_index(&containers);
     });
 }
 

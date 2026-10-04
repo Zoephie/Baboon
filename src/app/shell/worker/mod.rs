@@ -598,14 +598,18 @@ impl ContainerDumpJob {
 /// nothing, so whatever the UI had marked as in flight (a loading tag, a
 /// running search, a container write) stayed that way for the session.
 /// Going through this, every job answers.
-pub(in crate::app) fn spawn_worker<J, P>(
-    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+///
+/// Any channel will do: most jobs answer on the app's [`WorkerMessage`]
+/// channel, and the audio player, thumbnails and bitmap previews on their own.
+pub(in crate::app) fn spawn_worker<M, J, P>(
+    tx: &std::sync::mpsc::Sender<M>,
     ctx: &egui::Context,
     job: J,
     on_panic: P,
 ) where
-    J: FnOnce() -> WorkerMessage + Send + 'static,
-    P: FnOnce(String) -> WorkerMessage + Send + 'static,
+    M: Send + 'static,
+    J: FnOnce() -> M + Send + 'static,
+    P: FnOnce(String) -> M + Send + 'static,
 {
     let (tx, ctx) = (tx.clone(), ctx.clone());
     #[cfg(test)]
@@ -621,6 +625,28 @@ pub(in crate::app) fn spawn_worker<J, P>(
         .unwrap_or_else(|panic| on_panic(panic_text(panic.as_ref())));
         let _ = tx.send(message);
         ctx.request_repaint();
+    });
+}
+
+impl crate::app::Baboon {
+    /// [`spawn_worker`] on the app's own channel and context.
+    pub(in crate::app) fn spawn_job<J, P>(&self, job: J, on_panic: P)
+    where
+        J: FnOnce() -> WorkerMessage + Send + 'static,
+        P: FnOnce(String) -> WorkerMessage + Send + 'static,
+    {
+        spawn_worker(&self.tx, &self.egui_ctx, job, on_panic);
+    }
+}
+
+/// Run `job` on a worker thread when nothing waits for an answer: saving a
+/// cache in the background, say. A panic is logged with `what` rather than
+/// lost, and never reaches the UI thread.
+pub(in crate::app) fn spawn_background(what: &'static str, job: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
+            eprintln!("{what} failed: {}", panic_text(panic.as_ref()));
+        }
     });
 }
 

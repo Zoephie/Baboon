@@ -485,14 +485,15 @@ impl Baboon {
         }
         self.status = "Importing cache tags".to_owned();
         let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_folder_conversion_job(job, &tx)
-            }))
-            .unwrap_or_else(|_| Err("The cache import worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::CacheImportFinished { stamp, result });
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::CacheImportFinished { stamp, result: run_folder_conversion_job(job, &tx) },
+            move |_| WorkerMessage::CacheImportFinished {
+                stamp,
+                result: Err("The cache import worker crashed".to_owned()),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_cache_import_progress(

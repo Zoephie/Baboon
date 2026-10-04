@@ -12,7 +12,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, Sender},
 };
-use std::thread;
 
 use blam_tags::bitmap::decode::decode_to_rgba8;
 use blam_tags::paths::{derive_tags_root, group_tag_to_extension, resolve_tag_path, tag_ref_path};
@@ -167,6 +166,10 @@ pub struct Baboon {
     /// Single UI-thread receiver. Messages are applied in arrival order and
     /// generation-tagged results are discarded when their source is stale.
     rx: Receiver<WorkerMessage>,
+    /// The context every frame runs in, kept so a job can be started from
+    /// code that has no frame's context to hand: it wakes the UI when the
+    /// job answers.
+    egui_ctx: egui::Context,
     /// Every open kit: the content store of the multi-kit model, each owning
     /// its source and all state scoped to it. **Never empty** — an unloaded
     /// Baboon holds one empty workspace kit, so readers of per-kit state need
@@ -544,6 +547,7 @@ impl Baboon {
             default_names: names.clone(),
             tx,
             rx,
+            egui_ctx: ctx.clone(),
             // The startup workspace is seeded like any other new kit; every
             // later one goes through `Baboon::empty_kit`.
             kits: vec![Kit {

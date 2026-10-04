@@ -93,3 +93,22 @@ fn a_panicking_worker_still_sends_its_message() {
         results[1].1
     );
 }
+
+/// Every background job runs through `spawn_worker` or `spawn_background`,
+/// which catch a panic. A bare `thread::spawn` that panicked sent nothing, and
+/// whatever the UI had marked in flight stayed that way for the session.
+#[test]
+fn background_work_starts_only_through_the_panic_safe_spawns() {
+    let sources = crate::test_kits::app_product_sources();
+    let bare: Vec<&str> = sources
+        .iter()
+        .filter(|(file, text)| file != "shell/worker/mod.rs" && text.contains("thread::spawn("))
+        .map(|(file, _)| file.as_str())
+        .collect();
+    assert!(bare.is_empty(), "bare thread::spawn in {bare:?}");
+    let routed: usize = sources
+        .iter()
+        .map(|(_, text)| text.matches("spawn_worker(").count() + text.matches("spawn_job(").count())
+        .sum();
+    assert!(routed >= 40, "only {routed} spawns found; the scan is not looking");
+}

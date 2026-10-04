@@ -218,7 +218,12 @@ impl Baboon {
             self.show_entry_index_wait_notice = true;
         }
         self.status = "Building reference index…".to_owned();
-        thread::spawn(move || {
+        // A build that panicked used to send nothing and leave the index
+        // "building" for the session; it reports every tag missing instead.
+        let entry_total = entries.len();
+        let (worker_tx, worker_ctx) = (tx.clone(), ctx.clone());
+        spawn_worker(&tx, &ctx, move || {
+            let (tx, ctx) = (worker_tx, worker_ctx);
             let total = entries.len();
             let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
                 stamp,
@@ -276,12 +281,15 @@ impl Baboon {
                     }
                 }
             });
-            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt {
+            WorkerMessage::ReverseDependenciesBuilt {
                 stamp,
                 index,
                 missing,
-            });
-            ctx.request_repaint();
+            }
+        }, move |_| WorkerMessage::ReverseDependenciesBuilt {
+            stamp,
+            index: ReverseDependencyIndex::default(),
+            missing: entry_total,
         });
     }
 }

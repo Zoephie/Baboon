@@ -1583,12 +1583,11 @@ impl Baboon {
             state.overlays_pending = true;
         }
 
-        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            // `catch_unwind` for the same reason every preview worker has one:
-            // a panicking tag must still send its message or the pending flag
-            // sticks and the overlays never arrive.
-            let overlays = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Through `spawn_worker` like every preview worker: a panicking tag
+        // must still send its message or the pending flag sticks and the
+        // overlays never arrive.
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        let build = move || -> Option<_> {
                 let model = crate::core::source::read_entry(&source, &entry).ok()?;
                 if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
                     && is_object_family_group(model.header.group_tag)
@@ -1602,19 +1601,22 @@ impl Baboon {
                     hlmt_collision_overlay(&model, &source),
                     hlmt_physics_overlay(&model, &source),
                 ))
-            }))
-            .ok()
-            .flatten();
-            let (collision, physics) = overlays.unwrap_or((None, None));
-            let _ = tx.send(WorkerMessage::ModelOverlaysBuilt {
+        };
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || {
+                let (collision, physics) = build().unwrap_or((None, None));
+                WorkerMessage::ModelOverlaysBuilt { stamp, key, geometry_id, collision, physics }
+            },
+            move |_| WorkerMessage::ModelOverlaysBuilt {
                 stamp,
-                key,
+                key: panic_key,
                 geometry_id,
-                collision,
-                physics,
-            });
-            ctx.request_repaint();
-        });
+                collision: None,
+                physics: None,
+            },
+        );
     }
 
     /// Merge a worker's overlay geometry into the preview it was built for.

@@ -706,20 +706,19 @@ impl Baboon {
                 continue;
             }
 
-            let (tx, ctx, source) = (self.tx.clone(), ctx.clone(), source.clone());
-            thread::spawn(move || {
-                // `catch_unwind` because tags have panicked the bitmap decoders
-                // and the geometry parser before: a thread that panics never
-                // sends, so `pending` would keep its key and one of the four
-                // slots would be gone for good. Four such tags stopped the
-                // library and every hover preview.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    S::render(&source, &entry, max_edge)
-                }))
-                .unwrap_or_else(|_| Err(S::CRASHED.to_owned()));
-                let _ = tx.send(S::message(stamp, key, result));
-                ctx.request_repaint();
-            });
+            // Through `spawn_worker` because tags have panicked the bitmap
+            // decoders and the geometry parser before: a thread that panics
+            // never sends, so `pending` would keep its key and one of the four
+            // slots would be gone for good. Four such tags stopped the library
+            // and every hover preview.
+            let source = source.clone();
+            let panic_key = key.clone();
+            spawn_worker(
+                &self.tx,
+                ctx,
+                move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
+                move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
+            );
         }
     }
 

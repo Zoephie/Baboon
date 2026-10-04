@@ -751,15 +751,14 @@ impl Baboon {
         // The destination kit is the one that is definitely open, whether or not
         // it is the one configured in Settings.
         kit_roots.insert(target_game.clone(), target_tags_root.clone());
-        let tx = self.tx.clone();
         if let Some(dialog) = self.tag_import_dialog.as_mut() {
             dialog.analyzing = true;
             dialog.write_when_analyzed = write_when_done;
             dialog.invalidate_analysis();
         }
-        thread::spawn(move || {
+        self.spawn_job(move || {
             let stamp = source_stamp(&path);
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut analyze = || -> Result<_, String> {
                 let tag = crate::core::source::read_tag_at_path(
                     &path,
                     GameId::from_id(&source_game),
@@ -782,9 +781,9 @@ impl Baboon {
                     }
                     ConversionOutcome::Failed(error) => Err(error),
                 }
-            }))
-            .unwrap_or_else(|_| Err("The conversion crashed while analyzing this tag".to_owned()));
-            let _ = tx.send(WorkerMessage::ImportAnalysisFinished {
+            };
+            let result = analyze();
+            WorkerMessage::ImportAnalysisFinished {
                 result: result.map(|(draft, losses, refusal)| ImportAnalysis {
                     draft,
                     stamp,
@@ -792,7 +791,11 @@ impl Baboon {
                     refusal,
                 }),
                 templates: cache,
-            });
+            }
+        // The template cache went down with the job; it is only a cache.
+        }, |_| WorkerMessage::ImportAnalysisFinished {
+            result: Err("The conversion crashed while analyzing this tag".to_owned()),
+            templates: NativeTemplateCache::default(),
         });
     }
 
@@ -1075,13 +1078,10 @@ impl Baboon {
             dialog.error = None;
         }
         self.status = "Importing tags".to_owned();
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_folder_conversion_job(job, &tx)
-            }))
-            .unwrap_or_else(|_| Err("The tag import worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderConversionFinished(result));
-        });
+        self.spawn_job(
+            move || WorkerMessage::FolderConversionFinished(run_folder_conversion_job(job, &tx)),
+            |_| WorkerMessage::FolderConversionFinished(Err("The tag import worker crashed".to_owned())),
+        );
     }
 
     pub(in crate::app) fn handle_folder_conversion_progress(

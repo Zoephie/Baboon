@@ -181,16 +181,22 @@ impl Baboon {
                             generation: kit.generation,
                         };
                         let path = crate::core::source::index_db_path();
-                        thread::spawn(move || {
-                            let result = crate::core::source::save_entry_index(game.as_str(), &root, &entries)
-                                .map_err(|error| error.to_string());
-                            let _ = tx.send(WorkerMessage::EntryIndexSaved {
+                        let panic_path = path.clone();
+                        spawn_worker(
+                            &tx,
+                            &ctx,
+                            move || WorkerMessage::EntryIndexSaved {
                                 stamp,
                                 path,
-                                result,
-                            });
-                            ctx.request_repaint();
-                        });
+                                result: crate::core::source::save_entry_index(game.as_str(), &root, &entries)
+                                    .map_err(|error| error.to_string()),
+                            },
+                            move |error| WorkerMessage::EntryIndexSaved {
+                                stamp,
+                                path: panic_path,
+                                result: Err(format!("saving the index crashed: {error}")),
+                            },
+                        );
                     }
                 }
                 self.schedule_next_entry_index_refresh(kit_index, ctx);

@@ -34,6 +34,8 @@ pub(super) use waveform::{Waveform, channel_labels};
 
 use super::sound_extract::{ExtractRequest, ExtractSource, write_wav_pcm16};
 
+use crate::app::shell::worker::spawn_worker;
+
 /// Decode a tag-inline classic stream (CE/H2) to interleaved PCM. Shared by the
 /// audition (`PlayInline`) and extraction paths.
 pub(super) fn decode_inline(
@@ -867,6 +869,9 @@ enum AudioDone {
         result: Result<Arc<Waveform>, String>,
     },
     Extracted(String),
+    /// A job that panicked: its text, for the status line. It still counts
+    /// as finished, or the player would wait on it for the session.
+    Crashed(String),
 }
 
 struct AudioJobs {
@@ -1130,12 +1135,7 @@ impl AudioState {
 
     fn spawn_job(&mut self, ctx: &egui::Context, job: impl FnOnce() -> AudioDone + Send + 'static) {
         self.jobs.running += 1;
-        let tx = self.jobs.tx.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(job());
-            ctx.request_repaint();
-        });
+        spawn_worker(&self.jobs.tx, ctx, job, AudioDone::Crashed);
     }
 
     /// Apply what the workers have finished.
@@ -1150,6 +1150,10 @@ impl AudioState {
         match done {
             AudioDone::Extracted(status) => {
                 self.status = Some(status);
+                self.status_owner = None;
+            }
+            AudioDone::Crashed(error) => {
+                self.status = Some(format!("The audio job failed: {error}"));
                 self.status_owner = None;
             }
             AudioDone::Decoded {
@@ -1291,12 +1295,12 @@ impl AudioState {
         let root = tags_root.to_path_buf();
         let thread_root = root.clone();
         let thread_lang = lang.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let banks = WwiseBanks::open_pc_language(&thread_root, thread_lang.as_deref()).ok();
-            let _ = tx.send(banks);
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &tx,
+            ctx,
+            move || WwiseBanks::open_pc_language(&thread_root, thread_lang.as_deref()).ok(),
+            |_| None,
+        );
         self.wwise_loading = Some((root, lang, rx));
     }
 

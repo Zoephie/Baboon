@@ -340,12 +340,15 @@ impl Baboon {
             self.status = "Checking for updates...".to_owned();
         }
         let channel = self.prefs.update_channel;
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = fetch_latest_release(channel);
-            let _ = tx.send(WorkerMessage::UpdateCheckFinished { silent, result });
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::UpdateCheckFinished { silent, result: fetch_latest_release(channel) },
+            move |error| WorkerMessage::UpdateCheckFinished {
+                silent,
+                result: Err(format!("The update check crashed: {error}")),
+            },
+        );
     }
 
     /// Whether the automatic startup check should run.

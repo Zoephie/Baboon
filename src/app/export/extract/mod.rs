@@ -529,23 +529,23 @@ impl Baboon {
         });
         self.status = format!("Extracting {total} tag(s) to {}", output.display());
         let tx = self.tx.clone();
-        thread::spawn(move || {
+        let worker_ctx = ctx.clone();
+        spawn_worker(&self.tx, &ctx, move || {
             let progress_tx = tx.clone();
-            let progress_ctx = ctx.clone();
+            let progress_ctx = worker_ctx;
             let progress = move |done: usize, total: usize| {
                 let _ =
                     progress_tx.send(WorkerMessage::ContainerDumpProgress { stamp, done, total });
                 progress_ctx.request_repaint();
             };
             // This reads memory-mapped `.ucas` partitions across several
-            // threads; a panic in there must end the job, not the application.
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                dump_shipped_container_tags(&source, &entries, &output, &cancel, &progress)
-                    .map_err(|error| error.to_string())
-            }))
-            .unwrap_or_else(|_| Err("Tag extraction worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::ContainerDumpFinished { stamp, result });
-            ctx.request_repaint();
+            // threads; a panic in there ends the job, not the application.
+            let result = dump_shipped_container_tags(&source, &entries, &output, &cancel, &progress)
+                .map_err(|error| error.to_string());
+            WorkerMessage::ContainerDumpFinished { stamp, result }
+        }, move |_| WorkerMessage::ContainerDumpFinished {
+            stamp,
+            result: Err("Tag extraction worker crashed".to_owned()),
         });
     }
 

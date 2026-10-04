@@ -85,16 +85,12 @@ pub(in crate::app) fn draw_bitmap_preview(
             match extract_bitmap_level(tag, preview.image_index, preview.mip_index) {
                 Ok(level) => {
                     let (sender, receiver) = std::sync::mpsc::channel();
-                    let repaint = ctx.clone();
-                    std::thread::spawn(move || {
-                        let result = std::panic::catch_unwind(|| decode_bitmap_level(level))
-                            .unwrap_or_else(|_| {
-                                Err(anyhow::anyhow!("decoding the bitmap panicked"))
-                            })
-                            .map_err(|error| error.to_string());
-                        let _ = sender.send(result);
-                        repaint.request_repaint();
-                    });
+                    spawn_worker(
+                        &sender,
+                        ctx,
+                        move || decode_bitmap_level(level).map_err(|error| error.to_string()),
+                        |_| Err("decoding the bitmap panicked".to_owned()),
+                    );
                     preview.decoding = Some(receiver);
                 }
                 Err(error) => preview.decoded = Some(Err(error.to_string())),

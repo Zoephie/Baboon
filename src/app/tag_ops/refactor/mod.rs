@@ -89,9 +89,10 @@ impl Baboon {
             progress: None,
         });
         self.status = format!("{job_label}: Preparing");
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_folder_refactor_job(
+        self.spawn_job(
+            move || WorkerMessage::FolderRefactorFinished {
+                stamp,
+                result: run_folder_refactor_job(
                     root,
                     rel_path,
                     destination_parent,
@@ -103,11 +104,13 @@ impl Baboon {
                     existing_all_entries,
                     existing_reverse_dependencies,
                     &tx,
-                )
-            }))
-            .unwrap_or_else(|_| Err("Folder move/copy worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
-        });
+                ),
+            },
+            move |_| WorkerMessage::FolderRefactorFinished {
+                stamp,
+                result: Err("Folder move/copy worker crashed".to_owned()),
+            },
+        );
     }
 
     /// Tags that reference `entry` (its "parents"), via the reverse-dependency
@@ -513,9 +516,10 @@ impl Baboon {
             progress: None,
         });
         self.status = format!("{job_label}: Preparing");
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_tag_rename_job(
+        self.spawn_job(
+            move || WorkerMessage::FolderRefactorFinished {
+                stamp,
+                result: run_tag_rename_job(
                     root,
                     entry,
                     new_rel,
@@ -525,11 +529,13 @@ impl Baboon {
                     all_entries,
                     reverse_dependencies,
                     &tx,
-                )
-            }))
-            .unwrap_or_else(|_| Err("Tag move worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
-        });
+                ),
+            },
+            move |_| WorkerMessage::FolderRefactorFinished {
+                stamp,
+                result: Err("Tag move worker crashed".to_owned()),
+            },
+        );
     }
 }
 
