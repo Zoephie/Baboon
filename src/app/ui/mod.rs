@@ -4,7 +4,6 @@
 use crate::app::kits::terminal::open_terminal_log;
 use super::*;
 
-mod browser_panel;
 pub(in crate::app) mod dialogs;
 mod first_run;
 mod kit_tiles;
@@ -49,7 +48,7 @@ pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
 pub(in crate::app) const PANE_HEADER_ACTION_GAP: f32 = 4.0;
 const PANE_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
 const PANE_HEADER_MIN_LEFT_WIDTH: f32 = 200.0;
-const PANE_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
+pub(in crate::app) const PANE_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
 const BROWSER_SEARCH_HEIGHT: f32 = 24.0;
 const BROWSER_SEARCH_RADIUS: f32 = BROWSER_SEARCH_HEIGHT * 0.5;
 const BROWSER_SEARCH_ICON_SIZE: f32 = 16.0;
@@ -61,7 +60,7 @@ const BROWSER_SEARCH_RIGHT_PADDING: f32 = 8.0;
 /// `None` is the shared signal for tag and folder headers to put actions below
 /// the title instead, preventing either header from overlapping at narrow
 /// docked or window sizes.
-fn pane_header_inline_left_width(available: f32, action_width: f32) -> Option<f32> {
+pub(in crate::app) fn pane_header_inline_left_width(available: f32, action_width: f32) -> Option<f32> {
     (available >= PANE_HEADER_WIDE_BREAKPOINT).then(|| {
         (available - action_width - PANE_HEADER_SECTION_GAP).max(PANE_HEADER_MIN_LEFT_WIDTH)
     })
@@ -133,7 +132,7 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
     response
 }
 
-fn browser_favorites_divider(ui: &mut Ui, favorites_visible: bool) {
+pub(in crate::app) fn browser_favorites_divider(ui: &mut Ui, favorites_visible: bool) {
     if favorites_visible {
         ui.add_space(4.0);
         ui.separator();
@@ -141,7 +140,7 @@ fn browser_favorites_divider(ui: &mut Ui, favorites_visible: bool) {
     }
 }
 
-fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String) {
+pub(in crate::app) fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String) {
     let normalized = display_path.replace('\\', "/");
     let mut components: Vec<&str> = normalized
         .split('/')
@@ -162,7 +161,7 @@ fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String
 /// Draw clickable path segments above a pane title. A placeholder-free custom
 /// row keeps the hover fill behind the text while preserving the compact tag
 /// header typography.
-fn pane_header_breadcrumbs(
+pub(in crate::app) fn pane_header_breadcrumbs(
     ui: &mut Ui,
     breadcrumbs: &[(String, PathBuf)],
 ) -> Option<(PathBuf, String)> {
@@ -246,7 +245,7 @@ fn pane_header_breadcrumbs(
     clicked
 }
 
-fn navigate_folder_browser(pane: &mut FolderBrowserState, path: PathBuf, label: String) {
+pub(in crate::app) fn navigate_folder_browser(pane: &mut FolderBrowserState, path: PathBuf, label: String) {
     if pane.rel_path == path {
         return;
     }
@@ -548,7 +547,7 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
 /// Fills the sidebar width and allows long source paths to reflow as the pane
 /// narrows. Zero-width break opportunities after path separators keep Windows
 /// paths readable without changing the text the user sees.
-fn draw_game_banner_header(
+pub(in crate::app) fn draw_game_banner_header(
     ui: &mut Ui,
     app: &mut Baboon,
     game: GameId,
@@ -633,7 +632,7 @@ fn draw_kit_banner_tile(
     );
 }
 
-fn sidebar_wrappable_path_label(path: &str) -> String {
+pub(in crate::app) fn sidebar_wrappable_path_label(path: &str) -> String {
     let mut wrappable = String::with_capacity(path.len());
     for character in path.chars() {
         wrappable.push(character);
@@ -644,7 +643,7 @@ fn sidebar_wrappable_path_label(path: &str) -> String {
     wrappable
 }
 
-fn sidebar_source_path_label(source: &TagSource) -> String {
+pub(in crate::app) fn sidebar_source_path_label(source: &TagSource) -> String {
     match source {
         TagSource::SingleFile { path } => path.display().to_string(),
         TagSource::LooseFolder { root, .. } => root.display().to_string(),

@@ -217,6 +217,9 @@ fn a_mod_always_gets_the_priority_suffix() {
 }
 
 use super::*;
+use crate::app::browser::actions::remap_favorite_paths;
+use crate::app::browser::actions::loose_folder_explorer_path;
+use crate::app::browser::actions::explorer_select_args;
 use crate::app::kits::terminal::terminal_log_timestamp;
 use crate::app::kits::terminal::stream_terminal_output;
 use crate::app::kits::terminal::TERMINAL_VISIBLE_LINE_TRIM_TARGET;

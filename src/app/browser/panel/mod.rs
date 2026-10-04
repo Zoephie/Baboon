@@ -2,6 +2,20 @@
 //! It owns browser presentation and request collection for a single kit; layout of the panels belongs to the shell.
 
 use super::*;
+use crate::app::ui::pane_header_breadcrumbs;
+use crate::app::ui::PANE_HEADER_ICON_TEXT_GAP;
+use crate::app::ui::PANE_HEADER_ICON_SIZE;
+use crate::app::ui::pane_header_inline_left_width;
+use crate::app::ui::PANE_HEADER_SECTION_GAP;
+use crate::app::ui::PANE_HEADER_COMMON_ACTIONS_WIDTH;
+use crate::app::ui::pane_header_path_parts;
+use crate::app::ui::PANE_HEADER_ACTION_GAP;
+use crate::app::ui::browser_favorites_divider;
+use crate::app::ui::draw_game_banner_header;
+use crate::app::ui::sidebar_source_path_label;
+use crate::app::ui::navigate_folder_browser;
+use crate::app::ui::browser_search_field;
+use crate::app::ui::is_file_cached;
 
 const FOLDER_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 900.0;
 const FOLDER_HEADER_LAUNCHER_WIDTH: f32 = 190.0;

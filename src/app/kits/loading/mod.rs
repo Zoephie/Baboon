@@ -2,7 +2,7 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
-use crate::app::controller::reset_lazy_folder_browser;
+use crate::app::browser::actions::reset_lazy_folder_browser;
 
 /// How often a loaded loose folder's entry index is checked against disk.
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;

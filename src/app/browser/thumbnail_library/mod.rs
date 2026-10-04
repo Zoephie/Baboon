@@ -264,7 +264,7 @@ enum CellAction {
 
 impl Baboon {
     /// Draw one kit's library pane.
-    pub(super) fn draw_thumbnail_library<S: ThumbnailSource>(
+    pub(in crate::app) fn draw_thumbnail_library<S: ThumbnailSource>(
         &mut self,
         ui: &mut Ui,
         ctx: &egui::Context,
@@ -605,7 +605,7 @@ impl Baboon {
 
     /// Snapshot the kit's listed tags and recompute the filter, both only when
     /// something they depend on has actually changed.
-    pub(super) fn refresh_thumbnail_library<S: ThumbnailSource>(
+    pub(in crate::app) fn refresh_thumbnail_library<S: ThumbnailSource>(
         &mut self,
         kit_index: usize,
         ctx: &egui::Context,
@@ -667,7 +667,7 @@ impl Baboon {
 
     /// Start thumbnail jobs for `entries` that have none, up to the in-flight
     /// bound.
-    pub(super) fn queue_thumbnails<S: ThumbnailSource>(
+    pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
         &mut self,
         kit_index: usize,
         entries: Vec<TagEntry>,
@@ -723,7 +723,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn handle_thumbnail_ready<S: ThumbnailSource>(
+    pub(in crate::app) fn handle_thumbnail_ready<S: ThumbnailSource>(
         &mut self,
         stamp: KitStamp,
         key: String,

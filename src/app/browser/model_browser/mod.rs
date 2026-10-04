@@ -221,7 +221,7 @@ pub(in crate::app) fn rasterize_model_thumbnail(
 
 impl Baboon {
     /// Open (or focus) the Model Library in the active kit.
-    pub(super) fn open_model_library(&mut self) {
+    pub(in crate::app) fn open_model_library(&mut self) {
         let kit = self.active;
         if self.kits[kit].source.is_none() {
             self.status = "Load an editing kit before browsing its models".to_owned();
@@ -232,7 +232,7 @@ impl Baboon {
 
     /// Resolve a double-clicked render model to the tag its cell should open:
     /// the owning `.model` when the kit has one, otherwise the tag itself.
-    pub(super) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
+    pub(in crate::app) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
         let Some(source) = self.kits[kit_index].source.as_ref() else {
             return key.to_owned();
         };

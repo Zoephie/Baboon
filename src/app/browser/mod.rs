@@ -1,5 +1,7 @@
-//! Tag-browser tree, list, filtering, and context-menu presentation.
-//! It owns tag-browser filtering and presentation; source discovery, document loading, and edit application belong elsewhere.
+//! The tag browser: the folder and group trees with their filter and menus,
+//! the browser panel, what its rows and menus do (opening, copying,
+//! favourites, revealing), and the bitmap and model browsers with their
+//! thumbnails.
 
 use super::*;
 
@@ -306,3 +308,13 @@ pub(in crate::app) fn modified_text() -> Color32 {
 
 #[cfg(test)]
 mod modified_tags_tests;
+pub(in crate::app) mod panel;
+pub(in crate::app) mod actions;
+pub(in crate::app) mod bitmap_browser;
+pub(in crate::app) use bitmap_browser::*;
+pub(in crate::app) mod model_browser;
+pub(in crate::app) use model_browser::*;
+pub(in crate::app) mod thumbnail_library;
+pub(in crate::app) use thumbnail_library::*;
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;
