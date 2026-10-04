@@ -23,8 +23,16 @@ fn a_reveal_through_unloaded_folders_reaches_its_tag() {
 
     let key = kit.key("objects/weapons/rifle/assault_rifle.biped");
     h.app.reveal_in_browser(&key);
-    for _ in 0..8 {
+    // One unloaded folder a frame, three deep, plus the frames a background
+    // index job may take to land and rebuild the tree under it: bounded, not
+    // fixed, so a slow machine waits rather than fails.
+    for _ in 0..60 {
         h.frame(Vec::new());
+        if h.painted.iter().any(|text| text.contains("assault_rifle"))
+            && h.app.browser.reveal_target.is_none()
+        {
+            break;
+        }
     }
     assert!(
         h.painted.iter().any(|text| text.contains("assault_rifle")),
