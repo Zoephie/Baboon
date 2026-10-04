@@ -219,9 +219,6 @@ pub struct Baboon {
     status_changed_at: f64,
     /// When the per-frame prefs check next runs (egui time).
     prefs_next_check_at: f64,
-    /// Modal close transaction; the pending action is executed only after every
-    /// selected dirty document has been saved or discard is confirmed.
-    save_changes_prompt: SaveChangesPrompt,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
@@ -280,6 +277,8 @@ pub struct Baboon {
     pub(in crate::app) compare: CompareFeature,
     /// The browser: the keyword chooser and a tag waiting to be revealed.
     pub(in crate::app) browser: BrowserFeature,
+    /// Documents: the save-changes prompt.
+    pub(in crate::app) documents: DocumentsFeature,
 }
 
 impl Baboon {
@@ -430,7 +429,6 @@ impl Baboon {
             status_shown: String::new(),
             status_changed_at: 0.0,
             prefs_next_check_at: 0.0,
-            save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,
             audio: audio::AudioState::default(),
             ce_usmap: None,
@@ -591,6 +589,9 @@ impl Baboon {
             browser: BrowserFeature {
                 keyword_chooser_open: false,
                 reveal_target: None,
+            },
+            documents: DocumentsFeature {
+                save_changes_prompt: SaveChangesPrompt::default(),
             },
         }
     }

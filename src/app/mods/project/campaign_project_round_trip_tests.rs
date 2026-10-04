@@ -477,19 +477,19 @@ fn discarding_never_writes_the_user_s_project() {
     let user_bytes = fs::read(&user).unwrap();
 
     app.request_close_action(PendingCloseAction::CloseTab(rock.clone()), &ctx());
-    let prompt = &app.save_changes_prompt;
+    let prompt = &app.documents.save_changes_prompt;
     assert!(prompt.visible && prompt.can_stash);
     assert_eq!(prompt.stashed, 1);
     assert_eq!(prompt.stash_file.as_deref(), Some(kit.recovery().as_path()));
 
     let mut driver = PromptDriver::new();
     driver.click(&mut app, "Discard...");
-    assert!(app.save_changes_prompt.confirm_discard, "the first click arms");
-    assert!(app.save_changes_prompt.visible);
+    assert!(app.documents.save_changes_prompt.confirm_discard, "the first click arms");
+    assert!(app.documents.save_changes_prompt.visible);
     assert!(app.kits[0].open_tabs.contains(&rock));
     driver.click(&mut app, "Delete Stashed Edits");
 
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert!(!app.kits[0].open_tabs.contains(&rock));
     assert!(!app.tag_has_stashed_overlay(0, &rock));
     assert!(load_campaign_project(&kit.recovery()).unwrap().overlays.is_empty());
@@ -521,7 +521,7 @@ fn stashing_for_mod_keeps_the_edit_out_of_the_user_s_project() {
             user.display()
         )
     );
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert!(!app.kits[0].open_tabs.contains(&rock), "the close went ahead");
     let stashed = load_campaign_project(&kit.recovery()).unwrap();
     assert_eq!(
@@ -551,7 +551,7 @@ fn the_prompt_s_save_routes_a_container_tag_into_its_pak() {
 
     PromptDriver::new().click(&mut app, "Save");
 
-    let prompt = &app.save_changes_prompt;
+    let prompt = &app.documents.save_changes_prompt;
     assert!(prompt.visible, "the save failed, so the prompt stays");
     assert_eq!(
         prompt.error.as_deref(),

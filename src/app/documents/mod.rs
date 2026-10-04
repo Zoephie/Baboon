@@ -10,3 +10,10 @@ pub(in crate::app) mod close;
 pub(in crate::app) mod undo;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
+
+/// Documents: the save-changes prompt.
+pub(in crate::app) struct DocumentsFeature {
+    /// Modal close transaction; the pending action is executed only after every
+    /// selected dirty document has been saved or discard is confirmed.
+    pub(in crate::app) save_changes_prompt: SaveChangesPrompt,
+}

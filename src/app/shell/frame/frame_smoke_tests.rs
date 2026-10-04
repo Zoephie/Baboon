@@ -796,11 +796,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "save_changes_prompt",
-            &["save_changes_prompt"],
+            &["documents.save_changes_prompt"],
             &["documents/close/mod.rs"],
             memory_kit,
             |h| {
-                h.app.save_changes_prompt = SaveChangesPrompt {
+                h.app.documents.save_changes_prompt = SaveChangesPrompt {
                     visible: true,
                     dirty_tags: vec![DirtyTagEntry {
                         path: "objects/smoke.biped".to_owned(),

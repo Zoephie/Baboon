@@ -71,7 +71,7 @@ fn closing_a_clean_tab_closes_it_without_a_prompt() {
 
     app.request_close_action(PendingCloseAction::CloseTab(key.clone()), &ctx());
 
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert!(!tab_open(&app, &key));
     assert!(!app.kits[0].parsed_tags.contains_key(&key), "the document is dropped");
 }
@@ -82,7 +82,7 @@ fn closing_a_dirty_tab_raises_the_prompt_and_leaves_the_tab_open() {
 
     app.request_close_action(PendingCloseAction::CloseTab(key.clone()), &ctx());
 
-    let prompt = &app.save_changes_prompt;
+    let prompt = &app.documents.save_changes_prompt;
     assert!(prompt.visible);
     assert!(!prompt.can_stash, "a loose kit has nowhere to stash");
     assert_eq!(
@@ -107,7 +107,7 @@ fn closing_a_dirty_tab_raises_the_prompt_and_leaves_the_tab_open() {
     // A second close while the prompt is up is ignored rather than replacing it.
     app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
     assert!(matches!(
-        &app.save_changes_prompt.pending_action,
+        &app.documents.save_changes_prompt.pending_action,
         PendingCloseAction::CloseTab(_)
     ));
 }
@@ -121,8 +121,8 @@ fn the_prompt_s_save_writes_the_tag_then_closes_it() {
     driver.click(&mut app, "Save");
 
     assert_eq!(distance_on_disk(&kit, MODEL), 12.5);
-    assert!(!app.save_changes_prompt.visible);
-    assert!(app.save_changes_prompt.dirty_tags.is_empty());
+    assert!(!app.documents.save_changes_prompt.visible);
+    assert!(app.documents.save_changes_prompt.dirty_tags.is_empty());
     assert_eq!(app.status, "Saved 1 file(s)");
     assert!(!tab_open(&app, &key), "the close went ahead");
     assert!(tab_open(&app, &other));
@@ -144,7 +144,7 @@ fn the_prompt_s_dont_save_closes_without_writing() {
     driver.click(&mut app, "Don't Save");
 
     assert_eq!(fs::read(kit.root.join(MODEL)).unwrap(), before, "nothing written");
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert!(!tab_open(&app, &key));
     assert!(!app.kits[0].parsed_tags.contains_key(&key));
 }
@@ -157,8 +157,8 @@ fn the_prompt_s_cancel_keeps_the_tab_and_its_edit() {
 
     driver.click(&mut app, "Cancel");
 
-    assert!(!app.save_changes_prompt.visible);
-    assert!(app.save_changes_prompt.dirty_tags.is_empty());
+    assert!(!app.documents.save_changes_prompt.visible);
+    assert!(app.documents.save_changes_prompt.dirty_tags.is_empty());
     assert!(tab_open(&app, &key));
     assert!(is_dirty(&app, &key));
     assert_eq!(distance_in_document(&app, &key), 12.5);
@@ -174,16 +174,16 @@ fn the_prompt_s_cancel_keeps_the_tab_and_its_edit() {
 fn an_unchecked_tag_is_not_saved_and_the_prompt_comes_back() {
     let (kit, mut app, key, _other) = edited("close-unchecked");
     app.request_close_action(PendingCloseAction::CloseTab(key.clone()), &ctx());
-    app.save_changes_prompt.dirty_tags[0].checked = false;
+    app.documents.save_changes_prompt.dirty_tags[0].checked = false;
     let mut driver = PromptDriver::new();
 
     driver.click(&mut app, "Save");
 
     assert_eq!(distance_on_disk(&kit, MODEL), 0.0);
     assert_eq!(app.status, "No files selected to save");
-    assert!(app.save_changes_prompt.visible, "prompted again");
-    assert_eq!(app.save_changes_prompt.dirty_tags.len(), 1);
-    assert!(app.save_changes_prompt.dirty_tags[0].checked, "re-listed checked");
+    assert!(app.documents.save_changes_prompt.visible, "prompted again");
+    assert_eq!(app.documents.save_changes_prompt.dirty_tags.len(), 1);
+    assert!(app.documents.save_changes_prompt.dirty_tags[0].checked, "re-listed checked");
     assert!(tab_open(&app, &key));
     assert!(is_dirty(&app, &key));
 }
@@ -202,7 +202,7 @@ fn a_failed_save_keeps_the_prompt_up_with_the_reason() {
 
     driver.click(&mut app, "Save");
 
-    let prompt = &app.save_changes_prompt;
+    let prompt = &app.documents.save_changes_prompt;
     assert!(prompt.visible);
     let error = prompt.error.as_deref().expect("an error is shown");
     assert!(error.starts_with("Save failed: "), "{error}");
@@ -219,7 +219,7 @@ fn close_all_prompts_for_the_dirty_tags_only_then_closes_everything() {
 
     app.request_close_action(PendingCloseAction::CloseAllTabs, &ctx());
     assert_eq!(
-        app.save_changes_prompt
+        app.documents.save_changes_prompt
             .dirty_tags
             .iter()
             .map(|entry| entry.tag_id.clone())
@@ -242,7 +242,7 @@ fn close_all_but_this_keeps_the_named_tab_and_its_unsaved_edit() {
     // The dirty tag is the one kept, so nothing needs saving.
     app.request_close_action(PendingCloseAction::CloseAllButThis(key.clone()), &ctx());
 
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert_eq!(app.kits[0].open_tabs, vec![key.clone()]);
     assert!(!app.kits[0].parsed_tags.contains_key(&other));
     assert!(is_dirty(&app, &key));
@@ -251,8 +251,8 @@ fn close_all_but_this_keeps_the_named_tab_and_its_unsaved_edit() {
     // Keeping the clean one instead lists the dirty one.
     let (_kit, mut app, key, other) = edited("close-all-but-other");
     app.request_close_action(PendingCloseAction::CloseAllButThis(other.clone()), &ctx());
-    assert!(app.save_changes_prompt.visible);
-    assert_eq!(app.save_changes_prompt.dirty_tags[0].tag_id, key);
+    assert!(app.documents.save_changes_prompt.visible);
+    assert_eq!(app.documents.save_changes_prompt.dirty_tags[0].tag_id, key);
 }
 
 fn close_requested_input(time: f64) -> egui::RawInput {
@@ -294,12 +294,12 @@ fn a_close_while_the_window_is_hidden_is_still_vetoed_and_prompted_for() {
         app.editor.deferred_file_action,
         Some(DeferredFileAction::Close(PendingCloseAction::CloseApp))
     ));
-    assert!(!app.save_changes_prompt.visible, "the close waits a frame");
+    assert!(!app.documents.save_changes_prompt.visible, "the close waits a frame");
 
     let _ = ctx.run_logic(&hidden(screen(Vec::new(), 2.1)), |ctx| app.run_logic(ctx));
     assert!(app.editor.deferred_file_action.is_none());
-    assert!(app.save_changes_prompt.visible, "dirty work is prompted for");
-    assert_eq!(app.save_changes_prompt.dirty_tags[0].tag_id, key);
+    assert!(app.documents.save_changes_prompt.visible, "dirty work is prompted for");
+    assert_eq!(app.documents.save_changes_prompt.dirty_tags[0].tag_id, key);
 }
 
 /// The native close is vetoed, prompted for, and only then re-issued; the
@@ -325,9 +325,9 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     let _ = crate::app::run_ui_test(&ctx, screen(Vec::new(), 1.1), |ui| {
         app.request_close_action(action.clone(), ui.ctx())
     });
-    assert!(app.save_changes_prompt.visible, "dirty work is prompted for");
+    assert!(app.documents.save_changes_prompt.visible, "dirty work is prompted for");
     assert!(matches!(
-        app.save_changes_prompt.pending_action,
+        app.documents.save_changes_prompt.pending_action,
         PendingCloseAction::CloseApp
     ));
 
@@ -335,7 +335,7 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     let mut driver = PromptDriver::on(ctx.clone(), 2.0);
     driver.click(&mut app, "Don't Save");
     assert!(driver.commands.contains(&egui::ViewportCommand::Close));
-    assert!(app.save_changes_prompt.allow_app_close_once);
+    assert!(app.documents.save_changes_prompt.allow_app_close_once);
     assert!(!is_dirty(&app, &key));
     assert_eq!(distance_on_disk(&kit, MODEL), 0.0);
     // The quit recorded the session, naming the open tags.
@@ -348,7 +348,7 @@ fn the_app_close_is_two_step_and_writes_the_session() {
         app.handle_app_close_request(ui.ctx())
     });
     assert!(!root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
-    assert!(!app.save_changes_prompt.allow_app_close_once);
+    assert!(!app.documents.save_changes_prompt.allow_app_close_once);
     assert!(app.editor.deferred_file_action.is_none());
 }
 
@@ -388,9 +388,9 @@ fn a_clean_app_close_closes_at_once() {
         app.request_close_action(PendingCloseAction::CloseApp, ui.ctx())
     });
 
-    assert!(!app.save_changes_prompt.visible);
+    assert!(!app.documents.save_changes_prompt.visible);
     assert!(root_commands(&output).contains(&egui::ViewportCommand::Close));
-    assert!(app.save_changes_prompt.allow_app_close_once);
+    assert!(app.documents.save_changes_prompt.allow_app_close_once);
 }
 
 #[test]

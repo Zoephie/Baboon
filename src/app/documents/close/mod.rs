@@ -115,7 +115,7 @@ impl Baboon {
         // Chimp's recovery checkpoints wait for edits to pause; one still
         // waiting when the app or a workspace closes would be lost.
         self.flush_all_chimp_checkpoints();
-        if self.save_changes_prompt.visible
+        if self.documents.save_changes_prompt.visible
             || self.chimp.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
@@ -172,13 +172,13 @@ impl Baboon {
                 .campaign_project
                 .as_ref()
                 .map(|project| project.recovery_path.clone());
-            self.save_changes_prompt = SaveChangesPrompt {
+            self.documents.save_changes_prompt = SaveChangesPrompt {
                 visible: true,
                 can_stash,
                 dirty_tags,
                 pending_action: action,
                 error: None,
-                allow_app_close_once: self.save_changes_prompt.allow_app_close_once,
+                allow_app_close_once: self.documents.save_changes_prompt.allow_app_close_once,
                 stash_file,
                 stashed,
                 confirm_discard: false,
@@ -204,8 +204,8 @@ impl Baboon {
         if !ctx.input(|input| input.viewport().close_requested()) {
             return;
         }
-        if self.save_changes_prompt.allow_app_close_once {
-            self.save_changes_prompt.allow_app_close_once = false;
+        if self.documents.save_changes_prompt.allow_app_close_once {
+            self.documents.save_changes_prompt.allow_app_close_once = false;
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -215,7 +215,7 @@ impl Baboon {
             self.status = "Wait for the folder move/rename to finish before closing".to_owned();
             return;
         }
-        if self.save_changes_prompt.visible
+        if self.documents.save_changes_prompt.visible
             || self.chimp.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
@@ -319,7 +319,7 @@ impl Baboon {
                 } else {
                     clear_last_session();
                 }
-                self.save_changes_prompt.allow_app_close_once = true;
+                self.documents.save_changes_prompt.allow_app_close_once = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             PendingCloseAction::CloseTab(key) => self.close_tab(&key),
@@ -357,21 +357,21 @@ impl Baboon {
     }
 
     pub(in crate::app) fn handle_save_changes_prompt(&mut self, ctx: &egui::Context) {
-        let action = render_save_changes_prompt(ctx, &mut self.save_changes_prompt);
+        let action = render_save_changes_prompt(ctx, &mut self.documents.save_changes_prompt);
         match action {
             SaveChangesPromptAction::None => {}
             SaveChangesPromptAction::Cancel => {
-                self.save_changes_prompt.visible = false;
-                self.save_changes_prompt.dirty_tags.clear();
-                self.save_changes_prompt.error = None;
-                self.save_changes_prompt.confirm_discard = false;
+                self.documents.save_changes_prompt.visible = false;
+                self.documents.save_changes_prompt.dirty_tags.clear();
+                self.documents.save_changes_prompt.error = None;
+                self.documents.save_changes_prompt.confirm_discard = false;
             }
             // Arming, not acting: the click that deletes is the next one.
             SaveChangesPromptAction::ConfirmDiscard => {
-                self.save_changes_prompt.confirm_discard = true;
+                self.documents.save_changes_prompt.confirm_discard = true;
             }
             SaveChangesPromptAction::StashForMod => {
-                let action = self.save_changes_prompt.pending_action.clone();
+                let action = self.documents.save_changes_prompt.pending_action.clone();
                 let now = ctx.input(|input| input.time);
                 match self.checkpoint_campaign_project(self.active, now) {
                     Ok(_) => {
@@ -379,17 +379,17 @@ impl Baboon {
                         // longer unsaved work: leaving them dirty would prompt
                         // again on the next close and, for a CloseApp walking
                         // several kits, would never terminate.
-                        for entry in &self.save_changes_prompt.dirty_tags {
+                        for entry in &self.documents.save_changes_prompt.dirty_tags {
                             if let Some(document) =
                                 self.kits[self.active].parsed_tags.get_mut(&entry.tag_id)
                             {
                                 document.dirty.clear();
                             }
                         }
-                        self.save_changes_prompt.visible = false;
-                        self.save_changes_prompt.dirty_tags.clear();
-                        self.save_changes_prompt.error = None;
-                        self.save_changes_prompt.confirm_discard = false;
+                        self.documents.save_changes_prompt.visible = false;
+                        self.documents.save_changes_prompt.dirty_tags.clear();
+                        self.documents.save_changes_prompt.error = None;
+                        self.documents.save_changes_prompt.confirm_discard = false;
                         self.status = match self.kits[self.active]
                             .campaign_project
                             .as_ref()
@@ -406,13 +406,13 @@ impl Baboon {
                         self.request_close_action(action, ctx);
                     }
                     Err(error) => {
-                        self.save_changes_prompt.error =
+                        self.documents.save_changes_prompt.error =
                             Some(format!("Could not stash into the project: {error}"));
                     }
                 }
             }
             SaveChangesPromptAction::DontSave => {
-                let action = self.save_changes_prompt.pending_action.clone();
+                let action = self.documents.save_changes_prompt.pending_action.clone();
                 // Discarding is explicit, so drop the dirty flags the prompt
                 // listed. Without this, a CloseApp that spans several kits
                 // would see the same unsaved work again and re-prompt forever.
@@ -424,7 +424,7 @@ impl Baboon {
                 // saved is never written by a close.
                 let kit = self.active;
                 let tag_ids: Vec<String> = self
-                    .save_changes_prompt
+                    .documents.save_changes_prompt
                     .dirty_tags
                     .iter()
                     .map(|entry| entry.tag_id.clone())
@@ -448,10 +448,10 @@ impl Baboon {
                 if let Err(error) = self.checkpoint_campaign_project(kit, now) {
                     self.status = format!("Could not update the Campaign Evolved project: {error}");
                 }
-                self.save_changes_prompt.visible = false;
-                self.save_changes_prompt.dirty_tags.clear();
-                self.save_changes_prompt.error = None;
-                self.save_changes_prompt.confirm_discard = false;
+                self.documents.save_changes_prompt.visible = false;
+                self.documents.save_changes_prompt.dirty_tags.clear();
+                self.documents.save_changes_prompt.error = None;
+                self.documents.save_changes_prompt.confirm_discard = false;
                 self.request_close_action(action, ctx);
             }
             SaveChangesPromptAction::Save(tag_ids) => {
@@ -501,10 +501,10 @@ impl Baboon {
                     }
                 }
                 if errors.is_empty() {
-                    let action = self.save_changes_prompt.pending_action.clone();
-                    self.save_changes_prompt.visible = false;
-                    self.save_changes_prompt.dirty_tags.clear();
-                    self.save_changes_prompt.error = None;
+                    let action = self.documents.save_changes_prompt.pending_action.clone();
+                    self.documents.save_changes_prompt.visible = false;
+                    self.documents.save_changes_prompt.dirty_tags.clear();
+                    self.documents.save_changes_prompt.error = None;
                     self.status = if saved.is_empty() {
                         "No files selected to save".to_owned()
                     } else {
@@ -513,14 +513,14 @@ impl Baboon {
                     self.request_close_action(action, ctx);
                 } else {
                     let message = format!("Save failed: {}", errors.join("; "));
-                    let pending_action = self.save_changes_prompt.pending_action.clone();
-                    self.save_changes_prompt.dirty_tags =
+                    let pending_action = self.documents.save_changes_prompt.pending_action.clone();
+                    self.documents.save_changes_prompt.dirty_tags =
                         self.dirty_tags_for_close_action(&pending_action);
                     // A failed save leaves the prompt up, and an armed discard
                     // has no business surviving into it.
-                    self.save_changes_prompt.confirm_discard = false;
+                    self.documents.save_changes_prompt.confirm_discard = false;
                     self.status = message.clone();
-                    self.save_changes_prompt.error = Some(message);
+                    self.documents.save_changes_prompt.error = Some(message);
                 }
             }
         }
