@@ -1735,7 +1735,7 @@ mod tests {
     /// 180/π, applied to every angle field in every game.
     #[test]
     fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
-        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
         let _units = crate::core::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
@@ -1792,7 +1792,7 @@ mod tests {
     /// unconditional in the first place.
     #[test]
     fn angles_are_shown_and_typed_as_radians_when_degrees_are_off() {
-        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
         let _units = crate::core::format::AngleUnitGuard::set(false);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
@@ -1832,7 +1832,7 @@ mod tests {
     /// with nothing to buy it.
     #[test]
     fn radians_round_trip_exactly_rather_than_to_six_digits() {
-        use crate::app::foundation::format_foundation_scalar_value;
+        use crate::app::editor::fields::format_foundation_scalar_value;
         let _units = crate::core::format::AngleUnitGuard::set(false);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let angle = tag.root().field("angle").unwrap();
@@ -1859,7 +1859,7 @@ mod tests {
     /// editable and the read-only renderer, which used to disagree.
     #[test]
     fn euler_angles_follow_the_unit_in_both_renderers() {
-        use crate::app::foundation::{foundation_editable_component_parts, foundation_value_parts};
+        use crate::app::editor::fields::{foundation_editable_component_parts, foundation_value_parts};
         let euler = TagFieldData::RealEulerAngles3d(blam_tags::math::RealEulerAngles3d {
             yaw: std::f32::consts::FRAC_PI_2,
             pitch: 0.0,
@@ -1889,7 +1889,7 @@ mod tests {
     /// parse-then-format even though rad↔deg is not exact.
     #[test]
     fn angle_display_survives_repeated_edits() {
-        use crate::app::foundation::format_foundation_scalar_value;
+        use crate::app::editor::fields::format_foundation_scalar_value;
         let _units = crate::core::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let field = tag.root().field("angle").unwrap();
@@ -1923,7 +1923,7 @@ mod tests {
     /// on.
     #[test]
     fn plain_reals_are_left_alone() {
-        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
@@ -1958,7 +1958,7 @@ mod tests {
     /// `0` and became `0` the moment the field was touched.
     #[test]
     fn small_reals_are_not_displayed_as_zero() {
-        use crate::app::foundation::fmt_real;
+        use crate::app::editor::fields::fmt_real;
         for value in [0.001f32, 0.0001, 0.75, 1e-7, 0.123456, -0.005] {
             let shown = fmt_real(value);
             let parsed: f32 = shown.parse().expect("editable text parses back");

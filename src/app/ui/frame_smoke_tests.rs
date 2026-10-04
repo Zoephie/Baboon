@@ -767,7 +767,7 @@ fn cases() -> Vec<Case> {
         case(
             "colour_popup",
             &["color_popup", "color_popup_kit"],
-            &["material/color_picker/mod.rs"],
+            &["editor/material/color_picker/mod.rs"],
             memory_kit,
             |h| {
                 h.app.color_popup =
@@ -779,7 +779,7 @@ fn cases() -> Vec<Case> {
         case(
             "function_popup",
             &["function_popup", "function_popup_kit"],
-            &["function_editor/mod.rs"],
+            &["editor/function_editor/mod.rs"],
             memory_kit,
             |h| {
                 let bytes = decode_hex(&constant_function_hex(0.5)).unwrap();
@@ -857,7 +857,7 @@ fn cases() -> Vec<Case> {
         case(
             "block_confirm",
             &["block_confirm"],
-            &["controller/mod.rs"],
+            &["editor/actions/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
@@ -1238,7 +1238,7 @@ fn cases() -> Vec<Case> {
         case(
             "tsv_paste",
             &["tsv_paste"],
-            &["ui/dialogs/tsv_paste.rs"],
+            &["editor/tsv_paste_window.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);

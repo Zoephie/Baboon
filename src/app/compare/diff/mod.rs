@@ -130,9 +130,9 @@ fn moved_pairs(matched: &[(usize, usize)]) -> Vec<usize> {
 /// exactly where it is needed most.
 fn element_identity(element: Option<TagStruct<'_>>, names: &TagNameIndex) -> Option<String> {
     let element = element?;
-    foundation::first_named_string_label(element)
-        .or_else(|| foundation::first_tag_reference_label(element, names))
-        .or_else(|| foundation::first_string_label(element))
+    crate::app::editor::fields::first_named_string_label(element)
+        .or_else(|| crate::app::editor::fields::first_tag_reference_label(element, names))
+        .or_else(|| crate::app::editor::fields::first_string_label(element))
 }
 
 /// How deep a fingerprint follows nested structure before it stops. Deep enough
@@ -512,8 +512,8 @@ fn diff_structs(
                 });
             }
         } else if let (Some(va), Some(vb)) = (fa.value(), fb.value()) {
-            let ta = foundation::format_foundation_scalar_value(names, &va);
-            let tb = foundation::format_foundation_scalar_value(names, &vb);
+            let ta = crate::app::editor::fields::format_foundation_scalar_value(names, &va);
+            let tb = crate::app::editor::fields::format_foundation_scalar_value(names, &vb);
             if ta != tb {
                 out.push(TagFieldDiff {
                     path: field_path,
@@ -588,7 +588,7 @@ fn dump_struct(
         } else if let Some(inner) = field.as_struct() {
             dump_struct(&inner, &field_path, names, out, limit, added);
         } else if let Some(value) = field.value() {
-            let text = foundation::format_foundation_scalar_value(names, &value);
+            let text = crate::app::editor::fields::format_foundation_scalar_value(names, &value);
             out.push(TagFieldDiff {
                 path: field_path.clone(),
                 base_path: (!added).then_some(field_path),

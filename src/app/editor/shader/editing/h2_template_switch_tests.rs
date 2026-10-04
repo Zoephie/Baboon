@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::foundation::extracted_tests::tests::with_test_edit_context;
+use crate::app::editor::fields::extracted_tests::tests::with_test_edit_context;
 
 /// Switching an H2 shader's template queues the new template's parameter
 /// names, so parameters it lacks are pruned. This read the template off a

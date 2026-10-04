@@ -549,7 +549,7 @@ fn h2_scale_animation(parameter: &TagStruct<'_>) -> Option<[Option<f32>; 2]> {
                     .filter_map(|index| data.element(index))
                     .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))
                     .collect();
-                let function = crate::app::function_editor::h2_tag_function(&bytes)?;
+                let function = crate::app::editor::function_editor::h2_tag_function(&bytes)?;
                 Some(function.evaluate(0.0, 0.0))
             })
             .filter(|value| value.is_finite())

@@ -82,7 +82,6 @@ use crate::core::document::ops::*;
 use crate::core::document::TagDocument;
 #[cfg(test)]
 use crate::core::document::Dirty;
-use crate::core::document::apply::{BlockIndexTarget, block_index_value};
 use crate::core::keywords::*;
 mod prefs;
 use prefs::*;
@@ -90,14 +89,6 @@ pub(in crate::app) mod browser;
 use browser::*;
 mod export;
 use export::*;
-mod function_editor;
-use function_editor::*;
-mod foundation;
-use foundation::*;
-mod shader;
-use shader::*;
-mod material;
-use material::*;
 mod model_preview;
 use model_preview::*;
 mod tag_icons;
@@ -132,7 +123,7 @@ pub(in crate::app) mod kits;
 use kits::*;
 pub(in crate::app) mod documents;
 use documents::*;
-mod ui;
+pub(in crate::app) mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

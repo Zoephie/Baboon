@@ -1301,7 +1301,7 @@ impl Baboon {
     /// Show popups a tag pane opened this frame, recording the kit they were
     /// opened from so confirming one later edits that kit's document rather
     /// than whichever kit is active, or last opened a popup, by then.
-    pub(super) fn adopt_opened_popups(
+    pub(in crate::app) fn adopt_opened_popups(
         &mut self,
         kit: KitId,
         color: Option<MaterialColorPopup>,

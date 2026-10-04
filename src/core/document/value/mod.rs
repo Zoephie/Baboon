@@ -144,7 +144,7 @@ pub(crate) fn is_text_editable_value(value: &TagFieldData) -> bool {
 
 /// A typed angle in whatever unit is selected, as the radians the tag stores.
 ///
-/// The inverse of [`crate::app::foundation::fmt_angle`], and the two must be
+/// The inverse of [`crate::app::editor::fields::fmt_angle`], and the two must be
 /// switched by the same flag: a display that showed degrees while the parser
 /// read radians would divide every angle the user retyped by 57.3.
 fn angle_to_radians(typed: f32) -> f32 {

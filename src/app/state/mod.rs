@@ -3,13 +3,11 @@
 use super::*;
 
 mod documents;
-mod editing;
 mod prefs;
 mod preview;
 mod worker;
 
 pub(super) use documents::*;
-pub(super) use editing::*;
 pub(super) use prefs::*;
 pub(super) use preview::*;
 pub(super) use worker::*;

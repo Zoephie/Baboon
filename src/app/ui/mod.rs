@@ -14,7 +14,6 @@ pub(in crate::app) use loading::{
 mod recents;
 mod settings;
 mod shell;
-mod tag_pane;
 mod tag_tiles;
 mod welcome;
 
@@ -922,7 +921,7 @@ impl Baboon {
 
     /// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
     /// Keywords live in an external sidecar, not the tag binary.
-    fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
+    pub(in crate::app) fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(RichText::new("Keywords:").color(subtle_dark()));

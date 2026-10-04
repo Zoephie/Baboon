@@ -7,9 +7,9 @@ mod graph;
 mod h2;
 mod h3;
 
-pub(super) use graph::*;
-pub(super) use h2::*;
-pub(super) use h3::*;
+pub(in crate::app) use graph::*;
+pub(in crate::app) use h2::*;
+pub(in crate::app) use h3::*;
 
 /// Diff a view's current values against the last-applied snapshot and
 /// build `PendingFieldEdit`s for the fields that changed. The blob is

@@ -1,11 +1,13 @@
-//! Tag presentation, mutation, parsing, bitmap preview, and structural diffing.
-//! It owns tag-editor presentation and deferred edit construction; source loading and application lifecycle coordination belong elsewhere.
+//! The tag editor: the tag pane, the generic field editor (`fields`), the
+//! panels for particular groups (shader, material, function, sound, bitmap,
+//! model), the edits they collect and how the app applies them.
 
 use super::*;
 
 mod sound;
 pub(super) use sound::*;
 mod apply_doc;
+pub(in crate::app) mod actions;
 #[cfg(test)]
 mod campaign_evolved_field_paths_tests;
 mod field_meta;
@@ -287,3 +289,15 @@ const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
 
 #[cfg(test)]
 mod extracted_tests;
+pub(in crate::app) mod fields;
+pub(in crate::app) use fields::*;
+pub(in crate::app) mod shader;
+pub(in crate::app) use shader::*;
+pub(in crate::app) mod material;
+pub(in crate::app) use material::*;
+pub(in crate::app) mod function_editor;
+pub(in crate::app) use function_editor::*;
+pub(in crate::app) mod state;
+pub(in crate::app) use state::*;
+pub(in crate::app) mod pane;
+pub(in crate::app) mod tsv_paste_window;

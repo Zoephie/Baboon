@@ -10,7 +10,7 @@ fn collect(st: blam_tags::TagStruct<'_>, prefix: &str, out: &mut Vec<String>, de
     if depth > 6 {
         return;
     }
-    for (chain_struct, chain_prefix) in crate::app::foundation::inherited_struct_chain(st) {
+    for (chain_struct, chain_prefix) in crate::app::editor::fields::inherited_struct_chain(st) {
         let base = if chain_prefix.is_empty() {
             prefix.to_string()
         } else if prefix.is_empty() {
@@ -19,7 +19,7 @@ fn collect(st: blam_tags::TagStruct<'_>, prefix: &str, out: &mut Vec<String>, de
             format!("{prefix}/{chain_prefix}")
         };
         for field in chain_struct.fields() {
-            if crate::app::foundation::is_inherited_parent_name(field.name()) {
+            if crate::app::editor::fields::is_inherited_parent_name(field.name()) {
                 continue;
             }
             let path = crate::app::editor::append_field_path_for(&base, &field);

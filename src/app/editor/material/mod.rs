@@ -4,16 +4,16 @@
 use super::*;
 
 mod color_picker;
-pub(super) use color_picker::*;
+pub(in crate::app) use color_picker::*;
 
 #[cfg(test)]
 thread_local! {
     /// Shader editor models built, for the test that they are not rebuilt
     /// every frame.
-    pub(super) static SHADER_MODELS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(in crate::app) static SHADER_MODELS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-pub(super) fn draw_material_tag(
+pub(in crate::app) fn draw_material_tag(
     ui: &mut Ui,
     tag: &TagFile,
     document_revision: (u64, u64, u64, u64),
@@ -109,7 +109,7 @@ pub(super) fn draw_material_tag(
         });
 }
 
-pub(super) fn draw_material_struct_fields(
+pub(in crate::app) fn draw_material_struct_fields(
     ui: &mut Ui,
     tag_struct: TagStruct<'_>,
     names: &TagNameIndex,
@@ -131,7 +131,7 @@ pub(super) fn draw_material_struct_fields(
     }
 }
 
-pub(super) fn draw_material_field(
+pub(in crate::app) fn draw_material_field(
     ui: &mut Ui,
     field: TagField<'_>,
     names: &TagNameIndex,
@@ -259,7 +259,7 @@ pub(super) fn draw_material_field(
     }
 }
 
-pub(super) fn draw_material_resource(
+pub(in crate::app) fn draw_material_resource(
     ui: &mut Ui,
     name: &str,
     resource: TagResource<'_>,
@@ -327,7 +327,7 @@ pub(super) fn draw_material_resource(
     });
 }
 
-pub(super) fn draw_material_value_row(
+pub(in crate::app) fn draw_material_value_row(
     ui: &mut Ui,
     name: &str,
     value: &str,
@@ -418,7 +418,7 @@ pub(super) fn draw_material_value_row(
     }
 }
 
-pub(super) fn draw_material_function_value_row(
+pub(in crate::app) fn draw_material_function_value_row(
     ui: &mut Ui,
     name: &str,
     function: &TagFunction,
@@ -505,15 +505,15 @@ pub(super) fn draw_material_function_value_row(
     }
 }
 
-pub(super) fn material_section_text(text: String) -> RichText {
+pub(in crate::app) fn material_section_text(text: String) -> RichText {
     RichText::new(text).color(MATERIAL_TEXT).strong()
 }
 
-pub(super) fn clean_field_name(name: &str) -> String {
+pub(in crate::app) fn clean_field_name(name: &str) -> String {
     blam_tags::clean_field_name(name).into_owned()
 }
 
-pub(super) fn clean_field_name_basic(name: &str) -> String {
+pub(in crate::app) fn clean_field_name_basic(name: &str) -> String {
     name.replace(['*', '!'], "")
         .replace(['#', ':'], " ")
         .split_whitespace()
@@ -525,21 +525,21 @@ pub(super) fn clean_field_name_basic(name: &str) -> String {
 /// has its markup stripped and its element index / ordinal dropped. Backed by
 /// the engine's `TagFieldPath`, so names and multi-segment paths normalize
 /// uniformly. Used for path/name comparison keys.
-pub(super) fn canonical_field_path(path: &str) -> String {
+pub(in crate::app) fn canonical_field_path(path: &str) -> String {
     blam_tags::TagFieldPath::parse(path)
         .strip_node_indices()
         .to_string()
 }
 
-pub(super) fn clean_field_key(name: &str) -> String {
+pub(in crate::app) fn clean_field_key(name: &str) -> String {
     canonical_field_path(name).to_ascii_lowercase()
 }
 
-pub(super) fn clean_type_name(type_name: &str) -> String {
+pub(in crate::app) fn clean_type_name(type_name: &str) -> String {
     type_name.replace('_', " ")
 }
 
-pub(super) fn is_priority_section(name: &str) -> bool {
+pub(in crate::app) fn is_priority_section(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     matches!(
         name.as_str(),
@@ -547,14 +547,14 @@ pub(super) fn is_priority_section(name: &str) -> bool {
     )
 }
 
-pub(super) fn is_material_parameters_field(name: &str) -> bool {
+pub(in crate::app) fn is_material_parameters_field(name: &str) -> bool {
     matches!(
         clean_field_key(name).as_str(),
         "material parameters" | "parameters"
     )
 }
 
-pub(super) fn is_material_parameter_metadata(key: &str) -> bool {
+pub(in crate::app) fn is_material_parameter_metadata(key: &str) -> bool {
     key.starts_with("parameter name")
         || key.starts_with("parameter type")
         || key.starts_with("parameter index")
@@ -562,7 +562,7 @@ pub(super) fn is_material_parameter_metadata(key: &str) -> bool {
         || key.starts_with("register ")
 }
 
-pub(super) fn material_parameter_field_matches_type(key: &str, parameter_type: &str) -> bool {
+pub(in crate::app) fn material_parameter_field_matches_type(key: &str, parameter_type: &str) -> bool {
     if parameter_type.contains("bitmap") {
         return key == "bitmap" || key == "bitmap path";
     }
@@ -585,7 +585,7 @@ pub(super) fn material_parameter_field_matches_type(key: &str, parameter_type: &
     )
 }
 
-pub(super) fn material_parameter_value_priority(key: &str) -> u8 {
+pub(in crate::app) fn material_parameter_value_priority(key: &str) -> u8 {
     match key {
         "bitmap" => 0,
         "bitmap path" => 1,
@@ -597,22 +597,22 @@ pub(super) fn material_parameter_value_priority(key: &str) -> u8 {
     }
 }
 
-pub(super) fn should_skip_material_parameter_value(key: &str, value: &str) -> bool {
+pub(in crate::app) fn should_skip_material_parameter_value(key: &str, value: &str) -> bool {
     if matches!(key, "bitmap" | "bitmap path") {
         return is_none_like_value(value);
     }
     false
 }
 
-pub(super) fn is_none_like_value(value: &str) -> bool {
+pub(in crate::app) fn is_none_like_value(value: &str) -> bool {
     matches!(value.trim(), "" | "NONE" | "\"NONE\"")
 }
 
-pub(super) fn trim_formatted_value(value: &str) -> String {
+pub(in crate::app) fn trim_formatted_value(value: &str) -> String {
     value.trim().trim_matches('"').to_owned()
 }
 
-pub(super) fn enum_display_name(value: &str) -> Option<String> {
+pub(in crate::app) fn enum_display_name(value: &str) -> Option<String> {
     let start = value.find('(')?;
     let end = value.rfind(')')?;
     if start >= end {
@@ -621,15 +621,15 @@ pub(super) fn enum_display_name(value: &str) -> Option<String> {
     Some(value[start + 1..end].trim().to_owned())
 }
 
-pub(super) fn float_channel_to_u8(value: f32) -> u8 {
+pub(in crate::app) fn float_channel_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-pub(super) fn byte_to_float(value: u8) -> f32 {
+pub(in crate::app) fn byte_to_float(value: u8) -> f32 {
     value as f32 / 255.0
 }
 
-pub(super) fn format_pc_float(value: f32) -> String {
+pub(in crate::app) fn format_pc_float(value: f32) -> String {
     let mut text = format!("{:.7}", value.clamp(0.0, 1.0));
     while text.contains('.') && text.ends_with('0') {
         text.pop();
@@ -640,7 +640,7 @@ pub(super) fn format_pc_float(value: f32) -> String {
     text
 }
 
-pub(super) fn format_rgb_hex(red: f32, green: f32, blue: f32) -> String {
+pub(in crate::app) fn format_rgb_hex(red: f32, green: f32, blue: f32) -> String {
     format!(
         "#{:02X}{:02X}{:02X}",
         float_channel_to_u8(red),
@@ -649,7 +649,7 @@ pub(super) fn format_rgb_hex(red: f32, green: f32, blue: f32) -> String {
     )
 }
 
-pub(super) fn parse_rgb_hex(input: &str) -> Result<[u8; 3], String> {
+pub(in crate::app) fn parse_rgb_hex(input: &str) -> Result<[u8; 3], String> {
     let hex = input.trim().strip_prefix('#').unwrap_or(input.trim());
     if hex.len() != 6 {
         return Err("Use #RRGGBB or RRGGBB".to_owned());
@@ -667,7 +667,7 @@ pub(super) fn parse_rgb_hex(input: &str) -> Result<[u8; 3], String> {
     ])
 }
 
-pub(super) fn rgb_to_hsb_255(red: f32, green: f32, blue: f32) -> (u8, u8, u8) {
+pub(in crate::app) fn rgb_to_hsb_255(red: f32, green: f32, blue: f32) -> (u8, u8, u8) {
     let red = red.clamp(0.0, 1.0);
     let green = green.clamp(0.0, 1.0);
     let blue = blue.clamp(0.0, 1.0);
@@ -696,13 +696,13 @@ pub(super) fn rgb_to_hsb_255(red: f32, green: f32, blue: f32) -> (u8, u8, u8) {
     )
 }
 
-pub(super) fn is_material_tag(entry: &TagEntry) -> bool {
+pub(in crate::app) fn is_material_tag(entry: &TagEntry) -> bool {
     entry.group_name.as_deref() == Some("material")
         || entry.group_tag == u32::from_be_bytes(*b"mat ")
         || entry.display_path.to_ascii_lowercase().ends_with(".mat")
 }
 
-pub(super) fn is_material_shader_tag(entry: &TagEntry) -> bool {
+pub(in crate::app) fn is_material_shader_tag(entry: &TagEntry) -> bool {
     entry.group_name.as_deref() == Some("material_shader")
         || entry.group_tag == u32::from_be_bytes(*b"mats")
         || entry
@@ -711,7 +711,7 @@ pub(super) fn is_material_shader_tag(entry: &TagEntry) -> bool {
             .ends_with(".material_shader")
 }
 
-pub(super) fn is_shader_tag(entry: &TagEntry) -> bool {
+pub(in crate::app) fn is_shader_tag(entry: &TagEntry) -> bool {
     let group_name = entry.group_name.as_deref().unwrap_or_default();
     if group_name == "render_method" || group_name.starts_with("shader") {
         return true;
@@ -738,7 +738,7 @@ pub(super) fn is_shader_tag(entry: &TagEntry) -> bool {
     )
 }
 
-pub(super) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
+pub(in crate::app) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
     matches!(
         &group_tag.to_be_bytes(),
         b"rmsh"
@@ -756,7 +756,7 @@ pub(super) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
     )
 }
 
-pub(super) fn material_row_tint(value: &TagFieldData) -> Color32 {
+pub(in crate::app) fn material_row_tint(value: &TagFieldData) -> Color32 {
     match value {
         TagFieldData::Data(_) | TagFieldData::ApiInterop(_) | TagFieldData::Custom(_) => {
             MATERIAL_DATA_ROW
@@ -798,7 +798,7 @@ pub(super) fn material_row_tint(value: &TagFieldData) -> Color32 {
     }
 }
 
-pub(super) fn material_value_kind(value: &TagFieldData) -> &'static str {
+pub(in crate::app) fn material_value_kind(value: &TagFieldData) -> &'static str {
     match value {
         TagFieldData::StringId(s) | TagFieldData::OldStringId(s) if s.string.is_empty() => {
             "default"

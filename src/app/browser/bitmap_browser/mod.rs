@@ -162,7 +162,7 @@ pub(in crate::app) fn decode_thumbnail(
         max_edge,
     );
     let data = build_bitmap_preview(tag, image_index, mip)?;
-    let (rgba, width, height) = crate::app::shader::downscale_rgba(
+    let (rgba, width, height) = crate::app::editor::shader::downscale_rgba(
         &data.rgba,
         data.width as u32,
         data.height as u32,

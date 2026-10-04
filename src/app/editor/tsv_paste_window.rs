@@ -6,7 +6,7 @@ use super::*;
 impl Baboon {
     /// TSV import window: the user pastes tab-separated rows (header = field
     /// names) and applies them onto the target block's existing elements.
-    pub(in crate::app::ui) fn draw_tsv_paste_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_tsv_paste_window(&mut self, ctx: &egui::Context) {
         if self.tsv_paste.is_none() {
             return;
         }

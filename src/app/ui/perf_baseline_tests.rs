@@ -85,22 +85,22 @@ struct Counters {
 impl Counters {
     fn reset() {
         crate::app::browser::TREE_ROWS_LAID_OUT.with(|c| c.set(0));
-        crate::app::foundation::FUNCTION_PREVIEWS_BUILT.with(|c| c.set(0));
-        crate::app::foundation::DROPDOWN_LABELS_BUILT.with(|c| c.set(0));
+        crate::app::editor::fields::FUNCTION_PREVIEWS_BUILT.with(|c| c.set(0));
+        crate::app::editor::fields::DROPDOWN_LABELS_BUILT.with(|c| c.set(0));
         super::shell::terminal_output_tests::LINES_BUILT.with(|c| c.set(0));
-        crate::app::material::SHADER_MODELS_BUILT.with(|c| c.set(0));
+        crate::app::editor::material::SHADER_MODELS_BUILT.with(|c| c.set(0));
     }
 
     fn read() -> Self {
         Self {
             tree_rows: crate::app::browser::TREE_ROWS_LAID_OUT.with(std::cell::Cell::get),
-            function_previews: crate::app::foundation::FUNCTION_PREVIEWS_BUILT
+            function_previews: crate::app::editor::fields::FUNCTION_PREVIEWS_BUILT
                 .with(std::cell::Cell::get),
-            dropdown_labels: crate::app::foundation::DROPDOWN_LABELS_BUILT
+            dropdown_labels: crate::app::editor::fields::DROPDOWN_LABELS_BUILT
                 .with(std::cell::Cell::get),
             terminal_lines: super::shell::terminal_output_tests::LINES_BUILT
                 .with(std::cell::Cell::get),
-            shader_models: crate::app::material::SHADER_MODELS_BUILT.with(std::cell::Cell::get),
+            shader_models: crate::app::editor::material::SHADER_MODELS_BUILT.with(std::cell::Cell::get),
         }
     }
 }

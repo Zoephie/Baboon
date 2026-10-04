@@ -4,19 +4,19 @@
 use super::*;
 
 mod h2;
-pub(super) use h2::*;
+pub(in crate::app) use h2::*;
 mod render_method;
-pub(super) use render_method::*;
+pub(in crate::app) use render_method::*;
 mod rows;
-pub(super) use rows::*;
+pub(in crate::app) use rows::*;
 mod editing;
-pub(super) use editing::*;
+pub(in crate::app) use editing::*;
 mod widgets;
-pub(super) use widgets::*;
+pub(in crate::app) use widgets::*;
 
 /// Normalized material parameter prepared before the grid is drawn.
 /// `priority` supplies stable ordering without changing the source block order.
-pub(super) struct MaterialParameterValue {
+pub(in crate::app) struct MaterialParameterValue {
     label: String,
     value: String,
     fill: Color32,
@@ -28,7 +28,7 @@ pub(super) struct MaterialParameterValue {
 #[derive(Clone)]
 /// Display-ready shader cell; `value_kind` is also used to compare inherited
 /// and overridden values without depending on widget presentation.
-pub(super) struct ShaderGridCell {
+pub(in crate::app) struct ShaderGridCell {
     text: String,
     value_kind: &'static str,
     color: Option<MaterialColorPopup>,
@@ -37,7 +37,7 @@ pub(super) struct ShaderGridCell {
 /// One logical shader parameter row with inherited/default and current values.
 /// Creation and edit targets are mutually contextual: absent backing data uses a
 /// create operation, while explicit backing data uses `edit` and can be reset.
-pub(super) struct ShaderGridRow {
+pub(in crate::app) struct ShaderGridRow {
     label: String,
     default_cell: Option<ShaderGridCell>,
     value_cell: ShaderGridCell,
@@ -66,12 +66,12 @@ pub(super) struct ShaderGridRow {
 }
 
 /// Items shown in a right-click context menu on a shader grid row.
-pub(super) struct ShaderContextMenu {
+pub(in crate::app) struct ShaderContextMenu {
     items: Vec<ShaderContextItem>,
 }
 
 /// One action available in a `ShaderContextMenu`.
-pub(super) struct ShaderContextItem {
+pub(in crate::app) struct ShaderContextItem {
     label: String,
     action: ShaderContextAction,
 }
@@ -79,7 +79,7 @@ pub(super) struct ShaderContextItem {
 #[derive(Clone)]
 /// Deferred action selected from a shader row context menu.
 /// Actions are applied after drawing so no tag block is mutated while borrowed.
-pub(super) enum ShaderContextAction {
+pub(in crate::app) enum ShaderContextAction {
     AnimatedParameter(ShaderOp),
     FieldEdits(Vec<PendingFieldEdit>),
     ParameterOp(ShaderParamOp),
@@ -90,7 +90,7 @@ pub(super) enum ShaderContextAction {
 /// Paths identify either an existing field or the parent needed to materialize a
 /// missing parameter, as described by the corresponding edit kind.
 #[derive(Clone)]
-pub(super) struct ShaderRowEdit {
+pub(in crate::app) struct ShaderRowEdit {
     /// Full tag field path (slashes in field names escaped as `\/`).
     path: String,
     /// Clean current value used to seed/sync the in-place editor.
@@ -102,7 +102,7 @@ pub(super) struct ShaderRowEdit {
 /// Widget and commit semantics for a shader row.
 /// Variants encode storage differences that look similar in the UI but require
 /// distinct byte/block edits, especially classic H2 function-backed values.
-pub(super) enum ShaderRowEditKind {
+pub(in crate::app) enum ShaderRowEditKind {
     /// Real number text box.
     Scalar,
     /// Integer text box (also used for bool as 0/1).
@@ -201,7 +201,7 @@ pub(super) enum ShaderRowEditKind {
 
 #[derive(Clone)]
 /// Location and schema defaults required to create a missing parameter element.
-pub(super) struct ShaderParamCreateTarget {
+pub(in crate::app) struct ShaderParamCreateTarget {
     parameters_block_path: String,
     parameter_name: String,
     parameter_type_index: i32,
@@ -211,7 +211,7 @@ pub(super) struct ShaderParamCreateTarget {
 #[derive(Clone)]
 /// Creation target for a constant function, distinguishing an existing parent
 /// parameter from one that must be created with its animated child atomically.
-pub(super) enum ShaderFunctionCreateTarget {
+pub(in crate::app) enum ShaderFunctionCreateTarget {
     ExistingParameter {
         animated_block_path: String,
         output_type_index: i32,
@@ -227,7 +227,7 @@ pub(super) enum ShaderFunctionCreateTarget {
 /// Complete immutable shader view model prepared before rendering.
 /// Current values may be inherited; consumers must honor each row's
 /// `is_overridden` flag rather than inferring ownership from displayed text.
-pub(super) struct ShaderEditorModel {
+pub(in crate::app) struct ShaderEditorModel {
     /// True only for the 7 material-bearing shader types (shader/terrain/
     /// custom/halogram/foliage/skin/cortana); gates the MATERIAL section.
     has_material_row: bool,
@@ -254,14 +254,14 @@ pub(super) struct ShaderEditorModel {
 /// The 7 shader types that carry a `global material type` row (the first 8
 /// interface ctors in Guerilla, minus the base). The 6 effect-style shaders
 /// (particle/contrail/light_volume/beam/decal/water) have no material row.
-pub(super) fn shader_type_has_material_row(group_tag: u32) -> bool {
+pub(in crate::app) fn shader_type_has_material_row(group_tag: u32) -> bool {
     matches!(
         &group_tag.to_be_bytes(),
         b"rmsh" | b"rmtr" | b"rmcs" | b"rmhg" | b"rmfl" | b"rmsk" | b"rmct"
     )
 }
 
-pub(super) struct ShaderEditorCategory {
+pub(in crate::app) struct ShaderEditorCategory {
     index: usize,
     name: String,
     options: Vec<String>,
@@ -269,25 +269,25 @@ pub(super) struct ShaderEditorCategory {
     edit_path: Option<String>,
 }
 
-pub(super) struct ShaderEditorSection {
+pub(in crate::app) struct ShaderEditorSection {
     title: String,
     option_name: String,
     rows: Vec<ShaderGridRow>,
 }
 
-pub(super) struct ShaderFlagsRow {
+pub(in crate::app) struct ShaderFlagsRow {
     label: String,
     path: String,
     raw: u64,
     options: Vec<ShaderFlagOption>,
 }
 
-pub(super) struct ShaderFlagOption {
+pub(in crate::app) struct ShaderFlagOption {
     bit: u32,
     label: &'static str,
 }
 
-pub(super) fn build_shader_editor_model(
+pub(in crate::app) fn build_shader_editor_model(
     tag: &TagFile,
     group_tag: u32,
     source: Option<&TagSource>,

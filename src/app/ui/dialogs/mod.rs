@@ -6,7 +6,6 @@ use super::*;
 mod chimp_prompts;
 mod keyword_chooser;
 mod operation_notice;
-mod tsv_paste;
 
 
 /// What a folder import actually wrote, grouped by how much can be claimed for

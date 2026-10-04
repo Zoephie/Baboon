@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::browser::draw_entry;
-use crate::app::foundation::extracted_tests::tests::with_test_edit_context;
+use crate::app::editor::fields::extracted_tests::tests::with_test_edit_context;
 
 /// Drag `entry` from a real browser row onto a real shader reference cell
 /// of `kind`, and return the field edits the cell committed.
