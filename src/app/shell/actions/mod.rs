@@ -9,6 +9,43 @@
 use super::*;
 use super::recents::RecentAction;
 
+/// The keyboard shortcuts: each sends the action its menu item sends, so a
+/// key does exactly what the menu does. Checked in order, the first match
+/// consuming the key. egui matches modifiers logically — Ctrl+Shift+Z matches
+/// a plain Ctrl+Z pattern — so Ctrl+Shift+Z has to come first; checked the
+/// other way round it was an undo.
+pub(in crate::app) const SHORTCUTS: &[(egui::Modifiers, egui::Key, fn() -> AppAction)] = &[
+    (egui::Modifiers::CTRL, egui::Key::F, || AppAction::OpenFind),
+    (egui::Modifiers::CTRL, egui::Key::S, || {
+        AppAction::Defer(DeferredFileAction::SaveCurrentTag)
+    }),
+    (egui::Modifiers::CTRL, egui::Key::P, || {
+        AppAction::Defer(DeferredFileAction::PokeCurrentTag)
+    }),
+    // Deferred like the File menu's Close Current Tag: the close runs after
+    // the editor renders, so an edit still focused in a field is committed
+    // before the dirty check decides whether to prompt.
+    (egui::Modifiers::CTRL, egui::Key::W, || {
+        AppAction::Defer(DeferredFileAction::CloseCurrentTab)
+    }),
+    (
+        egui::Modifiers::CTRL.plus(egui::Modifiers::SHIFT),
+        egui::Key::Z,
+        || AppAction::Redo,
+    ),
+    (egui::Modifiers::CTRL, egui::Key::Z, || AppAction::Undo),
+    (egui::Modifiers::CTRL, egui::Key::Y, || AppAction::Redo),
+];
+
+/// The actions this frame's key presses ask for, each press consumed.
+pub(in crate::app) fn pressed_shortcuts(ctx: &egui::Context) -> Vec<AppAction> {
+    SHORTCUTS
+        .iter()
+        .filter(|(modifiers, key, _)| ctx.input_mut(|input| input.consume_key(*modifiers, *key)))
+        .map(|(_, _, action)| action())
+        .collect()
+}
+
 /// An application-level action, carried out once the frame's drawing is over.
 pub(in crate::app) enum AppAction {
     /// Make `kit`'s workspace the active one, for the actions sent after it.
@@ -17,6 +54,8 @@ pub(in crate::app) enum AppAction {
     /// when the menu took focus has been committed.
     Defer(DeferredFileAction),
     NewTag,
+    /// Open Find, or select its query again if it is open.
+    OpenFind,
     /// Import a tag or folder: into the containers for a container source, or
     /// converted from another game's kit for a loose one.
     ImportTags,
@@ -89,6 +128,7 @@ impl Baboon {
             }
             AppAction::Defer(action) => self.defer_file_action(action, ctx),
             AppAction::NewTag => self.open_new_tag_dialog(),
+            AppAction::OpenFind => self.open_find(),
             AppAction::ImportTags => {
                 if self.model.current_source_is_container() {
                     self.begin_import_tag(None);
@@ -197,3 +237,6 @@ impl Baboon {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -88,7 +88,11 @@ fn ctrl_s_queues_save(locked: bool) -> bool {
             repeat: false,
             modifiers: egui::Modifiers::CTRL,
         }]),
-        |_| app.prepare_root_frame(&ctx),
+        |_| {
+            app.prepare_root_frame(&ctx);
+            // A shortcut's action is applied with the frame's commands.
+            app.apply_commands(&ctx);
+        },
     );
     app.editor.deferred_file_action.is_some()
 }

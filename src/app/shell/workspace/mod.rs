@@ -2,6 +2,7 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use crate::app::shell::actions::pressed_shortcuts;
 use crate::app::shell::frame::terminal_line_is_strong;
 use crate::app::shell::frame::terminal_line_color;
 use crate::app::kits::terminal::open_terminal_log;
@@ -257,32 +258,10 @@ impl Baboon {
             });
             return;
         }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
-            self.open_find();
+        for action in pressed_shortcuts(ctx) {
+            self.commands.send(action);
         }
         self.refresh_find(ctx);
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
-        }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
-            self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
-        }
-        // Deferred like the File menu's Close Current Tag: the close runs after
-        // the editor renders, so an edit still focused in a field is committed
-        // before the dirty check decides whether to prompt.
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
-            self.defer_file_action(DeferredFileAction::CloseCurrentTab, ctx);
-        }
-        // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
-            self.undo_current_tag();
-        }
-        if ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
-        }) || ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Y))
-        {
-            self.redo_current_tag();
-        }
         let dropped_paths = ctx.input(|input| {
             input
                 .raw
