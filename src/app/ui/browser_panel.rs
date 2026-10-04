@@ -10,6 +10,26 @@ const FOLDER_BROWSER_SEARCH_STACK_BREAKPOINT: f32 = 600.0;
 /// A full-width, borderless navigation row like the entries in a menu/list.
 /// It stays transparent at rest and uses only a soft fill for hover/press.
 fn sidebar_list_button(ui: &mut Ui, icon: ButtonIcon, label: &str) -> egui::Response {
+    sidebar_shortcut_button(ui, label, |ui, rect| paint_button_icon_at(ui, icon, rect, text_dark()))
+}
+
+fn sidebar_app_button(ui: &mut Ui, texture: Option<&egui::TextureHandle>, label: &str,
+    fallback: &str, enabled: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        sidebar_shortcut_button(ui, label, |ui, rect| {
+            if let Some(texture) = texture {
+                ui.painter().image(texture.id(), rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+            } else {
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, fallback,
+                    TextStyle::Button.resolve(ui.style()), text_dark());
+            }
+        })
+    }).inner
+}
+
+fn sidebar_shortcut_button(ui: &mut Ui, label: &str,
+    paint_icon: impl FnOnce(&Ui, egui::Rect)) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), BUTTON_HEIGHT),
         Sense::click(),
@@ -24,10 +44,10 @@ fn sidebar_list_button(ui: &mut Ui, icon: ButtonIcon, label: &str) -> egui::Resp
             .rect_filled(rect, ui.visuals().widgets.hovered.rounding, fill);
     }
     let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::pos2(rect.left() + ui.spacing().indent + ui.spacing().item_spacing.x + BUTTON_ICON_SIZE * 0.5, rect.center().y),
         Vec2::splat(BUTTON_ICON_SIZE),
     );
-    paint_button_icon_at(ui, icon, icon_rect, text_dark());
+    paint_icon(ui, icon_rect);
     ui.painter().text(
         egui::pos2(icon_rect.right() + 6.0, rect.center().y),
         Align2::LEFT_CENTER,
@@ -37,6 +57,18 @@ fn sidebar_list_button(ui: &mut Ui, icon: ButtonIcon, label: &str) -> egui::Resp
     );
     response
 }
+
+fn sidebar_bundled_app_button(ui: &mut Ui, label: &str, uri: &'static str,
+    bytes: &'static [u8], enabled: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        sidebar_shortcut_button(ui, label, |ui, rect| {
+            egui::Image::from_bytes(uri, bytes).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+        })
+    }).inner
+}
+
+#[derive(Clone, Copy)]
+enum KitShortcut { GitReview, Blender, TagTest, Sapien }
 
 fn folder_browser_search_stacks(available_width: f32) -> bool {
     available_width < FOLDER_BROWSER_SEARCH_STACK_BREAKPOINT
@@ -622,8 +654,14 @@ impl Baboon {
             ui,
             Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
-        let mut open_git_review = false;
+        let mut shortcut_action = None;
         let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
+        let tool_root = self.editing_kit_root_for(kit_index);
+        let tag_test_ready = tool_root.as_ref().is_some_and(|root|
+            is_file_cached(ctx, &root.join(self.tag_test_executable_for(kit_index))));
+        let sapien_ready = tool_root.as_ref().is_some_and(|root| is_file_cached(ctx, &root.join("sapien.exe")));
+        let blender_ready = self.prefs.blender_path.as_ref().is_some_and(|path| is_file_cached(ctx, path));
+        let blender_icon = self.blender_icon.clone();
         let kit = &mut self.kits[kit_index];
         let search_keywords = kit.keywords.snapshot();
         if let Some(source) = kit.source.as_mut() {
@@ -735,16 +773,32 @@ impl Baboon {
                         kit.search_scope,
                         &search_keywords,
                     );
-                    browser_favorites_divider(ui, favorites_visible);
-
+                    if favorites_visible { ui.add_space(8.0); }
+                    show_browser_navigation_section(ui, "browser_shortcuts", "Shortcuts", ButtonIcon::Pin, text_dark(), |ui| {
                     if git_review_enabled {
                         if sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE).clicked() {
-                            open_git_review = true;
+                            shortcut_action = Some(KitShortcut::GitReview);
                         }
-                        ui.add_space(4.0);
-                        ui.separator();
-                        ui.add_space(4.0);
                     }
+                    if sidebar_app_button(ui, blender_icon.as_ref(), "Blender", "B", blender_ready)
+                        .on_hover_text("Launch Blender")
+                        .on_disabled_hover_text("Set a valid Blender executable in File > Settings").clicked() {
+                        shortcut_action = Some(KitShortcut::Blender);
+                    }
+                    if sidebar_bundled_app_button(ui, "Tag Test", "bytes://baboon_app_icons/tag-test.png",
+                        include_bytes!("../../../assets/App Icons/Tag Test.png"), tag_test_ready)
+                        .on_hover_text("Launch Tag Test without an auto-start scenario")
+                        .on_disabled_hover_text("Tag Test executable not found in this editing kit").clicked() {
+                        shortcut_action = Some(KitShortcut::TagTest);
+                    }
+                    if sidebar_bundled_app_button(ui, "Sapien", "bytes://baboon_app_icons/sapien.png",
+                        include_bytes!("../../../assets/App Icons/Sapien.png"), sapien_ready)
+                        .on_hover_text("Launch Sapien without an auto-start scenario")
+                        .on_disabled_hover_text("Sapien executable not found in this editing kit").clicked() {
+                        shortcut_action = Some(KitShortcut::Sapien);
+                    }
+                    });
+                    browser_favorites_divider(ui, true);
 
                     let tree_action = if !filter.is_empty() {
                         // Active search renders a memoized, pruned tree. A loose
@@ -908,9 +962,14 @@ impl Baboon {
         } else {
             ui.label("Use File to load a tag, folder, or monolithic cache.");
         }
-        if open_git_review {
+        if let Some(action) = shortcut_action {
             self.active = kit_index;
-            self.open_git_review(ctx);
+            match action {
+                KitShortcut::GitReview => self.open_git_review(ctx),
+                KitShortcut::Blender => self.launch_blender(),
+                KitShortcut::TagTest => self.launch_tag_test(),
+                KitShortcut::Sapien => self.launch_sapien(),
+            }
         }
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
     }
@@ -1276,6 +1335,63 @@ fn draw_folder_header_launcher(
 #[cfg(test)]
 mod responsive_folder_toolbar_tests {
     use super::*;
+
+    #[test]
+    fn shortcut_sections_collapse_independently_for_each_kit() {
+        let ctx = egui::Context::default();
+        ctx.style_mut(|style| style.animation_time = 0.0);
+        let mut ids = [egui::Id::NULL; 2];
+        let mut visible = [false; 2];
+        let mut frame = || {
+            visible.fill(false);
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    for kit in 0..2 {
+                        ui.push_id(kit, |ui| {
+                            ids[kit] = ui.make_persistent_id("browser_shortcuts");
+                            show_browser_navigation_section(ui, "browser_shortcuts", "Shortcuts",
+                                ButtonIcon::Pin, text_dark(), |ui| {
+                                    visible[kit] = true;
+                                    sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE);
+                                });
+                        });
+                    }
+                });
+            });
+            (ids, visible)
+        };
+        let (ids, visible) = frame();
+        assert_eq!(visible, [true, true]);
+        assert_ne!(ids[0], ids[1]);
+        let mut state = egui::collapsing_header::CollapsingState::load(&ctx, ids[0]).unwrap();
+        state.set_open(false);
+        state.store(&ctx);
+        assert_eq!(frame().1, [false, true]);
+    }
+
+    #[test]
+    fn unavailable_app_shortcuts_cannot_launch() {
+        let ctx = egui::Context::default();
+        let frame = |enabled, events| {
+            let mut response = None;
+            let _ = ctx.run(egui::RawInput { events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    response = Some(sidebar_app_button(ui, None, "Tag Test", "T", enabled));
+                });
+            });
+            response.unwrap()
+        };
+        let pos = frame(false, Vec::new()).rect.center();
+        let pointer = |pressed| egui::Event::PointerButton {
+            pos, pressed, button: egui::PointerButton::Primary, modifiers: Default::default(),
+        };
+        frame(false, vec![egui::Event::PointerMoved(pos), pointer(true)]);
+        assert!(!frame(false, vec![pointer(false)]).clicked());
+        // Publish the enabled hit target before the next pointer press.
+        frame(true, Vec::new());
+        frame(true, vec![egui::Event::PointerMoved(pos), pointer(true)]);
+        assert!(frame(true, vec![pointer(false)]).clicked());
+    }
 
     #[test]
     fn asset_toolbar_hides_folder_and_group_modes() {

@@ -8510,7 +8510,12 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game.as_deref()))
+        self.tag_test_executable_for(self.active)
+    }
+
+    pub(super) fn tag_test_executable_for(&self, kit_index: usize) -> &'static str {
+        tag_test_executable_for_game(self.kits.get(kit_index)
+            .and_then(|kit| kit.source.as_ref()).and_then(|source| source.game.as_deref()))
     }
 
     pub(super) fn launch_tag_test(&mut self) {

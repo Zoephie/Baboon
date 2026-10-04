@@ -309,34 +309,6 @@ fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
     *scroll_offset -= delta.x + delta.y;
 }
 
-/// A toolbar launcher button: shows the decoded `.ico` icon when available,
-/// otherwise falls back to a single-letter label. Returns the response so the
-/// caller can attach a hover tooltip and read `.clicked()`.
-fn launcher_button(
-    ui: &mut Ui,
-    icon: Option<&egui::TextureHandle>,
-    fallback: &str,
-    enabled: bool,
-) -> egui::Response {
-    match icon {
-        Some(texture) => ui.add_enabled(
-            enabled,
-            egui::ImageButton::new(
-                egui::Image::new(egui::load::SizedTexture::new(
-                    texture.id(),
-                    Vec2::splat(20.0),
-                ))
-                .tint(Color32::WHITE),
-            ),
-        ),
-        None => ui.add_enabled(
-            enabled,
-            egui::Button::new(RichText::new(fallback).color(Color32::WHITE))
-                .min_size(Vec2::splat(22.0)),
-        ),
-    }
-}
-
 fn editing_kit_menu_shortcuts() -> impl Iterator<Item = EditingKitShortcut> {
     EDITING_KIT_SHORTCUTS.into_iter().rev()
 }
@@ -859,33 +831,6 @@ impl Baboon {
 
     fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if launcher_button(ui, self.blender_icon.as_ref(), "B", true)
-                .on_hover_text("Launch Blender")
-                .clicked()
-            {
-                self.launch_blender();
-            }
-
-            let tag_test_ready = self
-                .kit_tool_path(self.tag_test_executable())
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
-                .on_hover_text("Launch tag_test without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_tag_test();
-            }
-
-            let sapien_ready = self
-                .kit_tool_path("sapien.exe")
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
-                .on_hover_text("Launch Sapien without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_sapien();
-            }
-
             // Campaign Evolved holds unsaved edits in a project rather than in
             // the game's files, so a workspace accumulates stashed
             // modifications across sessions. This is the way back to the
