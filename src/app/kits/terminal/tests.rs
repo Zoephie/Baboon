@@ -141,8 +141,12 @@ fn cmd_hands_a_program_its_quoted_arguments_whole() {
     let exe = std::env::current_exe().expect("test binary");
     // libtest reads every positional argument as a filter; with `--exact`
     // none of these match a test, so only the echo runs.
+    // The echo's name as libtest filters it, from this module's own path: a
+    // name written out by hand went stale when the module moved, and then
+    // the child ran no test and echoed nothing.
+    let module = module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest);
     let command = format!(
-        r#""{}" app::controller::terminal::tests::argv_echo_child --exact --nocapture --test-threads=1 tags_dir "D:\Chelan 1\tags resolved" bitmaps "characters\x""#,
+        r#""{}" {module}::argv_echo_child --exact --nocapture --test-threads=1 tags_dir "D:\Chelan 1\tags resolved" bitmaps "characters\x""#,
         exe.display()
     );
     let echoed = |mut command: std::process::Command| -> Option<Vec<String>> {
