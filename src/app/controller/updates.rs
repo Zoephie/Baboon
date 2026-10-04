@@ -184,7 +184,7 @@ fn fetch_latest_release_curl(
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn parse_latest_release_lines(
     channel: UpdateChannel,
     stdout: &[u8],

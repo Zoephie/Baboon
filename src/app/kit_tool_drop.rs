@@ -54,14 +54,26 @@ pub(in crate::app) struct KitToolDropTarget {
 }
 
 impl KitToolDropTarget {
-    #[cfg(all(test, windows))]
-    fn for_window_in_tests(window: isize) -> Self {
+    /// A target as the window lookup would report it, for tests on any OS.
+    /// `window` is a raw `HWND` on Windows and unused elsewhere.
+    #[cfg(test)]
+    pub(in crate::app) fn for_tests(
+        tool: KitTool,
+        kit_root: &Path,
+        accepts_files: bool,
+        tool_accepts_files: bool,
+        window: isize,
+    ) -> Self {
+        let executable = match tool {
+            KitTool::Sapien => "sapien.exe",
+            KitTool::Guerilla => "guerilla.exe",
+        };
         Self {
-            tool: KitTool::Sapien,
-            executable: PathBuf::from(r"C:\kit\sapien.exe"),
-            kit_root: PathBuf::from(r"C:\kit"),
-            accepts_files: true,
-            tool_accepts_files: true,
+            tool,
+            executable: kit_root.join(executable),
+            kit_root: kit_root.to_path_buf(),
+            accepts_files,
+            tool_accepts_files,
             window,
             client_point: (10, 10),
         }
@@ -269,6 +281,14 @@ mod platform {
     ) -> Option<KitToolDropTarget> {
         let mut cursor = POINT::default();
         unsafe { GetCursorPos(&mut cursor) }.ok()?;
+        kit_tool_at(cursor, executables)
+    }
+
+    /// The kit tool whose window is at `cursor`, in screen coordinates.
+    pub(super) fn kit_tool_at(
+        cursor: POINT,
+        executables: &mut HashMap<u32, Option<PathBuf>>,
+    ) -> Option<KitToolDropTarget> {
         let hit = unsafe { WindowFromPoint(cursor) };
         if hit.is_invalid() {
             return None;
@@ -623,12 +643,97 @@ mod tests {
         use windows::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostQuitMessage,
             RegisterClassW, SetTimer, TranslateMessage, WINDOW_EX_STYLE, WM_DROPFILES, WM_TIMER,
-            WNDCLASSW, WS_OVERLAPPEDWINDOW,
+            WNDCLASSW, WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
         };
         use windows::core::w;
 
         const CHILD_FLAG: &str = "BABOON_DROP_RECEIVER_CHILD";
+        const VISIBLE_FLAG: &str = "BABOON_DROP_RECEIVER_VISIBLE";
+        /// Where the visible receiver sits: x, y, width, height on screen.
+        const VISIBLE_RECT: (i32, i32, i32, i32) = (100, 100, 300, 200);
         const DROPPED: &str = r"C:\kit\tags\objects\weapons\rifle\rifle.weapon";
+
+        /// The lookup half, end to end: a window of a process whose executable
+        /// is named `sapien.exe`, found under a screen point, is reported as
+        /// Sapien in the kit it runs from, opted into drops, and a drop handed
+        /// to what the lookup returned reaches it. The child is a copy of this
+        /// test binary named `sapien.exe`, showing its receiver window.
+        #[test]
+        fn a_kit_tool_window_is_found_under_a_point_and_takes_the_drop() {
+            let kit = std::env::temp_dir().join(format!(
+                "baboon-hit-test-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&kit).expect("kit folder");
+            let sapien = kit.join("sapien.exe");
+            std::fs::copy(std::env::current_exe().expect("test binary"), &sapien)
+                .expect("copy the test binary as sapien.exe");
+            let child = Command::new(&sapien)
+                .args([
+                    "app::kit_tool_drop::tests::cross_process::drop_receiver_child",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD_FLAG, "1")
+                .env(VISIBLE_FLAG, "1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn the receiver");
+            let child = Arc::new(Mutex::new(child));
+            let watchdog = Arc::clone(&child);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(30));
+                let _ = watchdog.lock().unwrap().kill();
+            });
+            let stdout = child.lock().unwrap().stdout.take().expect("piped stdout");
+            let mut transcript = Vec::new();
+            let mut found = None;
+            let mut received = None;
+            for line in BufReader::new(stdout).lines() {
+                let line = line.expect("read the receiver");
+                transcript.push(line.clone());
+                if let Some((_, handle)) = line.split_once("HWND ") {
+                    let window: isize = handle.trim().parse().expect("a window handle");
+                    let (x, y, width, height) = VISIBLE_RECT;
+                    let centre = windows::Win32::Foundation::POINT {
+                        x: x + width / 2,
+                        y: y + height / 2,
+                    };
+                    // Nothing else of ours is a kit tool, so a miss is a miss.
+                    let target = super::super::platform::kit_tool_at(centre, &mut HashMap::new());
+                    found = Some((window, target.clone()));
+                    let Some(target) = target else { break };
+                    deliver_file_drop(&target, Path::new(DROPPED)).expect("post the drop");
+                } else if let Some((_, path)) = line.split_once("FILE ") {
+                    received = Some(path.to_owned());
+                    break;
+                }
+            }
+            let output = {
+                let mut child = child.lock().unwrap();
+                let _ = child.kill();
+                child.wait_with_output_in_place()
+            };
+            let transcript = format!("receiver said:\n{}\n{output}", transcript.join("\n"));
+            let (window, target) = found.unwrap_or_else(|| panic!("no window; {transcript}"));
+            let target = target.unwrap_or_else(|| panic!("no kit tool under the point; {transcript}"));
+            assert_eq!(target.tool, KitTool::Sapien);
+            assert_eq!(target.window, window, "the receiver's own window");
+            assert!(target.accepts_files && target.tool_accepts_files);
+            assert_eq!(
+                std::fs::canonicalize(&target.kit_root).unwrap(),
+                std::fs::canonicalize(&kit).unwrap(),
+                "the kit is the folder the tool runs from"
+            );
+            assert_eq!(received.as_deref(), Some(DROPPED), "{transcript}");
+            let _ = std::fs::remove_dir_all(&kit);
+        }
 
         #[test]
         fn a_posted_drop_reaches_another_process() {
@@ -662,7 +767,13 @@ mod tests {
                 transcript.push(line.clone());
                 if let Some((_, handle)) = line.split_once("HWND ") {
                     let window: isize = handle.trim().parse().expect("a window handle");
-                    let target = KitToolDropTarget::for_window_in_tests(window);
+                    let target = KitToolDropTarget::for_tests(
+                        KitTool::Sapien,
+                        Path::new(r"C:\kit"),
+                        true,
+                        true,
+                        window,
+                    );
                     deliver_file_drop(&target, Path::new(DROPPED)).expect("post the drop");
                 } else if let Some((_, path)) = line.split_once("FILE ") {
                     received = Some(path.to_owned());
@@ -722,15 +833,23 @@ mod tests {
                     println!("FAIL RegisterClassW");
                     return;
                 }
+                // Shown topmost at a known place when the hit test needs to
+                // find it under a point; hidden otherwise.
+                let visible = std::env::var_os(VISIBLE_FLAG).is_some();
+                let (ex_style, style, rect) = if visible {
+                    (WS_EX_TOPMOST, WS_POPUP | WS_VISIBLE, VISIBLE_RECT)
+                } else {
+                    (WINDOW_EX_STYLE::default(), WS_OVERLAPPEDWINDOW, (0, 0, 200, 100))
+                };
                 let Ok(window) = CreateWindowExW(
-                    WINDOW_EX_STYLE::default(),
+                    ex_style,
                     class_name,
                     w!("Baboon drop receiver"),
-                    WS_OVERLAPPEDWINDOW,
-                    0,
-                    0,
-                    200,
-                    100,
+                    style,
+                    rect.0,
+                    rect.1,
+                    rect.2,
+                    rect.3,
                     None,
                     None,
                     Some(module.into()),

@@ -113,3 +113,49 @@ fn short_commit_abbreviates_hashes_and_keeps_the_dirty_marker() {
     assert_eq!(short_commit(""), "");
     assert_eq!(short_commit("main"), "main");
 }
+
+/// What the PowerShell fetch on Windows prints, one value per line, read back
+/// into a result. Compiled everywhere so it is tested everywhere.
+#[test]
+fn the_powershell_release_lines_parse_into_a_result() {
+    let parse = |stdout: &str, stderr: &str, success: bool| {
+        parse_latest_release_lines(
+            UpdateChannel::Development,
+            stdout.as_bytes(),
+            stderr.as_bytes(),
+            success,
+        )
+    };
+    let result = parse(
+        "\r\nv0.3.0\r\nhttps://github.com/example/releases/tag/v0.3.0\r\n0123456789abcdef0123456789abcdef01234567\r\n",
+        "",
+        true,
+    )
+    .expect("parsed");
+    assert_eq!(result.latest_tag, "v0.3.0");
+    assert_eq!(
+        result.release_url,
+        "https://github.com/example/releases/tag/v0.3.0"
+    );
+    assert_eq!(result.commit, "0123456789abcdef0123456789abcdef01234567");
+    assert!(matches!(result.channel, UpdateChannel::Development));
+
+    // No URL or commit: the releases page, and no commit.
+    let bare = parse("dev\n", "", true).expect("parsed");
+    assert_eq!(bare.release_url, BABOON_RELEASES_URL);
+    assert_eq!(bare.commit, "");
+
+    assert_eq!(
+        parse("__BABOON_NO_PUBLIC_RELEASE__\n", "", true).unwrap_err(),
+        NO_PUBLIC_RELEASE_MESSAGE
+    );
+    assert!(parse("\n\n", "", true).is_err(), "no tag");
+    assert_eq!(
+        parse("v9.9.9\n", "  The remote name could not be resolved  ", false).unwrap_err(),
+        "The remote name could not be resolved"
+    );
+    assert_eq!(
+        parse("", "", false).unwrap_err(),
+        "command exited without an error message"
+    );
+}

@@ -9,12 +9,10 @@ mod terminal;
 pub(super) use terminal::open_terminal_log;
 #[cfg(test)]
 use terminal::terminal_log_timestamp;
-#[cfg(target_os = "windows")]
-use terminal::windows_shell_command;
 use terminal::{
     TerminalStopResult, append_terminal_log_path, create_terminal_log_file,
     run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
-    stream_terminal_output, trim_terminal_lines,
+    stream_terminal_output, terminal_shell_command, trim_terminal_lines,
 };
 mod tools;
 mod kit_tool_options;
@@ -3229,21 +3227,7 @@ impl Baboon {
         });
         thread::spawn(move || {
             let mut log_error_reported = false;
-            #[cfg(target_os = "windows")]
-            let mut cmd = windows_shell_command(&command);
-            #[cfg(not(target_os = "windows"))]
-            let mut cmd = {
-                #[cfg(unix)]
-                use std::os::unix::process::CommandExt;
-                let mut c = std::process::Command::new("sh");
-                c.args(["-c", &command]);
-                #[cfg(unix)]
-                c.process_group(0);
-                c
-            };
-            cmd.current_dir(&work_dir)
-                .stdout(std::process::Stdio::piped())
-                .stdin(std::process::Stdio::null());
+            let mut cmd = terminal_shell_command(&command, &work_dir);
             match cmd.spawn() {
                 Err(e) => {
                     send_terminal_line(
@@ -10295,6 +10279,44 @@ mod tests {
         assert!(!super::close_action_includes_chimp(
             &super::PendingCloseAction::CloseTab("tag".to_owned())
         ));
+    }
+
+    /// Path and key equality per OS. On Windows the comparisons are of the
+    /// text, ignoring ASCII case; elsewhere paths compare by component and
+    /// keys exactly. A typed path or key has to answer every row the same.
+    #[test]
+    fn path_and_key_equality_follows_the_platform() {
+        use super::same_entry_key;
+        use super::tools::same_path_text;
+        use crate::app::prefs::same_recent_path;
+        // (a, b, equal on Windows, equal elsewhere)
+        let paths = [
+            (r"C:\Kits\H3EK\tags", r"C:\Kits\H3EK\tags", true, true),
+            (r"C:\Kits\H3EK\tags", r"c:\kits\h3ek\TAGS", true, false),
+            ("/kits/h3ek/tags", "/kits/H3EK/tags", true, false),
+            (r"C:\Kits\H3EK", "C:/Kits/H3EK", false, false),
+            ("/kits/h3ek/", "/kits/h3ek", false, true),
+            ("/kits/./h3ek", "/kits/h3ek", false, true),
+            (r"\\?\C:\Kits\H3EK", r"C:\Kits\H3EK", false, false),
+            (r"\\Server\Share\H2EK", r"\\server\share\h2ek", true, false),
+        ];
+        for (a, b, windows, elsewhere) in paths {
+            let expected = if cfg!(windows) { windows } else { elsewhere };
+            let (a, b) = (Path::new(a), Path::new(b));
+            assert_eq!(same_recent_path(a, b), expected, "same_recent_path {a:?} {b:?}");
+            assert_eq!(same_path_text(a, b), expected, "same_path_text {a:?} {b:?}");
+        }
+        let keys = [
+            (r"file:C:\Kits\tags\a.weapon", r"file:C:\Kits\tags\a.weapon", true, true),
+            (r"file:C:\Kits\tags\a.weapon", r"file:c:\kits\TAGS\A.weapon", true, false),
+            (r"file:C:\Kits\tags\a.weapon", "file:C:/Kits/tags/a.weapon", false, false),
+            ("file:/kits/tags/a.weapon", "file:/kits/tags//a.weapon", false, false),
+            ("cache:rm:shaders\\default", "CACHE:RM:SHADERS\\DEFAULT", true, false),
+        ];
+        for (a, b, windows, elsewhere) in keys {
+            let expected = if cfg!(windows) { windows } else { elsewhere };
+            assert_eq!(same_entry_key(a, b), expected, "same_entry_key {a:?} {b:?}");
+        }
     }
 
     /// The close prompt's Save sends container tags to the container writers

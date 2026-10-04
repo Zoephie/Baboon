@@ -1015,6 +1015,113 @@ mod tests {
         let _ = fs::remove_dir_all(&scratch);
     }
 
+    /// Releasing a mounted container's mapping works only while the mount
+    /// holds the only reference to its archive. A clone held anywhere else (a
+    /// job that snapshots the source) keeps the `.ucas` mapped whatever the
+    /// mount does, so the unmap refuses and says what holds it: a running
+    /// job it can see by name, otherwise a count. Synthetic container; runs
+    /// on every OS (only Windows refuses the write itself, see above).
+    #[test]
+    fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
+        let scratch = std::env::temp_dir().join(format!(
+            "baboon-lease-holder-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&scratch).expect("scratch dir");
+        let utoc = scratch.join("held_P.utoc");
+        let mut writer = blam_tags::iostore::writer::OverrideContainerWriter::new("../../../");
+        let mut id = [0u8; 12];
+        id[..8].copy_from_slice(&0x0bad_f00d_dead_beefu64.to_le_bytes());
+        id[11] = blam_tags::iostore::CHUNK_TYPE_BULK_DATA;
+        writer.add_chunk(blam_tags::iostore::FIoChunkId(id), vec![7u8; 2048]);
+        writer.write(&utoc).expect("write a container to mount");
+
+        // Mounted the way the loader mounts it; the container carries no tags,
+        // so the set is assembled here rather than discovered.
+        let archive = blam_tags::iostore::IoStoreArchive::open(&utoc).expect("open");
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(crate::source::LoadedSourceData {
+            label: "Paks".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: scratch.clone(),
+                containers: vec![crate::source::MountedContainer {
+                    utoc_path: utoc.clone(),
+                    chunk_label: crate::source::container_chunk_label(&utoc),
+                    is_mod: true,
+                    archive: std::sync::Arc::new(archive),
+                }],
+                index: Default::default(),
+                packages: Default::default(),
+                shipped: Default::default(),
+            },
+            names: TagNameIndex::default(),
+            game: Some("haloce_evolved".to_owned()),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let archive = |app: &Baboon| match &app.kits[0].source.as_ref().unwrap().source {
+            TagSource::IoStoreContainerSet { containers, .. } => {
+                std::sync::Arc::clone(&containers[0].archive)
+            }
+            _ => panic!("not a container set"),
+        };
+        let unmap = |app: &mut Baboon| {
+            let mut lease = app
+                .acquire_container_write_lease(&utoc, ContainerWriteMode::Replace)
+                .expect("lease");
+            let result = app.unmap_leased_containers(&mut lease);
+            let mapped_meanwhile = archive(app).is_partition_mapped();
+            let _ = app.release_container_write_lease_inner(lease, ContainerWriteOutcome::Unchanged);
+            (result, mapped_meanwhile)
+        };
+
+        // A clone held while a job that snapshots the source is running.
+        let held = archive(&app);
+        app.poke_direct_running = true;
+        let (result, mapped) = unmap(&mut app);
+        let failure = result.expect_err("a held archive cannot be released");
+        assert_eq!(failure.phase, LeasePhase::Unmap);
+        assert!(
+            matches!(
+                failure.holders.as_slice(),
+                [ContainerHolder::Job {
+                    job: "a runtime poke",
+                    ..
+                }]
+            ),
+            "{failure}"
+        );
+        assert_eq!(failure.unattributed, 0);
+        assert!(mapped, "nothing was released");
+
+        // The same clone with no job to name: counted, not guessed at.
+        app.poke_direct_running = false;
+        let (result, _) = unmap(&mut app);
+        let failure = result.expect_err("still held");
+        assert!(failure.holders.is_empty(), "{failure}");
+        assert_eq!(failure.unattributed, 1);
+
+        // The only holder is the mount: released, then reopened by the lease.
+        drop(held);
+        let (result, mapped) = unmap(&mut app);
+        assert!(result.is_ok());
+        assert!(!mapped, "released while the lease held it");
+        assert!(archive(&app).is_partition_mapped(), "reopened on release");
+        drop(app);
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
     #[test]
     fn the_triplet_is_the_three_files_the_engine_loads() {
         let files = container_triplet(Path::new("D:/Game/Paks/~mods/mymod_P.utoc"));

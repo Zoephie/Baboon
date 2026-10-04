@@ -196,7 +196,7 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-fn same_path_text(a: &Path, b: &Path) -> bool {
+pub(super) fn same_path_text(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {
         a.to_string_lossy()
