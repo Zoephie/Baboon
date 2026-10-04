@@ -6,7 +6,7 @@ use crate::app::shell::frame::explorer_entry_row;
 
 impl Baboon {
     pub(in crate::app) fn draw_tag_reference_picker_window(&mut self, ctx: &egui::Context) {
-        if self.tag_reference_picker.is_none() {
+        if self.editor.tag_reference_picker.is_none() {
             return;
         }
         let expert_mode = self.prefs.expert_mode;
@@ -14,7 +14,7 @@ impl Baboon {
         // same kit its selection is applied to — otherwise it would offer
         // another game's tags to pick from.
         let picker_kit = self
-            .tag_reference_picker_kit
+            .editor.tag_reference_picker_kit
             .and_then(|kit| self.resolve_kit(kit))
             .unwrap_or(self.active);
         let Some(catalog) = self.kits[picker_kit]
@@ -22,7 +22,7 @@ impl Baboon {
             .as_ref()
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
         else {
-            self.tag_reference_picker = None;
+            self.editor.tag_reference_picker = None;
             return;
         };
 
@@ -30,7 +30,7 @@ impl Baboon {
         let mut picked = None;
         {
             let picker = self
-                .tag_reference_picker
+                .editor.tag_reference_picker
                 .as_mut()
                 .expect("picker presence checked above");
             egui::Window::new("Select Tag Reference")
@@ -58,7 +58,7 @@ impl Baboon {
 
         if let Some(input) = picked {
             let picker = self
-                .tag_reference_picker
+                .editor.tag_reference_picker
                 .take()
                 .expect("picker remains open while processing selection");
             let kit = picker_kit;
@@ -90,7 +90,7 @@ impl Baboon {
                 self.status = "The tag being edited is no longer open".to_owned();
             }
         } else if !open {
-            self.tag_reference_picker = None;
+            self.editor.tag_reference_picker = None;
         }
     }
 

@@ -7,13 +7,13 @@ impl Baboon {
     /// TSV import window: the user pastes tab-separated rows (header = field
     /// names) and applies them onto the target block's existing elements.
     pub(in crate::app) fn draw_tsv_paste_window(&mut self, ctx: &egui::Context) {
-        if self.tsv_paste.is_none() {
+        if self.editor.tsv_paste.is_none() {
             return;
         }
         let mut open = true;
         let mut do_apply = false;
         {
-            let paste = self.tsv_paste.as_mut().expect("checked above");
+            let paste = self.editor.tsv_paste.as_mut().expect("checked above");
             egui::Window::new(format!("Paste TSV → {}", paste.block_label))
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("tsv_paste"))
@@ -58,7 +58,7 @@ impl Baboon {
             self.apply_tsv_paste();
         }
         if !open {
-            self.tsv_paste = None;
+            self.editor.tsv_paste = None;
         }
     }
 }

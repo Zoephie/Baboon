@@ -1237,7 +1237,7 @@ impl Baboon {
     fn draw_and_apply_color_popup(&mut self, ctx: &egui::Context) {
         if let Some(result) = draw_color_popup(
             ctx,
-            &mut self.color_popup,
+            &mut self.editor.color_popup,
             &mut self.prefs.custom_color_swatches,
             &mut self.prefs.palette_last_dir,
         ) {
@@ -1271,19 +1271,19 @@ impl Baboon {
                     (tag_key, "Shader parameter", ops)
                 }
                 ColorPopupResult::FunctionDraftColor { target, argb } => {
-                    if let Some(popup) = self.function_popup.as_mut() {
+                    if let Some(popup) = self.editor.function_popup.as_mut() {
                         popup.apply_draft_color(target, argb);
                     }
                     return;
                 }
             };
             // Apply to the kit the picker was opened from.
-            if let Some(kit) = self.popup_target_kit(self.color_popup_kit) {
+            if let Some(kit) = self.popup_target_kit(self.editor.color_popup_kit) {
                 self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
             }
         }
-        if self.color_popup.is_none() {
-            self.color_popup_kit = None;
+        if self.editor.color_popup.is_none() {
+            self.editor.color_popup_kit = None;
         }
     }
 
@@ -1291,19 +1291,19 @@ impl Baboon {
     /// was opened from.
     fn draw_and_apply_function_popup(&mut self, ctx: &egui::Context) {
         if let Some(batch) =
-            draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
+            draw_function_popup(ctx, &mut self.editor.function_popup, &mut self.editor.color_popup)
         {
             let ops = DeferredOps {
                 pending: batch.edits,
                 function_data_ops: batch.data_ops,
                 ..DeferredOps::default()
             };
-            if let Some(kit) = self.popup_target_kit(self.function_popup_kit) {
+            if let Some(kit) = self.popup_target_kit(self.editor.function_popup_kit) {
                 self.apply_doc_ops(kit, &batch.tag_key, "Edit function", ops, UndoStep::Own);
             }
         }
-        if self.function_popup.is_none() {
-            self.function_popup_kit = None;
+        if self.editor.function_popup.is_none() {
+            self.editor.function_popup_kit = None;
         }
     }
 
@@ -1317,12 +1317,12 @@ impl Baboon {
         function: Option<FunctionPopup>,
     ) {
         if let Some(popup) = color {
-            self.color_popup = Some(popup);
-            self.color_popup_kit = Some(kit);
+            self.editor.color_popup = Some(popup);
+            self.editor.color_popup_kit = Some(kit);
         }
         if let Some(popup) = function {
-            self.function_popup = Some(popup);
-            self.function_popup_kit = Some(kit);
+            self.editor.function_popup = Some(popup);
+            self.editor.function_popup_kit = Some(kit);
         }
     }
 
@@ -1434,7 +1434,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
-        match self.deferred_file_action.take() {
+        match self.editor.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
                 if self.prefs.enable_chimp
                     && self.kits[self.active].surface == KitSurface::Chimp =>
@@ -1488,7 +1488,7 @@ impl Baboon {
                 memory.surrender_focus(focused);
             }
         });
-        self.deferred_file_action = Some(action);
+        self.editor.deferred_file_action = Some(action);
         // It runs at the start of the next frame, which a window with
         // nothing else to do would otherwise never draw.
         ctx.request_repaint();

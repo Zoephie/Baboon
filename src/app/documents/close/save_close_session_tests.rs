@@ -291,13 +291,13 @@ fn a_close_while_the_window_is_hidden_is_still_vetoed_and_prompted_for() {
         .unwrap_or_default();
     assert!(commands.contains(&egui::ViewportCommand::CancelClose), "{commands:?}");
     assert!(matches!(
-        app.deferred_file_action,
+        app.editor.deferred_file_action,
         Some(DeferredFileAction::Close(PendingCloseAction::CloseApp))
     ));
     assert!(!app.save_changes_prompt.visible, "the close waits a frame");
 
     let _ = ctx.run_logic(&hidden(screen(Vec::new(), 2.1)), |ctx| app.run_logic(ctx));
-    assert!(app.deferred_file_action.is_none());
+    assert!(app.editor.deferred_file_action.is_none());
     assert!(app.save_changes_prompt.visible, "dirty work is prompted for");
     assert_eq!(app.save_changes_prompt.dirty_tags[0].tag_id, key);
 }
@@ -315,11 +315,11 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     });
     assert!(root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
     assert!(matches!(
-        app.deferred_file_action,
+        app.editor.deferred_file_action,
         Some(DeferredFileAction::Close(PendingCloseAction::CloseApp))
     ));
     // What the next frame's `run_deferred_file_action` does with it.
-    let Some(DeferredFileAction::Close(action)) = app.deferred_file_action.take() else {
+    let Some(DeferredFileAction::Close(action)) = app.editor.deferred_file_action.take() else {
         unreachable!()
     };
     let _ = crate::app::run_ui_test(&ctx, screen(Vec::new(), 1.1), |ui| {
@@ -349,7 +349,7 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     });
     assert!(!root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
     assert!(!app.save_changes_prompt.allow_app_close_once);
-    assert!(app.deferred_file_action.is_none());
+    assert!(app.editor.deferred_file_action.is_none());
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn the_app_does_not_close_while_a_folder_refactor_runs() {
     });
 
     assert!(root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
-    assert!(app.deferred_file_action.is_none());
+    assert!(app.editor.deferred_file_action.is_none());
     assert_eq!(
         app.status,
         "Wait for the folder move/rename to finish before closing"

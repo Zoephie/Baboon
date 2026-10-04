@@ -301,3 +301,38 @@ pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod pane;
 pub(in crate::app) mod tsv_paste_window;
+
+/// The tag editor's windows and requests: the colour and function popups, the
+/// reference picker, TSV paste, block confirmation and clipboard, a deferred
+/// file action and a Campaign Evolved sound reference.
+pub(in crate::app) struct EditorFeature {
+    pub(in crate::app) color_popup: Option<MaterialColorPopup>,
+    /// Kits owning the editing popups below. Each outlives the frame that
+    /// opened it and applies an edit addressed by tag key — and a tag key is
+    /// only unique within a kit, so applying against whichever kit happens to
+    /// be active when the user confirms could edit another game's document, or
+    /// silently drop the edit when no such key exists there.
+    pub(in crate::app) color_popup_kit: Option<KitId>,
+    pub(in crate::app) function_popup_kit: Option<KitId>,
+    pub(in crate::app) tag_reference_picker_kit: Option<KitId>,
+    /// Function editor snapshot and write targets captured when the popup opens.
+    pub(in crate::app) function_popup: Option<FunctionPopup>,
+    pub(in crate::app) tsv_paste: Option<TsvPasteState>,
+    /// Pending destructive block op (delete / delete all) awaiting confirm.
+    pub(in crate::app) block_confirm: Option<BlockConfirm>,
+    /// Clipboard for copy/paste of a block element between identical tags.
+    pub(in crate::app) block_clipboard: Option<BlockClipboard>,
+    /// Movable Campaign Evolved tag-reference picker, when one is open.
+    pub(in crate::app) tag_reference_picker: Option<TagReferencePickerState>,
+    /// Pending play/extract of a `.sound` a container-source tag only refers to,
+    /// stamped with the kit that raised it. Resolved after rendering, since the
+    /// referenced tag's audio has to be walked out to Wwise first.
+    /// A referenced sound to resolve, with the kit whose containers resolve it
+    /// and the tab whose player asked (which owns the playback).
+    pub(in crate::app) pending_ce_sound_ref: Option<(KitId, String, CeSoundRefRequest)>,
+    /// One cross-frame edit popup at a time; its embedded tag/path identity
+    /// prevents applying a delayed confirmation to the newly selected tag.
+    /// File-menu actions run after the editor has rendered, so an edit being
+    /// committed by focus loss is applied before its save/export snapshot.
+    pub(in crate::app) deferred_file_action: Option<DeferredFileAction>,
+}

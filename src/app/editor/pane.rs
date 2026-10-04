@@ -57,7 +57,7 @@ impl Baboon {
         // Documentation overlay and the Campaign Evolved Wwise binding are both
         // resolved through `&mut self` methods, so they must be taken before any
         // long-lived field borrows below.
-        let picker_was_open = self.tag_reference_picker.is_some();
+        let picker_was_open = self.editor.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
         let bitmap_preview_view = self.prefs.bitmap_preview_view;
@@ -197,14 +197,14 @@ impl Baboon {
             bitmap_hover_entries: source.map(LoadedSourceData::full_entry_set),
             tag_reference_catalog: source
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
-            tag_reference_picker: &mut self.tag_reference_picker,
+            tag_reference_picker: &mut self.editor.tag_reference_picker,
             status: Some(&mut self.status),
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
             show_block_sizes: self.prefs.show_block_sizes,
             buffers: &mut kit.edit_buffers,
             pending: &mut ops.pending,
             block_ops: &mut ops.block_ops,
-            block_confirm: &mut self.block_confirm,
+            block_confirm: &mut self.editor.block_confirm,
             open_request: &mut self.pending_open,
             sound_play_request: crate::app::audio::SoundRequests::new(
                 &mut self.audio.pending,
@@ -231,7 +231,7 @@ impl Baboon {
             function_request: &mut function_request,
             docs: def_docs.as_deref(),
             tsv_paste_request: &mut tsv_paste_request,
-            block_clipboard: self.block_clipboard.as_ref(),
+            block_clipboard: self.editor.block_clipboard.as_ref(),
             block_clip_request: &mut block_clip_request,
             field_filter: field_filter.as_ref(),
             // Only the pane being navigated to sees the request. The scroll
@@ -330,26 +330,26 @@ impl Baboon {
         // is stamped with this kit because resolving it needs that kit's
         // containers, not whichever one happens to be active by the drain.
         if let Some(request) = ce_sound_ref_request {
-            self.pending_ce_sound_ref = Some((kit_id, key.clone(), request));
+            self.editor.pending_ce_sound_ref = Some((kit_id, key.clone(), request));
         }
         // The reference picker is opened from inside the field renderer rather
         // than hoisted here, so it is stamped by noticing it appear.
-        if !picker_was_open && self.tag_reference_picker.is_some() {
-            self.tag_reference_picker_kit = Some(kit_id);
+        if !picker_was_open && self.editor.tag_reference_picker.is_some() {
+            self.editor.tag_reference_picker_kit = Some(kit_id);
         }
         // And a block confirmation, raised the same way. Stamping only an
         // unstamped one leaves a confirmation another pane raised alone.
-        if let Some(confirm) = self.block_confirm.as_mut() {
+        if let Some(confirm) = self.editor.block_confirm.as_mut() {
             confirm.kit.get_or_insert(kit_id);
         }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
             self.status = format!("Copied {} '{}' element(s)", clip.elements.len(), clip.label);
-            self.block_clipboard = Some(clip);
+            self.editor.block_clipboard = Some(clip);
         }
         // "Paste TSV…" was chosen: open the import window.
         if let Some(req) = tsv_paste_request {
-            self.tsv_paste = Some(TsvPasteState {
+            self.editor.tsv_paste = Some(TsvPasteState {
                 kit: kit_id,
                 tag_key: key.clone(),
                 block_path: req.block_path,

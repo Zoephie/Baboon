@@ -107,8 +107,8 @@ impl Baboon {
         // a removed tag, so there is nothing to fix up afterwards.
         self.kits[self.active].close_tag_pane(key);
         self.unload_tag(key);
-        self.color_popup = None;
-        self.function_popup = None;
+        self.editor.color_popup = None;
+        self.editor.function_popup = None;
     }
 
     pub(in crate::app) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
@@ -327,8 +327,8 @@ impl Baboon {
             PendingCloseAction::CloseAllButThis(key) => self.close_all_tabs_but(&key),
             PendingCloseAction::CloseKit(id) => {
                 self.remove_kit(id);
-                self.color_popup = None;
-                self.function_popup = None;
+                self.editor.color_popup = None;
+                self.editor.function_popup = None;
                 self.status = "Closed kit".to_owned();
             }
         }
@@ -340,8 +340,8 @@ impl Baboon {
         self.kits[self.active].open_tabs.clear();
         self.kits[self.active].drop_documents_except(None);
         self.kits[self.active].selected_key = None;
-        self.color_popup = None;
-        self.function_popup = None;
+        self.editor.color_popup = None;
+        self.editor.function_popup = None;
     }
 
     pub(in crate::app) fn close_all_tabs_but(&mut self, key: &str) {
@@ -352,8 +352,8 @@ impl Baboon {
         }
         self.kits[self.active].drop_documents_except(Some(key));
         self.kits[self.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
-        self.color_popup = None;
-        self.function_popup = None;
+        self.editor.color_popup = None;
+        self.editor.function_popup = None;
     }
 
     pub(in crate::app) fn handle_save_changes_prompt(&mut self, ctx: &egui::Context) {

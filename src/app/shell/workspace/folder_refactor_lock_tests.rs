@@ -90,7 +90,7 @@ fn ctrl_s_queues_save(locked: bool) -> bool {
         }]),
         |_| app.prepare_root_frame(&ctx),
     );
-    app.deferred_file_action.is_some()
+    app.editor.deferred_file_action.is_some()
 }
 
 #[test]

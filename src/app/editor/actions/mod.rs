@@ -125,7 +125,7 @@ impl Baboon {
     /// the reference's own Wwise binding, then queue the same playback or
     /// extraction the primary sound player would.
     pub(in crate::app) fn process_ce_sound_ref(&mut self) {
-        let Some((kit_id, tab_key, request)) = self.pending_ce_sound_ref.take() else {
+        let Some((kit_id, tab_key, request)) = self.editor.pending_ce_sound_ref.take() else {
             return;
         };
         let Some(kit_index) = self.kit_index(kit_id) else {
@@ -300,7 +300,7 @@ impl Baboon {
         // The document is looked up in the active kit below, and two workspaces
         // of the same game share a key space, so a paste answered after a
         // switch could land in the wrong game's tag rather than simply missing.
-        let Some(kit) = self.tsv_paste.as_ref().map(|paste| paste.kit) else {
+        let Some(kit) = self.editor.tsv_paste.as_ref().map(|paste| paste.kit) else {
             return;
         };
         if !self.focus_navigation_kit(kit) {
@@ -310,7 +310,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        let Some(paste) = self.tsv_paste.as_ref() else {
+        let Some(paste) = self.editor.tsv_paste.as_ref() else {
             return;
         };
         let tag_key = paste.tag_key.clone();
@@ -390,7 +390,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn set_tsv_paste_status(&mut self, message: &str) {
-        if let Some(paste) = self.tsv_paste.as_mut() {
+        if let Some(paste) = self.editor.tsv_paste.as_mut() {
             paste.status = Some(message.to_owned());
         }
     }
@@ -434,7 +434,7 @@ impl Baboon {
     /// Render the block delete/delete-all confirmation modal (if pending) and
     /// apply the op on confirm.
     pub(in crate::app) fn handle_block_confirm(&mut self, ctx: &egui::Context) {
-        let Some(confirm) = self.block_confirm.as_ref() else {
+        let Some(confirm) = self.editor.block_confirm.as_ref() else {
             return;
         };
         // The op is applied to the active kit's document, and two workspaces of
@@ -477,10 +477,10 @@ impl Baboon {
         if do_apply {
             let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
             if routed && self.refuse_read_only_edit(self.active) {
-                self.block_confirm = None;
+                self.editor.block_confirm = None;
                 return;
             }
-            if let Some(confirm) = self.block_confirm.take()
+            if let Some(confirm) = self.editor.block_confirm.take()
                 && routed
             {
                 let deletes_model_variant = confirm.path == "variants"
@@ -511,7 +511,7 @@ impl Baboon {
                 }
             }
         } else if do_cancel {
-            self.block_confirm = None;
+            self.editor.block_confirm = None;
         }
     }
 }

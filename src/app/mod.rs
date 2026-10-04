@@ -205,33 +205,16 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
-    /// One cross-frame edit popup at a time; its embedded tag/path identity
-    /// prevents applying a delayed confirmation to the newly selected tag.
-    /// File-menu actions run after the editor has rendered, so an edit being
-    /// committed by focus loss is applied before its save/export snapshot.
-    deferred_file_action: Option<DeferredFileAction>,
     /// Kits whose session-restore load has not landed yet, and the one the
     /// session named as focused. Every load ends by making its own kit active,
     /// so the focus can only be honoured once none are outstanding.
     restoring_kits: HashSet<KitId>,
     restored_active_kit: Option<KitId>,
-    color_popup: Option<MaterialColorPopup>,
-    /// Kits owning the editing popups below. Each outlives the frame that
-    /// opened it and applies an edit addressed by tag key — and a tag key is
-    /// only unique within a kit, so applying against whichever kit happens to
-    /// be active when the user confirms could edit another game's document, or
-    /// silently drop the edit when no such key exists there.
-    color_popup_kit: Option<KitId>,
-    function_popup_kit: Option<KitId>,
-    tag_reference_picker_kit: Option<KitId>,
-    /// Function editor snapshot and write targets captured when the popup opens.
-    function_popup: Option<FunctionPopup>,
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
-    tsv_paste: Option<TsvPasteState>,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -246,23 +229,13 @@ pub struct Baboon {
     save_changes_prompt: SaveChangesPrompt,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
-    /// Pending destructive block op (delete / delete all) awaiting confirm.
-    block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
-    /// Pending play/extract of a `.sound` a container-source tag only refers to,
-    /// stamped with the kit that raised it. Resolved after rendering, since the
-    /// referenced tag's audio has to be walked out to Wwise first.
-    /// A referenced sound to resolve, with the kit whose containers resolve it
-    /// and the tab whose player asked (which owns the playback).
-    pending_ce_sound_ref: Option<(KitId, String, CeSoundRefRequest)>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
-    /// Movable Campaign Evolved tag-reference picker, when one is open.
-    tag_reference_picker: Option<TagReferencePickerState>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     blender_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
@@ -272,8 +245,6 @@ pub struct Baboon {
     custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
     custom_editing_kit_texture_failures: HashSet<String>,
     last_pixels_per_point: f32,
-    /// Clipboard for copy/paste of a block element between identical tags.
-    block_clipboard: Option<BlockClipboard>,
     /// A reference-jump awaiting its referrer tag to finish loading before we
     /// can walk it to locate the exact referencing field. Set from the
     /// "References to X" popup; drained by `apply_field_nav`.
@@ -322,6 +293,10 @@ pub struct Baboon {
     /// being edited or removed, paths being typed, tool commands, dragging a
     /// tag to a tool, the terminal, and a tool import waiting to start.
     pub(in crate::app) kit_tools: KitsFeature,
+    /// The tag editor's windows and requests: the colour and function popups,
+    /// the reference picker, TSV paste, block confirmation and clipboard, a
+    /// deferred file action and a Campaign Evolved sound reference.
+    pub(in crate::app) editor: EditorFeature,
 }
 
 impl Baboon {
@@ -466,14 +441,8 @@ impl Baboon {
             settings_open: false,
             settings_tab: SettingsTab::Startup,
             operation_notice: None,
-            deferred_file_action: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
-            color_popup: None,
-            color_popup_kit: None,
-            function_popup_kit: None,
-            tag_reference_picker_kit: None,
-            function_popup: None,
             pending_ref_jump: None,
             field_nav: None,
             ref_jump_expanded: HashSet::new(),
@@ -483,19 +452,15 @@ impl Baboon {
             content_explorer: None,
             keyword_chooser_open: false,
             reveal_target: None,
-            tsv_paste: None,
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
             prefs_next_check_at: 0.0,
             save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,
-            block_confirm: None,
             audio: audio::AudioState::default(),
             ce_usmap: None,
-            pending_ce_sound_ref: None,
             pending_open: None,
-            tag_reference_picker: None,
             blender_icon: load_ico_texture(
                 &ctx,
                 "blender_icon",
@@ -516,7 +481,6 @@ impl Baboon {
             custom_editing_kit_textures: HashMap::new(),
             custom_editing_kit_texture_failures: HashSet::new(),
             last_pixels_per_point: ctx.pixels_per_point(),
-            block_clipboard: None,
             poke: PokeFeature {
                 poke_dialog: None,
                 last_poke: None,
@@ -625,6 +589,19 @@ impl Baboon {
                 saved_terminal_open_games: terminal_open_games.clone(),
                 terminal_open_games,
                 pending_tool_import: None,
+            },
+            editor: EditorFeature {
+                deferred_file_action: None,
+                color_popup: None,
+                color_popup_kit: None,
+                function_popup_kit: None,
+                tag_reference_picker_kit: None,
+                function_popup: None,
+                tsv_paste: None,
+                block_confirm: None,
+                pending_ce_sound_ref: None,
+                tag_reference_picker: None,
+                block_clipboard: None,
             },
         }
     }

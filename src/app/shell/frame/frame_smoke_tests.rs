@@ -749,48 +749,48 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tag_reference_picker",
-            &["tag_reference_picker", "tag_reference_picker_kit"],
+            &["editor.tag_reference_picker", "editor.tag_reference_picker_kit"],
             &["search/result_windows/mod.rs"],
             container_kit,
             |h| {
-                h.app.tag_reference_picker = Some(TagReferencePickerState {
+                h.app.editor.tag_reference_picker = Some(TagReferencePickerState {
                     tag_key: ce_key(),
                     field_path: "model".to_owned(),
                     allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
                     current_group: None,
                     search: String::new(),
                 });
-                h.app.tag_reference_picker_kit = Some(active_id(h));
+                h.app.editor.tag_reference_picker_kit = Some(active_id(h));
             },
             &["Select Tag Reference"],
         ),
         case(
             "colour_popup",
-            &["color_popup", "color_popup_kit"],
+            &["editor.color_popup", "editor.color_popup_kit"],
             &["editor/material/color_picker/mod.rs"],
             memory_kit,
             |h| {
-                h.app.color_popup =
+                h.app.editor.color_popup =
                     Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0));
-                h.app.color_popup_kit = Some(active_id(h));
+                h.app.editor.color_popup_kit = Some(active_id(h));
             },
             &["Color Picker"],
         ),
         case(
             "function_popup",
-            &["function_popup", "function_popup_kit"],
+            &["editor.function_popup", "editor.function_popup_kit"],
             &["editor/function_editor/mod.rs"],
             memory_kit,
             |h| {
                 let bytes = decode_hex(&constant_function_hex(0.5)).unwrap();
                 let view = FunctionView::from_function(TagFunction::parse(&bytes).unwrap());
-                h.app.function_popup = Some(FunctionPopup::new(
+                h.app.editor.function_popup = Some(FunctionPopup::new(
                     biped_key(),
                     "Smoke Function".to_owned(),
                     view,
                     true,
                 ));
-                h.app.function_popup_kit = Some(active_id(h));
+                h.app.editor.function_popup_kit = Some(active_id(h));
             },
             &["Smoke Function"],
         ),
@@ -856,14 +856,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "block_confirm",
-            &["block_confirm"],
+            &["editor.block_confirm"],
             &["editor/actions/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.block_confirm = Some(BlockConfirm {
+                h.app.editor.block_confirm = Some(BlockConfirm {
                     kit: Some(active_id(h)),
                     tag_key: fixture::entry_key(SCENARIO),
                     path: "skies".to_owned(),
@@ -1237,14 +1237,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tsv_paste",
-            &["tsv_paste"],
+            &["editor.tsv_paste"],
             &["editor/tsv_paste_window.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.tsv_paste = Some(TsvPasteState {
+                h.app.editor.tsv_paste = Some(TsvPasteState {
                     kit: active_id(h),
                     tag_key: fixture::entry_key(SCENARIO),
                     block_path: "skies".to_owned(),
@@ -1403,20 +1403,20 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("poke.poke_direct_running", "running flag"),
     ("poke.poke_undo_running", "running flag"),
     ("kit_tools.editing_kit_path_attention", "highlights a row of the Settings window"),
-    ("deferred_file_action", "a queued action"),
+    ("editor.deferred_file_action", "a queued action"),
     ("restored_active_kit", "session restore bookkeeping"),
     ("reveal_target", "a one-shot browser request"),
     ("search.field_value_searching", "running flag of the field value search"),
     ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),
     ("export.pending_sound_extract", "a queued request"),
-    ("pending_ce_sound_ref", "a queued request"),
+    ("editor.pending_ce_sound_ref", "a queued request"),
     ("pending_open", "a queued request"),
     ("kit_tools.pending_tool_import", "a queued request"),
     ("blender_icon", "texture"),
     ("sapien_icon", "texture"),
     ("tag_test_icon", "texture"),
-    ("block_clipboard", "clipboard contents"),
+    ("editor.block_clipboard", "clipboard contents"),
     ("pending_ref_jump", "a queued navigation"),
     ("search.pending_find_jump", "a queued navigation"),
     ("field_nav", "navigation highlight"),
