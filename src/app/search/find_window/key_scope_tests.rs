@@ -54,9 +54,9 @@ fn key(key: egui::Key) -> egui::Event {
 fn find_answers_enter_and_escape_only_in_its_query_box() {
     let ctx = egui::Context::default();
     let mut app = Baboon::for_test();
-    app.find.open = true;
-    app.find.occurrences = vec![occurrence("a"), occurrence("b")];
-    app.find.active = Some(0);
+    app.search.find.open = true;
+    app.search.find.occurrences = vec![occurrence("a"), occurrence("b")];
+    app.search.find.active = Some(0);
     let field = Some(egui::Id::new("a_field"));
     let query = Some(egui::Id::new("find_query"));
 
@@ -65,20 +65,20 @@ fn find_answers_enter_and_escape_only_in_its_query_box() {
     frame(&mut app, &ctx, Vec::new(), field);
     frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
     assert_eq!(
-        app.find.active,
+        app.search.find.active,
         Some(0),
         "Enter in a field must not step Find"
     );
     frame(&mut app, &ctx, Vec::new(), field);
     frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
-    assert!(app.find.open, "Escape in a field must not close Find");
+    assert!(app.search.find.open, "Escape in a field must not close Find");
 
     // The same keys in the query box.
     frame(&mut app, &ctx, Vec::new(), query);
     frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
-    assert_eq!(app.find.active, Some(1), "Enter in the query box steps");
+    assert_eq!(app.search.find.active, Some(1), "Enter in the query box steps");
     frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
-    assert_eq!(app.find.active, Some(0), "and keeps stepping");
+    assert_eq!(app.search.find.active, Some(0), "and keeps stepping");
     frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
-    assert!(!app.find.open, "Escape in the query box closes Find");
+    assert!(!app.search.find.open, "Escape in the query box closes Find");
 }

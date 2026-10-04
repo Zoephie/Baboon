@@ -43,9 +43,9 @@ impl Baboon {
                     processed,
                     total,
                 } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.find.all_request_id
+                    if self.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
                     {
-                        self.find.progress = Some((processed, total));
+                        self.search.find.progress = Some((processed, total));
                     }
                     false
                 }
@@ -55,12 +55,12 @@ impl Baboon {
                     occurrences,
                     unreadable,
                 } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.find.all_request_id
+                    if self.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
                     {
-                        self.find.all_closed_occurrences = occurrences;
-                        self.find.unreadable = unreadable;
-                        self.find.searching = false;
-                        self.find.progress = None;
+                        self.search.find.all_closed_occurrences = occurrences;
+                        self.search.find.unreadable = unreadable;
+                        self.search.find.searching = false;
+                        self.search.find.progress = None;
                     }
                     false
                 }

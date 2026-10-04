@@ -513,7 +513,7 @@ impl Baboon {
         ui.separator();
         if ui.button("Search Field Values...").clicked() {
             close_menu(ui);
-            self.field_value_search_open = true;
+            self.search.field_value_search_open = true;
         }
         if ui.button("Browse Keywords...").clicked() {
             close_menu(ui);
@@ -1522,8 +1522,8 @@ impl Baboon {
             return;
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
-            self.find.open = true;
-            self.find.focus_query = true;
+            self.search.find.open = true;
+            self.search.find.focus_query = true;
         }
         self.refresh_find(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {

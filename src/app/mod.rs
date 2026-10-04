@@ -199,8 +199,6 @@ pub struct Baboon {
     /// second for a real kit — and the result depends only on which kit it is,
     /// so paying that once per session beats paying it once per tag.
     native_template_cache: Option<NativeTemplateCache>,
-    /// Modeless find-in-tag dialog and its exact occurrence list.
-    find: FindDialogState,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.
@@ -322,16 +320,11 @@ pub struct Baboon {
     tag_reference_picker_kit: Option<KitId>,
     /// Function editor snapshot and write targets captured when the popup opens.
     function_popup: Option<FunctionPopup>,
-    query_results: Option<TagQueryResults>,
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
-    field_value_search_open: bool,
-    field_value_query: String,
-    field_value_group: String,
-    field_value_searching: bool,
     /// Parsed-once documentation overlay (help/units + explanations) per group
     /// JSON, keyed by definition file path. Built lazily during render.
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
@@ -402,8 +395,6 @@ pub struct Baboon {
     /// can walk it to locate the exact referencing field. Set from the
     /// "References to X" popup; drained by `apply_field_nav`.
     pending_ref_jump: Option<PendingRefJump>,
-    /// Find result waiting for its target open tab to finish parsing.
-    pending_find_jump: Option<FindOccurrence>,
     /// Active reference-jump navigation: force ancestor blocks open and glow the
     /// exact referencing field until its glow window expires.
     field_nav: Option<FieldNav>,
@@ -420,6 +411,9 @@ pub struct Baboon {
     /// Memory poking: the poke dialog, the record that undoes the last poke,
     /// and whether a poke or its undo is running.
     pub(in crate::app) poke: PokeFeature,
+    /// Search: the Find dialog, tag query results, the field-value search and a
+    /// Find hit waiting to be opened.
+    pub(in crate::app) search: SearchFeature,
 }
 
 impl Baboon {
@@ -558,7 +552,6 @@ impl Baboon {
             tag_import_dialog: None,
             cache_import_dialog: None,
             native_template_cache: None,
-            find: FindDialogState::default(),
             available_update: None,
             last_update_check: None,
             chimp_usmap_path_input: prefs
@@ -627,9 +620,7 @@ impl Baboon {
             function_popup_kit: None,
             tag_reference_picker_kit: None,
             function_popup: None,
-            query_results: None,
             pending_ref_jump: None,
-            pending_find_jump: None,
             field_nav: None,
             ref_jump_expanded: HashSet::new(),
             ref_jump_occurrences: HashMap::new(),
@@ -638,10 +629,6 @@ impl Baboon {
             content_explorer: None,
             keyword_chooser_open: false,
             reveal_target: None,
-            field_value_search_open: false,
-            field_value_query: String::new(),
-            field_value_group: String::new(),
-            field_value_searching: false,
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
@@ -707,6 +694,15 @@ impl Baboon {
                 last_poke: None,
                 poke_direct_running: false,
                 poke_undo_running: false,
+            },
+            search: SearchFeature {
+                find: FindDialogState::default(),
+                query_results: None,
+                pending_find_jump: None,
+                field_value_search_open: false,
+                field_value_query: String::new(),
+                field_value_group: String::new(),
+                field_value_searching: false,
             },
         }
     }

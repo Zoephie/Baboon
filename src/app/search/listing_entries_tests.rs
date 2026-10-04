@@ -58,7 +58,7 @@ fn a_source_listing_is_read_off_the_ui_thread() {
 
     app.show_sounds_by_class(&ctx);
     let waiting = app
-        .query_results
+        .search.query_results
         .as_ref()
         .and_then(|results| results.note.clone());
     let message = app
@@ -69,7 +69,7 @@ fn a_source_listing_is_read_off_the_ui_thread() {
     app.process_worker_messages(&ctx);
 
     assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));
-    let results = app.query_results.expect("results");
+    let results = app.search.query_results.expect("results");
     assert_eq!(
         results.title, "Sounds by class (0)",
         "the one sound is unreadable"

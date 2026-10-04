@@ -102,7 +102,7 @@ impl Baboon {
                 let note = entries
                     .is_empty()
                     .then(|| "Every tag is referenced by at least one other tag.".to_owned());
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit: self.active_kit_id(),
                     title: format!("Unreferenced tags ({})", entries.len()),
                     entries,
@@ -112,7 +112,7 @@ impl Baboon {
                 });
             }
             None => {
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit: self.active_kit_id(),
                     title: "Unreferenced tags".to_owned(),
                     entries: Vec::new(),

@@ -17,6 +17,6 @@ fn field_search_results_belong_to_the_kit_that_ran_the_search() {
 
     app.handle_field_value_search_finished(stamp, "grass".to_owned(), Ok(Vec::new()));
 
-    let results = app.query_results.expect("results");
+    let results = app.search.query_results.expect("results");
     assert_eq!(results.kit, searched);
 }

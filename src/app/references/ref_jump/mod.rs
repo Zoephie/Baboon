@@ -24,7 +24,7 @@ impl Baboon {
         {
             self.field_nav = None;
         }
-        if let Some(hit) = self.pending_find_jump.clone() {
+        if let Some(hit) = self.search.pending_find_jump.clone() {
             if self.kits[self.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
                 && self.kits[self.active]
                     .parsed_tags
@@ -98,7 +98,7 @@ impl Baboon {
     /// unparsed ones trigger a background load and stay uncached ("loading…").
     pub(in crate::app) fn refresh_ref_jump_occurrences(&mut self, ctx: &egui::Context) {
         let Some((group_tag, rel_path)) = self
-            .query_results
+            .search.query_results
             .as_ref()
             .and_then(|results| results.ref_target.clone())
         else {
@@ -107,7 +107,7 @@ impl Baboon {
         // Snapshot (row, key) for expanded-but-uncached rows before borrowing
         // `parsed_tags` / triggering loads.
         let pending: Vec<(usize, String)> = self
-            .query_results
+            .search.query_results
             .as_ref()
             .map(|results| {
                 self.ref_jump_expanded
@@ -190,7 +190,7 @@ impl Baboon {
     ) -> bool {
         self.ref_jump_loading.remove(&index);
         let current = kit == self.active_kit_id()
-            && self.query_results.as_ref().is_some_and(|results| {
+            && self.search.query_results.as_ref().is_some_and(|results| {
                 results.ref_target.as_ref() == Some(&target)
                     && results
                         .entries

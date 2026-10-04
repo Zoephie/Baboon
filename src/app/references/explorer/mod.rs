@@ -175,7 +175,7 @@ impl Baboon {
                 let note = entries
                     .is_empty()
                     .then(|| "No other tags reference this tag.".to_owned());
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit: self.active_kit_id(),
                     title,
                     entries,
@@ -185,7 +185,7 @@ impl Baboon {
                 });
             }
             None => {
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit: self.active_kit_id(),
                     title,
                     entries: Vec::new(),

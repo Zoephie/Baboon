@@ -72,7 +72,7 @@ impl Baboon {
             return header_action;
         };
 
-        let filter_in_scope = match self.find.within {
+        let filter_in_scope = match self.search.find.within {
             FindWithin::CurrentTag => {
                 self.kits[kit_index].selected_key.as_deref() == Some(key.as_str())
             }
@@ -81,18 +81,18 @@ impl Baboon {
             }
         };
         let apply_find_filter = supports_field_search
-            && self.find.open
-            && self.find.filter_results
-            && !self.find.query.is_empty()
-            && !self.find.look_in.is_empty()
+            && self.search.find.open
+            && self.search.find.filter_results
+            && !self.search.find.query.is_empty()
+            && !self.search.find.look_in.is_empty()
             && filter_in_scope;
         let field_filter = if apply_find_filter {
             let signature = format!(
                 "{}|{:?}|{}|{}|{:?}",
-                self.find.query,
-                self.find.look_in,
-                self.find.match_case,
-                self.find.whole_word,
+                self.search.find.query,
+                self.search.find.look_in,
+                self.search.find.match_case,
+                self.search.find.whole_word,
                 doc.content_stamp(),
             );
             let cached = self.kits[kit_index]
@@ -105,10 +105,10 @@ impl Baboon {
                     &doc.tag,
                     self.names(),
                     def_docs.as_deref(),
-                    &self.find.query,
-                    self.find.look_in,
-                    self.find.match_case,
-                    self.find.whole_word,
+                    &self.search.find.query,
+                    self.search.find.look_in,
+                    self.search.find.match_case,
+                    self.search.find.whole_word,
                 ));
                 self.kits[kit_index].find_filter_applied.insert(
                     key.clone(),
@@ -363,7 +363,7 @@ impl Baboon {
         if find_filter_block_jump.is_some() {
             // Preserve find_filter_applied until the next render so disabling
             // the filter produces the normal one-shot restore-defaults pass.
-            self.find.filter_results = false;
+            self.search.find.filter_results = false;
         }
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
         // These ops are applied *after* the pane has been drawn, so the frame
@@ -622,9 +622,9 @@ impl Baboon {
             if icon_text_button(ui, ButtonIcon::Find, "Find", true).clicked() {
                 self.active = kit_index;
                 self.kits[kit_index].selected_key = Some(key.clone());
-                self.find.within = FindWithin::CurrentTag;
-                self.find.open = true;
-                self.find.focus_query = true;
+                self.search.find.within = FindWithin::CurrentTag;
+                self.search.find.open = true;
+                self.search.find.focus_query = true;
             }
         });
 

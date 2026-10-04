@@ -53,7 +53,7 @@ impl Baboon {
         let entries = match self.listing_entries() {
             Ok(entries) => entries.to_vec(),
             Err(note) => {
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit,
                     title: listing.title().to_owned(),
                     entries: Vec::new(),
@@ -72,7 +72,7 @@ impl Baboon {
             .iter()
             .filter(|entry| entry.group_tag.to_be_bytes() == *wanted)
             .count();
-        self.query_results = Some(TagQueryResults {
+        self.search.query_results = Some(TagQueryResults {
             kit,
             title: listing.title().to_owned(),
             entries: Vec::new(),
@@ -112,7 +112,7 @@ impl Baboon {
         if self.resolve_stamp(stamp).is_none() {
             return true;
         }
-        self.query_results = Some(results);
+        self.search.query_results = Some(results);
         false
     }
 }

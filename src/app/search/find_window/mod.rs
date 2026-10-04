@@ -5,7 +5,7 @@ use super::*;
 impl Baboon {
     /// Draw the modeless Find window and dispatch query or navigation changes.
     pub(in crate::app) fn draw_find_window(&mut self, ctx: &egui::Context) {
-        if !self.find.open {
+        if !self.search.find.open {
             return;
         }
         let mut open = true;
@@ -36,22 +36,22 @@ impl Baboon {
                         ui.label(RichText::new("find:").strong().color(text_dark()));
                         let response = ui.add_sized(
                             [290.0, 25.0],
-                            egui::TextEdit::singleline(&mut self.find.query)
+                            egui::TextEdit::singleline(&mut self.search.find.query)
                                 .id(egui::Id::new("find_query"))
                                 .vertical_align(egui::Align::Center),
                         );
-                        if self.find.focus_query {
+                        if self.search.find.focus_query {
                             response.request_focus();
                             if let Some(mut state) = egui::TextEdit::load_state(ctx, response.id) {
                                 state
                                     .cursor
                                     .set_char_range(Some(egui::text::CCursorRange::two(
                                         egui::text::CCursor::new(0),
-                                        egui::text::CCursor::new(self.find.query.chars().count()),
+                                        egui::text::CCursor::new(self.search.find.query.chars().count()),
                                     )));
                                 state.store(ctx, response.id);
                             }
-                            self.find.focus_query = false;
+                            self.search.find.focus_query = false;
                         }
                         changed |= response.changed();
                         // A single-line box gives up focus on Enter and Escape,
@@ -64,7 +64,7 @@ impl Baboon {
                                 input.modifiers.shift,
                             )
                         });
-                        if in_query && enter && !self.find.searching {
+                        if in_query && enter && !self.search.find.searching {
                             step = if shift { -1 } else { 1 };
                             // Keep the box focused so Enter keeps stepping.
                             response.request_focus();
@@ -74,70 +74,70 @@ impl Baboon {
 
                         ui.label(RichText::new("within:").strong().color(text_dark()));
                         egui::ComboBox::from_id_salt("find_within")
-                            .selected_text(self.find.within.label())
+                            .selected_text(self.search.find.within.label())
                             .width(190.0)
                             .show_ui(ui, |ui| {
                                 changed |= ui
                                     .selectable_value(
-                                        &mut self.find.within,
+                                        &mut self.search.find.within,
                                         FindWithin::CurrentTag,
                                         FindWithin::CurrentTag.label(),
                                     )
                                     .changed();
                                 changed |= ui
                                     .selectable_value(
-                                        &mut self.find.within,
+                                        &mut self.search.find.within,
                                         FindWithin::OpenTags,
                                         FindWithin::OpenTags.label(),
                                     )
                                     .changed();
                                 changed |= ui
                                     .selectable_value(
-                                        &mut self.find.within,
+                                        &mut self.search.find.within,
                                         FindWithin::AllTags,
                                         FindWithin::AllTags.label(),
                                     )
                                     .changed();
                             });
                         changed |= ui
-                            .checkbox(&mut self.find.match_case, "match case")
+                            .checkbox(&mut self.search.find.match_case, "match case")
                             .changed();
                         ui.end_row();
 
                         ui.label(RichText::new("look in:").strong().color(text_dark()));
                         egui::ComboBox::from_id_salt("find_look_in")
-                            .selected_text(self.find.look_in.label())
+                            .selected_text(self.search.find.look_in.label())
                             .width(190.0)
                             .show_ui(ui, |ui| {
                                 changed |= ui
-                                    .checkbox(&mut self.find.look_in.field_names, "Field names")
+                                    .checkbox(&mut self.search.find.look_in.field_names, "Field names")
                                     .changed();
                                 changed |= ui
-                                    .checkbox(&mut self.find.look_in.field_values, "Field values")
+                                    .checkbox(&mut self.search.find.look_in.field_values, "Field values")
                                     .changed();
                                 changed |= ui
-                                    .checkbox(&mut self.find.look_in.blocks, "Blocks")
+                                    .checkbox(&mut self.search.find.look_in.blocks, "Blocks")
                                     .changed();
                             });
                         changed |= ui
-                            .checkbox(&mut self.find.whole_word, "match whole word")
+                            .checkbox(&mut self.search.find.whole_word, "match whole word")
                             .changed();
                         ui.end_row();
                     });
                 ui.add_space(8.0);
-                if self.find.searching {
+                if self.search.find.searching {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         let text = self
-                            .find
+                            .search.find
                             .progress
                             .map(|(done, total)| format!("searching… {done}/{total}"))
                             .unwrap_or_else(|| "preparing all-tag search…".to_owned());
                         ui.label(RichText::new(text).small().color(subtle_dark()));
                     });
-                } else if self.find.unreadable > 0 && self.find.within == FindWithin::AllTags {
+                } else if self.search.find.unreadable > 0 && self.search.find.within == FindWithin::AllTags {
                     ui.label(
-                        RichText::new(format!("{} tag(s) could not be read", self.find.unreadable))
+                        RichText::new(format!("{} tag(s) could not be read", self.search.find.unreadable))
                             .small()
                             .color(subtle_dark()),
                     );
@@ -148,20 +148,20 @@ impl Baboon {
                         ui,
                         ButtonIcon::Filter,
                         "Filter Results",
-                        self.find.filter_results,
+                        self.search.find.filter_results,
                     )
                     .on_hover_text("Show only matching fields and blocks in the selected scope")
                     .clicked()
                     {
-                        self.find.filter_results = !self.find.filter_results;
+                        self.search.find.filter_results = !self.search.find.filter_results;
                         filter_changed = true;
                     }
-                    let can_navigate = !self.find.occurrences.is_empty() && !self.find.searching;
+                    let can_navigate = !self.search.find.occurrences.is_empty() && !self.search.find.searching;
                     let counter = self
-                        .find
+                        .search.find
                         .active
-                        .map(|index| format!("{}/{}", index + 1, self.find.occurrences.len()))
-                        .unwrap_or_else(|| format!("0/{}", self.find.occurrences.len()));
+                        .map(|index| format!("{}/{}", index + 1, self.search.find.occurrences.len()))
+                        .unwrap_or_else(|| format!("0/{}", self.search.find.occurrences.len()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if icon_button(
                             ui,
@@ -190,10 +190,10 @@ impl Baboon {
                 });
             });
         if changed {
-            self.find.active = None;
-            self.find.results_key = None;
+            self.search.find.active = None;
+            self.search.find.results_key = None;
             self.refresh_find(ctx);
-            if let Some(hit) = self.find.active_occurrence().cloned() {
+            if let Some(hit) = self.search.find.active_occurrence().cloned() {
                 self.activate_find_occurrence(ctx, hit);
             }
         }
@@ -204,7 +204,7 @@ impl Baboon {
             self.step_find(ctx, step);
         }
         if !open || query_escape {
-            self.find.close();
+            self.search.find.close();
             ctx.data_mut(|data| {
                 data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
             });

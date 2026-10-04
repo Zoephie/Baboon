@@ -139,7 +139,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
         app.rename_tag.is_none()
             && app.delete_confirm.is_none()
             && app.extract_target.is_none()
-            && app.query_results.is_none()
+            && app.search.query_results.is_none()
             && app.content_explorer.is_none()
             && app.folder_refactor.is_none()
             && app.loose_folder_rename.is_none()
@@ -532,7 +532,7 @@ fn cases() -> Vec<Case> {
                 app.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, kit, _| {
-                let results = app.query_results.as_ref().ok_or("no results")?;
+                let results = app.search.query_results.as_ref().ok_or("no results")?;
                 ensure(results.title == format!("References to {RENDER}"), results.title.clone())?;
                 ensure(
                     results.entries.iter().map(|entry| entry.key.clone()).collect::<Vec<_>>()

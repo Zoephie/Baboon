@@ -648,15 +648,15 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "find",
-            &["find"],
+            &["search.find"],
             &["search/find_window/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.find.open = true;
-                h.app.find.query = "sky".to_owned();
+                h.app.search.find.open = true;
+                h.app.search.find.query = "sky".to_owned();
             },
             &["Find", "Filter Results"],
         ),
@@ -722,13 +722,13 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "query_results",
-            &["query_results"],
+            &["search.query_results"],
             &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
                 let entries = h.app.kits[h.app.active].source.as_ref().unwrap().entries[..3]
                     .to_vec();
-                h.app.query_results = Some(TagQueryResults {
+                h.app.search.query_results = Some(TagQueryResults {
                     kit: active_id(h),
                     title: "Smoke Query Results".to_owned(),
                     entries,
@@ -741,10 +741,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "field_value_search",
-            &["field_value_search_open"],
+            &["search.field_value_search_open"],
             &["search/result_windows/mod.rs"],
             loose_kit,
-            |h| h.app.field_value_search_open = true,
+            |h| h.app.search.field_value_search_open = true,
             &["Search Field Values"],
         ),
         case(
@@ -1406,7 +1406,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("deferred_file_action", "a queued action"),
     ("restored_active_kit", "session restore bookkeeping"),
     ("reveal_target", "a one-shot browser request"),
-    ("field_value_searching", "running flag of the field value search"),
+    ("search.field_value_searching", "running flag of the field value search"),
     ("kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),
     ("pending_sound_extract", "a queued request"),
@@ -1418,7 +1418,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("tag_test_icon", "texture"),
     ("block_clipboard", "clipboard contents"),
     ("pending_ref_jump", "a queued navigation"),
-    ("pending_find_jump", "a queued navigation"),
+    ("search.pending_find_jump", "a queued navigation"),
     ("field_nav", "navigation highlight"),
 ];
 

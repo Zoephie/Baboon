@@ -18,3 +18,17 @@ pub(in crate::app) mod listings;
 
 #[cfg(test)]
 mod listing_entries_tests;
+
+/// Search: the Find dialog, tag query results, the field-value search and a
+/// Find hit waiting to be opened.
+pub(in crate::app) struct SearchFeature {
+    /// Modeless find-in-tag dialog and its exact occurrence list.
+    pub(in crate::app) find: FindDialogState,
+    pub(in crate::app) query_results: Option<TagQueryResults>,
+    pub(in crate::app) field_value_search_open: bool,
+    pub(in crate::app) field_value_query: String,
+    pub(in crate::app) field_value_group: String,
+    pub(in crate::app) field_value_searching: bool,
+    /// Find result waiting for its target open tab to finish parsing.
+    pub(in crate::app) pending_find_jump: Option<FindOccurrence>,
+}

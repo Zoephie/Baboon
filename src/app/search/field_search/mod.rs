@@ -11,7 +11,7 @@ impl Baboon {
         query: String,
         result: Result<Vec<FieldValueMatch>, String>,
     ) -> bool {
-        self.field_value_searching = false;
+        self.search.field_value_searching = false;
         // The results name tags in the kit the search ran in, which may not be
         // the one focused by the time they arrive.
         if self.resolve_stamp(stamp).is_none() {
@@ -25,7 +25,7 @@ impl Baboon {
                     .is_empty()
                     .then(|| format!("No tag field values contain \"{query}\"."));
                 self.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
-                self.query_results = Some(TagQueryResults {
+                self.search.query_results = Some(TagQueryResults {
                     kit: stamp.kit,
                     title: format!("Field value '{query}' ({})", entries.len()),
                     entries,
@@ -237,12 +237,12 @@ impl Baboon {
     /// Starts source-scoped indexing or search work without blocking the UI thread.
     /// Generation-tagged completion is ignored if the active source changes first.
     pub(in crate::app) fn begin_field_value_search(&mut self, ctx: egui::Context) {
-        let display = self.field_value_query.trim().to_owned();
+        let display = self.search.field_value_query.trim().to_owned();
         if display.is_empty() {
             return;
         }
         let query_lower = display.to_ascii_lowercase();
-        let group_filter = self.field_value_group.trim().to_ascii_lowercase();
+        let group_filter = self.search.field_value_group.trim().to_ascii_lowercase();
         let stamp = self.kit_stamp();
 
         // Fast path: answer from the cached index.
@@ -278,7 +278,7 @@ impl Baboon {
                 "Field search for \"{display}\": {} match(es) (indexed)",
                 entries.len()
             );
-            self.query_results = Some(TagQueryResults {
+            self.search.query_results = Some(TagQueryResults {
                 kit: self.active_kit_id(),
                 title: format!("Field value '{display}' ({})", entries.len()),
                 entries,
@@ -309,7 +309,7 @@ impl Baboon {
                 .collect()
         };
         let tag_source = self.source().expect("checked").source.clone();
-        self.field_value_searching = true;
+        self.search.field_value_searching = true;
         self.status = format!("Searching field values for \"{display}\"…");
         let panic_query = display.clone();
         spawn_worker(
@@ -392,7 +392,7 @@ impl Baboon {
         let note = entries
             .is_empty()
             .then(|| "No tags with this keyword are in the current source.".to_owned());
-        self.query_results = Some(TagQueryResults {
+        self.search.query_results = Some(TagQueryResults {
             kit: self.active_kit_id(),
             title: format!("Tags tagged '{keyword}' ({})", entries.len()),
             entries,

@@ -291,7 +291,7 @@ impl Baboon {
         // Walk any expanded-but-uncached referrer rows before we take the results
         // (this reads `self.query_results`).
         self.refresh_ref_jump_occurrences(ctx);
-        let Some(results) = self.query_results.take() else {
+        let Some(results) = self.search.query_results.take() else {
             return;
         };
         let mut open = true;
@@ -470,7 +470,7 @@ impl Baboon {
         if acting && !self.focus_navigation_kit(results.kit) {
             self.status = "That workspace has been closed".to_owned();
             if open {
-                self.query_results = Some(results);
+                self.search.query_results = Some(results);
             }
             return;
         }
@@ -498,12 +498,12 @@ impl Baboon {
         }
         // Keep the window's results until it is closed.
         if open {
-            self.query_results = Some(results);
+            self.search.query_results = Some(results);
         }
     }
 
     pub(in crate::app) fn draw_field_value_search_window(&mut self, ctx: &egui::Context) {
-        if !self.field_value_search_open {
+        if !self.search.field_value_search_open {
             return;
         }
         let mut open = true;
@@ -525,14 +525,14 @@ impl Baboon {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     let response = ui.add_enabled(
-                        !self.field_value_searching,
-                        egui::TextEdit::singleline(&mut self.field_value_query)
+                        !self.search.field_value_searching,
+                        egui::TextEdit::singleline(&mut self.search.field_value_query)
                             .hint_text(placeholder_text("value to find"))
                             .desired_width(240.0),
                     );
                     let submitted =
                         lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if self.field_value_searching {
+                    if self.search.field_value_searching {
                         ui.spinner();
                         ui.label(RichText::new("searching…").color(subtle_dark()));
                     } else if icon_text_button(ui, ButtonIcon::Search, "Search", true).clicked()
@@ -544,7 +544,7 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("group").color(subtle_dark()).small());
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.field_value_group)
+                        egui::TextEdit::singleline(&mut self.search.field_value_group)
                             .hint_text(placeholder_text("any (e.g. weap / weapon)"))
                             .desired_width(180.0),
                     )
@@ -580,13 +580,13 @@ impl Baboon {
                     }
                 });
             });
-        if do_search && !self.field_value_query.trim().is_empty() {
+        if do_search && !self.search.field_value_query.trim().is_empty() {
             self.begin_field_value_search(ctx.clone());
         }
         if do_build {
             self.begin_build_field_index(ctx.clone());
         }
-        self.field_value_search_open = open;
+        self.search.field_value_search_open = open;
     }
 }
 
