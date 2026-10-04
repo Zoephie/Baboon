@@ -165,14 +165,16 @@ fn compat_a_folder_scan_keys_tags_on_the_root_as_given() {
         scan(&root),
         format!("file:{}{s}objects{s}a{s}b.weapon", root.display())
     );
-    #[cfg(target_os = "macos")]
-    assert!(
-        !scan(&root).starts_with(&format!(
-            "file:{}",
-            std::fs::canonicalize(&root).unwrap().display()
-        )),
-        "the temp dir is under /var, a symlink; the key must not resolve it"
-    );
+    // macOS's temp dir is under `/var`, a symlink, unless TMPDIR points
+    // somewhere else; where the two spellings differ, the key keeps the one
+    // it was given.
+    let canonical = std::fs::canonicalize(&root).unwrap();
+    if canonical != root {
+        assert!(
+            !scan(&root).starts_with(&format!("file:{}", canonical.display())),
+            "the root is reached through a symlink; the key must not resolve it"
+        );
+    }
     // A root typed with forward slashes on Windows keeps them; what the walk
     // adds uses backslashes. Both halves are saved as they are.
     #[cfg(windows)]
@@ -207,8 +209,11 @@ fn compat_cache_root_keys() {
             canonical.display().to_string(),
             "an existing root is canonicalized"
         );
-        #[cfg(target_os = "macos")]
-        assert_ne!(cache_root_key(&existing), existing.display().to_string());
+        // Through a symlink (macOS's `/var`, unless TMPDIR says otherwise)
+        // the canonical spelling differs from the one given.
+        if canonical != existing {
+            assert_ne!(cache_root_key(&existing), existing.display().to_string());
+        }
     }
     #[cfg(windows)]
     {
