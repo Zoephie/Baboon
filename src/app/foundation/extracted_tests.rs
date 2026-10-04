@@ -499,7 +499,7 @@ pub(in crate::app) mod tests {
         let definitions_root = locate_definitions_root();
         let names = TagNameIndex::load_game(&definitions_root, GameId::HaloReach).unwrap();
         let hierarchy = group_hierarchy(Some(&definitions_root), Some(GameId::HaloReach));
-        let docs = crate::app::field_docs::build_def_docs(
+        let docs = crate::app::help::field_docs::build_def_docs(
             &definitions_root,
             GameId::HaloReach,
             "multiplayer_object_type_list",

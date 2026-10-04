@@ -12,7 +12,6 @@ mod find;
 pub(in crate::app) use find::{draw_icon_window_header, draw_icon_window_header_without_close};
 mod first_run;
 mod git_review;
-pub(super) mod help;
 mod kit_tiles;
 mod loading;
 pub(in crate::app) use loading::{

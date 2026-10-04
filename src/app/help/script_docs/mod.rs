@@ -7,19 +7,19 @@ const SCRIPT_DOCS_FILE: &str = "script_docs.sqlite3";
 const SCRIPT_DOCS_SCHEMA_VERSION: i64 = 1;
 
 /// The games with HaloScript documentation, in the order the help lists them.
-pub(super) fn script_doc_games() -> impl Iterator<Item = GameId> {
+pub(in crate::app) fn script_doc_games() -> impl Iterator<Item = GameId> {
     GameId::ALL.into_iter().filter(|game| game.has_script_docs())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ScriptDocCategory {
+pub(in crate::app) enum ScriptDocCategory {
     Functions,
     Globals,
     Types,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ScriptDocNetworkFilter {
+pub(in crate::app) enum ScriptDocNetworkFilter {
     All,
     Yes,
     Unknown,
@@ -38,14 +38,14 @@ impl ScriptDocNetworkFilter {
 }
 
 #[derive(Clone)]
-pub(super) struct ScriptDocRow {
-    pub(super) key: String,
-    pub(super) name: String,
-    pub(super) kind: String,
-    pub(super) summary: String,
+pub(in crate::app) struct ScriptDocRow {
+    pub(in crate::app) key: String,
+    pub(in crate::app) name: String,
+    pub(in crate::app) kind: String,
+    pub(in crate::app) summary: String,
 }
 
-pub(super) enum ScriptDocDetail {
+pub(in crate::app) enum ScriptDocDetail {
     Function {
         name: String,
         overloads: Vec<FunctionOverload>,
@@ -63,23 +63,23 @@ pub(super) enum ScriptDocDetail {
     },
 }
 
-pub(super) struct FunctionOverload {
-    pub(super) return_type: String,
-    pub(super) signature: String,
-    pub(super) description: String,
-    pub(super) network_safe: Option<String>,
+pub(in crate::app) struct FunctionOverload {
+    pub(in crate::app) return_type: String,
+    pub(in crate::app) signature: String,
+    pub(in crate::app) description: String,
+    pub(in crate::app) network_safe: Option<String>,
 }
 
-pub(super) struct ScriptExample {
-    pub(super) source_file: String,
-    pub(super) source_line: i64,
-    pub(super) code: String,
+pub(in crate::app) struct ScriptExample {
+    pub(in crate::app) source_file: String,
+    pub(in crate::app) source_line: i64,
+    pub(in crate::app) code: String,
 }
 
-pub(super) struct TypeUsage {
-    pub(super) role: String,
-    pub(super) symbol_name: String,
-    pub(super) signature: String,
+pub(in crate::app) struct TypeUsage {
+    pub(in crate::app) role: String,
+    pub(in crate::app) symbol_name: String,
+    pub(in crate::app) signature: String,
 }
 
 enum ScriptDocsDatabase {
@@ -88,15 +88,15 @@ enum ScriptDocsDatabase {
     Failed(String),
 }
 
-pub(super) struct ScriptDocsUiState {
+pub(in crate::app) struct ScriptDocsUiState {
     database: ScriptDocsDatabase,
-    pub(super) game: String,
-    pub(super) category: ScriptDocCategory,
-    pub(super) network_filter: ScriptDocNetworkFilter,
-    pub(super) search: String,
-    pub(super) selected: Option<String>,
-    pub(super) rows: Vec<ScriptDocRow>,
-    pub(super) detail: Option<ScriptDocDetail>,
+    pub(in crate::app) game: String,
+    pub(in crate::app) category: ScriptDocCategory,
+    pub(in crate::app) network_filter: ScriptDocNetworkFilter,
+    pub(in crate::app) search: String,
+    pub(in crate::app) selected: Option<String>,
+    pub(in crate::app) rows: Vec<ScriptDocRow>,
+    pub(in crate::app) detail: Option<ScriptDocDetail>,
     last_query: Option<(String, ScriptDocCategory, ScriptDocNetworkFilter, String)>,
 }
 
@@ -117,14 +117,14 @@ impl Default for ScriptDocsUiState {
 }
 
 impl ScriptDocsUiState {
-    pub(super) fn error(&self) -> Option<&str> {
+    pub(in crate::app) fn error(&self) -> Option<&str> {
         match &self.database {
             ScriptDocsDatabase::Failed(error) => Some(error),
             _ => None,
         }
     }
 
-    pub(super) fn ensure_loaded(&mut self, docs_root: &Path) {
+    pub(in crate::app) fn ensure_loaded(&mut self, docs_root: &Path) {
         if !matches!(self.database, ScriptDocsDatabase::Unloaded) {
             return;
         }
@@ -135,13 +135,13 @@ impl ScriptDocsUiState {
         };
     }
 
-    pub(super) fn invalidate(&mut self) {
+    pub(in crate::app) fn invalidate(&mut self) {
         self.selected = None;
         self.detail = None;
         self.last_query = None;
     }
 
-    pub(super) fn refresh(&mut self) {
+    pub(in crate::app) fn refresh(&mut self) {
         let query = (
             self.game.clone(),
             self.category,
@@ -177,7 +177,7 @@ impl ScriptDocsUiState {
         }
     }
 
-    pub(super) fn select(&mut self, key: String) {
+    pub(in crate::app) fn select(&mut self, key: String) {
         if self.selected.as_ref() == Some(&key) {
             return;
         }

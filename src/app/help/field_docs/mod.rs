@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// One entry in a struct's documentation sequence, in schema order.
-pub(super) enum DefEntry {
+pub(in crate::app) enum DefEntry {
     /// A real field. `clean_name` matches the engine's stripped field name (so
     /// it lines up with the tag's fields); `help`/`unit` come from the full
     /// schema name's `#…` / `:…` suffixes.
@@ -49,13 +49,13 @@ impl StructKey {
 
 /// Per-group documentation, keyed by struct ([`StructKey`]).
 #[derive(Default)]
-pub(super) struct DefDocs {
+pub(in crate::app) struct DefDocs {
     by_struct: HashMap<StructKey, Vec<DefEntry>>,
 }
 
 impl DefDocs {
     /// The documentation sequence for the struct with `guid` and `name`.
-    pub(super) fn entries_for(&self, guid: [u8; 16], name: &str) -> &[DefEntry] {
+    pub(in crate::app) fn entries_for(&self, guid: [u8; 16], name: &str) -> &[DefEntry] {
         self.by_struct
             .get(&StructKey::new(guid, name))
             .map(Vec::as_slice)
@@ -68,7 +68,7 @@ impl DefDocs {
         self.by_struct.values().flatten()
     }
 
-    pub(super) fn entries_for_struct(&self, tag_struct: &TagStruct<'_>) -> &[DefEntry] {
+    pub(in crate::app) fn entries_for_struct(&self, tag_struct: &TagStruct<'_>) -> &[DefEntry] {
         let definition = tag_struct.definition();
         self.entries_for(definition.guid(), definition.name())
     }
@@ -77,7 +77,7 @@ impl DefDocs {
 /// Stable renderer/Find identity for an injected explanation row. Keep the
 /// numeric suffix free of `#`/`[]`: those are stripped from canonical field
 /// paths because they normally identify schema ordinals and block elements.
-pub(super) fn documentation_path(path_prefix: &str, entry_index: usize) -> String {
+pub(in crate::app) fn documentation_path(path_prefix: &str, entry_index: usize) -> String {
     let segment = format!("@documentation {entry_index}");
     if path_prefix.is_empty() {
         segment
@@ -90,7 +90,7 @@ pub(super) fn documentation_path(path_prefix: &str, entry_index: usize) -> Strin
 /// and merging every file's structs by GUID. Object-family tags (biped → unit →
 /// object) inherit fields whose struct definitions live in the parent files, so
 /// the chain must be walked for those fields' docs to resolve.
-pub(super) fn build_def_docs(definitions_root: &Path, game: GameId, group: &str) -> DefDocs {
+pub(in crate::app) fn build_def_docs(definitions_root: &Path, game: GameId, group: &str) -> DefDocs {
     let mut docs = DefDocs::default();
     let mut visited = HashSet::new();
     let mut current = Some(group.to_owned());
@@ -130,7 +130,7 @@ fn resolve_parent_group(parent_tag: &str) -> Option<String> {
 /// Parse a single group definition JSON into a `DefDocs` (no chain). Test-only;
 /// production resolution uses [`build_def_docs`] to follow the inheritance chain.
 #[cfg(test)]
-pub(super) fn parse_def_docs(json: &str) -> DefDocs {
+pub(in crate::app) fn parse_def_docs(json: &str) -> DefDocs {
     let mut docs = DefDocs::default();
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
         merge_structs_into(&mut docs, &value);

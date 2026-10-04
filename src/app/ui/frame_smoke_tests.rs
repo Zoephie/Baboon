@@ -501,7 +501,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_about",
             &["about_open", "help_panel_tab"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;
@@ -512,7 +512,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_doc",
             &["about_open", "help_docs"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;
@@ -523,7 +523,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_tutorials",
             &["about_open", "tutorials"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;
@@ -534,7 +534,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_script_doc",
             &["about_open", "script_docs"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;
@@ -545,7 +545,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_tag_compat",
             &["about_open", "tag_compat"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;
@@ -556,7 +556,7 @@ fn cases() -> Vec<Case> {
         case(
             "help_map_names",
             &["about_open"],
-            &["ui/help/mod.rs"],
+            &["help/window/mod.rs"],
             welcome,
             |h| {
                 h.app.about_open = true;

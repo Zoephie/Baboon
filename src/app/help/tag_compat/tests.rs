@@ -178,7 +178,7 @@ fn the_tab_lays_out_against_the_shipped_database() {
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    super::super::ui::help::draw_tag_compat_body_for_tests(ui, state)
+                    crate::app::help::window::draw_tag_compat_body_for_tests(ui, state)
                 });
             },
         );

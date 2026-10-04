@@ -8,14 +8,14 @@ use std::path::Component;
 const TUTORIALS_FILE: &str = "tutorials.json";
 const TUTORIALS_SCHEMA_VERSION: u32 = 3;
 
-pub(super) const TUTORIAL_CATEGORIES: [TutorialCategory; 3] = [
+pub(in crate::app) const TUTORIAL_CATEGORIES: [TutorialCategory; 3] = [
     TutorialCategory::ThreeD,
     TutorialCategory::Sound,
     TutorialCategory::Script,
 ];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-pub(super) enum TutorialCategory {
+pub(in crate::app) enum TutorialCategory {
     #[serde(rename = "3d")]
     ThreeD,
     #[serde(rename = "sound")]
@@ -25,7 +25,7 @@ pub(super) enum TutorialCategory {
 }
 
 impl TutorialCategory {
-    pub(super) fn label(self) -> &'static str {
+    pub(in crate::app) fn label(self) -> &'static str {
         match self {
             Self::ThreeD => "3D",
             Self::Sound => "Sound",
@@ -36,18 +36,18 @@ impl TutorialCategory {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(super) enum TutorialKind {
+pub(in crate::app) enum TutorialKind {
     Video,
     Article,
 }
 
-pub(super) enum TutorialsState {
+pub(in crate::app) enum TutorialsState {
     Loaded(TutorialCatalog),
     Failed(String),
 }
 
 impl TutorialsState {
-    pub(super) fn load(ctx: &egui::Context) -> Self {
+    pub(in crate::app) fn load(ctx: &egui::Context) -> Self {
         let root = locate_help_docs_root();
         match load_tutorial_catalog(&root) {
             Ok(mut catalog) => {
@@ -60,13 +60,13 @@ impl TutorialsState {
 }
 
 #[derive(Deserialize)]
-pub(super) struct TutorialCatalog {
+pub(in crate::app) struct TutorialCatalog {
     version: u32,
-    pub(super) tutorials: Vec<TutorialEntry>,
+    pub(in crate::app) tutorials: Vec<TutorialEntry>,
 }
 
 impl TutorialCatalog {
-    pub(super) fn entries_for<'a>(
+    pub(in crate::app) fn entries_for<'a>(
         &'a self,
         game: &'a str,
         category: TutorialCategory,
@@ -78,26 +78,26 @@ impl TutorialCatalog {
 }
 
 #[derive(Deserialize)]
-pub(super) struct TutorialEntry {
-    pub(super) game: String,
-    pub(super) category: TutorialCategory,
-    pub(super) kind: TutorialKind,
-    pub(super) title: String,
-    pub(super) title_url: Option<String>,
-    pub(super) creator: String,
-    pub(super) url: Option<String>,
-    pub(super) thumbnail: Option<String>,
+pub(in crate::app) struct TutorialEntry {
+    pub(in crate::app) game: String,
+    pub(in crate::app) category: TutorialCategory,
+    pub(in crate::app) kind: TutorialKind,
+    pub(in crate::app) title: String,
+    pub(in crate::app) title_url: Option<String>,
+    pub(in crate::app) creator: String,
+    pub(in crate::app) url: Option<String>,
+    pub(in crate::app) thumbnail: Option<String>,
     #[serde(default)]
-    pub(super) blocks: Vec<TutorialBlock>,
+    pub(in crate::app) blocks: Vec<TutorialBlock>,
     #[serde(skip)]
-    pub(super) thumbnail_texture: Option<egui::TextureHandle>,
+    pub(in crate::app) thumbnail_texture: Option<egui::TextureHandle>,
     #[serde(skip)]
-    pub(super) thumbnail_error: Option<String>,
+    pub(in crate::app) thumbnail_error: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "kind")]
-pub(super) enum TutorialBlock {
+pub(in crate::app) enum TutorialBlock {
     #[serde(rename = "heading")]
     Heading { text: String },
     #[serde(rename = "paragraph")]
@@ -107,9 +107,9 @@ pub(super) enum TutorialBlock {
 }
 
 #[derive(Deserialize)]
-pub(super) struct TutorialSpan {
-    pub(super) text: String,
-    pub(super) url: Option<String>,
+pub(in crate::app) struct TutorialSpan {
+    pub(in crate::app) text: String,
+    pub(in crate::app) url: Option<String>,
 }
 
 fn load_tutorial_catalog(root: &Path) -> Result<TutorialCatalog, String> {

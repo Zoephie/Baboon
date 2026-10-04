@@ -7,13 +7,13 @@ use serde::Deserialize;
 const HELP_DOCS_FILE: &str = "help.json";
 
 #[derive(Clone)]
-pub(super) enum HelpDocsState {
+pub(in crate::app) enum HelpDocsState {
     Loaded(HelpDocs),
     Failed(String),
 }
 
 impl HelpDocsState {
-    pub(super) fn load() -> Self {
+    pub(in crate::app) fn load() -> Self {
         match load_help_docs() {
             Ok(docs) => HelpDocsState::Loaded(docs),
             Err(error) => HelpDocsState::Failed(error),
@@ -22,20 +22,20 @@ impl HelpDocsState {
 }
 
 #[derive(Clone, Deserialize)]
-pub(super) struct HelpDocs {
-    pub(super) tabs: Vec<HelpDocTab>,
+pub(in crate::app) struct HelpDocs {
+    pub(in crate::app) tabs: Vec<HelpDocTab>,
 }
 
 #[derive(Clone, Deserialize)]
-pub(super) struct HelpDocTab {
-    pub(super) id: String,
-    pub(super) sections: Vec<HelpDocSection>,
+pub(in crate::app) struct HelpDocTab {
+    pub(in crate::app) id: String,
+    pub(in crate::app) sections: Vec<HelpDocSection>,
 }
 
 #[derive(Clone, Deserialize)]
-pub(super) struct HelpDocSection {
-    pub(super) title: String,
-    pub(super) blocks: Vec<HelpDocBlock>,
+pub(in crate::app) struct HelpDocSection {
+    pub(in crate::app) title: String,
+    pub(in crate::app) blocks: Vec<HelpDocBlock>,
 }
 
 /// A hand-editable documentation block. The JSON uses an internal `"kind"`
@@ -43,7 +43,7 @@ pub(super) struct HelpDocSection {
 /// do not need Rust-specific enum knowledge.
 #[derive(Clone, Deserialize)]
 #[serde(tag = "kind")]
-pub(super) enum HelpDocBlock {
+pub(in crate::app) enum HelpDocBlock {
     #[serde(rename = "paragraph")]
     Paragraph { text: String },
     #[serde(rename = "bullets")]
@@ -51,7 +51,7 @@ pub(super) enum HelpDocBlock {
 }
 
 impl HelpDocs {
-    pub(super) fn tab(&self, id: &str) -> Option<&HelpDocTab> {
+    pub(in crate::app) fn tab(&self, id: &str) -> Option<&HelpDocTab> {
         self.tabs.iter().find(|tab| tab.id == id)
     }
 }

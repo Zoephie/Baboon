@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(super) fn draw_about_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_about_window(&mut self, ctx: &egui::Context) {
         if !self.about_open {
             return;
         }

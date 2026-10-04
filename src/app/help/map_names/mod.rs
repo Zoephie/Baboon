@@ -7,7 +7,7 @@ mod data;
 use data::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum MapNamesGameTab {
+pub(in crate::app) enum MapNamesGameTab {
     HaloCe,
     Halo2,
     Halo2Anniversary,
@@ -32,7 +32,7 @@ struct MapEntry {
     kind: MapKind,
 }
 
-pub(super) fn draw_map_names_tab(ui: &mut Ui, active_tab: &mut MapNamesGameTab) {
+pub(in crate::app) fn draw_map_names_tab(ui: &mut Ui, active_tab: &mut MapNamesGameTab) {
     ui.horizontal_wrapped(|ui| {
         for (tab, label) in MAP_TABS {
             ui.selectable_value(active_tab, *tab, *label);
