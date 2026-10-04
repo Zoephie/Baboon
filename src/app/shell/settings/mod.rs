@@ -969,9 +969,9 @@ impl Baboon {
                 }
             }
             SettingsCommand::DropChimpEverywhere => {
-                for kit in &mut self.model.kits {
-                    self.views[kit.id].surface = KitSurface::Tags;
-                    kit.chimp = ChimpState::default();
+                for index in 0..self.model.kits.len() {
+                    self.views[self.model.kits[index].id].surface = KitSurface::Tags;
+                    self.reset_chimp(index);
                 }
             }
             SettingsCommand::CheckForUpdates => self.begin_check_for_updates(ctx.clone(), false),

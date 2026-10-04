@@ -6,9 +6,10 @@ use super::*;
 pub(super) fn draw_chimp_export_editor(
     ui: &mut Ui,
     document: &mut ChimpDocument,
+    pane: &ChimpDocumentUi,
     usmap: &Usmap,
 ) -> bool {
-    let Some(export) = document.exports.get_mut(document.selected_export) else {
+    let Some(export) = document.exports.get_mut(pane.selected_export) else {
         ui.label("This package has no exports.");
         return false;
     };

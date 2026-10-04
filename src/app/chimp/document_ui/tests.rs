@@ -55,7 +55,7 @@ fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
     let mut frames = Frames::new();
     frames.click_exact("Properties", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.model.kits[0].chimp.documents[THING].view,
+        app.chimp_pane(0, THING).view,
         ChimpDocumentView::Properties
     );
     assert!(frames.shows("●  Thing"));
@@ -69,8 +69,9 @@ fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
     assert!(matches!(first_value(document, "Count"), PropValue::Int(42)));
     assert!(document.dirty);
     assert_eq!(document.edits, 1);
-    assert!(document.document_text_dirty && document.metadata_text_dirty);
-    assert!(document.header_usage.is_none());
+    let pane = app.chimp_pane(0, THING);
+    assert!(pane.document_text_dirty && pane.metadata_text_dirty);
+    assert!(pane.header_usage.is_none());
     let first = document.checkpoint_due.expect("a checkpoint is scheduled");
     assert!(
         first > before + CHIMP_CHECKPOINT_DELAY && first <= frames.time() + CHIMP_CHECKPOINT_DELAY,
@@ -95,7 +96,7 @@ fn the_header_view_edits_and_scans_through_the_pane() {
     let mut frames = Frames::new();
     frames.click_exact("Header", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.model.kits[0].chimp.documents[THING].view,
+        app.chimp_pane(0, THING).view,
         ChimpDocumentView::Header
     );
     frames.click_exact("Rocket", 0, &mut draw_pane(&mut app, THING));
@@ -116,12 +117,12 @@ fn the_header_view_edits_and_scans_through_the_pane() {
         &mut draw_pane(&mut app, THING),
     );
     assert!(matches!(
-        app.model.kits[0].chimp.documents[THING].referrers,
+        app.chimp_pane(0, THING).referrers,
         ChimpReferrerState::Scanning
     ));
     apply_until(&mut app, |app| {
         matches!(
-            app.model.kits[0].chimp.documents[THING].referrers,
+            app.chimp_pane(0, THING).referrers,
             ChimpReferrerState::Done(_)
         )
     });
@@ -138,7 +139,7 @@ fn the_metadata_view_and_the_orphaned_and_unloaded_states() {
     let mut frames = Frames::new();
     frames.click_exact("Metadata", 0, &mut draw_pane(&mut app, THING));
     assert_eq!(
-        app.model.kits[0].chimp.documents[THING].view,
+        app.chimp_pane(0, THING).view,
         ChimpDocumentView::Metadata
     );
     assert!(frames.shows("Decoded package metadata"));
@@ -364,15 +365,15 @@ fn real_package_rebuilds_into_a_readable_overlay() {
         .expect("a /Game package")
         .name
         .clone();
-    let mut document = load_chimp_document(&world, &package).unwrap();
-    assert_eq!(document.view, ChimpDocumentView::Document);
-    assert!(!document.document_text_dirty);
+    let (document, mut pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    assert_eq!(pane.view, ChimpDocumentView::Document);
+    assert!(!pane.document_text_dirty);
     assert!(
         !document.exports.is_empty(),
         "the real package should expose at least one readable export"
     );
     let readable: Value =
-        serde_json::from_str(&document.document_text).expect("readable document is valid JSON");
+        serde_json::from_str(&pane.document_text).expect("readable document is valid JSON");
     assert_eq!(readable["Package"], package);
     assert_eq!(
         readable["Exports"].as_array().map(Vec::len),
@@ -386,18 +387,18 @@ fn real_package_rebuilds_into_a_readable_overlay() {
     assert!(export.get("Name").is_some());
     assert!(export.get("Properties").is_some());
     assert_eq!(
-        document
+        pane
             .document_lines
             .lines(
-                &document.document_text,
+                &pane.document_text,
                 &egui::FontId::monospace(12.0),
                 true
             )
             .len(),
-        document.document_text.lines().count()
+        pane.document_text.lines().count()
     );
     let metadata: Value =
-        serde_json::from_str(&document.metadata_text).expect("metadata document is valid JSON");
+        serde_json::from_str(&pane.metadata_text).expect("metadata document is valid JSON");
     assert_eq!(metadata["Summary"]["Package"], package);
     assert_eq!(
         metadata["NameMap"].as_array().map(Vec::len),
@@ -413,15 +414,15 @@ fn real_package_rebuilds_into_a_readable_overlay() {
             .is_some_and(|providers| !providers.is_empty())
     );
     assert_eq!(
-        document
+        pane
             .metadata_lines
             .lines(
-                &document.metadata_text,
+                &pane.metadata_text,
                 &egui::FontId::monospace(12.0),
                 true
             )
             .len(),
-        document.metadata_text.lines().count()
+        pane.metadata_text.lines().count()
     );
     let (bytes, store) = rebuild_chimp_document(&world, &document).unwrap();
     FZenPackageHeader::deserialize(

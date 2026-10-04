@@ -131,7 +131,7 @@ pub(in crate::app) enum WorkerMessage {
     ChimpPackageLoaded {
         stamp: KitStamp,
         package: String,
-        result: Result<ChimpDocument, String>,
+        result: Result<(ChimpDocument, ChimpDocumentUi), String>,
     },
     /// A sweep for the packages that import `package`. There is no reverse
     /// index in the paks, so this reads every mounted header and cannot run on

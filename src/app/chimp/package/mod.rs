@@ -206,58 +206,90 @@ fn decode_chimp_exports(
     Ok((header, payloads, exports))
 }
 
+/// Load `package` with the pane it opens in: decoding its previews is work
+/// for the job that loads it, not for the frame that shows it.
+pub(super) fn load_chimp_document_with_pane(
+    world: &World,
+    package: &str,
+) -> Result<(ChimpDocument, ChimpDocumentUi), String> {
+    let document = load_chimp_document(world, package)?;
+    let pane = ChimpDocumentUi::new(world, &document);
+    Ok((document, pane))
+}
+
 pub(super) fn decode_chimp_document(
     world: &World,
     provider: PackageProvider,
     bytes: Vec<u8>,
 ) -> Result<ChimpDocument, String> {
     let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
-    let texture_previews =
-        chimp_texture_previews_for(world, &provider, &bytes, &header, &payloads, &exports);
-    let (mesh_kind, mesh_preview, mesh_preview_state) =
-        decode_chimp_mesh_preview(world, &provider, &bytes, &header, &exports);
-    let initial_view = if !texture_previews.is_empty() {
-        ChimpDocumentView::Texture
-    } else if mesh_kind.is_some() {
-        ChimpDocumentView::Mesh
-    } else {
-        ChimpDocumentView::default()
-    };
-    let mut document = ChimpDocument {
+    let mesh_kind = chimp_mesh_kind(&exports);
+    Ok(ChimpDocument {
         package: header.package_name(),
         provider,
         original: bytes,
         header,
         payloads,
         exports,
-        texture_previews,
         mesh_kind,
-        mesh_preview,
-        mesh_preview_state,
-        selected_export: 0,
         dirty: false,
-        view: initial_view,
-        document_text: String::new(),
-        document_lines: ChimpJsonLines::default(),
-        document_text_dirty: true,
-        metadata_text: String::new(),
-        metadata_lines: ChimpJsonLines::default(),
-        metadata_text_dirty: true,
-        header_usage: None,
-        header_name_filter: String::new(),
-        header_name_edit: None,
-        header_import_edit: None,
-        header_export_edit: None,
-        header_identity_edit: None,
-        header_error: None,
-        referrers: ChimpReferrerState::Idle,
         orphaned: false,
         checkpoint_due: None,
         edits: 0,
-    };
-    refresh_chimp_document_text(&mut document);
-    refresh_chimp_metadata_text(&mut document, world);
-    Ok(document)
+    })
+}
+
+impl ChimpDocumentUi {
+    /// The pane a freshly opened `document` starts with: its previews
+    /// decoded, its texts rendered, and the tab that best shows it.
+    pub(super) fn new(world: &World, document: &ChimpDocument) -> Self {
+        let texture_previews = chimp_texture_previews_for(
+            world,
+            &document.provider,
+            &document.original,
+            &document.header,
+            &document.payloads,
+            &document.exports,
+        );
+        let (_, mesh_preview, mesh_preview_state) = decode_chimp_mesh_preview(
+            world,
+            &document.provider,
+            &document.original,
+            &document.header,
+            &document.exports,
+        );
+        let view = if !texture_previews.is_empty() {
+            ChimpDocumentView::Texture
+        } else if document.mesh_kind.is_some() {
+            ChimpDocumentView::Mesh
+        } else {
+            ChimpDocumentView::default()
+        };
+        let mut ui = Self {
+            texture_previews,
+            mesh_preview,
+            mesh_preview_state,
+            selected_export: 0,
+            view,
+            document_text: String::new(),
+            document_lines: ChimpJsonLines::default(),
+            document_text_dirty: true,
+            metadata_text: String::new(),
+            metadata_lines: ChimpJsonLines::default(),
+            metadata_text_dirty: true,
+            header_usage: None,
+            header_name_filter: String::new(),
+            header_name_edit: None,
+            header_import_edit: None,
+            header_export_edit: None,
+            header_identity_edit: None,
+            header_error: None,
+            referrers: ChimpReferrerState::Idle,
+        };
+        refresh_chimp_document_text(document, &mut ui);
+        refresh_chimp_metadata_text(document, &mut ui, world);
+        ui
+    }
 }
 
 /// Whether an imported package is one of the mesh's materials.
@@ -1008,18 +1040,18 @@ fn chimp_metadata_json(document: &ChimpDocument, world: &World) -> Value {
     })
 }
 
-pub(super) fn refresh_chimp_document_text(document: &mut ChimpDocument) {
-    document.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
+pub(super) fn refresh_chimp_document_text(document: &ChimpDocument, ui: &mut ChimpDocumentUi) {
+    ui.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
         .unwrap_or_else(|error| format!("Could not render package document: {error}"));
-    document.document_lines = ChimpJsonLines::default();
-    document.document_text_dirty = false;
+    ui.document_lines = ChimpJsonLines::default();
+    ui.document_text_dirty = false;
 }
 
-pub(super) fn refresh_chimp_metadata_text(document: &mut ChimpDocument, world: &World) {
-    document.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
+pub(super) fn refresh_chimp_metadata_text(document: &ChimpDocument, ui: &mut ChimpDocumentUi, world: &World) {
+    ui.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
         .unwrap_or_else(|error| format!("Could not render package metadata: {error}"));
-    document.metadata_lines = ChimpJsonLines::default();
-    document.metadata_text_dirty = false;
+    ui.metadata_lines = ChimpJsonLines::default();
+    ui.metadata_text_dirty = false;
 }
 
 fn chimp_block_json(block: &PropertyBlock) -> Value {

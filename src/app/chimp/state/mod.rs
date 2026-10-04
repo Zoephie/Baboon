@@ -171,6 +171,8 @@ pub(in crate::app) struct ChimpState {
 /// view, apart from the [`ChimpState`] content.
 #[derive(Default)]
 pub(in crate::app) struct ChimpView {
+    /// Each open document's pane, by package.
+    pub(super) documents: HashMap<String, ChimpDocumentUi>,
     pub(super) browser: ChimpBrowser,
     pub(super) filter: String,
     pub(super) filtered_for: Option<String>,
@@ -191,6 +193,9 @@ pub(in crate::app) struct ChimpView {
     pub(super) save_dialog: Option<ChimpSaveDialog>,
 }
 
+/// One open Unreal package's content: its bytes and decoded header, payloads
+/// and exports, and its save and recovery bookkeeping. What its pane shows
+/// and drafts is its [`ChimpDocumentUi`] in the kit's [`ChimpView`].
 pub(in crate::app) struct ChimpDocument {
     pub(super) package: String,
     pub(super) provider: PackageProvider,
@@ -198,12 +203,29 @@ pub(in crate::app) struct ChimpDocument {
     pub(super) header: FZenPackageHeader,
     pub(super) payloads: Vec<Vec<u8>>,
     pub(super) exports: Vec<ChimpExport>,
-    pub(super) texture_previews: Vec<ChimpTexturePreview>,
     pub(super) mesh_kind: Option<ChimpMeshKind>,
+    pub(in crate::app) dirty: bool,
+    /// The mounted containers no longer provide this package, so `provider` no
+    /// longer describes anything and nothing may be written back through it.
+    /// The document keeps its bytes, so reading and extraction still work.
+    pub(super) orphaned: bool,
+    /// When (egui time) this document's recovery checkpoint is due. Set by an
+    /// edit and pushed back by the next one, so a burst of edits checkpoints
+    /// once, after it stops.
+    pub(super) checkpoint_due: Option<f64>,
+    /// Counts edits. A save records it when it rebuilds the package and, when
+    /// it finishes, clears `dirty` only if no edit landed while it ran.
+    pub(super) edits: u64,
+}
+
+/// One open package's pane: which tab and export it shows, the text and
+/// usage it derived from the document, header edits being drafted, who
+/// references it, and its texture and mesh previews.
+pub(in crate::app) struct ChimpDocumentUi {
+    pub(super) texture_previews: Vec<ChimpTexturePreview>,
     pub(super) mesh_preview: Option<Result<ModelPreviewData, String>>,
     pub(super) mesh_preview_state: ModelPreviewState,
     pub(super) selected_export: usize,
-    pub(in crate::app) dirty: bool,
     pub(super) view: ChimpDocumentView,
     pub(super) document_text: String,
     pub(super) document_lines: ChimpJsonLines,
@@ -229,17 +251,6 @@ pub(in crate::app) struct ChimpDocument {
     /// Who imports this package. Not derived at load: there is no reverse index
     /// in the paks, so answering it means reading every mounted header.
     pub(super) referrers: ChimpReferrerState,
-    /// The mounted containers no longer provide this package, so `provider` no
-    /// longer describes anything and nothing may be written back through it.
-    /// The document keeps its bytes, so reading and extraction still work.
-    pub(super) orphaned: bool,
-    /// When (egui time) this document's recovery checkpoint is due. Set by an
-    /// edit and pushed back by the next one, so a burst of edits checkpoints
-    /// once, after it stops.
-    pub(super) checkpoint_due: Option<f64>,
-    /// Counts edits. A save records it when it rebuilds the package and, when
-    /// it finishes, clears `dirty` only if no edit landed while it ran.
-    pub(super) edits: u64,
 }
 
 #[derive(Default)]
@@ -439,6 +450,34 @@ impl Baboon {
     pub(super) fn open_chimp_document_pane(&mut self, kit_index: usize, package: &str) {
         let kit = &mut self.model.kits[kit_index];
         self.views[kit.id].chimp.open_document_pane(&mut kit.chimp, kit.id, package);
+    }
+
+    /// Add an open document to a kit, with its pane.
+    pub(super) fn insert_chimp_document(
+        &mut self,
+        kit_index: usize,
+        package: String,
+        document: ChimpDocument,
+        pane: ChimpDocumentUi,
+    ) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.documents.insert(package.clone(), pane);
+        kit.chimp.documents.insert(package, document);
+    }
+
+    /// Drop an open document from a kit, with its pane.
+    pub(super) fn remove_chimp_document(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.documents.remove(package);
+        kit.chimp.documents.remove(package);
+    }
+
+    /// Drop a kit's Chimp content and its view, as on a remount or when
+    /// Chimp is turned off.
+    pub(in crate::app) fn reset_chimp(&mut self, kit_index: usize) {
+        let kit = &mut self.model.kits[kit_index];
+        kit.chimp = ChimpState::default();
+        self.views[kit.id].chimp = ChimpView::default();
     }
 
     /// Close `package`'s document pane in a kit's Chimp layout.

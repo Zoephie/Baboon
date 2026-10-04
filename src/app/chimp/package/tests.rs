@@ -181,7 +181,8 @@ fn a_rebuild_refuses_orphans_bad_references_and_mistyped_values() {
 fn a_documents_text_views_describe_the_package_and_where_it_lives() {
     let install = SyntheticInstall::new();
     let document = install.document(THING);
-    let text: Value = serde_json::from_str(&document.document_text).unwrap();
+    let pane = install.pane(&document);
+    let text: Value = serde_json::from_str(&pane.document_text).unwrap();
     assert_eq!(text["Package"], THING);
     assert_eq!(text["Source"], "Meteorite/Content/Test/Thing.uasset");
     assert_eq!(text["Summary"]["Exports"], 1);
@@ -199,7 +200,7 @@ fn a_documents_text_views_describe_the_package_and_where_it_lives() {
     assert_eq!(properties["Inner"]["Depth"], 3);
     assert!(text["Exports"][0]["DecodeError"].is_null());
 
-    let metadata: Value = serde_json::from_str(&document.metadata_text).unwrap();
+    let metadata: Value = serde_json::from_str(&pane.metadata_text).unwrap();
     assert_eq!(metadata["Summary"]["Package"], THING);
     assert_eq!(metadata["Summary"]["IsUnversioned"], true);
     assert_eq!(metadata["NameMap"], json!([THING, "Thing", "Rocket"]));

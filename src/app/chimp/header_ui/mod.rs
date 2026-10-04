@@ -13,27 +13,28 @@ use super::*;
 pub(super) fn draw_chimp_header_view(
     ui: &mut Ui,
     document: &mut ChimpDocument,
+    pane: &mut ChimpDocumentUi,
     world: &World,
     expert_mode: bool,
     scan_referrers: &mut bool,
 ) -> bool {
-    if document.header_usage.is_none() {
-        refresh_chimp_header_usage(document);
+    if pane.header_usage.is_none() {
+        pane.header_usage = Some(chimp_header_usage(document));
     }
     // Collected during the draw and applied after it: the rename needs `&mut`
     // access to the very header and exports the rows are reading from.
     let mut edits = ChimpHeaderEdits::default();
-    draw_chimp_header_sections(ui, document, world, expert_mode, &mut edits);
+    draw_chimp_header_sections(ui, document, pane, world, expert_mode, &mut edits);
     // Passed out rather than started here: the scan needs the application, and
     // this call is holding a mutable borrow of one of its documents.
     *scan_referrers = edits.scan_referrers;
 
     if edits.start_identity {
-        document.header_name_edit = None;
-        document.header_import_edit = None;
-        document.header_export_edit = None;
+        pane.header_name_edit = None;
+        pane.header_import_edit = None;
+        pane.header_export_edit = None;
         let versioning = &document.header.versioning_info;
-        document.header_identity_edit = Some(ChimpIdentityEdit {
+        pane.header_identity_edit = Some(ChimpIdentityEdit {
             package_flags: format!("{:08X}", document.header.summary.package_flags),
             licensee_version: versioning.licensee_version,
             is_unversioned: document.header.is_unversioned,
@@ -41,27 +42,27 @@ pub(super) fn draw_chimp_header_view(
             file_version_ue4: versioning.package_file_version.file_version_ue4,
             file_version_ue5: versioning.package_file_version.file_version_ue5,
         });
-        document.header_error = None;
+        pane.header_error = None;
     }
     if edits.commit_identity
-        && let Some(edit) = document.header_identity_edit.take()
+        && let Some(edit) = pane.header_identity_edit.take()
     {
         match apply_chimp_identity_edit(document, &edit) {
             Ok(()) => {
-                document.header_error = None;
+                pane.header_error = None;
                 return true;
             }
             Err(error) => {
-                document.header_error = Some(error);
-                document.header_identity_edit = Some(edit);
+                pane.header_error = Some(error);
+                pane.header_identity_edit = Some(edit);
             }
         }
     }
     if let Some(index) = edits.start_export {
-        document.header_name_edit = None;
-        document.header_import_edit = None;
-        document.header_identity_edit = None;
-        document.header_export_edit =
+        pane.header_name_edit = None;
+        pane.header_import_edit = None;
+        pane.header_identity_edit = None;
+        pane.header_export_edit =
             document
                 .header
                 .export_map
@@ -78,61 +79,61 @@ pub(super) fn draw_chimp_header_view(
                     filter_flags: entry.filter_flags,
                     recompute_hash: false,
                 });
-        document.header_error = None;
+        pane.header_error = None;
     }
     if edits.commit_export
-        && let Some(edit) = document.header_export_edit.take()
+        && let Some(edit) = pane.header_export_edit.take()
     {
         match apply_chimp_export_edit(world, document, &edit) {
             Ok(()) => {
-                document.header_error = None;
+                pane.header_error = None;
                 return true;
             }
             Err(error) => {
-                document.header_error = Some(error);
-                document.header_export_edit = Some(edit);
+                pane.header_error = Some(error);
+                pane.header_export_edit = Some(edit);
             }
         }
     }
     if let Some((index, text)) = edits.start_name {
-        document.header_import_edit = None;
-        document.header_name_edit = Some(ChimpNameEdit {
+        pane.header_import_edit = None;
+        pane.header_name_edit = Some(ChimpNameEdit {
             index,
             text,
             focus: true,
         });
-        document.header_error = None;
+        pane.header_error = None;
     }
     if let Some((slot, current)) = edits.start_import {
-        document.header_name_edit = None;
-        document.header_import_edit = Some(chimp_import_edit_for(slot, &current, world));
-        document.header_error = None;
+        pane.header_name_edit = None;
+        pane.header_import_edit = Some(chimp_import_edit_for(slot, &current, world));
+        pane.header_error = None;
     }
     if edits.cancel {
-        document.header_name_edit = None;
-        document.header_import_edit = None;
-        document.header_export_edit = None;
-        document.header_identity_edit = None;
-        document.header_error = None;
+        pane.header_name_edit = None;
+        pane.header_import_edit = None;
+        pane.header_export_edit = None;
+        pane.header_identity_edit = None;
+        pane.header_error = None;
     }
     if let Some((index, text)) = edits.commit_name {
         match apply_chimp_name_rename(document, index, &text) {
             Ok(()) => {
-                document.header_name_edit = None;
-                document.header_error = None;
+                pane.header_name_edit = None;
+                pane.header_error = None;
                 return true;
             }
-            Err(error) => document.header_error = Some(error),
+            Err(error) => pane.header_error = Some(error),
         }
     }
     if let Some((index, slot)) = edits.commit_import {
         match apply_chimp_import_slot(document, index, slot) {
             Ok(()) => {
-                document.header_import_edit = None;
-                document.header_error = None;
+                pane.header_import_edit = None;
+                pane.header_error = None;
                 return true;
             }
-            Err(error) => document.header_error = Some(error),
+            Err(error) => pane.header_error = Some(error),
         }
     }
     false
@@ -157,6 +158,7 @@ struct ChimpHeaderEdits {
 fn draw_chimp_header_sections(
     ui: &mut Ui,
     document: &mut ChimpDocument,
+    pane: &mut ChimpDocumentUi,
     world: &World,
     expert_mode: bool,
     edits: &mut ChimpHeaderEdits,
@@ -173,7 +175,7 @@ fn draw_chimp_header_sections(
         scan_referrers,
         cancel,
     } = edits;
-    let usage = document
+    let usage = pane
         .header_usage
         .as_ref()
         .expect("refreshed by the caller");
@@ -186,17 +188,17 @@ fn draw_chimp_header_sections(
             egui::CollapsingHeader::new("Identity")
                 .default_open(true)
                 .show(ui, |ui| {
-                    if let Some(mut edit) = document.header_identity_edit.take() {
+                    if let Some(mut edit) = pane.header_identity_edit.take() {
                         draw_chimp_identity_panel(
                             ui,
                             &mut edit,
                             expert_mode,
-                            document.header_error.as_deref(),
+                            pane.header_error.as_deref(),
                             commit_identity,
                             cancel,
                         );
                         ui.add_space(4.0);
-                        document.header_identity_edit = Some(edit);
+                        pane.header_identity_edit = Some(edit);
                     } else if ui.button("Edit flags and versioning...").clicked() {
                         *start_identity = true;
                     }
@@ -235,7 +237,7 @@ fn draw_chimp_header_sections(
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Filter").color(subtle_dark()).small());
                         ui.add(
-                            egui::TextEdit::singleline(&mut document.header_name_filter)
+                            egui::TextEdit::singleline(&mut pane.header_name_filter)
                                 .desired_width(240.0)
                                 .hint_text(placeholder_text("substring")),
                         );
@@ -246,7 +248,7 @@ fn draw_chimp_header_sections(
                     // Taken out rather than borrowed in place: the panel reads
                     // the rest of the document (to price the edit) while it
                     // writes the draft, and those cannot be the same borrow.
-                    if let Some(mut edit) = document.header_name_edit.take() {
+                    if let Some(mut edit) = pane.header_name_edit.take() {
                         let current = names.get(edit.index).cloned().unwrap_or_default();
                         let entry_usage = usage.names.get(edit.index).cloned().unwrap_or_default();
                         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -309,7 +311,7 @@ fn draw_chimp_header_sections(
                                 );
                             }
 
-                            if let Some(error) = document.header_error.as_deref() {
+                            if let Some(error) = pane.header_error.as_deref() {
                                 ui.label(
                                     RichText::new(error)
                                         .color(Color32::from_rgb(150, 56, 44))
@@ -326,10 +328,10 @@ fn draw_chimp_header_sections(
                             });
                         });
                         ui.add_space(4.0);
-                        document.header_name_edit = Some(edit);
+                        pane.header_name_edit = Some(edit);
                     }
 
-                    let filter = document.header_name_filter.trim().to_ascii_lowercase();
+                    let filter = pane.header_name_filter.trim().to_ascii_lowercase();
                     let rows: Vec<usize> = names
                         .iter()
                         .enumerate()
@@ -403,17 +405,17 @@ fn draw_chimp_header_sections(
                 .default_open(true)
                 .show(ui, |ui| match &slots {
                     Ok(slots) => {
-                        if let Some(mut edit) = document.header_import_edit.take() {
+                        if let Some(mut edit) = pane.header_import_edit.take() {
                             draw_chimp_import_editor(
                                 ui,
                                 &mut edit,
                                 world,
-                                document.header_error.as_deref(),
+                                pane.header_error.as_deref(),
                                 commit_import,
                                 cancel,
                             );
                             ui.add_space(4.0);
-                            document.header_import_edit = Some(edit);
+                            pane.header_import_edit = Some(edit);
                         }
                         // Virtualised like the name map: a level package imports
                         // thousands of slots, each resolved against the world.
@@ -495,18 +497,18 @@ fn draw_chimp_header_sections(
             egui::CollapsingHeader::new(format!("Export map ({})", header.export_map.len()))
                 .default_open(false)
                 .show(ui, |ui| {
-                    if let Some(mut edit) = document.header_export_edit.take() {
+                    if let Some(mut edit) = pane.header_export_edit.take() {
                         draw_chimp_export_edit_panel(
                             ui,
                             &mut edit,
                             header,
                             expert_mode,
-                            document.header_error.as_deref(),
+                            pane.header_error.as_deref(),
                             commit_export,
                             cancel,
                         );
                         ui.add_space(4.0);
-                        document.header_export_edit = Some(edit);
+                        pane.header_export_edit = Some(edit);
                     }
                     let row_height = ui.spacing().interact_size.y;
                     egui::ScrollArea::vertical()
@@ -574,7 +576,7 @@ fn draw_chimp_header_sections(
             // cannot be answered from this package alone.
             egui::CollapsingHeader::new("Referenced by")
                 .default_open(false)
-                .show(ui, |ui| match &document.referrers {
+                .show(ui, |ui| match &pane.referrers {
                     ChimpReferrerState::Idle => {
                         ui.label(
                             RichText::new(

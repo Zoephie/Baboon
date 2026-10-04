@@ -205,14 +205,15 @@ fn opening_a_package_decodes_it_into_a_clean_focused_pane() {
     assert!(!document.dirty);
     assert_eq!(document.edits, 0);
     assert_eq!(document.checkpoint_due, None);
-    assert_eq!(document.view, ChimpDocumentView::Document);
-    assert_eq!(document.selected_export, 0);
-    assert!(document.texture_previews.is_empty());
     assert!(document.mesh_kind.is_none());
     assert_eq!(document.original, install.world.read_package(THING).unwrap());
-    assert!(!document.document_text_dirty && !document.metadata_text_dirty);
-    assert!(document.document_text.contains("Warthog"));
-    assert!(document.metadata_text.contains("pakchunk0-Windows.utoc"));
+    let pane = app.chimp_pane(0, THING);
+    assert_eq!(pane.view, ChimpDocumentView::Document);
+    assert_eq!(pane.selected_export, 0);
+    assert!(pane.texture_previews.is_empty());
+    assert!(!pane.document_text_dirty && !pane.metadata_text_dirty);
+    assert!(pane.document_text.contains("Warthog"));
+    assert!(pane.metadata_text.contains("pakchunk0-Windows.utoc"));
     assert_eq!(int(document, "Count"), 7);
     assert_eq!(app.chimp_activity(0), "mounted");
 
@@ -532,12 +533,7 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING, OTHER]);
     edit_count(&mut app, THING, 42);
-    app.model.kits[0]
-        .chimp
-        .documents
-        .get_mut(THING)
-        .unwrap()
-        .view = ChimpDocumentView::Properties;
+    app.chimp_pane_mut(0, THING).view = ChimpDocumentView::Properties;
     app.flush_all_chimp_checkpoints();
     let directory = app.model.chimp_recovery_dir(0).unwrap();
     assert!(directory.join("manifest.json").exists());
@@ -552,7 +548,7 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
     assert!(!document.dirty);
     assert_eq!(document.edits, 0);
     assert_eq!(int(document, "Count"), 7);
-    assert_eq!(document.view, ChimpDocumentView::Properties);
+    assert_eq!(app.chimp_pane(0, THING).view, ChimpDocumentView::Properties);
     assert!(!directory.exists());
     assert!(app.model.chimp_dirty_packages(0).is_empty());
     assert_eq!(app.discard_chimp_packages(0, &[THING.to_owned()]), Ok(0));
@@ -619,11 +615,11 @@ fn a_referrer_scan_finds_the_packages_that_import_the_target() {
     let mut app = install.app_with_open(&[THING, OTHER]);
     app.begin_chimp_referrer_scan(0, OTHER.to_owned(), egui::Context::default());
     assert!(matches!(
-        app.model.kits[0].chimp.documents[OTHER].referrers,
+        app.chimp_pane(0, OTHER).referrers,
         ChimpReferrerState::Scanning
     ));
     assert!(apply_next_worker_message(&mut app));
-    let ChimpReferrerState::Done(scan) = &app.model.kits[0].chimp.documents[OTHER].referrers else {
+    let ChimpReferrerState::Done(scan) = &app.chimp_pane(0, OTHER).referrers else {
         panic!("the scan settled");
     };
     assert_eq!(scan.referrers, [THING]);
@@ -631,7 +627,7 @@ fn a_referrer_scan_finds_the_packages_that_import_the_target() {
 
     app.begin_chimp_referrer_scan(0, THING.to_owned(), egui::Context::default());
     assert!(apply_next_worker_message(&mut app));
-    let ChimpReferrerState::Done(scan) = &app.model.kits[0].chimp.documents[THING].referrers else {
+    let ChimpReferrerState::Done(scan) = &app.chimp_pane(0, THING).referrers else {
         panic!("the scan settled");
     };
     assert!(scan.referrers.is_empty());

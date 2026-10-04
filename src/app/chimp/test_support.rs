@@ -103,27 +103,8 @@ pub(super) fn rename_fixture() -> ChimpDocument {
                 tail: Vec::new(),
             }),
         }],
-        texture_previews: Vec::new(),
         mesh_kind: None,
-        mesh_preview: None,
-        mesh_preview_state: Default::default(),
-        selected_export: 0,
         dirty: false,
-        view: ChimpDocumentView::Header,
-        document_text: String::new(),
-        document_lines: ChimpJsonLines::default(),
-        document_text_dirty: false,
-        metadata_text: String::new(),
-        metadata_lines: ChimpJsonLines::default(),
-        metadata_text_dirty: false,
-        header_usage: None,
-        header_name_filter: String::new(),
-        header_name_edit: None,
-        header_import_edit: None,
-        header_export_edit: None,
-        header_identity_edit: None,
-        header_error: None,
-        referrers: ChimpReferrerState::Idle,
         orphaned: false,
         checkpoint_due: None,
         edits: 0,
@@ -481,19 +462,35 @@ impl SyntheticInstall {
         load_chimp_document(&self.world, package).expect("the synthetic package decodes")
     }
 
+    /// The pane `document` opens in.
+    pub(super) fn pane(&self, document: &ChimpDocument) -> ChimpDocumentUi {
+        ChimpDocumentUi::new(&self.world, document)
+    }
+
     /// A test app whose kit 0 is this install, mounted, with `packages` open.
     pub(super) fn app_with_open(&self, packages: &[&str]) -> Baboon {
         let mut app = Baboon::for_test();
         app.model.kits[0].source = Some(self.source());
         app.model.kits[0].chimp.mount = ChimpMount::Ready(self.world.clone());
         for package in packages {
-            app.model.kits[0]
-                .chimp
-                .documents
-                .insert((*package).to_owned(), self.document(package));
+            let document = self.document(package);
+            let pane = self.pane(&document);
+            app.insert_chimp_document(0, (*package).to_owned(), document, pane);
             app.open_chimp_document_pane(0, package);
         }
         app
+    }
+}
+
+impl Baboon {
+    /// The pane `package` is open in on kit `kit_index`.
+    pub(super) fn chimp_pane(&self, kit_index: usize, package: &str) -> &ChimpDocumentUi {
+        &self.views[self.model.kits[kit_index].id].chimp.documents[package]
+    }
+
+    pub(super) fn chimp_pane_mut(&mut self, kit_index: usize, package: &str) -> &mut ChimpDocumentUi {
+        let id = self.model.kits[kit_index].id;
+        self.views[id].chimp.documents.get_mut(package).unwrap()
     }
 }
 

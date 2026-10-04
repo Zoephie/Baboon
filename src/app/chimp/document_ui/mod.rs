@@ -86,11 +86,11 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         if button_response.middle_clicked() {
             self.close_requests.push(package.clone());
         }
-        let has_texture = self.app.model.kits[self.kit_index]
+        let has_texture = self.app.views[self.app.model.kits[self.kit_index].id]
             .chimp
             .documents
             .get(&package)
-            .is_some_and(|document| !document.texture_previews.is_empty());
+            .is_some_and(|pane| !pane.texture_previews.is_empty());
         let has_mesh = self.app.model.kits[self.kit_index]
             .chimp
             .documents
@@ -316,11 +316,11 @@ impl Baboon {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
         };
-        let document = self.model.kits[kit_index]
-            .chimp
-            .documents
-            .get_mut(&package)
-            .expect("checked above");
+        let kit = &mut self.model.kits[kit_index];
+        let document = kit.chimp.documents.get_mut(&package).expect("checked above");
+        let Some(pane) = self.views[kit.id].chimp.documents.get_mut(&package) else {
+            return;
+        };
         let container = chimp_document_container_label(document, world.containers());
         ui.label(
             RichText::new(format!(
@@ -342,54 +342,54 @@ impl Baboon {
             );
         }
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut document.view, ChimpDocumentView::Document, "Document")
+            ui.selectable_value(&mut pane.view, ChimpDocumentView::Document, "Document")
                 .on_hover_text("Readable JSON representation of the complete decoded package");
-            if !document.texture_previews.is_empty() {
-                ui.selectable_value(&mut document.view, ChimpDocumentView::Texture, "Texture")
+            if !pane.texture_previews.is_empty() {
+                ui.selectable_value(&mut pane.view, ChimpDocumentView::Texture, "Texture")
                     .on_hover_text("Decoded Texture2D image preview");
             }
             if document.mesh_kind.is_some() {
-                ui.selectable_value(&mut document.view, ChimpDocumentView::Mesh, "Mesh")
+                ui.selectable_value(&mut pane.view, ChimpDocumentView::Mesh, "Mesh")
                     .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
             }
             ui.selectable_value(
-                &mut document.view,
+                &mut pane.view,
                 ChimpDocumentView::Properties,
                 "Properties",
             )
             .on_hover_text("Inspect exports and edit supported reflected scalar properties");
-            ui.selectable_value(&mut document.view, ChimpDocumentView::Header, "Header")
+            ui.selectable_value(&mut pane.view, ChimpDocumentView::Header, "Header")
                 .on_hover_text("The package's name map, imports and exports, and what uses each");
-            ui.selectable_value(&mut document.view, ChimpDocumentView::Metadata, "Metadata")
+            ui.selectable_value(&mut pane.view, ChimpDocumentView::Metadata, "Metadata")
                 .on_hover_text("Package dependencies and physical archive providers");
         });
         ui.separator();
 
-        let changed = match document.view {
+        let changed = match pane.view {
             ChimpDocumentView::Document => {
-                if document.document_text_dirty {
-                    refresh_chimp_document_text(document);
+                if pane.document_text_dirty {
+                    refresh_chimp_document_text(document, pane);
                 }
                 draw_chimp_json_document(
                     ui,
                     ("chimp_document_text", scope.to_owned(), package.clone()),
                     "Decoded Unreal package document",
                     "Copy JSON",
-                    &document.document_text,
-                    &mut document.document_lines,
+                    &pane.document_text,
+                    &mut pane.document_lines,
                 );
                 false
             }
             ChimpDocumentView::Texture => {
-                draw_chimp_texture_preview(ui, document, &mut self.model.prefs.bitmap_preview_view);
+                draw_chimp_texture_preview(ui, document, pane, &mut self.model.prefs.bitmap_preview_view);
                 false
             }
             ChimpDocumentView::Mesh => {
-                match document.mesh_preview.as_ref() {
+                match pane.mesh_preview.as_ref() {
                     Some(Ok(preview)) => model_preview::draw_standalone_mesh_preview(
                         ui,
                         preview,
-                        &mut document.mesh_preview_state,
+                        &mut pane.mesh_preview_state,
                     ),
                     Some(Err(error)) => {
                         ui.colored_label(Color32::from_rgb(150, 56, 44), error);
@@ -416,35 +416,35 @@ impl Baboon {
                             let label =
                                 format!("{}  {}", if supported { "●" } else { "○" }, export.object);
                             if ui
-                                .selectable_label(document.selected_export == index, label)
+                                .selectable_label(pane.selected_export == index, label)
                                 .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
                                 .clicked()
                             {
-                                document.selected_export = index;
+                                pane.selected_export = index;
                             }
                         }
                     });
                 });
                 egui::CentralPanel::default()
                     .show(ui, |ui| {
-                        draw_chimp_export_editor(ui, document, world.usmap())
+                        draw_chimp_export_editor(ui, document, pane, world.usmap())
                     })
                     .inner
             }
             ChimpDocumentView::Header => {
-                draw_chimp_header_view(ui, document, &world, expert, &mut scan_referrers)
+                draw_chimp_header_view(ui, document, pane, &world, expert, &mut scan_referrers)
             }
             ChimpDocumentView::Metadata => {
-                if document.metadata_text_dirty {
-                    refresh_chimp_metadata_text(document, &world);
+                if pane.metadata_text_dirty {
+                    refresh_chimp_metadata_text(document, pane, &world);
                 }
                 draw_chimp_json_document(
                     ui,
                     ("chimp_metadata_text", scope.to_owned(), package.clone()),
                     "Decoded package metadata",
                     "Copy metadata JSON",
-                    &document.metadata_text,
-                    &mut document.metadata_lines,
+                    &pane.metadata_text,
+                    &mut pane.metadata_lines,
                 );
                 false
             }
@@ -452,11 +452,11 @@ impl Baboon {
         if changed {
             document.dirty = true;
             document.edits += 1;
-            document.document_text_dirty = true;
-            document.metadata_text_dirty = true;
+            pane.document_text_dirty = true;
+            pane.metadata_text_dirty = true;
             // Reference counts are derived from the same header the metadata
             // text is, so they go stale at exactly the same moment.
-            document.header_usage = None;
+            pane.header_usage = None;
             document.checkpoint_due = Some(ui.input(|input| input.time) + CHIMP_CHECKPOINT_DELAY);
         }
         if scan_referrers {
@@ -487,10 +487,11 @@ fn chimp_document_container_label(
 
 fn draw_chimp_texture_preview(
     ui: &mut Ui,
-    document: &mut ChimpDocument,
+    document: &ChimpDocument,
+    pane: &mut ChimpDocumentUi,
     view_settings: &mut BitmapPreviewViewSettings,
 ) {
-    let options: Vec<(usize, String)> = document
+    let options: Vec<(usize, String)> = pane
         .texture_previews
         .iter()
         .map(|preview| {
@@ -506,9 +507,9 @@ fn draw_chimp_texture_preview(
         .collect();
     let mut selected_export = if options
         .iter()
-        .any(|(index, _)| *index == document.selected_export)
+        .any(|(index, _)| *index == pane.selected_export)
     {
-        document.selected_export
+        pane.selected_export
     } else {
         options.first().map(|(index, _)| *index).unwrap_or(0)
     };
@@ -526,8 +527,8 @@ fn draw_chimp_texture_preview(
                 }
             });
     }
-    document.selected_export = selected_export;
-    let Some(preview) = document
+    pane.selected_export = selected_export;
+    let Some(preview) = pane
         .texture_previews
         .iter_mut()
         .find(|preview| preview.export_index == selected_export)

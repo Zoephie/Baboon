@@ -651,8 +651,8 @@ pub(super) fn chimp_export_hash_desyncs(
         .collect()
 }
 
-/// Recompute who references each name-map entry and each import slot.
-pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument) {
+/// Who references each name-map entry and each import slot.
+pub(super) fn chimp_header_usage(document: &mut ChimpDocument) -> ChimpHeaderUsage {
     let mut names = vec![ChimpNameUsage::default(); document.header.name_map.len()];
     let mut record = |mapped: FMappedName, site: &str| {
         if let Some(usage) = names.get_mut(mapped.index() as usize) {
@@ -706,10 +706,10 @@ pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument) {
         }
     }
 
-    document.header_usage = Some(ChimpHeaderUsage {
+    ChimpHeaderUsage {
         names,
         import_references,
-    });
+    }
 }
 
 pub(super) fn validate_chimp_property_block(

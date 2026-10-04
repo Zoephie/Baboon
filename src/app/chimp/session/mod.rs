@@ -68,7 +68,7 @@ impl Baboon {
             })
             .collect();
         for &index in &remount {
-            self.model.kits[index].chimp = ChimpState::default();
+            self.reset_chimp(index);
             self.begin_chimp_mount(index, ctx.clone());
         }
         self.model.status = match &self.model.prefs.chimp_usmap_path {
@@ -390,6 +390,9 @@ impl Baboon {
                     continue;
                 }
             };
+            // Before the baseline is swapped back: the pane previews the
+            // recovered edit, not the shipped package.
+            let pane = ChimpDocumentUi::new(world, &document);
             // The recovery file contains the edited view of the package. Keep
             // the mounted source bytes as the discard baseline so a restored
             // edit can still be returned to the actual shipped package.
@@ -402,10 +405,7 @@ impl Baboon {
             };
             document.original = source_bytes;
             document.dirty = true;
-            self.model.kits[kit_index]
-                .chimp
-                .documents
-                .insert(package.clone(), document);
+            self.insert_chimp_document(kit_index, package.clone(), document, pane);
             self.open_chimp_document_pane(kit_index, &package);
             restored += 1;
         }
@@ -612,23 +612,24 @@ impl Baboon {
             if !document.dirty {
                 continue;
             }
-            let selected_export = document.selected_export;
-            let view = document.view;
-            let mut replacement = load_chimp_document(&world, package)
+            let shown = self.views[self.model.kits[kit_index].id]
+                .chimp
+                .documents
+                .get(package)
+                .map(|pane| (pane.selected_export, pane.view));
+            let (replacement, mut pane) = load_chimp_document_with_pane(&world, package)
                 .map_err(|error| format!("Could not restore {package}: {error}"))?;
-            replacement.selected_export =
-                selected_export.min(replacement.exports.len().saturating_sub(1));
-            replacement.view = view;
-            restored.push((package.clone(), replacement));
+            if let Some((selected_export, view)) = shown {
+                pane.selected_export = selected_export.min(replacement.exports.len().saturating_sub(1));
+                pane.view = view;
+            }
+            restored.push((package.clone(), replacement, pane));
         }
 
         self.clear_chimp_recovery_packages(kit_index, packages)?;
         let restored_count = restored.len();
-        for (package, document) in restored {
-            self.model.kits[kit_index]
-                .chimp
-                .documents
-                .insert(package, document);
+        for (package, document, pane) in restored {
+            self.insert_chimp_document(kit_index, package, document, pane);
         }
         Ok(restored_count)
     }
@@ -665,7 +666,7 @@ impl Baboon {
             &ctx,
             move || WorkerMessage::ChimpPackageLoaded {
                 stamp,
-                result: load_chimp_document(&world, &package),
+                result: load_chimp_document_with_pane(&world, &package),
                 package,
             },
             move |error| WorkerMessage::ChimpPackageLoaded {
@@ -691,13 +692,13 @@ impl Baboon {
             return;
         };
         let world = world.clone();
-        let Some(document) = self.model.kits[kit_index].chimp.documents.get_mut(&package) else {
+        let Some(pane) = self.views[self.model.kits[kit_index].id].chimp.documents.get_mut(&package) else {
             return;
         };
-        if matches!(document.referrers, ChimpReferrerState::Scanning) {
+        if matches!(pane.referrers, ChimpReferrerState::Scanning) {
             return;
         }
-        document.referrers = ChimpReferrerState::Scanning;
+        pane.referrers = ChimpReferrerState::Scanning;
         let stamp = KitStamp {
             kit: self.model.kits[kit_index].id,
             generation: self.model.kits[kit_index].generation,
@@ -737,8 +738,8 @@ impl Baboon {
                 ChimpReferrerState::Idle
             }
         };
-        if let Some(document) = self.model.kits[index].chimp.documents.get_mut(&package) {
-            document.referrers = state;
+        if let Some(pane) = self.views[self.model.kits[index].id].chimp.documents.get_mut(&package) {
+            pane.referrers = state;
         }
         false
     }
@@ -747,18 +748,15 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         package: String,
-        result: Result<ChimpDocument, String>,
+        result: Result<(ChimpDocument, ChimpDocumentUi), String>,
     ) -> bool {
         let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.model.kits[index].chimp.loading_packages.remove(&package);
         match result {
-            Ok(document) => {
-                self.model.kits[index]
-                    .chimp
-                    .documents
-                    .insert(package.clone(), document);
+            Ok((document, pane)) => {
+                self.insert_chimp_document(index, package.clone(), document, pane);
                 self.open_chimp_document_pane(index, &package);
             }
             Err(error) => self.model.status = error,
@@ -789,7 +787,7 @@ impl Baboon {
             return false;
         }
         self.close_chimp_document_pane(kit_index, package);
-        self.model.kits[kit_index].chimp.documents.remove(package);
+        self.remove_chimp_document(kit_index, package);
         true
     }
 }

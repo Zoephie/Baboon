@@ -215,6 +215,7 @@ fn typing_an_fname_interns_one_name_on_commit() {
 struct Editor {
     install: SyntheticInstall,
     document: ChimpDocument,
+    pane: ChimpDocumentUi,
     usmap: Usmap,
     changed: bool,
     frames: Frames,
@@ -224,9 +225,11 @@ impl Editor {
     fn new() -> Self {
         let install = SyntheticInstall::new();
         let document = install.document(THING);
+        let pane = install.pane(&document);
         Self {
             install,
             document,
+            pane,
             usmap: synthetic_usmap(),
             changed: false,
             frames: Frames::new(),
@@ -238,6 +241,7 @@ impl Editor {
     fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&mut egui::Ui))) -> bool {
         let Self {
             document,
+            pane,
             usmap,
             changed,
             frames,
@@ -245,7 +249,7 @@ impl Editor {
         } = self;
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                *changed |= draw_chimp_export_editor(ui, document, usmap);
+                *changed |= draw_chimp_export_editor(ui, document, pane, usmap);
             });
         };
         act(frames, &mut draw);

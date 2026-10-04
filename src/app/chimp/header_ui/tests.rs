@@ -52,6 +52,7 @@ fn the_named_object_flag_bits_match_the_engine_values() {
 struct Header {
     install: SyntheticInstall,
     document: ChimpDocument,
+    pane: ChimpDocumentUi,
     expert: bool,
     changed: bool,
     scan: bool,
@@ -62,9 +63,11 @@ impl Header {
     fn new() -> Self {
         let install = SyntheticInstall::new();
         let document = install.document(THING);
+        let pane = install.pane(&document);
         let mut header = Self {
             install,
             document,
+            pane,
             expert: false,
             changed: false,
             scan: false,
@@ -81,6 +84,7 @@ impl Header {
         let Self {
             install,
             document,
+            pane,
             expert,
             changed,
             scan,
@@ -90,7 +94,7 @@ impl Header {
         let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut asked = false;
-                *changed |= draw_chimp_header_view(ui, document, &world, *expert, &mut asked);
+                *changed |= draw_chimp_header_view(ui, document, pane, &world, *expert, &mut asked);
                 *scan |= asked;
             });
         };
@@ -113,7 +117,7 @@ impl Header {
 #[test]
 fn the_header_view_lists_names_imports_and_usage() {
     let header = Header::new();
-    let usage = header.document.header_usage.as_ref().expect("refreshed");
+    let usage = header.pane.header_usage.as_ref().expect("refreshed");
     assert_eq!(
         usage
             .names
@@ -148,7 +152,7 @@ fn the_header_view_lists_names_imports_and_usage() {
 fn renaming_a_name_entry_retargets_every_reference() {
     let mut header = Header::new();
     assert!(!header.act(|frames, draw| frames.click_exact("Rocket", 0, draw)));
-    let edit = header.document.header_name_edit.as_ref().expect("editing");
+    let edit = header.pane.header_name_edit.as_ref().expect("editing");
     assert_eq!((edit.index, edit.text.as_str()), (2, "Rocket"));
     assert!(header.shows("Editing entry 2 · Rocket"));
     assert!(header.shows("1 reference will follow this rename:"));
@@ -158,7 +162,7 @@ fn renaming_a_name_entry_retargets_every_reference() {
         frames.replace_text("Comet", draw);
         frames.key(egui::Key::Enter, egui::Modifiers::NONE, draw);
     }));
-    assert!(header.document.header_name_edit.is_none());
+    assert!(header.pane.header_name_edit.is_none());
     assert_eq!(header.document.header.name_map.names()[2], "Comet");
     assert!(matches!(
         first_value(&header.document, "Tag"),
@@ -172,7 +176,7 @@ fn the_package_name_entry_is_not_editable() {
     let mut header = Header::new();
     // The identity grid shows it first; the name-map row second.
     assert!(!header.act(|frames, draw| frames.click_exact(THING, 1, draw)));
-    assert!(header.document.header_name_edit.is_none());
+    assert!(header.pane.header_name_edit.is_none());
 }
 
 /// Flags and versioning are drafted, applied only if the package reads
@@ -181,32 +185,32 @@ fn the_package_name_entry_is_not_editable() {
 fn identity_edits_apply_and_refuse_bad_flags() {
     let mut header = Header::new();
     assert!(!header.click("Edit flags and versioning..."));
-    let edit = header.document.header_identity_edit.as_ref().expect("drafting");
+    let edit = header.pane.header_identity_edit.as_ref().expect("drafting");
     assert_eq!(edit.package_flags, "00000000");
     assert!(header.shows("Versioning fields are Expert mode only"));
     assert!(!header.click("0x80002200"));
     assert_eq!(
-        header.document.header_identity_edit.as_ref().unwrap().package_flags,
+        header.pane.header_identity_edit.as_ref().unwrap().package_flags,
         "80002200"
     );
     assert!(header.act(|frames, draw| frames.click_exact("Apply", 0, draw)));
     assert_eq!(header.document.header.summary.package_flags, 0x8000_2200);
-    assert!(header.document.header_identity_edit.is_none());
+    assert!(header.pane.header_identity_edit.is_none());
 
     header.click("Edit flags and versioning...");
-    header.document.header_identity_edit.as_mut().unwrap().package_flags = "zz".to_owned();
+    header.pane.header_identity_edit.as_mut().unwrap().package_flags = "zz".to_owned();
     assert!(!header.act(|frames, draw| frames.click_exact("Apply", 0, draw)));
     assert_eq!(
-        header.document.header_error.as_deref(),
+        header.pane.header_error.as_deref(),
         Some("\"zz\" is not a 32-bit hex value")
     );
-    assert!(header.document.header_identity_edit.is_some(), "the draft is kept");
+    assert!(header.pane.header_identity_edit.is_some(), "the draft is kept");
     assert!(header.shows("\"zz\" is not a 32-bit hex value"));
     assert_eq!(header.document.header.summary.package_flags, 0x8000_2200);
 
     header.act(|frames, draw| frames.click_exact("Cancel", 0, draw));
-    assert!(header.document.header_identity_edit.is_none());
-    assert!(header.document.header_error.is_none());
+    assert!(header.pane.header_identity_edit.is_none());
+    assert!(header.pane.header_error.is_none());
 }
 
 /// Expert mode exposes the versioning fields themselves.
@@ -228,25 +232,25 @@ fn an_import_slot_is_added_from_a_listed_export() {
     let mut header = Header::new();
     assert!(!header.click("+ Add import slot"));
     {
-        let edit = header.document.header_import_edit.as_mut().expect("drafting");
+        let edit = header.pane.header_import_edit.as_mut().expect("drafting");
         assert_eq!(edit.slot, 2);
         assert!(edit.kind == ChimpImportKind::Null);
         edit.kind = ChimpImportKind::Package;
         edit.package_path = OTHER.to_owned();
     }
     header.click("List exports");
-    let edit = header.document.header_import_edit.as_ref().unwrap();
+    let edit = header.pane.header_import_edit.as_ref().unwrap();
     assert_eq!(
         edit.resolved.as_ref().unwrap().as_ref().unwrap(),
         &[("OtherThing".to_owned(), public_export_hash("OtherThing"))]
     );
     header.act(|frames, draw| frames.click_exact("OtherThing", 0, draw));
     assert_eq!(
-        header.document.header_import_edit.as_ref().unwrap().object_name,
+        header.pane.header_import_edit.as_ref().unwrap().object_name,
         "OtherThing"
     );
     assert!(header.act(|frames, draw| frames.click_exact("Apply", 0, draw)));
-    assert!(header.document.header_import_edit.is_none());
+    assert!(header.pane.header_import_edit.is_none());
     let slots = read_import_slots(&header.document.header).unwrap();
     assert_eq!(slots.len(), 3);
     assert_eq!(
@@ -265,7 +269,7 @@ fn an_import_slot_is_added_from_a_listed_export() {
 fn retargeting_an_import_slot_starts_from_what_is_there() {
     let mut header = Header::new();
     header.click("/Game/Test/Other#");
-    let edit = header.document.header_import_edit.as_ref().expect("drafting");
+    let edit = header.pane.header_import_edit.as_ref().expect("drafting");
     assert_eq!(edit.slot, 0);
     assert!(edit.kind == ChimpImportKind::Package);
     assert_eq!(edit.package_path, OTHER);
@@ -284,11 +288,11 @@ fn an_export_edit_renames_and_reflags_keeping_unsaved_values() {
     assert!(header.shows("flags 0x0000000B"));
     // The name map lists "Thing" first; the export row second.
     header.act(|frames, draw| frames.click_exact("Thing", 1, draw));
-    let edit = header.document.header_export_edit.as_ref().expect("drafting");
+    let edit = header.pane.header_export_edit.as_ref().expect("drafting");
     assert_eq!((edit.index, edit.object_name.as_str(), edit.object_flags), (0, "Thing", 0xb));
     assert!(!header.click("ClassDefaultObject"));
-    assert_eq!(header.document.header_export_edit.as_ref().unwrap().object_flags, 0x1b);
-    header.document.header_export_edit.as_mut().unwrap().object_name = "Thing2".to_owned();
+    assert_eq!(header.pane.header_export_edit.as_ref().unwrap().object_flags, 0x1b);
+    header.pane.header_export_edit.as_mut().unwrap().object_name = "Thing2".to_owned();
     header.act(|frames, draw| {
         frames.frame(Vec::new(), draw);
     });
@@ -318,7 +322,7 @@ fn the_referrer_section_asks_for_a_scan_and_reports_it() {
     header.click("Find packages that import this");
     assert!(header.scan, "the scan is asked of the caller");
 
-    header.document.referrers = ChimpReferrerState::Done(ChimpReferrerScan {
+    header.pane.referrers = ChimpReferrerState::Done(ChimpReferrerScan {
         referrers: vec![OTHER.to_owned()],
         scanned: 1,
         unreadable: 0,
@@ -329,7 +333,7 @@ fn the_referrer_section_asks_for_a_scan_and_reports_it() {
     assert!(header.shows("1 package of 1 imports this"));
     assert!(header.shows(OTHER));
 
-    header.document.referrers = ChimpReferrerState::Done(ChimpReferrerScan {
+    header.pane.referrers = ChimpReferrerState::Done(ChimpReferrerScan {
         referrers: Vec::new(),
         scanned: 3,
         unreadable: 2,

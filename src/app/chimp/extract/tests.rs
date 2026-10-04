@@ -259,8 +259,8 @@ fn udim_rows_are_numbered_downward_from_the_top() {
         .map(|package| package.name.clone())
         .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
         .expect("elite minor armour normal");
-    let document = load_chimp_document(&world, &package).unwrap();
-    let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+    let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
     assert_eq!(
         (surfaces.width_in_blocks, surfaces.height_in_blocks),
         (3, 2)
@@ -327,8 +327,8 @@ fn real_udim_virtual_texture_extracts_to_numbered_dds_files() {
         .find(|name| name.to_ascii_lowercase().ends_with(&target))
         .unwrap_or_else(|| panic!("no Texture2D package ending in {target:?}"));
 
-    let document = load_chimp_document(&world, &package).unwrap();
-    let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+    let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
     assert!(surfaces.is_virtual, "{package} should be a virtual texture");
     assert!(surfaces.is_udim(), "{package} should be a UDIM set");
     // Tiles were cropped in block space, so the surface is still compressed.
@@ -427,8 +427,8 @@ fn unsplit_udim_exports_one_stitched_image() {
         .map(|package| package.name.clone())
         .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
         .expect("elite minor armour normal");
-    let document = load_chimp_document(&world, &package).unwrap();
-    let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+    let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
     assert!(surfaces.is_udim());
 
     let directory =
@@ -598,8 +598,8 @@ fn real_texture_mip_to_png() {
         .map(|package| package.name.clone())
         .find(|name| name.to_ascii_lowercase().ends_with(&target))
         .unwrap_or_else(|| panic!("no package ending in {target:?}"));
-    let document = load_chimp_document(&world, &package).unwrap();
-    let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+    let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
     let data = chimp_texture_mip_data(surfaces, 0, level).unwrap();
     println!(
         "{package}: {}x{} {} ({})",
@@ -648,15 +648,15 @@ fn real_meshes_preview_and_extract_to_jms_and_actorx() {
         let package = candidates
             .into_iter()
             .find_map(|package| {
-                let document = load_chimp_document(&world, &package.name).ok()?;
-                document.mesh_preview.as_ref()?.as_ref().ok()?;
+                let (_, pane) = load_chimp_document_with_pane(&world, &package.name).ok()?;
+                pane.mesh_preview.as_ref()?.as_ref().ok()?;
                 Some(package.name.clone())
             })
             .unwrap_or_else(|| panic!("no decodable {type_name} package"));
-        let document = load_chimp_document(&world, &package).unwrap();
-        assert_eq!(document.view, ChimpDocumentView::Mesh);
+        let (document, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        assert_eq!(pane.view, ChimpDocumentView::Mesh);
         assert_eq!(document.mesh_kind, Some(expected_kind));
-        let preview = document.mesh_preview.as_ref().unwrap().as_ref().unwrap();
+        let preview = pane.mesh_preview.as_ref().unwrap().as_ref().unwrap();
         assert!(!preview.preview.vertices.is_empty());
         assert!(!preview.preview.indices.is_empty());
         assert!(!preview.preview.batches.is_empty());
@@ -725,7 +725,7 @@ fn real_spiritdropship_nanite_export_is_complete() {
                 .contains("sm_spiritdropship_body")
         })
         .unwrap_or_else(|| panic!("SM_SpiritDropShip_Body was not found"));
-    let document = load_chimp_document(&world, &package.name).unwrap();
+    let (document, pane) = load_chimp_document_with_pane(&world, &package.name).unwrap();
     assert_eq!(document.mesh_kind, Some(ChimpMeshKind::Static));
 
     let archive = &world.archives()[document.provider.container];
@@ -775,7 +775,7 @@ fn real_spiritdropship_nanite_export_is_complete() {
         }
     }
     let converted = StaticMesh::from_nanite(&nanite);
-    let preview = document
+    let preview = pane
         .mesh_preview
         .as_ref()
         .and_then(|preview| preview.as_ref().ok())

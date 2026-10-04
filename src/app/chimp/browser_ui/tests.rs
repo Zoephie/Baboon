@@ -304,9 +304,9 @@ fn real_file_types_filter_and_texture_preview() {
         None => textures[0],
     };
     let package = world.packages()[package_index].name.clone();
-    let document = load_chimp_document(&world, &package).unwrap();
-    assert_eq!(document.view, ChimpDocumentView::Texture);
-    let decoded = document
+    let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+    assert_eq!(pane.view, ChimpDocumentView::Texture);
+    let decoded = pane
         .texture_previews
         .iter()
         .find_map(|preview| {

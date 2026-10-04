@@ -498,7 +498,10 @@ impl Baboon {
         let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
-        let index = document
+        let Some(pane) = self.views[self.model.kits[kit_index].id].chimp.documents.get(package) else {
+            return;
+        };
+        let index = pane
             .selected_export
             .min(document.payloads.len().saturating_sub(1));
         let world = match &self.model.kits[kit_index].chimp.mount {
@@ -570,11 +573,11 @@ impl Baboon {
         if !matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
-        let export_index = self.model.kits[kit_index]
+        let export_index = self.views[self.model.kits[kit_index].id]
             .chimp
             .documents
             .get(package)
-            .map(|document| document.selected_export);
+            .map(|pane| pane.selected_export);
         self.chimp.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
             kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
