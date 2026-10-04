@@ -731,6 +731,10 @@ mod shader_option_read_tests;
 #[path = "../app/tests/perf_baseline.rs"]
 mod perf_baseline;
 
+#[cfg(test)]
+#[path = "../app/tests/frame_smoke.rs"]
+mod frame_smoke;
+
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(

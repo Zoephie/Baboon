@@ -49,6 +49,19 @@ impl Baboon {
         self.open_chimp_save_dialog_with_pending(kit_index, Some(action))
     }
 
+    /// Open the save dialog without the modified packages it normally
+    /// requires, for tests that draw it.
+    #[cfg(test)]
+    pub(in crate::app) fn open_chimp_save_dialog_for_test(&mut self, kit_index: usize) {
+        self.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+            mode: ChimpSaveMode::ExportMod,
+            name: "ChimpMod".to_owned(),
+            folder: PathBuf::from("/no/such/Paks"),
+            overwrite_acknowledged: false,
+            pending_close_action: None,
+        });
+    }
+
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
         self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
     }

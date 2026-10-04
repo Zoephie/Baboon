@@ -109,7 +109,7 @@ impl Counters {
 // Harness: one app on one headless context, driven frame by frame
 // ---------------------------------------------------------------------------
 
-struct FrameSample {
+pub(super) struct FrameSample {
     /// `ctx.run` around the app's frame.
     run: Duration,
     /// `ctx.tessellate` of that frame's shapes.
@@ -123,19 +123,19 @@ impl FrameSample {
     }
 }
 
-struct Harness {
-    ctx: egui::Context,
-    app: Baboon,
+pub(super) struct Harness {
+    pub(super) ctx: egui::Context,
+    pub(super) app: Baboon,
     /// Seconds; advanced 1/60 s a frame so animations, tooltips and the
     /// app's own throttles see time pass as they would at 60 Hz.
     time: f64,
     pixels_per_point: f32,
     /// Every text painted by the last frame, for the scenario checks.
-    painted: Vec<String>,
+    pub(super) painted: Vec<String>,
 }
 
 impl Harness {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let ctx = egui::Context::default();
         Baboon::configure_context(&ctx);
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
@@ -166,7 +166,7 @@ impl Harness {
     }
 
     /// Run one whole application frame with `events`, timed.
-    fn frame(&mut self, events: Vec<egui::Event>) -> FrameSample {
+    pub(super) fn frame(&mut self, events: Vec<egui::Event>) -> FrameSample {
         self.time += 1.0 / 60.0;
         let mut input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
@@ -244,7 +244,7 @@ fn ping_pong_wheel(frame: usize) -> f32 {
 // Fixture: the only code that knows how app state is laid out
 // ---------------------------------------------------------------------------
 
-mod fixture {
+pub(super) mod fixture {
     use super::*;
     use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
     use blam_tags::render_method::{
@@ -255,12 +255,12 @@ mod fixture {
     };
     use blam_tags::{Enum, TagFieldData, TagReferenceData, TagStructMut};
 
-    pub(super) const GAME: &str = "halo3_mcc";
+    pub(in crate::app::ui) const GAME: &str = "halo3_mcc";
 
     /// `folders` × `subfolders` × `tags` loose-file entries, as
     /// `folder_NN/sub_NN/tag_NNN.biped`. The defaults (40 × 10 × 150) are
     /// the 60,000 tags the browser virtualization tests use.
-    pub(super) fn synthetic_entries(
+    pub(in crate::app::ui) fn synthetic_entries(
         folders: usize,
         subfolders: usize,
         tags: usize,
@@ -283,12 +283,12 @@ mod fixture {
         entries
     }
 
-    pub(super) fn entry_key(display_path: &str) -> String {
+    pub(in crate::app::ui) fn entry_key(display_path: &str) -> String {
         format!("file:{display_path}")
     }
 
     /// The browser entry for a document built in memory.
-    pub(super) fn document_entry(display_path: &str, tag: &TagFile) -> TagEntry {
+    pub(in crate::app::ui) fn document_entry(display_path: &str, tag: &TagFile) -> TagEntry {
         TagEntry {
             key: entry_key(display_path),
             display_path: display_path.to_owned(),
@@ -304,11 +304,15 @@ mod fixture {
     /// so the browser draws the full (non-lazy) tree and nothing is read
     /// off disk. This is the tree container and monolithic sources draw,
     /// which are the ones that reach tens of thousands of tags.
-    pub(super) fn install_kit(app: &mut Baboon, entries: Vec<TagEntry>) {
+    pub(in crate::app::ui) fn install_kit(app: &mut Baboon, entries: Vec<TagEntry>) {
         install_kit_for_game(app, entries, GAME);
     }
 
-    pub(super) fn install_kit_for_game(app: &mut Baboon, entries: Vec<TagEntry>, game: &str) {
+    pub(in crate::app::ui) fn install_kit_for_game(
+        app: &mut Baboon,
+        entries: Vec<TagEntry>,
+        game: &str,
+    ) {
         app.install_loaded_source(LoadedSourceData {
             label: "perf".to_owned(),
             source: TagSource::SingleFile {
@@ -332,7 +336,11 @@ mod fixture {
 
     /// Open `tag` in a tab, as if it had just finished loading. Its entry
     /// must already be in the kit (see [`document_entry`]).
-    pub(super) fn open_document(app: &mut Baboon, display_path: &str, tag: TagFile) -> String {
+    pub(in crate::app::ui) fn open_document(
+        app: &mut Baboon,
+        display_path: &str,
+        tag: TagFile,
+    ) -> String {
         let key = entry_key(display_path);
         let kit = &mut app.kits[app.active];
         kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
@@ -341,23 +349,26 @@ mod fixture {
     }
 
     /// The tag pane's "Expand all" for `key`, applied on its next draw.
-    pub(super) fn expand_all(app: &mut Baboon, key: &str) {
+    pub(in crate::app::ui) fn expand_all(app: &mut Baboon, key: &str) {
         app.kits[app.active]
             .pending_expand
             .insert(key.to_owned(), true);
     }
 
     /// The browser search box's contents, as if typed.
-    pub(super) fn set_filter(app: &mut Baboon, text: &str) {
+    pub(in crate::app::ui) fn set_filter(app: &mut Baboon, text: &str) {
         app.kits[app.active].filter = text.to_owned();
     }
 
     /// "Reveal in browser": opens the tag's folders and scrolls to it.
-    pub(super) fn reveal(app: &mut Baboon, key: &str) {
+    pub(in crate::app::ui) fn reveal(app: &mut Baboon, key: &str) {
         app.reveal_in_browser(key);
     }
 
-    pub(super) fn open_terminal(app: &mut Baboon, lines: impl IntoIterator<Item = String>) {
+    pub(in crate::app::ui) fn open_terminal(
+        app: &mut Baboon,
+        lines: impl IntoIterator<Item = String>,
+    ) {
         app.kits[app.active].terminal_open = true;
         app.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
         app.terminal.scroll_to_bottom = true;
@@ -365,7 +376,7 @@ mod fixture {
 
     /// One line of tool output arriving, with the app's own cap and
     /// autoscroll (see `push_terminal_line`).
-    pub(super) fn push_terminal_line(app: &mut Baboon, line: String) {
+    pub(in crate::app::ui) fn push_terminal_line(app: &mut Baboon, line: String) {
         app.terminal.lines.push(TerminalLineEntry::new(line));
         if app.terminal.lines.len() > 20_000 {
             let remove = app.terminal.lines.len() - 18_000;
@@ -374,11 +385,11 @@ mod fixture {
         app.terminal.scroll_to_bottom = true;
     }
 
-    pub(super) fn last_terminal_line(app: &Baboon) -> Option<String> {
+    pub(in crate::app::ui) fn last_terminal_line(app: &Baboon) -> Option<String> {
         app.terminal.lines.last().map(|line| line.text.clone())
     }
 
-    pub(super) fn terminal_line(index: usize) -> String {
+    pub(in crate::app::ui) fn terminal_line(index: usize) -> String {
         format!(
             "{index}: tool.exe: importing C:\\Halo\\tags\\objects\\weapons\\rifle_{index}\\\
              render\\rifle_{index}.render_model from data\\objects\\weapons ... done"
@@ -386,11 +397,11 @@ mod fixture {
     }
 
     /// A new tag of `group` from this repository's definitions.
-    pub(super) fn new_tag(group: &str) -> TagFile {
+    pub(in crate::app::ui) fn new_tag(group: &str) -> TagFile {
         new_tag_for(GAME, group)
     }
 
-    pub(super) fn new_tag_for(game: &str, group: &str) -> TagFile {
+    pub(in crate::app::ui) fn new_tag_for(game: &str, group: &str) -> TagFile {
         TagFile::new(
             locate_definitions_root()
                 .join(game)
@@ -404,7 +415,7 @@ mod fixture {
     /// compression, big-endian; mono; 22 kHz): a sine sweep, so the
     /// waveform has shape. Inline samples are what CE plays from, so the
     /// player and its waveform work with no sound bank or audio files.
-    pub(super) fn synthetic_ce_sound(permutations: usize, seconds: f32) -> TagFile {
+    pub(in crate::app::ui) fn synthetic_ce_sound(permutations: usize, seconds: f32) -> TagFile {
         let mut tag = new_tag_for("haloce_mcc", "sound");
         let frames = (22_050.0 * seconds) as usize;
         let mut root = tag.root_mut();
@@ -442,7 +453,10 @@ mod fixture {
 
     /// Give every block in `tag_struct` `counts[0]` elements, and every
     /// block in each block's first element `counts[1]`, and so on down.
-    pub(super) fn populate_blocks(tag_struct: &mut TagStructMut<'_>, counts: &[usize]) -> usize {
+    pub(in crate::app::ui) fn populate_blocks(
+        tag_struct: &mut TagStructMut<'_>,
+        counts: &[usize],
+    ) -> usize {
         let Some((&count, deeper)) = counts.split_first() else {
             return 0;
         };
@@ -475,7 +489,7 @@ mod fixture {
     /// A scenario whose every top-level block holds `counts[0]` elements and
     /// so on down (see [`populate_blocks`]). Returns it with its element
     /// count.
-    pub(super) fn large_scenario(counts: &[usize]) -> (TagFile, usize) {
+    pub(in crate::app::ui) fn large_scenario(counts: &[usize]) -> (TagFile, usize) {
         let mut tag = new_tag("scenario");
         let added = populate_blocks(&mut tag.root_mut(), counts);
         (tag, added)
@@ -487,7 +501,7 @@ mod fixture {
     /// the editor finds them once loaded — so nothing is read off disk.
     /// Returns the shader; [`install_render_method`] must run after the kit
     /// is installed.
-    pub(super) fn synthetic_shader(categories: usize) -> TagFile {
+    pub(in crate::app::ui) fn synthetic_shader(categories: usize) -> TagFile {
         let mut tag = new_tag("shader");
         {
             let mut root = tag.root_mut();
@@ -511,7 +525,7 @@ mod fixture {
         tag
     }
 
-    pub(super) fn install_render_method(
+    pub(in crate::app::ui) fn install_render_method(
         app: &mut Baboon,
         shader: &TagFile,
         categories: usize,

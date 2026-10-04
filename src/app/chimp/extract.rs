@@ -38,6 +38,19 @@ impl ChimpMeshTexturePrompt {
     pub(in crate::app) fn texture_subject(&self) -> Option<String> {
         chimp_mesh_texture_subject(&self.package)
     }
+
+    /// A prompt for `package` as a JMS export into a folder that does not
+    /// exist, for tests that draw it.
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        Self {
+            kit,
+            package: package.to_owned(),
+            format: ChimpMeshFormat::Jms,
+            texture_export: ChimpTextureExport::default(),
+            path: PathBuf::from("/no/such/folder/mesh.jms"),
+        }
+    }
 }
 
 /// How a Texture2D extraction should be written.
@@ -116,6 +129,16 @@ pub(in crate::app) struct ChimpTextureExportPrompt {
 impl ChimpTextureExportPrompt {
     pub(in crate::app) fn name(&self) -> &str {
         self.package.rsplit('/').next().unwrap_or(&self.package)
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        Self {
+            kit,
+            package: package.to_owned(),
+            export: ChimpTextureExport::default(),
+            export_index: None,
+        }
     }
 }
 
@@ -289,6 +312,22 @@ pub(in crate::app) struct ChimpLevelExportPrompt {
 impl ChimpLevelExportPrompt {
     pub(in crate::app) fn format_label(&self) -> &'static str {
         self.format.label()
+    }
+
+    /// A prompt for a two-cell level, for tests that draw it.
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        let default = SegmentBudget::default();
+        Self {
+            kit,
+            package: package.to_owned(),
+            cells: vec![format!("{package}_Generated_0"), format!("{package}_Generated_1")],
+            format: ChimpLevelFormat::SegmentedUsd,
+            nanite: true,
+            split: true,
+            triangles: default.triangles,
+            placements: default.placements,
+        }
     }
 
     pub(in crate::app) fn format_summary(&self) -> &'static str {
