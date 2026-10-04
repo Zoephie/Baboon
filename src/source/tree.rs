@@ -266,13 +266,27 @@ pub(crate) fn skippable_file_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
             .downcast_ref::<std::io::Error>()
-            .is_some_and(|io| skippable_io_error(io.kind()))
+            .is_some_and(skippable_io_error)
     })
 }
 
-fn skippable_io_error(kind: std::io::ErrorKind) -> bool {
+/// A file a scan passes over rather than failing on: gone, not ours to read,
+/// or (on Windows) held open by another program that shares nothing, such as
+/// an editing-kit tool saving it. A sharing or lock violation has no
+/// `ErrorKind` of its own, so it is matched by code.
+fn skippable_io_error(error: &std::io::Error) -> bool {
+    /// `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`.
+    #[cfg(windows)]
+    const HELD_BY_ANOTHER_PROGRAM: [i32; 2] = [32, 33];
+    #[cfg(windows)]
+    if error
+        .raw_os_error()
+        .is_some_and(|code| HELD_BY_ANOTHER_PROGRAM.contains(&code))
+    {
+        return true;
+    }
     matches!(
-        kind,
+        error.kind(),
         std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
     )
 }
@@ -289,7 +303,7 @@ pub(crate) fn walk_item(
             if error.depth() > 0
                 && error
                     .io_error()
-                    .is_some_and(|io| skippable_io_error(io.kind())) =>
+                    .is_some_and(skippable_io_error) =>
         {
             Ok(None)
         }
@@ -757,6 +771,62 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Which file errors a scan passes over. Anything else still fails it.
+    #[test]
+    fn a_scan_skips_missing_unreadable_and_held_files_only() {
+        use std::io::{Error, ErrorKind};
+        assert!(skippable_io_error(&Error::from(ErrorKind::NotFound)));
+        assert!(skippable_io_error(&Error::from(ErrorKind::PermissionDenied)));
+        assert!(!skippable_io_error(&Error::from(ErrorKind::InvalidData)));
+        assert!(!skippable_io_error(&Error::from(ErrorKind::UnexpectedEof)));
+        #[cfg(windows)]
+        {
+            // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_ACCESS_DENIED.
+            assert!(skippable_io_error(&Error::from_raw_os_error(32)));
+            assert!(skippable_io_error(&Error::from_raw_os_error(33)));
+            assert!(skippable_io_error(&Error::from_raw_os_error(5)));
+            // ERROR_INVALID_HANDLE is not a reason to skip.
+            assert!(!skippable_io_error(&Error::from_raw_os_error(6)));
+        }
+    }
+
+    /// A tag another program holds open without sharing (a kit tool saving
+    /// it) is left out of a folder scan, which finishes with the rest.
+    #[cfg(windows)]
+    #[test]
+    fn a_tag_held_open_without_sharing_is_skipped_by_a_scan() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "baboon-locked-scan-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let mut header = [0u8; 64];
+        header[48..52].copy_from_slice(b"weap");
+        header[60..64].copy_from_slice(b"BLAM");
+        fs::write(root.join("free.weapon"), header).unwrap();
+        fs::write(root.join("held.weapon"), header).unwrap();
+        let scan = || {
+            scan_folder_subtree_entries(&root, Path::new(""), &TagNameIndex::default())
+                .map(|entries| entries.len())
+        };
+        assert_eq!(scan().unwrap(), 2);
+
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(root.join("held.weapon"))
+            .unwrap();
+        let blocked = fs::File::open(root.join("held.weapon")).unwrap_err();
+        assert_eq!(blocked.raw_os_error(), Some(32), "{blocked}");
+        assert_eq!(scan().expect("the scan finishes"), 1);
+
+        drop(held);
+        assert_eq!(scan().unwrap(), 2);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn detect_game_from_game_id_folder_name() {
