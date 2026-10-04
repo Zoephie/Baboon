@@ -308,7 +308,7 @@ fn campaign_evolved_surface_on_load() -> KitSurface {
 #[cfg(test)]
 mod tests;
 
-pub(super) fn loaded_source_status(source: &LoadedSourceData) -> String {
+pub(in crate::app) fn loaded_source_status(source: &LoadedSourceData) -> String {
     match &source.source {
         TagSource::LooseFolder { .. } if source.all_entries.is_empty() => {
             format!("Browsing tags from {}", source.label)

@@ -8,7 +8,7 @@
 use super::*;
 use std::collections::{BTreeSet, VecDeque};
 
-use crate::app::controller::collect_tag_dependency_refs;
+use crate::app::references::collect_tag_dependency_refs;
 // Re-exported, not merely imported: the `app` module pulls this one in with
 // `use conversion::*`, and the controller, dialogs and document state all reach the
 // conversion types through that one path. A private `use` would resolve here and

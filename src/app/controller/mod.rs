@@ -2,10 +2,11 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
+use anyhow::Context as _;
 
 mod updates;
 use updates::*;
-mod terminal;
+pub(in crate::app) mod terminal;
 pub(super) use terminal::open_terminal_log;
 #[cfg(test)]
 use terminal::terminal_log_timestamp;
@@ -37,12 +38,7 @@ use saving::{
     register_saved_copy_in_loaded_source, save_as_extension, save_as_file_name, save_as_start_dir,
 };
 mod documents;
-mod loading;
-#[cfg(test)]
-use loading::loaded_source_status;
-mod references;
-use anyhow::Context as _;
-use references::*;
+pub(in crate::app) mod loading;
 mod container_write;
 pub(in crate::app) use container_write::*;
 use crate::core::created_tags::package_id_for;
@@ -134,7 +130,7 @@ fn install_root_for_paks(paks_dir: &Path) -> PathBuf {
     paks_dir.to_path_buf()
 }
 
-fn normalize_container_tag_rel(input: &str) -> String {
+pub(in crate::app) fn normalize_container_tag_rel(input: &str) -> String {
     let lowered = input.trim().replace('\\', "/").to_ascii_lowercase();
     let mut segments: Vec<&str> = lowered
         .split('/')
@@ -270,7 +266,7 @@ pub(super) fn classify_import_source_for(
 /// more names other packages and needs an import map that cannot be derived
 /// from the group alone. A group with neither is refused here rather than
 /// producing a tag that cannot be saved later.
-pub(super) fn new_container_template_for(
+pub(in crate::app) fn new_container_template_for(
     donor: Option<(usize, String)>,
     group_name: &str,
 ) -> Result<NewContainerTemplate, String> {
@@ -371,7 +367,7 @@ pub(super) fn new_container_template_bytes(
 /// Shared by creation and rename on purpose: the entry key derives from this,
 /// and a rename that derived either differently would produce an entry the save
 /// and project-overlay paths no longer recognize as the same tag.
-fn new_container_package(logical: &str, group_name: &str) -> String {
+pub(in crate::app) fn new_container_package(logical: &str, group_name: &str) -> String {
     format!("/Game/Tags/{logical}-{group_name}")
 }
 
@@ -2559,7 +2555,7 @@ impl Baboon {
     /// finished background refactor, which may well land while the user is in
     /// another workspace — and then it resolved the wrong root and remapped the
     /// wrong workspace's favorites with this one's rename map.
-    fn remap_favorites_for_kit(
+    pub(in crate::app) fn remap_favorites_for_kit(
         &mut self,
         kit: usize,
         old_to_new_keys: &HashMap<String, String>,
@@ -3019,7 +3015,7 @@ impl Baboon {
         self.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
     }
 
-    fn apply_entry_index_refresh(
+    pub(in crate::app) fn apply_entry_index_refresh(
         &mut self,
         kit_index: usize,
         refresh: EntryIndexRefresh,
@@ -6784,83 +6780,6 @@ impl Baboon {
         }
     }
 
-    pub(super) fn fix_current_tag_dependencies(&mut self) {
-        if self.refuse_read_only_edit(self.active) {
-            return;
-        }
-        let Some(key) = self.kits[self.active].selected_key.clone() else {
-            self.status = "No tag selected".to_owned();
-            return;
-        };
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Selected tag is no longer in the source".to_owned();
-            return;
-        };
-        let TagEntryLocation::LooseFile(_) = entry.location else {
-            self.status = "Fix Tag Dependencies requires a loose-folder tag".to_owned();
-            return;
-        };
-        let Some(root) = self.loaded_tags_root() else {
-            self.status = "Fix Tag Dependencies requires a loaded tags folder".to_owned();
-            return;
-        };
-
-        let entries = match self.dependency_database_entries() {
-            Ok(entries) => entries,
-            Err(error) => {
-                self.status = format!("Could not build dependency database: {error}");
-                return;
-            }
-        };
-        let names = self.names().clone();
-        let index = build_dependency_candidate_index(&entries, &names);
-        let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&key) else {
-            self.status = "Load the selected tag before fixing dependencies".to_owned();
-            return;
-        };
-        if doc.tag.endian != Endian::Le {
-            self.status = "Only little-endian loose tags can be edited".to_owned();
-            return;
-        }
-
-        let report = fix_tag_dependencies_in_tag(&mut doc.tag, &root, &names, &index);
-        if report.fixed > 0 {
-            doc.dirty.touch();
-        }
-        let status = report.status();
-        self.terminal
-            .lines
-            .extend(report.lines.into_iter().map(TerminalLineEntry::new));
-        trim_terminal_lines(&mut self.terminal.lines);
-        self.terminal.scroll_to_bottom = true;
-        self.status = status;
-    }
-
-    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
-    /// broken references against.
-    ///
-    /// This used to rescan the whole folder on the UI thread on every use,
-    /// even with the completed scan already in memory, then replace
-    /// `all_entries` without moving the kit generation and rewrite the whole
-    /// index. The completed scan is kept current by single-tag upserts and the
-    /// periodic refresh, so it is used as it is; before it exists, this says
-    /// so rather than blocking on a scan of its own.
-    fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
-        let source = self.kits[self.active]
-            .source
-            .as_ref()
-            .ok_or_else(|| "no tag source is loaded".to_owned())?;
-        if !matches!(source.source, TagSource::LooseFolder { .. }) {
-            return Err("load a loose editing-kit tags folder first".to_owned());
-        }
-        if source.all_entries.is_empty() {
-            return Err(
-                "the tag index is still being built; try again once indexing finishes".to_owned(),
-            );
-        }
-        Ok(source.all_entries.clone())
-    }
-
     /// Tags that reference `entry` (its "parents"), via the reverse-dependency
     /// index. `None` when no index is available (non-folder source or not yet
     /// scanned).
@@ -7283,447 +7202,6 @@ impl Baboon {
         });
     }
 
-    pub(super) fn references_to_entry(&self, entry: &TagEntry) -> Option<Vec<TagEntry>> {
-        let source = self.source()?;
-        let index = source.reverse_dependencies.as_ref()?;
-        let rel = dependency_entry_reference_path(entry, self.names())?;
-        let referrer_keys = index
-            .dependents_for(entry.group_tag, &rel)
-            .iter()
-            .map(String::as_str)
-            .collect::<HashSet<_>>();
-        let mut out: Vec<TagEntry> = source
-            .full_entry_set()
-            .iter()
-            .filter(|entry| referrer_keys.contains(entry.key.as_str()))
-            .cloned()
-            .collect();
-        out.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
-        Some(out)
-    }
-
-    /// All tags that nothing references (orphans / roots). `None` when no index
-    /// is available.
-    pub(super) fn unreferenced_entries(&self) -> Option<Vec<TagEntry>> {
-        let source = self.source()?;
-        let index = source.reverse_dependencies.as_ref()?;
-        let mut out: Vec<TagEntry> = source
-            .full_entry_set()
-            .iter()
-            .filter(|entry| {
-                dependency_entry_reference_path(entry, self.names())
-                    .map(|rel| index.dependents_for(entry.group_tag, &rel).is_empty())
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect();
-        out.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
-        Some(out)
-    }
-
-    /// Resolve the dependencies a tag declares (children) into browseable
-    /// entries, via a one-shot dependency-key → entry lookup over all entries.
-    fn children_of_entry(&self, key: &str) -> (Vec<TagEntry>, bool) {
-        let Some(source) = self.source() else {
-            return (Vec::new(), true);
-        };
-        let Some(index) = source.reverse_dependencies.as_ref() else {
-            return (Vec::new(), true);
-        };
-        let deps = index.dependencies_of(key);
-        let mut by_key: HashMap<String, &TagEntry> = HashMap::new();
-        for entry in source.full_entry_set() {
-            if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
-                by_key
-                    .entry(crate::core::source::dependency_key(entry.group_tag, &rel))
-                    .or_insert(entry);
-            }
-        }
-        let mut children: Vec<TagEntry> = deps
-            .iter()
-            .filter_map(|dep| {
-                by_key
-                    .get(&crate::core::source::dependency_key(dep.group_tag, &dep.rel_path))
-                    .map(|entry| (*entry).clone())
-            })
-            .collect();
-        children.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
-        children.dedup_by(|a, b| a.key == b.key);
-        (children, false)
-    }
-
-    /// Open the Content Explorer centered on `key`.
-    pub(super) fn open_content_explorer(&mut self, key: &str) {
-        let Some(focus) = self.entry_for_key(key).cloned() else {
-            return;
-        };
-        let (parents, parents_unavailable) = match self.references_to_entry(&focus) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(key);
-        self.content_explorer = Some(ContentExplorer {
-            kit: self.active_kit_id(),
-            focus,
-            parents,
-            children,
-            filter: String::new(),
-            index_unavailable: parents_unavailable && children_unavailable,
-            back: Vec::new(),
-            forward: Vec::new(),
-        });
-    }
-
-    /// Re-center the open Content Explorer on `entry`, recording history.
-    pub(super) fn content_explorer_navigate(&mut self, entry: TagEntry) {
-        let key = entry.key.clone();
-        let (parents, parents_unavailable) = match self.references_to_entry(&entry) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.content_explorer.as_mut() {
-            explorer.back.push(explorer.focus.clone());
-            explorer.forward.clear();
-            explorer.focus = entry;
-            explorer.parents = parents;
-            explorer.children = children;
-            explorer.index_unavailable = parents_unavailable && children_unavailable;
-        }
-    }
-
-    pub(super) fn content_explorer_back(&mut self) {
-        let Some(prev) = self
-            .content_explorer
-            .as_mut()
-            .and_then(|explorer| explorer.back.pop())
-        else {
-            return;
-        };
-        self.recenter_explorer(prev, true);
-    }
-
-    pub(super) fn content_explorer_forward(&mut self) {
-        let Some(next) = self
-            .content_explorer
-            .as_mut()
-            .and_then(|explorer| explorer.forward.pop())
-        else {
-            return;
-        };
-        self.recenter_explorer(next, false);
-    }
-
-    /// Re-center without clearing history; pushes the current focus onto the
-    /// opposite stack (used by back/forward).
-    fn recenter_explorer(&mut self, entry: TagEntry, going_back: bool) {
-        let key = entry.key.clone();
-        let (parents, parents_unavailable) = match self.references_to_entry(&entry) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.content_explorer.as_mut() {
-            let current = std::mem::replace(&mut explorer.focus, entry);
-            if going_back {
-                explorer.forward.push(current);
-            } else {
-                explorer.back.push(current);
-            }
-            explorer.parents = parents;
-            explorer.children = children;
-            explorer.index_unavailable = parents_unavailable && children_unavailable;
-        }
-    }
-
-    pub(super) fn show_references_for(&mut self, key: &str) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
-            return;
-        };
-        // Fresh query — drop any expander state from a previous references popup.
-        self.ref_jump_expanded.clear();
-        self.ref_jump_occurrences.clear();
-        self.ref_jump_loading.clear();
-        let title = format!("References to {}", entry.display_path.replace('\\', "/"));
-        // The referenced tag's dependency path, so a clicked row can jump to the
-        // exact field that points here.
-        let ref_target =
-            dependency_entry_reference_path(&entry, self.names()).map(|rel| (entry.group_tag, rel));
-        match self.references_to_entry(&entry) {
-            Some(entries) => {
-                let note = entries
-                    .is_empty()
-                    .then(|| "No other tags reference this tag.".to_owned());
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title,
-                    entries,
-                    annotations: Vec::new(),
-                    note,
-                    ref_target,
-                });
-            }
-            None => {
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title,
-                    entries: Vec::new(),
-                    annotations: Vec::new(),
-                    note: Some(self.reference_index_unavailable_note()),
-                    ref_target: None,
-                });
-            }
-        }
-    }
-
-    /// Once-per-frame driver for reference-jumps. Expires a finished glow, and —
-    /// when a pending jump's referrer tag has become the focused, parsed tab —
-    /// walks it for the exact field referencing the target and navigates there.
-    pub(super) fn apply_field_nav(&mut self, ctx: &egui::Context) {
-        let now = ctx.input(|input| input.time);
-        if let Some(nav) = &self.field_nav {
-            if now >= nav.glow_until {
-                self.field_nav = None;
-            } else {
-                // Keep frames coming so the glow expires on time even when idle.
-                ctx.request_repaint();
-            }
-        }
-        // A glow belongs to the kit whose tag it is; drop it once that kit is
-        // gone rather than glowing a field in another game.
-        if let Some(nav) = &self.field_nav
-            && self.kit_index(nav.kit).is_none()
-        {
-            self.field_nav = None;
-        }
-        if let Some(hit) = self.pending_find_jump.clone() {
-            if self.kits[self.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
-                && self.kits[self.active]
-                    .parsed_tags
-                    .contains_key(&hit.tag_key)
-            {
-                self.activate_find_occurrence(ctx, hit);
-            }
-        }
-        let Some(jump) = self.pending_ref_jump.clone() else {
-            return;
-        };
-        // The jump belongs to the kit it was queued from; if that kit closed
-        // while the referrer was loading, drop it.
-        let Some(kit) = self.kit_index(jump.kit) else {
-            self.pending_ref_jump = None;
-            return;
-        };
-        // Wait until the referrer is the focused tab and finished loading.
-        if self.kits[kit].selected_key.as_deref() != Some(jump.tag_key.as_str()) {
-            return;
-        }
-        let Some(doc) = self.kits[kit].parsed_tags.get(&jump.tag_key) else {
-            return; // still loading — retry next frame
-        };
-        let mut refs = Vec::new();
-        collect_tag_references(doc.tag.root(), "", &mut refs);
-        let target = normalize_ref(&jump.rel_path);
-        let hit = refs.into_iter().find(|reference| {
-            reference.group_tag == jump.group_tag && normalize_ref(&reference.rel_path) == target
-        });
-        self.pending_ref_jump = None;
-        match hit {
-            Some(reference) => self.navigate_to_field(ctx, &jump.tag_key, &reference.field_path),
-            None => {
-                self.status = format!(
-                    "Could not locate the referencing field in {}",
-                    jump.tag_key.replace('\\', "/")
-                );
-            }
-        }
-    }
-
-    /// Drive the editor to reveal `field_path` in the tag `tag_key`: select the
-    /// element index at every ancestor block, scroll the exact leaf into view,
-    /// and glow it briefly. Scroll targets are written once via egui temp-data;
-    /// element selection, the glow and force-open persist via `self.field_nav`.
-    pub(super) fn navigate_to_field(
-        &mut self,
-        ctx: &egui::Context,
-        tag_key: &str,
-        field_path: &str,
-    ) {
-        // Scroll the exact leaf field into view next frame, plus the enclosing
-        // block header as a fallback for non-value leaves.
-        ctx.data_mut(|data| data.insert_temp(field_jump_target_id(), field_path.to_owned()));
-        if let Some(block) = parent_block_path(field_path) {
-            ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
-        }
-        self.field_nav = Some(FieldNav {
-            kit: self.active_kit_id(),
-            tag_key: tag_key.to_owned(),
-            field_path: field_path.to_owned(),
-            block_indices: ancestor_block_indices(field_path),
-            glow_until: ctx.input(|input| input.time) + 2.5,
-        });
-        ctx.request_repaint();
-    }
-
-    /// Populate `ref_jump_occurrences` for any expanded, uncached referrer row in
-    /// the current "References to X" popup. Parsed referrers are walked in place;
-    /// unparsed ones trigger a background load and stay uncached ("loading…").
-    pub(super) fn refresh_ref_jump_occurrences(&mut self, ctx: &egui::Context) {
-        let Some((group_tag, rel_path)) = self
-            .query_results
-            .as_ref()
-            .and_then(|results| results.ref_target.clone())
-        else {
-            return;
-        };
-        // Snapshot (row, key) for expanded-but-uncached rows before borrowing
-        // `parsed_tags` / triggering loads.
-        let pending: Vec<(usize, String)> = self
-            .query_results
-            .as_ref()
-            .map(|results| {
-                self.ref_jump_expanded
-                    .iter()
-                    .filter(|index| !self.ref_jump_occurrences.contains_key(index))
-                    .filter_map(|&index| {
-                        results
-                            .entries
-                            .get(index)
-                            .map(|entry| (index, entry.key.clone()))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let target = normalize_ref(&rel_path);
-        for (index, key) in pending {
-            if let Some(doc) = self.kits[self.active].parsed_tags.get(&key) {
-                let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
-                self.ref_jump_occurrences.insert(index, occurrences);
-                continue;
-            }
-            // Not open: read and walk it on a worker. This used to go through
-            // the tab loader, which drops results for tags without a tab, so
-            // the row asked again as soon as each load finished — forever.
-            if !self.ref_jump_loading.insert(index) {
-                continue;
-            }
-            let Some(entry) = self.entry_for_key(&key).cloned() else {
-                self.ref_jump_loading.remove(&index);
-                self.ref_jump_occurrences.insert(index, Vec::new());
-                continue;
-            };
-            let Some(source_kind) = self.source().map(|source| source.source.clone()) else {
-                self.ref_jump_loading.remove(&index);
-                continue;
-            };
-            let kit = self.active_kit_id();
-            // The popup's own target, as `handle_ref_jump_occurrences` compares
-            // it; the walk matches against the normalized form.
-            let query_target = (group_tag, rel_path.clone());
-            let normalized = target.clone();
-            let (panic_key, panic_target) = (key.clone(), query_target.clone());
-            spawn_worker(
-                &self.tx,
-                ctx,
-                move || {
-                    let target = query_target;
-                    let result = read_entry(&source_kind, &entry)
-                        .map(|tag| ref_occurrences_in(&tag, target.0, &normalized))
-                        .map_err(|error| format!("{error:#}"));
-                    WorkerMessage::RefJumpOccurrences {
-                        kit,
-                        index,
-                        key,
-                        target,
-                        result,
-                    }
-                },
-                move |error| WorkerMessage::RefJumpOccurrences {
-                    kit,
-                    index,
-                    key: panic_key,
-                    target: panic_target,
-                    result: Err(error),
-                },
-            );
-        }
-    }
-
-    /// Applies `WorkerMessage::RefJumpOccurrences`. Dropped unless the popup
-    /// still shows the same target with the same tag in that row.
-    pub(super) fn handle_ref_jump_occurrences(
-        &mut self,
-        kit: KitId,
-        index: usize,
-        key: String,
-        target: (u32, String),
-        result: Result<Vec<RefOccurrence>, String>,
-    ) -> bool {
-        self.ref_jump_loading.remove(&index);
-        let current = kit == self.active_kit_id()
-            && self.query_results.as_ref().is_some_and(|results| {
-                results.ref_target.as_ref() == Some(&target)
-                    && results
-                        .entries
-                        .get(index)
-                        .is_some_and(|entry| entry.key == key)
-            });
-        if !current {
-            return true;
-        }
-        let occurrences = match result {
-            Ok(occurrences) => occurrences,
-            Err(error) => {
-                self.status = format!("Could not read the referring tag: {error}");
-                Vec::new()
-            }
-        };
-        self.ref_jump_occurrences.insert(index, occurrences);
-        false
-    }
-
-    /// Explain why a reference lookup found no index, tailored to whether one is
-    /// currently building (auto after the full scan, or via Tools → Build
-    /// Reference Index).
-    fn reference_index_unavailable_note(&self) -> String {
-        if self.kits[self.active].index_jobs.building_references
-            || self.kits[self.active].scanning_entries
-        {
-            "Reference index is building — try again in a moment.".to_owned()
-        } else {
-            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
-        }
-    }
-
-    pub(super) fn show_unreferenced_tags(&mut self) {
-        match self.unreferenced_entries() {
-            Some(entries) => {
-                let note = entries
-                    .is_empty()
-                    .then(|| "Every tag is referenced by at least one other tag.".to_owned());
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title: format!("Unreferenced tags ({})", entries.len()),
-                    entries,
-                    annotations: Vec::new(),
-                    note,
-                    ref_target: None,
-                });
-            }
-            None => {
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title: "Unreferenced tags".to_owned(),
-                    entries: Vec::new(),
-                    annotations: Vec::new(),
-                    note: Some(self.reference_index_unavailable_note()),
-                    ref_target: None,
-                });
-            }
-        }
-    }
-
     /// Locate a tag in the browser tree: switch to Folders mode, clear the
     /// filter, select it, and request a one-shot force-open + scroll.
     pub(super) fn reveal_in_browser(&mut self, key: &str) {
@@ -7737,167 +7215,6 @@ impl Baboon {
             kit: self.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),
-        });
-    }
-
-    /// Build the reverse-dependency index in the background so the
-    /// find-references / unreferenced / Content Explorer features work without
-    /// first running a move/rename. Idempotent: skips while a build is running,
-    /// and skips an already-present index unless `force` is set (Tools →
-    /// Rebuild). Loose-folder sources only; the result is persisted to disk so
-    /// future launches load it instantly.
-    /// Starts source-scoped indexing or search work without blocking the UI thread.
-    /// Generation-tagged completion is ignored if the active source changes first.
-    pub(super) fn begin_build_reverse_dependencies(&mut self, ctx: egui::Context, force: bool) {
-        self.begin_build_reverse_dependencies_inner(ctx, force, false);
-    }
-
-    fn begin_build_reverse_dependencies_for_entry_index(&mut self, ctx: egui::Context) {
-        self.begin_build_reverse_dependencies_inner(ctx, false, true);
-    }
-
-    fn begin_build_reverse_dependencies_inner(
-        &mut self,
-        ctx: egui::Context,
-        force: bool,
-        paired_entry_index_build: bool,
-    ) {
-        if self.kits[self.active].index_jobs.building_references
-            || self.kits[self.active].scanning_entries
-        {
-            return;
-        }
-        let Some(source) = self.source() else {
-            return;
-        };
-        // Loose folders index automatically after their scan. Containers are
-        // indexable too, but only on request (Tools → Build Reference Index):
-        // container tags carry no dependency-list stream, so every tag has to be
-        // parsed — for Campaign Evolved that is ~12k tags and several GB of
-        // reads, too much to run behind every mount.
-        let is_loose = matches!(source.source, TagSource::LooseFolder { .. });
-        if !is_loose && !matches!(source.source, TagSource::IoStoreContainerSet { .. }) {
-            return;
-        }
-        if source.reverse_dependencies.is_some() && !force {
-            return;
-        }
-        // A container mount enumerates every tag up front. A loose folder must
-        // use its completed scan only: an index built from the lazy browser
-        // subset would be wrong (it would flag tags as unreferenced just because
-        // their referrers weren't scanned).
-        let entries = if is_loose {
-            source.all_entries.clone()
-        } else {
-            source.full_entry_set().to_vec()
-        };
-        if entries.is_empty() && is_loose && source.complete_scan {
-            // Scanned, and there is nothing in it: an empty graph, not a
-            // reason to scan again (which is what an empty folder did, forever).
-            if let Some(source) = self.source_mut() {
-                source.reverse_dependencies = Some(ReverseDependencyIndex::default());
-            }
-            return;
-        }
-        if entries.is_empty() {
-            // The full entry set isn't ready yet, so kick the scan first.
-            // `begin_scan_all_entries` is idempotent (guards on
-            // `scanning_entries`); the update loop re-enters here and builds the
-            // index once the scan lands. Containers have nothing to scan — an
-            // empty mount simply has nothing to index.
-            if is_loose {
-                if !self.kits[self.active].scanning_entries {
-                    self.status = "Indexing tags, then building reference index…".to_owned();
-                }
-                self.begin_scan_all_entries_with_label(
-                    ctx,
-                    "Indexing tags, then building reference index...",
-                );
-            }
-            return;
-        }
-        let tag_source = source.source.clone();
-        let stamp = self.kit_stamp();
-        let tx = self.tx.clone();
-        self.kits[self.active].index_jobs.building_references = true;
-        self.kits[self.active]
-            .index_jobs
-            .references_changed_during_build
-            .clear();
-        self.kits[self.active].index_jobs.references_for_entry_index = paired_entry_index_build;
-        self.kits[self.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
-            label: "Building reference index...".to_owned(),
-            processed: 0,
-            total: entries.len(),
-        });
-        if paired_entry_index_build {
-            self.show_entry_index_wait_notice = true;
-        }
-        self.status = "Building reference index…".to_owned();
-        thread::spawn(move || {
-            let total = entries.len();
-            let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
-                stamp,
-                processed: 0,
-                total,
-            });
-            let worker_count = std::thread::available_parallelism()
-                .map(|count| count.get())
-                .unwrap_or(1)
-                .clamp(1, total.max(1));
-            let chunk_size = total.div_ceil(worker_count).max(1);
-            let processed = std::sync::atomic::AtomicUsize::new(0);
-
-            let mut index = ReverseDependencyIndex::default();
-            let mut missing = 0usize;
-            std::thread::scope(|scope| {
-                let mut handles = Vec::new();
-                for chunk in entries.chunks(chunk_size) {
-                    let tag_source = &tag_source;
-                    let progress_tx = tx.clone();
-                    let progress_ctx = ctx.clone();
-                    let processed = &processed;
-                    handles.push(scope.spawn(move || {
-                        let mut chunk_results = Vec::new();
-                        for entry in chunk {
-                            if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
-                                chunk_results.push((entry.key.clone(), deps));
-                            }
-                            let processed_now =
-                                processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            if processed_now == total || processed_now % 32 == 0 {
-                                let _ = progress_tx.send(WorkerMessage::ReferenceIndexProgress {
-                                    stamp,
-                                    processed: processed_now,
-                                    total,
-                                });
-                                progress_ctx.request_repaint();
-                            }
-                        }
-                        chunk_results
-                    }));
-                }
-
-                // A chunk whose thread panicked used to vanish from the index
-                // without a word. Its tags are counted instead, so the index is
-                // reported (and not saved) as incomplete.
-                for (handle, chunk) in handles.into_iter().zip(entries.chunks(chunk_size)) {
-                    match handle.join() {
-                        Ok(chunk_results) => {
-                            for (key, deps) in chunk_results {
-                                index.set_tag_dependencies(key, deps);
-                            }
-                        }
-                        Err(_) => missing += chunk.len(),
-                    }
-                }
-            });
-            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt {
-                stamp,
-                index,
-                missing,
-            });
-            ctx.request_repaint();
         });
     }
 
@@ -8893,101 +8210,6 @@ impl Baboon {
         }
     }
 
-    /// Resolve a pending "Open referenced tag" request against its active
-    /// source. Loose folders resolve a file path; Campaign Evolved resolves the
-    /// existing stable entry from its mounted container catalog.
-    pub(super) fn process_pending_open(&mut self, ctx: &egui::Context) {
-        let Some(req) = self.pending_open.take() else {
-            return;
-        };
-        let container_key = self.source().and_then(|source| {
-            matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then(|| {
-                container_entry_for_reference(
-                    &source.entries,
-                    req.group_tag,
-                    &req.rel_path,
-                    self.names(),
-                )
-                .map(|entry| entry.key.clone())
-            })
-        });
-        if let Some(container_key) = container_key {
-            let Some(key) = container_key else {
-                self.status = format!(
-                    "Referenced Campaign Evolved tag not found: {} (group {})",
-                    req.rel_path.replace('\\', "/"),
-                    blam_tags::format_group_tag(req.group_tag)
-                );
-                return;
-            };
-            self.select_entry(key.clone(), ctx.clone());
-            if req.float {
-                self.kits[self.active].open_tag_pane_beside(&key);
-            }
-            return;
-        }
-
-        let root = match self.source().map(|s| &s.source) {
-            Some(TagSource::LooseFolder { root, .. }) => root.clone(),
-            _ => {
-                self.status = "Open requires a loose-folder source".to_owned();
-                return;
-            }
-        };
-        // Resolve the file extension from the definitions name index first
-        // (covers every group, e.g. collision_model/physics_model), falling
-        // back to the built-in table.
-        let ext = self
-            .names()
-            .name_for(req.group_tag)
-            .or_else(|| blam_tags::paths::group_tag_to_extension(req.group_tag))
-            .unwrap_or("");
-        // Normalize: tolerate forward slashes and a path that already carries
-        // its extension (e.g. a shader bitmap ref), so we don't double-append.
-        let mut rel = req.rel_path.replace('/', "\\");
-        if !ext.is_empty() {
-            if let Some(stripped) = rel
-                .strip_suffix(&format!(".{ext}"))
-                .or_else(|| rel.strip_suffix(&format!(".{}", ext.to_ascii_uppercase())))
-            {
-                rel = stripped.to_owned();
-            }
-        }
-        let abs = blam_tags::paths::resolve_tag_path(&root, &rel, ext);
-        if !abs.exists() {
-            self.status = format!(
-                "Referenced tag not found: {} (group {})",
-                abs.display(),
-                blam_tags::format_group_tag(req.group_tag)
-            );
-            return;
-        }
-        let key = file_entry_key(&abs);
-        // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
-        // the scanner's own constructor: this used to derive the display path
-        // from the unstripped reference, which could double the extension.
-        if self.entry_for_key(&key).is_none() {
-            let names = self
-                .source()
-                .map(|source| source.names.clone())
-                .unwrap_or_default();
-            if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
-                let folder_seeds = self.kits[self.active].folder_seeds();
-                if let Some(source) = self.source_mut() {
-                    source.upsert_entry(entry, &folder_seeds);
-                }
-                self.kits[self.active].generation =
-                    self.kits[self.active].generation.wrapping_add(1);
-            }
-        }
-        self.select_entry(key.clone(), ctx.clone());
-        // Alt-click asks for the tag beside the current one rather than as
-        // another tab in the same group.
-        if req.float {
-            self.kits[self.active].open_tag_pane_beside(&key);
-        }
-    }
-
     /// Run a geometry Import request (`tool render/collision/physics/...`)
     /// streamed to the terminal panel.
     pub(super) fn process_pending_tool_import(&mut self, ctx: &egui::Context) {
@@ -9463,8 +8685,6 @@ mod browser_refresh_tests;
 #[cfg(test)]
 mod save_changes_prompt_tests;
 
-#[cfg(test)]
-mod ref_jump_tests;
 
 #[cfg(test)]
 mod mod_override_tests;
@@ -9899,151 +9119,6 @@ fn loose_entry_key_for_canonical_path<'a>(
 #[cfg(test)]
 mod tests;
 
-type DependencyCandidateIndex = HashMap<(u32, String), Vec<String>>;
-
-#[derive(Default)]
-struct DependencyFixReport {
-    scanned: usize,
-    fixed: usize,
-    already_ok: usize,
-    unresolved: usize,
-    ambiguous: usize,
-    skipped: usize,
-    lines: Vec<String>,
-}
-
-impl DependencyFixReport {
-    fn status(&self) -> String {
-        if self.fixed > 0 {
-            format!(
-                "Fixed {} dependenc{} ({} unresolved, {} ambiguous)",
-                self.fixed,
-                if self.fixed == 1 { "y" } else { "ies" },
-                self.unresolved,
-                self.ambiguous
-            )
-        } else if self.unresolved == 0 && self.ambiguous == 0 {
-            format!(
-                "No broken dependencies found across {} reference(s)",
-                self.scanned
-            )
-        } else {
-            format!(
-                "No dependencies auto-fixed ({} unresolved, {} ambiguous)",
-                self.unresolved, self.ambiguous
-            )
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TagReferenceUse {
-    field_path: String,
-    group_tag: u32,
-    rel_path: String,
-}
-
-fn fix_tag_dependencies_in_tag(
-    tag: &mut TagFile,
-    tags_root: &Path,
-    names: &TagNameIndex,
-    index: &DependencyCandidateIndex,
-) -> DependencyFixReport {
-    let mut refs = Vec::new();
-    collect_tag_references(tag.root(), "", &mut refs);
-
-    let mut report = DependencyFixReport {
-        scanned: refs.len(),
-        lines: vec![format!(
-            "Fix Tag Dependencies: scanned {} reference(s)",
-            refs.len()
-        )],
-        ..Default::default()
-    };
-    let mut fixes = Vec::new();
-    for reference in refs {
-        let Some(extension) = names
-            .name_for(reference.group_tag)
-            .or_else(|| group_tag_to_extension(reference.group_tag))
-        else {
-            report.skipped += 1;
-            report.lines.push(format!(
-                "Skipped {}: unknown group {}",
-                reference.field_path,
-                format_group_tag(reference.group_tag)
-            ));
-            continue;
-        };
-        if dependency_target_exists(tags_root, &reference.rel_path, extension) {
-            report.already_ok += 1;
-            continue;
-        }
-
-        let leaf = dependency_leaf_key(&reference.rel_path);
-        let key = (reference.group_tag, leaf.clone());
-        let candidates = index.get(&key).map(Vec::as_slice).unwrap_or(&[]);
-        match candidates {
-            [candidate] if !candidate.eq_ignore_ascii_case(&reference.rel_path) => {
-                fixes.push((reference.clone(), candidate.clone()));
-            }
-            [] => {
-                report.unresolved += 1;
-                report.lines.push(format!(
-                    "Unresolved {}: {}",
-                    reference.field_path,
-                    format_reference_path(names, reference.group_tag, &reference.rel_path)
-                ));
-            }
-            _ => {
-                report.ambiguous += 1;
-                report.lines.push(format!(
-                    "Ambiguous {}: {} candidate(s) named {}.{}",
-                    reference.field_path,
-                    candidates.len(),
-                    leaf,
-                    extension
-                ));
-            }
-        }
-    }
-
-    for (reference, fixed_path) in fixes {
-        let mut root = tag.root_mut();
-        let Some(mut field) = root.field_path_mut(&reference.field_path) else {
-            report.unresolved += 1;
-            report.lines.push(format!(
-                "Skipped {}: field path no longer resolves",
-                reference.field_path
-            ));
-            continue;
-        };
-        let result = field.set(TagFieldData::TagReference(TagReferenceData {
-            group_tag_and_name: Some((reference.group_tag, fixed_path.clone())),
-        }));
-        match result {
-            Ok(()) => {
-                report.fixed += 1;
-                report.lines.push(format!(
-                    "Fixed {}: {} -> {}",
-                    reference.field_path,
-                    format_reference_path(names, reference.group_tag, &reference.rel_path),
-                    format_reference_path(names, reference.group_tag, &fixed_path)
-                ));
-            }
-            Err(error) => {
-                report.unresolved += 1;
-                report.lines.push(format!(
-                    "Skipped {}: could not write dependency ({error:?})",
-                    reference.field_path
-                ));
-            }
-        }
-    }
-
-    report.lines.push(report.status());
-    report
-}
-
 /// What a TSV paste did, counted from the per-cell outcomes. It used to count
 /// the cells it tried, so a paste whose cells all failed to parse still said
 /// every one of them was pasted.
@@ -10093,131 +9168,6 @@ mod listing_entries_tests;
 
 #[cfg(test)]
 mod tsv_paste_summary_tests;
-
-/// Where `tag` points at the reference `(group_tag, target)`, one row per
-/// referencing field. `target` is already normalized.
-fn ref_occurrences_in(tag: &TagFile, group_tag: u32, target: &str) -> Vec<RefOccurrence> {
-    let mut refs = Vec::new();
-    collect_tag_references(tag.root(), "", &mut refs);
-    refs.into_iter()
-        .filter(|reference| {
-            reference.group_tag == group_tag && normalize_ref(&reference.rel_path) == target
-        })
-        .map(|reference| RefOccurrence {
-            label: occurrence_label(&reference.field_path),
-            field_path: reference.field_path,
-        })
-        .collect()
-}
-
-fn collect_tag_references(
-    tag_struct: TagStruct<'_>,
-    path_prefix: &str,
-    refs: &mut Vec<TagReferenceUse>,
-) {
-    for field in tag_struct.fields() {
-        let field_path = append_field_path_for(path_prefix, &field);
-        match field.value() {
-            Some(TagFieldData::TagReference(reference)) => {
-                let Some((group_tag, rel_path)) = reference.group_tag_and_name else {
-                    continue;
-                };
-                let rel_path = sanitize_ref_path(&rel_path).replace('/', "\\");
-                if rel_path.is_empty() || rel_path.eq_ignore_ascii_case("none") {
-                    continue;
-                }
-                refs.push(TagReferenceUse {
-                    field_path,
-                    group_tag,
-                    rel_path,
-                });
-                continue;
-            }
-            Some(_) => continue,
-            None => {}
-        }
-        if let Some(nested) = field.as_struct() {
-            collect_tag_references(nested, &field_path, refs);
-        } else if let Some(block) = field.as_block() {
-            for (index, element) in block.iter().enumerate() {
-                let element_path = format!("{field_path}[{index}]");
-                collect_tag_references(element, &element_path, refs);
-            }
-        } else if let Some(array) = field.as_array() {
-            for (index, element) in array.iter().enumerate() {
-                let element_path = format!("{field_path}[{index}]");
-                collect_tag_references(element, &element_path, refs);
-            }
-        }
-    }
-}
-
-/// Collect just the reference *targets* in a tag, without the field-path
-/// bookkeeping [`collect_tag_references`] does for the reference-jump UI.
-/// Indexing walks every element of every block across the whole tag set, where
-/// building a path string per visited field dominates the cost — and the
-/// dependency index discards those paths.
-pub(in crate::app) fn collect_tag_dependency_refs(
-    tag_struct: TagStruct<'_>,
-    refs: &mut Vec<DependencyRef>,
-) {
-    for field in tag_struct.fields() {
-        match field.value() {
-            Some(TagFieldData::TagReference(reference)) => {
-                let Some((group_tag, rel_path)) = reference.group_tag_and_name else {
-                    continue;
-                };
-                let rel_path = sanitize_ref_path(&rel_path).replace('/', "\\");
-                if rel_path.is_empty() || rel_path.eq_ignore_ascii_case("none") {
-                    continue;
-                }
-                refs.push(DependencyRef {
-                    group_tag,
-                    rel_path,
-                });
-                continue;
-            }
-            Some(_) => continue,
-            None => {}
-        }
-        if let Some(nested) = field.as_struct() {
-            collect_tag_dependency_refs(nested, refs);
-        } else if let Some(block) = field.as_block() {
-            for element in block.iter() {
-                collect_tag_dependency_refs(element, refs);
-            }
-        } else if let Some(array) = field.as_array() {
-            for element in array.iter() {
-                collect_tag_dependency_refs(element, refs);
-            }
-        }
-    }
-}
-
-fn build_dependency_candidate_index(
-    entries: &[TagEntry],
-    names: &TagNameIndex,
-) -> DependencyCandidateIndex {
-    let mut index: DependencyCandidateIndex = HashMap::new();
-    let mut seen = HashSet::new();
-    for entry in entries {
-        let Some(rel_path) = dependency_entry_reference_path(entry, names) else {
-            continue;
-        };
-        if !seen.insert((entry.group_tag, rel_path.to_ascii_lowercase())) {
-            continue;
-        }
-        let leaf = dependency_leaf_key(&rel_path);
-        index
-            .entry((entry.group_tag, leaf))
-            .or_default()
-            .push(rel_path);
-    }
-    for candidates in index.values_mut() {
-        candidates.sort();
-    }
-    index
-}
 
 #[derive(Default)]
 struct ReferenceRewriteResult {
@@ -10707,7 +9657,7 @@ fn run_folder_refactor_job(
     })
 }
 
-fn send_folder_refactor_progress(
+pub(in crate::app) fn send_folder_refactor_progress(
     tx: &Sender<WorkerMessage>,
     label: &str,
     phase: &str,
@@ -10793,7 +9743,7 @@ fn copy_folder_recursive_progress(
     Ok(())
 }
 
-fn build_folder_reference_rewrites(
+pub(in crate::app) fn build_folder_reference_rewrites(
     tags_root: &Path,
     source: &Path,
     destination: &Path,
@@ -10881,7 +9831,7 @@ fn merge_refactored_entries(
     all_entries
 }
 
-fn affected_move_rewrite_entries(
+pub(in crate::app) fn affected_move_rewrite_entries(
     all_entries: &[TagEntry],
     old_entries: &[TagEntry],
     new_entries: &[TagEntry],
@@ -11020,49 +9970,6 @@ fn rewrite_references_in_entries(
     Ok(result)
 }
 
-fn build_reverse_dependency_index(
-    root: &Path,
-    source: &TagSource,
-    entries: &[TagEntry],
-    label: &str,
-    tx: &Sender<WorkerMessage>,
-) -> ReverseDependencyIndex {
-    let mut index = ReverseDependencyIndex::default();
-    let total = entries.len();
-    for (entry_index, entry) in entries.iter().enumerate() {
-        if entry_index == 0 || (entry_index + 1) % 50 == 0 || entry_index + 1 == total {
-            let progress = if total == 0 {
-                None
-            } else {
-                Some((entry_index + 1) as f32 / total as f32)
-            };
-            send_folder_refactor_progress(
-                tx,
-                label,
-                &format!("Building dependency index {}/{}", entry_index + 1, total),
-                progress,
-            );
-        }
-        let deps = match read_entry_dependencies(source, entry) {
-            Ok(deps) => deps,
-            Err(error) => {
-                let _ = tx.send(WorkerMessage::TerminalLine(format!(
-                    "Warning: skipped dependency index for {}: {error}",
-                    entry.display_path
-                )));
-                continue;
-            }
-        };
-        index.set_tag_dependencies(entry.key.clone(), deps);
-    }
-    let _ = tx.send(WorkerMessage::TerminalLine(format!(
-        "Built dependency index for {} tag(s) under {}",
-        index.len(),
-        root.display()
-    )));
-    index
-}
-
 fn refresh_reverse_dependency_index_after_refactor(
     index: &mut ReverseDependencyIndex,
     source: &TagSource,
@@ -11144,45 +10051,10 @@ fn persist_entry_index_changes(
     refresh
 }
 
-fn read_entry_dependencies(
-    source: &TagSource,
-    entry: &TagEntry,
-) -> Result<Vec<DependencyRef>, String> {
-    match &entry.location {
-        // A loose tag usually carries a `want` (dependency-list) stream, which
-        // is far cheaper to read than the whole tag.
-        TagEntryLocation::LooseFile(path) => {
-            if let Some(refs) = TagFile::read_dependency_references(path)
-                .map_err(|error| format!("Could not read dependency list: {error}"))?
-            {
-                return Ok(refs
-                    .into_iter()
-                    .map(|(group_tag, rel_path)| DependencyRef {
-                        group_tag,
-                        rel_path: sanitize_ref_path(&rel_path).replace('/', "\\"),
-                    })
-                    .collect());
-            }
-        }
-        // Cache and container tags have no separate dependency-list stream to
-        // shortcut through (verified: none of Campaign Evolved's 12,291
-        // container tags has a `want` chunk), so they fall through to the parse
-        // path below — which `read_entry` supports for both.
-        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => {}
-        // A brand-new tag exists only as an in-memory document; it has no
-        // payload to read here, and it is not yet referenced by anything.
-        TagEntryLocation::NewContainer { .. } => return Ok(Vec::new()),
-    }
-    let tag = read_entry(source, entry).map_err(|error| format!("Could not parse tag: {error}"))?;
-    let mut refs = Vec::new();
-    collect_tag_dependency_refs(tag.root(), &mut refs);
-    Ok(refs)
-}
-
 #[cfg(test)]
 mod container_dependency_tests;
 
-fn rewrite_reference_needles(rewrites: &HashMap<(u32, String), String>) -> Vec<Vec<u8>> {
+pub(in crate::app) fn rewrite_reference_needles(rewrites: &HashMap<(u32, String), String>) -> Vec<Vec<u8>> {
     let mut seen = HashSet::new();
     rewrites
         .keys()
@@ -11193,7 +10065,7 @@ fn rewrite_reference_needles(rewrites: &HashMap<(u32, String), String>) -> Vec<V
         .collect()
 }
 
-fn bytes_contain_any_ascii_case_insensitive(bytes: &[u8], needles: &[Vec<u8>]) -> bool {
+pub(in crate::app) fn bytes_contain_any_ascii_case_insensitive(bytes: &[u8], needles: &[Vec<u8>]) -> bool {
     if needles.is_empty() || bytes.is_empty() {
         return false;
     }
@@ -11354,24 +10226,6 @@ fn remap_favorite_paths(
     }
 }
 
-fn reference_path_from_abs_file(
-    tags_root: &Path,
-    path: &Path,
-    group_tag: u32,
-    names: &TagNameIndex,
-) -> Option<String> {
-    let rel = path.strip_prefix(tags_root).ok()?;
-    reference_path_from_rel_file(rel, group_tag, names)
-}
-
-fn reference_path_from_rel_file(
-    rel_file: &Path,
-    group_tag: u32,
-    names: &TagNameIndex,
-) -> Option<String> {
-    reference_path_without_group_extension(&rel_file.to_string_lossy(), group_tag, names)
-}
-
 #[cfg(test)]
 mod tsv_paste_tests;
 
@@ -11400,17 +10254,11 @@ mod restore_focus_tests;
 #[cfg(test)]
 mod field_search_tests;
 
-#[cfg(test)]
-mod dependency_tests;
 
 #[cfg(test)]
 mod mod_output_tests;
 
-#[cfg(test)]
-mod dependency_database_tests;
 
-#[cfg(test)]
-mod refresh_reference_tests;
 
 #[cfg(test)]
 mod saved_tag_index_tests;

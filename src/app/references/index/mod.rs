@@ -2,10 +2,11 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
+use crate::app::controller::terminal::trim_terminal_lines;
 
 impl Baboon {
     /// Applies `WorkerMessage::ReverseDependenciesBuilt`, rejecting stale source generations.
-    pub(super) fn handle_reverse_dependencies_built(
+    pub(in crate::app) fn handle_reverse_dependencies_built(
         &mut self,
         stamp: KitStamp,
         index: ReverseDependencyIndex,
@@ -73,7 +74,7 @@ impl Baboon {
     }
 
     /// Applies `WorkerMessage::ReferenceIndexProgress`, rejecting stale or inactive builds.
-    pub(super) fn handle_reference_index_progress(
+    pub(in crate::app) fn handle_reference_index_progress(
         &mut self,
         stamp: KitStamp,
         processed: usize,
@@ -97,7 +98,7 @@ impl Baboon {
     }
 
     /// Applies `WorkerMessage::FolderRefactorProgress` to the visible refactor state.
-    pub(super) fn handle_folder_refactor_progress(
+    pub(in crate::app) fn handle_folder_refactor_progress(
         &mut self,
         progress: FolderRefactorProgress,
     ) -> bool {
@@ -116,7 +117,7 @@ impl Baboon {
     /// land on the active kit, so a move that finished after the user switched
     /// workspaces rebuilt the *other* game's browser from these results and
     /// dropped its open documents and unsaved edit buffers along the way.
-    pub(super) fn handle_folder_refactor_finished(
+    pub(in crate::app) fn handle_folder_refactor_finished(
         &mut self,
         stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
@@ -184,11 +185,11 @@ impl Baboon {
     }
 }
 
-pub(super) fn normalize_ref(rel_path: &str) -> String {
+pub(in crate::app) fn normalize_ref(rel_path: &str) -> String {
     crate::core::source::normalize_dependency_path(rel_path)
 }
 
-pub(super) fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
+pub(in crate::app) fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     let mut acc = String::new();
     for segment in field_path.split('/') {
@@ -220,7 +221,7 @@ pub(super) fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
     out
 }
 
-pub(super) fn occurrence_label(field_path: &str) -> String {
+pub(in crate::app) fn occurrence_label(field_path: &str) -> String {
     field_path
         .split('/')
         .map(|segment| match segment.split_once('[') {
@@ -239,14 +240,14 @@ fn strip_ordinal_token(name: &str) -> &str {
     name.split('#').next().unwrap_or(name)
 }
 
-pub(super) fn dependency_entry_reference_path(
+pub(in crate::app) fn dependency_entry_reference_path(
     entry: &TagEntry,
     names: &TagNameIndex,
 ) -> Option<String> {
     reference_path_without_group_extension(&entry.display_path, entry.group_tag, names)
 }
 
-pub(super) fn normalized_reference_lookup_path(
+pub(in crate::app) fn normalized_reference_lookup_path(
     path: &str,
     group_tag: u32,
     names: &TagNameIndex,
@@ -267,7 +268,7 @@ pub(super) fn normalized_reference_lookup_path(
     normalize_ref(&path)
 }
 
-pub(super) fn container_entry_for_reference<'a>(
+pub(in crate::app) fn container_entry_for_reference<'a>(
     entries: &'a [TagEntry],
     group_tag: u32,
     rel_path: &str,
@@ -287,7 +288,7 @@ pub(super) fn container_entry_for_reference<'a>(
     })
 }
 
-pub(super) fn reference_path_without_group_extension(
+pub(in crate::app) fn reference_path_without_group_extension(
     path: &str,
     group_tag: u32,
     names: &TagNameIndex,
@@ -313,7 +314,7 @@ pub(super) fn reference_path_without_group_extension(
         .map(|path| path.replace('/', "\\"))
 }
 
-pub(super) fn dependency_leaf_key(rel_path: &str) -> String {
+pub(in crate::app) fn dependency_leaf_key(rel_path: &str) -> String {
     rel_path
         .replace('/', "\\")
         .rsplit('\\')
@@ -322,7 +323,7 @@ pub(super) fn dependency_leaf_key(rel_path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub(super) fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
+pub(in crate::app) fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
     resolve_tag_path(tags_root, rel_path, extension).is_file()
 }
 

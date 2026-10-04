@@ -340,7 +340,7 @@ pub(super) fn send_terminal_line(
     ctx.request_repaint();
 }
 
-pub(super) fn trim_terminal_lines(lines: &mut Vec<TerminalLineEntry>) {
+pub(in crate::app) fn trim_terminal_lines(lines: &mut Vec<TerminalLineEntry>) {
     if lines.len() > TERMINAL_VISIBLE_LINE_LIMIT {
         let remove = lines.len() - TERMINAL_VISIBLE_LINE_TRIM_TARGET;
         lines.drain(..remove);

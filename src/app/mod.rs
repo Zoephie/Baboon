@@ -147,6 +147,8 @@ mod compare;
 use compare::*;
 mod search;
 use search::*;
+mod references;
+use references::*;
 mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
