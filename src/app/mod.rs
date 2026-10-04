@@ -263,7 +263,7 @@ impl Baboon {
         let terminal_open_games = load_terminal_open_games();
         let suppress_startup_popups = startup_arguments.suppresses_startup_popups();
         let first_run_wizard = (!suppress_startup_popups && !load_first_run_complete())
-            .then(|| FirstRunWizardState::new(storage.mode));
+            .then(|| FirstRunWizardState::new(storage.mode, &prefs));
         set_dark_mode(prefs.dark_mode);
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
@@ -353,6 +353,14 @@ impl Baboon {
         names: TagNameIndex,
         last_opened_windows: Option<LastOpenedWindowsPrompt>,
     ) -> Self {
+        // What the application opens on: setup, or the last session's windows.
+        let mut dialogs = DialogHost::default();
+        if let Some(wizard) = first_run_wizard {
+            dialogs.open(wizard);
+        }
+        if let Some(prompt) = last_opened_windows {
+            dialogs.open(prompt);
+        }
         let (tx, rx) = mpsc::channel();
         let editing_kit_validation = EditingKitValidationCache::new(
             &prefs.editing_kit_paths,
@@ -415,25 +423,13 @@ impl Baboon {
                 pending_sound_extract: None,
             },
             chimp: ChimpFeature {
-                chimp_usmap_path_input: prefs
-                    .chimp_usmap_path
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
                 chimp_level_job: None,
                 chimp_writes: HashMap::new(),
             },
             kit_tools: KitsFeature {
                 editing_kit_validation,
-                custom_editing_kit_draft: None,
-                custom_editing_kit_removal: None,
                 editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
                 editing_kit_path_attention: None,
-                blender_path_input: prefs
-                    .blender_path
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
                 kit_tool_drag: KitToolDragState::default(),
                 terminal: TerminalState {
                     input: String::new(),
@@ -472,10 +468,6 @@ impl Baboon {
             shell: ShellFeature {
                 available_update: None,
                 last_update_check: None,
-                pending_ui_scale: prefs.ui_scale,
-                first_run_wizard,
-                settings_open: false,
-                settings_tab: SettingsTab::Startup,
                 restoring_kits: HashSet::new(),
                 restored_active_kit: None,
                 prefs_next_check_at: 0.0,
@@ -498,7 +490,7 @@ impl Baboon {
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
             commands: CommandQueue::default(),
-            dialogs: DialogHost::with_open(last_opened_windows),
+            dialogs,
             // The startup workspace is seeded like any other new kit; every
             // later one goes through `Baboon::empty_kit`.
             views: KitViews::startup(KitView::new(

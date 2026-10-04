@@ -20,10 +20,10 @@ pub(in crate::app) use workspace::IndexingNotice;
 pub(in crate::app) mod welcome;
 pub(in crate::app) use welcome::draw_welcome_screen;
 pub(in crate::app) mod first_run;
-pub(in crate::app) use first_run::{FirstRunCommand, draw_first_run_wizard};
+pub(in crate::app) use first_run::FirstRunCommand;
 pub(in crate::app) mod settings;
 pub(in crate::app) use settings::{
-    SettingsCommand, draw_nested_default_picker, draw_settings_window, draw_update_channel_picker,
+    SettingsCommand, SettingsWindow, draw_nested_default_picker, draw_update_channel_picker,
 };
 pub(in crate::app) mod kit_tiles;
 pub(in crate::app) use kit_tiles::TileParts;
@@ -44,10 +44,6 @@ pub(crate) use launch::{StartupArguments, parse_startup_arguments};
 /// restored, the operation notice, toolbar icons and game artwork, and when
 /// prefs are next checked.
 pub(in crate::app) struct ShellFeature {
-    pub(in crate::app) settings_open: bool,
-    pub(in crate::app) settings_tab: SettingsTab,
-    pub(in crate::app) pending_ui_scale: f32,
-    pub(in crate::app) first_run_wizard: Option<FirstRunWizardState>,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.

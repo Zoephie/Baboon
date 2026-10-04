@@ -8,8 +8,7 @@ use super::*;
 #[test]
 fn a_settings_checkbox_changes_the_live_preference() {
     let mut h = Harness::new();
-    h.app.shell.settings_open = true;
-    h.app.shell.settings_tab = SettingsTab::Browser;
+    h.app.open_settings(Some(SettingsTab::Browser));
     for _ in 0..4 {
         h.frame(Vec::new());
     }
@@ -23,4 +22,19 @@ fn a_settings_checkbox_changes_the_live_preference() {
     let mut expected = before.clone();
     expected.double_click_to_open_tags = after.double_click_to_open_tags;
     assert!(*after == expected, "nothing else changed");
+}
+
+/// A draft the commit refuses comes back as its dialog, with the reason.
+#[test]
+fn a_refused_editing_kit_draft_reopens_with_its_reason() {
+    let mut app = Baboon::for_test();
+    app.commands.send(SettingsCommand::CommitEditingKitDraft(
+        CustomEditingKitDraft::new(),
+    ));
+    app.apply_commands(&egui::Context::default());
+    let draft = app
+        .dialogs
+        .get::<CustomEditingKitDraft>()
+        .expect("reopened");
+    assert_eq!(draft.error.as_deref(), Some("Enter an editing kit name"));
 }

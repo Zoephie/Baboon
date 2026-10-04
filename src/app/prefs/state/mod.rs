@@ -16,10 +16,28 @@ pub(in crate::app) struct FirstRunWizardState {
     pub(in crate::app) committed_storage: Option<crate::core::storage::StorageMode>,
     pub(in crate::app) editing_kit_detection_ran: bool,
     pub(in crate::app) validation_error: Option<String>,
+    /// The Blender path as typed, applied when it names a file.
+    pub(in crate::app) blender_path_input: String,
+    /// The UI scale while its slider is dragged, applied on release.
+    pub(in crate::app) pending_ui_scale: f32,
+}
+
+/// The Blender path box's starting text: the path the preferences hold.
+pub(in crate::app) fn blender_path_input(prefs: &GuiPrefs) -> String {
+    prefs
+        .blender_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default()
 }
 
 impl FirstRunWizardState {
-    pub(in crate::app) fn new(existing_mode: Option<crate::core::storage::StorageMode>) -> Self {
+    /// Setup from the start, or from the interface page when a storage mode
+    /// was already chosen; its inputs start from `prefs`.
+    pub(in crate::app) fn new(
+        existing_mode: Option<crate::core::storage::StorageMode>,
+        prefs: &GuiPrefs,
+    ) -> Self {
         Self {
             page: if existing_mode.is_some() {
                 FirstRunPage::Interface
@@ -30,6 +48,8 @@ impl FirstRunWizardState {
             committed_storage: existing_mode,
             editing_kit_detection_ran: false,
             validation_error: None,
+            blender_path_input: blender_path_input(prefs),
+            pending_ui_scale: prefs.ui_scale,
         }
     }
 }

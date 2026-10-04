@@ -13,12 +13,13 @@ const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(2
 impl Baboon {
     pub(in crate::app) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
-        if self.shell.first_run_wizard.is_some() {
+        if self.dialogs.get::<FirstRunWizardState>().is_some() {
+            // Setup draws alone, over an empty window.
             ctx.set_zoom_factor(self.model.prefs.ui_scale);
             set_dark_mode(self.model.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
-            draw_first_run_wizard(&cx!(self, ctx), &mut self.shell, &mut self.kit_tools);
+            self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
             self.apply_commands(ctx);
             return;
         }
@@ -298,12 +299,6 @@ impl Baboon {
     }
 
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {
-        draw_settings_window(
-            &cx!(self, ctx),
-            &mut self.shell,
-            &mut self.kit_tools,
-            &mut self.chimp.chimp_usmap_path_input,
-        );
         self.diff_expanded_mod_export_rows();
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.

@@ -352,7 +352,7 @@ impl Baboon {
             if let Err(error) = save_gui_prefs(
                 &prefs,
                 &self.kit_tools.terminal_open_games,
-                self.shell.first_run_wizard.is_none(),
+                self.dialogs.get::<FirstRunWizardState>().is_none(),
             ) {
                 self.model.prefs.custom_editing_kit_profiles = previous;
                 self.model.status = error;
@@ -370,8 +370,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn prompt_for_editing_kit_path(&mut self, shortcut: EditingKitShortcut, status: String) {
-        self.shell.settings_open = true;
-        self.shell.settings_tab = SettingsTab::EditingKits;
+        self.open_settings(Some(SettingsTab::EditingKits));
         self.kit_tools.editing_kit_path_attention = Some(shortcut.game.as_str().to_owned());
         self.kit_tools.editing_kit_path_inputs
             .entry(shortcut.game.as_str().to_owned())

@@ -30,6 +30,7 @@ pub(in crate::app) trait Dialog: Any {
 pub(in crate::app) struct AppReads<'a> {
     pub(in crate::app) kit_tools: &'a KitsFeature,
     pub(in crate::app) search: &'a SearchFeature,
+    pub(in crate::app) shell: &'a ShellFeature,
 }
 
 /// The [`AppReads`] of an application, borrowed beside its dialogs.
@@ -38,6 +39,7 @@ macro_rules! app_reads {
         $crate::app::dialogs::AppReads {
             kit_tools: &$app.kit_tools,
             search: &$app.search,
+            shell: &$app.shell,
         }
     };
 }
@@ -55,16 +57,6 @@ fn key_of(dialog: &dyn Dialog) -> (TypeId, u64) {
 }
 
 impl DialogHost {
-    /// A host with `dialog` open, if there is one: what the application starts
-    /// with.
-    pub(in crate::app) fn with_open(dialog: Option<impl Dialog>) -> Self {
-        let mut host = Self::default();
-        if let Some(dialog) = dialog {
-            host.open(dialog);
-        }
-        host
-    }
-
     /// Open `dialog`, replacing an open one with the same type and instance
     /// where it stands.
     pub(in crate::app) fn open(&mut self, dialog: impl Dialog) {

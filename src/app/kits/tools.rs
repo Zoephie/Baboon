@@ -37,13 +37,13 @@ impl Baboon {
 
     pub(in crate::app) fn launch_blender(&mut self) {
         let Some(path) = self.model.prefs.blender_path.clone() else {
-            self.shell.settings_open = true;
+            self.open_settings(None);
             self.model.status = "Set the Blender path in File > Settings first".to_owned();
             return;
         };
         if !path.is_file() {
             self.model.status = format!("Blender executable not found: {}", path.display());
-            self.shell.settings_open = true;
+            self.open_settings(None);
             return;
         }
         self.spawn_tool("Blender", &path, path.parent().map(Path::to_path_buf), &[]);
@@ -65,7 +65,13 @@ impl Baboon {
         }
         if let Some(path) = dialog.pick_file() {
             self.model.prefs.blender_path = Some(path.clone());
-            self.kit_tools.blender_path_input = path.display().to_string();
+            // Into whichever open window shows the path as typed.
+            if let Some(settings) = self.dialogs.get_mut::<SettingsWindow>() {
+                settings.blender_path_input = path.display().to_string();
+            }
+            if let Some(wizard) = self.dialogs.get_mut::<FirstRunWizardState>() {
+                wizard.blender_path_input = path.display().to_string();
+            }
             self.model.status = format!("Blender path set to {}", path.display());
         }
     }

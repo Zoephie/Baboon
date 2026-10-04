@@ -124,12 +124,7 @@ impl Baboon {
             AppAction::ConfirmClearModifications { kit, stashed, unsaved } => {
                 self.dialogs.open(ClearStashConfirm { kit, stashed, unsaved });
             }
-            AppAction::OpenSettings(tab) => {
-                if let Some(tab) = tab {
-                    self.shell.settings_tab = tab;
-                }
-                self.shell.settings_open = true;
-            }
+            AppAction::OpenSettings(tab) => self.open_settings(tab),
             AppAction::OpenToolCommands => {
                 if self.dialogs.get::<ToolCommandsUiState>().is_none() {
                     self.dialogs.open(ToolCommandsUiState::default());

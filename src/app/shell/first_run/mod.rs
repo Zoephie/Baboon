@@ -24,8 +24,8 @@ pub(in crate::app) fn commit_ui_scale_now(response: &egui::Response, pending: f3
 /// and what its buttons asked for, held until the draft has been sent.
 struct FirstRunDraw<'a> {
     prefs: GuiPrefs,
-    shell: &'a mut ShellFeature,
-    kit_tools: &'a mut KitsFeature,
+    wizard: &'a mut FirstRunWizardState,
+    app: &'a AppReads<'a>,
     effects: Vec<FirstRunCommand>,
 }
 
@@ -43,6 +43,8 @@ pub(in crate::app) enum FirstRunCommand {
     ChooseBlenderPath,
     SetEditingKitPath(EditingKitShortcut, String),
     ChooseEditingKitPath(EditingKitShortcut),
+    /// The update channel changed: forget the last check's verdict.
+    ForgetUpdateCheck,
 }
 
 impl Baboon {
@@ -52,7 +54,7 @@ impl Baboon {
                 crate::core::storage::activate(mode);
                 match self.save_first_run_checkpoint(false) {
                     Ok(()) => {
-                        if let Some(state) = self.shell.first_run_wizard.as_mut() {
+                        if let Some(state) = self.dialogs.get_mut::<FirstRunWizardState>() {
                             state.committed_storage = Some(mode);
                             state.page = FirstRunPage::Interface;
                             state.validation_error = None;
@@ -64,14 +66,13 @@ impl Baboon {
             FirstRunCommand::LeaveInterface => match self.save_first_run_checkpoint(false) {
                 Ok(()) => {
                     let should_detect = self
-                        .shell
-                        .first_run_wizard
-                        .as_ref()
+                        .dialogs
+                        .get::<FirstRunWizardState>()
                         .is_some_and(|state| !state.editing_kit_detection_ran);
                     if should_detect {
                         self.auto_detect_editing_kit_paths();
                     }
-                    if let Some(state) = self.shell.first_run_wizard.as_mut() {
+                    if let Some(state) = self.dialogs.get_mut::<FirstRunWizardState>() {
                         state.editing_kit_detection_ran = true;
                         state.validation_error = None;
                         state.page = FirstRunPage::EditingKits;
@@ -81,7 +82,7 @@ impl Baboon {
             },
             FirstRunCommand::Finish => match self.save_first_run_checkpoint(true) {
                 Ok(()) => {
-                    self.shell.first_run_wizard = None;
+                    self.dialogs.close::<FirstRunWizardState>();
                     self.model.status = "Setup complete".to_owned();
                 }
                 Err(error) => self.first_run_failed(error),
@@ -91,11 +92,12 @@ impl Baboon {
                 self.set_editing_kit_path_input(shortcut, input)
             }
             FirstRunCommand::ChooseEditingKitPath(shortcut) => self.choose_editing_kit_path(shortcut),
+            FirstRunCommand::ForgetUpdateCheck => self.forget_update_check(),
         }
     }
 
     fn first_run_failed(&mut self, error: String) {
-        if let Some(state) = self.shell.first_run_wizard.as_mut() {
+        if let Some(state) = self.dialogs.get_mut::<FirstRunWizardState>() {
             state.validation_error = Some(error);
         }
     }
@@ -113,35 +115,37 @@ impl Baboon {
 /// edits a draft of the preferences; once drawn, a changed draft is sent
 /// first and then what a page's button asked for, which saves the
 /// preferences as just set.
-pub(in crate::app) fn draw_first_run_wizard(cx: &Ctx, shell: &mut ShellFeature, kit_tools: &mut KitsFeature) {
-    let Some(page) = shell.first_run_wizard.as_ref().map(|state| state.page) else {
-        return;
-    };
-    let ctx = cx.egui;
-    let mut s = FirstRunDraw {
-        prefs: cx.model.prefs.clone(),
-        shell,
-        kit_tools,
-        effects: Vec::new(),
-    };
+impl Dialog for FirstRunWizardState {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let page = self.page;
+        let ctx = cx.egui;
+        let mut s = FirstRunDraw {
+            prefs: cx.model.prefs.clone(),
+            wizard: self,
+            app,
+            effects: Vec::new(),
+        };
 
-    egui::Window::new("Welcome to Baboon")
-        .id(egui::Id::new("first_run_wizard"))
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(window_width(ctx, 720.0))
-        .show(ctx, |ui| match page {
-            FirstRunPage::Storage => draw_first_run_storage(ui, &mut s),
-            FirstRunPage::Interface => draw_first_run_interface(ui, &mut s),
-            FirstRunPage::EditingKits => draw_first_run_editing_kits(ui, &mut s),
-        });
-    let FirstRunDraw { prefs, effects, .. } = s;
-    if prefs != cx.model.prefs {
-        cx.edit_prefs(move |live| *live = prefs);
-    }
-    for effect in effects {
-        cx.send(effect);
+        egui::Window::new("Welcome to Baboon")
+            .id(egui::Id::new("first_run_wizard"))
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(window_width(ctx, 720.0))
+            .show(ctx, |ui| match page {
+                FirstRunPage::Storage => draw_first_run_storage(ui, &mut s),
+                FirstRunPage::Interface => draw_first_run_interface(ui, &mut s),
+                FirstRunPage::EditingKits => draw_first_run_editing_kits(ui, &mut s),
+            });
+        let FirstRunDraw { prefs, effects, .. } = s;
+        if prefs != cx.model.prefs {
+            cx.edit_prefs(move |live| *live = prefs);
+        }
+        for effect in effects {
+            cx.send(effect);
+        }
+        // Finish closes it, once the setup is saved.
+        true
     }
 }
 
@@ -154,12 +158,10 @@ fn draw_first_run_storage(ui: &mut Ui, s: &mut FirstRunDraw) {
     ui.label("Choose where Baboon should keep its automatic settings and cache files.");
     ui.add_space(8.0);
 
-    let locked = s
-        .shell.first_run_wizard
-        .as_ref()
+    let locked = Some(&*s.wizard)
         .and_then(|state| state.committed_storage)
         .is_some();
-    let state = s.shell.first_run_wizard.as_mut().expect("wizard exists");
+    let state = &mut *s.wizard;
     ui.add_enabled_ui(!locked, |ui| {
         ui.radio_value(
             &mut state.selected_storage,
@@ -183,13 +185,10 @@ fn draw_first_run_storage(ui: &mut Ui, s: &mut FirstRunDraw) {
         ui.add_space(6.0);
         ui.label(RichText::new("The storage location was saved for this setup.").italics());
     }
-    draw_first_run_error(ui, s.shell);
+    draw_first_run_error(ui, s.wizard);
     ui.add_space(14.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let selected = s
-            .shell.first_run_wizard
-            .as_ref()
-            .and_then(|state| state.selected_storage);
+        let selected = Some(&*s.wizard).and_then(|state| state.selected_storage);
         if ui
             .add_enabled(selected.is_some(), egui::Button::new("Next"))
             .clicked()
@@ -205,15 +204,17 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
     ui.label("Blender is optional. You can change any of these settings later.");
     ui.add_space(10.0);
     ui.label(RichText::new("Updates").strong());
-    draw_update_channel_picker(ui, &mut s.prefs, s.shell);
+    if draw_update_channel_picker(ui, &mut s.prefs) {
+        s.effects.push(FirstRunCommand::ForgetUpdateCheck);
+    }
     ui.add_space(12.0);
     ui.label(RichText::new("Blender executable").strong());
     ui.horizontal(|ui| {
         if ui
-            .add(egui::TextEdit::singleline(&mut s.kit_tools.blender_path_input).desired_width(470.0))
+            .add(egui::TextEdit::singleline(&mut s.wizard.blender_path_input).desired_width(470.0))
             .changed()
         {
-            let value = s.kit_tools.blender_path_input.trim();
+            let value = s.wizard.blender_path_input.trim();
             s.prefs.blender_path = (!value.is_empty()).then(|| PathBuf::from(value));
         }
         if ui.button("Browse...").clicked() {
@@ -221,7 +222,7 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
         }
         if ui.button("Clear").clicked() {
             s.prefs.blender_path = None;
-            s.kit_tools.blender_path_input.clear();
+            s.wizard.blender_path_input.clear();
         }
     });
     ui.add_space(12.0);
@@ -233,11 +234,11 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
     ui.horizontal(|ui| {
         ui.label("UI scale");
         let response = ui.add(egui::Slider::new(
-            &mut s.shell.pending_ui_scale,
+            &mut s.wizard.pending_ui_scale,
             MIN_UI_SCALE..=MAX_UI_SCALE,
         ));
-        if commit_ui_scale_now(&response, s.shell.pending_ui_scale, s.prefs.ui_scale) {
-            s.prefs.ui_scale = s.shell.pending_ui_scale;
+        if commit_ui_scale_now(&response, s.wizard.pending_ui_scale, s.prefs.ui_scale) {
+            s.prefs.ui_scale = s.wizard.pending_ui_scale;
         }
     });
     ui.horizontal(|ui| {
@@ -257,11 +258,11 @@ fn draw_first_run_interface(ui: &mut Ui, s: &mut FirstRunDraw) {
         &mut s.prefs.folders_before_tags,
         "List subfolders before tags",
     );
-    draw_first_run_error(ui, s.shell);
+    draw_first_run_error(ui, s.wizard);
     ui.add_space(14.0);
     ui.horizontal(|ui| {
         if ui.button("Back").clicked() {
-            s.shell.first_run_wizard.as_mut().expect("wizard exists").page = FirstRunPage::Storage;
+            s.wizard.page = FirstRunPage::Storage;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Next").clicked() {
@@ -280,7 +281,9 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
         .show(ui, |ui| {
             for shortcut in EDITING_KIT_SHORTCUTS {
                 let mut input = s
-                    .kit_tools.editing_kit_path_inputs
+                    .app
+                    .kit_tools
+                    .editing_kit_path_inputs
                     .get(shortcut.game.as_str())
                     .cloned()
                     .unwrap_or_default();
@@ -301,12 +304,11 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
                 });
             }
         });
-    draw_first_run_error(ui, s.shell);
+    draw_first_run_error(ui, s.wizard);
     ui.add_space(14.0);
     ui.horizontal(|ui| {
         if ui.button("Back").clicked() {
-            s.shell.first_run_wizard.as_mut().expect("wizard exists").page =
-                FirstRunPage::Interface;
+            s.wizard.page = FirstRunPage::Interface;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Finish").clicked() {
@@ -316,12 +318,8 @@ fn draw_first_run_editing_kits(ui: &mut Ui, s: &mut FirstRunDraw) {
     });
 }
 
-fn draw_first_run_error(ui: &mut Ui, shell: &ShellFeature) {
-    if let Some(error) = shell
-        .first_run_wizard
-        .as_ref()
-        .and_then(|state| state.validation_error.as_deref())
-    {
+fn draw_first_run_error(ui: &mut Ui, wizard: &FirstRunWizardState) {
+    if let Some(error) = wizard.validation_error.as_deref() {
         ui.add_space(8.0);
         ui.colored_label(Color32::from_rgb(220, 70, 70), error);
     }

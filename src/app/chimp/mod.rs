@@ -343,5 +343,4 @@ pub(in crate::app) struct ChimpFeature {
     pub(in crate::app) chimp_level_job: Option<ChimpLevelJob>,
     /// Kits with a Chimp save running, and the close to run once it lands.
     pub(in crate::app) chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
-    pub(in crate::app) chimp_usmap_path_input: String,
 }

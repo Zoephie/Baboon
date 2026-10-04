@@ -41,9 +41,6 @@ pub(in crate::app) mod profiles;
 /// tool, the terminal, and a tool import waiting to start.
 pub(in crate::app) struct KitsFeature {
     pub(in crate::app) editing_kit_validation: EditingKitValidationCache,
-    pub(in crate::app) custom_editing_kit_draft: Option<CustomEditingKitDraft>,
-    pub(in crate::app) custom_editing_kit_removal: Option<CustomEditingKitRemoval>,
-    pub(in crate::app) blender_path_input: String,
     pub(in crate::app) editing_kit_path_inputs: HashMap<String, String>,
     pub(in crate::app) editing_kit_path_attention: Option<String>,
     /// A browser drag hovering Sapien's or Guerilla's window, if one is.

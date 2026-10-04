@@ -824,14 +824,14 @@ impl Baboon {
             ctx.input_mut(|input| input.time = input.time.max(now));
         }
         self.window_state.observe(ctx);
-        if self.shell.first_run_wizard.is_none() {
+        if self.dialogs.get::<FirstRunWizardState>().is_none() {
             self.process_worker_messages(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit
         // that was still focused, so the action sees it.
         self.run_deferred_file_action(ctx);
-        if self.shell.first_run_wizard.is_none() {
+        if self.dialogs.get::<FirstRunWizardState>().is_none() {
             // Defers the close, so the UI commits a focused edit before the
             // next frame decides whether there is anything to save.
             self.handle_app_close_request(ctx);

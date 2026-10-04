@@ -918,9 +918,11 @@ impl Baboon {
 /// what it asked for, held until the draft has been sent.
 struct SettingsDraw<'a> {
     prefs: GuiPrefs,
-    shell: &'a mut ShellFeature,
-    kit_tools: &'a mut KitsFeature,
-    usmap_input: &'a mut String,
+    window: &'a mut SettingsWindow,
+    app: &'a AppReads<'a>,
+    /// Dialogs Settings opens over itself: the editing-kit editor and its
+    /// removal confirmation.
+    opened: Vec<Box<dyn Dialog>>,
     effects: Vec<SettingsCommand>,
 }
 
@@ -932,6 +934,8 @@ pub(in crate::app) enum SettingsCommand {
     /// dropped.
     DropChimpEverywhere,
     CheckForUpdates,
+    /// The update channel changed: forget the last check's verdict.
+    ForgetUpdateCheck,
     AutoDetectEditingKits,
     RefreshEditingKitStatus,
     LoadEditingKit(CustomEditingKitProfile),
@@ -941,7 +945,8 @@ pub(in crate::app) enum SettingsCommand {
     CommitEditingKitDraft(CustomEditingKitDraft),
     RemoveEditingKit(CustomEditingKitRemoval),
     ChooseBlenderPath,
-    CommitChimpUsmapInput,
+    /// Use the USMAP at this typed path, or the bundled one when it is empty.
+    CommitChimpUsmapInput(String),
     ChooseChimpUsmap,
     UseBundledUsmap,
 }
@@ -973,6 +978,7 @@ impl Baboon {
                 }
             }
             SettingsCommand::CheckForUpdates => self.begin_check_for_updates(ctx.clone(), false),
+            SettingsCommand::ForgetUpdateCheck => self.forget_update_check(),
             SettingsCommand::AutoDetectEditingKits => self.auto_detect_editing_kit_paths(),
             SettingsCommand::RefreshEditingKitStatus => {
                 self.refresh_editing_kit_validation();
@@ -984,15 +990,39 @@ impl Baboon {
             SettingsCommand::ReorderEditingKits(request) => self.reorder_editing_kits(&request),
             SettingsCommand::CommitEditingKitDraft(mut draft) => {
                 if !self.commit_custom_editing_kit_draft(&mut draft) {
-                    self.kit_tools.custom_editing_kit_draft = Some(draft);
+                    self.dialogs.open(draft);
                 }
             }
             SettingsCommand::RemoveEditingKit(removal) => self.remove_custom_editing_kit_profile(&removal),
             SettingsCommand::ChooseBlenderPath => self.choose_blender_path(),
-            SettingsCommand::CommitChimpUsmapInput => self.commit_chimp_usmap_path_input(ctx.clone()),
+            SettingsCommand::CommitChimpUsmapInput(input) => {
+                self.commit_chimp_usmap_path_input(&input, ctx.clone())
+            }
             SettingsCommand::ChooseChimpUsmap => self.choose_chimp_usmap_path(ctx.clone()),
             SettingsCommand::UseBundledUsmap => self.apply_chimp_usmap_path(None, ctx.clone()),
         }
+    }
+
+    /// Open Settings on `tab`, or turn the open one to it.
+    pub(in crate::app) fn open_settings(&mut self, tab: Option<SettingsTab>) {
+        match self.dialogs.get_mut::<SettingsWindow>() {
+            Some(settings) => {
+                if let Some(tab) = tab {
+                    settings.tab = tab;
+                }
+            }
+            None => self.dialogs.open(SettingsWindow::new(
+                &self.model.prefs,
+                tab.unwrap_or(SettingsTab::Startup),
+            )),
+        }
+    }
+
+    /// Forget what the last update check found, as when the channel it
+    /// checked changes.
+    pub(in crate::app) fn forget_update_check(&mut self) {
+        self.shell.available_update = None;
+        self.shell.last_update_check = None;
     }
 
     /// Move an editing kit in the list as dragged, and save the order.
@@ -1003,7 +1033,7 @@ impl Baboon {
             if let Err(error) = save_gui_prefs(
                 &prefs,
                 &self.kit_tools.terminal_open_games,
-                self.shell.first_run_wizard.is_none(),
+                self.dialogs.get::<FirstRunWizardState>().is_none(),
             ) {
                 self.model.prefs.custom_editing_kit_profiles = previous;
                 self.model.status = error;
@@ -1020,56 +1050,90 @@ impl Baboon {
 /// It edits a draft of the preferences; once drawn, a changed draft is
 /// sent first and then whatever the window asked for, so those see the
 /// preferences as the user just set them.
-pub(in crate::app) fn draw_settings_window(
-    cx: &Ctx,
-    shell: &mut ShellFeature,
-    kit_tools: &mut KitsFeature,
-    usmap_input: &mut String,
-) {
-    if !shell.settings_open {
-        return;
-    }
-    let ctx = cx.egui;
-    let mut s = SettingsDraw {
-        prefs: cx.model.prefs.clone(),
-        shell,
-        kit_tools,
-        usmap_input,
-        effects: Vec::new(),
-    };
+/// The Settings window: which tab it shows, and what is being typed into it
+/// before it becomes a preference.
+pub(in crate::app) struct SettingsWindow {
+    pub(in crate::app) tab: SettingsTab,
+    /// The UI scale while its slider is dragged, applied on release.
+    pub(in crate::app) pending_ui_scale: f32,
+    /// The Blender path as typed, applied when it names a file.
+    pub(in crate::app) blender_path_input: String,
+    /// The Chimp USMAP path as typed, applied on Enter or Apply.
+    pub(in crate::app) usmap_input: String,
+}
 
-    let mut open = s.shell.settings_open;
-    egui::Window::new("Settings")
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("app_settings"))
-        .title_bar(false)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(window_width(ctx, 760.0))
-        .default_height(window_height(ctx, 640.0, false))
-        .show(ctx, |ui| {
-            let mut selected = s.shell.settings_tab;
-            settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
-                SettingsTab::Startup => draw_settings_startup_tab(cx, ui, &mut s),
-                SettingsTab::Browser => draw_settings_browser_tab(ui, &mut s),
-                SettingsTab::EditingKits => draw_settings_editing_kits_tab(cx, ui, &mut s),
-                SettingsTab::Appearance => draw_settings_appearance_tab(cx, ui, &mut s),
-                SettingsTab::Tools => draw_settings_tools_tab(cx, ui, &mut s),
+impl SettingsWindow {
+    /// Settings on `tab`, its inputs starting from `prefs`.
+    pub(in crate::app) fn new(prefs: &GuiPrefs, tab: SettingsTab) -> Self {
+        Self {
+            tab,
+            pending_ui_scale: prefs.ui_scale,
+            blender_path_input: blender_path_input(prefs),
+            usmap_input: prefs
+                .chimp_usmap_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl SettingsDraw<'_> {
+    /// Open `dialog` over Settings once it has drawn.
+    fn opened_dialog(&mut self, dialog: impl Dialog) {
+        self.opened.push(Box::new(dialog));
+    }
+}
+
+impl Dialog for SettingsWindow {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let mut s = SettingsDraw {
+            prefs: cx.model.prefs.clone(),
+            window: self,
+            app,
+            opened: Vec::new(),
+            effects: Vec::new(),
+        };
+
+        let mut open = true;
+        egui::Window::new("Settings")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("app_settings"))
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(window_width(ctx, 760.0))
+            .default_height(window_height(ctx, 640.0, false))
+            .show(ctx, |ui| {
+                let mut selected = s.window.tab;
+                settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
+                    SettingsTab::Startup => draw_settings_startup_tab(cx, ui, &mut s),
+                    SettingsTab::Browser => draw_settings_browser_tab(ui, &mut s),
+                    SettingsTab::EditingKits => draw_settings_editing_kits_tab(cx, ui, &mut s),
+                    SettingsTab::Appearance => draw_settings_appearance_tab(cx, ui, &mut s),
+                    SettingsTab::Tools => draw_settings_tools_tab(cx, ui, &mut s),
+                });
+                s.window.tab = selected;
             });
-            s.shell.settings_tab = selected;
-        });
-    if !open {
-        s.shell.pending_ui_scale = s.prefs.ui_scale;
-    }
-    s.shell.settings_open = open;
-    draw_custom_editing_kit_dialog(ctx, &mut s);
-    draw_custom_editing_kit_removal_dialog(ctx, &mut s);
-    let SettingsDraw { prefs, effects, .. } = s;
-    if prefs != cx.model.prefs {
-        cx.edit_prefs(move |live| *live = prefs);
-    }
-    for effect in effects {
-        cx.send(effect);
+        let SettingsDraw {
+            prefs,
+            opened,
+            effects,
+            ..
+        } = s;
+        // The draft goes first, so what the window asked for sees the
+        // preferences as the user just set them.
+        if prefs != cx.model.prefs {
+            cx.edit_prefs(move |live| *live = prefs);
+        }
+        for effect in effects {
+            cx.send(effect);
+        }
+        for dialog in opened {
+            cx.send(crate::app::context::Command::OpenDialog(dialog));
+        }
+        open
     }
 }
 
@@ -1201,37 +1265,37 @@ fn draw_settings_startup_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     ui.separator();
     ui.label(RichText::new("Updates").color(text_dark()).strong());
     ui.add_space(4.0);
-    draw_update_channel_picker(ui, &mut s.prefs, s.shell);
+    if draw_update_channel_picker(ui, &mut s.prefs) {
+        s.effects.push(SettingsCommand::ForgetUpdateCheck);
+    }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         if ui.button("Check now").clicked() {
             s.effects.push(SettingsCommand::CheckForUpdates);
         }
-        draw_update_check_result(ui, s.shell);
+        draw_update_check_result(ui, s.app.shell);
     });
 }
 
 /// Radio rows for which build track update checks follow, plus whether the
-/// check runs at startup.
+/// check runs at startup. Returns whether the channel changed, which makes
+/// the last check's verdict stale: it says nothing about the new channel.
 /// Shared by Settings and the first-run wizard so the two cannot drift.
-pub(in crate::app) fn draw_update_channel_picker(ui: &mut Ui, prefs: &mut GuiPrefs, shell: &mut ShellFeature) {
+pub(in crate::app) fn draw_update_channel_picker(ui: &mut Ui, prefs: &mut GuiPrefs) -> bool {
     ui.label(RichText::new("Check for updates on").color(text_dark()));
+    let mut changed = false;
     for option in UpdateChannel::ALL {
-        if ui
+        changed |= ui
             .radio_value(&mut prefs.update_channel, option, option.label())
             .on_hover_text(option.help())
-            .changed()
-        {
-            // The previous channel's verdict says nothing about this one.
-            shell.available_update = None;
-            shell.last_update_check = None;
-        }
+            .changed();
     }
     ui.add_space(4.0);
     ui.checkbox(
         &mut prefs.check_updates_on_startup,
         "Check for updates when Baboon starts",
     );
+    changed
 }
 
 /// One line describing what the last check concluded, with a link when
@@ -1299,7 +1363,7 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     );
     ui.horizontal(|ui| {
         if icon_text_button(ui, ButtonIcon::Add, "Add Editing Kit", true).clicked() {
-            s.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
+            s.opened_dialog(CustomEditingKitDraft::new());
         }
         if ui.button("Auto Detect").clicked() {
             s.effects.push(SettingsCommand::AutoDetectEditingKits);
@@ -1314,12 +1378,13 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         ui.label(RichText::new("No editing kits configured").color(subtle_dark()));
     }
     for profile in s.prefs.custom_editing_kit_profiles.clone() {
-        let validation = s.kit_tools.editing_kit_validation.custom(&profile.id);
+        let validation = s.app.kit_tools.editing_kit_validation.custom(&profile.id);
         let warning = s
+            .app
             .kit_tools.editing_kit_validation
             .custom_icon_error(&profile.id)
             .map(str::to_owned);
-        let texture = s.shell.artwork.workspace_banner(
+        let texture = s.app.shell.artwork.workspace_banner(
             ui.ctx(),
             &cx.model.prefs.custom_editing_kit_profiles,
             profile.game_id(),
@@ -1343,10 +1408,10 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
             s.effects.push(SettingsCommand::LoadEditingKit(profile.clone()));
         }
         if edit {
-            s.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::from_profile(&profile));
+            s.opened_dialog(CustomEditingKitDraft::from_profile(&profile));
         }
         if remove {
-            s.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+            s.opened_dialog(CustomEditingKitRemoval {
                 id: profile.id.clone(),
                 name: profile.name.clone(),
             });
@@ -1363,99 +1428,100 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     }
 }
 
-fn draw_custom_editing_kit_dialog(ctx: &egui::Context, s: &mut SettingsDraw) {
-    let Some(mut draft) = s.kit_tools.custom_editing_kit_draft.take() else {
-        return;
-    };
-    let title = if draft.editing_id.is_some() {
-        "Edit Editing Kit"
-    } else {
-        "Add Editing Kit"
-    };
-    let mut open = true;
-    let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
-    let texture = custom_texture.or_else(|| {
-        s.shell
-            .artwork
-            .game_banner(ctx, GameId::from_id(&draft.game))
-    });
-    let mut actions = EditingKitFormActions::default();
-    egui::Window::new(title)
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("custom_editing_kit_dialog"))
-        .title_bar(false)
-        .collapsible(false)
-        .auto_sized()
-        .default_width(window_width(ctx, 580.0))
-        .max_width(window_width(ctx, 580.0))
-        .max_height(window_height(ctx, (ctx.content_rect().height() - 32.0).max(0.0), false))
-        .scroll([false, true])
-        .show(ctx, |ui| {
-            crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
-            ui.separator();
-            egui::Frame::NONE
-                .inner_margin(ui.spacing().window_margin)
-                .show(ui, |ui| {
-                    actions = draw_editing_kit_form(ui, &mut draft, texture.as_ref());
-                });
+/// Adding or editing a custom editing kit, opened from Settings. Save sends
+/// the draft to be committed; one the commit refuses comes back with its
+/// reason.
+impl Dialog for CustomEditingKitDraft {
+    fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let title = if self.editing_id.is_some() {
+            "Edit Editing Kit"
+        } else {
+            "Add Editing Kit"
+        };
+        let mut open = true;
+        let custom_texture = draft_editing_kit_icon_texture(ctx, &self.icon);
+        let texture = custom_texture.or_else(|| {
+            app.shell
+                .artwork
+                .game_banner(ctx, GameId::from_id(&self.game))
         });
-    let EditingKitFormActions {
-        save,
-        cancel,
-        remove,
-    } = actions;
+        let mut actions = EditingKitFormActions::default();
+        egui::Window::new(title)
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("custom_editing_kit_dialog"))
+            .title_bar(false)
+            .collapsible(false)
+            .auto_sized()
+            .default_width(window_width(ctx, 580.0))
+            .max_width(window_width(ctx, 580.0))
+            .max_height(window_height(
+                ctx,
+                (ctx.content_rect().height() - 32.0).max(0.0),
+                false,
+            ))
+            .scroll([false, true])
+            .show(ctx, |ui| {
+                crate::app::search::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
+                ui.separator();
+                egui::Frame::NONE
+                    .inner_margin(ui.spacing().window_margin)
+                    .show(ui, |ui| {
+                        actions = draw_editing_kit_form(ui, self, texture.as_ref());
+                    });
+            });
+        let EditingKitFormActions {
+            save,
+            cancel,
+            remove,
+        } = actions;
 
-    if remove {
-        s.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
-            id: draft.editing_id.clone().unwrap(),
-            name: draft.name.clone(),
-        });
-        open = false;
-    }
-    if cancel {
-        open = false;
-    }
-    if save && open {
-        // Committed once drawn; a draft the commit refuses comes back with
-        // its reason, keeping the dialog up.
-        s.effects.push(SettingsCommand::CommitEditingKitDraft(draft));
-    } else if open {
-        s.kit_tools.custom_editing_kit_draft = Some(draft);
+        if remove {
+            cx.open_dialog(CustomEditingKitRemoval {
+                id: self.editing_id.clone().unwrap(),
+                name: self.name.clone(),
+            });
+            return false;
+        }
+        if cancel || !open {
+            return false;
+        }
+        if save {
+            cx.send(SettingsCommand::CommitEditingKitDraft(self.clone()));
+            return false;
+        }
+        true
     }
 }
 
-fn draw_custom_editing_kit_removal_dialog(ctx: &egui::Context, s: &mut SettingsDraw) {
-    let Some(removal) = s.kit_tools.custom_editing_kit_removal.clone() else {
-        return;
-    };
-    let mut open = true;
-    let mut confirm = false;
-    let mut cancel = false;
-    egui::Window::new("Remove Editing Kit?")
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("remove_custom_editing_kit"))
-        .collapsible(false)
-        .resizable(false)
-        .open(&mut open)
-        .show(ctx, |ui| {
-            ui.label(format!(
-                "Remove “{}” from Baboon? Its editing-kit files will not be deleted.",
-                removal.name
-            ));
-            ui.horizontal(|ui| {
-                confirm = ui.button("Remove").clicked();
-                cancel = ui.button("Cancel").clicked();
+/// Removing a custom editing kit: its files stay where they are.
+impl Dialog for CustomEditingKitRemoval {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let mut open = true;
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new("Remove Editing Kit?")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("remove_custom_editing_kit"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Remove “{}” from Baboon? Its editing-kit files will not be deleted.",
+                    self.name
+                ));
+                ui.horizontal(|ui| {
+                    confirm = ui.button("Remove").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
             });
-        });
-    if confirm {
-        s.effects.push(SettingsCommand::RemoveEditingKit(removal));
-        open = false;
-    }
-    if cancel {
-        open = false;
-    }
-    if !open {
-        s.kit_tools.custom_editing_kit_removal = None;
+        if confirm {
+            cx.send(SettingsCommand::RemoveEditingKit(self.clone()));
+            return false;
+        }
+        open && !cancel
     }
 }
 
@@ -1471,17 +1537,17 @@ fn draw_settings_appearance_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("UI scale").color(subtle_dark()));
         ui.add(
-            egui::Slider::new(&mut s.shell.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
+            egui::Slider::new(&mut s.window.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
         );
-        draw_ui_scale_input(ui, &mut s.shell.pending_ui_scale);
+        draw_ui_scale_input(ui, &mut s.window.pending_ui_scale);
         if ui.button("Apply").clicked() {
-            s.prefs.ui_scale = s.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+            s.prefs.ui_scale = s.window.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
             cx.set_status("UI scale applied");
         }
         if ui.button("Reset").clicked() {
-            s.shell.pending_ui_scale = DEFAULT_UI_SCALE;
+            s.window.pending_ui_scale = DEFAULT_UI_SCALE;
         }
     });
     ui.horizontal(|ui| {
@@ -1525,11 +1591,11 @@ fn draw_settings_tools_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Path").color(subtle_dark()));
         let path_response = ui
-            .add(egui::TextEdit::singleline(&mut s.kit_tools.blender_path_input).desired_width(360.0));
+            .add(egui::TextEdit::singleline(&mut s.window.blender_path_input).desired_width(360.0));
         if lost_focus_once(&path_response)
             && ui.input(|input| input.key_pressed(egui::Key::Enter))
         {
-            let trimmed = s.kit_tools.blender_path_input.trim();
+            let trimmed = s.window.blender_path_input.trim();
             s.prefs.blender_path = if trimmed.is_empty() {
                 None
             } else {
@@ -1546,7 +1612,7 @@ fn draw_settings_tools_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
         }
         if icon_text_button(ui, ButtonIcon::Clear, "Clear", true).clicked() {
             s.prefs.blender_path = None;
-            s.kit_tools.blender_path_input.clear();
+            s.window.blender_path_input.clear();
             cx.set_status("Blender path cleared");
         }
     });
@@ -1569,14 +1635,16 @@ fn draw_settings_tools_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Path").color(subtle_dark()));
         let path_response = ui.add(
-            egui::TextEdit::singleline(s.usmap_input)
+            egui::TextEdit::singleline(&mut s.window.usmap_input)
                 .desired_width(360.0)
                 .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
         );
         if lost_focus_once(&path_response)
             && ui.input(|input| input.key_pressed(egui::Key::Enter))
         {
-            s.effects.push(SettingsCommand::CommitChimpUsmapInput);
+            s.effects.push(SettingsCommand::CommitChimpUsmapInput(
+                s.window.usmap_input.clone(),
+            ));
         }
         if ui.button("Browse...").clicked() {
             s.effects.push(SettingsCommand::ChooseChimpUsmap);

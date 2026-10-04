@@ -466,36 +466,40 @@ fn cases() -> Vec<Case> {
         // --- windows over the shell ---
         case(
             "first_run_storage",
-            &["shell.first_run_wizard"],
+            &["dialog:FirstRunWizardState"],
             &["shell/first_run/mod.rs"],
             welcome,
-            |h| h.app.shell.first_run_wizard = Some(FirstRunWizardState::new(None)),
+            |h| {
+                h.app
+                    .dialogs
+                    .open(FirstRunWizardState::new(None, &h.app.model.prefs))
+            },
             &["Welcome to Baboon", "Installed mode (recommended)"],
         ),
         case(
             "first_run_interface",
-            &["shell.first_run_wizard"],
+            &["dialog:FirstRunWizardState"],
             &["shell/first_run/mod.rs"],
             welcome,
             |h| {
-                let mut wizard = FirstRunWizardState::new(None);
+                let mut wizard = FirstRunWizardState::new(None, &h.app.model.prefs);
                 wizard.page = FirstRunPage::Interface;
-                h.app.shell.first_run_wizard = Some(wizard);
+                h.app.dialogs.open(wizard);
             },
             &["Welcome to Baboon", "Updates and interface"],
         ),
         case(
             "first_run_editing_kits",
-            &["shell.first_run_wizard"],
+            &["dialog:FirstRunWizardState"],
             &["shell/first_run/mod.rs"],
             welcome,
             |h| {
-                let mut wizard = FirstRunWizardState::new(None);
+                let mut wizard = FirstRunWizardState::new(None, &h.app.model.prefs);
                 wizard.page = FirstRunPage::EditingKits;
                 // Detection searches the machine for installed kits; the
                 // case is about the page, not about what is installed here.
                 wizard.editing_kit_detection_ran = true;
-                h.app.shell.first_run_wizard = Some(wizard);
+                h.app.dialogs.open(wizard);
             },
             &["Welcome to Baboon", "Detected paths fill only empty entries."],
         ),
@@ -573,80 +577,73 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "settings_startup",
-            &["shell.settings_open", "shell.settings_tab"],
+            &["dialog:SettingsWindow"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::Startup;
+                h.app.open_settings(Some(SettingsTab::Startup));
             },
             &["Settings", "When reopening Baboon with a previous session:"],
         ),
         case(
             "settings_browser",
-            &["shell.settings_open"],
+            &["dialog:SettingsWindow"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::Browser;
+                h.app.open_settings(Some(SettingsTab::Browser));
             },
             &["Settings", "Double-click to open tags"],
         ),
         case(
             "settings_editing_kits",
-            &["shell.settings_open"],
+            &["dialog:SettingsWindow"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::EditingKits;
+                h.app.open_settings(Some(SettingsTab::EditingKits));
             },
             &["Settings", "Auto Detect"],
         ),
         case(
             "settings_appearance",
-            &["shell.settings_open"],
+            &["dialog:SettingsWindow"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::Appearance;
+                h.app.open_settings(Some(SettingsTab::Appearance));
             },
             &["Settings", "Angles in degrees"],
         ),
         case(
             "settings_tools",
-            &["shell.settings_open"],
+            &["dialog:SettingsWindow"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::Tools;
+                h.app.open_settings(Some(SettingsTab::Tools));
             },
             &["Settings", "Chimp — Unreal mappings"],
         ),
         case(
             "settings_custom_kit_draft",
-            &["kit_tools.custom_editing_kit_draft"],
+            &["dialog:CustomEditingKitDraft"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::EditingKits;
-                h.app.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
+                h.app.open_settings(Some(SettingsTab::EditingKits));
+                h.app.dialogs.open(CustomEditingKitDraft::new());
             },
             &["Editing Kit Root Folder"],
         ),
         case(
             "settings_custom_kit_removal",
-            &["kit_tools.custom_editing_kit_removal"],
+            &["dialog:CustomEditingKitRemoval"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.shell.settings_open = true;
-                h.app.shell.settings_tab = SettingsTab::EditingKits;
-                h.app.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
+                h.app.open_settings(Some(SettingsTab::EditingKits));
+                h.app.dialogs.open(CustomEditingKitRemoval {
                     id: "smoke".to_owned(),
                     name: "Smoke Kit".to_owned(),
                 });

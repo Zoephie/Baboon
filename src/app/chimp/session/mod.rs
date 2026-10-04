@@ -49,12 +49,15 @@ impl Baboon {
         }
 
         self.model.prefs.chimp_usmap_path = path;
-        self.chimp.chimp_usmap_path_input = self
-            .model.prefs
-            .chimp_usmap_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_default();
+        if let Some(settings) = self.dialogs.get_mut::<SettingsWindow>() {
+            settings.usmap_input = self
+                .model
+                .prefs
+                .chimp_usmap_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+        }
         let remount: Vec<usize> = self
             .model.kits
             .iter()
@@ -83,8 +86,12 @@ impl Baboon {
         };
     }
 
-    pub(in crate::app) fn commit_chimp_usmap_path_input(&mut self, ctx: egui::Context) {
-        let trimmed = self.chimp.chimp_usmap_path_input.trim();
+    pub(in crate::app) fn commit_chimp_usmap_path_input(
+        &mut self,
+        input: &str,
+        ctx: egui::Context,
+    ) {
+        let trimmed = input.trim();
         let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
         self.apply_chimp_usmap_path(path, ctx);
     }
