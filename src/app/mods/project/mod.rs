@@ -1147,7 +1147,7 @@ impl Baboon {
     /// document reopened later in the same session does not get a second, stale
     /// copy of it.
     pub(in crate::app) fn apply_pending_history(&mut self, kit: usize, key: &str) {
-        let Some(history) = self.kits[kit].pending_history.remove(key) else {
+        let Some(history) = self.kits[kit].restore.pending_history.remove(key) else {
             return;
         };
         let Some(document) = self.kits[kit].parsed_tags.get_mut(key) else {
@@ -2121,7 +2121,7 @@ impl Baboon {
         // Staged by document key before any tag is opened, so it is already
         // waiting whichever way the document arrives — restored from a stashed
         // edit below, or read back off disk by a worker some frames later.
-        self.kits[kit].pending_history = snapshot
+        self.kits[kit].restore.pending_history = snapshot
             .history
             .iter()
             .filter_map(|(identity, history)| {

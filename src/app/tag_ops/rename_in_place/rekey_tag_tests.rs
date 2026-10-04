@@ -7,6 +7,7 @@
 //! though it worked. These tests are the cheapest place to catch that.
 
 use super::*;
+use crate::app::shell::session::RestorePlan;
 
 const OLD: &str = "ublock:pakchunk0:objects/vehicles/warthog";
 const NEW: &str = "ublock:pakchunk0:objects/vehicles/scorpion";
@@ -31,7 +32,7 @@ fn kit_with_state() -> Kit {
     let mut kit = Kit::empty(KitId(1), TagNameIndex::default());
     for key in [OLD, BYSTANDER] {
         kit.parsed_tags.insert(key.to_owned(), document());
-        kit.pending_history
+        kit.restore.pending_history
             .insert(key.to_owned(), TagHistory::default());
         kit.bitmap_previews
             .insert(key.to_owned(), BitmapPreviewState::default());
@@ -52,7 +53,7 @@ fn kit_with_state() -> Kit {
         kit.loading_tags.insert(key.to_owned());
         kit.keywords.add(key, "vehicle");
         kit.open_tabs.push(key.to_owned());
-        kit.pending_restore_tags.push(LastSessionTag {
+        kit.restore.pending_restore_tags.push(LastSessionTag {
             key: key.to_owned(),
             label: key.to_owned(),
             group_tag: 0,
@@ -96,7 +97,7 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
 
     assert!(!kit.parsed_tags.contains_key(OLD));
     assert!(kit.parsed_tags.contains_key(NEW));
-    assert!(kit.pending_history.contains_key(NEW));
+    assert!(kit.restore.pending_history.contains_key(NEW));
     assert!(kit.bitmap_previews.contains_key(NEW));
     assert!(kit.model_previews.contains_key(NEW));
     assert!(kit.ce_sound_bindings.contains_key(NEW));
@@ -114,7 +115,7 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
     assert_eq!(kit.open_tabs, vec![NEW.to_owned(), BYSTANDER.to_owned()]);
     assert_eq!(panes(&kit), vec![NEW.to_owned(), BYSTANDER.to_owned()]);
     assert!(
-        kit.pending_restore_tags
+        kit.restore.pending_restore_tags
             .iter()
             .any(|staged| staged.key == NEW)
     );
@@ -196,7 +197,6 @@ fn every_field_of_a_kit_is_accounted_for() {
     let Kit {
         // Carried by `rekey_tag_in_kit`.
         parsed_tags: _,
-        pending_history: _,
         bitmap_previews: _,
         model_previews: _,
         ce_sound_bindings: _,
@@ -206,7 +206,6 @@ fn every_field_of_a_kit_is_accounted_for() {
         selected_key: _,
         open_tabs: _,
         tag_tree: _,
-        pending_restore_tags: _,
         keywords: _,
 
         // Dropped or invalidated by it, deliberately.
@@ -245,8 +244,6 @@ fn every_field_of_a_kit_is_accounted_for() {
         // another and merging them here would guess.
         chimp: _,
         surface: _,
-        pending_restore_chimp_packages: _,
-        pending_restore_active_chimp_package: _,
 
         // Re-derived by the caller once the source entries have moved, because
         // it needs the tag's new `display_path` and this function only has keys.
@@ -268,10 +265,20 @@ fn every_field_of_a_kit_is_accounted_for() {
         campaign_project: _,
         pending_campaign_project: _,
         pending_container_folders: _,
-        // Staged session-restore state, consumed once the source lands.
+        // Staged session-restore state, classified field by field below.
+        restore: _,
+    } = Kit::empty(KitId(9), TagNameIndex::default());
+    let RestorePlan {
+        // Carried by `rekey_tag_in_kit`.
+        pending_history: _,
+        pending_restore_tags: _,
+        // Keyed by package path; moved through `rekey_chimp_package`.
+        pending_restore_chimp_packages: _,
+        pending_restore_active_chimp_package: _,
+        // Not addressed by a tag key at all; consumed once the source lands.
         pending_restore_folders: _,
         pending_restore_bitmap_library: _,
         pending_restore_model_library: _,
         pending_launch_tags: _,
-    } = Kit::empty(KitId(9), TagNameIndex::default());
+    } = RestorePlan::default();
 }

@@ -240,7 +240,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // dirty flag and its undo journal together, and a rename is not a reason
     // to lose any of the three.
     move_key(&mut kit.parsed_tags, old, new);
-    move_key(&mut kit.pending_history, old, new);
+    move_key(&mut kit.restore.pending_history, old, new);
     move_key(&mut kit.bitmap_previews, old, new);
     move_key(&mut kit.model_previews, old, new);
     move_key(&mut kit.ce_sound_bindings, old, new);
@@ -285,7 +285,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
             *key = new.to_owned();
         }
     }
-    for staged in &mut kit.pending_restore_tags {
+    for staged in &mut kit.restore.pending_restore_tags {
         if staged.key == old {
             staged.key = new.to_owned();
         }

@@ -282,9 +282,9 @@ impl Baboon {
     }
 
     fn finish_pending_chimp_session_restore(&mut self, kit_index: usize, ctx: egui::Context) {
-        let packages = std::mem::take(&mut self.kits[kit_index].pending_restore_chimp_packages);
+        let packages = std::mem::take(&mut self.kits[kit_index].restore.pending_restore_chimp_packages);
         if packages.is_empty() {
-            self.kits[kit_index].pending_restore_active_chimp_package = None;
+            self.kits[kit_index].restore.pending_restore_active_chimp_package = None;
             return;
         }
         let world = match &self.kits[kit_index].chimp.mount {
@@ -308,7 +308,7 @@ impl Baboon {
         }
         if self.kits[kit_index].chimp.loading_packages.is_empty()
             && let Some(active) = self.kits[kit_index]
-                .pending_restore_active_chimp_package
+                .restore.pending_restore_active_chimp_package
                 .take()
             && self.kits[kit_index].documents_contains_chimp(&active)
         {
@@ -795,7 +795,7 @@ impl Baboon {
             Err(error) => self.status = error,
         }
         if self.kits[index].chimp.loading_packages.is_empty()
-            && let Some(active) = self.kits[index].pending_restore_active_chimp_package.take()
+            && let Some(active) = self.kits[index].restore.pending_restore_active_chimp_package.take()
             && self.kits[index].documents_contains_chimp(&active)
         {
             let kit_id = self.kits[index].id;

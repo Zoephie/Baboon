@@ -85,9 +85,9 @@ impl Baboon {
             .filter(|profile| profile.has_chosen_folders())
             .cloned()
         {
-            self.kits[self.active].pending_launch_tags = Some(launch.tag_paths);
+            self.kits[self.active].restore.pending_launch_tags = Some(launch.tag_paths);
             if !self.load_custom_editing_kit_profile(profile, ctx) {
-                self.kits[self.active].pending_launch_tags = None;
+                self.kits[self.active].restore.pending_launch_tags = None;
                 self.status = format!("Command line: {}", self.status);
             }
             return;
@@ -109,7 +109,7 @@ impl Baboon {
             self.status = format!("Command line: {}", status.message());
             return;
         };
-        self.kits[self.active].pending_launch_tags = Some(launch.tag_paths);
+        self.kits[self.active].restore.pending_launch_tags = Some(launch.tag_paths);
         self.begin_load_editing_kit_layout(
             layout,
             shortcut.game.as_str().to_owned(),
@@ -121,7 +121,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn finish_pending_command_line_launch(&mut self, ctx: egui::Context) {
-        let Some(requested) = self.kits[self.active].pending_launch_tags.take() else {
+        let Some(requested) = self.kits[self.active].restore.pending_launch_tags.take() else {
             return;
         };
         // Command-line startup deliberately remains popup-free. Indexing still

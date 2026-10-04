@@ -444,12 +444,12 @@ fn a_mount_reopens_the_saved_session_packages() {
     let install = SyntheticInstall::new();
     let mut app = Baboon::for_test();
     app.kits[0].source = Some(install.source());
-    app.kits[0].pending_restore_chimp_packages = vec![
+    app.kits[0].restore.pending_restore_chimp_packages = vec![
         THING.to_owned(),
         "/Game/Test/Missing".to_owned(),
         OTHER.to_owned(),
     ];
-    app.kits[0].pending_restore_active_chimp_package = Some(THING.to_owned());
+    app.kits[0].restore.pending_restore_active_chimp_package = Some(THING.to_owned());
     app.handle_chimp_mounted(
         stamp(&app),
         Ok(install.world.clone()),
@@ -468,8 +468,8 @@ fn a_mount_reopens_the_saved_session_packages() {
     open.sort();
     assert_eq!(open, [OTHER, THING]);
     assert_eq!(chimp.selected_package.as_deref(), Some(THING));
-    assert!(app.kits[0].pending_restore_active_chimp_package.is_none());
-    assert!(app.kits[0].pending_restore_chimp_packages.is_empty());
+    assert!(app.kits[0].restore.pending_restore_active_chimp_package.is_none());
+    assert!(app.kits[0].restore.pending_restore_chimp_packages.is_empty());
 }
 
 /// Changing the USMAP is refused while anything is modified, and

@@ -153,13 +153,13 @@ fn releasing_a_failed_source_load_makes_the_workspace_reusable() {
         id: "reach-profile".to_owned(),
         name: "Reach".to_owned(),
     });
-    kit.pending_launch_tags = Some(vec![PathBuf::from("objects/example.weapon")]);
+    kit.restore.pending_launch_tags = Some(vec![PathBuf::from("objects/example.weapon")]);
 
     kit.release_source_load();
 
     assert!(kit.can_accept_source_load());
     assert!(kit.profile.is_none());
-    assert!(kit.pending_launch_tags.is_none());
+    assert!(kit.restore.pending_launch_tags.is_none());
 }
 
 #[test]

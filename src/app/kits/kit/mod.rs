@@ -2,6 +2,7 @@
 //! It owns kit identity and per-source state; global preferences, dialogs, and process-level services belong on [`Baboon`].
 
 use super::*;
+use crate::app::shell::session::RestorePlan;
 
 /// Stable, never-reused identity for a loaded kit.
 ///
@@ -184,30 +185,10 @@ pub(in crate::app) struct Kit {
     /// `tag_tree`).
     pub(in crate::app) blam: BlamUiState,
 
-    /// Tags staged by a session restore, drained once this kit's source
-    /// finishes loading. Held per kit rather than in one shared slot so
-    /// several kits can restore concurrently and finish in any order.
-    pub(in crate::app) pending_restore_tags: Vec<LastSessionTag>,
-    pub(in crate::app) pending_restore_folders: Vec<LastSessionFolder>,
-    /// Undo/redo stacks a restored project brought back, by document key, held
-    /// until the document they belong to exists. A restored tab is loaded
-    /// asynchronously, so the history almost always arrives before the tag it
-    /// applies to.
-    pub(in crate::app) pending_history: HashMap<String, TagHistory>,
-    /// Chimp packages staged by session restore until the Unreal container
-    /// world has mounted. Kept separate from tag restoration so Tags remains
-    /// the initial surface.
-    pub(in crate::app) pending_restore_chimp_packages: Vec<String>,
-    pub(in crate::app) pending_restore_active_chimp_package: Option<String>,
-    /// Whether session restore should reopen the Bitmap Library here, staged
-    /// the same way and for the same reason as the Chimp packages: the tab can
-    /// only be opened once this kit's source has finished loading.
-    pub(in crate::app) pending_restore_bitmap_library: bool,
-    /// Whether session restore should reopen the Model Library here, likewise.
-    pub(in crate::app) pending_restore_model_library: bool,
-    /// Loose tag paths requested on the command line, drained after this kit's
-    /// editing-kit source finishes loading.
-    pub(in crate::app) pending_launch_tags: Option<Vec<PathBuf>>,
+    /// What a restored session still has to put back once the kit's source
+    /// loads: tags and folders, undo histories, Chimp packages, the libraries,
+    /// and tags named on the command line.
+    pub(in crate::app) restore: RestorePlan,
 }
 
 impl Kit {
@@ -261,14 +242,16 @@ impl Kit {
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
             blam: BlamUiState::default(),
-            pending_restore_tags: Vec::new(),
-            pending_restore_folders: Vec::new(),
-            pending_history: HashMap::new(),
-            pending_restore_chimp_packages: Vec::new(),
-            pending_restore_bitmap_library: false,
-            pending_restore_model_library: false,
-            pending_restore_active_chimp_package: None,
-            pending_launch_tags: None,
+            restore: RestorePlan {
+                pending_restore_tags: Vec::new(),
+                pending_restore_folders: Vec::new(),
+                pending_history: HashMap::new(),
+                pending_restore_chimp_packages: Vec::new(),
+                pending_restore_bitmap_library: false,
+                pending_restore_model_library: false,
+                pending_restore_active_chimp_package: None,
+                pending_launch_tags: None,
+            },
         }
     }
 
@@ -320,13 +303,13 @@ impl Kit {
         }
         self.requested_path = None;
         self.profile = None;
-        self.pending_restore_tags.clear();
-        self.pending_restore_folders.clear();
-        self.pending_restore_chimp_packages.clear();
-        self.pending_restore_bitmap_library = false;
-        self.pending_restore_model_library = false;
-        self.pending_restore_active_chimp_package = None;
-        self.pending_launch_tags = None;
+        self.restore.pending_restore_tags.clear();
+        self.restore.pending_restore_folders.clear();
+        self.restore.pending_restore_chimp_packages.clear();
+        self.restore.pending_restore_bitmap_library = false;
+        self.restore.pending_restore_model_library = false;
+        self.restore.pending_restore_active_chimp_package = None;
+        self.restore.pending_launch_tags = None;
         self.pending_campaign_project = None;
         // Folders belong to the source that was being loaded, so a reused kit
         // must not seed them into whatever mounts here next.
@@ -544,17 +527,8 @@ impl Baboon {
         // the same folder can find this kit.
         let requested_path = self.kits[index].requested_path.clone();
         let profile = self.kits[index].profile.clone();
-        let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
-        let pending_restore_folders = std::mem::take(&mut self.kits[index].pending_restore_folders);
-        let pending_restore_chimp_packages =
-            std::mem::take(&mut self.kits[index].pending_restore_chimp_packages);
-        let pending_restore_active_chimp_package =
-            self.kits[index].pending_restore_active_chimp_package.take();
-        let pending_restore_bitmap_library =
-            std::mem::take(&mut self.kits[index].pending_restore_bitmap_library);
-        let pending_restore_model_library =
-            std::mem::take(&mut self.kits[index].pending_restore_model_library);
-        let pending_launch_tags = self.kits[index].pending_launch_tags.take();
+        // The whole restore plan, staged before the load, carries over.
+        let restore = std::mem::take(&mut self.kits[index].restore);
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
         // The browser view belongs to the workspace, not to the source in it:
@@ -576,13 +550,7 @@ impl Baboon {
             profile,
             browser_mode,
             browser_sort,
-            pending_restore_tags,
-            pending_restore_folders,
-            pending_restore_chimp_packages,
-            pending_restore_active_chimp_package,
-            pending_restore_bitmap_library,
-            pending_restore_model_library,
-            pending_launch_tags,
+            restore,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
         };

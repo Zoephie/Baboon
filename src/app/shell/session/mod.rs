@@ -179,12 +179,12 @@ impl Baboon {
             if was_active {
                 self.shell.restored_active_kit = Some(restoring);
             }
-            self.kits[self.active].pending_restore_tags = tags;
-            self.kits[self.active].pending_restore_folders = folders;
-            self.kits[self.active].pending_restore_chimp_packages = chimp_packages;
-            self.kits[self.active].pending_restore_bitmap_library = bitmap_library_open;
-            self.kits[self.active].pending_restore_model_library = model_library_open;
-            self.kits[self.active].pending_restore_active_chimp_package = active_chimp_package;
+            self.kits[self.active].restore.pending_restore_tags = tags;
+            self.kits[self.active].restore.pending_restore_folders = folders;
+            self.kits[self.active].restore.pending_restore_chimp_packages = chimp_packages;
+            self.kits[self.active].restore.pending_restore_bitmap_library = bitmap_library_open;
+            self.kits[self.active].restore.pending_restore_model_library = model_library_open;
+            self.kits[self.active].restore.pending_restore_active_chimp_package = active_chimp_package;
             // Its browser view is staged the same way: `install_loaded_source`
             // carries it across the load rather than resetting it, so each
             // workspace comes back in the view it was left in.
@@ -255,13 +255,13 @@ impl Baboon {
         // Ahead of the early return below: a workspace whose only open tab was
         // the Bitmap Library has no tags staged, and would otherwise come back
         // without it.
-        if std::mem::take(&mut self.kits[self.active].pending_restore_bitmap_library) {
+        if std::mem::take(&mut self.kits[self.active].restore.pending_restore_bitmap_library) {
             self.open_bitmap_library();
         }
-        if std::mem::take(&mut self.kits[self.active].pending_restore_model_library) {
+        if std::mem::take(&mut self.kits[self.active].restore.pending_restore_model_library) {
             self.open_model_library();
         }
-        let restore_folders = std::mem::take(&mut self.kits[self.active].pending_restore_folders);
+        let restore_folders = std::mem::take(&mut self.kits[self.active].restore.pending_restore_folders);
         for folder in &restore_folders {
             self.handle_browser_action(
                 BrowserAction::OpenFolderBrowser {
@@ -272,7 +272,7 @@ impl Baboon {
                 ctx.clone(),
             );
         }
-        let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);
+        let restore = std::mem::take(&mut self.kits[self.active].restore.pending_restore_tags);
         if restore.is_empty() && restore_folders.is_empty() {
             return;
         }
@@ -603,3 +603,34 @@ mod restore_focus_tests;
 
 #[cfg(test)]
 mod session_tests;
+
+/// What a restored session still has to put back once the kit's source loads:
+/// tags and folders, undo histories, Chimp packages, the libraries, and tags
+/// named on the command line.
+#[derive(Default)]
+pub(in crate::app) struct RestorePlan {
+    /// Tags staged by a session restore, drained once this kit's source
+    /// finishes loading. Held per kit rather than in one shared slot so
+    /// several kits can restore concurrently and finish in any order.
+    pub(in crate::app) pending_restore_tags: Vec<LastSessionTag>,
+    pub(in crate::app) pending_restore_folders: Vec<LastSessionFolder>,
+    /// Undo/redo stacks a restored project brought back, by document key, held
+    /// until the document they belong to exists. A restored tab is loaded
+    /// asynchronously, so the history almost always arrives before the tag it
+    /// applies to.
+    pub(in crate::app) pending_history: HashMap<String, TagHistory>,
+    /// Chimp packages staged by session restore until the Unreal container
+    /// world has mounted. Kept separate from tag restoration so Tags remains
+    /// the initial surface.
+    pub(in crate::app) pending_restore_chimp_packages: Vec<String>,
+    pub(in crate::app) pending_restore_active_chimp_package: Option<String>,
+    /// Whether session restore should reopen the Bitmap Library here, staged
+    /// the same way and for the same reason as the Chimp packages: the tab can
+    /// only be opened once this kit's source has finished loading.
+    pub(in crate::app) pending_restore_bitmap_library: bool,
+    /// Whether session restore should reopen the Model Library here, likewise.
+    pub(in crate::app) pending_restore_model_library: bool,
+    /// Loose tag paths requested on the command line, drained after this kit's
+    /// editing-kit source finishes loading.
+    pub(in crate::app) pending_launch_tags: Option<Vec<PathBuf>>,
+}
