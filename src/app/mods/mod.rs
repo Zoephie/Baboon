@@ -3,6 +3,7 @@
 //! review, and their windows.
 
 use super::*;
+use crate::app::chimp::ChimpMount;
 use crate::app::editor::{
     EditSinks, FieldEditContext, FieldFilter, FieldFilterAction, draw_foundation_group,
     draw_struct_fields_inline, strip_node_indices,

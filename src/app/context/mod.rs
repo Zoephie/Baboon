@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::chimp::ChimpCommand;
 use crate::app::runtime_poke::PokeCommand;
 use crate::app::editor::EditorCommand;
 use crate::app::export::ExportCommand;

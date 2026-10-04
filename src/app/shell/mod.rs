@@ -3,6 +3,10 @@
 //! around the features.
 
 use super::*;
+use crate::app::chimp::{
+    ChimpDocument, ChimpDocumentUi, ChimpFeature, ChimpLevelPhase, ChimpReferrerScan,
+    ChimpTypeIndex, ChimpWritten, KitSurface, draw_chimp_workspace, format_remaining,
+};
 use crate::app::runtime_poke::{LastPoke, PokePlan, PokeReport};
 use crate::core::document::value::extension_to_group_tag;
 use crate::app::editor::{

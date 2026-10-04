@@ -4,6 +4,7 @@
 //! when it was a bare `thread::spawn`, which sent nothing.
 
 use super::*;
+use crate::app::chimp::ChimpMount;
 
 /// Every loader reserves the kit for the path it is loading; the reservation
 /// is what reads as "starting up" and what a second open of the same path

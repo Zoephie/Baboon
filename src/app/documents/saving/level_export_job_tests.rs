@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::chimp::ChimpLevelJob;
 
 /// Many exports share `ExportFinished`; one finishing while a level export
 /// runs used to end the level's job, hiding its progress and releasing

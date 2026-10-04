@@ -4,6 +4,7 @@
 //! scenarios, and dropping tags on the tools.
 
 use super::*;
+use crate::app::chimp::{ChimpState, ChimpView, KitSurface};
 use crate::core::document::value::is_saveable_tag;
 use crate::app::editor::{
     AppliedFindFilter, ColorPopupWindow, EditDrafts, EditorCaches, FunctionPopupWindow,

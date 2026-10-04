@@ -88,7 +88,7 @@ use audio::AudioCommand;
 mod runtime_poke;
 use runtime_poke::PokeFeature;
 mod chimp;
-use chimp::*;
+use chimp::ChimpFeature;
 #[cfg(test)]
 mod loose_fixture;
 use crate::core::created_tags::{CreatedTagLedger, CreatedTagRecord};

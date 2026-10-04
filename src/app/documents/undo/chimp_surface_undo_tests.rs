@@ -6,6 +6,7 @@
 //! (see `chimp::edit`), and with none selected they do nothing.
 
 use super::*;
+use crate::app::chimp::KitSurface;
 
 const KEY: &str = "ublock:pakchunk0:objects/vehicles/warthog";
 
