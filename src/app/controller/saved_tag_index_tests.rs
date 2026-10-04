@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::kits::loading::persist_entry_index_changes;
 
 /// A plain Save leaves nothing for the periodic refresh to find, and the
 /// reference index knows what the saved tag now points at.

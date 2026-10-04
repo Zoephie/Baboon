@@ -59,11 +59,11 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
     added
 }
 
-pub(super) fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
+pub(in crate::app) fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
     detect_editing_kit_paths_in_common_roots(steam_common_roots())
 }
 
-pub(super) fn detect_editing_kit_paths_in_common_roots<I>(
+pub(in crate::app) fn detect_editing_kit_paths_in_common_roots<I>(
     common_roots: I,
 ) -> HashMap<String, PathBuf>
 where
@@ -95,7 +95,7 @@ where
 }
 
 #[cfg(test)]
-pub(super) fn apply_detected_editing_kit_paths(
+pub(in crate::app) fn apply_detected_editing_kit_paths(
     editing_kit_paths: &mut HashMap<String, PathBuf>,
     editing_kit_path_inputs: &mut HashMap<String, String>,
     editing_kit_path_attention: &mut Option<String>,
@@ -147,7 +147,7 @@ fn default_steam_roots() -> Vec<PathBuf> {
     roots
 }
 
-pub(super) fn parse_steam_library_paths(text: &str) -> Vec<PathBuf> {
+pub(in crate::app) fn parse_steam_library_paths(text: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for line in text.lines() {
         let tokens = quoted_vdf_tokens(line);
@@ -195,7 +195,7 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-pub(super) fn same_path_text(a: &Path, b: &Path) -> bool {
+pub(in crate::app) fn same_path_text(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {
         a.to_string_lossy()

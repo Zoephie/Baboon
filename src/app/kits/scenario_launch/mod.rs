@@ -7,17 +7,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const SCENARIO_GROUP_TAG: u32 = u32::from_be_bytes(*b"scnr");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct ScenarioLaunchContext {
-    pub(super) kit_root: PathBuf,
-    pub(super) scenario_file: PathBuf,
-    pub(super) scenario_path: String,
-    pub(super) game: GameId,
+pub(in crate::app) struct ScenarioLaunchContext {
+    pub(in crate::app) kit_root: PathBuf,
+    pub(in crate::app) scenario_file: PathBuf,
+    pub(in crate::app) scenario_path: String,
+    pub(in crate::app) game: GameId,
     /// `-tags_dir`/`-data_dir` for a Halo CE or Halo 2 kit using folders other
     /// than its root's own; see [`kit_tool_folder_options`].
-    pub(super) tool_options: Vec<(&'static str, PathBuf)>,
+    pub(in crate::app) tool_options: Vec<(&'static str, PathBuf)>,
 }
 
-pub(super) fn scenario_launch_context(
+pub(in crate::app) fn scenario_launch_context(
     source: &LoadedSourceData,
     entry: &TagEntry,
 ) -> Result<ScenarioLaunchContext, String> {
@@ -145,7 +145,7 @@ pub(in crate::app) fn scenario_launch_availability_with(
     }
 }
 
-pub(super) fn scenario_startup_command(game: GameId, scenario_path: &str) -> String {
+pub(in crate::app) fn scenario_startup_command(game: GameId, scenario_path: &str) -> String {
     let command = game.scenario_startup_command();
     let argument = if scenario_path.chars().any(char::is_whitespace) || scenario_path.contains(';')
     {
@@ -156,12 +156,12 @@ pub(super) fn scenario_startup_command(game: GameId, scenario_path: &str) -> Str
     format!("{command} {argument}")
 }
 
-pub(super) fn tag_test_executable_for_game(game: Option<GameId>) -> &'static str {
+pub(in crate::app) fn tag_test_executable_for_game(game: Option<GameId>) -> &'static str {
     game.and_then(GameFacts::tag_test_executable)
         .unwrap_or("tag_test.exe")
 }
 
-pub(super) fn update_scenario_startup_file(path: &Path, command: &str) -> Result<(), String> {
+pub(in crate::app) fn update_scenario_startup_file(path: &Path, command: &str) -> Result<(), String> {
     let existing = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
@@ -174,7 +174,7 @@ pub(super) fn update_scenario_startup_file(path: &Path, command: &str) -> Result
         .map_err(|error| format!("Could not update {}: {error}", path.display()))
 }
 
-pub(super) fn clear_scenario_startup_commands(path: &Path) -> Result<(), String> {
+pub(in crate::app) fn clear_scenario_startup_commands(path: &Path) -> Result<(), String> {
     let existing = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -337,3 +337,166 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+impl Baboon {
+    /// Whether this workspace's editing kit has a Sapien that can open a
+    /// scenario at all — the question of whether to *offer* the button, as
+    /// opposed to whether it can be pressed right now.
+    ///
+    /// Answered from the kit's game alone, deliberately. Whether a particular
+    /// scenario resolves to a launchable path, and whether `sapien.exe` is
+    /// where it should be, are reasons to grey the button out; a kit whose
+    /// Sapien has no way to be given a scenario is a reason for there to be no
+    /// button.
+    pub(in crate::app) fn kit_offers_scenario_sapien(&self, kit: usize) -> bool {
+        self.kits
+            .get(kit)
+            .and_then(|kit| kit.source.as_ref())
+            .and_then(|source| source.game)
+            .is_some_and(GameFacts::sapien_takes_scenario_argument)
+    }
+
+    pub(in crate::app) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        context.game.sapien_takes_scenario_argument()
+            && context.kit_root.join("sapien.exe").is_file()
+    }
+
+    pub(in crate::app) fn launch_scenario_in_sapien(&mut self, key: &str) {
+        let context = {
+            let Some(source) = self.source() else {
+                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                return;
+            };
+            let Some(entry) = self.entry_for_key(key) else {
+                self.status = "The scenario tag is no longer in the source".to_owned();
+                return;
+            };
+            match scenario_launch_context(source, entry) {
+                Ok(context) => context,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        };
+        if !context.game.sapien_takes_scenario_argument() {
+            self.status =
+                "Opening a scenario directly in Sapien is not supported for this editing kit"
+                    .to_owned();
+            return;
+        }
+        let executable = context.kit_root.join("sapien.exe");
+        if !executable.is_file() {
+            self.status = format!("Sapien executable not found: {}", executable.display());
+            return;
+        }
+
+        let dirty = self.kits[self.active]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set());
+        if dirty {
+            if let Err(error) = self.save_tag_by_key(key) {
+                self.status = format!("Could not save scenario before launch: {error}");
+                return;
+            }
+        }
+
+        let mut process = Command::new(&executable);
+        for (option, folder) in &context.tool_options {
+            process.arg(option).arg(folder);
+        }
+        process
+            .arg(&context.scenario_file)
+            .current_dir(&context.kit_root);
+        match process.spawn() {
+            Ok(_) => {
+                self.status = format!("Launched Sapien for {}", context.scenario_path);
+            }
+            Err(error) => {
+                self.status = format!("Could not launch Sapien for this scenario: {error}");
+            }
+        }
+    }
+
+    pub(in crate::app) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        let executable = tag_test_executable_for_game(Some(context.game));
+        context.kit_root.join(executable).is_file()
+    }
+
+    pub(in crate::app) fn launch_scenario_in_tag_test(&mut self, key: &str) {
+        let context = {
+            let Some(source) = self.source() else {
+                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                return;
+            };
+            let Some(entry) = self.entry_for_key(key) else {
+                self.status = "The scenario tag is no longer in the source".to_owned();
+                return;
+            };
+            match scenario_launch_context(source, entry) {
+                Ok(context) => context,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        };
+        let executable_name = tag_test_executable_for_game(Some(context.game));
+        let executable = context.kit_root.join(executable_name);
+        if !executable.is_file() {
+            self.status = format!("tag_test executable not found: {}", executable.display());
+            return;
+        }
+
+        let dirty = self.kits[self.active]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set());
+        if dirty {
+            if let Err(error) = self.save_tag_by_key(key) {
+                self.status = format!("Could not save scenario before launch: {error}");
+                return;
+            }
+        }
+
+        let startup_file = context.kit_root.join("init.txt");
+        let command = scenario_startup_command(context.game, &context.scenario_path);
+        if let Err(error) = update_scenario_startup_file(&startup_file, &command) {
+            self.status = error;
+            return;
+        }
+        let mut process = Command::new(&executable);
+        for (option, folder) in &context.tool_options {
+            process.arg(option).arg(folder);
+        }
+        process.current_dir(&context.kit_root);
+        match process.spawn() {
+            Ok(_) => {
+                self.status = format!(
+                    "Launched tag_test for {} using {}",
+                    context.scenario_path,
+                    startup_file.display()
+                );
+            }
+            Err(error) => {
+                self.status = format!(
+                    "Wrote {}, but could not launch tag_test: {error}",
+                    startup_file.display()
+                );
+            }
+        }
+    }
+}

@@ -92,7 +92,7 @@ fn only_workspace_close_actions_wait_for_chimp_documents() {
 #[test]
 fn path_and_key_equality_follows_the_platform() {
     use super::same_entry_key;
-    use super::tools::same_path_text;
+    use crate::app::kits::detect::same_path_text;
     use crate::app::prefs::same_recent_path;
     // (a, b, equal on Windows, equal elsewhere)
     let paths = [
@@ -217,6 +217,10 @@ fn a_mod_always_gets_the_priority_suffix() {
 }
 
 use super::*;
+use crate::app::kits::terminal::terminal_log_timestamp;
+use crate::app::kits::terminal::stream_terminal_output;
+use crate::app::kits::terminal::TERMINAL_VISIBLE_LINE_TRIM_TARGET;
+use crate::app::kits::terminal::TERMINAL_VISIBLE_LINE_LIMIT;
 use crate::app::controller::saving::register_saved_copy_in_loaded_source;
 
 #[test]

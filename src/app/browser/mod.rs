@@ -257,16 +257,16 @@ fn scenario_launch_id() -> egui::Id {
 
 pub(in crate::app) fn set_browser_scenario_launch(
     ui: &Ui,
-    availability: crate::app::controller::ScenarioLaunchAvailability,
+    availability: crate::app::kits::scenario_launch::ScenarioLaunchAvailability,
 ) {
     ui.data_mut(|data| data.insert_temp(scenario_launch_id(), availability));
 }
 
 pub(in crate::app) fn browser_scenario_launch(
     ui: &Ui,
-) -> crate::app::controller::ScenarioLaunchAvailability {
+) -> crate::app::kits::scenario_launch::ScenarioLaunchAvailability {
     ui.data(|data| {
-        data.get_temp::<crate::app::controller::ScenarioLaunchAvailability>(scenario_launch_id())
+        data.get_temp::<crate::app::kits::scenario_launch::ScenarioLaunchAvailability>(scenario_launch_id())
     })
     .unwrap_or_default()
 }

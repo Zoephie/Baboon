@@ -2,7 +2,7 @@
 //! a tag's broken dependencies against the tags that exist.
 
 use super::*;
-use crate::app::controller::terminal::trim_terminal_lines;
+use crate::app::kits::terminal::trim_terminal_lines;
 use crate::app::tag_ops::refactor::send_folder_refactor_progress;
 
 impl Baboon {

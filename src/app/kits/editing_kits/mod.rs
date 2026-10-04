@@ -4,32 +4,32 @@ use super::*;
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-pub(super) const CUSTOM_ICON_FOLDER: &str = "editing kit icons";
-pub(super) const RECOMMENDED_CUSTOM_ICON_SIZE: u32 = 200;
+pub(in crate::app) const CUSTOM_ICON_FOLDER: &str = "editing kit icons";
+pub(in crate::app) const RECOMMENDED_CUSTOM_ICON_SIZE: u32 = 200;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct EditingKitLayout {
-    pub(super) root: PathBuf,
-    pub(super) tags: PathBuf,
-    pub(super) data: Option<PathBuf>,
+pub(in crate::app) struct EditingKitLayout {
+    pub(in crate::app) root: PathBuf,
+    pub(in crate::app) tags: PathBuf,
+    pub(in crate::app) data: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum EditingKitPathStatus {
+pub(in crate::app) enum EditingKitPathStatus {
     Unconfigured,
     Ready(EditingKitLayout),
     Invalid(String),
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct EditingKitValidationCache {
+pub(in crate::app) struct EditingKitValidationCache {
     built_ins: HashMap<String, EditingKitPathStatus>,
     custom_layouts: HashMap<String, Result<EditingKitLayout, String>>,
     custom_icon_errors: HashMap<String, Option<String>>,
 }
 
 impl EditingKitValidationCache {
-    pub(super) fn new(
+    pub(in crate::app) fn new(
         paths: &HashMap<String, PathBuf>,
         profiles: &[CustomEditingKitProfile],
     ) -> Self {
@@ -38,7 +38,7 @@ impl EditingKitValidationCache {
         cache
     }
 
-    pub(super) fn refresh(
+    pub(in crate::app) fn refresh(
         &mut self,
         paths: &HashMap<String, PathBuf>,
         profiles: &[CustomEditingKitProfile],
@@ -70,7 +70,7 @@ impl EditingKitValidationCache {
             .collect();
     }
 
-    pub(super) fn refresh_builtin(
+    pub(in crate::app) fn refresh_builtin(
         &mut self,
         shortcut: EditingKitShortcut,
         configured: Option<&Path>,
@@ -81,7 +81,7 @@ impl EditingKitValidationCache {
         status
     }
 
-    pub(super) fn refresh_custom(
+    pub(in crate::app) fn refresh_custom(
         &mut self,
         profile: &CustomEditingKitProfile,
     ) -> Result<EditingKitLayout, String> {
@@ -93,21 +93,21 @@ impl EditingKitValidationCache {
         status
     }
 
-    pub(super) fn builtin(&self, shortcut: EditingKitShortcut) -> EditingKitPathStatus {
+    pub(in crate::app) fn builtin(&self, shortcut: EditingKitShortcut) -> EditingKitPathStatus {
         self.built_ins
             .get(shortcut.game.as_str())
             .cloned()
             .unwrap_or(EditingKitPathStatus::Unconfigured)
     }
 
-    pub(super) fn custom(&self, profile_id: &str) -> Result<EditingKitLayout, String> {
+    pub(in crate::app) fn custom(&self, profile_id: &str) -> Result<EditingKitLayout, String> {
         self.custom_layouts
             .get(profile_id)
             .cloned()
             .unwrap_or_else(|| Err("Editing-kit status has not been refreshed".to_owned()))
     }
 
-    pub(super) fn custom_icon_error(&self, profile_id: &str) -> Option<&str> {
+    pub(in crate::app) fn custom_icon_error(&self, profile_id: &str) -> Option<&str> {
         self.custom_icon_errors
             .get(profile_id)
             .and_then(Option::as_deref)
@@ -115,7 +115,7 @@ impl EditingKitValidationCache {
 }
 
 impl Baboon {
-    pub(super) fn refresh_editing_kit_validation(&mut self) {
+    pub(in crate::app) fn refresh_editing_kit_validation(&mut self) {
         self.editing_kit_validation.refresh(
             &self.prefs.editing_kit_paths,
             &self.prefs.custom_editing_kit_profiles,
@@ -123,7 +123,7 @@ impl Baboon {
         self.custom_editing_kit_texture_failures.clear();
     }
 
-    pub(super) fn refresh_builtin_editing_kit_validation(
+    pub(in crate::app) fn refresh_builtin_editing_kit_validation(
         &mut self,
         shortcut: EditingKitShortcut,
     ) -> EditingKitPathStatus {
@@ -138,14 +138,14 @@ impl Baboon {
 }
 
 impl EditingKitPathStatus {
-    pub(super) fn layout(&self) -> Option<&EditingKitLayout> {
+    pub(in crate::app) fn layout(&self) -> Option<&EditingKitLayout> {
         match self {
             Self::Ready(layout) => Some(layout),
             Self::Unconfigured | Self::Invalid(_) => None,
         }
     }
 
-    pub(super) fn message(&self) -> String {
+    pub(in crate::app) fn message(&self) -> String {
         match self {
             Self::Unconfigured => "Not configured".to_owned(),
             Self::Ready(layout) => format!("Ready: {}", layout.root.display()),
@@ -154,7 +154,7 @@ impl EditingKitPathStatus {
     }
 }
 
-pub(super) fn validate_builtin_editing_kit(
+pub(in crate::app) fn validate_builtin_editing_kit(
     shortcut: EditingKitShortcut,
     configured: Option<&Path>,
 ) -> EditingKitPathStatus {
@@ -180,11 +180,11 @@ pub(super) fn validate_builtin_editing_kit(
 }
 
 #[cfg(test)]
-pub(super) fn validate_custom_editing_kit_layout(path: &Path) -> Result<EditingKitLayout, String> {
+pub(in crate::app) fn validate_custom_editing_kit_layout(path: &Path) -> Result<EditingKitLayout, String> {
     validate_loose_editing_kit_layout(path, true)
 }
 
-pub(super) fn validate_editing_kit_profile_layout(
+pub(in crate::app) fn validate_editing_kit_profile_layout(
     path: &Path,
     game: &str,
 ) -> Result<EditingKitLayout, String> {
@@ -322,13 +322,13 @@ fn is_named_dir(path: &Path, expected: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(expected))
 }
 
-pub(super) fn canonical_or_clean(path: &Path) -> PathBuf {
+pub(in crate::app) fn canonical_or_clean(path: &Path) -> PathBuf {
     clean_recent_path(fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
 }
 
 /// A profile's layout: its chosen tags and data folders when it has them (see
 /// [`validate_kit_layout`]), otherwise the folders found under its root.
-pub(super) fn validate_profile_layout(
+pub(in crate::app) fn validate_profile_layout(
     profile: &CustomEditingKitProfile,
 ) -> Result<EditingKitLayout, String> {
     validate_kit_layout(
@@ -346,7 +346,7 @@ pub(super) fn validate_profile_layout(
 /// ordinary discovery. With either named, `root` is taken as the kit root as
 /// given (no search beneath it), the named folders must exist, and an unnamed
 /// one falls back to the root's own `tags`/`data`.
-pub(super) fn validate_kit_layout(
+pub(in crate::app) fn validate_kit_layout(
     root: &Path,
     game: &str,
     tags_folder: Option<&Path>,
@@ -394,7 +394,7 @@ pub(super) fn validate_kit_layout(
 /// The tags folder that identifies a profile's kit: two profiles may share a
 /// root, but not a tags folder. A profile that doesn't validate is identified
 /// by where its tags folder would be.
-pub(super) fn profile_tags_folder(profile: &CustomEditingKitProfile) -> PathBuf {
+pub(in crate::app) fn profile_tags_folder(profile: &CustomEditingKitProfile) -> PathBuf {
     validate_profile_layout(profile)
         .map(|layout| layout.tags)
         .unwrap_or_else(|_| {
@@ -413,7 +413,7 @@ pub(super) fn profile_tags_folder(profile: &CustomEditingKitProfile) -> PathBuf 
 /// a kit left on its defaults saves as it always did and passes its tools no
 /// folder options; otherwise the folder relative to the root when it is
 /// inside it, or absolute.
-pub(super) fn folder_to_store(
+pub(in crate::app) fn folder_to_store(
     root: &Path,
     folder: Option<&Path>,
     default_name: &str,
@@ -437,7 +437,7 @@ pub(super) fn folder_to_store(
 /// The child folders of `root` whose names contain `needle` (`tags` or
 /// `data`), sorted: the choices offered beside a kit's tags and data folder
 /// inputs.
-pub(super) fn kit_folder_candidates(root: &Path, needle: &str) -> Vec<String> {
+pub(in crate::app) fn kit_folder_candidates(root: &Path, needle: &str) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(root)
         .into_iter()
         .flatten()
@@ -452,7 +452,7 @@ pub(super) fn kit_folder_candidates(root: &Path, needle: &str) -> Vec<String> {
 
 /// The name of `root`'s own `tags` or `data` folder, as it is spelled on disk,
 /// for filling a folder input when the root is chosen.
-pub(super) fn default_kit_folder_name(root: &Path, default_name: &str) -> Option<String> {
+pub(in crate::app) fn default_kit_folder_name(root: &Path, default_name: &str) -> Option<String> {
     find_named_child(root, default_name)
         .and_then(|path| path.file_name()?.to_str().map(str::to_owned))
 }
@@ -460,7 +460,7 @@ pub(super) fn default_kit_folder_name(root: &Path, default_name: &str) -> Option
 /// The folder that tells a profile's kit apart when it is listed: its root, or
 /// for a kit that chose its own folders (whose root other kits may share), its
 /// tags folder.
-pub(super) fn profile_location<'a>(
+pub(in crate::app) fn profile_location<'a>(
     profile: &'a CustomEditingKitProfile,
     layout: Option<&'a EditingKitLayout>,
 ) -> &'a Path {
@@ -474,7 +474,7 @@ pub(super) fn profile_location<'a>(
 /// Whether another profile already uses `resolved_tags` as its tags folder.
 /// Kits may share a root, but two kits on one tags folder would share its
 /// index, favorites and keywords while each believing it owned them.
-pub(super) fn custom_profile_tags_conflicts(
+pub(in crate::app) fn custom_profile_tags_conflicts(
     profiles: &[CustomEditingKitProfile],
     editing_profile_id: Option<&str>,
     resolved_tags: &Path,
@@ -486,7 +486,7 @@ pub(super) fn custom_profile_tags_conflicts(
     })
 }
 
-pub(super) fn executable_directory() -> Result<PathBuf, String> {
+pub(in crate::app) fn executable_directory() -> Result<PathBuf, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Could not locate the Baboon executable: {error}"))?;
     executable
@@ -495,7 +495,7 @@ pub(super) fn executable_directory() -> Result<PathBuf, String> {
         .ok_or_else(|| "The Baboon executable has no parent directory".to_owned())
 }
 
-pub(super) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, String> {
+pub(in crate::app) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, String> {
     let legacy = legacy_custom_icon_base();
     resolve_custom_icon_path_in_roots(&crate::core::storage::data_path(""), legacy.as_deref(), relative)
 }
@@ -532,7 +532,7 @@ fn resolve_custom_icon_path_in_roots(
     Ok(current)
 }
 
-pub(super) fn custom_profile_icon_error(profile: &CustomEditingKitProfile) -> Option<String> {
+pub(in crate::app) fn custom_profile_icon_error(profile: &CustomEditingKitProfile) -> Option<String> {
     let relative = profile.icon.as_deref()?;
     let absolute = match resolve_custom_icon_path(relative) {
         Ok(path) => path,
@@ -543,7 +543,7 @@ pub(super) fn custom_profile_icon_error(profile: &CustomEditingKitProfile) -> Op
         .map(|error| format!("Using the default icon: {error}"))
 }
 
-pub(super) fn validate_custom_icon_source(path: &Path) -> Result<(u32, u32), String> {
+pub(in crate::app) fn validate_custom_icon_source(path: &Path) -> Result<(u32, u32), String> {
     let png_extension = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -558,7 +558,7 @@ pub(super) fn validate_custom_icon_source(path: &Path) -> Result<(u32, u32), Str
     Ok((image.width(), image.height()))
 }
 
-pub(super) fn copy_custom_icon(
+pub(in crate::app) fn copy_custom_icon(
     source: &Path,
     project_name: &str,
     profile_id: &str,
@@ -621,7 +621,7 @@ fn copy_custom_icon_at(
     Ok(relative)
 }
 
-pub(super) fn remove_unreferenced_custom_icon(
+pub(in crate::app) fn remove_unreferenced_custom_icon(
     relative: &Path,
     profiles: &[CustomEditingKitProfile],
 ) -> Result<(), String> {
@@ -671,7 +671,7 @@ fn remove_unreferenced_custom_icon_in_roots(
     Ok(())
 }
 
-pub(super) fn safe_custom_icon_relative_path(path: &Path) -> bool {
+pub(in crate::app) fn safe_custom_icon_relative_path(path: &Path) -> bool {
     !path.is_absolute()
         && path.starts_with(CUSTOM_ICON_FOLDER)
         && path.components().all(|component| {
@@ -699,7 +699,7 @@ pub(in crate::app) fn is_windows_reserved_name(name: &str) -> bool {
     RESERVED.iter().any(|reserved| reserved.eq_ignore_ascii_case(base))
 }
 
-pub(super) fn sanitise_project_name(name: &str) -> String {
+pub(in crate::app) fn sanitise_project_name(name: &str) -> String {
     let mut output = String::new();
     let mut previous_separator = false;
     for ch in name.trim().chars() {

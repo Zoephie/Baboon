@@ -1,7 +1,7 @@
 //! Top-level windows, menus, dialogs, and frame composition for [`Baboon`].
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
-use super::controller::open_terminal_log;
+use crate::app::kits::terminal::open_terminal_log;
 use super::*;
 
 mod browser_panel;
@@ -17,7 +17,6 @@ mod settings;
 mod shell;
 mod tag_pane;
 mod tag_tiles;
-mod tool_commands;
 mod welcome;
 
 pub(in crate::app) const PANE_HEADER_ICON_SIZE: f32 = 32.0;

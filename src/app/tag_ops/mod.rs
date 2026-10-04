@@ -9,10 +9,6 @@ pub(in crate::app) mod duplicate;
 pub(in crate::app) mod rename_in_place;
 pub(in crate::app) mod folder_rename;
 pub(in crate::app) use folder_rename::sibling_differing_in_case;
-
-pub(in crate::app) const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
-pub(in crate::app) const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
-pub(in crate::app) const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 pub(in crate::app) mod container_folders;
 pub(in crate::app) mod new_tag_window;
 pub(in crate::app) mod rename_tag_window;

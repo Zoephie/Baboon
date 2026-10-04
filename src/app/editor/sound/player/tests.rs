@@ -16,7 +16,7 @@ fn clips_of(duration: Option<f64>) -> Vec<PlayerClip> {
 
 fn owner() -> SoundOwner {
     SoundOwner {
-        kit: crate::app::kit::KitId(1),
+        kit: crate::app::kits::kit::KitId(1),
         key: "test".to_owned(),
     }
 }

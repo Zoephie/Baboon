@@ -70,8 +70,6 @@ pub(super) const BABOON_BUILD_COMMIT: &str = env!("BABOON_BUILD_COMMIT");
 
 mod game_assets;
 use game_assets::*;
-mod editing_kits;
-use editing_kits::*;
 mod launch;
 use launch::{CommandLineLaunch, resolve_launch_tag_entries};
 pub(crate) use launch::{StartupArguments, parse_startup_arguments};
@@ -79,8 +77,6 @@ mod style;
 use style::*;
 mod state;
 use state::*;
-mod kit;
-use kit::*;
 use crate::core::document::journal::*;
 use crate::core::document::ops::*;
 use crate::core::document::TagDocument;
@@ -104,8 +100,6 @@ mod material;
 use material::*;
 mod model_preview;
 use model_preview::*;
-mod tool_commands;
-use tool_commands::*;
 mod tag_icons;
 use tag_icons::*;
 mod button_icons;
@@ -121,10 +115,6 @@ use model_browser::*;
 mod audio;
 mod runtime_poke;
 use runtime_poke::*;
-mod kit_tool_drop;
-use kit_tool_drop::*;
-mod scenario_palettes;
-use scenario_palettes::*;
 mod chimp;
 use chimp::*;
 pub(in crate::app) mod controller;
@@ -144,6 +134,8 @@ pub(in crate::app) mod mods;
 use mods::*;
 pub(in crate::app) mod tag_ops;
 use tag_ops::*;
+pub(in crate::app) mod kits;
+use kits::*;
 mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
@@ -529,7 +521,7 @@ impl Baboon {
             Arc::new(|ctx| {
                 let cursor = ctx.data(|data| {
                     data.get_temp::<egui::CursorIcon>(egui::Id::new(
-                        controller::KIT_TOOL_DROP_CURSOR,
+                        kits::tool_drop::KIT_TOOL_DROP_CURSOR,
                     ))
                 });
                 if let Some(cursor) = cursor {

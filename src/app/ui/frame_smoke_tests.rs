@@ -663,7 +663,7 @@ fn cases() -> Vec<Case> {
         case(
             "tool_commands",
             &["tool_commands"],
-            &["ui/tool_commands.rs"],
+            &["kits/tool_commands_window.rs"],
             loose_kit,
             |h| h.app.tool_commands.open = true,
             &["Tool Commands"],

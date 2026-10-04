@@ -4,25 +4,25 @@
 use super::*;
 
 #[derive(Clone, Debug)]
-pub(super) struct ToolCommand {
-    pub(super) name: String,
-    pub(super) category: String,
-    pub(super) description: String,
-    pub(super) example: String,
-    pub(super) args: Vec<ToolCommandArg>,
+pub(in crate::app) struct ToolCommand {
+    pub(in crate::app) name: String,
+    pub(in crate::app) category: String,
+    pub(in crate::app) description: String,
+    pub(in crate::app) example: String,
+    pub(in crate::app) args: Vec<ToolCommandArg>,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ToolCommandArg {
-    pub(super) name: String,
-    pub(super) kind: ToolCommandArgKind,
-    pub(super) description: String,
-    pub(super) required: bool,
-    pub(super) values: Vec<String>,
+pub(in crate::app) struct ToolCommandArg {
+    pub(in crate::app) name: String,
+    pub(in crate::app) kind: ToolCommandArgKind,
+    pub(in crate::app) description: String,
+    pub(in crate::app) required: bool,
+    pub(in crate::app) values: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ToolCommandArgKind {
+pub(in crate::app) enum ToolCommandArgKind {
     PathData,
     PathTag,
     PathFile,
@@ -32,17 +32,17 @@ pub(super) enum ToolCommandArgKind {
 }
 
 #[derive(Default)]
-pub(super) struct ToolCommandsUiState {
-    pub(super) open: bool,
-    pub(super) catalog_game: Option<GameId>,
-    pub(super) commands: Vec<ToolCommand>,
-    pub(super) error: Option<String>,
-    pub(super) selected: Option<String>,
-    pub(super) values: HashMap<String, String>,
-    pub(super) optional_open: bool,
+pub(in crate::app) struct ToolCommandsUiState {
+    pub(in crate::app) open: bool,
+    pub(in crate::app) catalog_game: Option<GameId>,
+    pub(in crate::app) commands: Vec<ToolCommand>,
+    pub(in crate::app) error: Option<String>,
+    pub(in crate::app) selected: Option<String>,
+    pub(in crate::app) values: HashMap<String, String>,
+    pub(in crate::app) optional_open: bool,
 }
 
-pub(super) fn load_tool_commands(game: GameId) -> Result<Vec<ToolCommand>, String> {
+pub(in crate::app) fn load_tool_commands(game: GameId) -> Result<Vec<ToolCommand>, String> {
     let text = crate::core::tool_commands::get_tool_commands_json(game)
         .ok_or_else(|| format!("No tool command catalog is embedded for {game}"))?;
     parse_tool_commands_json(text).map_err(|error| {
@@ -124,7 +124,7 @@ fn json_string(value: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing string field {key:?}"))
 }
 
-pub(super) fn tool_command_preview(
+pub(in crate::app) fn tool_command_preview(
     command: &ToolCommand,
     values: &HashMap<String, String>,
 ) -> String {
@@ -139,7 +139,7 @@ pub(super) fn tool_command_preview(
     parts.join(" ")
 }
 
-pub(super) fn tool_command_missing_required(
+pub(in crate::app) fn tool_command_missing_required(
     command: &ToolCommand,
     values: &HashMap<String, String>,
 ) -> Option<String> {
@@ -150,7 +150,7 @@ pub(super) fn tool_command_missing_required(
         .map(|arg| arg.name.clone())
 }
 
-pub(super) fn effective_arg_value(
+pub(in crate::app) fn effective_arg_value(
     arg: &ToolCommandArg,
     values: &HashMap<String, String>,
 ) -> String {
@@ -162,7 +162,7 @@ pub(super) fn effective_arg_value(
     value.to_owned()
 }
 
-pub(super) fn tool_arg_key(command_name: &str, arg: &ToolCommandArg) -> String {
+pub(in crate::app) fn tool_arg_key(command_name: &str, arg: &ToolCommandArg) -> String {
     if command_name.is_empty() {
         arg.name.clone()
     } else {
@@ -170,7 +170,7 @@ pub(super) fn tool_arg_key(command_name: &str, arg: &ToolCommandArg) -> String {
     }
 }
 
-pub(super) fn path_arg_from_picker(
+pub(in crate::app) fn path_arg_from_picker(
     path: &Path,
     base: Option<&Path>,
     strip_extension: bool,

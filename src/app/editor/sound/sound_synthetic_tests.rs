@@ -238,7 +238,7 @@ fn run_drawing(
                     edit.sound_play_request = SoundRequests::new(
                         queued,
                         Some(SoundOwner {
-                            kit: crate::app::kit::KitId(1),
+                            kit: crate::app::kits::kit::KitId(1),
                             key: "test".to_owned(),
                         }),
                     );

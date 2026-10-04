@@ -2,7 +2,7 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
-use crate::app::controller::terminal::trim_terminal_lines;
+use crate::app::kits::terminal::trim_terminal_lines;
 
 impl Baboon {
     /// Applies `WorkerMessage::ReverseDependenciesBuilt`, rejecting stale source generations.

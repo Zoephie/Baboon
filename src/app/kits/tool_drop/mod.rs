@@ -186,7 +186,7 @@ impl Baboon {
     /// the definitions. The first ask starts that read and answers `None`, as
     /// does a definition that could not be read: the UI thread does not wait
     /// on disk, least of all with a drag in hand.
-    pub(super) fn scenario_palettes_for_game(
+    pub(in crate::app) fn scenario_palettes_for_game(
         &mut self,
         game: GameId,
         ctx: &egui::Context,

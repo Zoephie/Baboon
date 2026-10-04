@@ -2,24 +2,25 @@
 //! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
 
 use super::*;
-use crate::app::tag_ops::TERMINAL_VISIBLE_LINE_TRIM_TARGET;
-use crate::app::tag_ops::TERMINAL_VISIBLE_LINE_LIMIT;
+
+pub(in crate::app) const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
+pub(in crate::app) const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
 
 impl Baboon {
     /// Applies `WorkerMessage::TerminalLine` without changing receive-loop ordering.
-    pub(super) fn handle_terminal_line(&mut self, line: String) -> bool {
+    pub(in crate::app) fn handle_terminal_line(&mut self, line: String) -> bool {
         self.push_terminal_line(line);
         false
     }
 
     /// Applies `WorkerMessage::TerminalLogError` without changing receive-loop ordering.
-    pub(super) fn handle_terminal_log_error(&mut self, error: String) -> bool {
+    pub(in crate::app) fn handle_terminal_log_error(&mut self, error: String) -> bool {
         self.status = error;
         false
     }
 
     /// Applies `WorkerMessage::TerminalDone`; stale run IDs skip the rest of that loop iteration.
-    pub(super) fn handle_terminal_done(&mut self, run_id: u64) -> bool {
+    pub(in crate::app) fn handle_terminal_done(&mut self, run_id: u64) -> bool {
         if self.terminal.running_id != Some(run_id) {
             return true;
         }
@@ -33,12 +34,12 @@ impl Baboon {
     }
 }
 
-pub(super) enum TerminalStopResult {
+pub(in crate::app) enum TerminalStopResult {
     Stopped,
     AlreadyExited,
 }
 
-pub(super) fn stop_terminal_process(
+pub(in crate::app) fn stop_terminal_process(
     process: &TerminalProcess,
 ) -> Result<TerminalStopResult, String> {
     #[cfg(target_os = "windows")]
@@ -170,7 +171,7 @@ fn windows_shell_command_line(command: &str) -> String {
 /// `cmd` running `command` as typed, with no console window; see
 /// [`windows_shell_command_line`].
 #[cfg(target_os = "windows")]
-pub(super) fn windows_shell_command(command: &str) -> std::process::Command {
+pub(in crate::app) fn windows_shell_command(command: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt;
     let mut c = background_command("cmd");
     c.raw_arg(windows_shell_command_line(command));
@@ -183,7 +184,7 @@ pub(super) fn windows_shell_command(command: &str) -> std::process::Command {
 /// On Windows that is `cmd` with the command line passed raw (see
 /// [`windows_shell_command_line`]). Elsewhere it is `sh -c` in a new process
 /// group, so stopping the command kills whatever it started as well.
-pub(super) fn terminal_shell_command(command: &str, work_dir: &Path) -> std::process::Command {
+pub(in crate::app) fn terminal_shell_command(command: &str, work_dir: &Path) -> std::process::Command {
     #[cfg(target_os = "windows")]
     let mut cmd = windows_shell_command(command);
     #[cfg(not(target_os = "windows"))]
@@ -202,7 +203,7 @@ pub(super) fn terminal_shell_command(command: &str, work_dir: &Path) -> std::pro
     cmd
 }
 
-pub(super) fn run_terminal_command_for_reimport(
+pub(in crate::app) fn run_terminal_command_for_reimport(
     command: &str,
     work_dir: &Path,
     tx: &Sender<WorkerMessage>,
@@ -269,7 +270,7 @@ pub(super) fn run_terminal_command_for_reimport(
     }
 }
 
-pub(super) fn stream_terminal_output<R: std::io::Read>(
+pub(in crate::app) fn stream_terminal_output<R: std::io::Read>(
     mut reader: R,
     tx: &Sender<WorkerMessage>,
     ctx: &egui::Context,
@@ -330,7 +331,7 @@ fn emit_terminal_output_line(
     ctx.request_repaint();
 }
 
-pub(super) fn send_terminal_line(
+pub(in crate::app) fn send_terminal_line(
     tx: &Sender<WorkerMessage>,
     ctx: &egui::Context,
     log_file: &mut Option<std::fs::File>,
@@ -349,7 +350,7 @@ pub(in crate::app) fn trim_terminal_lines(lines: &mut Vec<TerminalLineEntry>) {
     }
 }
 
-pub(super) fn create_terminal_log_file(
+pub(in crate::app) fn create_terminal_log_file(
     run_id: u64,
     command: &str,
 ) -> Result<(PathBuf, std::fs::File), String> {
@@ -369,7 +370,7 @@ pub(super) fn create_terminal_log_file(
     Ok((path, file))
 }
 
-pub(super) fn write_terminal_log_line(
+pub(in crate::app) fn write_terminal_log_line(
     log_file: &mut Option<std::fs::File>,
     tx: &Sender<WorkerMessage>,
     line: &str,
@@ -391,7 +392,7 @@ pub(super) fn write_terminal_log_line(
     }
 }
 
-pub(super) fn append_terminal_log_path(path: &Path, line: &str) -> Result<(), String> {
+pub(in crate::app) fn append_terminal_log_path(path: &Path, line: &str) -> Result<(), String> {
     use std::io::Write as _;
 
     let mut file = std::fs::OpenOptions::new()
@@ -402,7 +403,7 @@ pub(super) fn append_terminal_log_path(path: &Path, line: &str) -> Result<(), St
         .map_err(|error| format!("Could not write terminal log {}: {error}", path.display()))
 }
 
-pub(super) fn terminal_log_timestamp() -> String {
+pub(in crate::app) fn terminal_log_timestamp() -> String {
     let seconds = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
         Err(_) => 0,
@@ -458,3 +459,255 @@ pub(in crate::app) fn open_terminal_log(path: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests;
+
+impl Baboon {
+    pub(in crate::app) fn push_terminal_line(&mut self, line: String) {
+        self.terminal.lines.push(TerminalLineEntry::new(line));
+        trim_terminal_lines(&mut self.terminal.lines);
+        self.terminal.scroll_to_bottom = true;
+    }
+
+    pub(in crate::app) fn begin_terminal_command(&mut self, ctx: egui::Context) {
+        let command = self.terminal.input.trim().to_owned();
+        if command.is_empty() {
+            return;
+        }
+        self.submit_terminal_command(command, ctx);
+    }
+
+    pub(in crate::app) fn submit_terminal_command(&mut self, command: String, ctx: egui::Context) {
+        if self.terminal.history.last() != Some(&command) {
+            self.terminal.history.push(command.clone());
+        }
+        self.terminal.history_cursor = None;
+        self.terminal.input.clear();
+        self.terminal.refocus_input = true;
+        self.spawn_terminal_command(command, ctx);
+    }
+
+    pub(in crate::app) fn recall_terminal_history(&mut self, delta: i32) {
+        let len = self.terminal.history.len();
+        if len == 0 {
+            return;
+        }
+
+        let next = match self.terminal.history_cursor {
+            Some(index) => index as i32 + delta,
+            None if delta < 0 => len as i32 - 1,
+            None => return,
+        };
+
+        if next < 0 {
+            self.terminal.history_cursor = Some(0);
+            self.terminal.input = self.terminal.history[0].clone();
+        } else if next >= len as i32 {
+            self.terminal.history_cursor = None;
+            self.terminal.input.clear();
+        } else {
+            let next = next as usize;
+            self.terminal.history_cursor = Some(next);
+            self.terminal.input = self.terminal.history[next].clone();
+        }
+    }
+
+    /// Run `command` in the editing-kit root, streaming output to the terminal
+    /// panel. Shared by the terminal input and the geometry Import button.
+    /// Starts the configured command without blocking frame rendering.
+    /// Output and completion return through ordered worker messages for the active run id.
+    pub(in crate::app) fn spawn_terminal_command(&mut self, command: String, ctx: egui::Context) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
+        if self.terminal.running {
+            self.status = "A command is already running".to_owned();
+            return;
+        }
+        let Some(work_dir) = self.kits[self.active].terminal_work_dir.clone() else {
+            self.status = "Run requires a loaded editing-kit folder".to_owned();
+            return;
+        };
+        // Rewritten before it is echoed, so the terminal shows what really ran.
+        let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
+        self.kits[self.active].terminal_open = true;
+        self.terminal
+            .lines
+            .push(TerminalLineEntry::new(format!("> {command}")));
+        trim_terminal_lines(&mut self.terminal.lines);
+        self.terminal.scroll_to_bottom = true;
+        self.terminal.refocus_input = true;
+        self.terminal.running = true;
+        let run_id = self.terminal.next_run_id;
+        self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
+        self.terminal.running_id = Some(run_id);
+        self.terminal.running_command = Some(command.clone());
+        let mut log_file = match create_terminal_log_file(run_id, &command) {
+            Ok((path, file)) => {
+                self.terminal.last_log_path = Some(path);
+                Some(file)
+            }
+            Err(error) => {
+                self.status = format!("Terminal full log unavailable: {error}");
+                self.terminal.last_log_path = None;
+                None
+            }
+        };
+        let tx = self.tx.clone();
+        let child_slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        self.terminal.process = Some(TerminalProcess {
+            child: Arc::clone(&child_slot),
+            stop_requested: Arc::clone(&stop_requested),
+        });
+        thread::spawn(move || {
+            let mut log_error_reported = false;
+            let mut cmd = terminal_shell_command(&command, &work_dir);
+            match cmd.spawn() {
+                Err(e) => {
+                    send_terminal_line(
+                        &tx,
+                        &ctx,
+                        &mut log_file,
+                        &mut log_error_reported,
+                        format!("[error] {e}"),
+                    );
+                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
+                    ctx.request_repaint();
+                }
+                Ok(child) => {
+                    let stdout = match child_slot.lock() {
+                        Ok(mut slot) => {
+                            *slot = Some(child);
+                            slot.as_mut().and_then(|child| child.stdout.take())
+                        }
+                        Err(_) => {
+                            send_terminal_line(
+                                &tx,
+                                &ctx,
+                                &mut log_file,
+                                &mut log_error_reported,
+                                "[error] terminal process lock was poisoned".to_owned(),
+                            );
+                            let _ = tx.send(WorkerMessage::TerminalDone { run_id });
+                            ctx.request_repaint();
+                            return;
+                        }
+                    };
+                    if let Some(stdout) = stdout {
+                        let _ = stream_terminal_output(
+                            stdout,
+                            &tx,
+                            &ctx,
+                            &mut log_file,
+                            &mut log_error_reported,
+                        );
+                    }
+                    let exit = match child_slot.lock() {
+                        Ok(mut slot) => {
+                            if let Some(mut child) = slot.take() {
+                                child.wait().ok()
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => {
+                            send_terminal_line(
+                                &tx,
+                                &ctx,
+                                &mut log_file,
+                                &mut log_error_reported,
+                                "[error] terminal process lock was poisoned".to_owned(),
+                            );
+                            None
+                        }
+                    };
+                    if let Some(code) = exit.and_then(|status| status.code())
+                        && !stop_requested.load(Ordering::SeqCst)
+                    {
+                        send_terminal_line(
+                            &tx,
+                            &ctx,
+                            &mut log_file,
+                            &mut log_error_reported,
+                            format!("[exit {code}]"),
+                        );
+                    }
+                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
+                    ctx.request_repaint();
+                }
+            }
+        });
+    }
+
+    pub(in crate::app) fn stop_terminal_command(&mut self) {
+        if !self.terminal.running {
+            self.status = "No terminal command is running".to_owned();
+            return;
+        }
+        let Some(process) = self.terminal.process.as_ref() else {
+            self.status = "No tracked terminal process to stop".to_owned();
+            return;
+        };
+
+        process.stop_requested.store(true, Ordering::SeqCst);
+        let command = self
+            .terminal
+            .running_command
+            .clone()
+            .unwrap_or_else(|| "command".to_owned());
+        match stop_terminal_process(process) {
+            Ok(TerminalStopResult::Stopped) => {
+                let line = format!("[stopped] {command} stopped by user");
+                let mut log_status = None;
+                if let Some(path) = self.terminal.last_log_path.as_ref()
+                    && let Err(error) = append_terminal_log_path(path, &line)
+                {
+                    log_status = Some(error);
+                }
+                self.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.terminal.lines);
+                self.finish_stopped_terminal_command();
+                self.status = log_status.unwrap_or_else(|| "Terminal command stopped".to_owned());
+            }
+            Ok(TerminalStopResult::AlreadyExited) => {
+                self.finish_stopped_terminal_command();
+                self.status = "Terminal command had already exited".to_owned();
+            }
+            Err(error) => {
+                let line = format!("[error] could not stop terminal command: {error}");
+                let mut log_status = None;
+                if let Some(path) = self.terminal.last_log_path.as_ref()
+                    && let Err(log_error) = append_terminal_log_path(path, &line)
+                {
+                    log_status = Some(log_error);
+                }
+                self.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.terminal.lines);
+                self.terminal.scroll_to_bottom = true;
+                self.status = log_status
+                    .unwrap_or_else(|| format!("Could not stop terminal command: {error}"));
+            }
+        }
+    }
+
+    pub(in crate::app) fn finish_stopped_terminal_command(&mut self) {
+        self.terminal.running = false;
+        self.terminal.running_id = None;
+        self.terminal.running_command = None;
+        self.terminal.process = None;
+        self.terminal.scroll_to_bottom = true;
+        self.terminal.refocus_input = true;
+    }
+
+    /// Record the current terminal-open state against the loaded game so it
+    /// is restored next time that editing kit is opened.
+    pub(in crate::app) fn remember_terminal_open_for_game(&mut self) {
+        let Some(game) = self.source().and_then(|s| s.game.clone()) else {
+            return;
+        };
+        if self.kits[self.active].terminal_open {
+            self.terminal_open_games.insert(game.as_str().to_owned());
+        } else {
+            self.terminal_open_games.remove(game.as_str());
+        }
+    }
+}

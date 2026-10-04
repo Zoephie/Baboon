@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(super) fn draw_tool_commands_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_tool_commands_window(&mut self, ctx: &egui::Context) {
         if !self.tool_commands.open {
             return;
         }
@@ -165,7 +165,7 @@ impl Baboon {
         self.tool_commands.open = open;
     }
 
-    pub(super) fn ensure_tool_commands_loaded(&mut self, game: GameId) {
+    pub(in crate::app) fn ensure_tool_commands_loaded(&mut self, game: GameId) {
         if self.tool_commands.catalog_game == Some(game) {
             return;
         }
@@ -191,7 +191,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn draw_tool_command_list(&mut self, ui: &mut Ui) {
+    pub(in crate::app) fn draw_tool_command_list(&mut self, ui: &mut Ui) {
         let mut categories = Vec::<String>::new();
         for command in &self.tool_commands.commands {
             if !categories
@@ -282,7 +282,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn draw_selected_tool_command(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_selected_tool_command(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let Some(command) = self.selected_tool_command().cloned() else {
             ui.label(RichText::new("Select a command").color(subtle_dark()));
             return;
@@ -355,7 +355,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn selected_tool_command(&self) -> Option<&ToolCommand> {
+    pub(in crate::app) fn selected_tool_command(&self) -> Option<&ToolCommand> {
         let selected = self.tool_commands.selected.as_deref()?;
         self.tool_commands
             .commands
@@ -363,7 +363,7 @@ impl Baboon {
             .find(|command| command.name == selected)
     }
 
-    pub(super) fn draw_tool_command_arg(
+    pub(in crate::app) fn draw_tool_command_arg(
         &mut self,
         ui: &mut Ui,
         command: &ToolCommand,

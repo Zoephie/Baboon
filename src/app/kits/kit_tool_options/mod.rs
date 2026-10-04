@@ -10,7 +10,7 @@ use super::*;
 ///
 /// The Halo 3-era tools take no such options (they open `tags\` and `data\`
 /// relative to the folder they run in), and their kits can't choose folders.
-pub(super) fn kit_tool_folder_options(
+pub(in crate::app) fn kit_tool_folder_options(
     layout: &KitLayout,
     game: Option<GameId>,
 ) -> Vec<(&'static str, PathBuf)> {
@@ -30,7 +30,7 @@ pub(super) fn kit_tool_folder_options(
 /// `command` with the kit's folder options after its program, when the
 /// program is the kit's `tool` (`tool`, `tool.exe`, `.\tool.exe`, quoted or
 /// not). Any other command is left alone.
-pub(super) fn with_tool_folder_options(
+pub(in crate::app) fn with_tool_folder_options(
     command: &str,
     options: &[(&'static str, PathBuf)],
 ) -> String {
@@ -80,7 +80,7 @@ fn crt_quoted(argument: &str) -> String {
 
 impl Baboon {
     /// The active kit's tool folder options; see [`kit_tool_folder_options`].
-    pub(super) fn active_kit_tool_folder_options(&self) -> Vec<(&'static str, PathBuf)> {
+    pub(in crate::app) fn active_kit_tool_folder_options(&self) -> Vec<(&'static str, PathBuf)> {
         let Some(layout) = self.kit_layout_for(self.active) else {
             return Vec::new();
         };

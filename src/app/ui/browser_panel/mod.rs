@@ -142,7 +142,7 @@ impl Baboon {
             .source
             .as_ref()
             .map(|source| {
-                crate::app::controller::scenario_launch_availability_with(source, |path| {
+                crate::app::kits::scenario_launch::scenario_launch_availability_with(source, |path| {
                     is_file_cached(ui.ctx(), path)
                 })
             })
@@ -496,7 +496,7 @@ impl Baboon {
             self.kits[kit_index]
                 .source
                 .as_ref()
-                .map(crate::app::controller::scenario_launch_availability)
+                .map(crate::app::kits::scenario_launch::scenario_launch_availability)
                 .unwrap_or_default(),
         );
         set_browser_is_folder_pane(ui, false);

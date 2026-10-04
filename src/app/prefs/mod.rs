@@ -1,7 +1,7 @@
 //! Preferences and last-session persistence, including legacy migration.
 //! It owns preference/session serialization and migration; interactive settings presentation belongs to the UI layer.
 
-use super::controller::add_standard_editing_kit_profiles;
+use crate::app::kits::detect::add_standard_editing_kit_profiles;
 use super::*;
 
 pub(super) fn prefs_path() -> PathBuf {

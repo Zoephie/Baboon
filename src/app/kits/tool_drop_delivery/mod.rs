@@ -276,7 +276,7 @@ mod platform {
         }
     }
 
-    pub(super) fn kit_tool_under_cursor(
+    pub(in crate::app) fn kit_tool_under_cursor(
         executables: &mut HashMap<u32, Option<PathBuf>>,
     ) -> Option<KitToolDropTarget> {
         let mut cursor = POINT::default();
@@ -285,7 +285,7 @@ mod platform {
     }
 
     /// The kit tool whose window is at `cursor`, in screen coordinates.
-    pub(super) fn kit_tool_at(
+    pub(in crate::app) fn kit_tool_at(
         cursor: POINT,
         executables: &mut HashMap<u32, Option<PathBuf>>,
     ) -> Option<KitToolDropTarget> {
@@ -327,7 +327,7 @@ mod platform {
         })
     }
 
-    pub(super) fn mouse_buttons_are_up() -> bool {
+    pub(in crate::app) fn mouse_buttons_are_up() -> bool {
         // The high bit is the button's current state.
         [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
             .into_iter()
@@ -422,7 +422,7 @@ mod platform {
         )))
     }
 
-    pub(super) fn deliver_file_drop(target: &KitToolDropTarget, file: &Path) -> Result<(), String> {
+    pub(in crate::app) fn deliver_file_drop(target: &KitToolDropTarget, file: &Path) -> Result<(), String> {
         let tool = target.tool.label();
         let bytes = encode_dropfiles(file, target.client_point);
         let memory = unsafe { GlobalAlloc(GHND, bytes.len()) }
@@ -473,17 +473,17 @@ mod platform {
 mod platform {
     use super::*;
 
-    pub(super) fn kit_tool_under_cursor(
+    pub(in crate::app) fn kit_tool_under_cursor(
         _executables: &mut HashMap<u32, Option<PathBuf>>,
     ) -> Option<KitToolDropTarget> {
         None
     }
 
-    pub(super) fn mouse_buttons_are_up() -> bool {
+    pub(in crate::app) fn mouse_buttons_are_up() -> bool {
         false
     }
 
-    pub(super) fn deliver_file_drop(
+    pub(in crate::app) fn deliver_file_drop(
         _target: &KitToolDropTarget,
         _file: &Path,
     ) -> Result<(), String> {
