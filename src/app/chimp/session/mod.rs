@@ -856,9 +856,7 @@ impl Model {
                 .map(|(key, document)| (key.as_str(), document.dirty)),
         )
     }
-}
 
-impl Model {
     fn load_chimp_recovery_manifest(
         &self,
         kit_index: usize,

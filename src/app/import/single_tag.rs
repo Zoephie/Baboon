@@ -48,7 +48,7 @@ impl Baboon {
         let extension = group_tag_to_extension(group_tag)
             .unwrap_or(group_name.as_str())
             .to_owned();
-        let (profile_verdicts, mode) = self.classify_import_source(group_tag, &tag);
+        let (profile_verdicts, mode) = self.model.classify_import_source(group_tag, &tag);
         let name = picked
             .file_stem()
             .and_then(|s| s.to_str())
@@ -102,19 +102,7 @@ impl Baboon {
         }
     }
 
-    /// Work out how a picked file has to be landed, against the active source's
-    /// game as the destination.
-    pub(in crate::app) fn classify_import_source(
-        &self,
-        group_tag: u32,
-        imported: &TagFile,
-    ) -> (Vec<(String, ProfileFit)>, ImportMode) {
-        let target_game = self
-            .model.source()
-            .and_then(|s| s.game)
-            .unwrap_or(GameId::CampaignEvolved);
-        classify_import_source_for(target_game.as_str(), group_tag, imported)
-    }
+
 
     /// Apply the pending import: validate the schema gate, resolve the target
     /// path against existing tags, and either overwrite an existing tag's
@@ -432,5 +420,19 @@ impl Model {
             }
             _ => None,
         }
+    }
+
+    /// Work out how a picked file has to be landed, against the active source's
+    /// game as the destination.
+    pub(in crate::app) fn classify_import_source(
+        &self,
+        group_tag: u32,
+        imported: &TagFile,
+    ) -> (Vec<(String, ProfileFit)>, ImportMode) {
+        let target_game = self
+            .source()
+            .and_then(|s| s.game)
+            .unwrap_or(GameId::CampaignEvolved);
+        classify_import_source_for(target_game.as_str(), group_tag, imported)
     }
 }

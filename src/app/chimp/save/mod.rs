@@ -940,9 +940,7 @@ impl Model {
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
         self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
     }
-}
 
-impl Model {
     /// Rebuild every dirty package in the kit, recording the edit count each
     /// was rebuilt at.
     fn rebuild_dirty_chimp_documents(

@@ -102,7 +102,7 @@ impl Baboon {
         style_list_menu(ui);
         if ui
             .add_enabled(
-                !self.editing_kit_is_read_only(self.model.active),
+                !self.model.editing_kit_is_read_only(self.model.active),
                 egui::Button::new("New Tag..."),
             )
             .clicked()
@@ -116,7 +116,7 @@ impl Baboon {
         // another game. Splitting them in the menu would make
         // the user answer a question about Baboon's internals
         // to do the same thing.
-        let can_import = self.model.current_source_is_container() || self.can_import_tags();
+        let can_import = self.model.current_source_is_container() || self.model.can_import_tags();
         if ui
             .add_enabled(can_import, egui::Button::new("Import Tags..."))
             .on_hover_text(if self.model.current_source_is_container() {
@@ -226,7 +226,7 @@ impl Baboon {
             ui,
             ButtonIcon::Save,
             save_label,
-            !self.editing_kit_is_read_only(self.model.active),
+            !self.model.editing_kit_is_read_only(self.model.active),
         )
         .clicked()
         {
@@ -236,7 +236,7 @@ impl Baboon {
         if ui
             .add_enabled(
                 self.model.kits[self.model.active].selected_key.is_some()
-                    && !self.editing_kit_is_read_only(self.model.active),
+                    && !self.model.editing_kit_is_read_only(self.model.active),
                 egui::Button::new("Save Current Tag As..."),
             )
             .clicked()
@@ -247,7 +247,7 @@ impl Baboon {
         if self.model.current_source_is_container() {
             if ui
                 .add_enabled(
-                    self.can_poke_current_tag(),
+                    self.model.can_poke_current_tag(),
                     egui::Button::new("Poke Current Tag...    Ctrl+P"),
                 )
                 .on_hover_text(

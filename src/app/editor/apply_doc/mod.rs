@@ -21,7 +21,7 @@ impl Baboon {
         ops: DeferredOps,
         step: UndoStep,
     ) -> Option<AppliedDeferredOps> {
-        if self.editing_kit_is_read_only(kit_index) {
+        if self.model.editing_kit_is_read_only(kit_index) {
             if !ops.is_empty() {
                 self.refuse_read_only_edit(kit_index);
             }

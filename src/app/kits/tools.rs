@@ -6,28 +6,10 @@ use super::*;
 impl Baboon {
 
 
-    pub(in crate::app) fn editing_kit_is_read_only(&self, kit_index: usize) -> bool {
-        let Some(kit) = self.model.kits.get(kit_index) else {
-            return false;
-        };
-        // The tags folder rather than the kit root: every folder above the
-        // root is above the tags folder too, so this matches at least what the
-        // root did and never makes a read-only kit writable.
-        let root = self
-            .model.kit_layout_for(kit_index)
-            .map(|layout| layout.tags)
-            .or_else(|| match &kit.source.as_ref()?.source {
-                TagSource::SingleFile { path } => Some(path.clone()),
-                _ => None,
-            });
-        self.model.prefs
-            .custom_editing_kit_profiles
-            .iter()
-            .any(|profile| profile.is_read_only_for(kit.profile.as_ref(), root.as_deref()))
-    }
+
 
     pub(in crate::app) fn refuse_read_only_edit(&mut self, kit_index: usize) -> bool {
-        if self.editing_kit_is_read_only(kit_index) {
+        if self.model.editing_kit_is_read_only(kit_index) {
             self.model.status =
                 "This editing kit is read-only. Change its Editing Kit settings to enable editing."
                     .to_owned();
@@ -151,7 +133,7 @@ impl Baboon {
     /// Run a geometry Import request (`tool render/collision/physics/...`)
     /// streamed to the terminal panel.
     pub(in crate::app) fn process_pending_tool_import(&mut self, ctx: &egui::Context) {
-        if self.editing_kit_is_read_only(self.model.active) {
+        if self.model.editing_kit_is_read_only(self.model.active) {
             self.kit_tools.pending_tool_import = None;
             self.refuse_read_only_edit(self.model.active);
             return;
@@ -300,5 +282,25 @@ impl Model {
 
     pub(in crate::app) fn active_game_is_campaign_evolved(&self) -> bool {
         self.source_game().is_some_and(GameId::is_campaign_evolved)
+    }
+
+    pub(in crate::app) fn editing_kit_is_read_only(&self, kit_index: usize) -> bool {
+        let Some(kit) = self.kits.get(kit_index) else {
+            return false;
+        };
+        // The tags folder rather than the kit root: every folder above the
+        // root is above the tags folder too, so this matches at least what the
+        // root did and never makes a read-only kit writable.
+        let root = self
+            .kit_layout_for(kit_index)
+            .map(|layout| layout.tags)
+            .or_else(|| match &kit.source.as_ref()?.source {
+                TagSource::SingleFile { path } => Some(path.clone()),
+                _ => None,
+            });
+        self.prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .any(|profile| profile.is_read_only_for(kit.profile.as_ref(), root.as_deref()))
     }
 }

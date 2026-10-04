@@ -41,7 +41,7 @@ impl Baboon {
         show_keyword_bar: bool,
     ) -> Option<BrowserAction> {
         let key = entry.key.clone();
-        let kit_read_only = self.editing_kit_is_read_only(kit_index);
+        let kit_read_only = self.model.editing_kit_is_read_only(kit_index);
         let header_action =
             self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
         if kit_read_only {

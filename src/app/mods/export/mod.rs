@@ -496,9 +496,7 @@ impl Model {
             .map(|container| container.chunk_label.clone())
             .collect()
     }
-}
 
-impl Model {
     /// The mounted mod currently serving this tag, if the mount resolved it to
     /// one rather than to the game's own pack.
     pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {

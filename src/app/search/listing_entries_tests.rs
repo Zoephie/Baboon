@@ -40,7 +40,7 @@ fn whole_source_listings_see_a_source_listed_up_front() {
         },
         vec![sound()],
     ));
-    assert_eq!(app.listing_entries().map(<[TagEntry]>::len), Ok(1));
+    assert_eq!(app.model.listing_entries().map(<[TagEntry]>::len), Ok(1));
 }
 
 /// A listing reads its tags on a worker: the window says it is reading,
@@ -90,7 +90,7 @@ fn whole_source_listings_wait_for_a_loose_folder_scan() {
         },
         vec![sound()],
     ));
-    let Err(error) = app.listing_entries() else {
+    let Err(error) = app.model.listing_entries() else {
         panic!("a loose folder mid-scan must not be listed");
     };
     assert!(error.contains("still being built"), "{error}");

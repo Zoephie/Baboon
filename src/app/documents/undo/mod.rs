@@ -92,7 +92,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_undo_current(&self) -> bool {
-        if self.chimp_surface_is_active() || self.editing_kit_is_read_only(self.model.active) {
+        if self.chimp_surface_is_active() || self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
         self.model.kits[self.model.active]
@@ -103,7 +103,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_redo_current(&self) -> bool {
-        if self.chimp_surface_is_active() || self.editing_kit_is_read_only(self.model.active) {
+        if self.chimp_surface_is_active() || self.model.editing_kit_is_read_only(self.model.active) {
             return false;
         }
         self.model.kits[self.model.active]

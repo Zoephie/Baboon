@@ -463,17 +463,7 @@ pub(in crate::app) fn import_sources_for(target_game: &str) -> Vec<&'static str>
 }
 
 impl Baboon {
-    /// Whether Import Tags can act on the active kit. Loose kits only: a
-    /// monolithic cache is read-only, and a Campaign Evolved container has its
-    /// own import path because a tag there is a package, not a file.
-    pub(in crate::app) fn can_import_tags(&self) -> bool {
-        if self.editing_kit_is_read_only(self.model.active) {
-            return false;
-        }
-        self.model.source().is_some_and(|source| {
-            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
-        })
-    }
+
 
     fn refuse_read_only_tag_import(&mut self) -> bool {
         let index = self
@@ -1138,7 +1128,7 @@ impl Baboon {
         if !self.focus_navigation_kit(kit) {
             return;
         }
-        if self.can_import_tags() && !self.model.kits[self.model.active].scanning_entries {
+        if self.model.can_import_tags() && !self.model.kits[self.model.active].scanning_entries {
             self.refresh_tag_browser(ctx.clone());
         }
     }
@@ -1307,3 +1297,17 @@ mod import_timing_tests;
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    /// Whether Import Tags can act on the active kit. Loose kits only: a
+    /// monolithic cache is read-only, and a Campaign Evolved container has its
+    /// own import path because a tag there is a package, not a file.
+    pub(in crate::app) fn can_import_tags(&self) -> bool {
+        if self.editing_kit_is_read_only(self.active) {
+            return false;
+        }
+        self.source().is_some_and(|source| {
+            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
+        })
+    }
+}

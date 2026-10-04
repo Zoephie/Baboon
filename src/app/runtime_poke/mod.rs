@@ -2603,17 +2603,7 @@ impl Baboon {
         self.poke.poke_dialog = None;
     }
 
-    pub(super) fn can_poke_current_tag(&self) -> bool {
-        cfg!(windows)
-            && self
-                .model.selected_entry()
-                .is_some_and(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
-            && self
-                .model.kits
-                .get(self.model.active)
-                .and_then(|kit| kit.selected_key.as_ref())
-                .is_some_and(|key| self.model.kits[self.model.active].parsed_tags.contains_key(key))
-    }
+
 
     fn current_poke_request(&self) -> Result<PokeRequest, String> {
         if !cfg!(windows) {
@@ -3074,4 +3064,18 @@ pub(in crate::app) struct PokeFeature {
     pub(in crate::app) last_poke: Option<LastPoke>,
     pub(in crate::app) poke_direct_running: bool,
     pub(in crate::app) poke_undo_running: bool,
+}
+
+impl Model {
+    pub(super) fn can_poke_current_tag(&self) -> bool {
+        cfg!(windows)
+            && self
+                .selected_entry()
+                .is_some_and(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+            && self
+                .kits
+                .get(self.active)
+                .and_then(|kit| kit.selected_key.as_ref())
+                .is_some_and(|key| self.kits[self.active].parsed_tags.contains_key(key))
+    }
 }

@@ -235,7 +235,7 @@ impl Baboon {
             self.model.status = format!("{prefix} holds no tags to import");
             return;
         }
-        let targets = self.cache_import_targets();
+        let targets = self.model.cache_import_targets();
         if targets.is_empty() {
             self.model.status = "Open the editing kit these tags should land in first — File › Load \
                  Folder"
@@ -290,7 +290,7 @@ impl Baboon {
             return;
         };
         let display_path = entry.display_path.clone();
-        let targets = self.cache_import_targets();
+        let targets = self.model.cache_import_targets();
         if targets.is_empty() {
             self.model.status = "Open the editing kit this tag should land in first — File › Load Folder"
                 .to_owned();
@@ -326,31 +326,7 @@ impl Baboon {
         });
     }
 
-    /// Every open loose workspace with a detected game, as somewhere to land.
-    ///
-    /// Loose only, and for the same reason Import Tags is: a cache is read-only
-    /// and a Campaign Evolved container is a set of packages rather than files.
-    /// Ordered by label so the list does not shuffle between openings.
-    fn cache_import_targets(&self) -> Vec<CacheImportTarget> {
-        let mut targets: Vec<CacheImportTarget> = self
-            .model.kits
-            .iter()
-            .filter_map(|kit| {
-                let source = kit.source.as_ref()?;
-                let TagSource::LooseFolder { root, game, .. } = &source.source else {
-                    return None;
-                };
-                Some(CacheImportTarget {
-                    kit: kit.id,
-                    label: source.label.clone(),
-                    game: (*game)?,
-                    tags_root: root.clone(),
-                })
-            })
-            .collect();
-        targets.sort_by(|left, right| left.label.cmp(&right.label));
-        targets
-    }
+
 }
 
 impl Baboon {
@@ -689,3 +665,31 @@ impl Baboon {
 
 #[cfg(test)]
 mod outside_tree_tests;
+
+impl Model {
+    /// Every open loose workspace with a detected game, as somewhere to land.
+    ///
+    /// Loose only, and for the same reason Import Tags is: a cache is read-only
+    /// and a Campaign Evolved container is a set of packages rather than files.
+    /// Ordered by label so the list does not shuffle between openings.
+    fn cache_import_targets(&self) -> Vec<CacheImportTarget> {
+        let mut targets: Vec<CacheImportTarget> = self
+            .kits
+            .iter()
+            .filter_map(|kit| {
+                let source = kit.source.as_ref()?;
+                let TagSource::LooseFolder { root, game, .. } = &source.source else {
+                    return None;
+                };
+                Some(CacheImportTarget {
+                    kit: kit.id,
+                    label: source.label.clone(),
+                    game: (*game)?,
+                    tags_root: root.clone(),
+                })
+            })
+            .collect();
+        targets.sort_by(|left, right| left.label.cmp(&right.label));
+        targets
+    }
+}

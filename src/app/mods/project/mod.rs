@@ -2192,9 +2192,7 @@ impl Model {
         paths.sort();
         paths
     }
-}
 
-impl Model {
     pub(in crate::app) fn campaign_entry_for_identity(
         &self,
         kit: usize,

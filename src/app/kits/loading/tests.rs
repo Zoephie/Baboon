@@ -170,7 +170,7 @@ fn a_read_only_profile_still_covers_its_kit() {
         tags_folder: None,
         data_folder: None,
     }];
-    assert!(app.editing_kit_is_read_only(0));
+    assert!(app.model.editing_kit_is_read_only(0));
     app.model.prefs.custom_editing_kit_profiles[0].root = PathBuf::from("/ek/other");
-    assert!(!app.editing_kit_is_read_only(0));
+    assert!(!app.model.editing_kit_is_read_only(0));
 }

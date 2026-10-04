@@ -3,27 +3,7 @@
 use super::*;
 
 impl Baboon {
-    /// Scan every scenario (`scnr`) tag and list its map id (+ map name where
-    /// present). Reads `map id` at the scenario root, which covers the modern
-    /// engines (H2A/H3/ODST/Reach/H4); classic Halo 2 stores it elsewhere.
-    /// Every tag a whole-source listing should walk, or why it cannot yet.
-    ///
-    /// A container mount enumerates every tag up front, into `entries`, and
-    /// leaves `all_entries` empty; a loose folder only has them all once its
-    /// background scan is done. The listings read `all_entries` directly, so
-    /// on a container they walked nothing, and on a folder mid-scan they
-    /// walked nothing too, and both said "none found".
-    pub(in crate::app) fn listing_entries(&self) -> Result<&[TagEntry], String> {
-        let source = self
-            .model.source()
-            .ok_or_else(|| "No source loaded.".to_owned())?;
-        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty() {
-            return Err(
-                "The tag index is still being built; try again once indexing finishes.".to_owned(),
-            );
-        }
-        Ok(source.full_entry_set())
-    }
+
 
     /// List every scenario's map id (and name, where it has one).
     pub(in crate::app) fn show_map_ids(&mut self, ctx: &egui::Context) {
@@ -50,7 +30,7 @@ impl Baboon {
     /// thread. The results window says what it is reading meanwhile.
     pub(in crate::app) fn show_source_listing(&mut self, listing: SourceListing, ctx: &egui::Context) {
         let kit = self.model.active_kit_id();
-        let entries = match self.listing_entries() {
+        let entries = match self.model.listing_entries() {
             Ok(entries) => entries.to_vec(),
             Err(note) => {
                 self.search.query_results = Some(TagQueryResults {
@@ -272,4 +252,28 @@ pub(in crate::app) fn listing_uncompressed_sounds(rows: Vec<(String, String, Tag
         .is_empty()
         .then(|| "No uncompressed sound tags found.".to_owned());
     (entries, annotations, note)
+}
+
+impl Model {
+    /// Scan every scenario (`scnr`) tag and list its map id (+ map name where
+    /// present). Reads `map id` at the scenario root, which covers the modern
+    /// engines (H2A/H3/ODST/Reach/H4); classic Halo 2 stores it elsewhere.
+    /// Every tag a whole-source listing should walk, or why it cannot yet.
+    ///
+    /// A container mount enumerates every tag up front, into `entries`, and
+    /// leaves `all_entries` empty; a loose folder only has them all once its
+    /// background scan is done. The listings read `all_entries` directly, so
+    /// on a container they walked nothing, and on a folder mid-scan they
+    /// walked nothing too, and both said "none found".
+    pub(in crate::app) fn listing_entries(&self) -> Result<&[TagEntry], String> {
+        let source = self
+            .source()
+            .ok_or_else(|| "No source loaded.".to_owned())?;
+        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty() {
+            return Err(
+                "The tag index is still being built; try again once indexing finishes.".to_owned(),
+            );
+        }
+        Ok(source.full_entry_set())
+    }
 }
