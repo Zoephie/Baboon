@@ -57,6 +57,10 @@ mod update_channel_tests;
 #[path = "tests/prefs_bitmap_preview.rs"]
 mod bitmap_preview_tests;
 
+#[cfg(test)]
+#[path = "tests/compat_fixtures.rs"]
+mod compat_fixtures;
+
 pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Some(text) = read_prefs_text() else {
         return GuiPrefs::default();

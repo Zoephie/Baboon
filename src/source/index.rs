@@ -788,7 +788,16 @@ fn load_entry_index_from_db(
     root: &Path,
 ) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
     let conn = open_index_db().ok()?;
-    let source_id = source_id(&conn, game, root).ok().flatten()?;
+    load_entry_index_from_conn(&conn, game, root)
+}
+
+/// The rows saved for `game` at `root` in an open index database.
+fn load_entry_index_from_conn(
+    conn: &Connection,
+    game: &str,
+    root: &Path,
+) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
+    let source_id = source_id(conn, game, root).ok().flatten()?;
     let mut stmt = conn
         .prepare(
             "SELECT key, rel_path, display_path, group_tag, group_name,
@@ -996,3 +1005,7 @@ pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) ->
     }
     rows
 }
+
+#[cfg(test)]
+#[path = "../app/tests/compat_keys.rs"]
+mod compat_keys;

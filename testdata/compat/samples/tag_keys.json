@@ -1,0 +1,15 @@
+{
+  "file_windows": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon",
+  "file_mixed": "file:C:/Kits/HREK/tags\\objects\\characters\\elite\\elite.biped",
+  "file_unc": "file:\\\\fileserver\\share\\H2EK\\tags\\objects\\characters\\masterchief\\masterchief.biped",
+  "file_posix": "file:/Users/me/Kits/H4EK/tags/objects/weapons/rifle/storm_rifle/storm_rifle.weapon",
+  "file_verbatim": "file:\\\\?\\C:\\Kits\\H3ODSTEK\\tags\\objects\\vehicles\\warthog\\warthog.vehicle",
+  "cache_bitm": "cache:bitm:objects\\weapons\\rifle\\assault_rifle\\bitmaps\\assault_rifle_diffuse",
+  "cache_rm": "cache:rm:shaders\\default",
+  "cache_snd": "cache:snd!:sound\\weapons\\assault_rifle\\fire",
+  "ublock_base": "ublock:pakchunk0-WinGDK:Meteorite/Content/Tags/objects/characters/marine/marine-biped.ubulk",
+  "ublock_level": "ublock:pakchunk240-WinGDK:Meteorite/Content/Tags/levels/halo1/solo/a30/_Generated_/a30-scenario.ubulk",
+  "ublock_mod": "ublock:mymod_P:Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk",
+  "newtag_ce": "newtag:/Game/Tags/objects/foo/bar-camera_track",
+  "legacy_bare": "objects/weapons/rifle/new_rifle/new_rifle.weapon"
+}

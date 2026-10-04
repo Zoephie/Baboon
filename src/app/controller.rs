@@ -382,7 +382,7 @@ fn new_container_package(logical: &str, group_name: &str) -> String {
 
 /// The browser/document key for a new tag at `package`. Prefixed so it cannot
 /// collide with a mounted container tag's key.
-fn new_container_key(package: &str) -> String {
+pub(in crate::app) fn new_container_key(package: &str) -> String {
     format!("newtag:{package}")
 }
 

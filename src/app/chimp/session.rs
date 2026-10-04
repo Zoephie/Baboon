@@ -16,6 +16,18 @@ struct ChimpRecoveryManifest {
     packages: HashMap<String, String>,
 }
 
+/// The folder a Paks root's Chimp checkpoints live in, named by a hash of the
+/// root's spelling. Spell the root differently and the checkpoints are not
+/// found, so this name is part of the saved format.
+fn chimp_recovery_dir_name(root: &Path) -> String {
+    let digest = Sha256::digest(root.to_string_lossy().as_bytes());
+    let key: String = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("chimp-recovery-{key}")
+}
+
 impl Baboon {
     pub(in crate::app) fn apply_chimp_usmap_path(
         &mut self,
@@ -342,12 +354,7 @@ impl Baboon {
             TagSource::IoStoreContainerSet { root, .. } => root,
             _ => return None,
         };
-        let digest = Sha256::digest(root.to_string_lossy().as_bytes());
-        let key: String = digest[..12]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        Some(crate::storage::data_path(&format!("chimp-recovery-{key}")))
+        Some(crate::storage::data_path(&chimp_recovery_dir_name(root)))
     }
 
     fn load_chimp_recovery_manifest(
@@ -942,5 +949,34 @@ mod tests {
             restored.packages.get("/Game/UI/Probe").map(String::as_str),
             Some("012345.uasset")
         );
+    }
+
+    /// The saved sample in `testdata/compat`: its folder is the one this
+    /// build would look in for its root, and its manifest still parses.
+    #[test]
+    fn compat_chimp_recovery_sample() {
+        let chimp = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/compat/samples/chimp");
+        let directory = fs::read_dir(&chimp)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.is_dir())
+            .expect("a recovery folder");
+        let manifest: ChimpRecoveryManifest =
+            serde_json::from_slice(&fs::read(directory.join("manifest.json")).unwrap())
+                .expect("manifest");
+        assert_eq!(
+            directory.file_name().unwrap().to_string_lossy(),
+            chimp_recovery_dir_name(Path::new(&manifest.source))
+        );
+        assert_ne!(
+            chimp_recovery_dir_name(Path::new(&manifest.source.replace('\\', "/"))),
+            chimp_recovery_dir_name(Path::new(&manifest.source)),
+            "the spelling is hashed as is"
+        );
+        assert_eq!(manifest.packages.len(), 1);
+        for filename in manifest.packages.values() {
+            assert!(directory.join(filename).is_file(), "{filename}");
+        }
     }
 }

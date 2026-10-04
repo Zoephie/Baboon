@@ -1,0 +1,247 @@
+{
+  "angles_in_degrees": true,
+  "bitmap_preview_background": "dark_gray",
+  "bitmap_preview_border": true,
+  "bitmap_preview_checkerboard": true,
+  "blender_path": "C:\\Program Files\\Blender Foundation\\Blender 4.2\\blender.exe",
+  "browser_mode": "folders",
+  "browser_sort": "natural",
+  "check_updates_on_startup": true,
+  "chimp_output_dir": "D:\\ChimpOut",
+  "chimp_usmap_path": "D:\\Mappings\\CE_5.5.4.usmap",
+  "confirm_container_overwrite": true,
+  "confirm_runtime_poke": true,
+  "custom_color_swatches": [
+    "#FF0000FF",
+    {
+      "name": "Spartan blue",
+      "rgba": "#336699FF"
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "dark_mode": true,
+  "double_click_to_open_tags": false,
+  "editing_kit_favorites": [
+    {
+      "folders": [
+        "objects\\weapons"
+      ],
+      "tags": [
+        "objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon"
+      ],
+      "tags_root": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags"
+    },
+    {
+      "folders": [],
+      "tags": [
+        "objects/weapons/rifle/storm_rifle/storm_rifle.weapon"
+      ],
+      "tags_root": "/Users/me/Kits/H4EK/tags"
+    }
+  ],
+  "editing_kit_profiles": [
+    {
+      "game": "haloce_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000000",
+      "name": "HCEEK",
+      "read_only": false,
+      "root": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\HCEEK"
+    },
+    {
+      "game": "halo2_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000001",
+      "name": "H2EK",
+      "read_only": false,
+      "root": "\\\\fileserver\\share\\H2EK"
+    },
+    {
+      "game": "halo3_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000002",
+      "name": "H3EK",
+      "read_only": false,
+      "root": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK"
+    },
+    {
+      "game": "halo3odst_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000003",
+      "name": "H3ODSTEK",
+      "read_only": false,
+      "root": "C:\\Kits\\H3ODSTEK"
+    },
+    {
+      "game": "haloreach_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000004",
+      "name": "HREK",
+      "read_only": false,
+      "root": "C:/Kits/HREK"
+    },
+    {
+      "game": "halo4_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000005",
+      "name": "H4EK",
+      "read_only": false,
+      "root": "/Users/me/Kits/H4EK"
+    },
+    {
+      "game": "halo2amp_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000006",
+      "name": "H2AMPEK",
+      "read_only": false,
+      "root": "C:\\Kits\\H2AMPEK"
+    },
+    {
+      "game": "haloce_evolved",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000007",
+      "name": "Campaign Evolved",
+      "read_only": false,
+      "root": "D:\\XboxGames\\Halo Campaign Evolved\\Content"
+    },
+    {
+      "data_folder": "C:\\Kits\\H2EK\\data_moda",
+      "game": "halo2_mcc",
+      "git_tracked": true,
+      "icon": "editing kit icons\\H2-moda-3f6f1c4e\\icon-0123456789ab.png",
+      "id": "3f6f1c4e-8d0e-4e7b-9a52-2f8f4f9b6c11",
+      "name": "H2 (moda tags)",
+      "read_only": true,
+      "root": "C:\\Kits\\H2EK",
+      "tags_folder": "C:\\Kits\\H2EK\\tags_moda"
+    },
+    {
+      "game": "haloreach_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "5b0c8a8e-1111-4222-8333-444455556666",
+      "name": "Reach ignored folder",
+      "read_only": false,
+      "root": "C:\\Kits\\HREK2",
+      "tags_folder": "C:\\Kits\\HREK2\\tags_moda"
+    }
+  ],
+  "ek_folder_aliases": [
+    {
+      "folder_name": "h2rek",
+      "game": "halo2_mcc"
+    },
+    {
+      "folder_name": "MyReachKit",
+      "game": "haloreach_mcc"
+    }
+  ],
+  "enable_chimp": true,
+  "expert_mode": true,
+  "first_run_complete": true,
+  "folders_before_tags": false,
+  "model_preview_perspective": true,
+  "model_preview_size": 320.0,
+  "nested_default": "schema",
+  "palette_last_dir": "C:\\Users\\me\\Palettes",
+  "recent_folders": [
+    "D:\\XboxGames\\Halo Campaign Evolved\\Content",
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags",
+    "\\\\fileserver\\share\\H2EK",
+    "/Users/me/Kits/H4EK"
+  ],
+  "scroll_speed": 1.0,
+  "scroll_to_cycle_dropdowns": true,
+  "session_restore": "ask",
+  "show_block_sizes": false,
+  "show_browser_prefixes": false,
+  "storage_mode": "installed",
+  "terminal_open_games": [
+    "halo3_mcc",
+    "haloce_evolved"
+  ],
+  "tool_commands_collapsed_categories": [
+    "Lightmaps"
+  ],
+  "tool_commands_left_width": 280.0,
+  "tool_commands_window_pos": [
+    120.0,
+    80.0
+  ],
+  "tool_commands_window_size": [
+    900.0,
+    600.0
+  ],
+  "ui_scale": 1.0,
+  "update_channel": "stable",
+  "zoom_speed": 1.0
+}

@@ -1371,7 +1371,7 @@ fn run_container_duplicate(
     })?;
     let chunk_label = target.chunk_label.clone();
     let entry = TagEntry {
-        key: format!("ublock:{chunk_label}:{}", input.paths.ubulk),
+        key: crate::source::container_entry_key(&chunk_label, &input.paths.ubulk),
         display_path: input.paths.display.clone(),
         group_tag: input.group_tag,
         group_name: Some(input.group_name.clone()),

@@ -1,0 +1,31 @@
+{
+  "kits": [
+    {
+      "active": true,
+      "active_chimp_package": "/Game/Maps/a30/a30_Persistent",
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [
+        "/Game/Maps/a30/a30_Persistent",
+        "/Game/Tags/objects/characters/marine/marine-biped"
+      ],
+      "source": {
+        "game": "haloce_evolved",
+        "has_project": true,
+        "kind": "iostore_container_set",
+        "path": "D:\\XboxGames\\Halo Campaign Evolved\\Content",
+        "profile_id": "bab00000-0000-4000-8000-000000000007",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651077220,
+          "key": "ublock:mymod_P:Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk",
+          "label": "marine_copy - biped",
+          "path": null
+        }
+      ]
+    }
+  ],
+  "version": 4
+}

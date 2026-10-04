@@ -16,3 +16,5 @@ CLAUDE.md
 docs/tag-conversion-mappings.md
 .DS_Store
 .baboon/
+# The compatibility fixtures are named like the runtime files above on purpose.
+!/testdata/**

@@ -15,7 +15,7 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("loaded tag"));
     let display_path = display_path_with_friendly_extension(&file_name, group_tag, names);
-    let key = format!("file:{}", path.display());
+    let key = file_entry_key(&path);
     let entry = TagEntry {
         key: key.clone(),
         display_path: display_path.clone(),
@@ -149,7 +149,7 @@ pub fn load_monolithic_blob_index(
             names,
         );
         entries.push(TagEntry {
-            key: format!("cache:{}:{}", format_group_tag(entry.group_tag), entry.name),
+            key: cache_entry_key(entry.group_tag, &entry.name),
             display_path,
             group_tag: entry.group_tag,
             group_name,
@@ -395,11 +395,7 @@ pub fn mount_additional_container(
             .collect();
         archive.recover_entries(&bases, None);
     }
-    let chunk_label = utoc
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("container")
-        .to_string();
+    let chunk_label = container_chunk_label(&utoc);
     let mut fresh: Vec<TagEntry> = Vec::new();
     let mut pending_packages: Vec<(String, String)> = Vec::new();
     let mut pending_index: Vec<(String, String)> = Vec::new();
@@ -429,7 +425,7 @@ pub fn mount_additional_container(
         let display_path = display_str_with_friendly_extension(&logical, group_tag, &names);
         pending_index.push((format!("{group_tag:08x}:{logical}"), e.path.clone()));
         fresh.push(TagEntry {
-            key: format!("ublock:{chunk_label}:{}", e.path),
+            key: container_entry_key(&chunk_label, &e.path),
             display_path,
             group_tag,
             group_name: names.name_for(group_tag).map(str::to_owned),
@@ -590,11 +586,7 @@ fn build_container_set(
         let Some(archive) = archive else { continue };
         let is_mod = is_mod.get(position).copied().unwrap_or(false);
         opened_any = true;
-        let chunk_label = utoc
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("container")
-            .to_string();
+        let chunk_label = container_chunk_label(&utoc);
         let container_index = containers.len();
         let archive = Arc::new(archive);
         let mut contributed = false;
@@ -636,7 +628,7 @@ fn build_container_set(
             let display_path = display_str_with_friendly_extension(&logical, group_tag, &names);
 
             let entry = TagEntry {
-                key: format!("ublock:{chunk_label}:{}", e.path),
+                key: container_entry_key(&chunk_label, &e.path),
                 display_path,
                 group_tag,
                 group_name: names.name_for(group_tag).map(str::to_owned),

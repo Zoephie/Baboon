@@ -1,0 +1,16 @@
+{
+  "tags": [
+    {
+      "chunk_label": "mymod_P",
+      "created_unix_secs": 1759500000,
+      "display_path": "objects/characters/marine/marine_copy.biped",
+      "group_tag": 1651077220,
+      "package_id": 1311768467463790320,
+      "package_path": "/Game/Tags/objects/characters/marine/marine_copy-biped",
+      "source_display": "objects/characters/marine/marine.biped",
+      "uasset_path": "Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.uasset",
+      "ubulk_path": "Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk",
+      "utoc_path": "D:\\XboxGames\\Halo Campaign Evolved\\Content\\Meteorite\\Content\\Paks\\~mods\\mymod_P.utoc"
+    }
+  ]
+}

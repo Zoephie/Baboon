@@ -161,7 +161,7 @@ fn run_container_rename(
 
     let chunk_label = target.chunk_label.clone();
     let entry = TagEntry {
-        key: format!("ublock:{chunk_label}:{new_ubulk}"),
+        key: crate::source::container_entry_key(&chunk_label, &new_ubulk),
         display_path: input.new_display.clone(),
         group_tag: input.group_tag,
         group_name: Some(input.group_name.clone()),

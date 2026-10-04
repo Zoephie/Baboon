@@ -1,0 +1,17 @@
+{
+  "source": {
+    "game": "haloce_evolved",
+    "kind": "iostore_container_set",
+    "path": "D:\\XboxGames\\Halo Campaign Evolved\\Content\\Meteorite\\Content\\Paks",
+    "project_path": "C:\\Users\\me\\AppData\\Roaming\\Baboon\\campaign_evolved_recovery.baboon"
+  },
+  "tags": [
+    {
+      "group_tag": 1651077220,
+      "key": "ublock:pakchunk0-WinGDK:Meteorite/Content/Tags/objects/characters/marine/marine-biped.ubulk",
+      "label": "objects/characters/marine/marine.biped - biped",
+      "path": null
+    }
+  ],
+  "version": 2
+}

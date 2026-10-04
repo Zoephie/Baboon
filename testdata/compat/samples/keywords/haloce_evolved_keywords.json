@@ -1,0 +1,11 @@
+{
+  "newtag:/Game/Tags/objects/foo/bar-camera_track": [
+    "cinematic"
+  ],
+  "ublock:mymod_P:Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk": [
+    "copy"
+  ],
+  "ublock:pakchunk0-WinGDK:Meteorite/Content/Tags/objects/characters/marine/marine-biped.ubulk": [
+    "ai"
+  ]
+}

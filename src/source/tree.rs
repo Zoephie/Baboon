@@ -397,7 +397,7 @@ where
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: file_entry_key(&path),
             display_path,
             group_tag,
             group_name,
@@ -406,6 +406,41 @@ where
     }
     entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
     Ok(entries)
+}
+
+// ── Entry keys ────────────────────────────────────────────────────────────────
+//
+// An entry key is saved in sessions, keyword sidecars, favourites and the index
+// database, so its spelling is a file format. Each kind is built here and
+// nowhere else in the loaders; `compat_keys` pins every spelling.
+
+/// A loose tag file's key: `file:` and the path exactly as displayed. Never
+/// normalized: the path is the root as the user gave it joined with what the
+/// walk found, so it can mix separators, and splitting it on `:` breaks drive
+/// letters.
+pub(crate) fn file_entry_key(path: &Path) -> String {
+    format!("file:{}", path.display())
+}
+
+/// A monolithic cache tag's key: its group with trailing spaces trimmed (`rm`
+/// for `rm  `) and its name as the cache stores it, backslashes included.
+pub(crate) fn cache_entry_key(group_tag: u32, name: &str) -> String {
+    format!("cache:{}:{name}", format_group_tag(group_tag))
+}
+
+/// A Campaign Evolved container tag's key: the container's label and the
+/// payload path in its original case.
+pub(crate) fn container_entry_key(chunk_label: &str, rel_path: &str) -> String {
+    format!("ublock:{chunk_label}:{rel_path}")
+}
+
+/// The label a container's tags are keyed under: its `.utoc` file stem, so a
+/// renamed mod or a renumbered chunk changes every key in it.
+pub(crate) fn container_chunk_label(utoc: &Path) -> String {
+    utoc.file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("container")
+        .to_string()
 }
 
 /// Probes one loose file and returns its stable source entry when it is a tag.
@@ -449,7 +484,7 @@ pub fn loose_file_entry(
     let group_name = names.name_for(group_tag).map(str::to_owned);
     let display_path = display_path_with_friendly_extension(rel, group_tag, names);
     Ok(Some(TagEntry {
-        key: format!("file:{}", path.display()),
+        key: file_entry_key(&path),
         display_path,
         group_tag,
         group_name,
@@ -478,7 +513,7 @@ fn scan_folder_entries(root: &Path, names: &TagNameIndex) -> Result<Vec<TagEntry
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: file_entry_key(&path),
             display_path,
             group_tag,
             group_name,
@@ -552,7 +587,7 @@ fn scan_folder_direct_entries(
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: file_entry_key(&path),
             display_path,
             group_tag,
             group_name,

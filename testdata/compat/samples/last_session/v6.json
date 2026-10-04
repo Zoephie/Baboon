@@ -1,0 +1,315 @@
+{
+  "kits": [
+    {
+      "active": true,
+      "active_chimp_package": null,
+      "bitmap_library": true,
+      "browser_mode": "groups",
+      "browser_sort": "type",
+      "chimp_packages": [],
+      "folders": [
+        {
+          "label": "weapons",
+          "path": "objects/weapons"
+        },
+        {
+          "label": "010_jungle",
+          "path": "levels/solo/010_jungle"
+        }
+      ],
+      "model_library": true,
+      "source": {
+        "game": "halo3_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK",
+        "profile_id": "bab00000-0000-4000-8000-000000000002",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 2003132784,
+          "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon",
+          "label": "objects/weapons/rifle/assault_rifle/assault_rifle.weapon - weapon",
+          "path": "\\\\?\\C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon"
+        },
+        {
+          "group_tag": 2003132784,
+          "key": "objects/weapons/rifle/new_rifle/new_rifle.weapon",
+          "label": "objects/weapons/rifle/new_rifle/new_rifle.weapon - weapon",
+          "path": "\\\\?\\C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\new_rifle\\new_rifle.weapon"
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "haloreach_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:/Kits/HREK",
+        "profile_id": "bab00000-0000-4000-8000-000000000004",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651077220,
+          "key": "file:C:/Kits/HREK/tags\\objects\\characters\\elite\\elite.biped",
+          "label": "objects/characters/elite/elite.biped - biped",
+          "path": "\\\\?\\C:\\Kits\\HREK\\tags\\objects\\characters\\elite\\elite.biped"
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "halo2_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "\\\\fileserver\\share\\H2EK",
+        "profile_id": "bab00000-0000-4000-8000-000000000001",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651077220,
+          "key": "file:\\\\fileserver\\share\\H2EK\\tags\\objects\\characters\\masterchief\\masterchief.biped",
+          "label": "objects/characters/masterchief/masterchief.biped - biped",
+          "path": "\\\\?\\UNC\\fileserver\\share\\H2EK\\tags\\objects\\characters\\masterchief\\masterchief.biped"
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "halo4_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "/Users/me/Kits/H4EK",
+        "profile_id": null,
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 2003132784,
+          "key": "file:/Users/me/Kits/H4EK/tags/objects/weapons/rifle/storm_rifle/storm_rifle.weapon",
+          "label": "objects/weapons/rifle/storm_rifle/storm_rifle.weapon - weapon",
+          "path": "/Users/me/Kits/H4EK/tags/objects/weapons/rifle/storm_rifle/storm_rifle.weapon"
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "halo3odst_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:\\Kits\\H3ODSTEK",
+        "profile_id": "bab00000-0000-4000-8000-000000000003",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1986357353,
+          "key": "file:\\\\?\\C:\\Kits\\H3ODSTEK\\tags\\objects\\vehicles\\warthog\\warthog.vehicle",
+          "label": "objects/vehicles/warthog/warthog.vehicle - vehicle",
+          "path": "\\\\?\\C:\\Kits\\H3ODSTEK\\tags\\objects\\vehicles\\warthog\\warthog.vehicle"
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "haloce_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:\\Kits\\HCEEK",
+        "profile_id": "bab00000-0000-4000-8000-000000000000",
+        "project_path": null
+      },
+      "tags": []
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "halo2amp_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:\\Kits\\H2AMPEK",
+        "profile_id": "bab00000-0000-4000-8000-000000000006",
+        "project_path": null
+      },
+      "tags": []
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": null,
+        "has_project": false,
+        "kind": "monolithic_cache",
+        "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Halo The Master Chief Collection\\halo3\\maps",
+        "profile_id": null,
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651078253,
+          "key": "cache:bitm:objects\\weapons\\rifle\\assault_rifle\\bitmaps\\assault_rifle_diffuse",
+          "label": "objects/weapons/rifle/assault_rifle/bitmaps/assault_rifle_diffuse.bitmap - bitmap",
+          "path": null
+        },
+        {
+          "group_tag": 1919754272,
+          "key": "cache:rm:shaders\\default",
+          "label": "shaders/default.shader - render_method",
+          "path": null
+        },
+        {
+          "group_tag": 1936614433,
+          "key": "cache:snd!:sound\\weapons\\assault_rifle\\fire",
+          "label": "sound/weapons/assault_rifle/fire.sound - sound",
+          "path": null
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": null,
+        "has_project": false,
+        "kind": "single_file",
+        "path": "C:\\Downloads\\masterchief.render_model",
+        "profile_id": null,
+        "project_path": null
+      },
+      "tags": []
+    },
+    {
+      "active": false,
+      "active_chimp_package": "/Game/Maps/a30/a30_Persistent",
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [
+        "/Game/Maps/a30/a30_Persistent"
+      ],
+      "folders": [
+        {
+          "label": "characters",
+          "path": "objects/characters"
+        }
+      ],
+      "model_library": false,
+      "source": {
+        "game": "haloce_evolved",
+        "has_project": true,
+        "kind": "iostore_container_set",
+        "path": "D:\\XboxGames\\Halo Campaign Evolved\\Content",
+        "profile_id": "bab00000-0000-4000-8000-000000000007",
+        "project_path": "C:\\Users\\me\\Documents\\Baboon Projects\\Campaign Overhaul.baboon"
+      },
+      "tags": [
+        {
+          "group_tag": 1651077220,
+          "key": "ublock:pakchunk0-WinGDK:Meteorite/Content/Tags/objects/characters/marine/marine-biped.ubulk",
+          "label": "objects/characters/marine/marine.biped - biped",
+          "path": null
+        },
+        {
+          "group_tag": 1935896178,
+          "key": "ublock:pakchunk240-WinGDK:Meteorite/Content/Tags/levels/halo1/solo/a30/_Generated_/a30-scenario.ubulk",
+          "label": "levels/halo1/solo/a30/_generated_/a30.scenario - scenario",
+          "path": null
+        },
+        {
+          "group_tag": 1651077220,
+          "key": "ublock:mymod_P:Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk",
+          "label": "objects/characters/marine/marine_copy.biped - biped",
+          "path": null
+        },
+        {
+          "group_tag": 1953653099,
+          "key": "newtag:/Game/Tags/objects/foo/bar-camera_track",
+          "label": "objects/foo/bar.camera_track - camera_track",
+          "path": null
+        }
+      ]
+    },
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": false,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "folders": [],
+      "model_library": false,
+      "source": {
+        "game": "halo5_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:\\Kits\\H5EK",
+        "profile_id": "3f6f1c4e-8d0e-4e7b-9a52-000000000099",
+        "project_path": null
+      },
+      "tags": []
+    }
+  ],
+  "version": 6
+}

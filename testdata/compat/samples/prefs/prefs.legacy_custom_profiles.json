@@ -1,0 +1,16 @@
+{
+  "custom_editing_kit_profiles": [
+    {
+      "game": "HALO3_MCC",
+      "git_tracked": false,
+      "icon": null,
+      "id": "3f6f1c4e-8d0e-4e7b-9a52-2f8f4f9b6c11",
+      "name": "Old custom",
+      "read_only": false,
+      "root": "C:\\Kits\\H3EK"
+    }
+  ],
+  "editing_kit_paths": {
+    "haloreach_mcc": "C:\\Kits\\HREK"
+  }
+}

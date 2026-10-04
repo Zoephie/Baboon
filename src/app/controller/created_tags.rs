@@ -167,7 +167,7 @@ impl CreatedTagLedger {
         Self::load_from(&Self::path())
     }
 
-    fn load_from(path: &Path) -> Self {
+    pub(in crate::app) fn load_from(path: &Path) -> Self {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
@@ -207,7 +207,7 @@ impl CreatedTagLedger {
         self.save_to(&Self::path())
     }
 
-    fn save_to(&self, path: &Path) -> Result<(), String> {
+    pub(in crate::app) fn save_to(&self, path: &Path) -> Result<(), String> {
         if let Some(error) = &self.load_error {
             return Err(format!(
                 "The duplicate ledger {} was not updated: when Baboon started it {error}. \

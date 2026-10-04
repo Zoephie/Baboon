@@ -1,0 +1,30 @@
+{
+  "mode": "maximized",
+  "normal": {
+    "inner_position_px": {
+      "x": 100.0,
+      "y": 80.0
+    },
+    "inner_size_logical": {
+      "height": 800.0,
+      "width": 1280.0
+    },
+    "monitor_bounds_px": {
+      "height": 2160.0,
+      "width": 3840.0,
+      "x": 0.0,
+      "y": 0.0
+    },
+    "monitor_name": "\\\\.\\DISPLAY1",
+    "native_scale_factor": 1.5,
+    "outer_position_px": {
+      "x": 92.0,
+      "y": 49.0
+    },
+    "outer_size_logical": {
+      "height": 839.0,
+      "width": 1296.0
+    }
+  },
+  "schema_version": 1
+}

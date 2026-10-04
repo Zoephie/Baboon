@@ -920,6 +920,22 @@ mod tests {
         assert!(!invalid_values.validate());
     }
 
+    /// The saved sample in `testdata/compat` still loads, and the same file
+    /// claiming a newer schema does not.
+    #[test]
+    fn compat_window_state_sample() {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("testdata/compat/samples/window_state/window-state.json"),
+        )
+        .unwrap();
+        let state = parse_state(&text).expect("sample loads");
+        assert_eq!(state.mode, WindowMode::Maximized);
+        let future = text.replace("\"schema_version\": 1", "\"schema_version\": 2");
+        assert_ne!(future, text);
+        assert!(parse_state(&future).is_none());
+    }
+
     #[test]
     fn restored_dimensions_obey_minimum_and_work_area() {
         let tiny = state(WindowMode::Normal, [10.0, 10.0], [100.0, 100.0]);

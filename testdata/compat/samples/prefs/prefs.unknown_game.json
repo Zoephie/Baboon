@@ -1,0 +1,46 @@
+{
+  "editing_kit_profiles": [
+    {
+      "game": "halo5_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "3f6f1c4e-8d0e-4e7b-9a52-2f8f4f9b6c11",
+      "name": "Future kit",
+      "read_only": false,
+      "root": "C:\\Kits\\H5EK",
+      "some_newer_setting": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "game": "halo3_mcc",
+      "git_tracked": false,
+      "icon": null,
+      "id": "bab00000-0000-4000-8000-000000000002",
+      "name": "H3EK",
+      "read_only": false,
+      "root": "C:\\Kits\\H3EK"
+    },
+    {
+      "game": "",
+      "git_tracked": false,
+      "icon": null,
+      "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "name": "No game",
+      "read_only": false,
+      "root": "C:\\Kits\\Unknown"
+    }
+  ],
+  "ek_folder_aliases": [
+    {
+      "folder_name": "h5ek",
+      "game": "halo5_mcc"
+    }
+  ],
+  "terminal_open_games": [
+    "halo5_mcc",
+    "halo3_mcc"
+  ]
+}

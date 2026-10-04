@@ -1,0 +1,21 @@
+{
+  "entries": [
+    {
+      "display_path": "objects/weapons/rifle/assault_rifle/assault_rifle.weapon",
+      "group_name": "weapon",
+      "group_tag": 2003132784,
+      "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon",
+      "modified_nanos": 123000000,
+      "modified_secs": 1759500000,
+      "rel_path": "objects/weapons/rifle/assault_rifle/assault_rifle.weapon",
+      "size": 123456
+    },
+    {
+      "display_path": "objects/characters/masterchief/masterchief.model",
+      "group_name": null,
+      "group_tag": 1751936372,
+      "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\characters\\masterchief\\masterchief.model"
+    }
+  ],
+  "root": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags"
+}
