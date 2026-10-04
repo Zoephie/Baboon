@@ -274,4 +274,11 @@ impl LooseKit {
         };
         build_reverse_dependency_index(&self.root, &source, &self.entries(), "Indexing", &tx)
     }
+
+    /// [`Self::install`], with the reference index already built.
+    pub(super) fn install_indexed(&self, app: &mut Baboon) {
+        let mut source = self.source();
+        source.reverse_dependencies = Some(self.index());
+        app.install_loaded_source(source);
+    }
 }

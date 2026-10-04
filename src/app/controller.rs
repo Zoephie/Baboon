@@ -9806,6 +9806,10 @@ mod save_close_session_tests;
 #[path = "tests/browser_action_table.rs"]
 mod browser_action_table_tests;
 
+#[cfg(test)]
+#[path = "tests/loose_refactor_jobs.rs"]
+mod loose_refactor_jobs_tests;
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
