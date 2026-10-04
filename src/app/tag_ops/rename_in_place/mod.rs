@@ -512,7 +512,7 @@ impl Baboon {
         new_rel: &str,
         ctx: egui::Context,
     ) {
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         // All three in-place writers are mutually exclusive per workspace: two
         // of them on one `.utoc` would race, and each validates against a handle
         // the other is invalidating.
@@ -523,7 +523,7 @@ impl Baboon {
             self.model.status = "Another container write is already running in this workspace".to_owned();
             return;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
@@ -536,7 +536,7 @@ impl Baboon {
             return;
         };
 
-        let containers = self.mounted_containers().unwrap_or_default();
+        let containers = self.model.mounted_containers().unwrap_or_default();
         let grounds = match container_rename_eligibility(&entry, &containers, &self.tag_ops.created_tags) {
             Ok(grounds) => grounds,
             Err(error) => {
@@ -562,7 +562,7 @@ impl Baboon {
             self.model.status = format!("{} is already at that path", entry.display_path);
             return;
         }
-        if self.source().is_some_and(|source| {
+        if self.model.source().is_some_and(|source| {
             source
                 .entries
                 .iter()
@@ -582,7 +582,7 @@ impl Baboon {
             target.is_mod,
             target.utoc_path.clone(),
         );
-        let root = match self.source().map(|source| &source.source) {
+        let root = match self.model.source().map(|source| &source.source) {
             Some(TagSource::IoStoreContainerSet { root, .. }) => root.clone(),
             _ => {
                 self.model.status = "Source is not a Campaign Evolved container source".to_owned();
@@ -680,7 +680,7 @@ impl Baboon {
             self.release_container_write_lease(lease, outcome, ctx);
         }
         self.tag_ops.container_rename_running.remove(&stamp.kit);
-        let kit_index = self.kit_index(stamp.kit);
+        let kit_index = self.model.kit_index(stamp.kit);
 
         let result = match result {
             Ok(result) => result,

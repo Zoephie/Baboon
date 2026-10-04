@@ -127,7 +127,7 @@ impl Baboon {
         // Command-line startup deliberately remains popup-free. Indexing still
         // runs in the background and remains visible in the status bar.
         self.kit_tools.show_entry_index_wait_notice = false;
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             self.model.status = "Command line: the editing-kit source did not load".to_owned();
             return;
         };
@@ -280,7 +280,7 @@ impl Baboon {
         }
         self.model.kits[self.model.active].profile = profile;
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         let tags_root = layout.tags;

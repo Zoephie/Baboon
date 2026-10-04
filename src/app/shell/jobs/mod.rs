@@ -43,7 +43,7 @@ impl Baboon {
                     processed,
                     total,
                 } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
+                    if self.model.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
                     {
                         self.search.find.progress = Some((processed, total));
                     }
@@ -55,7 +55,7 @@ impl Baboon {
                     occurrences,
                     unreadable,
                 } => {
-                    if self.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
+                    if self.model.resolve_stamp(stamp).is_some() && request_id == self.search.find.all_request_id
                     {
                         self.search.find.all_closed_occurrences = occurrences;
                         self.search.find.unreadable = unreadable;

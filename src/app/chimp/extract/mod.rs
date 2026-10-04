@@ -816,7 +816,7 @@ impl Baboon {
         textures: ChimpTextureScope,
         ctx: egui::Context,
     ) {
-        let Some(kit_index) = self.kit_index(prompt.kit) else {
+        let Some(kit_index) = self.model.kit_index(prompt.kit) else {
             self.model.status = "The workspace this export came from is closed".to_owned();
             return;
         };

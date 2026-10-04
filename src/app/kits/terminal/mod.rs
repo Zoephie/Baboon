@@ -527,7 +527,7 @@ impl Baboon {
             return;
         };
         // Rewritten before it is echoed, so the terminal shows what really ran.
-        let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
+        let command = with_tool_folder_options(&command, &self.model.active_kit_tool_folder_options());
         self.views[self.model.kits[self.model.active].id].terminal.open = true;
         self.kit_tools.terminal
             .lines
@@ -701,7 +701,7 @@ impl Baboon {
     /// Record the current terminal-open state against the loaded game so it
     /// is restored next time that editing kit is opened.
     pub(in crate::app) fn remember_terminal_open_for_game(&mut self) {
-        let Some(game) = self.source().and_then(|s| s.game.clone()) else {
+        let Some(game) = self.model.source().and_then(|s| s.game.clone()) else {
             return;
         };
         if self.views[self.model.kits[self.model.active].id].terminal.open {

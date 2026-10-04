@@ -9,13 +9,13 @@ use crate::app::documents::saving::load_new_tag_groups;
 impl Baboon {
     pub(in crate::app) fn open_new_tag_dialog(&mut self) {
         let default_game = self
-            .source()
+            .model.source()
             .and_then(|source| source.game)
             .unwrap_or(GameId::Halo3)
             .as_str()
             .to_owned();
         self.tag_ops.new_tag_dialog = NewTagDialog {
-            kit: Some(self.active_kit_id()),
+            kit: Some(self.model.active_kit_id()),
             game: default_game,
             rel_path: String::new(),
             output_path: None,
@@ -74,7 +74,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn choose_new_tag_output_path(&mut self) {
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.tag_ops.new_tag_dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
             return;
@@ -135,11 +135,11 @@ impl Baboon {
             return;
         }
         // create the tag purely in memory and let Save / Export Mod write it.
-        if self.current_source_is_container() {
+        if self.model.current_source_is_container() {
             self.create_new_container_tag();
             return;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.tag_ops.new_tag_dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
             return;
@@ -219,7 +219,7 @@ impl Baboon {
         // `file:` key: a bare display-path key cannot be read back out of the
         // entry index, and a row carrying one made the whole index fail to load.
         let names = self
-            .source()
+            .model.source()
             .map(|source| source.names.clone())
             .unwrap_or_default();
         let entry = match loose_file_entry(&root, &output, &names) {
@@ -309,7 +309,7 @@ impl Baboon {
         let key = new_tag_entry_key(&package);
         if self.model.kits[self.model.active].parsed_tags.contains_key(&key)
             || self
-                .source()
+                .model.source()
                 .is_some_and(|s| s.entry_for_key(&key).is_some())
         {
             return Err(format!("A new tag already exists at {logical}"));
@@ -340,7 +340,7 @@ impl Baboon {
         new_rel: &str,
         duplicate: bool,
     ) -> Result<String, String> {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return Err("Tag is no longer in the source".to_owned());
         };
         let TagEntryLocation::NewContainer {
@@ -389,7 +389,7 @@ impl Baboon {
         }
         if self.model.kits[self.model.active].parsed_tags.contains_key(&new_key)
             || self
-                .source()
+                .model.source()
                 .is_some_and(|source| source.entry_for_key(&new_key).is_some())
         {
             return Err(format!("A tag already exists at {new_rel}"));

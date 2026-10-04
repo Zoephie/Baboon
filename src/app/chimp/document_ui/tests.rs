@@ -41,7 +41,7 @@ fn a_clean_pane_describes_the_package_and_offers_its_views() {
     }
     assert!(!frames.shows("Texture") && !frames.shows("Mesh"));
     frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
-    assert!(!app.has_chimp_save_dialog(), "disabled while clean");
+    assert!(!app.model.has_chimp_save_dialog(), "disabled while clean");
     assert_eq!(app.model.kits[0].chimp.documents[THING].edits, 0);
 }
 
@@ -83,7 +83,7 @@ fn an_edit_in_the_pane_marks_counts_and_schedules_a_checkpoint() {
     assert!(document.checkpoint_due.unwrap() > first, "pushed back");
 
     frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
-    assert!(app.has_chimp_save_dialog());
+    assert!(app.model.has_chimp_save_dialog());
 }
 
 /// The Header view through the pane: a rename counts as an edit, and the

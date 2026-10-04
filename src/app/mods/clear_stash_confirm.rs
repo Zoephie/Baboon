@@ -85,7 +85,7 @@ impl Baboon {
             self.mods.clear_stash_confirm = None;
             // Resolved rather than assumed: the workspace may have been closed
             // while the confirmation was up.
-            if let Some(index) = self.resolve_kit(kit) {
+            if let Some(index) = self.model.resolve_kit(kit) {
                 self.clear_campaign_stash(index, ctx);
             }
         }

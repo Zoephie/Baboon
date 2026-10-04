@@ -12,7 +12,7 @@ impl Baboon {
         index: ReverseDependencyIndex,
         missing: usize,
     ) -> bool {
-        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             return true;
         };
         // The build is over whether or not its result is still wanted.
@@ -26,7 +26,7 @@ impl Baboon {
                 .references_changed_during_build,
         );
         self.kit_tools.show_entry_index_wait_notice = false;
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
         // The build read every tag before it started returning; a tag saved,
@@ -83,7 +83,7 @@ impl Baboon {
     ) -> bool {
         // Drives the global progress bar only; the stamp is checked purely so
         // a closed or reloaded kit's progress stops updating it.
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         if !self.model.kits[kit_index].index_jobs.building_references {
@@ -132,7 +132,7 @@ impl Baboon {
         };
         // The kit was closed or reloaded while the job ran: the work on disk is
         // done, but there is no longer anything here to apply it to.
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             self.model.status = done.status;
             return false;
         };

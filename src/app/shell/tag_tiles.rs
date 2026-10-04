@@ -262,7 +262,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             });
             return button_response;
         }
-        let discardable = self.app.tag_has_discardable_changes(self.kit_index, &key);
+        let discardable = self.app.model.tag_has_discardable_changes(self.kit_index, &key);
         context_menu(&button_response, |ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
@@ -615,7 +615,7 @@ impl Baboon {
         // drained for the same reason as the bitmaps above.
         if let Some(key) = self.views[self.model.kits[kit_index].id].model_browser.pending_open.take() {
             self.model.active = kit_index;
-            let open = self.resolve_model_browser_open(kit_index, &key);
+            let open = self.model.resolve_model_browser_open(kit_index, &key);
             self.select_entry(open, ctx.clone());
         }
         if let Some(key) = self.views[self.model.kits[kit_index].id]

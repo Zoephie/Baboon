@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
     let mut app = Baboon::for_test();
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     let key = "file:a.model".to_owned();
     let preview = RenderModelPreview {
         materials: vec![Default::default()],

@@ -470,7 +470,7 @@ impl Baboon {
         if self.editing_kit_is_read_only(self.model.active) {
             return false;
         }
-        self.source().is_some_and(|source| {
+        self.model.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
         })
     }
@@ -479,7 +479,7 @@ impl Baboon {
         let index = self
             .import.tag_import_dialog
             .as_ref()
-            .and_then(|dialog| self.kit_index(dialog.kit));
+            .and_then(|dialog| self.model.kit_index(dialog.kit));
         index.is_some_and(|index| self.refuse_read_only_edit(index))
     }
 
@@ -489,11 +489,11 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(target_game) = self.source().and_then(|source| source.game).map(|game| game.as_str().to_owned()) else {
+        let Some(target_game) = self.model.source().and_then(|source| source.game).map(|game| game.as_str().to_owned()) else {
             self.model.status = "Import Tags needs a loaded editing kit with a detected game".to_owned();
             return;
         };
-        let Some(target_tags_root) = self.loaded_tags_root() else {
+        let Some(target_tags_root) = self.model.loaded_tags_root() else {
             self.model.status = "Import Tags needs a loaded tags folder".to_owned();
             return;
         };
@@ -506,7 +506,7 @@ impl Baboon {
             .map(|rel| normalize_import_rel(&rel))
             .unwrap_or_default();
         self.import.tag_import_dialog = Some(TagImportDialog {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             target_game,
             target_tags_root,
             source_input: String::new(),
@@ -637,7 +637,7 @@ impl Baboon {
             .collect::<Vec<_>>();
         let definitions_root = locate_definitions_root();
         let names = self
-            .source()
+            .model.source()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| TagNameIndex::load_from_definitions(&definitions_root));
         if let Some(dialog) = self.import.tag_import_dialog.as_mut() {
@@ -1035,7 +1035,7 @@ impl Baboon {
             definitions_root: definitions_root.clone(),
         };
         let names = self
-            .source()
+            .model.source()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| TagNameIndex::load_from_definitions(&definitions_root));
         let job = FolderConversionJob {

@@ -10,24 +10,15 @@ fn blam_import_fill() -> Color32 {
 }
 
 impl Baboon {
-    /// The Blam! surface only covers Halo 3 pipelines for now, so both the
-    /// Tools menu entry and the surface strip answer to the kit's game.
-    pub(in crate::app) fn active_kit_is_halo3(&self) -> bool {
-        self.kit_is_halo3(self.model.active)
-    }
 
-    pub(in crate::app) fn kit_is_halo3(&self, kit_index: usize) -> bool {
-        self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .is_some_and(|source| source.game == Some(GameId::Halo3))
-    }
+
+
 
     /// The Blam! pane: a [`BLAM_KEY`] tile in the kit's tag tree, so it drags,
     /// splits, and resizes like any open tag.
     pub(in crate::app) fn draw_blam_pane(&mut self, ui: &mut Ui, kit_index: usize) {
         let kit_id = self.model.kits[kit_index].id;
-        let data_root = self.kit_layout_for(kit_index).map(|layout| layout.data);
+        let data_root = self.model.kit_layout_for(kit_index).map(|layout| layout.data);
 
         // Re-detect when the asset path changes (or a rescan was forced), not
         // every frame — the ticks follow the typed path without hammering disk.
@@ -250,5 +241,20 @@ impl Baboon {
         if import_clicked {
             self.begin_blam_import(kit_index, ui.ctx().clone());
         }
+    }
+}
+
+impl Model {
+    /// The Blam! surface only covers Halo 3 pipelines for now, so both the
+    /// Tools menu entry and the surface strip answer to the kit's game.
+    pub(in crate::app) fn active_kit_is_halo3(&self) -> bool {
+        self.kit_is_halo3(self.active)
+    }
+
+    pub(in crate::app) fn kit_is_halo3(&self, kit_index: usize) -> bool {
+        self.kits[kit_index]
+            .source
+            .as_ref()
+            .is_some_and(|source| source.game == Some(GameId::Halo3))
     }
 }

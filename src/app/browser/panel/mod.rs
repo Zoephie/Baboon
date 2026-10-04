@@ -523,7 +523,7 @@ impl Baboon {
             Arc::clone(&self.views[self.model.kits[kit_index].id].bitmap_browser.thumbnails),
         );
         let mut open_git_review = false;
-        let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
+        let git_review_enabled = self.model.git_review_enabled_for_kit(kit_index);
         let kit = &mut self.model.kits[kit_index];
         let view = &mut self.views[kit.id];
         if let Some(source) = kit.source.as_mut() {

@@ -453,17 +453,7 @@ impl GitReviewState {
 }
 
 impl Baboon {
-    pub(in crate::app) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
-        self.model.kits.get(kit).is_some_and(|kit| {
-            matches!(
-                kit.source.as_ref().map(|source| &source.source),
-                Some(TagSource::LooseFolder { .. })
-            ) && profile_has_git_tracking(
-                kit.profile.as_ref(),
-                &self.model.prefs.custom_editing_kit_profiles,
-            )
-        })
-    }
+
 
     pub(in crate::app) fn open_git_review(&mut self, ctx: &egui::Context) {
         let kit = self.model.active;
@@ -474,7 +464,7 @@ impl Baboon {
             self.model.status = "Git Review is available for folder-based editing kits".to_owned();
             return;
         }
-        if !self.git_review_enabled_for_kit(kit) {
+        if !self.model.git_review_enabled_for_kit(kit) {
             self.model.status =
                 "Enable Tracked in Git in this editing kit's settings to use Git Review"
                     .to_owned();
@@ -549,7 +539,7 @@ impl Baboon {
         request: u64,
         view: Result<GitReviewView, String>,
     ) -> bool {
-        let Some(kit_index) = self.kit_index(kit) else {
+        let Some(kit_index) = self.model.kit_index(kit) else {
             return false;
         };
         let state = &mut self.views[self.model.kits[kit_index].id].git_review;
@@ -606,3 +596,17 @@ impl Baboon {
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    pub(in crate::app) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
+        self.kits.get(kit).is_some_and(|kit| {
+            matches!(
+                kit.source.as_ref().map(|source| &source.source),
+                Some(TagSource::LooseFolder { .. })
+            ) && profile_has_git_tracking(
+                kit.profile.as_ref(),
+                &self.prefs.custom_editing_kit_profiles,
+            )
+        })
+    }
+}

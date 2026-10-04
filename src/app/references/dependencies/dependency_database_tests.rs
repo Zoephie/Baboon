@@ -46,12 +46,12 @@ fn fix_dependencies_uses_the_completed_scan_without_rescanning() {
     let mut app = Baboon::for_test();
     app.install_loaded_source(loose(&root, vec![known]));
     let scanned = app
-        .dependency_database_entries()
+        .model.dependency_database_entries()
         .map(|entries| entries.len());
 
     let mut unscanned = Baboon::for_test();
     unscanned.install_loaded_source(loose(&root, Vec::new()));
-    let waiting = unscanned.dependency_database_entries().is_err();
+    let waiting = unscanned.model.dependency_database_entries().is_err();
 
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(

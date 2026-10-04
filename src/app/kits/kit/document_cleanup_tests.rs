@@ -34,13 +34,13 @@ fn a_second_source_in_a_kit_never_reuses_a_generation() {
         // installing; mirror it so the test sees what jobs see.
         app.model.kits[app.model.active].generation = app.model.kits[app.model.active].generation.wrapping_add(1);
         seen.push(app.model.kits[app.model.active].generation);
-        stamps.push(app.kit_stamp());
+        stamps.push(app.model.kit_stamp());
     }
     let mut unique = seen.clone();
     unique.dedup();
     assert_eq!(unique, seen, "generations {seen:?} repeat");
-    assert!(app.resolve_stamp(stamps[0]).is_none(), "a stale stamp is refused");
-    assert!(app.resolve_stamp(stamps[2]).is_some());
+    assert!(app.model.resolve_stamp(stamps[0]).is_none(), "a stale stamp is refused");
+    assert!(app.model.resolve_stamp(stamps[2]).is_some());
 }
 
 /// Closing tabs drops every cache kept for them, model previews included.

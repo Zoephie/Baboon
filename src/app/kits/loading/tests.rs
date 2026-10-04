@@ -82,11 +82,11 @@ fn a_kit_with_chosen_folders_uses_them_everywhere() {
         data: ek.join("data_moda"),
     };
     let app = loose_kit_with(&chosen.tags, "haloce_mcc", Some(chosen.clone()));
-    assert_eq!(app.kit_layout_for(0), Some(chosen.clone()));
-    assert_eq!(app.loaded_data_root(), Some(ek.join("data_moda")));
+    assert_eq!(app.model.kit_layout_for(0), Some(chosen.clone()));
+    assert_eq!(app.model.loaded_data_root(), Some(ek.join("data_moda")));
     assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
     assert_eq!(
-        app.active_kit_tool_folder_options(),
+        app.model.active_kit_tool_folder_options(),
         vec![
             ("-tags_dir", ek.join("tags_moda")),
             ("-data_dir", ek.join("data_moda")),
@@ -95,7 +95,7 @@ fn a_kit_with_chosen_folders_uses_them_everywhere() {
     // The same folders opened as a Halo 3 kit get no options: its tools
     // can't take them.
     let halo3 = loose_kit_with(&chosen.tags.clone(), "halo3_mcc", Some(chosen));
-    assert!(halo3.active_kit_tool_folder_options().is_empty());
+    assert!(halo3.model.active_kit_tool_folder_options().is_empty());
 }
 
 /// Opening a profile's chosen tags folder as a folder opens the profile,
@@ -136,10 +136,10 @@ fn a_chosen_tags_folder_belongs_to_its_profile() {
 fn a_loaded_kits_folders_all_come_from_its_layout() {
     let ek = PathBuf::from("/ek/H3EK");
     let app = loose_kit_at(&ek.join("tags"));
-    assert_eq!(app.editing_kit_root(), Some(ek.clone()));
-    assert_eq!(app.loaded_data_root(), Some(ek.join("data")));
+    assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
+    assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
     assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
-    assert_eq!(app.kit_tool_path("sapien.exe"), Some(ek.join("sapien.exe")));
+    assert_eq!(app.model.kit_tool_path("sapien.exe"), Some(ek.join("sapien.exe")));
 }
 
 /// A loose folder with another name used to be its own kit root for tool
@@ -149,8 +149,8 @@ fn a_loaded_kits_folders_all_come_from_its_layout() {
 fn a_folder_not_named_tags_has_its_parent_for_a_root_everywhere() {
     let app = loose_kit_at(Path::new("/ek/H3EK/tags_moda"));
     let ek = PathBuf::from("/ek/H3EK");
-    assert_eq!(app.editing_kit_root(), Some(ek.clone()));
-    assert_eq!(app.loaded_data_root(), Some(ek.join("data")));
+    assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
+    assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
     assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek));
 }
 

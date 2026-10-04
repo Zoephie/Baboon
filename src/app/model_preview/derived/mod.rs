@@ -1629,10 +1629,10 @@ impl Baboon {
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             return true;
         };
-        let stale = self.resolve_stamp(stamp).is_none();
+        let stale = self.model.resolve_stamp(stamp).is_none();
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };

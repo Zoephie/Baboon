@@ -24,18 +24,7 @@ enum ChimpSaveAction {
 }
 
 impl Baboon {
-    fn chimp_default_output_folder(&self, kit_index: usize) -> Option<PathBuf> {
-        let root = match &self.model.kits.get(kit_index)?.source.as_ref()?.source {
-            TagSource::IoStoreContainerSet { root, .. } => root,
-            _ => return None,
-        };
-        Some(
-            self.model.prefs
-                .chimp_output_dir
-                .clone()
-                .unwrap_or_else(|| root.clone()),
-        )
-    }
+
 
     pub(in crate::app) fn open_chimp_save_dialog(&mut self, kit_index: usize) {
         self.open_chimp_save_dialog_with_pending(kit_index, None);
@@ -62,9 +51,7 @@ impl Baboon {
         });
     }
 
-    pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
-        self.model.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
-    }
+
 
     fn open_chimp_save_dialog_with_pending(
         &mut self,
@@ -81,7 +68,7 @@ impl Baboon {
             self.model.status = "Chimp has no modified packages to save".to_owned();
             return false;
         }
-        let Some(folder) = self.chimp_default_output_folder(kit_index) else {
+        let Some(folder) = self.model.chimp_default_output_folder(kit_index) else {
             self.model.status = "Chimp does not have a Paks output folder".to_owned();
             return false;
         };
@@ -164,7 +151,7 @@ impl Baboon {
             return;
         }
 
-        let Some(index) = self.resolve_kit(kit) else {
+        let Some(index) = self.model.resolve_kit(kit) else {
             self.chimp.chimp_discard_prompt = None;
             return;
         };
@@ -212,7 +199,7 @@ impl Baboon {
         else {
             return;
         };
-        let dirty_packages = self.chimp_dirty_packages(kit_index);
+        let dirty_packages = self.model.chimp_dirty_packages(kit_index);
         let source_containers: Vec<PathBuf> = match &self.model.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => {
                 let mut paths: Vec<_> = dirty_packages
@@ -416,7 +403,7 @@ impl Baboon {
         action: PendingCloseAction,
         ctx: &egui::Context,
     ) {
-        let packages = self.chimp_dirty_packages(kit_index);
+        let packages = self.model.chimp_dirty_packages(kit_index);
         if packages.is_empty() {
             self.request_close_action(action, ctx);
         } else {
@@ -633,7 +620,7 @@ impl Baboon {
     /// Run the close a save was started for, now that the save has settled.
     fn finish_chimp_write(&mut self, kit: KitId, ctx: &egui::Context) {
         let pending = self.chimp.chimp_writes.remove(&kit).flatten();
-        if let (Some(action), Some(kit_index)) = (pending, self.kit_index(kit)) {
+        if let (Some(action), Some(kit_index)) = (pending, self.model.kit_index(kit)) {
             self.finish_chimp_close_after_save(kit_index, action, ctx);
         }
     }
@@ -668,7 +655,7 @@ impl Baboon {
             self.model.status = format!("Could not build {}: {error}", output.display());
             return;
         }
-        let Some(kit_index) = self.kit_index(kit) else {
+        let Some(kit_index) = self.model.kit_index(kit) else {
             remove_chimp_triplet(temporary);
             return;
         };
@@ -757,7 +744,7 @@ impl Baboon {
             }
         }
         self.drain_pending_chimp_remounts(ctx);
-        match (result, self.kit_index(kit)) {
+        match (result, self.model.kit_index(kit)) {
             (Err(error), _) => self.model.status = error,
             (Ok(()), None) => {}
             (Ok(()), Some(kit_index)) => {
@@ -959,3 +946,22 @@ fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    fn chimp_default_output_folder(&self, kit_index: usize) -> Option<PathBuf> {
+        let root = match &self.kits.get(kit_index)?.source.as_ref()?.source {
+            TagSource::IoStoreContainerSet { root, .. } => root,
+            _ => return None,
+        };
+        Some(
+            self.prefs
+                .chimp_output_dir
+                .clone()
+                .unwrap_or_else(|| root.clone()),
+        )
+    }
+
+    pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
+        self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
+    }
+}

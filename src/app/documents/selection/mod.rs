@@ -14,7 +14,7 @@ impl Baboon {
         // Routed by kit id rather than generation: a parsed document stays
         // valid across a source reload, and must land in the kit that asked
         // for it even if the user has since switched to another.
-        let Some(index) = self.resolve_kit(kit) else {
+        let Some(index) = self.model.resolve_kit(kit) else {
             return true;
         };
         self.model.kits[index].loading_tags.remove(&key);
@@ -33,7 +33,7 @@ impl Baboon {
             }
             Err(error) => {
                 let name = self
-                    .entry_for_key_in(index, &key)
+                    .model.entry_for_key_in(index, &key)
                     .map(|entry| entry.display_path.clone())
                     .unwrap_or_else(|| key.clone());
                 let message = format!("Could not load {name}: {error}");
@@ -63,7 +63,7 @@ impl Baboon {
         self.kit_tools.terminal.process = None;
         self.kit_tools.terminal.scroll_to_bottom = true;
         self.kit_tools.terminal.refocus_input = true;
-        let Some(index) = self.resolve_kit(kit) else {
+        let Some(index) = self.model.resolve_kit(kit) else {
             return true;
         };
         match result {
@@ -86,19 +86,9 @@ impl Baboon {
 mod tag_load_failure_tests;
 
 impl Baboon {
-    pub(in crate::app) fn loaded_tags_root(&self) -> Option<PathBuf> {
-        self.loaded_tags_root_for(self.model.active)
-    }
 
-    /// A specific kit's loose tags root. Background work has to name its kit:
-    /// the one it started in may no longer be the focused one when it lands.
-    pub(in crate::app) fn loaded_tags_root_for(&self, kit: usize) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.model.kits.get(kit)?.source.as_ref()?.source
-        else {
-            return None;
-        };
-        Some(root.clone())
-    }
+
+
 
     pub(in crate::app) fn select_entry(&mut self, key: String, ctx: egui::Context) {
         self.kit_and_view(self.model.active).open_tag_pane(&key);
@@ -118,7 +108,7 @@ impl Baboon {
         {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return;
         };
         // Check both the lazily-loaded entries and the full scan set (all_entries).
@@ -145,7 +135,7 @@ impl Baboon {
             return;
         }
         let source_kind = source.source.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         self.model.kits[self.model.active].loading_tags.insert(key.clone());
         self.model.status = format!("Loading {}", entry.display_path);
         let panic_key = key.clone();
@@ -164,24 +154,11 @@ impl Baboon {
         );
     }
 
-    /// Kept for save/export paths that address "the current tag".
-    #[allow(dead_code)]
-    pub(in crate::app) fn selected_entry(&self) -> Option<&TagEntry> {
-        let key = self.model.kits[self.model.active].selected_key.as_ref()?;
-        self.entry_for_key(key)
-    }
 
-    pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
-        self.entry_for_key_in(self.model.active, key)
-    }
 
-    /// Resolve a tag key against a specific kit. Anything that runs for a kit
-    /// other than the focused one has to use this: a key only means something
-    /// inside its own source, so resolving it against the active kit silently
-    /// finds nothing and the caller skips the tag.
-    pub(in crate::app) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
-        self.model.kits.get(kit)?.entry_for_key(key)
-    }
+
+
+
 
     pub(in crate::app) fn unload_tag(&mut self, key: &str) {
         self.kit_and_view(self.model.active).drop_document(key);
@@ -204,5 +181,40 @@ impl Baboon {
         // tag's contents, and the shader grid's model is keyed by the document's
         // dirty revision, which the change has already moved — so nothing to
         // clear there.
+    }
+}
+
+impl Model {
+    pub(in crate::app) fn loaded_tags_root(&self) -> Option<PathBuf> {
+        self.loaded_tags_root_for(self.active)
+    }
+
+    /// A specific kit's loose tags root. Background work has to name its kit:
+    /// the one it started in may no longer be the focused one when it lands.
+    pub(in crate::app) fn loaded_tags_root_for(&self, kit: usize) -> Option<PathBuf> {
+        let TagSource::LooseFolder { root, .. } = &self.kits.get(kit)?.source.as_ref()?.source
+        else {
+            return None;
+        };
+        Some(root.clone())
+    }
+
+    /// Kept for save/export paths that address "the current tag".
+    #[allow(dead_code)]
+    pub(in crate::app) fn selected_entry(&self) -> Option<&TagEntry> {
+        let key = self.kits[self.active].selected_key.as_ref()?;
+        self.entry_for_key(key)
+    }
+
+    pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
+        self.entry_for_key_in(self.active, key)
+    }
+
+    /// Resolve a tag key against a specific kit. Anything that runs for a kit
+    /// other than the focused one has to use this: a key only means something
+    /// inside its own source, so resolving it against the active kit silently
+    /// finds nothing and the caller skips the tag.
+    pub(in crate::app) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
+        self.kits.get(kit)?.entry_for_key(key)
     }
 }

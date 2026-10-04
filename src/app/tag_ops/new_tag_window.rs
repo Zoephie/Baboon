@@ -17,7 +17,7 @@ impl Baboon {
         let mut close_requested = false;
         // Campaign Evolved container sources create the tag in memory (no loose
         // tags folder, no filesystem picker) at a container-relative path.
-        let is_container = self.current_source_is_container();
+        let is_container = self.model.current_source_is_container();
         egui::Window::new("New Tag")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("new_tag_dialog"))
@@ -26,7 +26,7 @@ impl Baboon {
             .open(&mut open)
             .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
-                if !is_container && self.loaded_tags_root().is_none() {
+                if !is_container && self.model.loaded_tags_root().is_none() {
                     ui.label(
                         RichText::new(
                             "Load a loose editing-kit tags folder before creating a tag.",
@@ -165,7 +165,7 @@ impl Baboon {
                         );
                         if ui
                             .add_enabled(
-                                self.loaded_tags_root().is_some()
+                                self.model.loaded_tags_root().is_some()
                                     && !self.tag_ops.new_tag_dialog.groups.is_empty(),
                                 egui::Button::new("Choose..."),
                             )
@@ -210,7 +210,7 @@ impl Baboon {
                         && if is_container {
                             !self.tag_ops.new_tag_dialog.rel_path.trim().is_empty()
                         } else {
-                            self.loaded_tags_root().is_some()
+                            self.model.loaded_tags_root().is_some()
                                 && self.tag_ops.new_tag_dialog.output_path.is_some()
                         };
                     if ui
@@ -219,7 +219,7 @@ impl Baboon {
                             "No tag groups are available for this game"
                         } else if is_container {
                             "Enter a path for the new tag"
-                        } else if self.loaded_tags_root().is_none() {
+                        } else if self.model.loaded_tags_root().is_none() {
                             "Load a loose editing-kit tags folder first"
                         } else {
                             "Choose where to save the new tag"

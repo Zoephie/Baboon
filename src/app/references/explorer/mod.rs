@@ -4,6 +4,138 @@
 use super::*;
 
 impl Baboon {
+
+
+
+
+
+
+    /// Open the Content Explorer centered on `key`.
+    pub(in crate::app) fn open_content_explorer(&mut self, key: &str) {
+        let Some(focus) = self.model.entry_for_key(key).cloned() else {
+            return;
+        };
+        let (parents, parents_unavailable) = match self.model.references_to_entry(&focus) {
+            Some(parents) => (parents, false),
+            None => (Vec::new(), true),
+        };
+        let (children, children_unavailable) = self.model.children_of_entry(key);
+        self.references.content_explorer = Some(ContentExplorer {
+            kit: self.model.active_kit_id(),
+            focus,
+            parents,
+            children,
+            filter: String::new(),
+            index_unavailable: parents_unavailable && children_unavailable,
+            back: Vec::new(),
+            forward: Vec::new(),
+        });
+    }
+
+    /// Re-center the open Content Explorer on `entry`, recording history.
+    pub(in crate::app) fn content_explorer_navigate(&mut self, entry: TagEntry) {
+        let key = entry.key.clone();
+        let (parents, parents_unavailable) = match self.model.references_to_entry(&entry) {
+            Some(parents) => (parents, false),
+            None => (Vec::new(), true),
+        };
+        let (children, children_unavailable) = self.model.children_of_entry(&key);
+        if let Some(explorer) = self.references.content_explorer.as_mut() {
+            explorer.back.push(explorer.focus.clone());
+            explorer.forward.clear();
+            explorer.focus = entry;
+            explorer.parents = parents;
+            explorer.children = children;
+            explorer.index_unavailable = parents_unavailable && children_unavailable;
+        }
+    }
+
+    pub(in crate::app) fn content_explorer_back(&mut self) {
+        let Some(prev) = self
+            .references.content_explorer
+            .as_mut()
+            .and_then(|explorer| explorer.back.pop())
+        else {
+            return;
+        };
+        self.recenter_explorer(prev, true);
+    }
+
+    pub(in crate::app) fn content_explorer_forward(&mut self) {
+        let Some(next) = self
+            .references.content_explorer
+            .as_mut()
+            .and_then(|explorer| explorer.forward.pop())
+        else {
+            return;
+        };
+        self.recenter_explorer(next, false);
+    }
+
+    /// Re-center without clearing history; pushes the current focus onto the
+    /// opposite stack (used by back/forward).
+    pub(in crate::app) fn recenter_explorer(&mut self, entry: TagEntry, going_back: bool) {
+        let key = entry.key.clone();
+        let (parents, parents_unavailable) = match self.model.references_to_entry(&entry) {
+            Some(parents) => (parents, false),
+            None => (Vec::new(), true),
+        };
+        let (children, children_unavailable) = self.model.children_of_entry(&key);
+        if let Some(explorer) = self.references.content_explorer.as_mut() {
+            let current = std::mem::replace(&mut explorer.focus, entry);
+            if going_back {
+                explorer.forward.push(current);
+            } else {
+                explorer.back.push(current);
+            }
+            explorer.parents = parents;
+            explorer.children = children;
+            explorer.index_unavailable = parents_unavailable && children_unavailable;
+        }
+    }
+
+    pub(in crate::app) fn show_references_for(&mut self, key: &str) {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
+            return;
+        };
+        // Fresh query — drop any expander state from a previous references popup.
+        self.references.ref_jump_expanded.clear();
+        self.references.ref_jump_occurrences.clear();
+        self.references.ref_jump_loading.clear();
+        let title = format!("References to {}", entry.display_path.replace('\\', "/"));
+        // The referenced tag's dependency path, so a clicked row can jump to the
+        // exact field that points here.
+        let ref_target =
+            dependency_entry_reference_path(&entry, self.model.names()).map(|rel| (entry.group_tag, rel));
+        match self.model.references_to_entry(&entry) {
+            Some(entries) => {
+                let note = entries
+                    .is_empty()
+                    .then(|| "No other tags reference this tag.".to_owned());
+                self.search.query_results = Some(TagQueryResults {
+                    kit: self.model.active_kit_id(),
+                    title,
+                    entries,
+                    annotations: Vec::new(),
+                    note,
+                    ref_target,
+                });
+            }
+            None => {
+                self.search.query_results = Some(TagQueryResults {
+                    kit: self.model.active_kit_id(),
+                    title,
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(self.model.reference_index_unavailable_note()),
+                    ref_target: None,
+                });
+            }
+        }
+    }
+}
+
+impl Model {
     pub(in crate::app) fn references_to_entry(&self, entry: &TagEntry) -> Option<Vec<TagEntry>> {
         let source = self.source()?;
         let index = source.reverse_dependencies.as_ref()?;
@@ -71,129 +203,5 @@ impl Baboon {
         children.sort_by_cached_key(|entry| crate::core::source::natural_key(&entry.display_path));
         children.dedup_by(|a, b| a.key == b.key);
         (children, false)
-    }
-
-    /// Open the Content Explorer centered on `key`.
-    pub(in crate::app) fn open_content_explorer(&mut self, key: &str) {
-        let Some(focus) = self.entry_for_key(key).cloned() else {
-            return;
-        };
-        let (parents, parents_unavailable) = match self.references_to_entry(&focus) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(key);
-        self.references.content_explorer = Some(ContentExplorer {
-            kit: self.active_kit_id(),
-            focus,
-            parents,
-            children,
-            filter: String::new(),
-            index_unavailable: parents_unavailable && children_unavailable,
-            back: Vec::new(),
-            forward: Vec::new(),
-        });
-    }
-
-    /// Re-center the open Content Explorer on `entry`, recording history.
-    pub(in crate::app) fn content_explorer_navigate(&mut self, entry: TagEntry) {
-        let key = entry.key.clone();
-        let (parents, parents_unavailable) = match self.references_to_entry(&entry) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.references.content_explorer.as_mut() {
-            explorer.back.push(explorer.focus.clone());
-            explorer.forward.clear();
-            explorer.focus = entry;
-            explorer.parents = parents;
-            explorer.children = children;
-            explorer.index_unavailable = parents_unavailable && children_unavailable;
-        }
-    }
-
-    pub(in crate::app) fn content_explorer_back(&mut self) {
-        let Some(prev) = self
-            .references.content_explorer
-            .as_mut()
-            .and_then(|explorer| explorer.back.pop())
-        else {
-            return;
-        };
-        self.recenter_explorer(prev, true);
-    }
-
-    pub(in crate::app) fn content_explorer_forward(&mut self) {
-        let Some(next) = self
-            .references.content_explorer
-            .as_mut()
-            .and_then(|explorer| explorer.forward.pop())
-        else {
-            return;
-        };
-        self.recenter_explorer(next, false);
-    }
-
-    /// Re-center without clearing history; pushes the current focus onto the
-    /// opposite stack (used by back/forward).
-    pub(in crate::app) fn recenter_explorer(&mut self, entry: TagEntry, going_back: bool) {
-        let key = entry.key.clone();
-        let (parents, parents_unavailable) = match self.references_to_entry(&entry) {
-            Some(parents) => (parents, false),
-            None => (Vec::new(), true),
-        };
-        let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.references.content_explorer.as_mut() {
-            let current = std::mem::replace(&mut explorer.focus, entry);
-            if going_back {
-                explorer.forward.push(current);
-            } else {
-                explorer.back.push(current);
-            }
-            explorer.parents = parents;
-            explorer.children = children;
-            explorer.index_unavailable = parents_unavailable && children_unavailable;
-        }
-    }
-
-    pub(in crate::app) fn show_references_for(&mut self, key: &str) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
-            return;
-        };
-        // Fresh query — drop any expander state from a previous references popup.
-        self.references.ref_jump_expanded.clear();
-        self.references.ref_jump_occurrences.clear();
-        self.references.ref_jump_loading.clear();
-        let title = format!("References to {}", entry.display_path.replace('\\', "/"));
-        // The referenced tag's dependency path, so a clicked row can jump to the
-        // exact field that points here.
-        let ref_target =
-            dependency_entry_reference_path(&entry, self.names()).map(|rel| (entry.group_tag, rel));
-        match self.references_to_entry(&entry) {
-            Some(entries) => {
-                let note = entries
-                    .is_empty()
-                    .then(|| "No other tags reference this tag.".to_owned());
-                self.search.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title,
-                    entries,
-                    annotations: Vec::new(),
-                    note,
-                    ref_target,
-                });
-            }
-            None => {
-                self.search.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title,
-                    entries: Vec::new(),
-                    annotations: Vec::new(),
-                    note: Some(self.reference_index_unavailable_note()),
-                    ref_target: None,
-                });
-            }
-        }
     }
 }

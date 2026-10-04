@@ -212,7 +212,7 @@ impl Baboon {
         result: Result<Arc<World>, String>,
         ctx: egui::Context,
     ) -> bool {
-        let Some(index) = self.resolve_stamp(stamp) else {
+        let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.model.kits[index].chimp.reset_filter();
@@ -332,7 +332,7 @@ impl Baboon {
         stamp: KitStamp,
         type_index: ChimpTypeIndex,
     ) -> bool {
-        let Some(index) = self.resolve_stamp(stamp) else {
+        let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         let classified = type_index
@@ -349,19 +349,13 @@ impl Baboon {
         false
     }
 
-    fn chimp_recovery_dir(&self, kit_index: usize) -> Option<PathBuf> {
-        let root = match &self.model.kits.get(kit_index)?.source.as_ref()?.source {
-            TagSource::IoStoreContainerSet { root, .. } => root,
-            _ => return None,
-        };
-        Some(crate::core::storage::data_path(&chimp_recovery_dir_name(root)))
-    }
+
 
     fn load_chimp_recovery_manifest(
         &self,
         kit_index: usize,
     ) -> Option<(PathBuf, ChimpRecoveryManifest)> {
-        let directory = self.chimp_recovery_dir(kit_index)?;
+        let directory = self.model.chimp_recovery_dir(kit_index)?;
         let text = fs::read_to_string(directory.join("manifest.json")).ok()?;
         let manifest = serde_json::from_str(&text).ok()?;
         Some((directory, manifest))
@@ -501,7 +495,7 @@ impl Baboon {
     /// Write `package`'s recovery checkpoint. Nothing to checkpoint (no
     /// container source, no mount, no document) is not an error.
     fn checkpoint_chimp_document(&mut self, kit_index: usize, package: &str) -> Result<(), String> {
-        let Some(directory) = self.chimp_recovery_dir(kit_index) else {
+        let Some(directory) = self.model.chimp_recovery_dir(kit_index) else {
             return Ok(());
         };
         let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
@@ -588,15 +582,7 @@ impl Baboon {
         Ok(())
     }
 
-    pub(in crate::app) fn chimp_dirty_packages(&self, kit_index: usize) -> Vec<String> {
-        sorted_unique_dirty_chimp_keys(
-            self.model.kits[kit_index]
-                .chimp
-                .documents
-                .iter()
-                .map(|(key, document)| (key.as_str(), document.dirty)),
-        )
-    }
+
 
     pub(in crate::app) fn open_chimp_discard_prompt(
         &mut self,
@@ -757,7 +743,7 @@ impl Baboon {
         package: String,
         scan: Result<ChimpReferrerScan, String>,
     ) -> bool {
-        let Some(index) = self.resolve_stamp(stamp) else {
+        let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         let state = match scan {
@@ -779,7 +765,7 @@ impl Baboon {
         package: String,
         result: Result<ChimpDocument, String>,
     ) -> bool {
-        let Some(index) = self.resolve_stamp(stamp) else {
+        let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.model.kits[index].chimp.loading_packages.remove(&package);
@@ -859,3 +845,23 @@ fn sorted_unique_dirty_chimp_keys<'a>(
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    fn chimp_recovery_dir(&self, kit_index: usize) -> Option<PathBuf> {
+        let root = match &self.kits.get(kit_index)?.source.as_ref()?.source {
+            TagSource::IoStoreContainerSet { root, .. } => root,
+            _ => return None,
+        };
+        Some(crate::core::storage::data_path(&chimp_recovery_dir_name(root)))
+    }
+
+    pub(in crate::app) fn chimp_dirty_packages(&self, kit_index: usize) -> Vec<String> {
+        sorted_unique_dirty_chimp_keys(
+            self.kits[kit_index]
+                .chimp
+                .documents
+                .iter()
+                .map(|(key, document)| (key.as_str(), document.dirty)),
+        )
+    }
+}

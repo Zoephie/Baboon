@@ -49,12 +49,12 @@ impl Baboon {
             self.views[self.model.kits[kit_index].id].blam.status = "Pick an asset data folder first".to_owned();
             return;
         }
-        let Some(layout) = self.kit_layout_for(kit_index) else {
+        let Some(layout) = self.model.kit_layout_for(kit_index) else {
             self.views[self.model.kits[kit_index].id].blam.status =
                 "This workspace has no loose editing kit to import into".to_owned();
             return;
         };
-        let Some(tags_root) = self.loaded_tags_root_for(kit_index) else {
+        let Some(tags_root) = self.model.loaded_tags_root_for(kit_index) else {
             self.views[self.model.kits[kit_index].id].blam.status =
                 "This workspace has no loose tags folder to import into".to_owned();
             return;
@@ -146,7 +146,7 @@ impl Baboon {
         kind: BlamLogKind,
         message: String,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         let blam = &mut self.views[self.model.kits[kit_index].id].blam;
@@ -164,7 +164,7 @@ impl Baboon {
         outcomes: Vec<(String, Result<String, String>)>,
         created: Vec<(TagEntry, TagFile)>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.views[self.model.kits[kit_index].id].blam.running = false;

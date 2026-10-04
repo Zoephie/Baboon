@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn a_stale_thumbnail_still_frees_its_decode_slot() {
     let mut app = Baboon::for_test();
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     app.views[app.model.kits[0].id]
         .bitmap_browser
         .pending
@@ -94,7 +94,7 @@ fn a_generation_bump_keeps_thumbnails_that_are_still_right() {
 #[test]
 fn a_stale_texture_resolve_clears_textures_pending() {
     let mut app = Baboon::for_test();
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     let state = app.views[app.model.kits[0].id]
         .caches.model_previews
         .entry("file:a.model".to_owned())

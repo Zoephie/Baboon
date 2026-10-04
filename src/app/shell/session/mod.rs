@@ -246,7 +246,7 @@ impl Baboon {
         else {
             return;
         };
-        if let Some(index) = self.kit_index(active) {
+        if let Some(index) = self.model.kit_index(active) {
             self.model.active = index;
         }
     }
@@ -307,14 +307,14 @@ impl Baboon {
     /// opened the stale saved key and reported that the tag had disappeared.
     /// Return the source's current key so existing sessions recover in place.
     pub(in crate::app) fn restored_tag_entry_key(&mut self, tag: &LastSessionTag) -> Option<String> {
-        if let Some(entry) = self.entry_for_key(&tag.key) {
+        if let Some(entry) = self.model.entry_for_key(&tag.key) {
             return Some(entry.key.clone());
         }
         let path = tag.path.as_ref()?;
         if !path.is_file() {
             return None;
         }
-        let source = self.source()?;
+        let source = self.model.source()?;
         let TagSource::LooseFolder { root, .. } = &source.source else {
             return None;
         };

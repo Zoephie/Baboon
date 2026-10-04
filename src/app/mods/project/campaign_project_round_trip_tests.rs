@@ -309,9 +309,9 @@ fn a_capture_holds_the_workspace_and_a_checkpoint_writes_it() {
     assert!(history.redo.is_empty());
     assert_eq!(friction_in(&history.undo[1].bytes), Some(0.25), "the state before the step");
     assert_eq!(snapshot.folders, BTreeSet::from(["objects/mine".to_owned()]));
-    assert!(app.tag_has_stashed_overlay(0, &key("objects/rock")));
-    assert!(!app.tag_has_stashed_overlay(0, &key("objects/stone")));
-    assert_eq!(app.stashed_campaign_tags(0), vec!["objects/rock".to_owned()]);
+    assert!(app.model.tag_has_stashed_overlay(0, &key("objects/rock")));
+    assert!(!app.model.tag_has_stashed_overlay(0, &key("objects/stone")));
+    assert_eq!(app.model.stashed_campaign_tags(0), vec!["objects/rock".to_owned()]);
 
     assert_eq!(app.checkpoint_campaign_project(0, 1.0), Ok(true));
     let written = load_campaign_project(&kit.recovery()).unwrap();
@@ -411,7 +411,7 @@ fn a_new_session_adopts_the_recovery_file() {
     next.model.kits[0].parsed_tags.clear();
     autosave_at(&mut next, &egui::Context::default(), 1.0);
 
-    assert!(next.tag_has_stashed_overlay(0, &key("objects/rock")));
+    assert!(next.model.tag_has_stashed_overlay(0, &key("objects/rock")));
     assert_eq!(
         next.model.status,
         "Restored 1 stashed modification(s) from this workspace's last session"
@@ -491,7 +491,7 @@ fn discarding_never_writes_the_user_s_project() {
 
     assert!(!app.documents.save_changes_prompt.visible);
     assert!(!app.model.kits[0].open_tabs.contains(&rock));
-    assert!(!app.tag_has_stashed_overlay(0, &rock));
+    assert!(!app.model.tag_has_stashed_overlay(0, &rock));
     assert!(load_campaign_project(&kit.recovery()).unwrap().overlays.is_empty());
     assert_eq!(fs::read(&user).unwrap(), user_bytes, "the user's project is untouched");
     assert_eq!(load_campaign_project(&user).unwrap().overlays.len(), 1);

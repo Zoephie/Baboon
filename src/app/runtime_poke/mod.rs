@@ -2606,7 +2606,7 @@ impl Baboon {
     pub(super) fn can_poke_current_tag(&self) -> bool {
         cfg!(windows)
             && self
-                .selected_entry()
+                .model.selected_entry()
                 .is_some_and(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
             && self
                 .model.kits
@@ -2624,7 +2624,7 @@ impl Baboon {
             .clone()
             .ok_or_else(|| "No tag selected".to_owned())?;
         let entry = self
-            .entry_for_key(&key)
+            .model.entry_for_key(&key)
             .cloned()
             .ok_or_else(|| "Selected tag is no longer in the source".to_owned())?;
         if !matches!(entry.location, TagEntryLocation::Container { .. }) {
@@ -2648,7 +2648,7 @@ impl Baboon {
             .write_to_bytes()
             .map_err(|error| format!("Could not snapshot edited tag: {error}"))?;
         Ok(PokeRequest {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             key,
             source: source_data.source.clone(),
             entries: source_data.full_entry_set().to_vec(),

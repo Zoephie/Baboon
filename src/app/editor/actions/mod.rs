@@ -128,7 +128,7 @@ impl Baboon {
         let Some((kit_id, tab_key, request)) = self.editor.pending_ce_sound_ref.take() else {
             return;
         };
-        let Some(kit_index) = self.kit_index(kit_id) else {
+        let Some(kit_index) = self.model.kit_index(kit_id) else {
             return;
         };
         let paks_root = match self.model.kits[kit_index].source.as_ref().map(|s| &s.source) {
@@ -265,10 +265,10 @@ impl Baboon {
         textures_id: u64,
         textures: Vec<MaterialTextures>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             return true;
         };
-        let stale = self.resolve_stamp(stamp).is_none();
+        let stale = self.model.resolve_stamp(stamp).is_none();
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get_mut(&key) else {
             return true;
         };

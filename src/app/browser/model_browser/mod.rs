@@ -230,18 +230,7 @@ impl Baboon {
         self.kit_and_view(kit).open_tag_pane(MODEL_LIBRARY_KEY);
     }
 
-    /// Resolve a double-clicked render model to the tag its cell should open:
-    /// the owning `.model` when the kit has one, otherwise the tag itself.
-    pub(in crate::app) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
-        let Some(source) = self.model.kits[kit_index].source.as_ref() else {
-            return key.to_owned();
-        };
-        let entries = source.full_entry_set();
-        let Some(clicked) = entries.iter().find(|entry| entry.key == key) else {
-            return key.to_owned();
-        };
-        owning_model_key(entries, clicked).unwrap_or_else(|| key.to_owned())
-    }
+
 }
 
 /// The Model Library's [`ThumbnailSource`].
@@ -320,3 +309,18 @@ mod tests;
 
 #[cfg(test)]
 mod library_scan_tests;
+
+impl Model {
+    /// Resolve a double-clicked render model to the tag its cell should open:
+    /// the owning `.model` when the kit has one, otherwise the tag itself.
+    pub(in crate::app) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
+        let Some(source) = self.kits[kit_index].source.as_ref() else {
+            return key.to_owned();
+        };
+        let entries = source.full_entry_set();
+        let Some(clicked) = entries.iter().find(|entry| entry.key == key) else {
+            return key.to_owned();
+        };
+        owning_model_key(entries, clicked).unwrap_or_else(|| key.to_owned())
+    }
+}

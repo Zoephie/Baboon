@@ -19,7 +19,7 @@ impl Baboon {
         // A load targets the kit it was started for. If that kit closed while
         // the load was in flight the result is dropped rather than landing in
         // whichever kit happens to be active now.
-        let Some(index) = self.resolve_kit(kit) else {
+        let Some(index) = self.model.resolve_kit(kit) else {
             self.settle_restored_kit(kit);
             return true;
         };
@@ -36,7 +36,7 @@ impl Baboon {
         // Check the outgoing project to disk before its source is replaced, and
         // refuse the switch if that fails rather than losing its edits.
         let outgoing = self.model.active;
-        if self.current_source_is_campaign_project_capable(outgoing)
+        if self.model.current_source_is_campaign_project_capable(outgoing)
             && let Err(error) =
                 self.checkpoint_campaign_project(outgoing, ctx.input(|input| input.time))
         {
@@ -102,11 +102,11 @@ impl Baboon {
         // A fresh source for this kit: none of its old index work applies.
         // Other kits' jobs are theirs, and are left running.
         self.model.kits[installed].index_jobs = IndexJobs::default();
-        let loose_folder_source = self.source().is_some_and(|source| {
+        let loose_folder_source = self.model.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
         let has_cached_entries = self
-            .source()
+            .model.source()
             .is_some_and(|source| !source.all_entries.is_empty());
         if loose_folder_source {
             if has_cached_entries {
@@ -149,7 +149,7 @@ impl Baboon {
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.model.kits[kit_index].scanning_entries = false;
@@ -222,7 +222,7 @@ impl Baboon {
         label: String,
         result: Result<Vec<TagEntry>, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         self.model.kits[kit_index].scanning_entries = false;
@@ -251,7 +251,7 @@ impl Baboon {
         matched: usize,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         if !self.model.kits[kit_index].scanning_entries {
@@ -273,11 +273,11 @@ impl Baboon {
         result: Result<EntryIndexRefresh, String>,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             return true;
         };
         self.model.kits[kit_index].index_jobs.refreshing = false;
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
         self.schedule_next_entry_index_refresh(kit_index, ctx);
@@ -378,7 +378,7 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         self.model.status = format!("Loading {}", path.display());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
@@ -436,7 +436,7 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         let ek_folder_aliases = self.model.prefs.ek_folder_aliases.clone();
@@ -510,7 +510,7 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         self.model.status = format!("Opening {}", path.display());
         let recent_path = clean_recent_path(path.clone());
@@ -546,25 +546,7 @@ impl Baboon {
         self.begin_load_iostore_container_path(path, ctx);
     }
 
-    /// The `Paks` directory of the Campaign Evolved install this session is
-    /// working with — an already-mounted container set's own root, else the
-    /// install configured in Settings. `None` when neither is known, which is
-    /// the only case where a container has to be mounted on its own.
-    pub(in crate::app) fn campaign_evolved_pak_root(&self) -> Option<PathBuf> {
-        let mounted = self.model.kits.iter().find_map(|kit| {
-            match kit.source.as_ref().map(|source| &source.source) {
-                Some(TagSource::IoStoreContainerSet { root, .. }) => Some(root.clone()),
-                _ => None,
-            }
-        });
-        mounted.or_else(|| {
-            self.model.prefs
-                .custom_editing_kit_profiles
-                .iter()
-                .filter(|profile| profile.is_campaign_evolved())
-                .find_map(|profile| crate::core::source::find_paks_dir(&profile.root))
-        })
-    }
+
 
     /// Mounts a single IoStore container (`.utoc`) off the UI thread; completion
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
@@ -574,13 +556,13 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         // Mount the container against the install's `Paks` directory. A mod
         // installed in `Paks/~mods` carries no directory index of its own, and
         // only the base containers it overrides can name its chunks.
-        let pak_root = self.campaign_evolved_pak_root();
+        let pak_root = self.model.campaign_evolved_pak_root();
         self.model.status = format!("Mounting {}", path.display());
         let recent_path = clean_recent_path(path.clone());
         // Through `spawn_worker`: a loader that panicked used to send nothing,
@@ -621,7 +603,7 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let names = self.model.default_names.clone();
         let definitions_root = locate_definitions_root();
         self.model.status = format!("Mounting containers in {}", paks_dir.display());
@@ -705,7 +687,7 @@ impl Baboon {
             return Ok(false);
         }
 
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return Err("Load an editing-kit tags folder before dropping tag files".to_owned());
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -723,7 +705,7 @@ impl Baboon {
             ));
         }
 
-        if let Some(key) = self.key_for_loose_path(&path) {
+        if let Some(key) = self.model.key_for_loose_path(&path) {
             self.select_entry(key, ctx);
             return Ok(true);
         }
@@ -744,23 +726,7 @@ impl Baboon {
         Ok(true)
     }
 
-    pub(in crate::app) fn key_for_loose_path(&self, path: &Path) -> Option<String> {
-        let source = self.source()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .find_map(|entry| {
-                let TagEntryLocation::LooseFile(existing) = &entry.location else {
-                    return None;
-                };
-                if existing == path || fs::canonicalize(existing).ok().as_deref() == Some(path) {
-                    Some(entry.key.clone())
-                } else {
-                    None
-                }
-            })
-    }
+
 
     /// Trigger a background full recursive scan of a LooseFolder source so
     /// that Groups mode and search work without needing to expand every tree
@@ -988,7 +954,7 @@ impl Baboon {
         if now < self.model.kits[self.model.active].index_jobs.next_refresh_at {
             return;
         }
-        let should_refresh = self.source().is_some_and(|source| {
+        let should_refresh = self.model.source().is_some_and(|source| {
             source.game.is_some()
                 && !source.all_entries.is_empty()
                 && matches!(source.source, TagSource::LooseFolder { .. })
@@ -1004,7 +970,7 @@ impl Baboon {
         if self.model.kits[self.model.active].scanning_entries || self.model.kits[self.model.active].index_jobs.refreshing {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -1016,7 +982,7 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tag_source = source.source.clone();
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         self.model.kits[self.model.active].index_jobs.refreshing = true;
         spawn_worker(
             &self.tx,
@@ -1246,3 +1212,43 @@ pub(in crate::app) fn persist_entry_index_changes(
 
 #[cfg(test)]
 mod folder_extractable_tree_tests;
+
+impl Model {
+    /// The `Paks` directory of the Campaign Evolved install this session is
+    /// working with — an already-mounted container set's own root, else the
+    /// install configured in Settings. `None` when neither is known, which is
+    /// the only case where a container has to be mounted on its own.
+    pub(in crate::app) fn campaign_evolved_pak_root(&self) -> Option<PathBuf> {
+        let mounted = self.kits.iter().find_map(|kit| {
+            match kit.source.as_ref().map(|source| &source.source) {
+                Some(TagSource::IoStoreContainerSet { root, .. }) => Some(root.clone()),
+                _ => None,
+            }
+        });
+        mounted.or_else(|| {
+            self.prefs
+                .custom_editing_kit_profiles
+                .iter()
+                .filter(|profile| profile.is_campaign_evolved())
+                .find_map(|profile| crate::core::source::find_paks_dir(&profile.root))
+        })
+    }
+
+    pub(in crate::app) fn key_for_loose_path(&self, path: &Path) -> Option<String> {
+        let source = self.source()?;
+        source
+            .entries
+            .iter()
+            .chain(source.all_entries.iter())
+            .find_map(|entry| {
+                let TagEntryLocation::LooseFile(existing) = &entry.location else {
+                    return None;
+                };
+                if existing == path || fs::canonicalize(existing).ok().as_deref() == Some(path) {
+                    Some(entry.key.clone())
+                } else {
+                    None
+                }
+            })
+    }
+}

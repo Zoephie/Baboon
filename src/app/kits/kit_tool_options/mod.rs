@@ -78,10 +78,14 @@ fn crt_quoted(argument: &str) -> String {
     format!("\"{argument}{}\"", "\\".repeat(trailing))
 }
 
-impl Baboon {
+
+#[cfg(test)]
+mod tests;
+
+impl Model {
     /// The active kit's tool folder options; see [`kit_tool_folder_options`].
     pub(in crate::app) fn active_kit_tool_folder_options(&self) -> Vec<(&'static str, PathBuf)> {
-        let Some(layout) = self.kit_layout_for(self.model.active) else {
+        let Some(layout) = self.kit_layout_for(self.active) else {
             return Vec::new();
         };
         kit_tool_folder_options(
@@ -90,6 +94,3 @@ impl Baboon {
         )
     }
 }
-
-#[cfg(test)]
-mod tests;

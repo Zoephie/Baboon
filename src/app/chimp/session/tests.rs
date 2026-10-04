@@ -253,7 +253,7 @@ fn a_checkpoint_writes_the_edited_package_and_names_it_in_the_manifest() {
     );
     assert_eq!(app.model.kits[0].chimp.documents[THING].checkpoint_due, None);
 
-    let directory = app.chimp_recovery_dir(0).unwrap();
+    let directory = app.model.chimp_recovery_dir(0).unwrap();
     assert_eq!(directory, install.recovery_dir());
     let manifest: ChimpRecoveryManifest =
         serde_json::from_slice(&fs::read(directory.join("manifest.json")).unwrap()).unwrap();
@@ -296,7 +296,7 @@ fn a_checkpoint_without_a_mount_is_quietly_skipped() {
     app.model.kits[0].chimp.mount = ChimpMount::Idle;
     app.flush_all_chimp_checkpoints();
     assert_eq!(app.model.kits[0].chimp.documents[THING].checkpoint_due, None);
-    assert!(!app.chimp_recovery_dir(0).unwrap().exists());
+    assert!(!app.model.chimp_recovery_dir(0).unwrap().exists());
     assert_eq!(app.model.status, "Ready");
 }
 
@@ -354,7 +354,7 @@ fn a_checkpoint_for_an_unmounted_package_is_reported_and_kept() {
     let mut first = install.app_with_open(&[THING]);
     edit_count(&mut first, THING, 42);
     first.flush_all_chimp_checkpoints();
-    let directory = first.chimp_recovery_dir(0).unwrap();
+    let directory = first.model.chimp_recovery_dir(0).unwrap();
     let mut manifest: ChimpRecoveryManifest =
         serde_json::from_slice(&fs::read(directory.join("manifest.json")).unwrap()).unwrap();
     let file = manifest.packages.remove(THING).unwrap();
@@ -539,9 +539,9 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
         .unwrap()
         .view = ChimpDocumentView::Properties;
     app.flush_all_chimp_checkpoints();
-    let directory = app.chimp_recovery_dir(0).unwrap();
+    let directory = app.model.chimp_recovery_dir(0).unwrap();
     assert!(directory.join("manifest.json").exists());
-    assert_eq!(app.chimp_dirty_packages(0), [THING]);
+    assert_eq!(app.model.chimp_dirty_packages(0), [THING]);
 
     assert_eq!(
         app.discard_chimp_packages(0, &[THING.to_owned(), OTHER.to_owned()]),
@@ -554,7 +554,7 @@ fn discarding_restores_the_shipped_package_and_drops_its_checkpoint() {
     assert_eq!(int(document, "Count"), 7);
     assert_eq!(document.view, ChimpDocumentView::Properties);
     assert!(!directory.exists());
-    assert!(app.chimp_dirty_packages(0).is_empty());
+    assert!(app.model.chimp_dirty_packages(0).is_empty());
     assert_eq!(app.discard_chimp_packages(0, &[THING.to_owned()]), Ok(0));
 }
 

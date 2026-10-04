@@ -470,7 +470,7 @@ impl Baboon {
         };
         let mut occurrences = Vec::new();
         for key in keys {
-            let Some(entry) = self.entry_for_key(&key).cloned() else {
+            let Some(entry) = self.model.entry_for_key(&key).cloned() else {
                 continue;
             };
             if !supports_field_search(&entry) {
@@ -483,7 +483,7 @@ impl Baboon {
             occurrences.extend(collect_find_occurrences(
                 &doc.tag,
                 &key,
-                self.names(),
+                self.model.names(),
                 docs.as_deref(),
                 &self.search.find.query,
                 self.search.find.look_in,
@@ -524,7 +524,7 @@ impl Baboon {
     }
 
     fn refresh_all_tag_find(&mut self, ctx: &egui::Context) {
-        let needs_full_scan = self.source().is_some_and(|source| {
+        let needs_full_scan = self.model.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
         });
         if needs_full_scan {
@@ -540,7 +540,7 @@ impl Baboon {
             self.search.find.occurrences.clear();
             return;
         }
-        if self.source().is_none() {
+        if self.model.source().is_none() {
             self.search.find.occurrences.clear();
             return;
         }
@@ -606,7 +606,7 @@ impl Baboon {
             }
         }
         for key in open_keys {
-            let Some(entry) = self.entry_for_key(&key).cloned() else {
+            let Some(entry) = self.model.entry_for_key(&key).cloned() else {
                 continue;
             };
             if !supports_field_search(&entry) {
@@ -621,7 +621,7 @@ impl Baboon {
                 collect_find_occurrences(
                     &doc.tag,
                     &key,
-                    self.names(),
+                    self.model.names(),
                     docs.as_deref(),
                     &self.search.find.query,
                     self.search.find.look_in,
@@ -639,7 +639,7 @@ impl Baboon {
         };
         self.search.find.all_request_id = self.search.find.all_request_id.wrapping_add(1);
         let request_id = self.search.find.all_request_id;
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         let tag_source = source.source.clone();
         let documentation_source = match (&source.source, source.game) {
             (
@@ -650,7 +650,7 @@ impl Baboon {
             ) => Some((definitions_root.clone(), game)),
             _ => None,
         };
-        let names = self.names().clone();
+        let names = self.model.names().clone();
         let query = self.search.find.query.clone();
         let look_in = self.search.find.look_in;
         let match_case = self.search.find.match_case;
@@ -752,12 +752,12 @@ impl Baboon {
             self.search.pending_find_jump = Some(hit);
             return;
         }
-        if let Some(entry) = self.entry_for_key(&hit.tag_key) {
+        if let Some(entry) = self.model.entry_for_key(&hit.tag_key) {
             let source_game = self.model.kits[self.model.active]
                 .source
                 .as_ref()
                 .and_then(|source| source.game);
-            if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
+            if is_previewable_geometry_group_for_game(entry.group_tag, self.model.names(), source_game) {
                 self.views[self.model.kits[self.model.active].id]
                     .caches.model_previews
                     .entry(hit.tag_key.clone())

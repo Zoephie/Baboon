@@ -772,7 +772,7 @@ impl Baboon {
         let Some(mut state) = self.compare.tag_diff.take() else {
             return;
         };
-        let diff_kit = self.kit_index(state.kit).unwrap_or(self.model.active);
+        let diff_kit = self.model.kit_index(state.kit).unwrap_or(self.model.active);
         let current = self.model.kits[diff_kit].parsed_tags.get(&state.a_key);
         let group = current.map(|doc| doc.tag.group().tag);
         let source = self.model.kits[diff_kit].source.as_ref();

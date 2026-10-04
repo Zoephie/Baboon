@@ -515,7 +515,7 @@ fn duplicating_a_tag_copies_its_bytes_beside_it() {
         format!("Duplicated {MODEL} → {}", copy.display())
     );
     let copy_key = kit.key("objects/props/crate_copy.model");
-    assert!(app.entry_for_key(&copy_key).is_some(), "registered in the browser");
+    assert!(app.model.entry_for_key(&copy_key).is_some(), "registered in the browser");
     assert!(app.model.kits[0].parsed_tags.contains_key(&copy_key), "and opened clean");
     assert!(!app.model.kits[0].parsed_tags[&copy_key].dirty.is_set());
     assert!(app.tag_ops.rename_tag.is_none());
@@ -582,7 +582,7 @@ fn deleting_a_tag_moves_it_to_the_trash_and_forgets_it() {
         "{}",
         destination.display()
     );
-    assert!(app.entry_for_key(&key).is_none());
+    assert!(app.model.entry_for_key(&key).is_none());
     assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
     assert_eq!(app.model.kits[0].selected_key, None);
     assert_ne!(app.model.kits[0].generation, generation);

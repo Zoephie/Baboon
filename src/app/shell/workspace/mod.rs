@@ -116,10 +116,10 @@ impl Baboon {
         // another game. Splitting them in the menu would make
         // the user answer a question about Baboon's internals
         // to do the same thing.
-        let can_import = self.current_source_is_container() || self.can_import_tags();
+        let can_import = self.model.current_source_is_container() || self.can_import_tags();
         if ui
             .add_enabled(can_import, egui::Button::new("Import Tags..."))
-            .on_hover_text(if self.current_source_is_container() {
+            .on_hover_text(if self.model.current_source_is_container() {
                 "Bring a tag file into these containers"
             } else {
                 "Bring a tag, or a whole folder of them, in from another game's editing kit"
@@ -128,7 +128,7 @@ impl Baboon {
             .clicked()
         {
             close_menu(ui);
-            if self.current_source_is_container() {
+            if self.model.current_source_is_container() {
                 self.begin_import_tag(None);
             } else {
                 self.open_tag_import_dialog(None);
@@ -162,7 +162,7 @@ impl Baboon {
         // these write a copy the user owns and can move, back up
         // or hand to someone. Before them, the only way to get a
         // `.baboon` out of Baboon was to export a mod.
-        let can_save_project = self.current_source_is_campaign_project_capable(self.model.active);
+        let can_save_project = self.model.current_source_is_campaign_project_capable(self.model.active);
         let project_target = self.model.kits[self.model.active]
             .project.active
             .as_ref()
@@ -190,7 +190,7 @@ impl Baboon {
             self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
         }
         ui.separator();
-        let has_loaded_folder = self.loaded_tags_root().is_some();
+        let has_loaded_folder = self.model.loaded_tags_root().is_some();
         if ui
             .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
             .clicked()
@@ -244,7 +244,7 @@ impl Baboon {
             close_menu(ui);
             self.save_current_tag_as();
         }
-        if self.current_source_is_container() {
+        if self.model.current_source_is_container() {
             if ui
                 .add_enabled(
                     self.can_poke_current_tag(),
@@ -393,7 +393,7 @@ impl Baboon {
         let selected = self.model.kits[self.model.active].selected_key.clone();
         let discardable = selected
             .as_deref()
-            .is_some_and(|key| self.tag_has_discardable_changes(self.model.active, key));
+            .is_some_and(|key| self.model.tag_has_discardable_changes(self.model.active, key));
         if ui
             .add_enabled(discardable, egui::Button::new("Discard Unsaved Changes"))
             .on_hover_text("Return the current tag to the way its source has it")
@@ -404,8 +404,8 @@ impl Baboon {
                 self.discard_tag_changes(self.model.active, &key, ctx);
             }
         }
-        if self.current_source_is_campaign_project_capable(self.model.active) {
-            let stashed = self.stashed_campaign_tags(self.model.active);
+        if self.model.current_source_is_campaign_project_capable(self.model.active) {
+            let stashed = self.model.stashed_campaign_tags(self.model.active);
             let unsaved = self.model.kits[self.model.active]
                 .parsed_tags
                 .values()
@@ -425,7 +425,7 @@ impl Baboon {
             {
                 close_menu(ui);
                 self.mods.clear_stash_confirm = Some(ClearStashConfirm {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     stashed,
                     unsaved,
                 });
@@ -481,7 +481,7 @@ impl Baboon {
             close_menu(ui);
             if let Some(key) = self.model.kits[self.model.active].selected_key.clone() {
                 self.compare.tag_diff = Some(TagDiffState {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     a_key: key,
                     source: TagCompareSource::OpenTag,
                     b_kit: None,
@@ -499,7 +499,7 @@ impl Baboon {
         }
         let can_fix_dependencies = has_current
             && self
-                .source()
+                .model.source()
                 .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
         if ui
             .add_enabled(
@@ -542,14 +542,14 @@ impl Baboon {
         {
             // Loose folders and Campaign Evolved containers can
             // both be indexed; cache sources cannot.
-            let indexable = self.source().is_some_and(|source| {
+            let indexable = self.model.source().is_some_and(|source| {
                 matches!(
                     source.source,
                     TagSource::LooseFolder { .. } | TagSource::IoStoreContainerSet { .. }
                 )
             });
             let has_index = self
-                .source()
+                .model.source()
                 .is_some_and(|source| source.reverse_dependencies.is_some());
             let label = if self.model.kits[self.model.active].index_jobs.building_references {
                 "Building Reference Index…"
@@ -573,7 +573,7 @@ impl Baboon {
         // Regenerate the tag index: force a fresh full scan and overwrite the
         // cached index file.
         let can_regen = self
-            .source()
+            .model.source()
             .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
             .unwrap_or(false);
         if ui
@@ -594,7 +594,7 @@ impl Baboon {
             self.model.kits[self.model.active].field_index.invalidate();
             self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
         }
-        let can_refresh_browser = self.source().is_some_and(|source| {
+        let can_refresh_browser = self.model.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
         });
         if ui
@@ -929,7 +929,7 @@ impl Baboon {
                     // writes only the recovery file — none of which was visible
                     // anywhere before.
                     let project = self
-                        .current_source_is_campaign_project_capable(self.model.active)
+                        .model.current_source_is_campaign_project_capable(self.model.active)
                         .then(|| self.model.kits[self.model.active].project.active.as_ref())
                         .flatten()
                         // A workspace with neither a project file nor a stash has
@@ -1331,7 +1331,7 @@ impl Baboon {
     pub(in crate::app) fn popup_target_kit(&mut self, opened_from: Option<KitId>) -> Option<usize> {
         match opened_from {
             Some(kit) => {
-                let index = self.resolve_kit(kit);
+                let index = self.model.resolve_kit(kit);
                 if index.is_none() {
                     self.model.status =
                         "The editing kit this was opened from has closed; the edit was dropped."
@@ -1380,7 +1380,7 @@ impl Baboon {
                 .any(|kit| kit.open_tabs.iter().any(|key| key == tag_key))
         });
         let sound_root = if !self.audio.pending.is_empty() {
-            self.source_tags_root().map(std::path::Path::to_path_buf)
+            self.model.source_tags_root().map(std::path::Path::to_path_buf)
         } else {
             None
         };

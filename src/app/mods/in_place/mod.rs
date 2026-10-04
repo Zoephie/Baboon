@@ -6,12 +6,7 @@ use crate::app::tag_ops::new_tag::new_container_template_bytes;
 use crate::app::tag_ops::new_tag::container_rel_to_package_path;
 
 impl Baboon {
-    pub(in crate::app) fn current_source_is_container(&self) -> bool {
-        matches!(
-            self.source().map(|s| &s.source),
-            Some(TagSource::IoStoreContainerSet { .. })
-        )
-    }
+
 
     /// Export a container tag as a higher-priority override container. The base
     /// game is never modified.
@@ -26,7 +21,7 @@ impl Baboon {
         key: &str,
         rename_to: Option<(String, bool)>,
     ) -> Result<Option<PathBuf>, String> {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return Err("Tag is no longer in the source".to_owned());
         };
         let TagEntryLocation::Container {
@@ -36,7 +31,7 @@ impl Baboon {
         else {
             return Err("Not a Campaign Evolved container tag".to_owned());
         };
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return Err("No source loaded".to_owned());
         };
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
@@ -192,7 +187,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return None;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return None;
         };
@@ -219,7 +214,7 @@ impl Baboon {
             }
         };
         let (root, containers) = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "No source loaded".to_owned();
                 return None;
             };
@@ -250,7 +245,7 @@ impl Baboon {
         };
         Some((
             InPlaceOverwriteJob {
-                stamp: self.kit_stamp(),
+                stamp: self.model.kit_stamp(),
                 key: key.to_owned(),
                 dirty_revision,
                 root,
@@ -280,7 +275,7 @@ impl Baboon {
             self.model.status = format!("Overwrite failed: {e}{hint}");
             return;
         }
-        let Some(kit) = self.resolve_stamp(job.stamp) else {
+        let Some(kit) = self.model.resolve_stamp(job.stamp) else {
             self.model.status = format!(
                 "Saved into {}, but the workspace changed meanwhile; reload it to see the tag",
                 job.utoc_path.display()
@@ -326,7 +321,7 @@ impl Baboon {
     /// none of, one derived from the group. The base game is untouched; the
     /// user copies the emitted `.utoc`/`.ucas`/`.pak` into `Paks/`.
     pub(in crate::app) fn save_new_container_tag(&mut self, key: &str) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
@@ -351,7 +346,7 @@ impl Baboon {
             }
         };
         let template = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "No source loaded".to_owned();
                 return;
             };
@@ -515,3 +510,12 @@ pub(in crate::app) fn container_save_route(expert_mode: bool, confirm: bool) -> 
 
 #[cfg(test)]
 mod in_place_overwrite_tests;
+
+impl Model {
+    pub(in crate::app) fn current_source_is_container(&self) -> bool {
+        matches!(
+            self.source().map(|s| &s.source),
+            Some(TagSource::IoStoreContainerSet { .. })
+        )
+    }
+}

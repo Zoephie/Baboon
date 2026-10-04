@@ -144,7 +144,7 @@ impl Baboon {
         // Which palette is the scenario definition's call, and the definition
         // is the source kit's game. A kit Baboon has not loaded, or whose
         // definitions it cannot read, gets no gate: Sapien decides.
-        let Some(game) = self.game_of_loaded_kit_containing(&file) else {
+        let Some(game) = self.model.game_of_loaded_kit_containing(&file) else {
             return Ok(KitToolDropPlan {
                 file,
                 palette: None,
@@ -171,16 +171,7 @@ impl Baboon {
         Ok(KitToolDropPlan { file, palette })
     }
 
-    /// The game of the loaded editing kit whose tags folder holds `file`.
-    fn game_of_loaded_kit_containing(&self, file: &Path) -> Option<GameId> {
-        (0..self.model.kits.len()).find_map(|kit_index| {
-            let kit_root = self.editing_kit_root_for(kit_index)?;
-            if !tag_within_kit(file, &kit_root) {
-                return None;
-            }
-            self.model.kits[kit_index].source.as_ref()?.game
-        })
-    }
+
 
     /// The scenario palette table for `game`, once a worker has read it from
     /// the definitions. The first ask starts that read and answers `None`, as
@@ -254,3 +245,16 @@ fn file_leaf(file: &Path) -> String {
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    /// The game of the loaded editing kit whose tags folder holds `file`.
+    fn game_of_loaded_kit_containing(&self, file: &Path) -> Option<GameId> {
+        (0..self.kits.len()).find_map(|kit_index| {
+            let kit_root = self.editing_kit_root_for(kit_index)?;
+            if !tag_within_kit(file, &kit_root) {
+                return None;
+            }
+            self.kits[kit_index].source.as_ref()?.game
+        })
+    }
+}

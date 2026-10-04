@@ -15,7 +15,7 @@ impl Baboon {
         // another game's tags to pick from.
         let picker_kit = self
             .editor.tag_reference_picker_kit
-            .and_then(|kit| self.resolve_kit(kit))
+            .and_then(|kit| self.model.resolve_kit(kit))
             .unwrap_or(self.model.active);
         let Some(catalog) = self.model.kits[picker_kit]
             .source
@@ -112,7 +112,7 @@ impl Baboon {
             .as_ref()
             .map(|explorer| explorer.kit)
             .expect("checked above");
-        let explorer_kit_index = self.resolve_kit(explorer_kit).unwrap_or(self.model.active);
+        let explorer_kit_index = self.model.resolve_kit(explorer_kit).unwrap_or(self.model.active);
         let mut filter = self
             .references.content_explorer
             .as_ref()
@@ -265,27 +265,11 @@ impl Baboon {
         }
     }
 
-    /// Floating window listing the results of a tag query (find-references /
-    /// unreferenced). Clicking an entry opens it.
-    pub(in crate::app) fn source_game(&self) -> Option<GameId> {
-        self.source().and_then(|source| source.game)
-    }
 
-    pub(in crate::app) fn source_tags_root(&self) -> Option<&std::path::Path> {
-        self.source().and_then(|source| match &source.source {
-            TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-            _ => None,
-        })
-    }
 
-    pub(in crate::app) fn source_definitions_root(&self) -> Option<&std::path::Path> {
-        self.source().and_then(|source| match &source.source {
-            TagSource::LooseFolder {
-                definitions_root, ..
-            } => Some(definitions_root.as_path()),
-            _ => None,
-        })
-    }
+
+
+
 
     pub(in crate::app) fn draw_query_results_window(&mut self, ctx: &egui::Context) {
         // Walk any expanded-but-uncached referrer rows before we take the results
@@ -485,7 +469,7 @@ impl Baboon {
             // the referrer that points at X (resolved once the tag loads).
             if let Some((group_tag, rel_path)) = &results.ref_target {
                 self.references.pending_ref_jump = Some(PendingRefJump {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     tag_key: key.clone(),
                     group_tag: *group_tag,
                     rel_path: rel_path.clone(),
@@ -641,3 +625,27 @@ fn fixed_height_row<R>(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui) -> R)
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    /// Floating window listing the results of a tag query (find-references /
+    /// unreferenced). Clicking an entry opens it.
+    pub(in crate::app) fn source_game(&self) -> Option<GameId> {
+        self.source().and_then(|source| source.game)
+    }
+
+    pub(in crate::app) fn source_tags_root(&self) -> Option<&std::path::Path> {
+        self.source().and_then(|source| match &source.source {
+            TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+            _ => None,
+        })
+    }
+
+    pub(in crate::app) fn source_definitions_root(&self) -> Option<&std::path::Path> {
+        self.source().and_then(|source| match &source.source {
+            TagSource::LooseFolder {
+                definitions_root, ..
+            } => Some(definitions_root.as_path()),
+            _ => None,
+        })
+    }
+}

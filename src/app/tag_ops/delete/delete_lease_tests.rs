@@ -17,7 +17,7 @@ fn a_finished_container_delete_gives_its_lease_back() {
         "leased while the delete runs"
     );
 
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     app.handle_container_delete_finished(stamp, lease_id, Err("disk full".to_owned()));
 
     let again = app

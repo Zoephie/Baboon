@@ -826,13 +826,13 @@ impl Baboon {
         let key = state.key.clone();
         let raw_name = state.new_path_input.clone();
         let old_display = state.old_display.clone();
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let destination_display = duplicate_display_path(&old_display, raw_name.trim());
         let existing = self
-            .source()
+            .model.source()
             .map(source_entries_display_paths)
             .unwrap_or_default();
         let new_leaf =
@@ -854,7 +854,7 @@ impl Baboon {
             TagEntryLocation::Container { .. } => {
                 self.tag_ops.rename_tag = None;
                 self.tag_ops.container_duplicate_confirm = Some(ContainerDuplicateConfirm {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     key,
                     destination_leaf: new_leaf,
                 });
@@ -873,7 +873,7 @@ impl Baboon {
         };
         let destination = loose_duplicate_destination(source_path, new_leaf)?;
         let (source_kind, source_names) = {
-            let source = self.source().ok_or("No tag source is loaded")?;
+            let source = self.model.source().ok_or("No tag source is loaded")?;
             (source.source.clone(), source.names.clone())
         };
         let is_dirty = self.model.kits[self.model.active]
@@ -941,7 +941,7 @@ impl Baboon {
                 "A Campaign Evolved duplicate is already running for this workspace".to_owned();
             return;
         }
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
@@ -964,7 +964,7 @@ impl Baboon {
             }
         };
         let existing = self
-            .source()
+            .model.source()
             .map(source_entries_display_paths)
             .unwrap_or_default();
         if let Err(error) =
@@ -988,7 +988,7 @@ impl Baboon {
             wrapper_bytes,
             diagnostics,
         ) = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "No source is loaded".to_owned();
                 return;
             };
@@ -1167,7 +1167,7 @@ impl Baboon {
             };
             self.release_container_write_lease(lease, outcome, ctx);
         }
-        let kit_index = self.kit_index(stamp.kit);
+        let kit_index = self.model.kit_index(stamp.kit);
         let completion =
             classify_container_duplicate_completion(result.is_ok(), kit_index.is_some());
         clear_container_duplicate_running(&mut self.tag_ops.container_duplicate_running, stamp.kit);

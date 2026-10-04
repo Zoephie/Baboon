@@ -14,7 +14,7 @@ impl Baboon {
         self.search.field_value_searching = false;
         // The results name tags in the kit the search ran in, which may not be
         // the one focused by the time they arrive.
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
         match result {
@@ -45,7 +45,7 @@ impl Baboon {
         stamp: KitStamp,
         blobs: Result<Vec<(String, String)>, String>,
     ) -> bool {
-        if let Some(kit_index) = self.resolve_stamp(stamp) {
+        if let Some(kit_index) = self.model.resolve_stamp(stamp) {
             match blobs {
                 Ok(blobs) => self.model.kits[kit_index]
                     .field_index
@@ -243,7 +243,7 @@ impl Baboon {
         }
         let query_lower = display.to_ascii_lowercase();
         let group_filter = self.search.field_value_group.trim().to_ascii_lowercase();
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
 
         // Fast path: answer from the cached index.
         if self.model.kits[self.model.active]
@@ -258,9 +258,9 @@ impl Baboon {
             let mut entries = Vec::new();
             let mut annotations = Vec::new();
             for (key, snippet) in hits {
-                if let Some(entry) = self.entry_for_key(&key).cloned() {
+                if let Some(entry) = self.model.entry_for_key(&key).cloned() {
                     if !group_filter.is_empty()
-                        && !self.group_label_matches(entry.group_tag, &group_filter)
+                        && !self.model.group_label_matches(entry.group_tag, &group_filter)
                     {
                         continue;
                     }
@@ -279,7 +279,7 @@ impl Baboon {
                 entries.len()
             );
             self.search.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
+                kit: self.model.active_kit_id(),
                 title: format!("Field value '{display}' ({})", entries.len()),
                 entries,
                 annotations,
@@ -289,11 +289,11 @@ impl Baboon {
             return;
         }
 
-        if self.source().is_none() {
+        if self.model.source().is_none() {
             return;
         }
         let base_entries: Vec<TagEntry> = {
-            let source = self.source().expect("checked");
+            let source = self.model.source().expect("checked");
             if source.all_entries.is_empty() {
                 source.entries.clone()
             } else {
@@ -305,10 +305,10 @@ impl Baboon {
         } else {
             base_entries
                 .into_iter()
-                .filter(|entry| self.group_label_matches(entry.group_tag, &group_filter))
+                .filter(|entry| self.model.group_label_matches(entry.group_tag, &group_filter))
                 .collect()
         };
-        let tag_source = self.source().expect("checked").source.clone();
+        let tag_source = self.model.source().expect("checked").source.clone();
         self.search.field_value_searching = true;
         self.model.status = format!("Searching field values for \"{display}\"…");
         let panic_query = display.clone();
@@ -330,26 +330,14 @@ impl Baboon {
         self.begin_build_field_index(ctx);
     }
 
-    /// Whether a group matches a (lowercased) group filter — by four-CC or by a
-    /// substring of the group's name/extension (e.g. "weap" or "weapon").
-    pub(in crate::app) fn group_label_matches(&self, group_tag: u32, filter_lower: &str) -> bool {
-        if format_group_tag(group_tag).to_ascii_lowercase() == filter_lower {
-            return true;
-        }
-        self.names()
-            .name_for(group_tag)
-            .or_else(|| group_tag_to_extension(group_tag))
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .contains(filter_lower)
-    }
+
 
     /// Build the in-memory searchable-text index in the background (idempotent —
     /// skips if already ready for this generation or already building).
     /// Starts source-scoped indexing or search work without blocking the UI thread.
     /// Generation-tagged completion is ignored if the active source changes first.
     pub(in crate::app) fn begin_build_field_index(&mut self, ctx: egui::Context) {
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         if self.model.kits[self.model.active]
             .field_index
             .is_ready_for(stamp.generation)
@@ -357,7 +345,7 @@ impl Baboon {
         {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return;
         };
         let entries: Vec<TagEntry> = if source.all_entries.is_empty() {
@@ -387,13 +375,13 @@ impl Baboon {
         let keys = self.model.kits[self.model.active].keywords.tags_with(keyword);
         let entries: Vec<TagEntry> = keys
             .iter()
-            .filter_map(|key| self.entry_for_key(key).cloned())
+            .filter_map(|key| self.model.entry_for_key(key).cloned())
             .collect();
         let note = entries
             .is_empty()
             .then(|| "No tags with this keyword are in the current source.".to_owned());
         self.search.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             title: format!("Tags tagged '{keyword}' ({})", entries.len()),
             entries,
             annotations: Vec::new(),
@@ -405,3 +393,19 @@ impl Baboon {
 
 #[cfg(test)]
 mod field_search_tests;
+
+impl Model {
+    /// Whether a group matches a (lowercased) group filter — by four-CC or by a
+    /// substring of the group's name/extension (e.g. "weap" or "weapon").
+    pub(in crate::app) fn group_label_matches(&self, group_tag: u32, filter_lower: &str) -> bool {
+        if format_group_tag(group_tag).to_ascii_lowercase() == filter_lower {
+            return true;
+        }
+        self.names()
+            .name_for(group_tag)
+            .or_else(|| group_tag_to_extension(group_tag))
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains(filter_lower)
+    }
+}

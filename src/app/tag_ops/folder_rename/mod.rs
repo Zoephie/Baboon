@@ -100,7 +100,7 @@ impl Baboon {
             self.model.status = "A folder move/rename is already running".to_owned();
             return;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
@@ -122,10 +122,10 @@ impl Baboon {
         // large folder on disk here stalls the window (Halo 3's `objects`,
         // 15,555 tags, took 0.3 s on a warm cache). Otherwise from disk, the
         // way the job itself finds them.
-        let names = self.names().clone();
+        let names = self.model.names().clone();
         let folder = root.join(&rel_path);
         let loaded = self
-            .source()
+            .model.source()
             .filter(|source| !source.all_entries.is_empty())
             .map(|source| {
                 source
@@ -148,7 +148,7 @@ impl Baboon {
                 }
             },
         };
-        let outside_referrers = self.source().and_then(|source| {
+        let outside_referrers = self.model.source().and_then(|source| {
             let index = source.reverse_dependencies.as_ref()?;
             let keys = outside_referrer_keys(&inside, index, &names);
             let mut paths = source
@@ -165,7 +165,7 @@ impl Baboon {
             .map(|parent| parent.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
         self.tag_ops.loose_folder_rename = Some(LooseFolderRenameState {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             rel_path,
             parent_display,
             name_input: old_name.clone(),
@@ -194,7 +194,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return true;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Rename requires a loaded tags folder".to_owned();
             return true;
         };

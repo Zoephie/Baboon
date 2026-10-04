@@ -635,12 +635,12 @@ impl Baboon {
             .filter(|dialog| !dialog.review_only)
             .map(ModExportDialog::output_utoc);
         let mounted_mods = kit_index
-            .map(|index| self.mounted_mod_labels(index))
+            .map(|index| self.model.mounted_mod_labels(index))
             .unwrap_or_default();
         let replaces_mounted = export_target
             .as_deref()
             .zip(kit_index)
-            .map(|(target, index)| self.export_replaces_mounted(index, target))
+            .map(|(target, index)| self.model.export_replaces_mounted(index, target))
             .unwrap_or_default();
 
         let mut open = true;
@@ -1041,7 +1041,7 @@ impl Baboon {
             })
             .unwrap_or_default();
         if !pending.is_empty()
-            && let Some(index) = self.resolve_kit(kit)
+            && let Some(index) = self.model.resolve_kit(kit)
         {
             for identity in pending {
                 let diff = self.diff_reviewed_tag(index, &identity);

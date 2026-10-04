@@ -729,7 +729,7 @@ impl Baboon {
         result: Result<ThumbnailImage, String>,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+        let Some(kit_index) = self.model.resolve_kit(stamp.kit) else {
             // The kit closed while this ran.
             return true;
         };
@@ -739,7 +739,7 @@ impl Baboon {
         S::library_mut(&mut self.views[self.model.kits[kit_index].id])
             .pending
             .remove(&key);
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             // Reloaded while this ran: the thumbnail is of the old source.
             return true;
         }

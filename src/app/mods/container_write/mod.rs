@@ -402,7 +402,7 @@ impl Baboon {
             return Ok(lease);
         }
         for kit_index in 0..self.model.kits.len() {
-            if !self.chimp_covers(kit_index, &target_utoc) {
+            if !self.model.chimp_covers(kit_index, &target_utoc) {
                 continue;
             }
             let kit_id = self.model.kits[kit_index].id;
@@ -419,7 +419,7 @@ impl Baboon {
                             file: target_utoc.clone(),
                             label: lease_label(&target_utoc),
                             holders: vec![ContainerHolder::ChimpWorld {
-                                workspace: self.workspace_label(kit_index),
+                                workspace: self.model.workspace_label(kit_index),
                                 doing,
                             }],
                             unattributed: 0,
@@ -444,7 +444,7 @@ impl Baboon {
                         file: target_utoc.clone(),
                         label: lease_label(&target_utoc),
                         holders: vec![ContainerHolder::ChimpWorld {
-                            workspace: self.workspace_label(kit_index),
+                            workspace: self.model.workspace_label(kit_index),
                             doing: "still mounting".to_owned(),
                         }],
                         unattributed: 0,
@@ -513,7 +513,7 @@ impl Baboon {
                 };
                 let (mut holders, unattributed) =
                     self.probe_container_holders(kit_index, &target_utoc, holders, unattributed);
-                holders.extend(self.other_workspace_mounts(kit_index, &target_utoc));
+                holders.extend(self.model.other_workspace_mounts(kit_index, &target_utoc));
                 return Err(ContainerWriteFailure {
                     phase: LeasePhase::Unmap,
                     file: target_utoc.with_extension("ucas"),
@@ -549,7 +549,7 @@ impl Baboon {
     pub(in crate::app) fn drain_pending_chimp_remounts(&mut self, ctx: &egui::Context) -> usize {
         let remount: Vec<usize> = std::mem::take(&mut self.mods.pending_chimp_remounts)
             .into_iter()
-            .filter_map(|kit| self.kit_index(kit))
+            .filter_map(|kit| self.model.kit_index(kit))
             .collect();
         for &kit_index in &remount {
             self.begin_chimp_mount(kit_index, ctx.clone());
@@ -582,7 +582,7 @@ impl Baboon {
     ) -> ContainerWriteReport {
         let mut report = ContainerWriteReport::default();
         for (kit_id, index) in std::mem::take(&mut lease.unmapped) {
-            let Some(kit_index) = self.kit_index(kit_id) else {
+            let Some(kit_index) = self.model.kit_index(kit_id) else {
                 continue;
             };
             if let Some(failure) = self.reopen_unmapped_container(kit_index, index) {
@@ -603,7 +603,7 @@ impl Baboon {
                 if remount.contains(&kit_id) {
                     continue;
                 }
-                if self.chimp_covers(kit_index, &target)
+                if self.model.chimp_covers(kit_index, &target)
                     && matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_))
                 {
                     self.model.kits[kit_index].chimp.mount = ChimpMount::Idle;
@@ -651,7 +651,7 @@ impl Baboon {
                     .iter()
                     .map(|(kit, _)| *kit)
                     .chain(lease.chimp_idled.iter().copied())
-                    .any(|kit| self.kit_index(kit).is_none())
+                    .any(|kit| self.model.kit_index(kit).is_none())
             })
             .map(|(id, _)| *id)
             .collect();
@@ -707,27 +707,9 @@ impl Baboon {
         }
     }
 
-    /// Whether this workspace's Chimp mount covers `target_utoc`.
-    fn chimp_covers(&self, kit_index: usize, target_utoc: &Path) -> bool {
-        if matches!(
-            self.model.kits[kit_index].chimp.mount,
-            ChimpMount::Idle | ChimpMount::Failed(_)
-        ) {
-            return false;
-        }
-        self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .is_some_and(|source| target_utoc.starts_with(source.source.root_path()))
-    }
 
-    fn workspace_label(&self, kit_index: usize) -> String {
-        self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .map(|source| source.label.clone())
-            .unwrap_or_else(|| "this workspace".to_owned())
-    }
+
+
 
     /// Name what still holds a mounted container, and count what cannot be
     /// named.
@@ -744,7 +726,7 @@ impl Baboon {
         mut holders: Vec<ContainerHolder>,
         unattributed: usize,
     ) -> (Vec<ContainerHolder>, usize) {
-        let workspace = self.workspace_label(kit_index);
+        let workspace = self.model.workspace_label(kit_index);
         let kit_id = self.model.kits[kit_index].id;
         let mut remaining = unattributed;
         let tracked: [(&'static str, bool); 8] = [
@@ -780,7 +762,7 @@ impl Baboon {
         }
         // Chimp holds its own separate mapping and `.pak` handle rather than a
         // clone of this archive, so it never accounts for one of the count.
-        if self.chimp_covers(kit_index, target_utoc) {
+        if self.model.chimp_covers(kit_index, target_utoc) {
             holders.push(ContainerHolder::ChimpWorld {
                 workspace,
                 doing: self.chimp_activity(kit_index),
@@ -789,20 +771,7 @@ impl Baboon {
         (holders, remaining)
     }
 
-    /// Other open workspaces mounting the same container file.
-    fn other_workspace_mounts(&self, writing: usize, target_utoc: &Path) -> Vec<ContainerHolder> {
-        (0..self.model.kits.len())
-            .filter(|&kit_index| kit_index != writing)
-            .filter(|&kit_index| {
-                self.model.kits[kit_index].source.as_ref().is_some_and(|source| {
-                    !crate::core::source::mounted_containers_at(&source.source, target_utoc).is_empty()
-                })
-            })
-            .map(|kit_index| ContainerHolder::OtherWorkspaceMount {
-                workspace: self.workspace_label(kit_index),
-            })
-            .collect()
-    }
+
 }
 
 fn lease_label(target_utoc: &Path) -> String {
@@ -815,3 +784,42 @@ fn lease_label(target_utoc: &Path) -> String {
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    /// Whether this workspace's Chimp mount covers `target_utoc`.
+    fn chimp_covers(&self, kit_index: usize, target_utoc: &Path) -> bool {
+        if matches!(
+            self.kits[kit_index].chimp.mount,
+            ChimpMount::Idle | ChimpMount::Failed(_)
+        ) {
+            return false;
+        }
+        self.kits[kit_index]
+            .source
+            .as_ref()
+            .is_some_and(|source| target_utoc.starts_with(source.source.root_path()))
+    }
+
+    fn workspace_label(&self, kit_index: usize) -> String {
+        self.kits[kit_index]
+            .source
+            .as_ref()
+            .map(|source| source.label.clone())
+            .unwrap_or_else(|| "this workspace".to_owned())
+    }
+
+    /// Other open workspaces mounting the same container file.
+    fn other_workspace_mounts(&self, writing: usize, target_utoc: &Path) -> Vec<ContainerHolder> {
+        (0..self.kits.len())
+            .filter(|&kit_index| kit_index != writing)
+            .filter(|&kit_index| {
+                self.kits[kit_index].source.as_ref().is_some_and(|source| {
+                    !crate::core::source::mounted_containers_at(&source.source, target_utoc).is_empty()
+                })
+            })
+            .map(|kit_index| ContainerHolder::OtherWorkspaceMount {
+                workspace: self.workspace_label(kit_index),
+            })
+            .collect()
+    }
+}

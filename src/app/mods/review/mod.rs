@@ -19,7 +19,7 @@ impl Baboon {
         let Some(open) = self.mods.mod_export.as_ref() else {
             return;
         };
-        if self.resolve_kit(open.kit) != Some(kit) {
+        if self.model.resolve_kit(open.kit) != Some(kit) {
             return;
         }
         let Some((snapshot, rows)) = self.capture_mod_export_rows(kit) else {
@@ -131,7 +131,7 @@ impl Baboon {
             let _ = fs::create_dir_all(&folder);
         }
         self.mods.mod_export = Some(ModExportDialog {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             review_only,
             snapshot,
             rows,
@@ -251,7 +251,7 @@ impl Baboon {
             .mods.mod_export
             .as_ref()
             .map(|dialog| dialog.kit)
-            .and_then(|kit| self.resolve_kit(kit))
+            .and_then(|kit| self.model.resolve_kit(kit))
         else {
             return Err("The review is no longer open".to_owned());
         };

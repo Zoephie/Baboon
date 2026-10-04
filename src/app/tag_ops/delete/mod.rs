@@ -316,11 +316,11 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         if self.tag_ops.container_delete_running.contains(&kit)
             || self.tag_ops.container_duplicate_running.contains(&kit)
         {
@@ -328,14 +328,14 @@ impl Baboon {
                 "A Campaign Evolved write is already running for this workspace".to_owned();
             return;
         }
-        let containers = self.mounted_containers().unwrap_or_default();
+        let containers = self.model.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
         if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
             self.model.status = error;
             return;
         }
-        let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
+        let (referrers, referrers_unavailable) = match self.model.references_to_entry(&entry) {
             Some(list) => (
                 list.into_iter().map(|entry| entry.display_path).collect(),
                 false,
@@ -379,12 +379,7 @@ impl Baboon {
         });
     }
 
-    pub(in crate::app) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
-        match &self.source()?.source {
-            TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
-            _ => None,
-        }
-    }
+
 
     /// Apply the confirmed deletion. Loose tags are moved on the spot; container
     /// tags go to a worker, because rewriting a pak's TOC is not a UI-thread job.
@@ -402,11 +397,11 @@ impl Baboon {
         // Re-resolved after the dialog, not carried through it: a modeless
         // confirmation outlives the frame that opened it, and the source can
         // have moved on underneath.
-        let Some(entry) = self.entry_for_key(&confirm.key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&confirm.key).cloned() else {
             self.model.status = "Tag is no longer in the source".to_owned();
             return;
         };
-        let containers = self.mounted_containers().unwrap_or_default();
+        let containers = self.model.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
         if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.tag_ops.created_tags)
         {
@@ -436,7 +431,7 @@ impl Baboon {
     }
 
     fn delete_loose_tag(&mut self, entry: &TagEntry, path: &Path) -> Result<PathBuf, String> {
-        let game = self.source().and_then(|source| source.game);
+        let game = self.model.source().and_then(|source| source.game);
         let destination =
             loose_trash_destination(game.map(GameId::as_str), &entry.display_path, now_unix_secs())?;
         if let Some(parent) = destination.parent() {
@@ -455,9 +450,9 @@ impl Baboon {
         rel_path: String,
         ctx: egui::Context,
     ) {
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let (root, containers, target_label, is_mod) = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "No source is loaded".to_owned();
                 return;
             };
@@ -560,7 +555,7 @@ impl Baboon {
             };
             self.release_in_place_lease(lease, outcome);
         }
-        let kit_index = self.kit_index(stamp.kit);
+        let kit_index = self.model.kit_index(stamp.kit);
         self.tag_ops.container_delete_running.remove(&stamp.kit);
         let result = match result {
             Ok(result) => result,
@@ -745,3 +740,12 @@ mod tests;
 
 #[cfg(test)]
 mod delete_lease_tests;
+
+impl Model {
+    pub(in crate::app) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
+        match &self.source()?.source {
+            TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
+            _ => None,
+        }
+    }
+}

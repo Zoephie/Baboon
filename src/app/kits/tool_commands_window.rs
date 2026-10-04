@@ -8,7 +8,7 @@ impl Baboon {
         if !self.kit_tools.tool_commands.open {
             return;
         }
-        let game = self.source_game();
+        let game = self.model.source_game();
         if let Some(game) = game {
             self.ensure_tool_commands_loaded(game);
         }
@@ -477,7 +477,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
-        let layout = self.kit_layout_for(self.model.active);
+        let layout = self.model.kit_layout_for(self.model.active);
         let kit_root = layout.as_ref().map(|layout| layout.root.clone());
         let data_root = layout.as_ref().map(|layout| layout.data.clone());
         let tags_root = layout.as_ref().map(|layout| layout.tags.clone());

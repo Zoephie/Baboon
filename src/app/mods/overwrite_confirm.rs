@@ -21,8 +21,8 @@ impl Baboon {
         // over the tag, that is the mod — not the game's shipped pak, which is
         // what this dialog used to promise in every case.
         let target = self
-            .resolve_kit(kit)
-            .and_then(|index| self.container_label_for_tag(index, &key));
+            .model.resolve_kit(kit)
+            .and_then(|index| self.model.container_label_for_tag(index, &key));
         egui::Window::new("Overwrite game files?")
             .id(egui::Id::new("overwrite_confirm"))
             .open(&mut open)

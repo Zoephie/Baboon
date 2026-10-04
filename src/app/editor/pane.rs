@@ -103,7 +103,7 @@ impl Baboon {
             let filter = cached.unwrap_or_else(|| {
                 let filter = std::sync::Arc::new(compute_find_field_filter(
                     &doc.tag,
-                    self.names(),
+                    self.model.names(),
                     def_docs.as_deref(),
                     &self.search.find.query,
                     self.search.find.look_in,
@@ -561,7 +561,7 @@ impl Baboon {
         match &entry.group_tag.to_be_bytes() {
             b"scnr" => self.draw_scenario_launcher_buttons(ui, kit_index, entry),
             b"bitm" => {
-                let tags_root = self.loaded_tags_root_for(kit_index);
+                let tags_root = self.model.loaded_tags_root_for(kit_index);
                 let can_reimport = bitmap_reimport_data_path(entry, tags_root.as_deref()).is_some();
                 if icon_text_button(ui, ButtonIcon::Import, "Reimport", can_reimport)
                     .on_disabled_hover_text("Reimport requires a loose editing-kit bitmap tag")

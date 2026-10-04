@@ -25,7 +25,7 @@ impl Baboon {
             self.model.status = "Save or close dirty tags before moving/copying folders".to_owned();
             return;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Folder move/copy requires a loaded tags folder".to_owned();
             return;
         };
@@ -70,18 +70,18 @@ impl Baboon {
         move_folder: bool,
         job_label: String,
     ) {
-        let names = self.names().clone();
+        let names = self.model.names().clone();
         let existing_all_entries = self
-            .source()
+            .model.source()
             .map(|source| source.all_entries.clone())
             .unwrap_or_default();
         let existing_reverse_dependencies = self
-            .source()
+            .model.source()
             .and_then(|source| source.reverse_dependencies.clone());
-        let game = self.source().and_then(|source| source.game.clone());
+        let game = self.model.source().and_then(|source| source.game.clone());
         // Routed back to the kit the refactor was started in, not
         // whichever one is focused when it lands.
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         let tx = self.tx.clone();
         self.tag_ops.folder_refactor = Some(FolderRefactorUiState {
             label: job_label.clone(),
@@ -140,7 +140,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_name_operation(&mut self, key: &str, operation: TagNameOperation) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return;
         };
         let is_new_container = matches!(entry.location, TagEntryLocation::NewContainer { .. });
@@ -152,10 +152,10 @@ impl Baboon {
                 // validates against a handle the other is invalidating.
                 !self
                     .tag_ops.container_duplicate_running
-                    .contains(&self.active_kit_id())
+                    .contains(&self.model.active_kit_id())
                     && !self
                         .tag_ops.container_delete_running
-                        .contains(&self.active_kit_id())
+                        .contains(&self.model.active_kit_id())
                     && matches!(
                         entry.location,
                         TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
@@ -204,7 +204,7 @@ impl Baboon {
         // and the branch that runs come from one answer. It depends on Baboon's
         // ledger, which cannot change while the dialog is open.
         let in_place_pak = if operation == TagNameOperation::Rename {
-            let containers = self.mounted_containers().unwrap_or_default();
+            let containers = self.model.mounted_containers().unwrap_or_default();
             rename_in_place::container_rename_eligibility(&entry, &containers, &self.tag_ops.created_tags)
                 .ok()
                 .and_then(|_| match &entry.location {
@@ -226,7 +226,7 @@ impl Baboon {
                 }
             }
         };
-        let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
+        let (referrers, referrers_unavailable) = match self.model.references_to_entry(&entry) {
             Some(list) => (
                 list.iter()
                     .map(|e| e.display_path.replace('\\', "/"))
@@ -236,7 +236,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         self.tag_ops.rename_tag = Some(RenameTagState {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
             extension: if operation == TagNameOperation::Duplicate {
@@ -403,11 +403,11 @@ impl Baboon {
             self.model.status = "Save or close dirty tags before renaming".to_owned();
             return;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Tag no longer exists".to_owned();
             return;
         };
@@ -425,7 +425,7 @@ impl Baboon {
         // the pak that holds it — the same primitive as a rename, since a move
         // *is* a rename to a different parent.
         if matches!(
-            self.entry_for_key(key).map(|entry| &entry.location),
+            self.model.entry_for_key(key).map(|entry| &entry.location),
             Some(TagEntryLocation::NewContainer { .. } | TagEntryLocation::Container { .. })
         ) {
             self.open_rename_tag(key);
@@ -443,11 +443,11 @@ impl Baboon {
             self.model.status = "Save or close dirty tags before moving".to_owned();
             return;
         }
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Move requires a loaded tags folder".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag no longer exists".to_owned();
             return;
         };
@@ -496,18 +496,18 @@ impl Baboon {
         new_rel: String,
         job_label: &str,
     ) {
-        let names = self.names().clone();
-        let game = self.source().and_then(|source| source.game.clone());
+        let names = self.model.names().clone();
+        let game = self.model.source().and_then(|source| source.game.clone());
         let all_entries = self
-            .source()
+            .model.source()
             .map(|source| source.all_entries.clone())
             .unwrap_or_default();
         let reverse_dependencies = self
-            .source()
+            .model.source()
             .and_then(|source| source.reverse_dependencies.clone());
         // Routed back to the kit the refactor was started in, not
         // whichever one is focused when it lands.
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         let tx = self.tx.clone();
         let job_label = job_label.to_owned();
         self.tag_ops.folder_refactor = Some(FolderRefactorUiState {

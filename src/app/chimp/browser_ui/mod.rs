@@ -41,7 +41,7 @@ impl Baboon {
         kit_index: usize,
     ) {
         chimp_workspace_toolbar(ui, |ui| {
-            let packages = self.chimp_dirty_packages(kit_index);
+            let packages = self.model.chimp_dirty_packages(kit_index);
             let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
             let response = ui.add_enabled(!packages.is_empty(), egui::Button::image(icon));
             if response

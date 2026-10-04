@@ -22,7 +22,7 @@ fn an_incomplete_reference_index_is_reported_as_such() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
 
     app.handle_reverse_dependencies_built(stamp, ReverseDependencyIndex::default(), 3);
 

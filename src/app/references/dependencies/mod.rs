@@ -14,7 +14,7 @@ impl Baboon {
             self.model.status = "No tag selected".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Selected tag is no longer in the source".to_owned();
             return;
         };
@@ -22,19 +22,19 @@ impl Baboon {
             self.model.status = "Fix Tag Dependencies requires a loose-folder tag".to_owned();
             return;
         };
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Fix Tag Dependencies requires a loaded tags folder".to_owned();
             return;
         };
 
-        let entries = match self.dependency_database_entries() {
+        let entries = match self.model.dependency_database_entries() {
             Ok(entries) => entries,
             Err(error) => {
                 self.model.status = format!("Could not build dependency database: {error}");
                 return;
             }
         };
-        let names = self.names().clone();
+        let names = self.model.names().clone();
         let index = build_dependency_candidate_index(&entries, &names);
         let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(&key) else {
             self.model.status = "Load the selected tag before fixing dependencies".to_owned();
@@ -58,52 +58,18 @@ impl Baboon {
         self.model.status = status;
     }
 
-    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
-    /// broken references against.
-    ///
-    /// This used to rescan the whole folder on the UI thread on every use,
-    /// even with the completed scan already in memory, then replace
-    /// `all_entries` without moving the kit generation and rewrite the whole
-    /// index. The completed scan is kept current by single-tag upserts and the
-    /// periodic refresh, so it is used as it is; before it exists, this says
-    /// so rather than blocking on a scan of its own.
-    pub(in crate::app) fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
-        let source = self.model.kits[self.model.active]
-            .source
-            .as_ref()
-            .ok_or_else(|| "no tag source is loaded".to_owned())?;
-        if !matches!(source.source, TagSource::LooseFolder { .. }) {
-            return Err("load a loose editing-kit tags folder first".to_owned());
-        }
-        if source.all_entries.is_empty() {
-            return Err(
-                "the tag index is still being built; try again once indexing finishes".to_owned(),
-            );
-        }
-        Ok(source.all_entries.clone())
-    }
 
-    /// Explain why a reference lookup found no index, tailored to whether one is
-    /// currently building (auto after the full scan, or via Tools → Build
-    /// Reference Index).
-    pub(in crate::app) fn reference_index_unavailable_note(&self) -> String {
-        if self.model.kits[self.model.active].index_jobs.building_references
-            || self.model.kits[self.model.active].scanning_entries
-        {
-            "Reference index is building — try again in a moment.".to_owned()
-        } else {
-            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
-        }
-    }
+
+
 
     pub(in crate::app) fn show_unreferenced_tags(&mut self) {
-        match self.unreferenced_entries() {
+        match self.model.unreferenced_entries() {
             Some(entries) => {
                 let note = entries
                     .is_empty()
                     .then(|| "Every tag is referenced by at least one other tag.".to_owned());
                 self.search.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     title: format!("Unreferenced tags ({})", entries.len()),
                     entries,
                     annotations: Vec::new(),
@@ -113,11 +79,11 @@ impl Baboon {
             }
             None => {
                 self.search.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     title: "Unreferenced tags".to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
-                    note: Some(self.reference_index_unavailable_note()),
+                    note: Some(self.model.reference_index_unavailable_note()),
                     ref_target: None,
                 });
             }
@@ -151,7 +117,7 @@ impl Baboon {
         {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             return;
         };
         // Loose folders index automatically after their scan. Containers are
@@ -201,7 +167,7 @@ impl Baboon {
             return;
         }
         let tag_source = source.source.clone();
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         let tx = self.tx.clone();
         self.model.kits[self.model.active].index_jobs.building_references = true;
         self.model.kits[self.model.active]
@@ -655,3 +621,43 @@ mod refresh_reference_tests;
 
 #[cfg(test)]
 mod container_dependency_tests;
+
+impl Model {
+    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
+    /// broken references against.
+    ///
+    /// This used to rescan the whole folder on the UI thread on every use,
+    /// even with the completed scan already in memory, then replace
+    /// `all_entries` without moving the kit generation and rewrite the whole
+    /// index. The completed scan is kept current by single-tag upserts and the
+    /// periodic refresh, so it is used as it is; before it exists, this says
+    /// so rather than blocking on a scan of its own.
+    pub(in crate::app) fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
+        let source = self.kits[self.active]
+            .source
+            .as_ref()
+            .ok_or_else(|| "no tag source is loaded".to_owned())?;
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+            return Err("load a loose editing-kit tags folder first".to_owned());
+        }
+        if source.all_entries.is_empty() {
+            return Err(
+                "the tag index is still being built; try again once indexing finishes".to_owned(),
+            );
+        }
+        Ok(source.all_entries.clone())
+    }
+
+    /// Explain why a reference lookup found no index, tailored to whether one is
+    /// currently building (auto after the full scan, or via Tools → Build
+    /// Reference Index).
+    pub(in crate::app) fn reference_index_unavailable_note(&self) -> String {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
+            "Reference index is building — try again in a moment.".to_owned()
+        } else {
+            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
+        }
+    }
+}

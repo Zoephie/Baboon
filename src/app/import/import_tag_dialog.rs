@@ -288,7 +288,7 @@ impl Baboon {
         let Some(pending) = self.import.import_discard_confirm.as_ref() else {
             return;
         };
-        let label = self.tag_path_label(&pending.target_key);
+        let label = self.model.tag_path_label(&pending.target_key);
         let mut discard = false;
         let mut cancel = false;
         egui::Window::new("Discard unsaved changes?")

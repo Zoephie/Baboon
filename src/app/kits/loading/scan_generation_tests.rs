@@ -34,7 +34,7 @@ fn a_finished_scan_moves_the_kit_generation() {
         chosen_kit_layout: None,
     });
     let before = app.model.kits[0].generation;
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     // Not empty: an empty scan leaves the reference build thinking the
     // scan is unfinished, and it starts another scan, which bumps the
     // generation on its own and would hide a missing bump here.
@@ -124,7 +124,7 @@ fn an_empty_folder_is_scanned_once() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
 
     app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
 

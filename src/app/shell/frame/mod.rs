@@ -734,10 +734,10 @@ impl Baboon {
         // Campaign Evolved has no Sapien at all. Neither is a button worth
         // greying out — a control that can never work reads as something the
         // user has misconfigured.
-        let offers_sapien = self.kit_offers_scenario_sapien(kit_index);
+        let offers_sapien = self.model.kit_offers_scenario_sapien(kit_index);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let tag_test_ready = self.can_launch_scenario_in_tag_test(kit_index, entry);
+            let tag_test_ready = self.model.can_launch_scenario_in_tag_test(kit_index, entry);
             if scenario_launcher_button(
                 ui,
                 "bytes://baboon_app_icons/tag-test.png",
@@ -752,7 +752,7 @@ impl Baboon {
                 self.launch_scenario_in_tag_test(&key);
             }
             if offers_sapien {
-                let sapien_ready = self.can_launch_scenario_in_sapien(kit_index, entry);
+                let sapien_ready = self.model.can_launch_scenario_in_sapien(kit_index, entry);
                 if scenario_launcher_button(
                     ui,
                     "bytes://baboon_app_icons/sapien.png",
@@ -781,7 +781,7 @@ impl Baboon {
             }
 
             let tag_test_ready = self
-                .kit_tool_path(self.tag_test_executable())
+                .model.kit_tool_path(self.model.tag_test_executable())
                 .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.shell.tag_test_icon.as_ref(), "T", tag_test_ready)
                 .on_hover_text("Launch tag_test without an auto-start scenario")
@@ -791,7 +791,7 @@ impl Baboon {
             }
 
             let sapien_ready = self
-                .kit_tool_path("sapien.exe")
+                .model.kit_tool_path("sapien.exe")
                 .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.shell.sapien_icon.as_ref(), "S", sapien_ready)
                 .on_hover_text("Launch Sapien without an auto-start scenario")
@@ -805,8 +805,8 @@ impl Baboon {
             // modifications across sessions. This is the way back to the
             // shipped tags; it is drawn here, outside the workspace tree, so it
             // always acts on the focused kit.
-            if self.current_source_is_campaign_project_capable(self.model.active) {
-                let stashed = self.stashed_campaign_tags(self.model.active);
+            if self.model.current_source_is_campaign_project_capable(self.model.active) {
+                let stashed = self.model.stashed_campaign_tags(self.model.active);
                 let unsaved = self.model.kits[self.model.active]
                     .parsed_tags
                     .values()
@@ -824,7 +824,7 @@ impl Baboon {
                     .clicked()
                 {
                     self.mods.clear_stash_confirm = Some(ClearStashConfirm {
-                        kit: self.active_kit_id(),
+                        kit: self.model.active_kit_id(),
                         stashed,
                         unsaved,
                     });
@@ -834,7 +834,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
-        let game = self.source_game();
+        let game = self.model.source_game();
         let commands = monitor_commands_for_game(game);
         let enabled = !commands.is_empty();
         let ctx = ui.ctx().clone();
@@ -867,7 +867,7 @@ impl Baboon {
     /// Tools ▸ Assets: the asset libraries, browsed across the whole kit rather
     /// than one tag at a time.
     pub(in crate::app) fn draw_assets_tools_menu(&mut self, ui: &mut Ui) {
-        let enabled = self.source().is_some();
+        let enabled = self.model.source().is_some();
         let menu = ui
             .add_enabled_ui(enabled, |ui| {
                 right_opening_menu_button(ui, "Assets", 222.0, |ui| {
@@ -881,7 +881,7 @@ impl Baboon {
                     }
                     // Baboon's own import pipelines only cover Halo 3 so far,
                     // so the entry only appears there.
-                    if self.active_kit_is_halo3() && ui.button("Blam!").clicked() {
+                    if self.model.active_kit_is_halo3() && ui.button("Blam!").clicked() {
                         return Some("blam");
                     }
                     None

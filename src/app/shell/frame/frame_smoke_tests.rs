@@ -129,7 +129,7 @@ fn loose_kit(h: &mut Harness) {
 
 /// The tags root of the [`loose_kit`] base.
 fn loose_root(h: &Harness) -> PathBuf {
-    h.app.loaded_tags_root().expect("a loose kit is loaded")
+    h.app.model.loaded_tags_root().expect("a loose kit is loaded")
 }
 
 const CE_TAG: &str = "objects/weapons/rifle/rifle.weapon";
@@ -180,7 +180,7 @@ fn ce_key() -> String {
 }
 
 fn active_id(h: &Harness) -> KitId {
-    h.app.active_kit_id()
+    h.app.model.active_kit_id()
 }
 
 fn biped_key() -> String {

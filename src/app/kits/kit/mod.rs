@@ -214,58 +214,27 @@ impl Kit {
 }
 
 impl Baboon {
-    /// Look a kit up by its stable id. Unused while `kits` holds a single
-    /// workspace; these are the entry points the kit strip, per-kit worker
-    /// routing, and the layout trees resolve through once more than one kit
-    /// can be resident.
-    #[allow(dead_code)]
-    pub(in crate::app) fn kit_index(&self, id: KitId) -> Option<usize> {
-        self.model.kits.iter().position(|kit| kit.id == id)
-    }
 
-    #[allow(dead_code)]
-    pub(in crate::app) fn kit(&self, id: KitId) -> Option<&Kit> {
-        self.model.kits.iter().find(|kit| kit.id == id)
-    }
+
+
 
     #[allow(dead_code)]
     pub(in crate::app) fn kit_mut(&mut self, id: KitId) -> Option<&mut Kit> {
         self.model.kits.iter_mut().find(|kit| kit.id == id)
     }
 
-    /// The active kit. Infallible: `kits` is never empty and `active` is
-    /// always a valid index into it.
-    #[allow(dead_code)]
-    pub(in crate::app) fn active_kit(&self) -> &Kit {
-        &self.model.kits[self.model.active]
-    }
+
 
     #[allow(dead_code)]
     pub(in crate::app) fn active_kit_mut(&mut self) -> &mut Kit {
         &mut self.model.kits[self.model.active]
     }
 
-    pub(in crate::app) fn active_kit_id(&self) -> KitId {
-        self.model.kits[self.model.active].id
-    }
 
-    /// Stamp identifying the active kit and its current revision, to be
-    /// attached to a background job so its result can be routed back.
-    pub(in crate::app) fn kit_stamp(&self) -> KitStamp {
-        let kit = &self.model.kits[self.model.active];
-        KitStamp {
-            kit: kit.id,
-            generation: kit.generation,
-        }
-    }
 
-    /// Resolve a stamp to the kit index it still refers to, or `None` if the
-    /// kit has closed or its source was replaced while the job was running.
-    /// Ids are never reused, so a closed kit cannot alias a live one.
-    pub(in crate::app) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
-        let index = self.kit_index(stamp.kit)?;
-        (self.model.kits[index].generation == stamp.generation).then_some(index)
-    }
+
+
+
 
     /// Focus the kit a piece of navigation state belongs to, before acting on
     /// it. Navigation names tags by key, and a key only means something within
@@ -273,7 +242,7 @@ impl Baboon {
     /// it came from. Returns false when that kit has closed, in which case the
     /// navigation is dropped rather than applied to whichever kit is active.
     pub(in crate::app) fn focus_navigation_kit(&mut self, kit: KitId) -> bool {
-        match self.kit_index(kit) {
+        match self.model.kit_index(kit) {
             Some(index) => {
                 self.model.active = index;
                 // Bring its workspace tab to the front too. `active` alone only
@@ -292,24 +261,15 @@ impl Baboon {
         }
     }
 
-    /// Resolve a kit id to its index, ignoring generation. For results that
-    /// stay valid across a source reload, such as a parsed document.
-    pub(in crate::app) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
-        self.kit_index(kit)
-    }
 
-    /// The active kit's source, or `None` for an empty workspace.
-    pub(in crate::app) fn source(&self) -> Option<&LoadedSourceData> {
-        self.model.kits[self.model.active].source.as_ref()
-    }
+
+
 
     pub(in crate::app) fn source_mut(&mut self) -> Option<&mut LoadedSourceData> {
         self.model.kits[self.model.active].source.as_mut()
     }
 
-    pub(in crate::app) fn names(&self) -> &TagNameIndex {
-        &self.model.kits[self.model.active].names
-    }
+
 
     /// Allocate the next never-reused kit id.
     #[allow(dead_code)]
@@ -355,7 +315,7 @@ impl Baboon {
     /// empty — closing the last one leaves a fresh empty workspace, which is
     /// the same state Baboon starts in.
     pub(in crate::app) fn remove_kit(&mut self, id: KitId) {
-        let Some(index) = self.kit_index(id) else {
+        let Some(index) = self.model.kit_index(id) else {
             return;
         };
         let closing_campaign_evolved = self.model.kits[index]
@@ -373,15 +333,9 @@ impl Baboon {
         self.model.active = active_after_removal(self.model.active, index, self.model.kits.len());
     }
 
-    /// Whether any kit holds unsaved edits.
-    pub(in crate::app) fn any_kit_dirty(&self) -> bool {
-        self.model.kits.iter().any(kit_has_dirty_documents)
-    }
 
-    /// Index of the first kit holding unsaved edits.
-    pub(in crate::app) fn first_dirty_kit(&self) -> Option<usize> {
-        self.model.kits.iter().position(kit_has_dirty_documents)
-    }
+
+
 
     /// Route an open request for `path` to a kit.
     ///
@@ -415,7 +369,7 @@ impl Baboon {
     /// All state staged specifically for that failed load is discarded with
     /// the reservation so it cannot leak into the next source.
     pub(in crate::app) fn release_source_load(&mut self, kit: KitId) {
-        let Some(index) = self.kit_index(kit) else {
+        let Some(index) = self.model.kit_index(kit) else {
             return;
         };
         self.model.kits[index].release_source_load();
@@ -427,7 +381,7 @@ impl Baboon {
     pub(in crate::app) fn install_loaded_source(&mut self, source: LoadedSourceData) {
         let mut names = source.names.clone();
         names.merge_missing(self.model.default_names.clone());
-        let id = self.active_kit_id();
+        let id = self.model.active_kit_id();
         let index = self.model.active;
         // The requested path outlives the load it started, so a later open of
         // the same folder can find this kit.
@@ -592,3 +546,73 @@ pub(in crate::app) struct IndexJobs {
 
 #[cfg(test)]
 mod document_cleanup_tests;
+
+impl Model {
+    /// Look a kit up by its stable id. Unused while `kits` holds a single
+    /// workspace; these are the entry points the kit strip, per-kit worker
+    /// routing, and the layout trees resolve through once more than one kit
+    /// can be resident.
+    #[allow(dead_code)]
+    pub(in crate::app) fn kit_index(&self, id: KitId) -> Option<usize> {
+        self.kits.iter().position(|kit| kit.id == id)
+    }
+
+    #[allow(dead_code)]
+    pub(in crate::app) fn kit(&self, id: KitId) -> Option<&Kit> {
+        self.kits.iter().find(|kit| kit.id == id)
+    }
+
+    /// The active kit. Infallible: `kits` is never empty and `active` is
+    /// always a valid index into it.
+    #[allow(dead_code)]
+    pub(in crate::app) fn active_kit(&self) -> &Kit {
+        &self.kits[self.active]
+    }
+
+    pub(in crate::app) fn active_kit_id(&self) -> KitId {
+        self.kits[self.active].id
+    }
+
+    /// Stamp identifying the active kit and its current revision, to be
+    /// attached to a background job so its result can be routed back.
+    pub(in crate::app) fn kit_stamp(&self) -> KitStamp {
+        let kit = &self.kits[self.active];
+        KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        }
+    }
+
+    /// Resolve a stamp to the kit index it still refers to, or `None` if the
+    /// kit has closed or its source was replaced while the job was running.
+    /// Ids are never reused, so a closed kit cannot alias a live one.
+    pub(in crate::app) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
+        let index = self.kit_index(stamp.kit)?;
+        (self.kits[index].generation == stamp.generation).then_some(index)
+    }
+
+    /// Resolve a kit id to its index, ignoring generation. For results that
+    /// stay valid across a source reload, such as a parsed document.
+    pub(in crate::app) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
+        self.kit_index(kit)
+    }
+
+    /// The active kit's source, or `None` for an empty workspace.
+    pub(in crate::app) fn source(&self) -> Option<&LoadedSourceData> {
+        self.kits[self.active].source.as_ref()
+    }
+
+    pub(in crate::app) fn names(&self) -> &TagNameIndex {
+        &self.kits[self.active].names
+    }
+
+    /// Whether any kit holds unsaved edits.
+    pub(in crate::app) fn any_kit_dirty(&self) -> bool {
+        self.kits.iter().any(kit_has_dirty_documents)
+    }
+
+    /// Index of the first kit holding unsaved edits.
+    pub(in crate::app) fn first_dirty_kit(&self) -> Option<usize> {
+        self.kits.iter().position(kit_has_dirty_documents)
+    }
+}

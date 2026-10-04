@@ -119,7 +119,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
         chosen_kit_layout: None,
     });
     // A build starts, and reads the tag as it is: pointing at nothing.
-    let stamp = app.kit_stamp();
+    let stamp = app.model.kit_stamp();
     app.model.kits[0].index_jobs.building_references = true;
     let mut read_before_the_save = ReverseDependencyIndex::default();
     read_before_the_save.set_tag_dependencies(entry.key.clone(), Vec::new());

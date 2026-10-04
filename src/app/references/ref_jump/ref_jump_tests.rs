@@ -54,7 +54,7 @@ fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
         chosen_kit_layout: None,
     });
     app.search.query_results = Some(TagQueryResults {
-        kit: app.active_kit_id(),
+        kit: app.model.active_kit_id(),
         title: "References to bitmaps/target".to_owned(),
         entries: vec![entry],
         annotations: Vec::new(),

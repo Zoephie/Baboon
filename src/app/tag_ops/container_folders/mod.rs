@@ -125,16 +125,7 @@ fn container_folder_rel(parent_rel: Option<&str>, leaf: &str) -> String {
 }
 
 impl Baboon {
-    /// Names occupying `parent_rel` in the given workspace.
-    fn folder_siblings_in(&self, kit_index: usize, parent_rel: Option<&str>) -> Vec<String> {
-        let kit = &self.model.kits[kit_index];
-        let entries = kit
-            .source
-            .as_ref()
-            .map(|source| source.entries.as_slice())
-            .unwrap_or_default();
-        folder_siblings(entries, &kit.pending_container_folders, parent_rel)
-    }
+
 
     /// Raise the New Folder dialog for `parent_rel` (`None` = container root).
     pub(in crate::app) fn open_new_container_folder(&mut self, parent_rel: Option<String>) {
@@ -173,7 +164,7 @@ impl Baboon {
         let Some(dialog) = self.tag_ops.container_folder_dialog.as_ref() else {
             return true;
         };
-        let Some(kit_index) = self.kit_index(dialog.kit) else {
+        let Some(kit_index) = self.model.kit_index(dialog.kit) else {
             // The workspace closed while the modeless dialog was open.
             return true;
         };
@@ -183,7 +174,7 @@ impl Baboon {
 
         // A rename keeps its own leaf available, or renaming a folder to the
         // case-variant of its current name would collide with itself.
-        let mut siblings = self.folder_siblings_in(kit_index, parent_rel.as_deref());
+        let mut siblings = self.model.folder_siblings_in(kit_index, parent_rel.as_deref());
         if let Some(old) = renaming.as_deref() {
             let old_leaf = old.rsplit('/').next().unwrap_or(old);
             siblings.retain(|name| !name.eq_ignore_ascii_case(old_leaf));
@@ -297,3 +288,16 @@ impl Baboon {
 
 #[cfg(test)]
 mod tests;
+
+impl Model {
+    /// Names occupying `parent_rel` in the given workspace.
+    fn folder_siblings_in(&self, kit_index: usize, parent_rel: Option<&str>) -> Vec<String> {
+        let kit = &self.kits[kit_index];
+        let entries = kit
+            .source
+            .as_ref()
+            .map(|source| source.entries.as_slice())
+            .unwrap_or_default();
+        folder_siblings(entries, &kit.pending_container_folders, parent_rel)
+    }
+}

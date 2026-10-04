@@ -25,7 +25,7 @@ impl Baboon {
             self.model.status = "That tag has no unsaved changes".to_owned();
             return;
         }
-        let label = self.tag_path_label(key);
+        let label = self.model.tag_path_label(key);
         let kit_state = &mut self.model.kits[kit];
         let view = &mut self.views[kit_state.id];
         kit_state.parsed_tags.remove(key);
@@ -68,7 +68,7 @@ impl Baboon {
     /// with "unsaved new tag is no longer loaded".
     pub(in crate::app) fn forget_new_container_entry(&mut self, kit: usize, key: &str) -> bool {
         if !matches!(
-            self.entry_for_key_in(kit, key).map(|entry| &entry.location),
+            self.model.entry_for_key_in(kit, key).map(|entry| &entry.location),
             Some(TagEntryLocation::NewContainer { .. })
         ) {
             return false;
@@ -94,15 +94,7 @@ impl Baboon {
         true
     }
 
-    /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
-    /// in this kit's project from an earlier session.
-    pub(in crate::app) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
-        self.model.kits[kit]
-            .parsed_tags
-            .get(key)
-            .is_some_and(|document| document.dirty.is_set())
-            || self.tag_has_stashed_overlay(kit, key)
-    }
+
 
     pub(in crate::app) fn close_tab(&mut self, key: &str) {
         // `close_tag_pane` re-derives the open set and moves the selection off
@@ -119,7 +111,7 @@ impl Baboon {
         self.flush_all_chimp_checkpoints();
         if self.documents.save_changes_prompt.visible
             || self.chimp.chimp_discard_prompt.is_some()
-            || self.has_chimp_save_dialog()
+            || self.model.has_chimp_save_dialog()
         {
             return;
         }
@@ -142,12 +134,12 @@ impl Baboon {
         // just below — resolves against the right kit.
         match &action {
             PendingCloseAction::CloseKit(id) => {
-                if let Some(index) = self.kit_index(*id) {
+                if let Some(index) = self.model.kit_index(*id) {
                     self.model.active = index;
                 }
             }
             PendingCloseAction::CloseApp => {
-                if let Some(index) = self.first_dirty_kit() {
+                if let Some(index) = self.model.first_dirty_kit() {
                     self.model.active = index;
                 }
             }
@@ -159,8 +151,8 @@ impl Baboon {
         // way to say no: overlays were only ever inserted, so an edit could not
         // be taken back once stashed. The prompt is raised for these sources
         // too, and offers stashing as a third, named choice.
-        let can_stash = self.current_source_is_campaign_project_capable(self.model.active);
-        let dirty_tags = self.dirty_tags_for_close_action(&action);
+        let can_stash = self.model.current_source_is_campaign_project_capable(self.model.active);
+        let dirty_tags = self.model.dirty_tags_for_close_action(&action);
         if !dirty_tags.is_empty() {
             // What discarding would cost, resolved here rather than described in the
             // abstract: these edits were stashed into the workspace's project within
@@ -168,7 +160,7 @@ impl Baboon {
             // that outlives the session.
             let stashed = dirty_tags
                 .iter()
-                .filter(|entry| self.tag_has_stashed_overlay(self.model.active, &entry.tag_id))
+                .filter(|entry| self.model.tag_has_stashed_overlay(self.model.active, &entry.tag_id))
                 .count();
             let stash_file = self.model.kits[self.model.active]
                 .project.active
@@ -188,7 +180,7 @@ impl Baboon {
             return;
         }
 
-        let chimp_packages = self.dirty_chimp_for_close_action(&action);
+        let chimp_packages = self.model.dirty_chimp_for_close_action(&action);
         if !chimp_packages.is_empty() {
             self.open_chimp_discard_prompt(self.model.active, chimp_packages, Some(action), None);
             return;
@@ -219,87 +211,22 @@ impl Baboon {
         }
         if self.documents.save_changes_prompt.visible
             || self.chimp.chimp_discard_prompt.is_some()
-            || self.has_chimp_save_dialog()
+            || self.model.has_chimp_save_dialog()
         {
             return;
         }
         self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
     }
 
-    pub(in crate::app) fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
-        self.close_action_tag_keys(action)
-            .into_iter()
-            .filter_map(|key| {
-                let doc = self.model.kits[self.model.active].parsed_tags.get(&key)?;
-                if !doc.dirty.is_set() {
-                    return None;
-                }
-                // Edits to a tag that has no writer (a monolithic build, a
-                // big-endian tag) are session-scratch by construction. Listing
-                // them here would offer a Save that always fails, and — for
-                // CloseApp, which re-checks for dirty work after the prompt —
-                // a close that never terminates.
-                if !document_edits_are_saveable(&self.model.kits[self.model.active], &key, doc) {
-                    return None;
-                }
-                Some(DirtyTagEntry {
-                    path: self.tag_path_label(&key),
-                    tag_id: key,
-                    checked: true,
-                })
-            })
-            .collect()
-    }
 
-    pub(in crate::app) fn dirty_chimp_for_close_action(&self, action: &PendingCloseAction) -> Vec<String> {
-        if close_action_includes_chimp(action) {
-            self.chimp_dirty_packages(self.model.active)
-        } else {
-            Vec::new()
-        }
-    }
 
-    pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
-        match action {
-            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
-                ordered_unique_keys(self.model.kits[self.model.active].open_tabs.iter())
-            }
-            PendingCloseAction::CloseTab(key) => vec![key.clone()],
-            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
-                self.model.kits[self.model.active]
-                    .open_tabs
-                    .iter()
-                    .filter(|key| *key != kept_key),
-            ),
-            // `request_close_action` has already made this kit active, so the
-            // active-kit lookups above address the right documents.
-            PendingCloseAction::CloseKit(_) => {
-                ordered_unique_keys(self.model.kits[self.model.active].open_tabs.iter())
-            }
-        }
-    }
 
-    pub(in crate::app) fn tag_path_label(&self, key: &str) -> String {
-        let Some(entry) = self.entry_for_key(key) else {
-            return key.to_owned();
-        };
-        match &entry.location {
-            TagEntryLocation::LooseFile(path) => path.display().to_string(),
-            TagEntryLocation::Monolithic { .. }
-            | TagEntryLocation::Container { .. }
-            | TagEntryLocation::NewContainer { .. } => entry.display_path.clone(),
-        }
-    }
 
-    /// Whether the loaded document for `key` still has unsaved edits. Save
-    /// paths that report through `status` (container writes) use this to tell
-    /// success from failure.
-    pub(in crate::app) fn tag_is_dirty(&self, key: &str) -> bool {
-        self.model.kits[self.model.active]
-            .parsed_tags
-            .get(key)
-            .is_some_and(|document| document.dirty.is_set())
-    }
+
+
+
+
+
 
     pub(in crate::app) fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
@@ -309,7 +236,7 @@ impl Baboon {
                 // not call it recursively here: a dirty Chimp document used
                 // to be counted by this check but omitted from the tag prompt,
                 // creating an infinite CloseApp -> request_close_action loop.
-                if self.any_kit_dirty() {
+                if self.model.any_kit_dirty() {
                     self.model.status = "Could not close while unsaved workspace data remains".to_owned();
                     return;
                 }
@@ -468,12 +395,12 @@ impl Baboon {
                     // instead of returning a path, so success is read back off
                     // the document's dirty flag.
                     match close_prompt_save_route(
-                        self.entry_for_key(&tag_id).map(|entry| &entry.location),
+                        self.model.entry_for_key(&tag_id).map(|entry| &entry.location),
                     ) {
                         ClosePromptSave::NewContainer => {
                             self.save_new_container_tag(&tag_id);
-                            if self.tag_is_dirty(&tag_id) {
-                                let label = self.tag_path_label(&tag_id);
+                            if self.model.tag_is_dirty(&tag_id) {
+                                let label = self.model.tag_path_label(&tag_id);
                                 errors.push(format!("{label}: not saved"));
                             } else {
                                 saved.push(tag_id.clone());
@@ -482,9 +409,9 @@ impl Baboon {
                         }
                         ClosePromptSave::ContainerInPlace => {
                             self.overwrite_current_tag_in_place(&tag_id);
-                            if self.tag_is_dirty(&tag_id) {
+                            if self.model.tag_is_dirty(&tag_id) {
                                 // The overwrite failure reason is in `status`.
-                                let label = self.tag_path_label(&tag_id);
+                                let label = self.model.tag_path_label(&tag_id);
                                 let detail = self.model.status.clone();
                                 errors.push(format!("{label}: {detail}"));
                             } else {
@@ -497,7 +424,7 @@ impl Baboon {
                     match self.save_tag_by_key(&tag_id) {
                         Ok(path) => saved.push(path.display().to_string()),
                         Err(error) => {
-                            let label = self.tag_path_label(&tag_id);
+                            let label = self.model.tag_path_label(&tag_id);
                             errors.push(format!("{label}: {error}"));
                         }
                     }
@@ -517,7 +444,7 @@ impl Baboon {
                     let message = format!("Save failed: {}", errors.join("; "));
                     let pending_action = self.documents.save_changes_prompt.pending_action.clone();
                     self.documents.save_changes_prompt.dirty_tags =
-                        self.dirty_tags_for_close_action(&pending_action);
+                        self.model.dirty_tags_for_close_action(&pending_action);
                     // A failed save leaves the prompt up, and an armed discard
                     // has no business surviving into it.
                     self.documents.save_changes_prompt.confirm_discard = false;
@@ -735,3 +662,90 @@ mod save_close_session_tests;
 
 #[cfg(test)]
 mod close_tests;
+
+impl Model {
+    /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
+    /// in this kit's project from an earlier session.
+    pub(in crate::app) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
+        self.kits[kit]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set())
+            || self.tag_has_stashed_overlay(kit, key)
+    }
+
+    pub(in crate::app) fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
+        self.close_action_tag_keys(action)
+            .into_iter()
+            .filter_map(|key| {
+                let doc = self.kits[self.active].parsed_tags.get(&key)?;
+                if !doc.dirty.is_set() {
+                    return None;
+                }
+                // Edits to a tag that has no writer (a monolithic build, a
+                // big-endian tag) are session-scratch by construction. Listing
+                // them here would offer a Save that always fails, and — for
+                // CloseApp, which re-checks for dirty work after the prompt —
+                // a close that never terminates.
+                if !document_edits_are_saveable(&self.kits[self.active], &key, doc) {
+                    return None;
+                }
+                Some(DirtyTagEntry {
+                    path: self.tag_path_label(&key),
+                    tag_id: key,
+                    checked: true,
+                })
+            })
+            .collect()
+    }
+
+    pub(in crate::app) fn dirty_chimp_for_close_action(&self, action: &PendingCloseAction) -> Vec<String> {
+        if close_action_includes_chimp(action) {
+            self.chimp_dirty_packages(self.active)
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
+        match action {
+            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
+                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            }
+            PendingCloseAction::CloseTab(key) => vec![key.clone()],
+            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
+                self.kits[self.active]
+                    .open_tabs
+                    .iter()
+                    .filter(|key| *key != kept_key),
+            ),
+            // `request_close_action` has already made this kit active, so the
+            // active-kit lookups above address the right documents.
+            PendingCloseAction::CloseKit(_) => {
+                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            }
+        }
+    }
+
+    pub(in crate::app) fn tag_path_label(&self, key: &str) -> String {
+        let Some(entry) = self.entry_for_key(key) else {
+            return key.to_owned();
+        };
+        match &entry.location {
+            TagEntryLocation::LooseFile(path) => path.display().to_string(),
+            TagEntryLocation::Monolithic { .. }
+            | TagEntryLocation::Container { .. }
+            | TagEntryLocation::NewContainer { .. } => entry.display_path.clone(),
+        }
+    }
+
+    /// Whether the loaded document for `key` still has unsaved edits. Save
+    /// paths that report through `status` (container writes) use this to tell
+    /// success from failure.
+    pub(in crate::app) fn tag_is_dirty(&self, key: &str) -> bool {
+        self.kits[self.active]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set())
+    }
+}

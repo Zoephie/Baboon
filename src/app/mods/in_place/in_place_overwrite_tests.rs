@@ -4,7 +4,7 @@ use crate::app::mods::in_place::InPlaceOverwriteJob;
 
 fn job(app: &Baboon, dirty_revision: u64) -> InPlaceOverwriteJob {
     InPlaceOverwriteJob {
-        stamp: app.kit_stamp(),
+        stamp: app.model.kit_stamp(),
         key: "tag".to_owned(),
         dirty_revision,
         root: PathBuf::new(),

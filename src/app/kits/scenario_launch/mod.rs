@@ -339,41 +339,17 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 mod tests;
 
 impl Baboon {
-    /// Whether this workspace's editing kit has a Sapien that can open a
-    /// scenario at all — the question of whether to *offer* the button, as
-    /// opposed to whether it can be pressed right now.
-    ///
-    /// Answered from the kit's game alone, deliberately. Whether a particular
-    /// scenario resolves to a launchable path, and whether `sapien.exe` is
-    /// where it should be, are reasons to grey the button out; a kit whose
-    /// Sapien has no way to be given a scenario is a reason for there to be no
-    /// button.
-    pub(in crate::app) fn kit_offers_scenario_sapien(&self, kit: usize) -> bool {
-        self.model.kits
-            .get(kit)
-            .and_then(|kit| kit.source.as_ref())
-            .and_then(|source| source.game)
-            .is_some_and(GameFacts::sapien_takes_scenario_argument)
-    }
 
-    pub(in crate::app) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
-        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return false;
-        };
-        let Ok(context) = scenario_launch_context(source, entry) else {
-            return false;
-        };
-        context.game.sapien_takes_scenario_argument()
-            && context.kit_root.join("sapien.exe").is_file()
-    }
+
+
 
     pub(in crate::app) fn launch_scenario_in_sapien(&mut self, key: &str) {
         let context = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
-            let Some(entry) = self.entry_for_key(key) else {
+            let Some(entry) = self.model.entry_for_key(key) else {
                 self.model.status = "The scenario tag is no longer in the source".to_owned();
                 return;
             };
@@ -425,24 +401,15 @@ impl Baboon {
         }
     }
 
-    pub(in crate::app) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
-        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return false;
-        };
-        let Ok(context) = scenario_launch_context(source, entry) else {
-            return false;
-        };
-        let executable = tag_test_executable_for_game(Some(context.game));
-        context.kit_root.join(executable).is_file()
-    }
+
 
     pub(in crate::app) fn launch_scenario_in_tag_test(&mut self, key: &str) {
         let context = {
-            let Some(source) = self.source() else {
+            let Some(source) = self.model.source() else {
                 self.model.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
-            let Some(entry) = self.entry_for_key(key) else {
+            let Some(entry) = self.model.entry_for_key(key) else {
                 self.model.status = "The scenario tag is no longer in the source".to_owned();
                 return;
             };
@@ -498,5 +465,46 @@ impl Baboon {
                 );
             }
         }
+    }
+}
+
+impl Model {
+    /// Whether this workspace's editing kit has a Sapien that can open a
+    /// scenario at all — the question of whether to *offer* the button, as
+    /// opposed to whether it can be pressed right now.
+    ///
+    /// Answered from the kit's game alone, deliberately. Whether a particular
+    /// scenario resolves to a launchable path, and whether `sapien.exe` is
+    /// where it should be, are reasons to grey the button out; a kit whose
+    /// Sapien has no way to be given a scenario is a reason for there to be no
+    /// button.
+    pub(in crate::app) fn kit_offers_scenario_sapien(&self, kit: usize) -> bool {
+        self.kits
+            .get(kit)
+            .and_then(|kit| kit.source.as_ref())
+            .and_then(|source| source.game)
+            .is_some_and(GameFacts::sapien_takes_scenario_argument)
+    }
+
+    pub(in crate::app) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        context.game.sapien_takes_scenario_argument()
+            && context.kit_root.join("sapien.exe").is_file()
+    }
+
+    pub(in crate::app) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        let executable = tag_test_executable_for_game(Some(context.game));
+        context.kit_root.join(executable).is_file()
     }
 }

@@ -4,9 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app) fn editing_kit_root(&self) -> Option<PathBuf> {
-        self.editing_kit_root_for(self.model.active)
-    }
+
 
     pub(in crate::app) fn editing_kit_is_read_only(&self, kit_index: usize) -> bool {
         let Some(kit) = self.model.kits.get(kit_index) else {
@@ -16,7 +14,7 @@ impl Baboon {
         // root is above the tags folder too, so this matches at least what the
         // root did and never makes a read-only kit writable.
         let root = self
-            .kit_layout_for(kit_index)
+            .model.kit_layout_for(kit_index)
             .map(|layout| layout.tags)
             .or_else(|| match &kit.source.as_ref()?.source {
                 TagSource::SingleFile { path } => Some(path.clone()),
@@ -39,32 +37,20 @@ impl Baboon {
         }
     }
 
-    pub(in crate::app) fn editing_kit_root_for(&self, kit_index: usize) -> Option<PathBuf> {
-        Some(self.kit_layout_for(kit_index)?.root)
-    }
 
-    /// The loaded kit's root, tags and data folders. See [`KitLayout`].
-    pub(in crate::app) fn kit_layout_for(&self, kit_index: usize) -> Option<KitLayout> {
-        self.model.kits.get(kit_index)?.source.as_ref()?.kit_layout()
-    }
 
-    pub(in crate::app) fn kit_tool_path(&self, executable_name: &str) -> Option<PathBuf> {
-        Some(self.editing_kit_root()?.join(executable_name))
-    }
+
+
+
 
     pub(in crate::app) fn launch_sapien(&mut self) {
         self.launch_kit_tool("Sapien", "sapien.exe");
     }
 
-    /// The tag_test executable name for the loaded game. Each editing kit ships
-    /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
-    /// the generic name when the game is unknown.
-    pub(in crate::app) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game))
-    }
+
 
     pub(in crate::app) fn launch_tag_test(&mut self) {
-        self.launch_kit_tool_clearing_startup("tag_test", self.tag_test_executable(), "init.txt");
+        self.launch_kit_tool_clearing_startup("tag_test", self.model.tag_test_executable(), "init.txt");
     }
 
     pub(in crate::app) fn launch_blender(&mut self) {
@@ -103,7 +89,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn launch_kit_tool(&mut self, label: &str, executable_name: &str) {
-        let Some(path) = self.kit_tool_path(executable_name) else {
+        let Some(path) = self.model.kit_tool_path(executable_name) else {
             self.model.status = format!("{label} requires a loaded editing-kit folder");
             return;
         };
@@ -111,8 +97,8 @@ impl Baboon {
             self.model.status = format!("{label} executable not found: {}", path.display());
             return;
         }
-        let options = self.active_kit_tool_folder_options();
-        self.spawn_tool(label, &path, self.editing_kit_root(), &options);
+        let options = self.model.active_kit_tool_folder_options();
+        self.spawn_tool(label, &path, self.model.editing_kit_root(), &options);
     }
 
     pub(in crate::app) fn launch_kit_tool_clearing_startup(
@@ -121,7 +107,7 @@ impl Baboon {
         executable_name: &str,
         startup_file_name: &str,
     ) {
-        let Some(path) = self.kit_tool_path(executable_name) else {
+        let Some(path) = self.model.kit_tool_path(executable_name) else {
             self.model.status = format!("{label} requires a loaded editing-kit folder");
             return;
         };
@@ -129,7 +115,7 @@ impl Baboon {
             self.model.status = format!("{label} executable not found: {}", path.display());
             return;
         }
-        let Some(root) = self.editing_kit_root() else {
+        let Some(root) = self.model.editing_kit_root() else {
             self.model.status = format!("{label} requires a loaded editing-kit folder");
             return;
         };
@@ -138,7 +124,7 @@ impl Baboon {
             self.model.status = error;
             return;
         }
-        let options = self.active_kit_tool_folder_options();
+        let options = self.model.active_kit_tool_folder_options();
         self.spawn_tool(label, &path, Some(root), &options);
     }
 
@@ -173,7 +159,7 @@ impl Baboon {
         let Some(req) = self.kit_tools.pending_tool_import.take() else {
             return;
         };
-        if self.editing_kit_root().is_none() {
+        if self.model.editing_kit_root().is_none() {
             self.model.status = "Import requires a loaded editing-kit folder".to_owned();
             return;
         }
@@ -187,7 +173,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "The tag is no longer in the browser".to_owned();
             return;
         };
@@ -195,7 +181,7 @@ impl Baboon {
             self.model.status = "Reimport requires a loose editing-kit tag".to_owned();
             return;
         }
-        let Some(verb) = geometry_import_verb(self.names(), entry.group_tag) else {
+        let Some(verb) = geometry_import_verb(self.model.names(), entry.group_tag) else {
             self.model.status = "This tag type does not support reimport".to_owned();
             return;
         };
@@ -215,11 +201,11 @@ impl Baboon {
             self.model.status = "A command is already running".to_owned();
             return;
         }
-        let Some(source) = self.source().map(|source| source.source.clone()) else {
+        let Some(source) = self.model.source().map(|source| source.source.clone()) else {
             self.model.status = "Reimport requires a loaded editing-kit folder".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Bitmap tag is no longer in the source".to_owned();
             return;
         };
@@ -230,7 +216,7 @@ impl Baboon {
             self.model.status = "Bitmap reimport requires a loose tags folder".to_owned();
             return;
         };
-        let Some(work_dir) = self.kit_layout_for(self.model.active).map(|layout| layout.root) else {
+        let Some(work_dir) = self.model.kit_layout_for(self.model.active).map(|layout| layout.root) else {
             self.model.status = "Could not resolve editing-kit root".to_owned();
             return;
         };
@@ -240,7 +226,7 @@ impl Baboon {
         };
         let command = with_tool_folder_options(
             &format!("tool bitmaps \"{data_path}\""),
-            &self.active_kit_tool_folder_options(),
+            &self.model.active_kit_tool_folder_options(),
         );
         self.views[self.model.kits[self.model.active].id].terminal.open = true;
         self.kit_tools.terminal
@@ -266,7 +252,7 @@ impl Baboon {
         };
 
         let tx = self.tx.clone();
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let panic_key = key.clone();
         let worker_ctx = ctx.clone();
         spawn_worker(
@@ -287,7 +273,31 @@ impl Baboon {
     }
 }
 
-impl Baboon {
+impl Model {
+    pub(in crate::app) fn editing_kit_root(&self) -> Option<PathBuf> {
+        self.editing_kit_root_for(self.active)
+    }
+
+    pub(in crate::app) fn editing_kit_root_for(&self, kit_index: usize) -> Option<PathBuf> {
+        Some(self.kit_layout_for(kit_index)?.root)
+    }
+
+    /// The loaded kit's root, tags and data folders. See [`KitLayout`].
+    pub(in crate::app) fn kit_layout_for(&self, kit_index: usize) -> Option<KitLayout> {
+        self.kits.get(kit_index)?.source.as_ref()?.kit_layout()
+    }
+
+    pub(in crate::app) fn kit_tool_path(&self, executable_name: &str) -> Option<PathBuf> {
+        Some(self.editing_kit_root()?.join(executable_name))
+    }
+
+    /// The tag_test executable name for the loaded game. Each editing kit ships
+    /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
+    /// the generic name when the game is unknown.
+    pub(in crate::app) fn tag_test_executable(&self) -> &'static str {
+        tag_test_executable_for_game(self.source().and_then(|s| s.game))
+    }
+
     pub(in crate::app) fn active_game_is_campaign_evolved(&self) -> bool {
         self.source_game().is_some_and(GameId::is_campaign_evolved)
     }

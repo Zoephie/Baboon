@@ -79,7 +79,7 @@ impl Baboon {
         done: usize,
         total: usize,
     ) -> bool {
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
         let Some(job) = self
@@ -179,7 +179,7 @@ impl Baboon {
         result: Result<(), String>,
     ) -> bool {
         // Reports through the global status line only.
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
         match result {
@@ -208,7 +208,7 @@ pub(in crate::app) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a Str
 }
 
 pub(in crate::app) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
-    app.names()
+    app.model.names()
         .name_for(entry.group_tag)
         .or_else(|| group_tag_to_extension(entry.group_tag))
         .map(|extension| extension.trim().to_owned())
@@ -431,7 +431,7 @@ impl Baboon {
         // A brand-new (in-memory) container tag has no baseline to overwrite —
         // "Save" writes it as a new `_P` override container instead.
         if matches!(
-            self.entry_for_key(&key).map(|entry| &entry.location),
+            self.model.entry_for_key(&key).map(|entry| &entry.location),
             Some(TagEntryLocation::NewContainer { .. })
         ) {
             self.save_new_container_tag(&key);
@@ -441,7 +441,7 @@ impl Baboon {
         // in place, which is destructive and is not how anyone should be
         // shipping a change — so it is an expert-mode route now. Everyone else
         // gets the export, which is the supported one.
-        if self.current_source_is_container() {
+        if self.model.current_source_is_container() {
             match container_save_route(
                 self.model.prefs.expert_mode,
                 self.model.prefs.confirm_container_overwrite,
@@ -454,7 +454,7 @@ impl Baboon {
                 }
                 ContainerSaveRoute::ConfirmOverwriteInPlace => {
                     self.mods.overwrite_confirm = Some(OverwriteConfirm {
-                        kit: self.active_kit_id(),
+                        kit: self.model.active_kit_id(),
                         key,
                     });
                 }
@@ -474,7 +474,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return Err(self.model.status.clone());
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return Err("Selected tag is no longer in the source".to_owned());
         };
         let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) else {
@@ -560,11 +560,11 @@ impl Baboon {
         };
         // For a container tag, "Save As" opens the rename dialog in duplicate
         // mode (new name, no reference redirect) and writes an override.
-        if self.current_source_is_container() {
+        if self.model.current_source_is_container() {
             self.open_container_duplicate(&key);
             return;
         }
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(&key).cloned() else {
             self.model.status = "Selected tag is no longer in the source".to_owned();
             return;
         };

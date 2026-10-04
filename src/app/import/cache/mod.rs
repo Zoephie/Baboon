@@ -218,8 +218,8 @@ impl Baboon {
             self.model.status = "A cache import is already open".to_owned();
             return;
         }
-        let kit = self.active_kit_id();
-        let Some(source_data) = self.source() else {
+        let kit = self.model.active_kit_id();
+        let Some(source_data) = self.model.source() else {
             return;
         };
         if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
@@ -277,8 +277,8 @@ impl Baboon {
             self.model.status = "A cache import is already open".to_owned();
             return;
         }
-        let kit = self.active_kit_id();
-        let Some(source_data) = self.source() else {
+        let kit = self.model.active_kit_id();
+        let Some(source_data) = self.model.source() else {
             return;
         };
         if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
@@ -367,7 +367,7 @@ impl Baboon {
         if let Some(index) = self
             .import.cache_import_dialog
             .as_ref()
-            .and_then(|dialog| self.kit_index(dialog.kit))
+            .and_then(|dialog| self.model.kit_index(dialog.kit))
             && self.refuse_read_only_edit(index)
         {
             return;
@@ -422,7 +422,7 @@ impl Baboon {
         let cancel = dialog.cancel.clone();
         cancel.store(false, Ordering::Relaxed);
 
-        let Some(index) = self.kit_index(kit) else {
+        let Some(index) = self.model.kit_index(kit) else {
             return;
         };
         let Some(source_data) = self.model.kits[index].source.as_ref() else {
@@ -540,7 +540,7 @@ impl Baboon {
         };
         let (kit, prefix) = (dialog.kit, dialog.prefix.clone());
         let single = dialog.single.as_ref().map(|single| single.key.clone());
-        let Some(index) = self.kit_index(kit) else {
+        let Some(index) = self.model.kit_index(kit) else {
             return;
         };
         let Some(source_data) = self.model.kits[index].source.as_ref() else {
@@ -641,7 +641,7 @@ impl Baboon {
         // Dropping the result then is the point of the stamp: reporting it would
         // attach a run's outcome to whatever workspace happens to hold that slot
         // now.
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return false;
         }
         let Some(dialog) = self.import.cache_import_dialog.as_mut() else {

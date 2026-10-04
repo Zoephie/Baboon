@@ -57,8 +57,8 @@ impl Baboon {
             .parsed_tags
             .get(key)
             .map(|doc| doc.tag.group().tag);
-        let game = self.source_game();
-        let definitions_root = self.source_definitions_root().map(Path::to_owned);
+        let game = self.model.source_game();
+        let definitions_root = self.model.source_definitions_root().map(Path::to_owned);
         match restored {
             Some((bytes, label)) => {
                 match group_tag

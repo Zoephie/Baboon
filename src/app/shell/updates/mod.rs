@@ -351,8 +351,12 @@ impl Baboon {
         );
     }
 
+
+}
+
+impl Model {
     /// Whether the automatic startup check should run.
     pub(in crate::app) fn should_check_updates_on_startup(&self) -> bool {
-        self.model.prefs.check_updates_on_startup
+        self.prefs.check_updates_on_startup
     }
 }

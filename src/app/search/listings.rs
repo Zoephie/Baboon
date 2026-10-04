@@ -15,7 +15,7 @@ impl Baboon {
     /// walked nothing too, and both said "none found".
     pub(in crate::app) fn listing_entries(&self) -> Result<&[TagEntry], String> {
         let source = self
-            .source()
+            .model.source()
             .ok_or_else(|| "No source loaded.".to_owned())?;
         if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty() {
             return Err(
@@ -49,7 +49,7 @@ impl Baboon {
     /// is thousands of full tag parses, and they used to do it on the UI
     /// thread. The results window says what it is reading meanwhile.
     pub(in crate::app) fn show_source_listing(&mut self, listing: SourceListing, ctx: &egui::Context) {
-        let kit = self.active_kit_id();
+        let kit = self.model.active_kit_id();
         let entries = match self.listing_entries() {
             Ok(entries) => entries.to_vec(),
             Err(note) => {
@@ -64,7 +64,7 @@ impl Baboon {
                 return;
             }
         };
-        let Some(source) = self.source().map(|source| source.source.clone()) else {
+        let Some(source) = self.model.source().map(|source| source.source.clone()) else {
             return;
         };
         let wanted = listing.group();
@@ -80,7 +80,7 @@ impl Baboon {
             note: Some(format!("Reading {count} tag(s)…")),
             ref_target: None,
         });
-        let stamp = self.kit_stamp();
+        let stamp = self.model.kit_stamp();
         spawn_worker(
             &self.tx,
             ctx,
@@ -109,7 +109,7 @@ impl Baboon {
         stamp: KitStamp,
         results: TagQueryResults,
     ) -> bool {
-        if self.resolve_stamp(stamp).is_none() {
+        if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
         self.search.query_results = Some(results);

@@ -20,7 +20,7 @@ impl Baboon {
         // A glow belongs to the kit whose tag it is; drop it once that kit is
         // gone rather than glowing a field in another game.
         if let Some(nav) = &self.references.field_nav
-            && self.kit_index(nav.kit).is_none()
+            && self.model.kit_index(nav.kit).is_none()
         {
             self.references.field_nav = None;
         }
@@ -38,7 +38,7 @@ impl Baboon {
         };
         // The jump belongs to the kit it was queued from; if that kit closed
         // while the referrer was loading, drop it.
-        let Some(kit) = self.kit_index(jump.kit) else {
+        let Some(kit) = self.model.kit_index(jump.kit) else {
             self.references.pending_ref_jump = None;
             return;
         };
@@ -84,7 +84,7 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
         }
         self.references.field_nav = Some(FieldNav {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             tag_key: tag_key.to_owned(),
             field_path: field_path.to_owned(),
             block_indices: ancestor_block_indices(field_path),
@@ -136,16 +136,16 @@ impl Baboon {
             if !self.references.ref_jump_loading.insert(index) {
                 continue;
             }
-            let Some(entry) = self.entry_for_key(&key).cloned() else {
+            let Some(entry) = self.model.entry_for_key(&key).cloned() else {
                 self.references.ref_jump_loading.remove(&index);
                 self.references.ref_jump_occurrences.insert(index, Vec::new());
                 continue;
             };
-            let Some(source_kind) = self.source().map(|source| source.source.clone()) else {
+            let Some(source_kind) = self.model.source().map(|source| source.source.clone()) else {
                 self.references.ref_jump_loading.remove(&index);
                 continue;
             };
-            let kit = self.active_kit_id();
+            let kit = self.model.active_kit_id();
             // The popup's own target, as `handle_ref_jump_occurrences` compares
             // it; the walk matches against the normalized form.
             let query_target = (group_tag, rel_path.clone());
@@ -189,7 +189,7 @@ impl Baboon {
         result: Result<Vec<RefOccurrence>, String>,
     ) -> bool {
         self.references.ref_jump_loading.remove(&index);
-        let current = kit == self.active_kit_id()
+        let current = kit == self.model.active_kit_id()
             && self.search.query_results.as_ref().is_some_and(|results| {
                 results.ref_target.as_ref() == Some(&target)
                     && results
@@ -218,13 +218,13 @@ impl Baboon {
         let Some(req) = self.references.pending_open.take() else {
             return;
         };
-        let container_key = self.source().and_then(|source| {
+        let container_key = self.model.source().and_then(|source| {
             matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then(|| {
                 container_entry_for_reference(
                     &source.entries,
                     req.group_tag,
                     &req.rel_path,
-                    self.names(),
+                    self.model.names(),
                 )
                 .map(|entry| entry.key.clone())
             })
@@ -245,7 +245,7 @@ impl Baboon {
             return;
         }
 
-        let root = match self.source().map(|s| &s.source) {
+        let root = match self.model.source().map(|s| &s.source) {
             Some(TagSource::LooseFolder { root, .. }) => root.clone(),
             _ => {
                 self.model.status = "Open requires a loose-folder source".to_owned();
@@ -256,7 +256,7 @@ impl Baboon {
         // (covers every group, e.g. collision_model/physics_model), falling
         // back to the built-in table.
         let ext = self
-            .names()
+            .model.names()
             .name_for(req.group_tag)
             .or_else(|| blam_tags::paths::group_tag_to_extension(req.group_tag))
             .unwrap_or("");
@@ -284,9 +284,9 @@ impl Baboon {
         // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
         // the scanner's own constructor: this used to derive the display path
         // from the unstripped reference, which could double the extension.
-        if self.entry_for_key(&key).is_none() {
+        if self.model.entry_for_key(&key).is_none() {
             let names = self
-                .source()
+                .model.source()
                 .map(|source| source.names.clone())
                 .unwrap_or_default();
             if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {

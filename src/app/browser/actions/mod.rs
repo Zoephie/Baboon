@@ -6,12 +6,7 @@ use super::*;
 use crate::core::tag_key::same_entry_key;
 
 impl Baboon {
-    pub(in crate::app) fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
-        self.model.prefs
-            .editing_kit_favorites
-            .iter()
-            .position(|kit| same_recent_path(&kit.tags_root, root))
-    }
+
 
     /// Rebuild `kit`'s resolved favorite entries from the saved paths for its
     /// tags root. Kit-scoped because a finished background refactor refreshes
@@ -19,10 +14,10 @@ impl Baboon {
     pub(in crate::app) fn refresh_favorite_entries_for(&mut self, kit: usize) {
         self.model.kits[kit].active_favorite_entries.clear();
         self.model.kits[kit].active_favorite_folders.clear();
-        let Some(root) = self.loaded_tags_root_for(kit) else {
+        let Some(root) = self.model.loaded_tags_root_for(kit) else {
             return;
         };
-        let Some(index) = self.favorite_kit_index(&root) else {
+        let Some(index) = self.model.favorite_kit_index(&root) else {
             return;
         };
         let names = self.model.kits[kit]
@@ -70,11 +65,11 @@ impl Baboon {
     }
 
     pub(in crate::app) fn toggle_favorite(&mut self, key: &str) {
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Favorites are only available for editing-kit tag folders".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer available".to_owned();
             return;
         };
@@ -91,7 +86,7 @@ impl Baboon {
             self.model.status = "Could not resolve tag relative to the loaded tags folder".to_owned();
             return;
         };
-        let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
+        let index = self.model.favorite_kit_index(&root).unwrap_or_else(|| {
             self.model.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
@@ -121,7 +116,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn toggle_folder_favorite(&mut self, rel_path: &Path) {
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "Only loose editing-kit folders can be favorited".to_owned();
             return;
         };
@@ -133,7 +128,7 @@ impl Baboon {
             self.model.status = format!("Folder no longer exists: {}", relative_path.display());
             return;
         }
-        let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
+        let index = self.model.favorite_kit_index(&root).unwrap_or_else(|| {
             self.model.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
@@ -174,10 +169,10 @@ impl Baboon {
         old_to_new_keys: &HashMap<String, String>,
         moved_folder: Option<(&Path, &Path)>,
     ) {
-        let Some(root) = self.loaded_tags_root_for(kit) else {
+        let Some(root) = self.model.loaded_tags_root_for(kit) else {
             return;
         };
-        let Some(index) = self.favorite_kit_index(&root) else {
+        let Some(index) = self.model.favorite_kit_index(&root) else {
             return;
         };
         remap_favorite_paths(
@@ -409,7 +404,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn copy_tag_name(&mut self, key: &str, ctx: &egui::Context) {
-        let Some(entry) = self.entry_for_key(key) else {
+        let Some(entry) = self.model.entry_for_key(key) else {
             self.model.status = "Tag is no longer in the browser".to_owned();
             return;
         };
@@ -425,11 +420,11 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_entry_in_explorer(&mut self, key: &str) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the browser".to_owned();
             return;
         };
-        let Some(source) = self.source().map(|source| &source.source) else {
+        let Some(source) = self.model.source().map(|source| &source.source) else {
             self.model.status = "No source loaded".to_owned();
             return;
         };
@@ -477,7 +472,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_loaded_tags_folder(&mut self) {
-        let Some(path) = self.loaded_tags_root() else {
+        let Some(path) = self.model.loaded_tags_root() else {
             self.model.status = "Open Tags Folder requires a loaded editing-kit tags folder".to_owned();
             return;
         };
@@ -485,16 +480,14 @@ impl Baboon {
     }
 
     pub(in crate::app) fn open_loaded_data_folder(&mut self) {
-        let Some(path) = self.loaded_data_root() else {
+        let Some(path) = self.model.loaded_data_root() else {
             self.model.status = "Open Data Folder requires a loaded editing-kit tags folder".to_owned();
             return;
         };
         self.open_folder_in_explorer(path, "data");
     }
 
-    pub(in crate::app) fn loaded_data_root(&self) -> Option<PathBuf> {
-        Some(self.kit_layout_for(self.model.active)?.data)
-    }
+
 
     /// Show a browser folder in File Explorer.
     ///
@@ -503,7 +496,7 @@ impl Baboon {
     /// the two. A kit that is not a loose folder has no directory to open, and
     /// says so rather than opening the wrong thing.
     pub(in crate::app) fn open_loose_folder_in_explorer(&mut self, rel_path: &Path) {
-        let Some(root) = self.loaded_tags_root() else {
+        let Some(root) = self.model.loaded_tags_root() else {
             self.model.status = "This workspace has no tags folder on disk".to_owned();
             return;
         };
@@ -542,14 +535,14 @@ impl Baboon {
     /// Locate a tag in the browser tree: switch to Folders mode, clear the
     /// filter, select it, and request a one-shot force-open + scroll.
     pub(in crate::app) fn reveal_in_browser(&mut self, key: &str) {
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             return;
         };
         self.views[self.model.kits[self.model.active].id].browser.filter.clear();
         self.views[self.model.kits[self.model.active].id].browser.mode = BrowserMode::Folders;
         self.model.kits[self.model.active].selected_key = Some(entry.key.clone());
         self.browser.reveal_target = Some(RevealRequest {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),
         });
@@ -678,3 +671,16 @@ mod folder_opener_tests;
 
 #[cfg(test)]
 mod explorer_path_tests;
+
+impl Model {
+    pub(in crate::app) fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
+        self.prefs
+            .editing_kit_favorites
+            .iter()
+            .position(|kit| same_recent_path(&kit.tags_root, root))
+    }
+
+    pub(in crate::app) fn loaded_data_root(&self) -> Option<PathBuf> {
+        Some(self.kit_layout_for(self.active)?.data)
+    }
+}

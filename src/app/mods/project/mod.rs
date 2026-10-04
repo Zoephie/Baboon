@@ -1202,12 +1202,7 @@ impl Baboon {
         );
     }
 
-    pub(in crate::app) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
-        self.model.kits[kit]
-            .source
-            .as_ref()
-            .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
-    }
+
 
     pub(in crate::app) fn campaign_entry_for_identity(
         &self,
@@ -1233,7 +1228,7 @@ impl Baboon {
     }
 
     fn ensure_campaign_project(&mut self, kit: usize, now: f64) {
-        if !self.current_source_is_campaign_project_capable(kit)
+        if !self.model.current_source_is_campaign_project_capable(kit)
             || self.model.kits[kit].project.active.is_some()
         {
             return;
@@ -1471,11 +1466,11 @@ impl Baboon {
             if !document.dirty.is_set() {
                 continue;
             }
-            let Some(entry) = self.entry_for_key_in(kit, key) else {
+            let Some(entry) = self.model.entry_for_key_in(kit, key) else {
                 continue;
             };
             let authored = self.authored_package_for_entry(kit, entry);
-            let Some(entry) = self.entry_for_key_in(kit, key) else {
+            let Some(entry) = self.model.entry_for_key_in(kit, key) else {
                 continue;
             };
             let Some((identity, logical_path, kind, package)) =
@@ -1511,11 +1506,11 @@ impl Baboon {
         let floating_order: Vec<String> = Vec::new();
         let mut tabs = Vec::new();
         for key in self.model.kits[kit].open_tabs.iter().chain(floating_order.iter()) {
-            let Some(entry) = self.entry_for_key_in(kit, key) else {
+            let Some(entry) = self.model.entry_for_key_in(kit, key) else {
                 continue;
             };
             let authored = self.authored_package_for_entry(kit, entry);
-            let Some(entry) = self.entry_for_key_in(kit, key) else {
+            let Some(entry) = self.model.entry_for_key_in(kit, key) else {
                 continue;
             };
             let Some((identity, logical_path, kind, package)) =
@@ -1534,7 +1529,7 @@ impl Baboon {
             });
         }
         let selected_identity = self.model.kits[kit].selected_key.as_ref().and_then(|key| {
-            self.entry_for_key_in(kit, key)
+            self.model.entry_for_key_in(kit, key)
                 .and_then(campaign_entry_project_parts)
                 .map(|(identity, _, _, _)| identity)
         });
@@ -1547,7 +1542,7 @@ impl Baboon {
             if undo.is_empty() && redo.is_empty() {
                 continue;
             }
-            let Some(entry) = self.entry_for_key_in(kit, key) else {
+            let Some(entry) = self.model.entry_for_key_in(kit, key) else {
                 continue;
             };
             let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
@@ -1614,7 +1609,7 @@ impl Baboon {
             .map(|(key, _)| key.clone())
             .collect();
         for key in dirty_keys {
-            if let Some(entry) = self.entry_for_key_in(kit, &key) {
+            if let Some(entry) = self.model.entry_for_key_in(kit, &key) {
                 modified.insert(entry);
             }
         }
@@ -1641,7 +1636,7 @@ impl Baboon {
     /// document's dirty flag left the edited bytes in the project and reopening
     /// the tag brought them straight back.
     pub(in crate::app) fn forget_campaign_overlay(&mut self, kit: usize, key: &str) -> bool {
-        let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
+        let Some(entry) = self.model.entry_for_key_in(kit, key).cloned() else {
             return false;
         };
         let Some((identity, ..)) = campaign_entry_project_parts(&entry) else {
@@ -1653,20 +1648,7 @@ impl Baboon {
             .is_some_and(|project| project.overlays.remove(&identity).is_some())
     }
 
-    /// Whether this kit's project has bytes stashed for `key` — that is, whether
-    /// discarding the document would also delete something from disk.
-    pub(in crate::app) fn tag_has_stashed_overlay(&self, kit: usize, key: &str) -> bool {
-        let Some(entry) = self.entry_for_key_in(kit, key) else {
-            return false;
-        };
-        let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
-            return false;
-        };
-        self.model.kits[kit]
-            .project.active
-            .as_ref()
-            .is_some_and(|project| project.overlays.contains_key(&identity))
-    }
+
 
     /// Forget every stashed overlay in this kit's project, returning how many
     /// tags were carrying one.
@@ -1679,19 +1661,7 @@ impl Baboon {
         count
     }
 
-    /// Identities of the tags this kit currently has stashed, as display paths.
-    pub(in crate::app) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
-        let Some(project) = self.model.kits[kit].project.active.as_ref() else {
-            return Vec::new();
-        };
-        let mut paths: Vec<String> = project
-            .overlays
-            .values()
-            .map(|overlay| overlay.logical_path.clone())
-            .collect();
-        paths.sort();
-        paths
-    }
+
 
     /// Throw away everything this workspace has not written into the game:
     /// every stashed overlay and every unsaved document. The tags then reload
@@ -1778,7 +1748,7 @@ impl Baboon {
     }
 
     fn maybe_autosave_campaign_project(&mut self, kit: usize, ctx: &egui::Context) {
-        if !self.current_source_is_campaign_project_capable(kit) {
+        if !self.model.current_source_is_campaign_project_capable(kit) {
             return;
         }
         let now = ctx.input(|input| input.time);
@@ -1947,7 +1917,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn save_campaign_project_file_as(&mut self, kit: usize, now: f64) {
-        if !self.current_source_is_campaign_project_capable(kit) {
+        if !self.model.current_source_is_campaign_project_capable(kit) {
             self.model.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
         }
@@ -2069,7 +2039,7 @@ impl Baboon {
             self.ensure_campaign_project(kit, now);
             return;
         };
-        if !self.current_source_is_campaign_project_capable(kit) {
+        if !self.model.current_source_is_campaign_project_capable(kit) {
             self.model.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
         }
@@ -2204,7 +2174,7 @@ impl Baboon {
         if self.model.kits[kit].parsed_tags.contains_key(key) {
             return true;
         }
-        let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
+        let Some(entry) = self.model.entry_for_key_in(kit, key).cloned() else {
             return false;
         };
         let Some((identity, _, _, _)) = campaign_entry_project_parts(&entry) else {
@@ -2267,4 +2237,42 @@ pub(in crate::app) struct KitProject {
     pub(in crate::app) active: Option<ActiveCampaignProject>,
     /// Project contents staged until this kit's source finishes mounting.
     pub(in crate::app) pending: Option<PendingCampaignProject>,
+}
+
+impl Model {
+    pub(in crate::app) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
+        self.kits[kit]
+            .source
+            .as_ref()
+            .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
+    }
+
+    /// Whether this kit's project has bytes stashed for `key` — that is, whether
+    /// discarding the document would also delete something from disk.
+    pub(in crate::app) fn tag_has_stashed_overlay(&self, kit: usize, key: &str) -> bool {
+        let Some(entry) = self.entry_for_key_in(kit, key) else {
+            return false;
+        };
+        let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
+            return false;
+        };
+        self.kits[kit]
+            .project.active
+            .as_ref()
+            .is_some_and(|project| project.overlays.contains_key(&identity))
+    }
+
+    /// Identities of the tags this kit currently has stashed, as display paths.
+    pub(in crate::app) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
+        let Some(project) = self.kits[kit].project.active.as_ref() else {
+            return Vec::new();
+        };
+        let mut paths: Vec<String> = project
+            .overlays
+            .values()
+            .map(|overlay| overlay.logical_path.clone())
+            .collect();
+        paths.sort();
+        paths
+    }
 }

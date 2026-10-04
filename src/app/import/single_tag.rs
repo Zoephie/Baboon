@@ -13,7 +13,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        if !self.current_source_is_container() {
+        if !self.model.current_source_is_container() {
             self.model.status = "Import tag is only for Campaign Evolved containers".to_owned();
             return;
         }
@@ -40,7 +40,7 @@ impl Baboon {
         }
         let group_tag = tag.header.group_tag;
         let group_name = self
-            .source()
+            .model.source()
             .and_then(|s| s.names.name_for(group_tag))
             .map(str::to_owned)
             .or_else(|| group_tag_to_extension(group_tag).map(str::to_owned))
@@ -55,7 +55,7 @@ impl Baboon {
             .unwrap_or("imported")
             .to_owned();
         self.import.import_tag_dialog = Some(ImportTagDialog {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             source_path: picked,
             folder_rel: folder_rel.unwrap_or_default(),
             name,
@@ -110,7 +110,7 @@ impl Baboon {
         imported: &TagFile,
     ) -> (Vec<(String, ProfileFit)>, ImportMode) {
         let target_game = self
-            .source()
+            .model.source()
             .and_then(|s| s.game)
             .unwrap_or(GameId::CampaignEvolved);
         classify_import_source_for(target_game.as_str(), group_tag, imported)
@@ -213,14 +213,14 @@ impl Baboon {
         }
 
         // Does a base-game tag already exist at this path+group?
-        let existing = self.source().and_then(|s| match &s.source {
+        let existing = self.model.source().and_then(|s| match &s.source {
             TagSource::IoStoreContainerSet { index, .. } => index
                 .lookup(group_tag, &logical)
                 .map(|(c, r)| (c, r.to_owned())),
             _ => None,
         });
         if let Some((container, rel_path)) = existing {
-            let key = self.source().and_then(|s| {
+            let key = self.model.source().and_then(|s| {
                 s.entries
                     .iter()
                     .find(|e| {
@@ -242,7 +242,7 @@ impl Baboon {
                 .unwrap_or(false)
             {
                 self.import.import_discard_confirm = Some(PendingImport {
-                    kit: self.active_kit_id(),
+                    kit: self.model.active_kit_id(),
                     tag,
                     target_key: key,
                 });
@@ -277,7 +277,7 @@ impl Baboon {
         self.model.kits[self.model.active]
             .parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
-        let label = self.tag_path_label(key);
+        let label = self.model.tag_path_label(key);
         self.model.status = format!("Imported over {label} (unsaved)");
     }
 
@@ -300,7 +300,7 @@ impl Baboon {
         } else {
             format!("{folder}/{leaf}")
         };
-        match &self.source()?.source {
+        match &self.model.source()?.source {
             TagSource::IoStoreContainerSet { index, .. } => {
                 index.lookup(group_tag, &logical).map(|_| logical)
             }

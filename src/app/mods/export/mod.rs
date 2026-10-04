@@ -34,57 +34,11 @@ impl Baboon {
             .map(|container| container.chunk_label.clone())
     }
 
-    /// The container a tag would be written into, and whether it is a mod.
-    pub(in crate::app) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
-        let source = self.model.kits.get(kit)?.source.as_ref()?;
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return None;
-        };
-        let TagEntryLocation::Container { container, .. } =
-            &self.entry_for_key_in(kit, key)?.location
-        else {
-            return None;
-        };
-        containers
-            .get(*container)
-            .map(|container| (container.chunk_label.clone(), container.is_mod))
-    }
 
-    /// Every mod this workspace has mounted, by container label.
-    pub(in crate::app) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
-        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Vec::new();
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Vec::new();
-        };
-        containers
-            .iter()
-            .filter(|container| container.is_mod)
-            .map(|container| container.chunk_label.clone())
-            .collect()
-    }
 
-    /// The mounted containers an export to `output` would replace, by label.
-    ///
-    /// A mod installed under `Paks` is mounted like any other container, and
-    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
-    /// mapping first — Windows refuses to truncate a file with a mapped section
-    /// open — so this is what the review dialog says out loud and what the export
-    /// releases before it writes.
-    pub(in crate::app) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
-        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Vec::new();
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Vec::new();
-        };
-        crate::core::source::mounted_containers_at(&source.source, output)
-            .into_iter()
-            .filter_map(|index| containers.get(index))
-            .map(|container| container.chunk_label.clone())
-            .collect()
-    }
+
+
+
 
     /// Write the reviewed mod. `included` are the identities the user kept.
     pub(in crate::app) fn write_reviewed_mod(
@@ -99,7 +53,7 @@ impl Baboon {
             self.model.status = error;
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             self.model.status = "No source loaded".to_owned();
             return;
         };
@@ -350,7 +304,7 @@ impl Baboon {
                 // a mod written to `Paks/~mods/` is already where the game will
                 // find it, so there is nothing to copy there either.
                 let in_place = self
-                    .source()
+                    .model.source()
                     .map(|source| directory.starts_with(source.source.root_path()))
                     .unwrap_or(false);
                 self.model.status = if !reopen_failures.is_empty() {
@@ -504,3 +458,57 @@ mod mod_override_tests;
 
 #[cfg(test)]
 mod priority_suffix_tests;
+
+impl Model {
+    /// The container a tag would be written into, and whether it is a mod.
+    pub(in crate::app) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let TagEntryLocation::Container { container, .. } =
+            &self.entry_for_key_in(kit, key)?.location
+        else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .map(|container| (container.chunk_label.clone(), container.is_mod))
+    }
+
+    /// Every mod this workspace has mounted, by container label.
+    pub(in crate::app) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        containers
+            .iter()
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// The mounted containers an export to `output` would replace, by label.
+    ///
+    /// A mod installed under `Paks` is mounted like any other container, and
+    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
+    /// mapping first — Windows refuses to truncate a file with a mapped section
+    /// open — so this is what the review dialog says out loud and what the export
+    /// releases before it writes.
+    pub(in crate::app) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        crate::core::source::mounted_containers_at(&source.source, output)
+            .into_iter()
+            .filter_map(|index| containers.get(index))
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+}

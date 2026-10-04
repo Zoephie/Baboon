@@ -14,7 +14,7 @@ impl Baboon {
     /// over it costs microseconds. Cloning the index onto a worker would be the
     /// expensive half of the job.
     pub(in crate::app) fn begin_dump_tag_references(&mut self, key: &str, _ctx: egui::Context) {
-        let Some(source) = self.source() else {
+        let Some(source) = self.model.source() else {
             self.model.status = "No tag source is loaded".to_owned();
             return;
         };
@@ -23,7 +23,7 @@ impl Baboon {
                 .to_owned();
             return;
         };
-        let Some(root) = self.entry_for_key(key).cloned() else {
+        let Some(root) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "That tag is no longer in the source".to_owned();
             return;
         };
@@ -31,7 +31,7 @@ impl Baboon {
         // per call, which is fine for one hop and quadratic inside a recursion.
         let mut by_dependency_key: HashMap<String, TagEntry> = HashMap::new();
         for entry in source.full_entry_set() {
-            if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
+            if let Some(rel) = dependency_entry_reference_path(entry, self.model.names()) {
                 by_dependency_key
                     .entry(crate::core::source::dependency_key(entry.group_tag, &rel))
                     .or_insert_with(|| entry.clone());
@@ -57,7 +57,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_export_json(&mut self, key: String, ctx: egui::Context) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let default_name = format!("{}.json", tag_file_stem(&entry));
@@ -82,7 +82,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let entries = keys
@@ -116,7 +116,7 @@ impl Baboon {
         label: String,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source_data.source else {
@@ -141,7 +141,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_raw(&mut self, key: String, ctx: egui::Context) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -161,7 +161,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_bitmap(&mut self, key: String, ctx: egui::Context) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -186,7 +186,7 @@ impl Baboon {
         folder: bool,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let entries = keys
@@ -200,7 +200,7 @@ impl Baboon {
         }
         let source = source_data.source.clone();
         let mut dialog = rfd::FileDialog::new().set_title("Extract Bitmap Source");
-        if let Some(layout) = self.kit_layout_for(self.model.active) {
+        if let Some(layout) = self.model.kit_layout_for(self.model.active) {
             dialog = dialog.set_directory(layout.data);
         }
         let Some(output) = dialog.pick_folder() else {
@@ -223,7 +223,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_bitmap_folder(&mut self, keys: Vec<String>, ctx: egui::Context) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let entries = keys
@@ -256,7 +256,7 @@ impl Baboon {
     pub(in crate::app) fn begin_extract_sounds(&mut self, keys: Vec<String>, all_languages: bool) {
         let entries: Vec<TagEntry> = keys
             .iter()
-            .filter_map(|key| self.entry_for_key(key).cloned())
+            .filter_map(|key| self.model.entry_for_key(key).cloned())
             .filter(|entry| crate::app::editor::is_sound_group(entry.group_tag))
             .collect();
         if entries.is_empty() {
@@ -264,10 +264,10 @@ impl Baboon {
             return;
         }
 
-        let source_kind = self.source().map(|source| source.source.clone());
+        let source_kind = self.model.source().map(|source| source.source.clone());
         match source_kind {
             Some(TagSource::LooseFolder { root, .. }) => {
-                let game = self.source().and_then(|source| source.game.clone());
+                let game = self.model.source().and_then(|source| source.game.clone());
                 let selected_language = self.audio.language.clone();
                 let shared_fmod_banks = matches!(
                     game,
@@ -281,7 +281,7 @@ impl Baboon {
                     .ok()
                 })
                 .flatten();
-                let Some(layout) = self.kit_layout_for(self.model.active) else {
+                let Some(layout) = self.model.kit_layout_for(self.model.active) else {
                     self.model.status = "Could not resolve the editing kit's data folder".to_owned();
                     return;
                 };
@@ -293,7 +293,7 @@ impl Baboon {
                         _ => continue,
                     };
                     match crate::core::source::read_entry(
-                        self.source()
+                        self.model.source()
                             .map(|source| &source.source)
                             .expect("source exists"),
                         entry,
@@ -431,7 +431,7 @@ impl Baboon {
             self.model.status = "An extraction is already running".to_owned();
             return;
         }
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let TagSource::IoStoreContainerSet { root, .. } = &source_data.source else {
@@ -467,7 +467,7 @@ impl Baboon {
             return;
         }
         self.export.container_dump_confirm = Some(ContainerDumpConfirm {
-            kit: self.active_kit_id(),
+            kit: self.model.active_kit_id(),
             output,
             total,
             scope,
@@ -486,7 +486,7 @@ impl Baboon {
             self.model.status = "An extraction is already running".to_owned();
             return;
         }
-        let Some(index) = self.kit_index(kit) else {
+        let Some(index) = self.model.kit_index(kit) else {
             return;
         };
         let Some(source_data) = self.model.kits[index].source.as_ref() else {
@@ -552,11 +552,11 @@ impl Baboon {
     /// Open the window that asks which game's tools a geometry or animation
     /// extraction is for, defaulting to the active kit's game.
     pub(in crate::app) fn prompt_extract_target(&mut self, key: String, kind: ExtractKind) {
-        let Some(entry) = self.entry_for_key(&key) else {
+        let Some(entry) = self.model.entry_for_key(&key) else {
             return;
         };
         let display_path = entry.display_path.clone();
-        let source = self.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
+        let source = self.model.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
         self.export.extract_target = Some(ExtractTargetPrompt {
             key,
             display_path,
@@ -574,7 +574,7 @@ impl Baboon {
         target: blam_tags::game::Game,
         ctx: egui::Context,
     ) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -594,7 +594,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_import_info(&mut self, key: String, ctx: egui::Context) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -624,7 +624,7 @@ impl Baboon {
         target: blam_tags::game::Game,
         ctx: egui::Context,
     ) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -648,7 +648,7 @@ impl Baboon {
         key: String,
         ctx: egui::Context,
     ) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -672,7 +672,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let entries = entries_for_keys(source_data, &keys);
@@ -701,11 +701,11 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_scenario_scripts(&mut self, key: String, ctx: egui::Context) {
-        if !self.active_game_is_campaign_evolved() {
+        if !self.model.active_game_is_campaign_evolved() {
             self.model.status = "Script extraction is only available for Campaign Evolved".to_owned();
             return;
         }
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -732,11 +732,11 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        if !self.active_game_is_campaign_evolved() {
+        if !self.model.active_game_is_campaign_evolved() {
             self.model.status = "Script import is only available for Campaign Evolved".to_owned();
             return;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
             self.model.status = "Tag is no longer in the browser".to_owned();
             return;
         };
@@ -752,7 +752,7 @@ impl Baboon {
         };
 
         if !self.model.kits[self.model.active].parsed_tags.contains_key(key) {
-            let Some(source) = self.source().map(|source| source.source.clone()) else {
+            let Some(source) = self.model.source().map(|source| source.source.clone()) else {
                 self.model.status = "No tag source is loaded".to_owned();
                 return;
             };
@@ -790,7 +790,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(in crate::app) fn begin_extract_hlsl_include_source(&mut self, key: String, ctx: egui::Context) {
-        let Some((source, entry)) = self.export_context(&key) else {
+        let Some((source, entry)) = self.model.export_context(&key) else {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
@@ -813,7 +813,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source() else {
+        let Some(source_data) = self.model.source() else {
             return;
         };
         let entries = entries_for_keys(source_data, &keys);
@@ -835,11 +835,7 @@ impl Baboon {
         });
     }
 
-    pub(in crate::app) fn export_context(&self, key: &str) -> Option<(TagSource, TagEntry)> {
-        let source = self.source()?.source.clone();
-        let entry = self.entry_for_key(key)?.clone();
-        Some((source, entry))
-    }
+
 }
 
 /// Create the directory a mod's files are about to be written into.
@@ -887,3 +883,11 @@ pub(in crate::app) fn container_dump_entries<'a>(
 
 #[cfg(test)]
 mod container_folder_extract_tests;
+
+impl Model {
+    pub(in crate::app) fn export_context(&self, key: &str) -> Option<(TagSource, TagEntry)> {
+        let source = self.source()?.source.clone();
+        let entry = self.entry_for_key(key)?.clone();
+        Some((source, entry))
+    }
+}

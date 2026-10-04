@@ -302,7 +302,7 @@ impl Baboon {
                 app.model.status = format!("Command line: {error}");
             }
         }
-        if app.should_check_updates_on_startup() {
+        if app.model.should_check_updates_on_startup() {
             app.begin_check_for_updates(cc.egui_ctx.clone(), true);
         }
         app

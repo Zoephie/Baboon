@@ -437,7 +437,7 @@ fn save_tag_by_key_refuses_what_it_cannot_write() {
     kit.open(&mut app, MODEL);
     app.model.kits[0].parsed_tags.get_mut(&key).unwrap().tag.endian = blam_tags::Endian::Be;
     let refused = app.save_tag_by_key(&key).unwrap_err();
-    let entry = app.entry_for_key(&key).cloned().unwrap();
+    let entry = app.model.entry_for_key(&key).cloned().unwrap();
     assert_eq!(
         Some(refused),
         unsaveable_reason(&entry, &app.model.kits[0].parsed_tags[&key].tag)
@@ -481,7 +481,7 @@ fn a_save_as_copy_inside_the_tags_folder_joins_the_browser() {
     assert_eq!(app.register_saved_copy_if_in_loaded_folder(&copy), Ok(true));
 
     let key = kit.key("objects/copies/crate_copy.model");
-    assert!(app.entry_for_key(&key).is_some());
+    assert!(app.model.entry_for_key(&key).is_some());
     assert_ne!(app.model.kits[0].generation, generation);
 
     // Outside the tags folder there is nothing to register.
@@ -493,7 +493,7 @@ fn a_save_as_copy_inside_the_tags_folder_joins_the_browser() {
 #[test]
 fn discarding_reloads_the_tag_from_disk() {
     let (_kit, mut app, key, _other) = edited("discard");
-    let label = app.tag_path_label(&key);
+    let label = app.model.tag_path_label(&key);
 
     app.discard_tag_changes(0, &key, &ctx());
     assert_eq!(app.model.status, format!("Discarded unsaved changes to {label}"));
@@ -516,7 +516,7 @@ fn discarding_reloads_the_tag_from_disk() {
 fn discarding_a_closed_tag_drops_its_document_without_reloading() {
     let (_kit, mut app, key, _other) = edited("discard-closed");
     app.kit_and_view(0).close_tag_pane(&key);
-    let label = app.tag_path_label(&key);
+    let label = app.model.tag_path_label(&key);
 
     app.discard_tag_changes(0, &key, &ctx());
 

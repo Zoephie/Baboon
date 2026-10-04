@@ -23,9 +23,9 @@ impl Baboon {
         let mut duplicate = false;
         let mut cancel = false;
         let (source_display, destination_display, target_label, target_kind, target_utoc) = self
-            .resolve_kit(kit)
+            .model.resolve_kit(kit)
             .and_then(|index| {
-                let entry = self.entry_for_key_in(index, &key)?;
+                let entry = self.model.entry_for_key_in(index, &key)?;
                 let (stem, extension) = entry
                     .display_path
                     .rsplit_once('.')
@@ -45,7 +45,7 @@ impl Baboon {
                 } else {
                     format!("{parent}/{destination_display}")
                 };
-                let (label, is_mod) = self.container_label_for_tag(index, &key)?;
+                let (label, is_mod) = self.model.container_label_for_tag(index, &key)?;
                 let utoc = match &entry.location {
                     TagEntryLocation::Container { container, .. } => self.model.kits[index]
                         .source

@@ -37,7 +37,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         pane: &mut KitId,
     ) -> egui_tiles::UiResponse {
         let kit_id = *pane;
-        let Some(kit_index) = self.app.kit_index(kit_id) else {
+        let Some(kit_index) = self.app.model.kit_index(kit_id) else {
             ui.label(RichText::new("This kit is no longer open").color(subtle_dark()));
             return egui_tiles::UiResponse::None;
         };
@@ -111,7 +111,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &KitId) -> egui::WidgetText {
-        let Some(index) = self.app.kit_index(*pane) else {
+        let Some(index) = self.app.model.kit_index(*pane) else {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
         let kit = &self.app.model.kits[index];
@@ -223,7 +223,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             left_panel()
         };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
-            if self.app.kit_index(*kit_id)
+            if self.app.model.kit_index(*kit_id)
                 .is_some_and(|index| self.app.model.kits[index].has_unwritten_modifications()));
         if dirty {
             tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
@@ -274,7 +274,7 @@ impl Baboon {
         self.kit_tree = tree;
 
         if let Some(kit_id) = focused
-            && let Some(index) = self.kit_index(kit_id)
+            && let Some(index) = self.model.kit_index(kit_id)
         {
             self.model.active = index;
         }

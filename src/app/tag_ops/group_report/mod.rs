@@ -131,7 +131,7 @@ impl Baboon {
             return;
         };
         let shipped = self
-            .source()
+            .model.source()
             .map(shipped_counts_by_group)
             .and_then(|counts| counts.get(&group.group_tag).copied())
             .unwrap_or(0);
