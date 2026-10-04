@@ -9,9 +9,9 @@ impl Baboon {
     /// walks it for the exact field referencing the target and navigates there.
     pub(in crate::app) fn apply_field_nav(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        if let Some(nav) = &self.field_nav {
+        if let Some(nav) = &self.references.field_nav {
             if now >= nav.glow_until {
-                self.field_nav = None;
+                self.references.field_nav = None;
             } else {
                 // Keep frames coming so the glow expires on time even when idle.
                 ctx.request_repaint();
@@ -19,10 +19,10 @@ impl Baboon {
         }
         // A glow belongs to the kit whose tag it is; drop it once that kit is
         // gone rather than glowing a field in another game.
-        if let Some(nav) = &self.field_nav
+        if let Some(nav) = &self.references.field_nav
             && self.kit_index(nav.kit).is_none()
         {
-            self.field_nav = None;
+            self.references.field_nav = None;
         }
         if let Some(hit) = self.search.pending_find_jump.clone() {
             if self.kits[self.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
@@ -33,13 +33,13 @@ impl Baboon {
                 self.activate_find_occurrence(ctx, hit);
             }
         }
-        let Some(jump) = self.pending_ref_jump.clone() else {
+        let Some(jump) = self.references.pending_ref_jump.clone() else {
             return;
         };
         // The jump belongs to the kit it was queued from; if that kit closed
         // while the referrer was loading, drop it.
         let Some(kit) = self.kit_index(jump.kit) else {
-            self.pending_ref_jump = None;
+            self.references.pending_ref_jump = None;
             return;
         };
         // Wait until the referrer is the focused tab and finished loading.
@@ -55,7 +55,7 @@ impl Baboon {
         let hit = refs.into_iter().find(|reference| {
             reference.group_tag == jump.group_tag && normalize_ref(&reference.rel_path) == target
         });
-        self.pending_ref_jump = None;
+        self.references.pending_ref_jump = None;
         match hit {
             Some(reference) => self.navigate_to_field(ctx, &jump.tag_key, &reference.field_path),
             None => {
@@ -83,7 +83,7 @@ impl Baboon {
         if let Some(block) = parent_block_path(field_path) {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
         }
-        self.field_nav = Some(FieldNav {
+        self.references.field_nav = Some(FieldNav {
             kit: self.active_kit_id(),
             tag_key: tag_key.to_owned(),
             field_path: field_path.to_owned(),
@@ -110,9 +110,9 @@ impl Baboon {
             .search.query_results
             .as_ref()
             .map(|results| {
-                self.ref_jump_expanded
+                self.references.ref_jump_expanded
                     .iter()
-                    .filter(|index| !self.ref_jump_occurrences.contains_key(index))
+                    .filter(|index| !self.references.ref_jump_occurrences.contains_key(index))
                     .filter_map(|&index| {
                         results
                             .entries
@@ -127,22 +127,22 @@ impl Baboon {
         for (index, key) in pending {
             if let Some(doc) = self.kits[self.active].parsed_tags.get(&key) {
                 let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
-                self.ref_jump_occurrences.insert(index, occurrences);
+                self.references.ref_jump_occurrences.insert(index, occurrences);
                 continue;
             }
             // Not open: read and walk it on a worker. This used to go through
             // the tab loader, which drops results for tags without a tab, so
             // the row asked again as soon as each load finished — forever.
-            if !self.ref_jump_loading.insert(index) {
+            if !self.references.ref_jump_loading.insert(index) {
                 continue;
             }
             let Some(entry) = self.entry_for_key(&key).cloned() else {
-                self.ref_jump_loading.remove(&index);
-                self.ref_jump_occurrences.insert(index, Vec::new());
+                self.references.ref_jump_loading.remove(&index);
+                self.references.ref_jump_occurrences.insert(index, Vec::new());
                 continue;
             };
             let Some(source_kind) = self.source().map(|source| source.source.clone()) else {
-                self.ref_jump_loading.remove(&index);
+                self.references.ref_jump_loading.remove(&index);
                 continue;
             };
             let kit = self.active_kit_id();
@@ -188,7 +188,7 @@ impl Baboon {
         target: (u32, String),
         result: Result<Vec<RefOccurrence>, String>,
     ) -> bool {
-        self.ref_jump_loading.remove(&index);
+        self.references.ref_jump_loading.remove(&index);
         let current = kit == self.active_kit_id()
             && self.search.query_results.as_ref().is_some_and(|results| {
                 results.ref_target.as_ref() == Some(&target)
@@ -207,7 +207,7 @@ impl Baboon {
                 Vec::new()
             }
         };
-        self.ref_jump_occurrences.insert(index, occurrences);
+        self.references.ref_jump_occurrences.insert(index, occurrences);
         false
     }
 
@@ -215,7 +215,7 @@ impl Baboon {
     /// source. Loose folders resolve a file path; Campaign Evolved resolves the
     /// existing stable entry from its mounted container catalog.
     pub(in crate::app) fn process_pending_open(&mut self, ctx: &egui::Context) {
-        let Some(req) = self.pending_open.take() else {
+        let Some(req) = self.references.pending_open.take() else {
             return;
         };
         let container_key = self.source().and_then(|source| {

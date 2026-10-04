@@ -83,7 +83,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.children_of_entry(key);
-        self.content_explorer = Some(ContentExplorer {
+        self.references.content_explorer = Some(ContentExplorer {
             kit: self.active_kit_id(),
             focus,
             parents,
@@ -103,7 +103,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.content_explorer.as_mut() {
+        if let Some(explorer) = self.references.content_explorer.as_mut() {
             explorer.back.push(explorer.focus.clone());
             explorer.forward.clear();
             explorer.focus = entry;
@@ -115,7 +115,7 @@ impl Baboon {
 
     pub(in crate::app) fn content_explorer_back(&mut self) {
         let Some(prev) = self
-            .content_explorer
+            .references.content_explorer
             .as_mut()
             .and_then(|explorer| explorer.back.pop())
         else {
@@ -126,7 +126,7 @@ impl Baboon {
 
     pub(in crate::app) fn content_explorer_forward(&mut self) {
         let Some(next) = self
-            .content_explorer
+            .references.content_explorer
             .as_mut()
             .and_then(|explorer| explorer.forward.pop())
         else {
@@ -144,7 +144,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         let (children, children_unavailable) = self.children_of_entry(&key);
-        if let Some(explorer) = self.content_explorer.as_mut() {
+        if let Some(explorer) = self.references.content_explorer.as_mut() {
             let current = std::mem::replace(&mut explorer.focus, entry);
             if going_back {
                 explorer.forward.push(current);
@@ -162,9 +162,9 @@ impl Baboon {
             return;
         };
         // Fresh query — drop any expander state from a previous references popup.
-        self.ref_jump_expanded.clear();
-        self.ref_jump_occurrences.clear();
-        self.ref_jump_loading.clear();
+        self.references.ref_jump_expanded.clear();
+        self.references.ref_jump_occurrences.clear();
+        self.references.ref_jump_loading.clear();
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.

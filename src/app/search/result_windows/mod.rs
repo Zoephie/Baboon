@@ -95,7 +95,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn draw_content_explorer_window(&mut self, ctx: &egui::Context) {
-        if self.content_explorer.is_none() {
+        if self.references.content_explorer.is_none() {
             return;
         }
         enum ExplorerAct {
@@ -108,18 +108,18 @@ impl Baboon {
         let mut open = true;
         let mut act: Option<ExplorerAct> = None;
         let explorer_kit = self
-            .content_explorer
+            .references.content_explorer
             .as_ref()
             .map(|explorer| explorer.kit)
             .expect("checked above");
         let explorer_kit_index = self.resolve_kit(explorer_kit).unwrap_or(self.active);
         let mut filter = self
-            .content_explorer
+            .references.content_explorer
             .as_ref()
             .map(|explorer| explorer.filter.clone())
             .unwrap_or_default();
         {
-            let explorer = self.content_explorer.as_ref().expect("checked above");
+            let explorer = self.references.content_explorer.as_ref().expect("checked above");
             egui::Window::new("Content Explorer")
                 .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("content_explorer"))
@@ -243,14 +243,14 @@ impl Baboon {
                     });
                 });
         }
-        if let Some(explorer) = self.content_explorer.as_mut() {
+        if let Some(explorer) = self.references.content_explorer.as_mut() {
             explorer.filter = filter;
         }
         match act {
             // The graph belongs to one kit; go back to it before acting, and
             // close the window if that kit has gone.
             Some(_) if !self.focus_navigation_kit(explorer_kit) => {
-                self.content_explorer = None;
+                self.references.content_explorer = None;
                 self.status = "That workspace has been closed".to_owned();
             }
             Some(ExplorerAct::Navigate(entry)) => self.content_explorer_navigate(entry),
@@ -261,7 +261,7 @@ impl Baboon {
             None => {}
         }
         if !open {
-            self.content_explorer = None;
+            self.references.content_explorer = None;
         }
     }
 
@@ -299,8 +299,8 @@ impl Baboon {
         let mut to_reveal: Option<String> = None;
         let mut to_toggle: Vec<usize> = Vec::new();
         let mut to_jump: Option<(String, String)> = None;
-        let expanded = &self.ref_jump_expanded;
-        let occurrences = &self.ref_jump_occurrences;
+        let expanded = &self.references.ref_jump_expanded;
+        let occurrences = &self.references.ref_jump_occurrences;
         egui::Window::new(&results.title)
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("tag_query_results"))
@@ -456,11 +456,11 @@ impl Baboon {
                 }
             });
         for index in to_toggle {
-            if self.ref_jump_expanded.remove(&index) {
+            if self.references.ref_jump_expanded.remove(&index) {
                 // Collapsed — drop the cache so a re-expand re-reads fresh.
-                self.ref_jump_occurrences.remove(&index);
+                self.references.ref_jump_occurrences.remove(&index);
             } else {
-                self.ref_jump_expanded.insert(index);
+                self.references.ref_jump_expanded.insert(index);
             }
         }
         // Every row names a tag in the kit the query ran against, so go back to
@@ -484,7 +484,7 @@ impl Baboon {
             // For a "References to X" result, queue a jump to the exact field in
             // the referrer that points at X (resolved once the tag loads).
             if let Some((group_tag, rel_path)) = &results.ref_target {
-                self.pending_ref_jump = Some(PendingRefJump {
+                self.references.pending_ref_jump = Some(PendingRefJump {
                     kit: self.active_kit_id(),
                     tag_key: key.clone(),
                     group_tag: *group_tag,

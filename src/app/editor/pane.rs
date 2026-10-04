@@ -205,7 +205,7 @@ impl Baboon {
             pending: &mut ops.pending,
             block_ops: &mut ops.block_ops,
             block_confirm: &mut self.editor.block_confirm,
-            open_request: &mut self.pending_open,
+            open_request: &mut self.references.pending_open,
             sound_play_request: crate::app::audio::SoundRequests::new(
                 &mut self.audio.pending,
                 Some(sound_owner),
@@ -240,7 +240,7 @@ impl Baboon {
             // same path — which, between two tags of the same group, is most of
             // them. Splitting a tag view is what exposed this.
             field_nav: self
-                .field_nav
+                .references.field_nav
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
             expand_all,

@@ -697,7 +697,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "content_explorer",
-            &["content_explorer"],
+            &["references.content_explorer"],
             &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
@@ -707,7 +707,7 @@ fn cases() -> Vec<Case> {
                     .unwrap()
                     .entries[0]
                     .clone();
-                h.app.content_explorer = Some(ContentExplorer {
+                h.app.references.content_explorer = Some(ContentExplorer {
                     kit: active_id(h),
                     focus,
                     parents: Vec::new(),
@@ -1411,15 +1411,15 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("ce_usmap", "parsed mappings cache"),
     ("export.pending_sound_extract", "a queued request"),
     ("editor.pending_ce_sound_ref", "a queued request"),
-    ("pending_open", "a queued request"),
+    ("references.pending_open", "a queued request"),
     ("kit_tools.pending_tool_import", "a queued request"),
     ("blender_icon", "texture"),
     ("sapien_icon", "texture"),
     ("tag_test_icon", "texture"),
     ("editor.block_clipboard", "clipboard contents"),
-    ("pending_ref_jump", "a queued navigation"),
+    ("references.pending_ref_jump", "a queued navigation"),
     ("search.pending_find_jump", "a queued navigation"),
-    ("field_nav", "navigation highlight"),
+    ("references.field_nav", "navigation highlight"),
 ];
 
 // ---------------------------------------------------------------------------

@@ -212,7 +212,6 @@ pub struct Baboon {
     restored_active_kit: Option<KitId>,
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
-    content_explorer: Option<ContentExplorer>,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     status: String,
@@ -234,8 +233,6 @@ pub struct Baboon {
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
-    /// Pending "open referenced tag in a new tab" request.
-    pending_open: Option<OpenTagRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     blender_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
@@ -245,23 +242,6 @@ pub struct Baboon {
     custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
     custom_editing_kit_texture_failures: HashSet<String>,
     last_pixels_per_point: f32,
-    /// A reference-jump awaiting its referrer tag to finish loading before we
-    /// can walk it to locate the exact referencing field. Set from the
-    /// "References to X" popup; drained by `apply_field_nav`.
-    pending_ref_jump: Option<PendingRefJump>,
-    /// Active reference-jump navigation: force ancestor blocks open and glow the
-    /// exact referencing field until its glow window expires.
-    field_nav: Option<FieldNav>,
-    /// Which referrer rows in the "References to X" popup are expanded to show
-    /// their per-occurrence list. Keyed by row index; reset per references query.
-    ref_jump_expanded: HashSet<usize>,
-    /// Lazily-computed occurrences per expanded referrer row. A present-but-empty
-    /// vec means "walked, none found"; absence means "not yet walked (loading)".
-    ref_jump_occurrences: HashMap<usize, Vec<RefOccurrence>>,
-    /// Referrer rows whose occurrences a worker is computing. The tag is read
-    /// and walked off the UI thread and never cached as a document: it is not
-    /// open, so there is no tab to keep it for.
-    ref_jump_loading: HashSet<usize>,
     /// Memory poking: the poke dialog, the record that undoes the last poke,
     /// and whether a poke or its undo is running.
     pub(in crate::app) poke: PokeFeature,
@@ -297,6 +277,9 @@ pub struct Baboon {
     /// the reference picker, TSV paste, block confirmation and clipboard, a
     /// deferred file action and a Campaign Evolved sound reference.
     pub(in crate::app) editor: EditorFeature,
+    /// References: the content explorer, reference jumps waiting or loading,
+    /// field navigation, and a referenced tag waiting to open.
+    pub(in crate::app) references: ReferencesFeature,
 }
 
 impl Baboon {
@@ -443,13 +426,7 @@ impl Baboon {
             operation_notice: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
-            pending_ref_jump: None,
-            field_nav: None,
-            ref_jump_expanded: HashSet::new(),
-            ref_jump_occurrences: HashMap::new(),
-            ref_jump_loading: HashSet::new(),
             tag_diff: None,
-            content_explorer: None,
             keyword_chooser_open: false,
             reveal_target: None,
             status: "Ready".to_owned(),
@@ -460,7 +437,6 @@ impl Baboon {
             last_opened_windows,
             audio: audio::AudioState::default(),
             ce_usmap: None,
-            pending_open: None,
             blender_icon: load_ico_texture(
                 &ctx,
                 "blender_icon",
@@ -602,6 +578,15 @@ impl Baboon {
                 pending_ce_sound_ref: None,
                 tag_reference_picker: None,
                 block_clipboard: None,
+            },
+            references: ReferencesFeature {
+                pending_ref_jump: None,
+                field_nav: None,
+                ref_jump_expanded: HashSet::new(),
+                ref_jump_occurrences: HashMap::new(),
+                ref_jump_loading: HashSet::new(),
+                content_explorer: None,
+                pending_open: None,
             },
         }
     }
