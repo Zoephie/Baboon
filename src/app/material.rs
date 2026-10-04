@@ -28,14 +28,14 @@ pub(super) fn draw_material_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    Frame::none()
+    Frame::NONE
         .fill(material_panel())
         .stroke(Stroke::new(1.0_f32, material_panel_edge()))
         .inner_margin(egui::Margin {
-            left: 2.0,
-            right: 2.0,
-            top: 2.0,
-            bottom: 2.0,
+            left: 2,
+            right: 2,
+            top: 2,
+            bottom: 2,
         })
         .show(ui, |ui| {
             if is_shader_tag(entry) {
@@ -375,7 +375,12 @@ pub(super) fn draw_material_value_row(
     };
     ui.painter().rect_filled(value_rect, 0.0, value_fill);
     ui.painter()
-        .rect_stroke(value_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            value_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     let text_offset = if let Some(color) = color {
         let swatch_size = (value_rect.height() - 4.0).max(12.0);
         let swatch_rect = egui::Rect::from_min_size(
@@ -384,7 +389,12 @@ pub(super) fn draw_material_value_row(
         );
         ui.painter().rect_filled(swatch_rect, 0.0, color.color32());
         ui.painter()
-            .rect_stroke(swatch_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+            .rect_stroke(
+                swatch_rect,
+                0.0,
+                Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+                egui::StrokeKind::Middle,
+            );
         let swatch_response = ui
             .interact(
                 swatch_rect,
@@ -447,7 +457,12 @@ pub(super) fn draw_material_function_value_row(
     );
     ui.painter().rect_filled(function_rect, 0.0, Color32::WHITE);
     ui.painter()
-        .rect_stroke(function_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            function_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().text(
         function_rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
@@ -465,7 +480,12 @@ pub(super) fn draw_material_function_value_row(
     );
     ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
     ui.painter()
-        .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            button_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().text(
         button_rect.center(),
         Align2::CENTER_CENTER,
@@ -843,8 +863,8 @@ mod shader_model_memo_tests {
 
         let ctx = egui::Context::default();
         let mut draw = |revision: (u64, u64, u64, u64)| {
-            let _ = ctx.run(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     crate::app::foundation::extracted_tests::tests::with_test_edit_context(
                         |edit| {
                             draw_material_tag(

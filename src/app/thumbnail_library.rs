@@ -505,10 +505,20 @@ impl Baboon {
             .rect_filled(image_rect, 0.0, foundation_input());
         if response.hovered() {
             ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_blue()));
+                .rect_stroke(
+                    image_rect,
+                    0.0,
+                    Stroke::new(1.0_f32, foundation_blue()),
+                    egui::StrokeKind::Middle,
+                );
         } else {
             ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+                .rect_stroke(
+                    image_rect,
+                    0.0,
+                    Stroke::new(1.0_f32, foundation_input_edge()),
+                    egui::StrokeKind::Middle,
+                );
         }
 
         match texture {
@@ -580,7 +590,7 @@ impl Baboon {
             style_tag_context_menu(ui);
             if context_menu_button(ui, S::MENU_ITEM).clicked() {
                 action = Some(CellAction::MenuAction(key.clone()));
-                ui.close_menu();
+                ui.close();
             }
         });
 

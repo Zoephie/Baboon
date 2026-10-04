@@ -167,7 +167,8 @@ fn the_tab_lays_out_against_the_shipped_database() {
 
     let render = |state: &mut TagCompatUiState| {
         let ctx = egui::Context::default();
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -175,8 +176,8 @@ fn the_tab_lays_out_against_the_shipped_database() {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     super::super::ui::help::draw_tag_compat_body_for_tests(ui, state)
                 });
             },

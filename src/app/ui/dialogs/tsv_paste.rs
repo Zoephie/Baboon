@@ -15,9 +15,10 @@ impl Baboon {
         {
             let paste = self.tsv_paste.as_mut().expect("checked above");
             egui::Window::new(format!("Paste TSV → {}", paste.block_label))
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("tsv_paste"))
                 .open(&mut open)
-                .default_width(560.0)
+                .default_width(window_width(ctx, 560.0))
                 .show(ctx, |ui| {
                     ui.label(
                         RichText::new(format!(

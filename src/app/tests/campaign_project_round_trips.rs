@@ -108,8 +108,8 @@ fn friction_in(bytes: &[u8]) -> Option<f32> {
 
 /// One frame at `time` running the autosave.
 fn autosave_at(app: &mut Baboon, ctx: &egui::Context, time: f64) {
-    let _ = ctx.run(screen(Vec::new(), time), |ctx| {
-        app.maybe_autosave_campaign_projects(ctx)
+    let _ = crate::app::run_ui_test(&ctx, screen(Vec::new(), time), |ui| {
+        app.maybe_autosave_campaign_projects(ui.ctx())
     });
 }
 

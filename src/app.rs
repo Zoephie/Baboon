@@ -153,6 +153,34 @@ mod controller;
 use controller::{ContainerLeaseId, ContainerWriteLease, CreatedTagLedger, CreatedTagRecord};
 mod ui;
 
+/// One headless egui pass for a test. egui 0.36 debug-panics when a
+/// `FullOutput` with unapplied texture deltas is dropped, and a test has no
+/// renderer to apply them to, so they are cleared here.
+#[cfg(test)]
+pub(crate) fn run_ui_test(
+    ctx: &egui::Context,
+    input: egui::RawInput,
+    run_ui: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let mut output = ctx.run_ui(input, run_ui);
+    output.textures_delta.clear();
+    output
+}
+
+/// The text a pass put on the clipboard, or empty when it copied nothing.
+/// egui 0.36 reports a copy as an output command rather than a field.
+#[cfg(test)]
+pub(crate) fn copied_text(output: &egui::PlatformOutput) -> String {
+    output
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 pub(super) fn test_definition_path(rel: &str) -> PathBuf {
     locate_definitions_root().join(rel)
@@ -492,7 +520,7 @@ impl Baboon {
     /// window's is.
     pub(crate) fn configure_context(ctx: &egui::Context) {
         ctx.set_fonts(foundation_fonts());
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         egui_extras::install_image_loaders(ctx);
         // A drag hovering Sapien's window asks for a copy or not-allowed
         // cursor (see `track_kit_tool_drop`). egui's own drag-and-drop hook

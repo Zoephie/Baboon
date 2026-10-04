@@ -32,7 +32,8 @@ mod welcome_column_tests {
         for taller_left in [false, true] {
             let ctx = egui::Context::default();
             let mut bottom = 0.0;
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -40,8 +41,8 @@ mod welcome_column_tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         draw_welcome_columns(ui, |columns| {
                             for (index, column) in columns.iter_mut().enumerate() {
                                 let height = if (index == 0) == taller_left {
@@ -150,7 +151,7 @@ impl Baboon {
                     let card_width = WELCOME_CARD_WIDTH.min(ui.available_width());
                     ui.set_width(card_width);
 
-                    Frame::none()
+                    Frame::NONE
                         .fill(foundation_group_bg())
                         .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
                         .show(ui, |ui| {
@@ -178,17 +179,17 @@ impl Baboon {
                                 Color32::from_rgb(255, 190, 151),
                             );
 
-                            Frame::none()
+                            Frame::NONE
                                 .inner_margin(egui::Margin {
-                                    left: 0.0,
-                                    right: 0.0,
-                                    top: 0.0,
-                                    bottom: 0.0,
+                                    left: 0,
+                                    right: 0,
+                                    top: 0,
+                                    bottom: 0,
                                 })
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.y = content_item_spacing_y;
                                     draw_welcome_columns(ui, |columns| {
-                                        Frame::none().inner_margin(egui::Margin::same(28.0)).show(
+                                        Frame::NONE.inner_margin(egui::Margin::same(28)).show(
                                             &mut columns[0],
                                             |ui| {
                                                 section_heading(ui, "Start", text_dark());
@@ -382,7 +383,7 @@ impl Baboon {
                                             },
                                         );
 
-                                        Frame::none().inner_margin(egui::Margin::same(28.0)).show(
+                                        Frame::NONE.inner_margin(egui::Margin::same(28)).show(
                                             &mut columns[1],
                                             |ui| {
                                                 section_heading(ui, "Recent", text_dark());

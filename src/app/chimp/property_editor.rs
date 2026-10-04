@@ -128,7 +128,7 @@ fn draw_chimp_property_block(
             .inner
             .unwrap_or(false);
             if added {
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
         }
@@ -484,7 +484,7 @@ fn edit_chimp_fname(
     }
     ui.data_mut(|data| data.remove::<String>(draft_id));
     let cancelled = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    if !response.lost_focus() || cancelled || text == current {
+    if !lost_focus_once(&response) || cancelled || text == current {
         return false;
     }
     *value = blam_tags::iostore::object::edit::intern_name(names, &text);
@@ -1963,7 +1963,8 @@ mod tests {
         let context = egui::Context::default();
         let mut value = 0_i64;
         let mut row_height = None;
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2010,8 +2011,8 @@ mod tests {
             ..Default::default()
         };
         let mut changed = false;
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 changed |= draw_chimp_fname(ui, "Name", value, names);
             });
         });
@@ -2129,7 +2130,7 @@ mod tests {
 
         /// Run `act` against the editor's frames, then report and clear
         /// whether any frame reported a change.
-        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&egui::Context))) -> bool {
+        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&mut egui::Ui))) -> bool {
             let Self {
                 document,
                 usmap,
@@ -2137,8 +2138,8 @@ mod tests {
                 frames,
                 ..
             } = self;
-            let mut draw = |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let mut draw = |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     *changed |= draw_chimp_export_editor(ui, document, usmap);
                 });
             };
@@ -2444,7 +2445,7 @@ mod tests {
             lone
         }
 
-        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&egui::Context))) -> bool {
+        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&mut egui::Ui))) -> bool {
             let Self {
                 value,
                 names,
@@ -2452,8 +2453,8 @@ mod tests {
                 frames,
             } = self;
             let mut changed = false;
-            let mut draw = |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let mut draw = |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     changed |=
                         draw_chimp_value(ui, egui::Id::new("lone"), value, None, names, usmap, 0);
                 });

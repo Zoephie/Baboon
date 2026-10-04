@@ -62,8 +62,8 @@ impl Column {
         let mut tops = Vec::new();
         let mut viewport = egui::Rect::NOTHING;
         let mut content_height = 0.0;
-        let _ = self.ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let output = egui::ScrollArea::vertical()
                     .vertical_scroll_offset(offset)
                     .show(ui, |ui| {
@@ -76,10 +76,9 @@ impl Column {
                             }
                         });
                     });
-                // The content's clip rect, which egui widens past the
-                // viewport by `clip_rect_margin`.
-                let margin = ui.visuals().clip_rect_margin;
-                viewport = output.inner_rect.expand(margin);
+                // The content's clip rect, which is the viewport itself:
+                // egui no longer widens it by `clip_rect_margin`.
+                viewport = output.inner_rect;
                 content_height = output.content_size.y;
             });
         });

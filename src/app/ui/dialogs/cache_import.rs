@@ -539,10 +539,11 @@ impl Baboon {
         let mut open = true;
         let mut action = None;
         egui::Window::new("Import Cache Folder")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("cache_import"))
             .open(&mut open)
             .resizable(true)
-            .default_width(560.0)
+            .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
                 if let Some(dialog) = self.cache_import_dialog.as_mut() {
                     action = draw_cache_import_body(ui, ctx, dialog);
@@ -637,7 +638,8 @@ mod cache_import_window_tests {
 
     fn render(dialog: &mut CacheImportDialog) {
         let ctx = egui::Context::default();
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -645,9 +647,9 @@ mod cache_import_window_tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    draw_cache_import_body(ui, ctx, dialog);
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_cache_import_body(ui, &ctx, dialog);
                 });
             },
         );

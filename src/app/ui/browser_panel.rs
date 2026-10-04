@@ -21,7 +21,7 @@ fn sidebar_list_button(ui: &mut Ui, icon: ButtonIcon, label: &str) -> egui::Resp
             ui.visuals().widgets.hovered.weak_bg_fill
         };
         ui.painter()
-            .rect_filled(rect, ui.visuals().widgets.hovered.rounding, fill);
+            .rect_filled(rect, ui.visuals().widgets.hovered.corner_radius, fill);
     }
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 12.0, rect.center().y),
@@ -160,12 +160,12 @@ impl Baboon {
         let scanning = self.kits[kit_index].scanning_entries;
         let source = self.kits[kit_index].source.as_mut();
 
-        Frame::none()
+        Frame::NONE
             .inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 8.0,
-                bottom: 8.0,
+                left: 10,
+                right: 10,
+                top: 8,
+                bottom: 8,
             })
             .show(ui, |ui| {
                 set_browser_modified_tags(ui, modified_tags);
@@ -827,7 +827,7 @@ fn browser_toolbar_controls(
                 .clicked()
             {
                 *sort = option;
-                ui.close_menu();
+                ui.close();
             }
         }
     });
@@ -1017,7 +1017,7 @@ fn draw_folder_header_common_actions(
                 }
                 if context_menu_button(ui, "Copy Folder Path").clicked() {
                     action.replace(BrowserAction::CopyFolderPath(pane.rel_path.clone()));
-                    ui.close_menu();
+                    ui.close();
                 }
                 context_menu_separator(ui);
                 let extract_label = pane.rel_path.to_string_lossy().replace('\\', "/");
@@ -1044,7 +1044,7 @@ fn draw_folder_header_common_actions(
                         rel_path: pane.rel_path.clone(),
                         label: pane.label.clone(),
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
             },
         );

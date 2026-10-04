@@ -29,8 +29,9 @@ fn a_workspace_activates_on_a_press_not_on_hover() {
     let mut time = 0.0;
     let mut frame = |app: &mut Baboon, events: Vec<egui::Event>| {
         time += 0.1;
-        let _ = ctx.run(input(time, events), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.draw_kit_tiles(ui, ctx));
+        let _ = crate::app::run_ui_test(&ctx, input(time, events), |ui| {
+            let ctx = ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |ui| app.draw_kit_tiles(ui, &ctx));
         });
     };
     let over_left = egui::pos2(200.0, 300.0);

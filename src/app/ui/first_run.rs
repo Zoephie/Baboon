@@ -31,7 +31,7 @@ impl Baboon {
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(false)
-            .default_width(720.0)
+            .default_width(window_width(ctx, 720.0))
             .show(ctx, |ui| match page {
                 FirstRunPage::Storage => self.draw_first_run_storage(ui),
                 FirstRunPage::Interface => self.draw_first_run_interface(ui),

@@ -874,12 +874,13 @@ mod tests {
             .insert("/Game/Test/Thing".to_owned(), document);
         let ctx = egui::Context::default();
         let due_at = |time: f64, app: &mut Baboon| {
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     time: Some(time),
                     ..Default::default()
                 },
-                |ctx| app.run_due_chimp_checkpoints(0, ctx),
+                |_| app.run_due_chimp_checkpoints(0, &ctx),
             );
             app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due
         };
@@ -1065,12 +1066,13 @@ mod tests {
         let mut app = install.app_with_open(&[THING]);
         edit_count(&mut app, THING, 42);
         let ctx = egui::Context::default();
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 time: Some(1.0),
                 ..Default::default()
             },
-            |ctx| app.run_due_chimp_checkpoints(0, ctx),
+            |ui| app.run_due_chimp_checkpoints(0, ui.ctx()),
         );
         assert_eq!(app.kits[0].chimp.documents[THING].checkpoint_due, None);
 

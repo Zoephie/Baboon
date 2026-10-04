@@ -20,7 +20,8 @@ fn frame(
     if let Some(pos) = pointer {
         events.insert(0, egui::Event::PointerMoved(pos));
     }
-    let _ = ctx.run(
+    let _ = crate::app::run_ui_test(
+        &ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -29,8 +30,8 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let response = ui
                     .add(egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false));
                 rect = response.rect;

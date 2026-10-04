@@ -122,8 +122,8 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
         egui::TextEdit::singleline(value)
             .hint_text(placeholder_text(hint))
             .text_color(text_dark())
-            .frame(false)
-            .margin(egui::Margin::same(0.0))
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::same(0))
             .vertical_align(egui::Align::Center)
             .min_size(edit_rect.size()),
     );
@@ -137,6 +137,7 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
         rect,
         BROWSER_SEARCH_RADIUS,
         pane_header_input_stroke(ui, response.hovered(), edit_response.has_focus()),
+        egui::StrokeKind::Middle,
     );
     response
 }
@@ -218,7 +219,7 @@ fn pane_header_breadcrumbs(
         if response.hovered() {
             ui.painter().rect_filled(
                 rect,
-                egui::Rounding::same(4.0),
+                egui::CornerRadius::same(4),
                 if is_dark_mode() {
                     Color32::from_white_alpha(26)
                 } else {
@@ -296,7 +297,7 @@ fn launcher_button(
     match icon {
         Some(texture) => ui.add_enabled(
             enabled,
-            egui::ImageButton::new(
+            egui::Button::image(
                 egui::Image::new(egui::load::SizedTexture::new(
                     texture.id(),
                     Vec2::splat(20.0),
@@ -753,7 +754,7 @@ fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
 /// up within the second. Keyed by `key` in egui's memory.
 pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
     ctx: &egui::Context,
-    key: impl std::hash::Hash,
+    key: impl std::hash::Hash + std::fmt::Debug,
     probe: impl FnOnce() -> T,
 ) -> T {
     const RECHECK_SECONDS: f64 = 1.0;
@@ -923,7 +924,7 @@ impl Baboon {
             .inner;
         if let Some(command) = menu.inner.flatten() {
             self.submit_terminal_command(format!("tool {command}"), ctx);
-            ui.close_menu();
+            ui.close();
         }
         let response = menu.response;
         if enabled {
@@ -969,7 +970,7 @@ impl Baboon {
                 }
                 _ => {}
             }
-            ui.close_menu();
+            ui.close();
         }
         let response = menu.response;
         if !enabled {
@@ -999,10 +1000,10 @@ impl Baboon {
             let mut draft = ui
                 .data_mut(|data| data.get_temp::<String>(draft_id))
                 .unwrap_or_default();
-            let keyword_field = Frame::none()
+            let keyword_field = Frame::NONE
                 .fill(foundation_input())
-                .rounding(egui::Rounding::same(BUTTON_HEIGHT / 2.0))
-                .inner_margin(egui::Margin::same(2.0))
+                .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
+                .inner_margin(egui::Margin::same(2))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.spacing_mut().interact_size.y = 20.0;
@@ -1012,7 +1013,7 @@ impl Baboon {
                             egui::TextEdit::singleline(&mut draft)
                                 .hint_text(placeholder_text("add keyword"))
                                 .desired_width(120.0)
-                                .frame(false),
+                                .frame(egui::Frame::NONE),
                         );
                         let add_response = ui
                             .scope(|ui| {
@@ -1020,7 +1021,7 @@ impl Baboon {
                                 ui.add(
                                     egui::Button::new("")
                                         .min_size(Vec2::splat(20.0))
-                                        .rounding(egui::Rounding::same(10.0)),
+                                        .corner_radius(egui::CornerRadius::same(10)),
                                 )
                             })
                             .inner;
@@ -1037,14 +1038,15 @@ impl Baboon {
             let (resp, add_clicked) = keyword_field.inner;
             ui.painter().rect_stroke(
                 keyword_field.response.rect,
-                egui::Rounding::same(BUTTON_HEIGHT / 2.0),
+                egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8),
                 pane_header_input_stroke(
                     ui,
                     keyword_field.response.hovered() || resp.hovered(),
                     resp.has_focus(),
                 ),
+                egui::StrokeKind::Middle,
             );
-            let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (add_clicked || submitted) && !draft.trim().is_empty() {
                 self.kits[kit_index].keywords.add(tag_key, &draft);
                 draft.clear();
@@ -1094,7 +1096,7 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
         blend(background.b(), target.b()),
     );
     ui.painter()
-        .rect_filled(rect, egui::Rounding::same(BUTTON_HEIGHT / 2.0), fill);
+        .rect_filled(rect, egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8), fill);
     let text_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
         egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
@@ -1125,8 +1127,8 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
 }
 
 impl eframe::App for Baboon {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.run_frame(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.run_frame(ui);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1142,13 +1144,14 @@ impl eframe::App for Baboon {
 }
 
 impl Baboon {
-    /// One whole application frame: everything `eframe::App::update` does.
+    /// One whole application frame: everything `eframe::App::ui` does.
     /// Split out because an `eframe::Frame` cannot be built outside eframe,
     /// and nothing here needs one — so headless tests drive exactly the
     /// frame the window does.
-    pub(crate) fn run_frame(&mut self, ctx: &egui::Context) {
+    pub(crate) fn run_frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         self.window_state.observe(ctx);
-        self.draw_root_ui(ctx);
+        self.draw_root_ui(ui);
         self.run_deferred_file_action(ctx);
         // A container write whose workspace closed while it was in flight left
         // a mapping released and an Unreal package mount idle. Nothing else
@@ -1177,8 +1180,8 @@ mod keyword_draft_tests {
         let mut app = Baboon::for_test();
         let mut draft_ids = Vec::new();
         let frame = |app: &mut Baboon, draft_ids: &mut Vec<egui::Id>| {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     draft_ids.clear();
                     for pane in ["pane a", "pane b"] {
                         ui.push_id(pane, |ui| {

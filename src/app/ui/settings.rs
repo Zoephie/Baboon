@@ -10,16 +10,16 @@ mod editing_kit_card_tests {
     #[test]
     fn editing_kit_inputs_match_button_height() {
         let ctx = egui::Context::default();
-        ctx.set_style(foundation_style());
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        ctx.set_global_style(foundation_style());
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut value = String::from("Editing kit");
                 for interactive in [true, false] {
                     let top = ui.next_widget_position().y;
                     let response =
                         ui.add(editing_kit_text_input(&mut value, 200.0).interactive(interactive));
-                    // TextEdit returns the inner text rect, excluding its frame margins.
-                    assert_eq!(response.rect.height() + 4.0, 24.0);
+                    // egui 0.36: TextEdit's response rect includes its frame margins.
+                    assert_eq!(response.rect.height(), 24.0);
                     assert_eq!(
                         ui.next_widget_position().y - top - ui.spacing().item_spacing.y,
                         24.0
@@ -74,12 +74,12 @@ mod editing_kit_card_tests {
         assert!(!profile.is_read_only_for(Some(&identity), Some(&profile.root)));
 
         let ctx = egui::Context::default();
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         for game in ["halo2_mcc", "haloce_mcc", "halo3_mcc", "haloce_evolved"] {
             let mut draft = CustomEditingKitDraft::new();
             draft.game = game.to_owned();
-            let output = ctx.run(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     draw_editing_kit_form(ui, &mut draft, None);
                 });
             });
@@ -147,13 +147,14 @@ mod editing_kit_card_tests {
     #[test]
     fn editing_kit_form_preview_tracks_draft_name_and_keeps_fields_inside_dialog() {
         let ctx = egui::Context::default();
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         egui_extras::install_image_loaders(&ctx);
         let mut draft = CustomEditingKitDraft::new();
         draft.root_input = r"C:\Program Files (x86)\Steam\steamapps\common\H2EK".to_owned();
         for name in ["Halo 2: Rebalance", "Renamed kit"] {
             draft.name = name.to_owned();
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -163,8 +164,8 @@ mod editing_kit_card_tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let right = ui.max_rect().right();
                         let actions = draw_editing_kit_form(ui, &mut draft, None);
                         assert!(!actions.save && !actions.cancel && !actions.remove);
@@ -206,10 +207,11 @@ mod editing_kit_card_tests {
     fn editing_kit_action_columns_match_shared_button_sizes_at_high_dpi() {
         for scale in [1.0, 2.0, 3.0] {
             let ctx = egui::Context::default();
-            ctx.set_style(foundation_style());
+            ctx.set_global_style(foundation_style());
             ctx.set_pixels_per_point(scale);
             egui_extras::install_image_loaders(&ctx);
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -217,8 +219,8 @@ mod editing_kit_card_tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         for (icon, label) in
                             [(ButtonIcon::Open, "Open"), (ButtonIcon::Edit, "Edit")]
                         {
@@ -243,7 +245,8 @@ mod editing_kit_card_tests {
         events: Vec<egui::Event>,
     ) -> egui::Rect {
         let mut rect = egui::Rect::NOTHING;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -252,14 +255,14 @@ mod editing_kit_card_tests {
                 events,
                 ..Default::default()
             },
-            |ctx| {
+            |_| {
                 rect = egui::Window::new("Settings")
                     .id(egui::Id::new("settings_resize_test"))
                     .title_bar(false)
                     .collapsible(false)
                     .resizable(true)
                     .default_pos(egui::pos2(100.0, 100.0))
-                    .default_size(Vec2::new(760.0, 400.0))
+                    .default_size(window_size(ctx, Vec2::new(760.0, 400.0), false))
                     .show(ctx, |ui| {
                         let mut open = true;
                         let mut selected = tab;
@@ -463,7 +466,8 @@ mod editing_kit_card_tests {
         egui_extras::install_image_loaders(&ctx);
         let mut positions = [egui::Pos2::ZERO; 2];
         let mut frame = |events| {
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -472,8 +476,8 @@ mod editing_kit_card_tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         for (index, id) in ["one", "two"].into_iter().enumerate() {
                             let top = ui.next_widget_position();
                             positions[index] = top + Vec2::new(9.0, 22.0);
@@ -532,7 +536,8 @@ mod editing_kit_card_tests {
             for error in [None, Some("Folder not found")] {
                 let ctx = egui::Context::default();
                 egui_extras::install_image_loaders(&ctx);
-                let output = ctx.run(
+                let output = crate::app::run_ui_test(
+                    &ctx,
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -540,8 +545,8 @@ mod editing_kit_card_tests {
                         )),
                         ..Default::default()
                     },
-                    |ctx| {
-                        egui::CentralPanel::default().show(ctx, |ui| {
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
                             let right = ui.max_rect().right();
                             let first_top = ui.next_widget_position().y;
                             assert_eq!(
@@ -698,10 +703,10 @@ fn editing_kit_card_with_read_only(
     let mut load = false;
     let mut edit = false;
     let mut remove = false;
-    let card = Frame::none()
+    let card = Frame::NONE
         .fill(fill)
-        .rounding(egui::Rounding::same(6.0))
-        .inner_margin(egui::Margin::same(2.0))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::same(2))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // Center within a fixed row, not the remaining scroll area's height.
@@ -732,7 +737,7 @@ fn editing_kit_card_with_read_only(
                         ui.add(
                             egui::Image::new(texture)
                                 .fit_to_exact_size(image_size)
-                                .rounding(egui::Rounding::same(4.0)),
+                                .corner_radius(egui::CornerRadius::same(4)),
                         );
                     } else {
                         ui.add(
@@ -1287,7 +1292,7 @@ fn settings_window_body(
         .min_scrolled_height(0.0)
         .max_height(height)
         .show(ui, |ui| {
-            Frame::none()
+            Frame::NONE
                 .inner_margin(ui.spacing().window_margin)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -1304,12 +1309,13 @@ impl Baboon {
 
         let mut open = self.settings_open;
         egui::Window::new("Settings")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("app_settings"))
             .title_bar(false)
             .collapsible(false)
             .resizable(true)
-            .default_width(760.0)
-            .default_height(640.0)
+            .default_width(window_width(ctx, 760.0))
+            .default_height(window_height(ctx, 640.0, false))
             .show(ctx, |ui| {
                 let mut selected = self.settings_tab;
                 settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
@@ -1685,18 +1691,19 @@ impl Baboon {
             custom_texture.or_else(|| self.game_banner_texture(ctx, &draft.game).cloned());
         let mut actions = EditingKitFormActions::default();
         egui::Window::new(title)
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("custom_editing_kit_dialog"))
             .title_bar(false)
             .collapsible(false)
             .auto_sized()
-            .default_width(580.0)
-            .max_width(580.0)
-            .max_height((ctx.screen_rect().height() - 32.0).max(0.0))
+            .default_width(window_width(ctx, 580.0))
+            .max_width(window_width(ctx, 580.0))
+            .max_height(window_height(ctx, (ctx.content_rect().height() - 32.0).max(0.0), false))
             .scroll([false, true])
             .show(ctx, |ui| {
                 super::find::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
                 ui.separator();
-                egui::Frame::none()
+                egui::Frame::NONE
                     .inner_margin(ui.spacing().window_margin)
                     .show(ui, |ui| {
                         actions = draw_editing_kit_form(ui, &mut draft, texture.as_ref());
@@ -1888,6 +1895,7 @@ impl Baboon {
         let mut confirm = false;
         let mut cancel = false;
         egui::Window::new("Remove Editing Kit?")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("remove_custom_editing_kit"))
             .collapsible(false)
             .resizable(false)
@@ -2022,7 +2030,9 @@ impl Baboon {
             ui.label(RichText::new("Path").color(subtle_dark()));
             let path_response = ui
                 .add(egui::TextEdit::singleline(&mut self.blender_path_input).desired_width(360.0));
-            if path_response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            if lost_focus_once(&path_response)
+                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+            {
                 let trimmed = self.blender_path_input.trim();
                 self.prefs.blender_path = if trimmed.is_empty() {
                     None
@@ -2067,7 +2077,9 @@ impl Baboon {
                     .desired_width(360.0)
                     .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
             );
-            if path_response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            if lost_focus_once(&path_response)
+                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+            {
                 self.commit_chimp_usmap_path_input(ui.ctx().clone());
             }
             if ui.button("Browse...").clicked() {

@@ -139,7 +139,7 @@ pub(super) fn draw_foundation_graph(
                     if editor.insert_curve_point(*selected_graph, x).is_ok() {
                         changed = true;
                     }
-                    ui.close_menu();
+                    ui.close();
                 }
                 let is_graph_point = editor
                     .curve_is_graph_point(*selected_graph, *selected_point)
@@ -155,7 +155,7 @@ pub(super) fn draw_foundation_graph(
                         *selected_point = (*selected_point).saturating_sub(1);
                         changed = true;
                     }
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 let segment_count = editor.curve_segment_count(*selected_graph).unwrap_or(0);
@@ -185,7 +185,7 @@ pub(super) fn draw_foundation_graph(
                         {
                             changed = true;
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
                 if selected_segment > 0 {
@@ -201,7 +201,7 @@ pub(super) fn draw_foundation_graph(
                             {
                                 changed = true;
                             }
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
                 }
@@ -217,7 +217,7 @@ pub(super) fn draw_foundation_graph(
     } else {
         draw_function_color_gradient_vertical(painter, plot, &function_color_stops(function));
     }
-    painter.rect_stroke(plot, 0.0, Stroke::new(1.0_f32, grid_line()));
+    painter.rect_stroke(plot, 0.0, Stroke::new(1.0_f32, grid_line()), egui::StrokeKind::Middle);
     for i in 1..10 {
         let x = egui::lerp(plot.left()..=plot.right(), i as f32 / 10.0);
         let y = egui::lerp(plot.bottom()..=plot.top(), i as f32 / 10.0);

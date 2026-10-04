@@ -42,13 +42,13 @@ fn button_sees_click(locked: bool) -> bool {
     let rect = std::cell::Cell::new(egui::Rect::NOTHING);
     let clicked = std::cell::Cell::new(false);
     let frame = |events: Vec<egui::Event>, app: &mut Baboon| {
-        let _ = ctx.run(input(events), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&ctx, input(events), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let response = ui.button("Save");
                 rect.set(response.rect);
                 clicked.set(clicked.get() | response.clicked());
             });
-            app.draw_folder_refactor_lock(ctx);
+            app.draw_folder_refactor_lock(&ctx);
         });
     };
     frame(Vec::new(), &mut app);
@@ -79,7 +79,8 @@ fn the_lock_swallows_clicks_meant_for_the_app_beneath() {
 fn ctrl_s_queues_save(locked: bool) -> bool {
     let mut app = app(locked);
     let ctx = egui::Context::default();
-    let _ = ctx.run(
+    let _ = crate::app::run_ui_test(
+        &ctx,
         input(vec![egui::Event::Key {
             key: egui::Key::S,
             physical_key: None,
@@ -87,7 +88,7 @@ fn ctrl_s_queues_save(locked: bool) -> bool {
             repeat: false,
             modifiers: egui::Modifiers::CTRL,
         }]),
-        |ctx| app.prepare_root_frame(ctx),
+        |_| app.prepare_root_frame(&ctx),
     );
     app.deferred_file_action.is_some()
 }

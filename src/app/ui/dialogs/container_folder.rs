@@ -28,9 +28,10 @@ impl Baboon {
                 "New Folder"
             };
             egui::Window::new(title)
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("container_folder"))
                 .open(&mut open)
-                .default_width(440.0)
+                .default_width(window_width(ctx, 440.0))
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Parent folder").color(subtle_dark()).small());
@@ -52,7 +53,7 @@ impl Baboon {
                         response.request_focus();
                         state.focus_input = false;
                     }
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         do_apply = true;
                     }
                     // Typing is the user's answer to a rejection, so the stale

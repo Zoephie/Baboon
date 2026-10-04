@@ -8,26 +8,28 @@ use super::*;
 const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(200);
 
 impl Baboon {
-    pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context) {
+    pub(super) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         if self.first_run_wizard.is_some() {
             ctx.set_zoom_factor(self.prefs.ui_scale);
             set_dark_mode(self.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
-            egui::CentralPanel::default().show(ctx, |_ui| {});
+            egui::CentralPanel::default().show(ui, |_ui| {});
             self.draw_first_run_wizard(ctx);
             return;
         }
         self.prepare_root_frame(ctx);
 
-        self.draw_menu_bar(ctx);
-        self.draw_status_bar(ctx);
+        self.draw_menu_bar(ui);
+        self.draw_status_bar(ui);
         self.draw_entry_index_wait_notice(ctx);
         // Terminal panel — rendered AFTER status so it sits above it.
-        self.draw_terminal_panel(ctx);
+        self.draw_terminal_panel(ui);
+        set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()))
-            .show(ctx, |ui| {
+            .frame(Frame::NONE.fill(editor_bg()))
+            .show(ui, |ui| {
                 self.draw_kit_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
@@ -51,16 +53,17 @@ impl Baboon {
 
     /// The top menu bar: the File, Edit, Tools, View, Help and Editing Kits
     /// menus, then the tool launcher buttons.
-    fn draw_menu_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("menu")
-            .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
-                left: 6.0,
-                right: 6.0,
-                top: 2.0,
-                bottom: 2.0,
+    fn draw_menu_bar(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
+        egui::Panel::top("menu")
+            .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+                left: 6,
+                right: 6,
+                top: 2,
+                bottom: 2,
             }))
-            .show(ctx, |ui| {
-                egui::menu::bar(ui, |ui| {
+            .show(ui, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
                     aligned_menu_button(ui, "File", |ui| {
                         self.draw_file_menu(ui, ctx);
                     });
@@ -94,7 +97,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.open_new_tag_dialog();
         }
         // One entry, two implementations. A container tag is a
@@ -114,7 +117,7 @@ impl Baboon {
             .on_disabled_hover_text("Load an editing kit or a Campaign Evolved container first")
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             if self.current_source_is_container() {
                 self.begin_import_tag(None);
             } else {
@@ -122,26 +125,26 @@ impl Baboon {
             }
         }
         if ui.button("Load Tag...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.begin_load_single(ctx.clone());
         }
         if ui.button("Load Folder...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.begin_load_folder(ctx.clone());
         }
         if ui.button("Load Monolithic blob_index.dat...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.begin_load_monolithic(ctx.clone());
         }
         if ui
             .button("Open Campaign Evolved container (.utoc)...")
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.begin_load_iostore_container(ctx.clone());
         }
         if ui.button("Open Baboon Project...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.begin_open_campaign_project(ctx.clone());
         }
         // A workspace's edits are autosaved to a recovery file
@@ -163,7 +166,7 @@ impl Baboon {
             .on_disabled_hover_text("Baboon projects hold changes to Campaign Evolved containers")
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.defer_file_action(DeferredFileAction::SaveProject, ctx);
         }
         if ui
@@ -173,7 +176,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
         }
         ui.separator();
@@ -182,14 +185,14 @@ impl Baboon {
             .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.open_loaded_tags_folder();
         }
         if ui
             .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.open_loaded_data_folder();
         }
         let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
@@ -199,7 +202,7 @@ impl Baboon {
         .inner
         .flatten();
         if let Some(action) = recent_action {
-            ui.close_menu();
+            ui.close();
             self.apply_recent_action(action, ctx);
         }
         ui.separator();
@@ -217,7 +220,7 @@ impl Baboon {
         )
         .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
         if ui
@@ -228,7 +231,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.save_current_tag_as();
         }
         if self.current_source_is_container() {
@@ -242,7 +245,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
             }
             if self.last_poke.is_some()
@@ -251,7 +254,7 @@ impl Baboon {
                     .on_hover_text("Restore the bytes from Baboon's last verified runtime poke")
                     .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.begin_undo_last_poke(ctx.clone());
             }
             if ui
@@ -268,7 +271,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.defer_file_action(DeferredFileAction::ExportMod, ctx);
             }
             // The same review, opened to look rather than to
@@ -284,7 +287,7 @@ impl Baboon {
                 )
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.review_changes();
             }
             // Expert-gated because it is the one action here
@@ -305,7 +308,7 @@ impl Baboon {
                     )
                     .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.defer_file_action(
                     DeferredFileAction::ExtractAllContainerTags,
                     ctx,
@@ -329,7 +332,7 @@ impl Baboon {
                     ctx,
                 );
             }
-            ui.close_menu();
+            ui.close();
         }
         if ui
             .add_enabled(
@@ -342,13 +345,13 @@ impl Baboon {
                 DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
                 ctx,
             );
-            ui.close_menu();
+            ui.close();
         }
         ui.separator();
         // Goes through the same close request as the window's own close
         // button, so unsaved tags are still offered for saving first.
         if ui.button("Exit").clicked() {
-            ui.close_menu();
+            ui.close();
             self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
         }
     }
@@ -360,7 +363,7 @@ impl Baboon {
             .add_enabled(self.can_undo_current(), egui::Button::new("Undo    Ctrl+Z"))
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.undo_current_tag();
         }
         if ui
@@ -370,7 +373,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.redo_current_tag();
         }
         ui.separator();
@@ -386,7 +389,7 @@ impl Baboon {
             .on_hover_text("Return the current tag to the way its source has it")
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             if let Some(key) = selected {
                 self.discard_tag_changes(self.active, &key, ctx);
             }
@@ -410,7 +413,7 @@ impl Baboon {
                 .on_disabled_hover_text("This workspace has no unsaved modifications")
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.clear_stash_confirm = Some(ClearStashConfirm {
                     kit: self.active_kit_id(),
                     stashed,
@@ -422,7 +425,7 @@ impl Baboon {
         ui.separator();
         if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
             self.settings_open = true;
-            ui.close_menu();
+            ui.close();
         }
     }
 
@@ -432,7 +435,7 @@ impl Baboon {
     fn draw_tools_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         style_list_menu(ui);
         if ui.button("Run Tool...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.tool_commands.open = true;
         }
         self.draw_monitor_tools_menu(ui);
@@ -447,7 +450,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.show_references_for(&key);
             }
@@ -459,13 +462,13 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.open_content_explorer(&key);
             }
         }
         if icon_text_button(ui, ButtonIcon::Compare, "Compare Tags...", has_current).clicked() {
-            ui.close_menu();
+            ui.close();
             if let Some(key) = self.kits[self.active].selected_key.clone() {
                 self.tag_diff = Some(TagDiffState {
                     kit: self.active_kit_id(),
@@ -495,33 +498,33 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.fix_current_tag_dependencies();
         }
 
         ui.separator();
         if ui.button("Search Field Values...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.field_value_search_open = true;
         }
         if ui.button("Browse Keywords...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.keyword_chooser_open = true;
         }
         if ui.button("Find Unreferenced Tags...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.show_unreferenced_tags();
         }
         if ui.button("List Scenario Map IDs...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.show_map_ids(ctx);
         }
         if ui.button("List Sounds by Class...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.show_sounds_by_class(ctx);
         }
         if ui.button("List Uncompressed Sounds...").clicked() {
-            ui.close_menu();
+            ui.close();
             self.show_uncompressed_sounds(ctx);
         }
 
@@ -553,7 +556,7 @@ impl Baboon {
                 .on_hover_text("Which tags reference which, for the reference searches above")
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.begin_build_reverse_dependencies(ctx.clone(), true);
             }
         }
@@ -571,7 +574,7 @@ impl Baboon {
             .on_hover_text("Rescan every tag in the folder from disk")
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             // Clear cached entries so the scan runs fresh.
             if let Some(s) = self.source_mut() {
                 s.all_entries.clear();
@@ -593,7 +596,7 @@ impl Baboon {
             )
             .clicked()
         {
-            ui.close_menu();
+            ui.close();
             self.refresh_tag_browser(ctx.clone());
         }
     }
@@ -611,14 +614,14 @@ impl Baboon {
             .clicked()
         {
             kit.browser_mode = BrowserMode::Folders;
-            ui.close_menu();
+            ui.close();
         }
         if ui
             .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
             .clicked()
         {
             kit.browser_mode = BrowserMode::Groups;
-            ui.close_menu();
+            ui.close();
         }
         ui.separator();
         let selected_sort = right_opening_menu_button(
@@ -642,7 +645,7 @@ impl Baboon {
         .flatten();
         if let Some(option) = selected_sort {
             kit.browser_sort = option;
-            ui.close_menu();
+            ui.close();
         }
         ui.separator();
         ui.checkbox(&mut self.prefs.show_browser_prefixes, "Show [tag]/[folder]");
@@ -663,13 +666,13 @@ impl Baboon {
         if ui
             .add_enabled(
                 terminal_enabled,
-                egui::SelectableLabel::new(self.kits[self.active].terminal_open, "Terminal"),
+                egui::Button::selectable(self.kits[self.active].terminal_open, "Terminal"),
             )
             .clicked()
         {
             self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
             self.remember_terminal_open_for_game();
-            ui.close_menu();
+            ui.close();
         }
     }
 
@@ -679,38 +682,38 @@ impl Baboon {
         if ui.button("About...").clicked() {
             self.help_panel_tab = HelpPanelTab::About;
             self.about_open = true;
-            ui.close_menu();
+            ui.close();
         }
         if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
             self.help_panel_tab = HelpPanelTab::Doc;
             self.about_open = true;
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Tutorials...").clicked() {
             self.help_panel_tab = HelpPanelTab::Tutorials;
             self.about_open = true;
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Tag Compatibility...").clicked() {
             self.help_panel_tab = HelpPanelTab::TagCompat;
             self.about_open = true;
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Map Names...").clicked() {
             self.help_panel_tab = HelpPanelTab::MapNames;
             self.about_open = true;
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Check for updates").clicked() {
             self.begin_check_for_updates(ctx.clone(), false);
-            ui.close_menu();
+            ui.close();
         }
         if let Some(update) = self.available_update.as_ref() {
             let label = format!("Update available: {}...", update.short_name());
             let url = update.release_url.clone();
             if ui.button(label).clicked() {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                ui.close_menu();
+                ui.close();
             }
         }
     }
@@ -757,7 +760,7 @@ impl Baboon {
                         response.on_disabled_hover_text(tooltip)
                     };
                     if response.clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.load_custom_editing_kit_profile(profile, ctx.clone());
                     }
                 }
@@ -781,7 +784,7 @@ impl Baboon {
                     .on_hover_text(tooltip)
                     .clicked()
                     {
-                        ui.close_menu();
+                        ui.close();
                         self.load_editing_kit_shortcut(shortcut, ctx.clone());
                     }
                 }
@@ -797,21 +800,22 @@ impl Baboon {
         if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
             self.settings_tab = SettingsTab::EditingKits;
             self.settings_open = true;
-            ui.close_menu();
+            ui.close();
         }
     }
 
     /// The status bar: the status line, index and job progress, the update
     /// link and the workspace's project.
-    fn draw_status_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status")
-            .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
-                left: 6.0,
-                right: 6.0,
-                top: 2.0,
-                bottom: 2.0,
+    fn draw_status_bar(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
+        egui::Panel::bottom("status")
+            .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+                left: 6,
+                right: 6,
+                top: 2,
+                bottom: 2,
             }))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
@@ -1047,32 +1051,33 @@ impl Baboon {
     }
 
     /// The terminal panel, when the active kit has it open.
-    fn draw_terminal_panel(&mut self, ctx: &egui::Context) {
+    fn draw_terminal_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         if self.kits[self.active].terminal_open {
             let work_dir_label = self.kits[self.active]
                 .terminal_work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            egui::TopBottomPanel::bottom("terminal")
+            egui::Panel::bottom("terminal")
                 .resizable(true)
-                .default_height(180.0)
-                .height_range(90.0..=600.0)
+                .default_size(180.0)
+                .size_range(90.0..=600.0)
                 .frame(
-                    Frame::none()
+                    Frame::NONE
                         .fill(foundation_group_bg())
                         .inner_margin(egui::Margin {
-                            left: 6.0,
-                            right: 6.0,
-                            top: 4.0,
-                            bottom: 4.0,
+                            left: 6,
+                            right: 6,
+                            top: 4,
+                            bottom: 4,
                         }),
                 )
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     // Header pinned to the top of the panel.
-                    egui::TopBottomPanel::top("terminal_header")
-                        .frame(Frame::none())
-                        .show_inside(ui, |ui| {
+                    egui::Panel::top("terminal_header")
+                        .frame(Frame::NONE)
+                        .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.strong(RichText::new("Terminal").color(text_dark()));
                                 ui.small(
@@ -1144,9 +1149,9 @@ impl Baboon {
                         });
 
                     // Input row pinned to the bottom of the panel.
-                    egui::TopBottomPanel::bottom("terminal_input")
-                        .frame(Frame::none())
-                        .show_inside(ui, |ui| {
+                    egui::Panel::bottom("terminal_input")
+                        .frame(Frame::NONE)
+                        .show(ui, |ui| {
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(">").monospace().color(subtle_dark()));
@@ -1171,7 +1176,7 @@ impl Baboon {
                                 let run_clicked = ui
                                     .add_enabled(!self.terminal.running, egui::Button::new("Run"))
                                     .clicked();
-                                let enter = resp.lost_focus()
+                                let enter = lost_focus_once(&resp)
                                     && ui.input(|i| i.key_pressed(egui::Key::Enter));
                                 if resp.has_focus() && !self.terminal.running {
                                     let recall = ui.input(|i| {
@@ -1201,16 +1206,16 @@ impl Baboon {
                     // feedback to fight the resize handle.
                     egui::CentralPanel::default()
                         .frame(
-                            Frame::none()
+                            Frame::NONE
                                 .fill(Color32::from_rgb(24, 24, 23))
                                 .inner_margin(egui::Margin {
-                                    left: 6.0,
-                                    right: 6.0,
-                                    top: 4.0,
-                                    bottom: 4.0,
+                                    left: 6,
+                                    right: 6,
+                                    top: 4,
+                                    bottom: 4,
                                 }),
                         )
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             let want_scroll_bottom = self.terminal.scroll_to_bottom;
                             self.terminal.scroll_to_bottom = false;
                             draw_terminal_output(ui, &self.terminal.lines, want_scroll_bottom);
@@ -1540,7 +1545,7 @@ impl Baboon {
                 .raw
                 .dropped_files
                 .iter()
-                .filter_map(|file| file.path.clone())
+                .map(|file| file.path().to_path_buf())
                 .collect::<Vec<_>>()
         });
         if !dropped_paths.is_empty() {
@@ -1600,7 +1605,7 @@ impl Baboon {
         let Some(progress) = &self.folder_refactor else {
             return;
         };
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         egui::Area::new(egui::Id::new("folder_refactor_lock"))
             .order(egui::Order::Foreground)
             .fixed_pos(screen.min)
@@ -1610,7 +1615,7 @@ impl Baboon {
                 ui.painter()
                     .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
                 let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(panel), |ui| {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                     Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_width(panel.width());
                         ui.label(RichText::new(&progress.label).strong().color(text_dark()));
@@ -1716,7 +1721,7 @@ pub(super) fn draw_terminal_output(
                     ui.max_rect().x_range(),
                     origin + first_top..=origin + total,
                 );
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     ui.skip_ahead_auto_ids(first);
                     for line in &lines[first..last.max(first)] {
                         #[cfg(test)]
@@ -1763,7 +1768,8 @@ pub(in crate::app) mod terminal_output_tests {
         bottom: bool,
     ) -> std::time::Duration {
         let started = std::time::Instant::now();
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1771,8 +1777,8 @@ pub(in crate::app) mod terminal_output_tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     draw_terminal_output(ui, lines, bottom);
                 });
             },
@@ -1783,7 +1789,8 @@ pub(in crate::app) mod terminal_output_tests {
     /// The text of every line painted in a frame.
     fn painted(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> Vec<String> {
         LINES_BUILT.with(|built| built.set(0));
-        let output = ctx.run(
+        let output = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1791,8 +1798,8 @@ pub(in crate::app) mod terminal_output_tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     draw_terminal_output(ui, lines, bottom);
                 });
             },
@@ -1822,7 +1829,7 @@ pub(in crate::app) mod terminal_output_tests {
 
         let ctx = egui::Context::default();
         // Scrolling animates over frames; land in one.
-        ctx.style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
         painted(&ctx, &lines, true);
         let bottom = (0..3).map(|_| painted(&ctx, &lines, false)).last().unwrap();
         assert!(starts(&bottom, "19999: "), "the last line is in view");

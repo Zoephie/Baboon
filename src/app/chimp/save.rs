@@ -113,7 +113,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(520.0)
+            .default_width(window_width(ctx, 520.0))
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label(
@@ -251,7 +251,7 @@ impl Baboon {
             .id(egui::Id::new("chimp_save_changes"))
             .collapsible(false)
             .resizable(true)
-            .default_width(620.0)
+            .default_width(window_width(ctx, 620.0))
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label(format!(
@@ -1077,12 +1077,12 @@ mod tests {
         (install, app, staging)
     }
 
-    fn draw_save(app: &mut Baboon) -> impl FnMut(&egui::Context) + '_ {
-        move |ctx| app.draw_chimp_save_window(ctx)
+    fn draw_save(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
+        move |ui| app.draw_chimp_save_window(ui.ctx())
     }
 
-    fn draw_discard(app: &mut Baboon) -> impl FnMut(&egui::Context) + '_ {
-        move |ctx| app.draw_chimp_discard_window(ctx)
+    fn draw_discard(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
+        move |ui| app.draw_chimp_discard_window(ui.ctx())
     }
 
     /// The save dialog needs something modified and a Paks folder to default

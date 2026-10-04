@@ -210,8 +210,8 @@ impl Grid {
             function_popup,
             ..
         } = self;
-        let output = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let output = crate::app::run_ui_test(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut sinks = EditSinks::default();
                 let mut edit = FieldEditContext::read_only(&mut sinks, "test", TAG_KEY);
                 edit.group_tag = doc.tag.header.group_tag;
@@ -517,9 +517,10 @@ impl Popup {
         }
     }
 
-    fn frame(&mut self, events: Vec<egui::Event>, draw: &mut dyn FnMut(&egui::Context)) {
+    fn frame(&mut self, events: Vec<egui::Event>, draw: &mut dyn FnMut(&mut egui::Ui)) {
         self.time += 1.0 / 60.0;
-        let output = self.ctx.run(
+        let output = crate::app::run_ui_test(
+            &self.ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -530,7 +531,7 @@ impl Popup {
                 events,
                 ..Default::default()
             },
-            |ctx| draw(ctx),
+            |ui| draw(ui),
         );
         self.painted = output
             .shapes
@@ -556,7 +557,7 @@ impl Popup {
             })
     }
 
-    fn click_at(&mut self, pos: egui::Pos2, draw: &mut dyn FnMut(&egui::Context)) {
+    fn click_at(&mut self, pos: egui::Pos2, draw: &mut dyn FnMut(&mut egui::Ui)) {
         for step in 1..=3 {
             let t = step as f32 / 3.0;
             let from = egui::pos2(pos.x - 40.0, pos.y - 40.0);
@@ -573,7 +574,7 @@ impl Popup {
         self.frame(Vec::new(), draw);
     }
 
-    fn click(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    fn click(&mut self, text: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         let pos = self.find(text).center();
         self.click_at(pos, draw);
     }
@@ -645,8 +646,10 @@ fn a_color_is_overridden_and_repicked_through_the_color_picker() {
     let mut swatches = default_color_swatches();
     let mut last_dir = None;
     let mut result = None;
-    let mut draw = |ctx: &egui::Context| {
-        if let Some(done) = draw_color_popup(ctx, &mut color_popup, &mut swatches, &mut last_dir) {
+    let mut draw = |ui: &mut egui::Ui| {
+        if let Some(done) =
+            draw_color_popup(ui.ctx(), &mut color_popup, &mut swatches, &mut last_dir)
+        {
             result = Some(done);
         }
     };
@@ -707,8 +710,8 @@ fn the_function_editor_retypes_an_animated_parameter() {
     let mut function_popup = Some(popup);
     let mut color_popup = None;
     let mut batch = None;
-    let mut draw = |ctx: &egui::Context| {
-        if let Some(done) = draw_function_popup(ctx, &mut function_popup, &mut color_popup) {
+    let mut draw = |ui: &mut egui::Ui| {
+        if let Some(done) = draw_function_popup(ui.ctx(), &mut function_popup, &mut color_popup) {
             batch = Some(done);
         }
     };

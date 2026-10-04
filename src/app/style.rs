@@ -83,7 +83,7 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     } else {
         Color32::from_rgb(188, 207, 216)
     };
-    visuals.menu_rounding = egui::Rounding::same(5.0);
+    visuals.menu_corner_radius = egui::CornerRadius::same(5);
     visuals.window_stroke = Stroke::new(1.0_f32, foundation_group_edge());
     visuals
 }
@@ -153,9 +153,10 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
         r"C:\Windows\Fonts\segoeui.ttf",
     ] {
         if let Ok(bytes) = std::fs::read(path) {
-            fonts
-                .font_data
-                .insert("foundation_ui".to_owned(), FontData::from_owned(bytes));
+            fonts.font_data.insert(
+                "foundation_ui".to_owned(),
+                std::sync::Arc::new(FontData::from_owned(bytes)),
+            );
             fonts
                 .families
                 .entry(FontFamily::Proportional)
@@ -185,9 +186,10 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
         let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
-        fonts
-            .font_data
-            .insert(GLYPH_FALLBACK.to_owned(), FontData::from_owned(bytes));
+        fonts.font_data.insert(
+            GLYPH_FALLBACK.to_owned(),
+            std::sync::Arc::new(FontData::from_owned(bytes)),
+        );
         for family in [FontFamily::Proportional, FontFamily::Monospace] {
             fonts
                 .families
@@ -214,9 +216,10 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
     .iter()
     .any(|path| match std::fs::read(path) {
         Ok(bytes) => {
-            fonts
-                .font_data
-                .insert(FOUNDATION_BOLD.to_owned(), FontData::from_owned(bytes));
+            fonts.font_data.insert(
+                FOUNDATION_BOLD.to_owned(),
+                std::sync::Arc::new(FontData::from_owned(bytes)),
+            );
             true
         }
         Err(_) => false,
@@ -270,6 +273,59 @@ pub(super) fn foundation_style() -> egui::Style {
     // dense custom-painted editor cells continue to use their explicit sizes.
     style.spacing.interact_size.y = BUTTON_HEIGHT;
     style
+}
+
+/// What a window adds around its content: frame margins, stroke and, with a
+/// title bar, the title bar. egui 0.29 sized a window by its content; egui
+/// 0.36 sizes it by everything it covers. Every window size in Baboon was
+/// picked for the content, so [`window_size`] and friends add this back.
+fn window_chrome(ctx: &egui::Context, title_bar: bool) -> Vec2 {
+    let style = ctx.global_style();
+    let frame = Frame::window(&style);
+    let mut chrome = frame.total_margin().sum();
+    if title_bar {
+        // The title row: a heading-font line inside the window margin, then
+        // the title frame's own bottom edge.
+        let heading =
+            ctx.fonts_mut(|fonts| fonts.row_height(&TextStyle::Heading.resolve(&style)));
+        let title_edge = frame.inner_margin(0).total_margin().bottom;
+        chrome.y += heading + frame.inner_margin.sum().y + title_edge;
+    }
+    chrome.ceil()
+}
+
+/// The outer size egui 0.36 wants for a window whose content is `content`.
+pub(super) fn window_size(ctx: &egui::Context, content: Vec2, title_bar: bool) -> Vec2 {
+    content + window_chrome(ctx, title_bar)
+}
+
+/// The outer width for a window whose content is `content` wide.
+pub(super) fn window_width(ctx: &egui::Context, content: f32) -> f32 {
+    content + window_chrome(ctx, false).x
+}
+
+/// The outer height for a window whose content is `content` tall.
+pub(super) fn window_height(ctx: &egui::Context, content: f32, title_bar: bool) -> f32 {
+    content + window_chrome(ctx, title_bar).y
+}
+
+/// Where the root frame's windows may sit: the screen less the menu bar, the
+/// status bar and the terminal. Recorded by the root frame each pass.
+fn window_work_area_id() -> egui::Id {
+    egui::Id::new("baboon_window_work_area")
+}
+
+pub(super) fn set_window_work_area(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.data_mut(|data| data.insert_temp(window_work_area_id(), rect));
+}
+
+/// The rect a window with no position of its own is placed and kept in.
+/// egui 0.29 placed such a window below the app's panels; egui 0.36 places it
+/// at the top of its constrain rect, which is the whole screen unless set,
+/// so it opened over the menu bar.
+pub(super) fn window_work_area(ctx: &egui::Context) -> egui::Rect {
+    ctx.data(|data| data.get_temp(window_work_area_id()))
+        .unwrap_or_else(|| ctx.content_rect())
 }
 
 static DARK_MODE_ENABLED: AtomicBool = AtomicBool::new(false);

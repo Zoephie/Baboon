@@ -264,7 +264,7 @@ fn draw_chimp_header_sections(
                                 response.request_focus();
                                 edit.focus = false;
                             }
-                            let submitted = response.lost_focus()
+                            let submitted = lost_focus_once(&response)
                                 && ui.input(|input| input.key_pressed(egui::Key::Enter));
 
                             // The blast radius, before the change rather than
@@ -1231,7 +1231,7 @@ mod tests {
         }
 
         /// Run `act`, then report and clear whether any frame applied an edit.
-        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&egui::Context))) -> bool {
+        fn act(&mut self, act: impl FnOnce(&mut Frames, &mut dyn FnMut(&mut egui::Ui))) -> bool {
             let Self {
                 install,
                 document,
@@ -1241,8 +1241,8 @@ mod tests {
                 frames,
             } = self;
             let world = install.world.clone();
-            let mut draw = |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let mut draw = |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let mut asked = false;
                     *changed |= draw_chimp_header_view(ui, document, &world, *expert, &mut asked);
                     *scan |= asked;

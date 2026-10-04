@@ -219,7 +219,8 @@ fn run_drawing(
     let mut time = 0.0;
     let mut frame = |events: Vec<egui::Event>, queued: &mut VecDeque<SoundRequest>| {
         time += 1.0 / 60.0;
-        let output = ctx.run(
+        let output = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -229,8 +230,8 @@ fn run_drawing(
                 events,
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let mut sinks = EditSinks::default();
                     let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                     edit.game = Some(game);

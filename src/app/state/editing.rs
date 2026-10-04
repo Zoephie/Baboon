@@ -59,7 +59,7 @@ impl EditDraft {
 
     pub(in crate::app) fn should_commit(&self, ui: &egui::Ui, response: &egui::Response) -> bool {
         self.changed
-            && (response.lost_focus()
+            && (lost_focus_once(&response)
                 || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))))
     }
 
@@ -635,7 +635,10 @@ impl<'a> FieldEditContext<'a> {
 }
 
 impl FieldEditContext<'_> {
-    pub(in crate::app) fn widget_id(&self, salt: impl std::hash::Hash) -> egui::Id {
+    pub(in crate::app) fn widget_id(
+        &self,
+        salt: impl std::hash::Hash + std::fmt::Debug,
+    ) -> egui::Id {
         egui::Id::new(("field_edit", self.view_scope, self.tag_key, salt))
     }
 

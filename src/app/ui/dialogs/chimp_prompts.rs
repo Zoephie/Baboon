@@ -22,7 +22,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(600.0)
+            .default_width(window_width(ctx, 600.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new(format!("{package} as {format_label}")).color(text_dark()));
@@ -161,7 +161,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(460.0)
+            .default_width(window_width(ctx, 460.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new(&name).color(text_dark()));
@@ -239,7 +239,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(640.0)
+            .default_width(window_width(ctx, 640.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new(format!("{package} as {format_label}")).color(text_dark()));

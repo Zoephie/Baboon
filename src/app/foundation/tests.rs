@@ -161,8 +161,8 @@ pub(in crate::app) mod tests {
         let labels_for_one_frame = |tag: &TagFile| {
             DROPDOWN_LABELS_BUILT.with(|count| count.set(0));
             with_test_edit_context(|edit| {
-                let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         draw_fields_with_docs(
                             ui,
                             &tag.root(),
@@ -211,13 +211,14 @@ pub(in crate::app) mod tests {
         let ctx = egui::Context::default();
         let check_at = |time: f64| {
             let mut missing = None;
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     time: Some(time),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         missing = Some(reference_target_missing_cached(
                             ui,
                             None,
@@ -280,8 +281,8 @@ pub(in crate::app) mod tests {
         }));
         with_test_edit_context(|edit| {
             edit.view_scope = "tile7";
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 0);
 
                     edit.field_nav = Some(first);
@@ -924,8 +925,8 @@ pub(in crate::app) mod tests {
                     ],
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let field = tag
                             .root()
                             .field_path("control points[0]/position")
@@ -1003,8 +1004,8 @@ pub(in crate::app) mod tests {
                     events,
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let field = tag.root().field_path(path).expect("color field");
                         let value = field.value().expect("color value");
                         let meta = field_display_meta(field.name());

@@ -62,9 +62,10 @@ impl Baboon {
             running = dialog.running;
             let busy = dialog.running || dialog.analyzing;
             egui::Window::new("Import Tags")
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("tag_import"))
                 .open(&mut open)
-                .default_width(720.0)
+                .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Into").color(subtle_dark()));
@@ -90,7 +91,7 @@ impl Baboon {
                         // On leaving the box — which Enter also does — never on
                         // a keystroke: resolving walks the path, and a path can
                         // name a folder holding tens of thousands of files.
-                        if response.lost_focus() {
+                        if lost_focus_once(&response) {
                             action = Some(ImportDialogAction::Resolve);
                         }
                         if ui.add_enabled(!busy, egui::Button::new("Choose tag...")).clicked() {

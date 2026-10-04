@@ -25,9 +25,10 @@ impl Baboon {
                 _ => "Rename Tag",
             };
             egui::Window::new(title)
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("rename_tag"))
                 .open(&mut open)
-                .default_width(560.0)
+                .default_width(window_width(ctx, 560.0))
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Current path").color(subtle_dark()).small());
                     ui.label(

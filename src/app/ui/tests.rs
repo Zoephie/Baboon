@@ -30,9 +30,9 @@ fn editing_kit_read_only_titles_use_a_muted_suffix_without_changing_the_name() {
         }
     }
     let ctx = egui::Context::default();
-    ctx.set_style(style);
-    let output = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    ctx.set_global_style(style);
+    let output = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             editing_kit_menu_row_with_read_only(ui, "Protected kit", "EK", None, true, true, true);
             draw_kit_banner_tile(ui, "Protected kit", "C:/Kits/Protected", None, true);
         });
@@ -56,7 +56,8 @@ fn shared_browser_buttons_use_standard_point_sizes() {
         let mut mode_rect = egui::Rect::NOTHING;
         let mut menu_rect = egui::Rect::NOTHING;
 
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64,8 +65,8 @@ fn shared_browser_buttons_use_standard_point_sizes() {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         mode_rect = selectable_icon_text_button(
                             ui,
@@ -88,9 +89,10 @@ fn shared_browser_buttons_use_standard_point_sizes() {
 #[test]
 fn scrolling_dropdown_matches_button_height() {
     let ctx = egui::Context::default();
-    ctx.set_style(foundation_style());
+    ctx.set_global_style(foundation_style());
     let mut dropdown_height = 0.0;
-    let _ = ctx.run(
+    let _ = crate::app::run_ui_test(
+        &ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -98,8 +100,8 @@ fn scrolling_dropdown_matches_button_height() {
             )),
             ..Default::default()
         },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 dropdown_height = combo_box_with_scroll(
                     ui,
                     egui::ComboBox::from_id_salt("button_height_test").selected_text("0. default"),
@@ -153,7 +155,8 @@ fn pane_header_two_line_title_is_centered_inside_the_icon_height() {
         ),
     ];
 
-    let _ = ctx.run(
+    let _ = crate::app::run_ui_test(
+        &ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -161,8 +164,8 @@ fn pane_header_two_line_title_is_centered_inside_the_icon_height() {
             )),
             ..Default::default()
         },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     (icon_rect, _) =
                         ui.allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
@@ -203,8 +206,8 @@ fn pane_headers_share_the_same_narrow_action_breakpoint() {
 #[test]
 fn custom_header_inputs_use_standard_hover_and_focus_strokes() {
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             assert_eq!(
                 pane_header_input_stroke(ui, false, false),
                 Stroke::new(1.0_f32, foundation_input_edge())
@@ -388,7 +391,8 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
         let mut separator = egui::Rect::NOTHING;
         let mut second_row = egui::Rect::NOTHING;
 
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -396,8 +400,8 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
                     first_row = editing_kit_menu_row(ui, "Halo 4", "H4", None, false, true).rect;
                     separator = ui.separator().rect;
@@ -482,13 +486,14 @@ fn a_rechecked_probe_runs_at_most_once_a_second() {
     let probes = std::cell::Cell::new(0);
     let ask = |time: f64| {
         let mut answer = false;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 time: Some(time),
                 ..Default::default()
             },
-            |ctx| {
-                answer = super::recheck_cached(ctx, "probe", || {
+            |_| {
+                answer = super::recheck_cached(&ctx, "probe", || {
                     probes.set(probes.get() + 1);
                     probes.get() > 1
                 });

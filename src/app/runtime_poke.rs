@@ -2951,9 +2951,10 @@ impl Baboon {
         let mut confirm = false;
         let mut close = false;
         egui::Window::new("Poke Current Tag")
+            .constrain_to(window_work_area(ctx))
             .collapsible(false)
             .resizable(true)
-            .default_width(620.0)
+            .default_width(window_width(ctx, 620.0))
             .open(&mut open)
             .show(ctx, |ui| match &dialog.state {
                 PokeDialogState::Scanning => {

@@ -386,7 +386,12 @@ pub(in crate::app) fn draw_shader_grid_row(
     if let (Some(reset), Some(reset_rect)) = (reset, reset_rect) {
         ui.painter().rect_filled(reset_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(reset_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+            .rect_stroke(
+                reset_rect,
+                0.0,
+                Stroke::new(1.0_f32, material_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         ui.painter().text(
             reset_rect.center(),
             Align2::CENTER_CENTER,
@@ -425,7 +430,12 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+            .rect_stroke(
+                button_rect,
+                0.0,
+                Stroke::new(1.0_f32, material_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         let icon_rect = egui::Rect::from_center_size(button_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
 
@@ -454,7 +464,12 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+                    .rect_stroke(
+                        del_rect,
+                        0.0,
+                        Stroke::new(1.0_f32, material_input_edge()),
+                        egui::StrokeKind::Middle,
+                    );
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -486,7 +501,12 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(f_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(f_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+            .rect_stroke(
+                f_rect,
+                0.0,
+                Stroke::new(1.0_f32, material_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
         // The f() button is the only way into the graph editor here, on
@@ -520,7 +540,12 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+                    .rect_stroke(
+                        del_rect,
+                        0.0,
+                        Stroke::new(1.0_f32, material_input_edge()),
+                        egui::StrokeKind::Middle,
+                    );
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -552,7 +577,12 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+            .rect_stroke(
+                button_rect,
+                0.0,
+                Stroke::new(1.0_f32, material_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         ui.painter().text(
             button_rect.center(),
             Align2::CENTER_CENTER,
@@ -590,7 +620,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 if let Some(reset) = reset.clone() {
                     if ui.button("Reset to default").clicked() {
                         edit.block_ops.push(reset);
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
                 if let Some(items) = menu_items {
@@ -602,7 +632,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                     for item in items {
                         if ui.button(&item.label).clicked() {
                             push_shader_context_action(edit, &item.action);
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
                 }
@@ -1109,7 +1139,12 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+                .rect_stroke(
+                    del_rect,
+                    0.0,
+                    Stroke::new(1.0_f32, material_input_edge()),
+                    egui::StrokeKind::Middle,
+                );
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1276,7 +1311,12 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+                .rect_stroke(
+                    del_rect,
+                    0.0,
+                    Stroke::new(1.0_f32, material_input_edge()),
+                    egui::StrokeKind::Middle,
+                );
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1837,7 +1877,12 @@ fn draw_shader_reference_cell(
         },
     );
     ui.painter()
-        .rect_stroke(open_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            open_rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
     let icon_color = if open_enabled {
         material_text()
@@ -1919,7 +1964,7 @@ fn draw_shader_reference_cell(
                 REFERENCE_MISSING_COLOR
             };
             ui.painter()
-                .rect_stroke(text_rect, 2.0, Stroke::new(1.5_f32, color));
+                .rect_stroke(text_rect, 2.0, Stroke::new(1.5_f32, color), egui::StrokeKind::Middle);
         }
         if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
             && accepts(&payload)
@@ -1933,7 +1978,12 @@ fn draw_shader_reference_cell(
     // "..." browse button
     ui.painter().rect_filled(browse_rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(browse_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            browse_rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().text(
         browse_rect.center(),
         Align2::CENTER_CENTER,
@@ -1978,13 +2028,19 @@ pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, co
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     let inner = rect.shrink(3.0);
     ui.painter().rect_filled(inner, 0.0, display_color);
     ui.painter().rect_stroke(
         inner,
         0.0,
         Stroke::new(1.25_f32, material_color_swatch_edge(display_color)),
+        egui::StrokeKind::Middle,
     );
 }
 
@@ -2189,7 +2245,8 @@ mod reference_cell_tests {
         let cell_rect = std::cell::Cell::new(egui::Rect::NOTHING);
         let mut committed = Vec::new();
         let mut frame = |events: Vec<egui::Event>| {
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -2198,8 +2255,8 @@ mod reference_cell_tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let top = ui.cursor().min;
                         draw_entry(ui, entry, None, false, false, None, None, true);
                         row_rect.set(egui::Rect::from_min_size(

@@ -186,7 +186,7 @@ fn view_tab_button_optional_icon(
         let hover = ui.visuals().widgets.hovered.bg_fill;
         ui.painter().rect_filled(
             rect,
-            ui.visuals().widgets.hovered.rounding,
+            ui.visuals().widgets.hovered.corner_radius,
             Color32::from_rgba_unmultiplied(hover.r(), hover.g(), hover.b(), 72),
         );
     }

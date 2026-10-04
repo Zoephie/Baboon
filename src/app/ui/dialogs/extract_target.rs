@@ -31,9 +31,10 @@ impl Baboon {
         let mut extract = false;
         let mut cancel = false;
         egui::Window::new(title)
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("extract_target"))
             .open(&mut open)
-            .default_width(520.0)
+            .default_width(window_width(ctx, 520.0))
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {

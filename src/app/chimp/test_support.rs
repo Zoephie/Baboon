@@ -603,12 +603,13 @@ impl Frames {
     pub(super) fn frame(
         &mut self,
         events: Vec<egui::Event>,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) -> &[(String, egui::Rect)] {
         // A tenth of a second, so two clicks a press apart are not a
         // double click.
         self.time += 0.1;
-        let output = self.ctx.run(
+        let output = crate::app::run_ui_test(
+            &self.ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -618,7 +619,7 @@ impl Frames {
                 events,
                 ..Default::default()
             },
-            |ctx| draw(ctx),
+            |ui| draw(ui),
         );
         self.labels = output
             .shapes
@@ -634,9 +635,18 @@ impl Frames {
         &self.labels
     }
 
-    /// Whether any painted text on the last frame starts with `text`.
+    /// Whether any painted text on the last frame starts with `text`. A
+    /// `DragValue` paints its prefix and its number as two texts, one after
+    /// the other on the same line; such a pair counts as one text.
     pub(super) fn shows(&self, text: &str) -> bool {
         self.labels.iter().any(|(label, _)| label.starts_with(text))
+            || self.labels.windows(2).any(|pair| {
+                let ((first, a), (second, b)) = (&pair[0], &pair[1]);
+                let gap = b.left() - a.right();
+                (a.center().y - b.center().y).abs() < 1.0
+                    && (-0.5..20.0).contains(&gap)
+                    && format!("{first}{second}").starts_with(text)
+            })
     }
 
     /// The `nth` painted text starting with `text`, once it has stopped
@@ -646,7 +656,7 @@ impl Frames {
         &mut self,
         text: &str,
         nth: usize,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) -> egui::Rect {
         self.find_by(&|label| label.starts_with(text), text, nth, draw)
     }
@@ -656,7 +666,7 @@ impl Frames {
         matches: &dyn Fn(&str) -> bool,
         text: &str,
         nth: usize,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) -> egui::Rect {
         let located = |labels: &[(String, egui::Rect)]| {
             labels
@@ -681,7 +691,7 @@ impl Frames {
         &mut self,
         text: &str,
         nth: usize,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) {
         let rect = self.find_by(&|label| label == text, text, nth, draw);
         self.slide_to(rect.center(), draw);
@@ -689,7 +699,7 @@ impl Frames {
     }
 
     /// Right-click the first painted text that is exactly `text`.
-    pub(super) fn right_click_exact(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn right_click_exact(&mut self, text: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         let rect = self.find_by(&|label| label == text, text, 0, draw);
         self.slide_to(rect.center(), draw);
         self.press(egui::PointerButton::Secondary, draw);
@@ -697,7 +707,7 @@ impl Frames {
 
     /// Click the value widget on the row labelled exactly `label`, which a
     /// property row right-aligns against the panel's edge.
-    pub(super) fn click_value_of(&mut self, label: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn click_value_of(&mut self, label: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         let rect = self.find_by(&|text| text == label, label, 0, draw);
         self.slide_to(egui::pos2(self.value_x, rect.center().y), draw);
         self.press(egui::PointerButton::Primary, draw);
@@ -708,7 +718,7 @@ impl Frames {
         &mut self,
         label: &str,
         text: &str,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) {
         self.click_value_of(label, draw);
         self.replace_text(text, draw);
@@ -717,7 +727,7 @@ impl Frames {
     }
 
     /// Move onto `target` over three frames.
-    pub(super) fn slide_to(&mut self, target: egui::Pos2, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn slide_to(&mut self, target: egui::Pos2, draw: &mut dyn FnMut(&mut egui::Ui)) {
         let start = self.pointer;
         for step in 1..=3 {
             let at = start + (target - start) * (step as f32 / 3.0);
@@ -727,7 +737,11 @@ impl Frames {
     }
 
     /// Press and release at the pointer, then draw a frame for the result.
-    pub(super) fn press(&mut self, button: egui::PointerButton, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn press(
+        &mut self,
+        button: egui::PointerButton,
+        draw: &mut dyn FnMut(&mut egui::Ui),
+    ) {
         let pos = self.pointer;
         let event = |pressed| egui::Event::PointerButton {
             pos,
@@ -741,24 +755,29 @@ impl Frames {
     }
 
     /// Click the `nth` painted text starting with `text`.
-    pub(super) fn click_nth(&mut self, text: &str, nth: usize, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn click_nth(
+        &mut self,
+        text: &str,
+        nth: usize,
+        draw: &mut dyn FnMut(&mut egui::Ui),
+    ) {
         let rect = self.find(text, nth, draw);
         self.slide_to(rect.center(), draw);
         self.press(egui::PointerButton::Primary, draw);
     }
 
-    pub(super) fn click(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn click(&mut self, text: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         self.click_nth(text, 0, draw);
     }
 
     /// Click at `pos`, which need not be on any text.
-    pub(super) fn click_at(&mut self, pos: egui::Pos2, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn click_at(&mut self, pos: egui::Pos2, draw: &mut dyn FnMut(&mut egui::Ui)) {
         self.slide_to(pos, draw);
         self.press(egui::PointerButton::Primary, draw);
     }
 
     /// Type `text` into whatever has focus.
-    pub(super) fn type_text(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn type_text(&mut self, text: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         self.frame(vec![egui::Event::Text(text.to_owned())], draw);
     }
 
@@ -766,7 +785,7 @@ impl Frames {
         &mut self,
         key: egui::Key,
         modifiers: egui::Modifiers,
-        draw: &mut dyn FnMut(&egui::Context),
+        draw: &mut dyn FnMut(&mut egui::Ui),
     ) {
         self.frame(
             vec![egui::Event::Key {
@@ -781,7 +800,7 @@ impl Frames {
     }
 
     /// Select everything in the focused text box and replace it with `text`.
-    pub(super) fn replace_text(&mut self, text: &str, draw: &mut dyn FnMut(&egui::Context)) {
+    pub(super) fn replace_text(&mut self, text: &str, draw: &mut dyn FnMut(&mut egui::Ui)) {
         self.key(egui::Key::A, egui::Modifiers::COMMAND, draw);
         self.type_text(text, draw);
     }

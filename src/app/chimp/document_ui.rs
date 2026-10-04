@@ -72,7 +72,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
 
     fn on_tab_button(
         &mut self,
-        tiles: &egui_tiles::Tiles<String>,
+        tiles: &mut egui_tiles::Tiles<String>,
         tile_id: egui_tiles::TileId,
         button_response: egui::Response,
     ) -> egui::Response {
@@ -99,15 +99,15 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         button_response.context_menu(|ui| {
             if ui.button("Close").clicked() {
                 self.close_requests.push(package.clone());
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Close all but this").clicked() {
                 self.close_all_but = Some(package.clone());
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Close all").clicked() {
                 self.close_all = true;
-                ui.close_menu();
+                ui.close();
             }
             if has_texture {
                 ui.separator();
@@ -400,14 +400,14 @@ impl Baboon {
                 false
             }
             ChimpDocumentView::Properties => {
-                egui::SidePanel::left(egui::Id::new((
+                egui::Panel::left(egui::Id::new((
                     "chimp_exports",
                     scope.to_owned(),
                     package.clone(),
                 )))
                 .resizable(true)
-                .default_width(220.0)
-                .show_inside(ui, |ui| {
+                .default_size(220.0)
+                .show(ui, |ui| {
                     ui.label(RichText::new("Exports").strong());
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for (index, export) in document.exports.iter().enumerate() {
@@ -425,7 +425,7 @@ impl Baboon {
                     });
                 });
                 egui::CentralPanel::default()
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         draw_chimp_export_editor(ui, document, world.usmap())
                     })
                     .inner
@@ -765,7 +765,7 @@ fn split_layout_job_lines(job: &egui::text::LayoutJob) -> Vec<egui::text::Layout
     let mut lines = Vec::new();
     let mut current = new_line();
     for section in &job.sections {
-        let mut text = &job.text[section.byte_range.clone()];
+        let mut text = &job.text[section.byte_range.start.0..section.byte_range.end.0];
         loop {
             let (piece, rest) = match text.find('\n') {
                 Some(end) => (&text[..end], Some(&text[end + 1..])),
@@ -789,7 +789,7 @@ fn split_layout_job_lines(job: &egui::text::LayoutJob) -> Vec<egui::text::Layout
 
 fn draw_chimp_json_document(
     ui: &mut Ui,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     title: &str,
     copy_label: &str,
     text: &str,
@@ -800,7 +800,7 @@ fn draw_chimp_json_document(
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().color(subtle_dark()));
         if ui.small_button(copy_label).clicked() {
-            ui.output_mut(|output| output.copied_text = text.to_owned());
+            ui.copy_text(text.to_owned());
         }
         ui.label(
             RichText::new(format!("{} lines", lines.len()))
@@ -808,9 +808,10 @@ fn draw_chimp_json_document(
                 .color(subtle_dark()),
         );
     });
-    let row_height = ui.fonts(|fonts| fonts.row_height(&font_id));
+    let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font_id));
     let digits = lines.len().to_string().len();
-    let gutter_width = ui.fonts(|fonts| fonts.glyph_width(&font_id, '0')) * digits as f32 + 14.0;
+    let gutter_width =
+        ui.fonts_mut(|fonts| fonts.glyph_width(&font_id, '0')) * digits as f32 + 14.0;
     let gutter_fill = ui.visuals().faint_bg_color;
     let number_color = ui.visuals().weak_text_color();
     ui.scope(|ui| {
@@ -849,18 +850,19 @@ fn draw_chimp_json_document(
 mod tests {
     use super::*;
 
-    fn draw_pane<'a>(app: &'a mut Baboon, package: &'a str) -> impl FnMut(&egui::Context) + 'a {
-        move |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+    fn draw_pane<'a>(app: &'a mut Baboon, package: &'a str) -> impl FnMut(&mut egui::Ui) + 'a {
+        move |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 app.draw_chimp_document_pane(ui, 0, package, "test");
             });
         }
     }
 
-    fn draw_tiles(app: &mut Baboon) -> impl FnMut(&egui::Context) + '_ {
-        move |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                app.draw_chimp_tiles(ui, ctx, 0);
+    fn draw_tiles(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |ui| {
+                app.draw_chimp_tiles(ui, &ctx, 0);
             });
         }
     }
@@ -1062,7 +1064,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut frame = |ctx: &egui::Context| {
             let started = std::time::Instant::now();
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -1070,8 +1073,8 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         draw_chimp_json_document(ui, "bench", "t", "c", &text, &mut lines);
                     });
                 },
@@ -1129,7 +1132,7 @@ mod tests {
             jobs.iter()
                 .flat_map(|job| {
                     job.sections.iter().flat_map(|section| {
-                        job.text[section.byte_range.clone()]
+                        job.text[section.byte_range.start.0..section.byte_range.end.0]
                             .split('\n')
                             .filter(|piece| !piece.is_empty())
                             .map(|piece| (piece.to_owned(), section.format.color))

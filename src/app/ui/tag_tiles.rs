@@ -127,12 +127,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         {
             self.focused = Some(key.clone());
         }
-        Frame::none()
+        Frame::NONE
             .inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 8.0,
-                bottom: 8.0,
+                left: 10,
+                right: 10,
+                top: 8,
+                bottom: 8,
             })
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
@@ -228,7 +228,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
     /// why they live here rather than in `tab_ui`.
     fn on_tab_button(
         &mut self,
-        tiles: &egui_tiles::Tiles<String>,
+        tiles: &mut egui_tiles::Tiles<String>,
         tile_id: egui_tiles::TileId,
         button_response: egui::Response,
     ) -> egui::Response {
@@ -246,15 +246,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             button_response.context_menu(|ui| {
                 if ui.button("Close").clicked() {
                     self.close_requests.push(key.clone());
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Close all").clicked() {
                     self.close_all = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Close all but this").clicked() {
                     self.close_all_but = Some(key.clone());
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             return button_response;
@@ -263,11 +263,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         button_response.context_menu(|ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Open with File Explorer").clicked() {
                 self.reveal_in_explorer = Some(key.clone());
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             // Offered for every game. For a loose kit this drops the in-memory
@@ -279,7 +279,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                 .clicked()
             {
                 self.discard = Some(key.clone());
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             // Every container in the tag resolves its open state through one
@@ -287,20 +287,20 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             // however deeply nested.
             if ui.button("Expand all").clicked() {
                 self.expand = Some((key.clone(), true));
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Collapse all").clicked() {
                 self.expand = Some((key.clone(), false));
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button("Close all").clicked() {
                 self.close_all = true;
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Close all but this").clicked() {
                 self.close_all_but = Some(key.clone());
-                ui.close_menu();
+                ui.close();
             }
         });
         button_response
@@ -353,7 +353,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         if ui.is_rect_visible(tab_rect) && !state.is_being_dragged {
             let bg = self.tab_bg_color(ui.visuals(), tiles, tile_id, state);
             let stroke = self.tab_outline_stroke(ui.visuals(), tiles, tile_id, state);
-            ui.painter().rect(tab_rect.shrink(0.5), 0.0, bg, stroke);
+            ui.painter().rect(tab_rect.shrink(0.5), 0.0, bg, stroke, egui::StrokeKind::Middle);
             if state.active {
                 ui.painter().hline(
                     tab_rect.x_range(),

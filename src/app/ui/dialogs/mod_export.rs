@@ -494,10 +494,10 @@ impl Baboon {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_width(width);
-                    Frame::none()
+                    Frame::NONE
                         .fill(wash)
                         .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.5)))
-                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                        .inner_margin(egui::Margin::symmetric(6, 6))
                         .show(ui, |ui| {
                             ui.label(RichText::new(title).color(accent).small());
                             // Scrolled within its own pane: an editor row is
@@ -664,15 +664,15 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(1100.0)
-            .default_height(640.0)
+            .default_width(window_width(ctx, 1100.0))
+            .default_height(window_height(ctx, 640.0, true))
             // Centred on first open, and draggable after that. `anchor` looks
             // like the way to centre a window and is not: it calls
             // `movable(false)` internally and re-pins the window every frame, so
             // the review -- the one dialog a reader wants to slide aside to look
             // at the tag underneath -- could be resized but never moved.
             .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
+            .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
                 let Some(dialog) = self.mod_export.as_ref() else {
                     return;
@@ -1359,8 +1359,8 @@ mod diff_view_tests {
         ctx.set_fonts(crate::app::foundation_fonts());
         TREES_BUILT.with(|built| built.set(0));
         for _ in 0..3 {
-            let _ = ctx.run(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     Baboon::draw_mod_export_diff(
                         ui,
                         &diff,

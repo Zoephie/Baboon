@@ -19,11 +19,12 @@ impl Baboon {
         // tags folder, no filesystem picker) at a container-relative path.
         let is_container = self.current_source_is_container();
         egui::Window::new("New Tag")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("new_tag_dialog"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
-            .default_width(560.0)
+            .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
                 if !is_container && self.loaded_tags_root().is_none() {
                     ui.label(

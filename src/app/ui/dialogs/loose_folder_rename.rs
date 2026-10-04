@@ -16,9 +16,10 @@ impl Baboon {
         {
             let state = self.loose_folder_rename.as_mut().expect("checked above");
             egui::Window::new("Rename Folder")
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("loose_folder_rename"))
                 .open(&mut open)
-                .default_width(520.0)
+                .default_width(window_width(ctx, 520.0))
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Parent folder").color(subtle_dark()).small());
@@ -50,7 +51,7 @@ impl Baboon {
                         }
                         state.focus_input = false;
                     }
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         do_apply = true;
                     }
                     if response.changed() {

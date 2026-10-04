@@ -11,13 +11,14 @@ impl Baboon {
 
         let mut open = self.about_open;
         egui::Window::new("Baboon Help")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("baboon_help"))
             .collapsible(false)
             .resizable(true)
             .constrain(true)
             .open(&mut open)
-            .default_size(Vec2::new(780.0, 560.0))
-            .min_size(Vec2::new(520.0, 360.0))
+            .default_size(window_size(ctx, Vec2::new(780.0, 560.0), true))
+            .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.help_panel_tab, HelpPanelTab::About, "About");
@@ -321,10 +322,10 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
     state.refresh();
 
     let mut clicked: Option<String> = None;
-    egui::SidePanel::left("tag_compat_groups")
+    egui::Panel::left("tag_compat_groups")
         .resizable(true)
-        .default_width(300.0)
-        .show_inside(ui, |ui| {
+        .default_size(300.0)
+        .show(ui, |ui| {
             ui.label(
                 RichText::new(format!("{} group(s)", state.groups.len()))
                     .color(subtle_dark())
@@ -358,7 +359,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
                 });
         });
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         let Some(group) = state.selected_group.clone() else {
             ui.label(
                 RichText::new("Select a tag group to see what happens to each of its fields.")
@@ -533,13 +534,13 @@ fn draw_script_doc_detail(ui: &mut Ui, detail: &ScriptDocDetail) {
 }
 
 fn script_code(ui: &mut Ui, code: &str) {
-    Frame::none()
+    Frame::NONE
         .fill(if is_dark_mode() {
             Color32::from_rgb(24, 27, 29)
         } else {
             Color32::from_rgb(238, 241, 243)
         })
-        .inner_margin(egui::Margin::same(6.0))
+        .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
             ui.add(
                 egui::Label::new(RichText::new(code).monospace().color(text_dark()))
@@ -687,7 +688,7 @@ fn draw_tutorials_tab(
 
 fn draw_tutorial_card(ui: &mut Ui, tutorial: &TutorialEntry) {
     Frame::group(ui.style())
-        .inner_margin(egui::Margin::same(12.0))
+        .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
@@ -726,7 +727,7 @@ fn draw_video_tutorial_body(ui: &mut Ui, tutorial: &TutorialEntry) {
                 texture.size_vec2(),
             ))
             .fit_to_exact_size(thumbnail_size)
-            .rounding(6.0)
+            .corner_radius(6.0)
             .sense(Sense::click()),
         ),
         None => {
@@ -900,7 +901,8 @@ mod tutorial_ui_tests {
             for category in TUTORIAL_CATEGORIES {
                 let mut selected_game = "haloce_evolved".to_owned();
                 let mut selected_category = category;
-                let output = ctx.run(
+                let output = crate::app::run_ui_test(
+                    &ctx,
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -908,8 +910,8 @@ mod tutorial_ui_tests {
                         )),
                         ..Default::default()
                     },
-                    |ctx| {
-                        egui::CentralPanel::default().show(ctx, |ui| {
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
                             draw_tutorials_tab(
                                 ui,
                                 &tutorials,
@@ -928,12 +930,17 @@ mod tutorial_ui_tests {
     fn tutorial_url_requests_a_new_browser_tab() {
         let ctx = egui::Context::default();
         let url = "https://www.youtube.com/watch?v=2xL2AiuaFwE";
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
-            open_tutorial_url(ctx, url);
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |_| {
+            open_tutorial_url(&ctx, url);
         });
         let request = output
             .platform_output
-            .open_url
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                egui::OutputCommand::OpenUrl(open) => Some(open.clone()),
+                _ => None,
+            })
             .expect("tutorial action should request an external URL");
         assert_eq!(request.url, url);
         assert!(request.new_tab);

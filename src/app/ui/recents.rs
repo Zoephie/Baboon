@@ -23,9 +23,10 @@ fn recent_folder_path_button(ui: &mut Ui, label: &str, width: f32) -> egui::Resp
         let visuals = ui.style().interact(&response);
         ui.painter().rect(
             rect.expand(visuals.expansion),
-            visuals.rounding,
+            visuals.corner_radius,
             visuals.weak_bg_fill,
             visuals.bg_stroke,
+            egui::StrokeKind::Middle,
         );
         ui.painter().text(
             egui::pos2(rect.left() + ui.spacing().button_padding.x, rect.center().y),
@@ -79,7 +80,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
                 .clicked()
             {
                 action = Some(RecentAction::Open(path.clone()));
-                ui.close_menu();
+                ui.close();
             }
             if ui
                 .add_sized([clear_width, row_height], egui::Button::new("×"))
@@ -95,7 +96,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
     ui.separator();
     if icon_text_button(ui, ButtonIcon::Clear, "Clear Recent Folders", true).clicked() {
         action = Some(RecentAction::ForgetAll);
-        ui.close_menu();
+        ui.close();
     }
     action
 }

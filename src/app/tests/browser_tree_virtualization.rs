@@ -67,7 +67,7 @@ impl Browser {
     fn new(skips: bool) -> Self {
         let entries = synthetic_entries();
         let ctx = egui::Context::default();
-        ctx.style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
         Self {
             ctx,
             tree: crate::source::build_tree(&entries),
@@ -112,8 +112,8 @@ impl Browser {
         let mut shown_offset = 0.0;
         let (tree, entries, lazy_root) = (&mut self.tree, &mut self.entries, &self.lazy_root);
         let names = crate::format::TagNameIndex::default();
-        let _ = self.ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut area = egui::ScrollArea::vertical();
                 if let Some(offset) = offset {
                     area = area.vertical_scroll_offset(offset);
@@ -163,7 +163,7 @@ impl Browser {
         });
         TREE_SKIPS_ROWS.with(|skips| skips.set(true));
         let tops = TREE_ROW_TOPS.with(|tops| std::mem::take(&mut *tops.borrow_mut()));
-        let row_height = self.ctx.style().spacing.interact_size.y;
+        let row_height = self.ctx.global_style().spacing.interact_size.y;
         let visible = tops
             .iter()
             .filter(|(_, top)| top + row_height > viewport.top() && *top < viewport.bottom())

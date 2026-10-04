@@ -18,7 +18,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(620.0)
+            .default_width(window_width(ctx, 620.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 if failed {
@@ -44,7 +44,7 @@ impl Baboon {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if ui.button("Copy").clicked() {
-                        ui.output_mut(|out| out.copied_text = message.clone());
+                        ui.copy_text(message.clone());
                     }
                     if ui.button("OK").clicked() {
                         dismiss = true;

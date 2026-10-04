@@ -238,9 +238,10 @@ pub(super) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, check
     let (small_icon_rect, big_icon_rect) = ui.spacing().icon_rectangles(checkbox_rect);
     ui.painter().add(egui::epaint::RectShape::new(
         big_icon_rect.expand(visuals.expansion),
-        visuals.rounding,
+        visuals.corner_radius,
         visuals.bg_fill,
         visuals.bg_stroke,
+        egui::StrokeKind::Middle,
     ));
     if checked {
         ui.painter().add(egui::Shape::line(
@@ -378,8 +379,9 @@ pub(super) fn selectable_text_button(
         };
         ui.painter().rect_stroke(
             response.rect.expand(1.0),
-            ui.visuals().widgets.hovered.rounding,
+            ui.visuals().widgets.hovered.corner_radius,
             Stroke::new(ui.visuals().selection.stroke.width, hover_color),
+            egui::StrokeKind::Middle,
         );
     }
     response
@@ -394,17 +396,27 @@ fn aligned_menu_custom_button<R>(
     right_aligned_width: Option<f32>,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    let bar_id = ui.id();
-    let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
     let button_response = ui.add(button);
     let mut positioning_response = button_response.clone();
-    let frame_left = Frame::menu(&ui.ctx().style()).total_margin().left;
+    let frame_left = Frame::menu(ui.style()).total_margin().left;
     positioning_response.rect.min.x = right_aligned_width
         .map_or(positioning_response.rect.min.x + frame_left, |width| {
             button_response.rect.right() - width + frame_left
         });
-    let inner = bar_state.bar_menu(&positioning_response, add_contents);
-    bar_state.store(ui.ctx(), bar_id);
+    // As `egui::containers::menu::MenuButton` opens its menu, with the menu
+    // bar's config, but placed by the shifted response.
+    let found = egui::containers::menu::MenuConfig::find(ui);
+    let config = egui::containers::menu::MenuConfig::new()
+        .close_behavior(found.close_behavior)
+        .style(found.style);
+    let inner = egui::Popup::menu(&positioning_response)
+        .close_behavior(config.close_behavior)
+        .style(config.style.clone())
+        .info(
+            egui::UiStackInfo::new(egui::UiKind::Menu)
+                .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config),
+        )
+        .show(add_contents);
     egui::InnerResponse::new(inner.map(|response| response.inner), button_response)
 }
 

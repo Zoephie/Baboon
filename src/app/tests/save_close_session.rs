@@ -274,8 +274,8 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     let (kit, mut app, key, _other) = edited("close-app");
     let ctx = egui::Context::default();
 
-    let output = ctx.run(close_requested_input(1.0), |ctx| {
-        app.handle_app_close_request(ctx)
+    let output = crate::app::run_ui_test(&ctx, close_requested_input(1.0), |ui| {
+        app.handle_app_close_request(ui.ctx())
     });
     assert!(root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
     assert!(matches!(
@@ -286,7 +286,9 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     let Some(DeferredFileAction::Close(action)) = app.deferred_file_action.take() else {
         unreachable!()
     };
-    let _ = ctx.run(screen(Vec::new(), 1.1), |ctx| app.request_close_action(action.clone(), ctx));
+    let _ = crate::app::run_ui_test(&ctx, screen(Vec::new(), 1.1), |ui| {
+        app.request_close_action(action.clone(), ui.ctx())
+    });
     assert!(app.save_changes_prompt.visible, "dirty work is prompted for");
     assert!(matches!(
         app.save_changes_prompt.pending_action,
@@ -306,8 +308,8 @@ fn the_app_close_is_two_step_and_writes_the_session() {
     assert!(session.kits[0].tags.iter().any(|tag| tag.key == key));
 
     // The close it re-issued comes back as a request and passes, once.
-    let output = ctx.run(close_requested_input(driver.time + 1.0), |ctx| {
-        app.handle_app_close_request(ctx)
+    let output = crate::app::run_ui_test(&ctx, close_requested_input(driver.time + 1.0), |ui| {
+        app.handle_app_close_request(ui.ctx())
     });
     assert!(!root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
     assert!(!app.save_changes_prompt.allow_app_close_once);
@@ -324,8 +326,8 @@ fn the_app_does_not_close_while_a_folder_refactor_runs() {
     });
     let ctx = egui::Context::default();
 
-    let output = ctx.run(close_requested_input(1.0), |ctx| {
-        app.handle_app_close_request(ctx)
+    let output = crate::app::run_ui_test(&ctx, close_requested_input(1.0), |ui| {
+        app.handle_app_close_request(ui.ctx())
     });
 
     assert!(root_commands(&output).contains(&egui::ViewportCommand::CancelClose));
@@ -346,8 +348,8 @@ fn a_clean_app_close_closes_at_once() {
     kit.open(&mut app, MODEL);
     let ctx = egui::Context::default();
 
-    let output = ctx.run(screen(Vec::new(), 1.0), |ctx| {
-        app.request_close_action(PendingCloseAction::CloseApp, ctx)
+    let output = crate::app::run_ui_test(&ctx, screen(Vec::new(), 1.0), |ui| {
+        app.request_close_action(PendingCloseAction::CloseApp, ui.ctx())
     });
 
     assert!(!app.save_changes_prompt.visible);

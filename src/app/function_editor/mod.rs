@@ -99,9 +99,10 @@ pub(in crate::app) fn draw_function_popup(
     let mut commit = false;
     let editable = popup.editable;
     egui::Window::new(popup.title.clone())
+        .constrain_to(window_work_area(ctx))
         .collapsible(false)
         .resizable(false)
-        .default_size(Vec2::new(700.0, 440.0))
+        .default_size(window_size(ctx, Vec2::new(700.0, 440.0), true))
         .open(&mut open)
         .show(ctx, |ui| {
             if !editable {

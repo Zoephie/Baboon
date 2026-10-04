@@ -953,7 +953,8 @@ mod tests {
         }
         let mut painted = Vec::new();
         for _ in 0..2 {
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -961,8 +962,8 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let mut sinks = EditSinks::default();
                         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                         edit.game = Some("halo2_mcc");

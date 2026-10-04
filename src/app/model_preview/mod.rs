@@ -278,7 +278,7 @@ fn draw_animation_combo(
         .map(|entry| entry.name.as_str())
         .unwrap_or("<None>");
     let popup_id = ui.make_persistent_id(("model_animation_popup", entry_key));
-    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let response = ui
         .scope(|ui| {
             if open {
@@ -307,14 +307,12 @@ fn draw_animation_combo(
     paint_button_icon_at(ui, ButtonIcon::Down, arrow_rect, foreground);
     let just_opened = response.clicked() && !open;
     if response.clicked() {
-        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
     }
-    egui::popup::popup_below_widget(
-        ui,
-        popup_id,
-        &response,
-        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
-        |ui| {
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
             ui.set_min_width(width.max(240.0));
             let search = ui.add(
                 egui::TextEdit::singleline(&mut playback.filter)
@@ -343,7 +341,7 @@ fn draw_animation_combo(
                         if ui
                             .add_enabled(
                                 row.playable,
-                                egui::SelectableLabel::new(playback.selected == Some(index), label),
+                                egui::Button::selectable(playback.selected == Some(index), label),
                             )
                             .clicked()
                         {
@@ -353,15 +351,14 @@ fn draw_animation_combo(
                             playback.playing = false;
                             playback.stopped = false;
                             playback.error = None;
-                            ui.memory_mut(|memory| memory.close_popup());
+                            egui::Popup::close_id(ui.ctx(), popup_id);
                         }
                     }
                     if shown == 0 {
                         ui.label(RichText::new("No animations match.").color(subtle_dark()));
                     }
                 });
-        },
-    );
+        });
 }
 
 pub(super) fn draw_model_preview_panel(
@@ -948,11 +945,11 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
             ui.allocate_exact_size(Vec2::new(width, header_height), Sense::hover());
         ui.painter().rect_filled(
             header_rect,
-            egui::Rounding {
-                nw: RADIUS,
-                ne: RADIUS,
-                sw: 0.0,
-                se: 0.0,
+            egui::CornerRadius {
+                nw: (RADIUS) as u8,
+                ne: (RADIUS) as u8,
+                sw: 0,
+                se: 0,
             },
             foundation_section_bar(),
         );
@@ -1020,15 +1017,15 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         }
 
         ui.add_space(-ui.spacing().item_spacing.y);
-        let body = egui::Frame::none()
+        let body = egui::Frame::NONE
             .fill(foundation_group_bg())
-            .rounding(egui::Rounding {
-                nw: 0.0,
-                ne: 0.0,
-                sw: RADIUS,
-                se: RADIUS,
+            .corner_radius(egui::CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: (RADIUS) as u8,
+                se: (RADIUS) as u8,
             })
-            .inner_margin(egui::Margin::same(if edge_to_edge { 0.0 } else { 8.0 }))
+            .inner_margin(egui::Margin::same(if edge_to_edge { 0 } else { 8 }))
             .show(ui, |ui| {
                 ui.set_min_width((width - if edge_to_edge { 0.0 } else { 16.0 }).max(1.0));
                 if let Some(min_body_height) = min_body_height {
@@ -1046,6 +1043,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
             container_rect,
             RADIUS,
             Stroke::new(1.0_f32, foundation_group_edge()),
+            egui::StrokeKind::Middle,
         );
         container_rect
     })
@@ -1298,7 +1296,7 @@ fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response 
     let width = ui.available_width().max(HEIGHT);
     let (rect, background_response) =
         ui.allocate_exact_size(Vec2::new(width, HEIGHT), Sense::hover());
-    let rounding = ui.visuals().widgets.inactive.rounding;
+    let rounding = ui.visuals().widgets.inactive.corner_radius;
     ui.painter()
         .rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
 
@@ -1321,8 +1319,8 @@ fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response 
         egui::TextEdit::singleline(filter)
             .hint_text(placeholder_text("Filter Markers…"))
             .text_color(text_dark())
-            .frame(false)
-            .margin(egui::Margin::same(0.0))
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::same(0))
             .vertical_align(egui::Align::Center)
             .min_size(edit_rect.size()),
     );
@@ -1339,7 +1337,7 @@ fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response 
     } else {
         Stroke::new(1.0_f32, foundation_input_edge())
     };
-    ui.painter().rect_stroke(rect, rounding, stroke);
+    ui.painter().rect_stroke(rect, rounding, stroke, egui::StrokeKind::Middle);
     response
 }
 
@@ -1415,7 +1413,12 @@ fn draw_model_viewport_with_stats(
     if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+            .rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0_f32, foundation_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         crate::app::ui::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);
@@ -1592,7 +1595,8 @@ mod tests {
         let context = egui::Context::default();
         let mut left_y = 0.0;
         let mut right_y = 0.0;
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1650,7 +1654,8 @@ mod tests {
         let context = egui::Context::default();
         context.set_fonts(foundation_fonts());
         let mut filter = String::new();
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1680,9 +1685,10 @@ mod tests {
         for width in [400.0, 559.0, 560.0, 679.0, 680.0, 900.0] {
             let context = egui::Context::default();
             context.set_fonts(foundation_fonts());
-            context.set_style(foundation_style());
+            context.set_global_style(foundation_style());
             let mut state = ModelPreviewState::default();
-            let _ = context.run(
+            let _ = crate::app::run_ui_test(
+                &context,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -1993,7 +1999,8 @@ mod tests {
             context.set_fonts(foundation_fonts());
             let mut state = ModelPreviewState::default();
             let mut card_rect = egui::Rect::NOTHING;
-            let _ = context.run(
+            let _ = crate::app::run_ui_test(
+                &context,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -2037,7 +2044,8 @@ mod tests {
         let context = egui::Context::default();
         context.set_fonts(foundation_fonts());
         let mut state = ModelPreviewState::default();
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2060,7 +2068,8 @@ mod tests {
         for width in [280.0, 360.0, 520.0, 800.0] {
             let context = egui::Context::default();
             context.set_fonts(foundation_fonts());
-            let _ = context.run(
+            let _ = crate::app::run_ui_test(
+                &context,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -2141,7 +2150,8 @@ mod tests {
                     shared_body_height - model_setup_extra_header_height(setup_width) - 16.0;
                 let mut preview_rect = egui::Rect::NOTHING;
                 let mut setup_rect = egui::Rect::NOTHING;
-                let _ = context.run(
+                let _ = crate::app::run_ui_test(
+                    &context,
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -2210,7 +2220,8 @@ mod tests {
         context.set_fonts(foundation_fonts());
         let mut header_rect = None;
         let mut body_rect = None;
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

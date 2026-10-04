@@ -85,7 +85,7 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
 /// Call it only for a hovered response: showing is what starts the grace.
 pub(in crate::app) fn hover_popup_due(ui: &Ui) -> bool {
     let ctx = ui.ctx();
-    let interaction = ctx.style().interaction.clone();
+    let interaction = ctx.global_style().interaction.clone();
     let (now, since_scroll, since_click, since_move) = ctx.input(|input| {
         (
             input.time,
@@ -151,7 +151,7 @@ pub(in crate::app) fn hover_tooltip_beside_pointer(ui: &Ui, response: &egui::Res
     );
     // Keep it on screen; never under the pointer, so even egui's
     // closest-widget search cannot be confused by it.
-    let screen = ui.ctx().screen_rect();
+    let screen = ui.ctx().content_rect();
     if rect.right() > screen.right() {
         rect = rect.translate(Vec2::new(screen.right() - rect.right(), 0.0));
     }
@@ -159,7 +159,7 @@ pub(in crate::app) fn hover_tooltip_beside_pointer(ui: &Ui, response: &egui::Res
         rect = rect.translate(Vec2::new(0.0, -rect.height() - 24.0));
     }
     let visuals = ui.visuals();
-    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke);
+    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke, egui::StrokeKind::Middle);
     painter.galley(rect.min + padding, galley, text_dark());
 }
 
@@ -175,9 +175,10 @@ pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Res
         if response.hovered() || response.has_focus() {
             ui.painter().rect(
                 rect.expand(visuals.expansion),
-                visuals.rounding,
+                visuals.corner_radius,
                 visuals.bg_fill,
                 Stroke::NONE,
+                egui::StrokeKind::Middle,
             );
         }
 
@@ -268,7 +269,7 @@ fn context_menu_primary_button(
             } else {
                 Stroke::NONE
             };
-            ui.painter().rect(rect, 3.0, fill, stroke);
+            ui.painter().rect(rect, 3.0, fill, stroke, egui::StrokeKind::Middle);
 
             let color = if interactive {
                 text_dark()
@@ -490,7 +491,7 @@ pub(in crate::app) fn style_tag_context_menu(ui: &mut Ui) {
     // it. Fix both bounds so 328 points of content plus the default 6-point
     // inset on each side produces a 340-point frame at 100% display scaling.
     let menu_margin = ui.spacing().menu_margin;
-    ui.set_width((CONTEXT_MENU_WIDTH - menu_margin.left - menu_margin.right).max(1.0));
+    ui.set_width((CONTEXT_MENU_WIDTH - menu_margin.sum().x).max(1.0));
     style_list_menu(ui);
 }
 
@@ -511,44 +512,44 @@ fn tag_extract_menu_button(
             && context_menu_button(ui, "Extract model geometry").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if supports_bsp_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract BSP geometry").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if supports_scenario_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract level geometry (one file per BSP)").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if supports_particle_geometry_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract particle geometry (JMI + one JMS per object)")
                 .clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if supports_animation_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract animations").clicked()
         {
             action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if supports_tag_import_info_extraction(entry.group_tag)
             && context_menu_button(ui, "Extract import-info").clicked()
         {
             action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if is_bitmap_group(entry.group_tag)
             && context_menu_button(ui, "Extract bitmap images...").clicked()
         {
             action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if is_bitmap_group(entry.group_tag)
             && browser_game_keeps_bitmap_sources(ui)
@@ -557,7 +558,7 @@ fn tag_extract_menu_button(
                 .clicked()
         {
             action = Some(BrowserAction::ExtractBitmapSource(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if crate::app::editor::is_sound_group(entry.group_tag) {
             let language = browser_sound_language(ui);
@@ -572,7 +573,7 @@ fn tag_extract_menu_button(
                     keys: vec![entry.key.clone()],
                     all_languages: false,
                 });
-                ui.close_menu();
+                ui.close();
             }
             if localized {
                 let available = browser_sound_available_languages(ui);
@@ -593,7 +594,7 @@ fn tag_extract_menu_button(
                         keys: vec![entry.key.clone()],
                         all_languages: true,
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
             }
         }
@@ -603,13 +604,13 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractMaterialShaderSources(
                 entry.key.clone(),
             ));
-            ui.close_menu();
+            ui.close();
         }
         if is_hlsl_include_group(entry.group_tag)
             && context_menu_button(ui, "Extract HLSL include...").clicked()
         {
             action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         action
     };
@@ -1205,11 +1206,11 @@ fn draw_tree_node_lazy_block(
             clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                 rel_path: node.rel_path.clone(),
             });
-            ui.close_menu();
+            ui.close();
         }
         if context_menu_button(ui, "Copy Folder Path").clicked() {
             clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-            ui.close_menu();
+            ui.close();
         }
         context_menu_separator(ui);
         if context_menu_button(ui, "Dump folder to JSON...").clicked() {
@@ -1217,7 +1218,7 @@ fn draw_tree_node_lazy_block(
                 rel_path: node.rel_path.clone(),
                 label: node.label.clone(),
             });
-            ui.close_menu();
+            ui.close();
         }
         if let Some(action) = folder_extract_menu_button(ui, node, entries, false, true) {
             clicked = Some(action);
@@ -1416,11 +1417,11 @@ fn draw_tree_node_block(
                 clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
                     rel_path: node.rel_path.clone(),
                 });
-                ui.close_menu();
+                ui.close();
             }
             if context_menu_button(ui, "Copy Folder Path").clicked() {
                 clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                ui.close_menu();
+                ui.close();
             }
             context_menu_separator(ui);
         }
@@ -1440,11 +1441,11 @@ fn draw_tree_node_block(
             if let Some(rel) = folder_rel.filter(|_| folder_is_pending_and_empty(node)) {
                 if context_menu_button(ui, "Rename folder...").clicked() {
                     clicked = Some(BrowserAction::RenameContainerFolder { rel: rel.clone() });
-                    ui.close_menu();
+                    ui.close();
                 }
                 if context_menu_button(ui, "Delete folder").clicked() {
                     clicked = Some(BrowserAction::DeleteContainerFolder { rel });
-                    ui.close_menu();
+                    ui.close();
                 }
             }
             context_menu_separator(ui);
@@ -1456,7 +1457,7 @@ fn draw_tree_node_block(
         if !groups_mode && favorite_keys.is_none() {
             if context_menu_button(ui, "Copy Folder Path").clicked() {
                 clicked = Some(BrowserAction::CopyFolderPath(node.rel_path.clone()));
-                ui.close_menu();
+                ui.close();
             }
             context_menu_separator(ui);
         }
@@ -1468,7 +1469,7 @@ fn draw_tree_node_block(
             .clicked()
         {
             clicked = Some(BrowserAction::DumpLoadedFolderJson(tag_keys));
-            ui.close_menu();
+            ui.close();
         }
 
         // Monolithic caches only. The tags in one are big-endian and read-only,
@@ -1488,7 +1489,7 @@ fn draw_tree_node_block(
                 clicked = Some(BrowserAction::ImportCacheFolderIntoKit {
                     prefix: folder_display_path(node),
                 });
-                ui.close_menu();
+                ui.close();
             }
         }
 
@@ -1736,7 +1737,7 @@ fn folder_extract_menu_from_keys(
                         rel_path: rel_path.clone(),
                         label: label.clone(),
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
                 context_menu_separator(ui);
             }
@@ -1756,7 +1757,7 @@ fn folder_extract_menu_from_keys(
                         label: label.clone(),
                         keys: container_keys,
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
             }
 
@@ -1772,7 +1773,7 @@ fn folder_extract_menu_from_keys(
                 .inner;
             if bitmap_response.clicked() {
                 action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
-                ui.close_menu();
+                ui.close();
             }
             if browser_game_keeps_bitmap_sources(ui) {
                 let source_response = ui
@@ -1786,7 +1787,7 @@ fn folder_extract_menu_from_keys(
                     .on_hover_text(BITMAP_SOURCE_HOVER);
                 if source_response.clicked() {
                     action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
-                    ui.close_menu();
+                    ui.close();
                 }
             }
 
@@ -1826,7 +1827,7 @@ fn folder_extract_menu_from_keys(
                     keys: sound_keys.clone(),
                     all_languages: false,
                 });
-                ui.close_menu();
+                ui.close();
             }
             let available_languages = browser_sound_available_languages(ui);
             let language_suffix = available_languages
@@ -1856,7 +1857,7 @@ fn folder_extract_menu_from_keys(
                         keys: sound_keys,
                         all_languages: true,
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
             }
 
@@ -1876,7 +1877,7 @@ fn folder_extract_menu_from_keys(
                 action = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
                     material_shader_keys,
                 ));
-                ui.close_menu();
+                ui.close();
             }
 
             let hlsl_count = hlsl_include_keys.len();
@@ -1891,7 +1892,7 @@ fn folder_extract_menu_from_keys(
                 .inner;
             if hlsl_response.clicked() {
                 action = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
-                ui.close_menu();
+                ui.close();
             }
 
             if !has_extractable {
@@ -1937,7 +1938,7 @@ fn loose_folder_primary_menu_items(
         .clicked()
         {
             action = Some(BrowserAction::ToggleFolderFavorite(rel_path.to_path_buf()));
-            ui.close_menu();
+            ui.close();
         }
         context_menu_separator(ui);
     }
@@ -1951,7 +1952,7 @@ fn loose_folder_primary_menu_items(
                 label: label.to_owned(),
                 open_in_new_tab: true,
             });
-            ui.close_menu();
+            ui.close();
         }
     }
     // Explorer and clipboard-path commands form the next section at every
@@ -1971,21 +1972,21 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         .on_hover_text("Rename this folder and update every reference to the tags inside it")
         .clicked()
     {
-        ui.close_menu();
+        ui.close();
         return Some(BrowserAction::RenameLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
         });
     }
     if context_menu_button(ui, "Move to...").clicked() {
-        ui.close_menu();
+        ui.close();
         return Some(BrowserAction::MoveLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
         });
     }
     if context_menu_button(ui, "Copy to...").clicked() {
-        ui.close_menu();
+        ui.close();
         return Some(BrowserAction::CopyLooseFolder {
             rel_path: rel_path.to_path_buf(),
             label: label.to_owned(),
@@ -1999,7 +2000,7 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         )
         .clicked()
     {
-        ui.close_menu();
+        ui.close();
         return Some(BrowserAction::ImportTagsIntoLooseFolder {
             rel_path: rel_path.to_path_buf(),
         });
@@ -2035,19 +2036,19 @@ fn container_authoring_menu_items(
         clicked = Some(BrowserAction::NewTagInFolder {
             folder_rel: folder_rel.clone(),
         });
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "Import tag here...").clicked() {
         clicked = Some(BrowserAction::ImportTagInFolder {
             folder_rel: folder_rel.clone(),
         });
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "New folder here...").clicked() {
         clicked = Some(BrowserAction::NewContainerFolder {
             parent_rel: folder_rel,
         });
-        ui.close_menu();
+        ui.close();
     }
     clicked
 }
@@ -2132,11 +2133,11 @@ fn show_group_tree_header<R>(
             if !display_name.is_empty() {
                 content = content.union(ui.label(RichText::new(display_name).color(label_color)));
             }
-            let badge = Frame::none()
+            let badge = Frame::NONE
                 .fill(Color32::from_rgb(48, 58, 66))
                 .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 89, 98)))
-                .rounding(egui::Rounding::same(4.0))
-                .inner_margin(egui::Margin::symmetric(6.0, 1.0))
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(6, 1))
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new(fourcc)
@@ -2201,10 +2202,12 @@ fn show_relocated_browser_tree_body<R>(
     ui.visuals_mut().indent_has_left_vline = draw_guide;
     if draw_guide && let Some(body) = body {
         let painter = ui.painter();
-        let rounded_top =
-            painter.round_pos_to_pixel_center(egui::pos2(guide_x, body.response.rect.top()));
-        let rounded_bottom = painter
-            .round_pos_to_pixel_center(egui::pos2(guide_x, body.response.rect.bottom() - 2.0));
+        use egui::emath::GuiRounding as _;
+        let pixels_per_point = painter.pixels_per_point();
+        let rounded_top = egui::pos2(guide_x, body.response.rect.top())
+            .round_to_pixel_center(pixels_per_point);
+        let rounded_bottom = egui::pos2(guide_x, body.response.rect.bottom() - 2.0)
+            .round_to_pixel_center(pixels_per_point);
         let descendant_cutouts = cutouts
             .and_then(|cutouts| {
                 cutouts
@@ -2293,7 +2296,7 @@ fn browser_row_hover_shape(
     let visuals = ui.style().interact_selectable(response, false);
     Some(egui::Shape::rect_filled(
         row_rect.expand(visuals.expansion),
-        visuals.rounding,
+        visuals.corner_radius,
         visuals.weak_bg_fill,
     ))
 }
@@ -2344,7 +2347,8 @@ mod group_header_tests {
         let ctx = egui::Context::default();
         let mut expected = egui::Rect::NOTHING;
         let mut actual = egui::Rect::NOTHING;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2352,8 +2356,8 @@ mod group_header_tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     expected = ui.available_rect_before_wrap();
                     actual = show_folder_tree_header(
                         ui,
@@ -2378,7 +2382,8 @@ mod group_header_tests {
         let ctx = egui::Context::default();
         let mut expected = egui::Rect::NOTHING;
         let mut actual = egui::Rect::NOTHING;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2386,8 +2391,8 @@ mod group_header_tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     expected = ui.available_rect_before_wrap();
                     actual = show_favorites_section(ui, |_| {}).rect;
                 });
@@ -2402,8 +2407,8 @@ mod group_header_tests {
     fn nested_folder_headers_keep_their_own_guides_enabled() {
         let ctx = egui::Context::default();
         let mut nested_guide_enabled = false;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 begin_folder_chevron_collection(ui);
                 show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, |ui| {
                     nested_guide_enabled = ui.visuals().indent_has_left_vline;
@@ -2435,8 +2440,8 @@ mod group_header_tests {
     fn nested_chevron_center_matches_parent_icon_guide() {
         let ctx = egui::Context::default();
         let mut delta = f32::INFINITY;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let parent_icon_center = ui.spacing().indent
                     + ui.spacing().item_spacing.x
                     + BROWSER_TREE_ICON_SIZE * 0.5;
@@ -2885,7 +2890,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             action = Some(BrowserAction::ImportCacheTagIntoKit {
                 key: entry.key.clone(),
             });
-            ui.close_menu();
+            ui.close();
         }
 
     let rename_enabled = supports_rename_menu(entry);
@@ -2900,17 +2905,17 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         if context_menu_primary_button(ui, "Rename", rename_enabled, primary_button_width).clicked()
         {
             action = Some(BrowserAction::RenameTag(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if context_menu_primary_button(ui, "Move", rename_enabled, primary_button_width).clicked() {
             action = Some(BrowserAction::MoveTag(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if context_menu_primary_button(ui, "Duplicate", duplicate_enabled, primary_button_width)
             .clicked()
         {
             action = Some(BrowserAction::DuplicateTag(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if context_menu_primary_button(ui, "Delete", delete_enabled, primary_button_width)
             .on_disabled_hover_text(
@@ -2919,7 +2924,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .clicked()
         {
             action = Some(BrowserAction::DeleteTag(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
     });
 
@@ -2935,16 +2940,16 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         context_menu_separator(ui);
         if is_embedded_tag_entry(entry) && context_menu_button(ui, "Extract raw tag...").clicked() {
             action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if scenario_scripts {
             if context_menu_button(ui, "Extract scripts...").clicked() {
                 action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
-                ui.close_menu();
+                ui.close();
             }
             if context_menu_button(ui, "Import scripts...").clicked() {
                 action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
-                ui.close_menu();
+                ui.close();
             }
         }
     }
@@ -2958,7 +2963,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
         };
         if context_menu_button(ui, label).clicked() {
             action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
     }
 
@@ -2979,7 +2984,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
                 .inner;
             if response.clicked() {
                 action = Some(BrowserAction::LaunchScenarioInSapien(entry.key.clone()));
-                ui.close_menu();
+                ui.close();
             }
             if !launch.sapien_present {
                 response.on_disabled_hover_text("sapien.exe was not found in this editing kit");
@@ -2992,7 +2997,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .inner;
         if response.clicked() {
             action = Some(BrowserAction::LaunchScenarioInTagTest(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if !launch.tag_test_present {
             response.on_disabled_hover_text("This kit's tag_test was not found in it");
@@ -3009,7 +3014,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             .inner;
         if response.clicked() {
             action = Some(BrowserAction::ReimportGeometry(entry.key.clone()));
-            ui.close_menu();
+            ui.close();
         }
         if !enabled {
             response.on_disabled_hover_text("Reimport requires a loose editing-kit tag");
@@ -3027,29 +3032,29 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
     context_menu_separator(ui);
     if context_menu_button(ui, "Open with File Explorer").clicked() {
         action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "Copy Tag Path").clicked() {
         action = Some(BrowserAction::CopyTagName(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "Find Tag References...").clicked() {
         action = Some(BrowserAction::FindReferences(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "Explore references...").clicked() {
         action = Some(BrowserAction::ExploreReferences(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
 
     context_menu_separator(ui);
     if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
         action = Some(BrowserAction::DumpJson(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
     if context_menu_button(ui, "Dump Tag References...").clicked() {
         action = Some(BrowserAction::DumpReferences(entry.key.clone()));
-        ui.close_menu();
+        ui.close();
     }
     action
 }
@@ -3130,11 +3135,11 @@ pub(in crate::app) fn draw_favorites(
                             .map(|root| root.join(folder))
                             .unwrap_or_else(|| folder.clone()),
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
                 if context_menu_button(ui, "Copy Folder Path").clicked() {
                     action = Some(BrowserAction::CopyFolderPath(folder.clone()));
-                    ui.close_menu();
+                    ui.close();
                 }
                 context_menu_separator(ui);
                 // Favorite folders do not own a tree node in this section.
@@ -3162,7 +3167,7 @@ pub(in crate::app) fn draw_favorites(
                         rel_path: folder.clone(),
                         label: label.clone(),
                     });
-                    ui.close_menu();
+                    ui.close();
                 }
             });
         }
@@ -3317,8 +3322,8 @@ mod tests {
             let mut group_tree = crate::source::build_group_tree(&full_index);
             assert_eq!(group_tree.children.len(), 1);
             let ctx = egui::Context::default();
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let mut status = None;
                     draw_tree_lazy(
                         ui,
@@ -3442,8 +3447,8 @@ mod tests {
                     events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let requests = crate::app::begin_bitmap_hovers(
                             ui,
                             std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
@@ -3482,8 +3487,8 @@ mod tests {
         let ctx = egui::Context::default();
         let body_drawn = |label: &str, open_first: bool| {
             let mut drawn = false;
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     if open_first {
                         let id = ui.make_persistent_id("objects");
                         let mut state =
@@ -3527,7 +3532,8 @@ mod tests {
         let tree = crate::source::build_tree(&entries);
         let ctx = egui::Context::default();
         let mut left = 0.0;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3535,8 +3541,8 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     draw_tree(
                         ui,
                         &tree,
@@ -3597,8 +3603,8 @@ mod tests {
         let height = |expand_folders: bool| {
             let ctx = egui::Context::default();
             let mut height = 0.0;
-            let _ = ctx.run(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let top = ui.cursor().top();
                     draw_tree(
                         ui,
@@ -3638,7 +3644,8 @@ mod tests {
         let mut time = 0.0;
         let mut frame = |dt: f64, events: Vec<egui::Event>| -> Vec<String> {
             time += dt;
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -3648,8 +3655,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let mut rects = [egui::Rect::NOTHING; 2];
                         for (index, rect) in rects.iter_mut().enumerate() {
                             let (row, response) = ui.allocate_exact_size(
@@ -3726,7 +3733,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut source_rect = egui::Rect::NOTHING;
         let frame = |events: Vec<egui::Event>, source_rect: &mut egui::Rect| {
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -3735,8 +3743,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(240.0, 20.0), Sense::click_and_drag());
                         *source_rect = rect;
@@ -3809,7 +3817,8 @@ mod tests {
                      target_rect: &mut egui::Rect,
                      hover_seen: &mut bool,
                      dropped: &mut Option<String>| {
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -3818,8 +3827,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let row_top = ui.cursor().min;
                         draw_entry(ui, &bitm, None, false, false, None, None, true);
                         *row_rect = egui::Rect::from_min_size(

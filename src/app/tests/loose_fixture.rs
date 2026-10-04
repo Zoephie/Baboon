@@ -326,8 +326,8 @@ impl PromptDriver {
         events: Vec<egui::Event>,
     ) -> Vec<(String, egui::Rect)> {
         self.time += 0.1;
-        let output = self.ctx.run(screen(events, self.time), |ctx| {
-            app.handle_save_changes_prompt(ctx)
+        let output = crate::app::run_ui_test(&self.ctx, screen(events, self.time), |ui| {
+            app.handle_save_changes_prompt(ui.ctx())
         });
         self.commands.extend(root_commands(&output));
         output

@@ -46,7 +46,8 @@ fn run(
     let ctx = egui::Context::default();
     let mut queued = VecDeque::new();
     let frame = |events: Vec<egui::Event>, queued: &mut VecDeque<SoundRequest>| {
-        let output = ctx.run(
+        let output = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -55,8 +56,8 @@ fn run(
                 events,
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let mut sinks = EditSinks::default();
                     let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                     edit.game = Some("halo3_mcc");

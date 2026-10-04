@@ -183,7 +183,7 @@ impl Harness {
         Counters::reset();
         let app = &mut self.app;
         let started = Instant::now();
-        let output = self.ctx.run(input, |ctx| app.run_frame(ctx));
+        let output = crate::app::run_ui_test(&self.ctx, input, |ui| app.run_frame(ui));
         let run = started.elapsed();
         let counters = Counters::read();
         let started = Instant::now();
@@ -227,6 +227,7 @@ fn wheel(dy: f32) -> egui::Event {
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, dy),
         modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
     }
 }
 

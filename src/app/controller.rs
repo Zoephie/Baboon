@@ -4339,13 +4339,13 @@ impl Baboon {
             return;
         };
         let copied_path = crate::format::to_native_path_string(&entry.display_path);
-        ctx.output_mut(|output| output.copied_text = copied_path.clone());
+        ctx.copy_text(copied_path.clone());
         self.status = format!("Copied {copied_path}");
     }
 
     pub(super) fn copy_folder_path(&mut self, path: &Path, ctx: &egui::Context) {
         let copied_path = crate::format::to_native_path_string(&path.to_string_lossy());
-        ctx.output_mut(|output| output.copied_text = copied_path.clone());
+        ctx.copy_text(copied_path.clone());
         self.status = format!("Copied {copied_path}");
     }
 
@@ -9899,8 +9899,8 @@ fn render_save_changes_prompt(
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .default_width(520.0)
-        .default_height(260.0)
+        .default_width(window_width(ctx, 520.0))
+        .default_height(window_height(ctx, 260.0, true))
         .show(ctx, |ui| {
             ui.label(
                 RichText::new("The following files have been modified. Select the files to save.")
@@ -10065,8 +10065,8 @@ fn render_last_opened_windows_prompt(
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .default_width(520.0)
-        .default_height(300.0)
+        .default_width(window_width(ctx, 520.0))
+        .default_height(window_height(ctx, 300.0, true))
         .show(ctx, |ui| {
             ui.label(
                 RichText::new("These windows were opened the last time you used Baboon.")

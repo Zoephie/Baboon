@@ -90,7 +90,7 @@ pub(super) fn draw_clip_player(
     // Whether a text field had the keyboard as the frame began. Asked after
     // the transport row is drawn, the answer misses an Enter that confirmed a
     // typed volume or speed: the box gives the keyboard up while handling it.
-    let keyboard_busy = ui.ctx().wants_keyboard_input();
+    let keyboard_busy = ui.ctx().egui_wants_keyboard_input();
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
     // Listed, stepped through and defaulted in display order: groups as the
@@ -295,7 +295,7 @@ pub(super) fn draw_clip_player(
 
     // Space plays or pauses and Enter stops, in the focused tab, when no text
     // field has the keyboard.
-    if edit.sound_has_focus && !keyboard_busy && !ui.ctx().wants_keyboard_input() {
+    if edit.sound_has_focus && !keyboard_busy && !ui.ctx().egui_wants_keyboard_input() {
         let (space, enter) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Space),
@@ -548,6 +548,7 @@ fn draw_timeline(
         3.0,
         foundation_input(),
         egui::Stroke::new(1.0, foundation_input_edge()),
+        egui::StrokeKind::Middle,
     );
 
     // The part of the clip shown: all of it until zoomed. While playing it
@@ -689,7 +690,7 @@ fn draw_timeline(
     let set_region = |edit: &mut FieldEditContext<'_>, region: Option<(f64, f64)>| {
         match region {
             Some((start, end)) => {
-                ui.data_mut(|data| data.insert_temp(region_id, (clip_id.clone(), start, end)))
+                ui.data_mut(|data| data.insert_temp(region_id, (clip_id.clone(), start, end)));
             }
             None => ui.data_mut(|data| data.remove::<(String, f64, f64)>(region_id)),
         }
@@ -777,7 +778,7 @@ fn draw_timeline(
     // Escape clears the region, in the focused tab.
     if region.is_some()
         && edit.sound_has_focus
-        && !ui.ctx().wants_keyboard_input()
+        && !ui.ctx().egui_wants_keyboard_input()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         set_region(edit, None);
@@ -1182,6 +1183,7 @@ fn draw_overview(
         2.0,
         foundation_blue().gamma_multiply(0.2),
         egui::Stroke::new(1.0, foundation_blue()),
+        egui::StrokeKind::Middle,
     );
     let response =
         response.on_hover_text("The whole sound: drag the box to scroll, click to centre");
@@ -1326,7 +1328,8 @@ mod tests {
             let focused = self.focused;
             let queued = &mut self.queued;
             let timeline = &mut self.timeline;
-            let output = self.ctx.run(
+            let output = crate::app::run_ui_test(
+                &self.ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -1336,8 +1339,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                         edit.sound_play_request = SoundRequests::new(queued, Some(owner()));
                         edit.sound_playback = playback.clone();
@@ -1879,16 +1882,43 @@ mod tests {
     }
 
     /// A glyph the fonts lack draws as an empty box; ⤨ did.
+    ///
+    /// This compares what each glyph draws with what a character no font has
+    /// draws, rather than asking `Fonts::has_glyphs`: egui 0.36 answers that
+    /// by checking that the face owning the character is not the face of the
+    /// replacement box, so every glyph of the emoji font that also supplies
+    /// the box (◀ ▶ 🔀 🌐 🔊 among them) is reported missing though it draws.
     #[test]
     fn every_player_glyph_is_in_the_app_s_fonts() {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::app::foundation_fonts());
-        let _ = ctx.run(Default::default(), |_| {});
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |_| {});
+        // Where in the font atlas each glyph of `text` comes from.
+        let drawn = |text: &str| -> Vec<([u16; 2], [u16; 2])> {
+            let galley = ctx.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    text.to_owned(),
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                )
+            });
+            galley
+                .rows
+                .iter()
+                .flat_map(|row| row.glyphs.iter())
+                .map(|glyph| (glyph.uv_rect.min, glyph.uv_rect.max))
+                .collect()
+        };
+        // U+0378 and U+0379 are unassigned, so no font has them: both draw
+        // the replacement box, and the check below must call them missing.
+        let replacement = drawn("\u{378}");
+        assert_eq!(replacement.len(), 1);
+        assert_eq!(drawn("\u{379}"), replacement);
+        let is_missing = |glyph: &str| drawn(glyph).iter().any(|uv| *uv == replacement[0]);
+        assert!(is_missing("\u{379}"), "the check sees a missing glyph");
         let missing: Vec<&str> = PLAYER_GLYPHS
             .into_iter()
-            .filter(|glyph| {
-                !ctx.fonts(|fonts| fonts.has_glyphs(&egui::FontId::proportional(14.0), glyph))
-            })
+            .filter(|glyph| is_missing(glyph))
             .collect();
         assert!(missing.is_empty(), "no glyph for {missing:?}");
     }
@@ -2043,6 +2073,7 @@ mod tests {
 
     fn wheel(delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel {
+            phase: egui::TouchPhase::Move,
             unit: egui::MouseWheelUnit::Point,
             delta,
             modifiers,

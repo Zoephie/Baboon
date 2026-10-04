@@ -358,12 +358,13 @@ pub(in crate::app) fn draw_color_popup(
     let mut result: Option<ColorPopupResult> = None;
     let window_title = format!("Color Picker - {}", color.title);
     egui::Window::new("Color Picker")
+        .constrain_to(window_work_area(ctx))
         .id(egui::Id::new("material_color_picker"))
         .title_bar(false)
         .collapsible(false)
         .movable(true)
         .resizable(false)
-        .default_size(Vec2::new(560.0, 480.0))
+        .default_size(window_size(ctx, Vec2::new(560.0, 480.0), false))
         .show(ctx, |ui| {
             super::super::ui::draw_icon_window_header_without_close(
                 ui,
@@ -378,7 +379,12 @@ pub(in crate::app) fn draw_color_popup(
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(80.0), Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, color.color32());
                     ui.painter()
-                        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+                        .rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+                            egui::StrokeKind::Middle,
+                        );
                     ui.add_space(14.0);
                     draw_color_channel_table(ui, color);
                 });
@@ -390,7 +396,7 @@ pub(in crate::app) fn draw_color_popup(
                     ui.label(RichText::new("PC Hex:").color(text_dark()));
                     let response = draw_copy_text(ui, &sc_hex, 225.0);
                     if response.clicked() {
-                        ui.output_mut(|output| output.copied_text = sc_hex.clone());
+                        ui.copy_text(sc_hex.clone());
                     }
                 });
                 ui.small(RichText::new("Click PC Hex to copy").color(subtle_dark()));
@@ -611,7 +617,12 @@ fn draw_color_comparison(ui: &mut Ui, color: &MaterialColorPopup) {
         Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
     );
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().galley(
         egui::pos2(
             container.center().x - new_label.size().x * 0.5,
@@ -727,7 +738,12 @@ pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColo
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     paint_sv_gradient(ui.painter(), rect, color.hue as f32 / 255.0);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     let cursor = egui::pos2(
         egui::lerp(rect.left()..=rect.right(), color.saturation as f32 / 255.0),
         egui::lerp(rect.bottom()..=rect.top(), color.brightness as f32 / 255.0),
@@ -760,7 +776,12 @@ pub(in crate::app) fn draw_color_hue_strip(ui: &mut Ui, color: &mut MaterialColo
     );
     paint_hue_gradient(ui.painter(), rect);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.hue as f32 / 255.0);
     let (red, green, blue) = hsb_to_rgb(color.hue as f32 / 255.0, 1.0, 1.0);
     paint_color_slider_marker(
@@ -790,7 +811,12 @@ pub(in crate::app) fn draw_color_alpha_strip(ui: &mut Ui, color: &mut MaterialCo
     paint_alpha_checkerboard(ui.painter(), rect);
     paint_alpha_gradient(ui.painter(), rect);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     let marker_y = egui::lerp(rect.bottom()..=rect.top(), color.alpha);
     let alpha = float_channel_to_u8(color.alpha);
     paint_color_slider_marker(ui.painter(), rect, marker_y, Color32::from_gray(alpha));
@@ -959,7 +985,12 @@ pub(in crate::app) fn draw_custom_color_swatches(
             None => draw_empty_custom_swatch(ui, rect),
         }
         ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+            .rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+                egui::StrokeKind::Middle,
+            );
         if response.secondary_clicked() {
             custom_swatches[index] = Some(ColorPaletteSwatch::unnamed([
                 float_channel_to_u8(color.red),
@@ -1024,7 +1055,7 @@ fn draw_save_palette_format_dialog(
         .collapsible(false)
         .movable(true)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .fixed_size(Vec2::new(420.0, 225.0))
+        .fixed_size(window_size(ctx, Vec2::new(420.0, 225.0), false))
         .show(ctx, |ui| {
             super::super::ui::draw_icon_window_header(
                 ui,
@@ -1438,7 +1469,7 @@ pub(in crate::app) fn draw_color_hex_rows(ui: &mut Ui, color: &mut MaterialColor
             color.hex_error = None;
         }
         let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if response.lost_focus() || (response.has_focus() && enter_pressed) {
+        if lost_focus_once(&response) || (response.has_focus() && enter_pressed) {
             match parse_rgb_hex(&color.hex_input) {
                 Ok([r, g, b]) => color.set_rgb_bytes(r, g, b),
                 Err(error) => color.hex_error = Some(error),
@@ -1465,7 +1496,7 @@ pub(in crate::app) fn draw_color_hex_rows(ui: &mut Ui, color: &mut MaterialColor
             ),
         );
         if response.clicked() {
-            ui.output_mut(|output| output.copied_text = pc_hex.clone());
+            ui.copy_text(pc_hex.clone());
         }
         response.on_hover_text(format!("{pc_hex}\nClick to copy PC Hex"));
     });
@@ -1545,7 +1576,12 @@ pub(in crate::app) fn draw_copy_text(ui: &mut Ui, value: &str, width: f32) -> eg
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().text(
         rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,

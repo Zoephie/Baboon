@@ -62,27 +62,27 @@ impl Baboon {
         self.draw_chimp_level_progress(ui, kit_index);
         ui.add_space(4.0);
         let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
-        egui::SidePanel::left(egui::Id::new((
+        egui::Panel::left(egui::Id::new((
             "chimp_package_browser",
             self.kits[kit_index].id.0,
         )))
         .resizable(true)
-        .default_width(360.0)
+        .default_size(360.0)
         .frame(
-            Frame::none()
+            Frame::NONE
                 .fill(left_panel())
-                .inner_margin(egui::Margin::same(8.0)),
+                .inner_margin(egui::Margin::same(8)),
         )
-        .show_inside(ui, |ui| {
+        .show(ui, |ui| {
             self.draw_chimp_browser(ui, ctx, kit_index);
         });
         egui::CentralPanel::default()
             .frame(
-                Frame::none()
+                Frame::NONE
                     .fill(editor_bg())
-                    .inner_margin(egui::Margin::same(10.0)),
+                    .inner_margin(egui::Margin::same(10)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 if ready {
                     match self.kits[kit_index].chimp.browser {
                         ChimpBrowser::Folders => {
@@ -126,9 +126,9 @@ impl Baboon {
         let name = job.name.clone();
 
         ui.add_space(4.0);
-        egui::Frame::none()
+        egui::Frame::NONE
             .fill(row_type())
-            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -815,7 +815,8 @@ mod tests {
     fn chimp_workspace_toolbar_does_not_consume_the_editor_viewport() {
         let context = egui::Context::default();
         let mut toolbar_height = None;
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -902,10 +903,11 @@ mod tests {
         assert!(!contains_ignore_ascii_case("StaticMesh", "skeletal"));
     }
 
-    fn draw_workspace(app: &mut Baboon) -> impl FnMut(&egui::Context) + '_ {
-        move |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                app.draw_chimp_workspace(ui, ctx, 0);
+    fn draw_workspace(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |ui| {
+                app.draw_chimp_workspace(ui, &ctx, 0);
             });
         }
     }

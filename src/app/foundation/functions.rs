@@ -28,10 +28,10 @@ fn draw_foundation_function_row_contents(
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        Frame::none()
+        Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
-            .inner_margin(egui::Margin::same(6.0))
+            .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
                 // `Frame::show` inherits the parent layout, and this row is
                 // built inside a `horizontal_top`. Force a vertical layout so
@@ -124,10 +124,10 @@ fn draw_foundation_wrapped_function_row_contents(
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &label, None);
-        Frame::none()
+        Frame::NONE
             .fill(foundation_group_bg())
             .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
-            .inner_margin(egui::Margin::same(6.0))
+            .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(640.0);
@@ -225,7 +225,7 @@ fn function_row_key(
 /// again.
 fn draw_function_row_unless_offscreen(
     ui: &mut Ui,
-    id_source: impl std::hash::Hash,
+    id_source: impl std::hash::Hash + std::fmt::Debug,
     key: u64,
     draw: impl FnOnce(&mut Ui),
 ) {

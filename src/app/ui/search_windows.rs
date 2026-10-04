@@ -33,6 +33,7 @@ impl Baboon {
                 .as_mut()
                 .expect("picker presence checked above");
             egui::Window::new("Select Tag Reference")
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new(
                     "campaign_evolved_tag_reference_picker_window",
                 ))
@@ -40,8 +41,8 @@ impl Baboon {
                 .movable(true)
                 .resizable(true)
                 .collapsible(false)
-                .default_size(Vec2::new(620.0, 420.0))
-                .min_size(Vec2::new(420.0, 220.0))
+                .default_size(window_size(ctx, Vec2::new(620.0, 420.0), true))
+                .min_size(window_size(ctx, Vec2::new(420.0, 220.0), true))
                 .show(ctx, |ui| {
                     picked = draw_tag_reference_catalog_picker_contents(
                         ui,
@@ -119,9 +120,10 @@ impl Baboon {
         {
             let explorer = self.content_explorer.as_ref().expect("checked above");
             egui::Window::new("Content Explorer")
+                .constrain_to(window_work_area(ctx))
                 .id(egui::Id::new("content_explorer"))
                 .open(&mut open)
-                .default_width(720.0)
+                .default_width(window_width(ctx, 720.0))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if ui
@@ -299,9 +301,10 @@ impl Baboon {
         let expanded = &self.ref_jump_expanded;
         let occurrences = &self.ref_jump_occurrences;
         egui::Window::new(&results.title)
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("tag_query_results"))
             .open(&mut open)
-            .default_width(440.0)
+            .default_width(window_width(ctx, 440.0))
             .show(ctx, |ui| {
                 if let Some(note) = &results.note {
                     ui.label(RichText::new(note).color(subtle_dark()));
@@ -326,7 +329,7 @@ impl Baboon {
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                            ui.output_mut(|output| output.copied_text = text);
+                            ui.copy_text(text);
                         }
                     });
                     ui.separator();
@@ -394,11 +397,11 @@ impl Baboon {
                                         row.context_menu(|ui| {
                                             if ui.button("Open").clicked() {
                                                 to_open = Some(entry.key.clone());
-                                                ui.close_menu();
+                                                ui.close();
                                             }
                                             if ui.button("Reveal in browser").clicked() {
                                                 to_reveal = Some(entry.key.clone());
-                                                ui.close_menu();
+                                                ui.close();
                                             }
                                         });
                                     }
@@ -506,9 +509,10 @@ impl Baboon {
         let mut do_search = false;
         let mut do_build = false;
         egui::Window::new("Search Field Values")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("field_value_search"))
             .open(&mut open)
-            .default_width(400.0)
+            .default_width(window_width(ctx, 400.0))
             .show(ctx, |ui| {
                 ui.label(
                     RichText::new(
@@ -526,7 +530,7 @@ impl Baboon {
                             .desired_width(240.0),
                     );
                     let submitted =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        lost_focus_once(&response) && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if self.field_value_searching {
                         ui.spinner();
                         ui.label(RichText::new("searching…").color(subtle_dark()));
@@ -699,7 +703,8 @@ mod tests {
                 note: None,
                 ref_target: None,
             });
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -707,7 +712,7 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| app.draw_query_results_window(ctx),
+                |_| app.draw_query_results_window(&ctx),
             );
             painted = output
                 .shapes

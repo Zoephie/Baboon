@@ -12,9 +12,10 @@ impl Baboon {
         let mut chosen: Option<String> = None;
         let all = self.kits[self.active].keywords.all_keywords();
         egui::Window::new("Keywords")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("keyword_chooser"))
             .open(&mut open)
-            .default_width(280.0)
+            .default_width(window_width(ctx, 280.0))
             .show(ctx, |ui| {
                 if all.is_empty() {
                     ui.label(

@@ -47,14 +47,14 @@ impl Baboon {
             }
         }
 
-        egui::TopBottomPanel::bottom(egui::Id::new(("blam_status_bar", kit_id.0)))
-            .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 4.0,
-                bottom: 4.0,
+        egui::Panel::bottom(egui::Id::new(("blam_status_bar", kit_id.0)))
+            .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+                left: 10,
+                right: 10,
+                top: 4,
+                bottom: 4,
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status:").color(subtle_dark()));
                     if self.kits[kit_index].blam.running {
@@ -69,17 +69,17 @@ impl Baboon {
             });
         // The log window sits between the content and the status bar: always
         // visible while an import narrates itself, resizable by its top edge.
-        egui::TopBottomPanel::bottom(egui::Id::new(("blam_log", kit_id.0)))
+        egui::Panel::bottom(egui::Id::new(("blam_log", kit_id.0)))
             .resizable(true)
-            .default_height(150.0)
-            .min_height(60.0)
-            .frame(Frame::none().fill(left_panel()).inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 6.0,
-                bottom: 6.0,
+            .default_size(150.0)
+            .min_size(60.0)
+            .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
+                left: 10,
+                right: 10,
+                top: 6,
+                bottom: 6,
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.label(RichText::new("Log").color(text_dark()).strong());
                 ui.separator();
                 egui::ScrollArea::vertical()
@@ -110,13 +110,13 @@ impl Baboon {
         let mut rescan_clicked = false;
         let mut import_clicked = false;
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()).inner_margin(egui::Margin {
-                left: 14.0,
-                right: 14.0,
-                top: 10.0,
-                bottom: 10.0,
+            .frame(Frame::NONE.fill(editor_bg()).inner_margin(egui::Margin {
+                left: 14,
+                right: 14,
+                top: 10,
+                bottom: 10,
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt(("blam_pane", kit_id.0))
                     .auto_shrink([false, false])

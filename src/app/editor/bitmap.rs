@@ -792,7 +792,12 @@ fn draw_bitmap_canvas_and_footer(
     // its 4 px tiles never zoom with the bitmap.
     let painter = ui.painter();
     painter.rect_filled(canvas_rect, 0.0, preview.bg.color());
-    painter.rect_stroke(canvas_rect, 0.0, Stroke::new(1.0_f32, grid_line()));
+    painter.rect_stroke(
+        canvas_rect,
+        0.0,
+        Stroke::new(1.0_f32, grid_line()),
+        egui::StrokeKind::Middle,
+    );
 
     let img_tl = canvas_rect.center() + preview.pan - draw_size * 0.5;
     let img_rect = egui::Rect::from_min_size(img_tl, draw_size);
@@ -829,6 +834,7 @@ fn draw_bitmap_canvas_and_footer(
             img_rect.expand(1.0),
             0.0,
             Stroke::new(2.0_f32, color),
+            egui::StrokeKind::Middle,
         );
     }
 
@@ -858,7 +864,12 @@ fn draw_bitmap_canvas_and_footer(
                     egui::vec2(swatch, swatch),
                 );
                 painter.rect_filled(swatch_rect, 2.0, Color32::from_rgb(r, g, b));
-                painter.rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, grid_line()));
+                painter.rect_stroke(
+                    swatch_rect,
+                    2.0,
+                    Stroke::new(1.0_f32, grid_line()),
+                    egui::StrokeKind::Middle,
+                );
                 painter.text(
                     swatch_rect.right_center() + egui::vec2(6.0, 0.0),
                     egui::Align2::LEFT_CENTER,

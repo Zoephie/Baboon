@@ -464,7 +464,12 @@ fn draw_foundation_right_rail(
                 );
                 ui.painter().rect_filled(rect, 0.0, color);
                 ui.painter()
-                    .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+                    .rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0_f32, foundation_input_edge()),
+                        egui::StrokeKind::Middle,
+                    );
                 if response.clicked() {
                     *color_popup = Some(
                         MaterialColorPopup::new(
@@ -624,7 +629,7 @@ fn draw_curve_panel(
                         if ui
                             .add_enabled(
                                 editable,
-                                egui::SelectableLabel::new(
+                                egui::Button::selectable(
                                     target == current,
                                     curve_segment_label(target),
                                 ),
@@ -647,7 +652,7 @@ fn draw_curve_panel(
                     if ui
                         .add_enabled(
                             editable,
-                            egui::SelectableLabel::new(
+                            egui::Button::selectable(
                                 mode == target,
                                 if target == CurvePointMode::Corner {
                                     "corner"
@@ -774,7 +779,7 @@ fn periodic_function_combo(
                 if ui
                     .add_enabled(
                         editable,
-                        egui::SelectableLabel::new(index == current, *label),
+                        egui::Button::selectable(index == current, *label),
                     )
                     .clicked()
                 {
@@ -860,7 +865,7 @@ fn transition_function_combo(
                 if ui
                     .add_enabled(
                         editable,
-                        egui::SelectableLabel::new(index == current, *label),
+                        egui::Button::selectable(index == current, *label),
                     )
                     .clicked()
                 {

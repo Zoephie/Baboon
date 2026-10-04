@@ -616,7 +616,12 @@ pub(in crate::app) fn draw_shader_flags_row(
     ui.painter()
         .rect_filled(default_rect, 0.0, material_default_input());
     ui.painter()
-        .rect_stroke(default_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            default_rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
 
     let value_rect = egui::Rect::from_min_size(
         default_rect.right_top() + Vec2::new(6.0, 0.0),
@@ -624,7 +629,12 @@ pub(in crate::app) fn draw_shader_flags_row(
     );
     ui.painter().rect_filled(value_rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(value_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            value_rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
 
     let enabled = edit.editable && !row.path.is_empty();
     for (index, option) in row.options.iter().enumerate() {
@@ -667,7 +677,12 @@ pub(in crate::app) fn draw_shader_flags_row(
             },
         );
         ui.painter()
-            .rect_stroke(checkbox_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+            .rect_stroke(
+                checkbox_rect,
+                0.0,
+                Stroke::new(1.0_f32, material_input_edge()),
+                egui::StrokeKind::Middle,
+            );
         if is_set {
             let stroke = Stroke::new(1.6_f32, material_text());
             ui.painter().line_segment(
@@ -729,7 +744,12 @@ pub(in crate::app) fn draw_shader_grid_cell(
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, material_input_edge()),
+            egui::StrokeKind::Middle,
+        );
 
     let Some(cell) = cell else {
         return;

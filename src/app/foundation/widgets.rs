@@ -3,6 +3,20 @@
 
 use super::*;
 
+/// Whether `response`'s widget gave up keyboard focus this frame.
+///
+/// egui 0.36 reports [`egui::Response::lost_focus`] on two frames in a row,
+/// so that a focus taken mid-frame still reaches a widget drawn earlier.
+/// Every caller here acts on the loss — commits an edit, resolves a path —
+/// and must act once, so this keeps only the frame egui 0.29 reported: the
+/// widget had focus when the frame began and has it no longer.
+pub(in crate::app) fn lost_focus_once(response: &egui::Response) -> bool {
+    response.lost_focus()
+        && response
+            .ctx
+            .memory(|memory| memory.had_focus_last_frame(response.id))
+}
+
 /// Paint text through the original painter path unless this cell has a Find match.
 pub(in crate::app) fn paint_findable_text(
     ui: &Ui,
@@ -30,7 +44,7 @@ fn findable_galley(
     kind: FindTargetKind,
 ) -> std::sync::Arc<egui::Galley> {
     let job = findable_layout_job(ui, text, font_id, color, kind);
-    ui.fonts(|fonts| fonts.layout_job(job))
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// Return whether the current Foundation cell has a rendered match of `kind`.
@@ -228,7 +242,12 @@ pub(in crate::app) fn foundation_input_cell_colored(
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, foundation_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     let response = foundation_read_only_text_cell(ui, rect, text, color, 5.0);
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
@@ -246,21 +265,22 @@ fn foundation_read_only_text_cell(
 ) -> egui::Response {
     let mut text = text;
     let font_id = FontId::proportional(12.5);
-    let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+        let text = text.as_str();
         findable_galley(ui, text, font_id.clone(), color, FindTargetKind::Value)
     };
     let response = ui.put(
         rect,
         egui::TextEdit::singleline(&mut text)
-            .frame(false)
+            .frame(egui::Frame::NONE)
             .font(FontId::proportional(12.5))
             .text_color(color)
             .vertical_align(egui::Align::Center)
             .margin(egui::Margin {
-                left: left_padding,
-                right: 5.0,
-                top: 2.0,
-                bottom: 2.0,
+                left: (left_padding) as i8,
+                right: 5,
+                top: 2,
+                bottom: 2,
             })
             .clip_text(true)
             .layouter(&mut layouter),
@@ -276,38 +296,39 @@ mod read_only_input_tests {
     #[test]
     fn read_only_inputs_allow_selection_and_copy_but_reject_mutations() {
         let ctx = egui::Context::default();
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         let value = "A long editing kit value that must be copied in full";
         let mut id = egui::Id::NULL;
         let mut frame = |events| {
-            ctx.run(
+            crate::app::run_ui_test(
+                &ctx,
                 egui::RawInput {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let (rect, _) =
                             ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
                         let response =
                             foundation_read_only_text_cell(ui, rect, value, text_dark(), 5.0);
                         id = response.id;
                         response.request_focus();
-                        let mut state = egui::TextEdit::load_state(ctx, id).unwrap();
+                        let mut state = egui::TextEdit::load_state(&ctx, id).unwrap();
                         state
                             .cursor
                             .set_char_range(Some(egui::text::CCursorRange::two(
                                 egui::text::CCursor::new(0),
                                 egui::text::CCursor::new(value.chars().count()),
                             )));
-                        state.store(ctx, id);
+                        state.store(&ctx, id);
                     });
                 },
             )
         };
         let _ = frame(vec![]);
         let copy = frame(vec![egui::Event::Copy]);
-        assert_eq!(copy.platform_output.copied_text, value);
+        assert_eq!(crate::app::copied_text(&copy.platform_output), value);
         let _ = frame(vec![
             egui::Event::Text("modified".to_owned()),
             egui::Event::Paste("pasted".to_owned()),
@@ -321,7 +342,7 @@ mod read_only_input_tests {
             },
         ]);
         let copy = frame(vec![egui::Event::Copy]);
-        assert_eq!(copy.platform_output.copied_text, value);
+        assert_eq!(crate::app::copied_text(&copy.platform_output), value);
     }
 }
 
@@ -343,7 +364,12 @@ fn tag_reference_icon_footprint() -> f32 {
 fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+        .rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, foundation_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     paint_tag_reference_icon(ui, rect, icon_group);
 }
 
@@ -385,10 +411,10 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     let size = Vec2::new(width, 24.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let margin = egui::Margin {
-        left: tag_reference_icon_footprint(),
-        right: 4.0,
-        top: 2.0,
-        bottom: 2.0,
+        left: (tag_reference_icon_footprint()) as i8,
+        right: 4,
+        top: 2,
+        bottom: 2,
     };
     let has_highlight = findable_text_has_match(ui, text, FindTargetKind::Value);
     let response = ui
@@ -410,7 +436,8 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
                 .clip_text(true);
             if has_highlight {
                 let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-                let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+        let text = text.as_str();
                     findable_galley(
                         ui,
                         text,
@@ -453,7 +480,8 @@ pub(in crate::app) fn foundation_text_edit_cell(
                 .margin(Vec2::new(4.0, 2.0));
             if has_highlight {
                 let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-                let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+        let text = text.as_str();
                     findable_galley(
                         ui,
                         text,

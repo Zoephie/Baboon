@@ -70,7 +70,8 @@ fn graph_frame(
     selected: &mut (usize, usize),
     events: Vec<egui::Event>,
 ) {
-    let _ = ctx.run(
+    let _ = crate::app::run_ui_test(
+        &ctx,
         egui::RawInput {
             events,
             screen_rect: Some(egui::Rect::from_min_size(
@@ -79,7 +80,7 @@ fn graph_frame(
             )),
             ..Default::default()
         },
-        |ctx| {
+        |_| {
             egui::Area::new(egui::Id::new("function_graph_test"))
                 .fixed_pos(egui::Pos2::ZERO)
                 .show(ctx, |ui| {

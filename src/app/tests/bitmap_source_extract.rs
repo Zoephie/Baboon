@@ -116,8 +116,8 @@ fn a_bitmap_without_a_source_says_so_and_writes_nothing() {
 fn only_ce_and_halo_2_offer_bitmap_source_extraction() {
     let ctx = egui::Context::default();
     let mut offered = Vec::new();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             for game in [
                 "haloce_mcc",
                 "halo2_mcc",

@@ -58,13 +58,13 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved && self.app.prefs.enable_chimp {
-            Frame::none()
+            Frame::NONE
                 .fill(menu_bar())
                 .inner_margin(egui::Margin {
-                    left: 8.0,
-                    right: 8.0,
-                    top: 4.0,
-                    bottom: 4.0,
+                    left: 8,
+                    right: 8,
+                    top: 4,
+                    bottom: 4,
                 })
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -88,21 +88,21 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
-        egui::SidePanel::left(egui::Id::new(("kit_browser_panel", kit_id.0)))
+        egui::Panel::left(egui::Id::new(("kit_browser_panel", kit_id.0)))
             .resizable(true)
-            .default_width(330.0)
-            .frame(Frame::none().fill(left_panel()).inner_margin(egui::Margin {
-                left: 8.0,
-                right: 8.0,
-                top: 6.0,
-                bottom: 6.0,
+            .default_size(330.0)
+            .frame(Frame::NONE.fill(left_panel()).inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 6,
+                bottom: 6,
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.app.draw_kit_browser(ui, &self.ctx, kit_index);
             });
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()))
-            .show_inside(ui, |ui| {
+            .frame(Frame::NONE.fill(editor_bg()))
+            .show(ui, |ui| {
                 self.app.draw_tag_tiles(ui, &self.ctx, kit_index);
             });
         egui_tiles::UiResponse::None
@@ -159,22 +159,22 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             style_list_menu(ui);
             ui.set_width(320.0);
             if ui.button("Load Folder...").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.add_kit = Some(LoadKind::Folder);
             }
             if ui.button("Load Tag...").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.add_kit = Some(LoadKind::SingleFile);
             }
             if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                ui.close_menu();
+                ui.close();
                 self.add_kit = Some(LoadKind::Monolithic);
             }
             if ui
                 .button("Open Campaign Evolved container (.utoc)...")
                 .clicked()
             {
-                ui.close_menu();
+                ui.close();
                 self.add_kit = Some(LoadKind::Container);
             }
             ui.separator();
@@ -186,7 +186,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                 .flatten()
             {
                 self.recent_action = Some(recent_action);
-                ui.close_menu();
+                ui.close();
             }
         })
         .response

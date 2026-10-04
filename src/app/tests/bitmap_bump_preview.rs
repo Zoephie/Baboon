@@ -116,9 +116,9 @@ fn the_bitmap_editor_decodes_off_the_ui_thread() {
     let mut preview = crate::app::BitmapPreviewState::default();
     let ctx = egui::Context::default();
     let frame = |preview: &mut crate::app::BitmapPreviewState| {
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                crate::app::editor::bitmap::draw_bitmap_preview(ui, ctx, &tag, &entry, preview);
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::app::editor::bitmap::draw_bitmap_preview(ui, &ctx, &tag, &entry, preview);
             });
         });
     };

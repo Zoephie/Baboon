@@ -708,14 +708,14 @@ fn run(case: &Case, kit: &LooseKit) -> Result<(), String> {
     app.status = "Ready".to_owned();
     let mut action = Some((case.action)(kit));
     let ctx = egui::Context::default();
-    let output = ctx.run(egui::RawInput::default(), |ctx| {
+    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         if let Some(action) = action.take() {
-            app.handle_browser_action(action, ctx.clone())
+            app.handle_browser_action(action, ui.ctx().clone())
         }
     });
     let worker_answered = app.rx.recv_timeout(Duration::from_millis(150)).is_ok();
     let outcome = Outcome {
-        copied_text: output.platform_output.copied_text,
+        copied_text: crate::app::copied_text(&output.platform_output),
         worker_answered,
     };
     (case.check)(&app, kit, &outcome)

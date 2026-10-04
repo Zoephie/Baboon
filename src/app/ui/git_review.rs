@@ -357,12 +357,12 @@ fn change_list_header(
 }
 
 fn list_header(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
-    Frame::none()
+    Frame::NONE
         .inner_margin(egui::Margin {
-            left: 10.0,
-            right: 10.0,
-            top: 8.0,
-            bottom: 8.0,
+            left: 10,
+            right: 10,
+            top: 8,
+            bottom: 8,
         })
         .show(ui, content);
 }
@@ -620,19 +620,19 @@ impl Baboon {
         let mut swapped = state.swapped;
         let mut action = None;
 
-        Frame::none()
+        Frame::NONE
             .show(ui, |ui| {
                 // Only the page-level stack is flush. The header and each pane
                 // keep their own inner spacing, but no gap is inserted between
                 // the full-width divider and the three-pane table.
                 let inner_spacing_y = ui.spacing().item_spacing.y;
                 ui.spacing_mut().item_spacing.y = 0.0;
-                Frame::none()
+                Frame::NONE
                     .inner_margin(egui::Margin {
-                        left: 10.0,
-                        right: 10.0,
-                        top: 8.0,
-                        bottom: 0.0,
+                        left: 10,
+                        right: 10,
+                        top: 8,
+                        bottom: 0,
                     })
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = inner_spacing_y;
@@ -698,12 +698,12 @@ impl Baboon {
                 );
 
                 if loading {
-                    Frame::none()
+                    Frame::NONE
                         .inner_margin(egui::Margin {
-                            left: 10.0,
-                            right: 10.0,
-                            top: 0.0,
-                            bottom: 8.0,
+                            left: 10,
+                            right: 10,
+                            top: 0,
+                            bottom: 8,
                         })
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -713,12 +713,12 @@ impl Baboon {
                         });
                 }
                 if let Some(error) = error.as_ref() {
-                    Frame::none()
+                    Frame::NONE
                         .inner_margin(egui::Margin {
-                            left: 10.0,
-                            right: 10.0,
-                            top: 0.0,
-                            bottom: 8.0,
+                            left: 10,
+                            right: 10,
+                            top: 0,
+                            bottom: 8,
                         })
                         .show(ui, |ui| {
                             ui.colored_label(Color32::from_rgb(225, 105, 105), error);
@@ -737,7 +737,7 @@ impl Baboon {
                     .body(|mut body| {
                         body.row(height, |mut row| {
                             row.col(|ui| {
-                                Frame::none().fill(editor_bg()).show(ui, |ui| {
+                                Frame::NONE.fill(editor_bg()).show(ui, |ui| {
                                     list_header(ui, |ui| {
                                             pane_title(ui, "Changes & Commit History");
                                             ui.add_space(4.0);
@@ -836,12 +836,12 @@ impl Baboon {
                                     });
                             });
                             row.col(|ui| {
-                                Frame::none()
+                                Frame::NONE
                                     .inner_margin(egui::Margin {
-                                        left: 10.0,
-                                        right: 10.0,
-                                        top: 8.0,
-                                        bottom: 8.0,
+                                        left: 10,
+                                        right: 10,
+                                        top: 8,
+                                        bottom: 8,
                                     })
                                     .show(ui, |ui| {
                                         compare_pane_title(ui, selected_path.as_deref());

@@ -22,7 +22,7 @@ impl Baboon {
             .tool_commands_window_size
             .unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
         let mut window_pos = self.prefs.tool_commands_window_pos.unwrap_or_else(|| {
-            let available = ctx.available_rect();
+            let available = ctx.content_rect();
             egui::pos2(
                 available.center().x - window_size.x * 0.5,
                 available.center().y - window_size.y * 0.5,
@@ -36,11 +36,13 @@ impl Baboon {
             .title_bar(false)
             .movable(false)
             .resizable(true)
-            .drag_to_scroll(false)
+            .drag_to_scroll(egui::containers::scroll_area::DragScroll::Never)
             .constrain(false)
             .open(&mut open)
             .current_pos(window_pos)
-            .min_size(MIN_TOOL_COMMANDS_WINDOW_SIZE)
+            .min_size(crate::app::window_size(ctx, MIN_TOOL_COMMANDS_WINDOW_SIZE, false))
+            // The saved size is the window's outer size, which is what egui
+            // now sizes a window by, so it comes back unchanged.
             .default_size(window_size);
         let response = window.show(ctx, |ui| {
             let title_height = 28.0;

@@ -116,7 +116,12 @@ pub(super) fn draw_model_viewport(
             paint_model_gl(info, painter, &frame);
         })),
     });
-    painter.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+    painter.rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, foundation_input_edge()),
+        egui::StrokeKind::Middle,
+    );
 
     if state.show_errors {
         draw_model_errors(
@@ -2895,7 +2900,7 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            Some(&[255, 255, 255, 255]),
+            glow::PixelUnpackData::Slice(Some(&[255, 255, 255, 255])),
         );
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
@@ -2926,7 +2931,7 @@ unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glo
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            Some(&image.rgba),
+            glow::PixelUnpackData::Slice(Some(&image.rgba)),
         );
         gl.generate_mipmap(glow::TEXTURE_2D);
         let wrap = |repeat: bool| {

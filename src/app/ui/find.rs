@@ -17,14 +17,14 @@ impl Baboon {
         // the app stepped to the next match, and Escape out of any menu or edit
         // closed Find.
         let mut query_escape = false;
-        let default_pos = ctx.screen_rect().right_top() + egui::vec2(-488.0, 72.0);
+        let default_pos = ctx.content_rect().right_top() + egui::vec2(-488.0, 72.0);
         egui::Window::new("Find")
             .id(egui::Id::new("find_in_tag"))
             .title_bar(false)
             .collapsible(false)
             .movable(true)
             .resizable(false)
-            .default_width(470.0)
+            .default_width(window_width(ctx, 470.0))
             .default_pos(default_pos)
             .show(ctx, |ui| {
                 draw_find_window_header(ui, &mut open);
@@ -56,7 +56,7 @@ impl Baboon {
                         changed |= response.changed();
                         // A single-line box gives up focus on Enter and Escape,
                         // so the key arrives on the frame it loses focus.
-                        let in_query = response.has_focus() || response.lost_focus();
+                        let in_query = response.has_focus() || lost_focus_once(&response);
                         let (enter, escape, shift) = ui.input(|input| {
                             (
                                 input.key_pressed(egui::Key::Enter),
@@ -326,11 +326,11 @@ mod key_scope_tests {
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = crate::app::run_ui_test(&ctx, input, |ui| {
             if let Some(id) = focus {
                 ctx.memory_mut(|memory| memory.request_focus(id));
             }
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut text = String::from("12");
                 ui.add(egui::TextEdit::singleline(&mut text).id(egui::Id::new("a_field")));
             });

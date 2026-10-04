@@ -32,7 +32,7 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(560.0)
+            .default_width(window_width(ctx, 560.0))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(

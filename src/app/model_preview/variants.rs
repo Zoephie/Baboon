@@ -433,7 +433,7 @@ pub(super) fn draw_variant_header_actions(
             });
             state.new_variant_name.clear();
             mutation_requested = true;
-            ui.close_menu();
+            ui.close();
         }
         let can_update =
             edit.editable && state.selected_variant.is_some() && !chosen_regions.is_empty();
@@ -449,7 +449,7 @@ pub(super) fn draw_variant_header_actions(
                 regions: chosen_regions,
             });
             mutation_requested = true;
-            ui.close_menu();
+            ui.close();
         }
     });
     let can_delete = edit.editable && state.selected_variant.is_some();

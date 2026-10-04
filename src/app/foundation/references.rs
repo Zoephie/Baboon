@@ -444,7 +444,12 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 REFERENCE_MISSING_COLOR
             };
             ui.painter()
-                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5_f32, color));
+                .rect_stroke(
+                    row_response.rect,
+                    3.0,
+                    Stroke::new(1.5_f32, color),
+                    egui::StrokeKind::Middle,
+                );
         }
         if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
             if accepts(&payload) {
@@ -789,7 +794,12 @@ pub(in crate::app) fn draw_foundation_flags_row(
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
-    painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+    painter.rect_stroke(
+        flags_rect,
+        0.0,
+        Stroke::new(1.0_f32, foundation_input_edge()),
+        egui::StrokeKind::Middle,
+    );
 
     if display_flags.is_empty() {
         paint_findable_text(
@@ -833,6 +843,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 checkbox_rect,
                 0.0,
                 Stroke::new(1.0_f32, foundation_input_edge()),
+                egui::StrokeKind::Middle,
             );
             if *is_set {
                 let stroke = Stroke::new(1.6_f32, text_dark());
@@ -889,7 +900,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
     }
 
     if meta.help.is_some() || meta.read_only {
-        ui.allocate_new_ui(
+        ui.scope_builder(
             egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
                 flags_rect.right_top() + Vec2::new(8.0, 0.0),
                 Vec2::new(120.0, 24.0),

@@ -109,7 +109,7 @@ pub(in crate::app) fn paint_bitmap_hover_preview(
         pointer + Vec2::new(14.0, 18.0),
         Vec2::new(content_width, content_height) + padding * 2.0,
     );
-    let screen = ui.ctx().screen_rect();
+    let screen = ui.ctx().content_rect();
     if rect.right() > screen.right() {
         rect = rect.translate(Vec2::new(screen.right() - rect.right(), 0.0));
     }
@@ -117,7 +117,7 @@ pub(in crate::app) fn paint_bitmap_hover_preview(
         rect = rect.translate(Vec2::new(0.0, -rect.height() - 24.0));
     }
     let visuals = ui.visuals();
-    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke);
+    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke, egui::StrokeKind::Middle);
     let image_min = egui::pos2(rect.center().x - image_size.x * 0.5, rect.top() + padding.y);
     painter.image(
         texture.id(),

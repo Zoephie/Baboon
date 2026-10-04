@@ -322,7 +322,7 @@ pub(in crate::app) fn draw_field(
     let glow_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
     if let Some(function) = field.as_function() {
         if glow {
-            egui::Frame::none().fill(glow_fill).show(ui, |ui| {
+            egui::Frame::NONE.fill(glow_fill).show(ui, |ui| {
                 draw_foundation_function_row(ui, &meta, &function, depth, &field_path, edit);
             });
         } else {
@@ -340,7 +340,7 @@ pub(in crate::app) fn draw_field(
             } else {
                 egui::Color32::TRANSPARENT
             };
-            let framed = egui::Frame::none().fill(fill).show(ui, |ui| {
+            let framed = egui::Frame::NONE.fill(fill).show(ui, |ui| {
                 draw_foundation_value_row(
                     ui,
                     field,
@@ -482,7 +482,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     name: &str,
     body: Option<&str>,
     depth: usize,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     open_override: Option<bool>,
 ) {
     // `name` is the explanation's title (often a section header like
@@ -522,10 +522,10 @@ pub(in crate::app) fn draw_foundation_explanation_row(
             has_body.then_some(ButtonIcon::Doc),
             |ui| {
                 if has_body {
-                    Frame::none()
+                    Frame::NONE
                         .fill(foundation_documentation_bg())
-                        .rounding(foundation_body_rounding())
-                        .inner_margin(egui::Margin::same(20.0))
+                        .corner_radius(foundation_body_rounding())
+                        .inner_margin(egui::Margin::same(20))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
                             // border is Width=Auto in a stretch StackPanel); only the
@@ -733,7 +733,7 @@ pub(super) fn inline_mapping_function_from_struct(
 pub(in crate::app) fn draw_foundation_group(
     ui: &mut Ui,
     title: String,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     depth: usize,
     default_open: bool,
     // `Some(open)` forces the open-state this frame (Search-fields filter);
@@ -754,15 +754,15 @@ pub(in crate::app) fn draw_foundation_group(
             true,
             None,
             |ui| {
-                Frame::none()
+                Frame::NONE
                     .fill(foundation_group_bg())
-                    .rounding(foundation_body_rounding())
+                    .corner_radius(foundation_body_rounding())
                     .inner_margin(egui::Margin {
-                        left: 8.0 + depth as f32 * 4.0,
-                        right: 8.0,
+                        left: (8.0 + depth as f32 * 4.0) as i8,
+                        right: 8,
 
-                        top: 6.0,
-                        bottom: 6.0,
+                        top: 6,
+                        bottom: 6,
                     })
                     .show(ui, add_contents);
             },
@@ -781,25 +781,25 @@ fn add_foundation_header_spacing(ui: &mut Ui) {
 
 const FOUNDATION_CONTAINER_RADIUS: f32 = 5.0;
 
-fn foundation_header_rounding(joined_to_body: bool) -> egui::Rounding {
+fn foundation_header_rounding(joined_to_body: bool) -> egui::CornerRadius {
     if joined_to_body {
-        egui::Rounding {
-            nw: FOUNDATION_CONTAINER_RADIUS,
-            ne: FOUNDATION_CONTAINER_RADIUS,
-            sw: 0.0,
-            se: 0.0,
+        egui::CornerRadius {
+            nw: (FOUNDATION_CONTAINER_RADIUS) as u8,
+            ne: (FOUNDATION_CONTAINER_RADIUS) as u8,
+            sw: 0,
+            se: 0,
         }
     } else {
-        egui::Rounding::same(FOUNDATION_CONTAINER_RADIUS)
+        egui::CornerRadius::same((FOUNDATION_CONTAINER_RADIUS) as u8)
     }
 }
 
-fn foundation_body_rounding() -> egui::Rounding {
-    egui::Rounding {
-        nw: 0.0,
-        ne: 0.0,
-        sw: FOUNDATION_CONTAINER_RADIUS,
-        se: FOUNDATION_CONTAINER_RADIUS,
+fn foundation_body_rounding() -> egui::CornerRadius {
+    egui::CornerRadius {
+        nw: 0,
+        ne: 0,
+        sw: (FOUNDATION_CONTAINER_RADIUS) as u8,
+        se: (FOUNDATION_CONTAINER_RADIUS) as u8,
     }
 }
 
@@ -807,7 +807,7 @@ fn foundation_body_rounding() -> egui::Rounding {
 fn draw_foundation_collapsing_header(
     ui: &mut Ui,
     title: String,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     depth: usize,
     default_open: bool,
     open_override: Option<bool>,
@@ -915,6 +915,7 @@ fn draw_foundation_collapsing_header(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
         Stroke::new(1.0_f32, foundation_block_edge()),
+        egui::StrokeKind::Middle,
     );
     open
 }
@@ -1038,7 +1039,7 @@ pub(in crate::app) fn draw_foundation_block(
     if actions.copy_block_tsv && count > 0 {
         let tsv = block_to_tsv(&block, names);
         if !tsv.is_empty() {
-            ui.output_mut(|output| output.copied_text = tsv);
+            ui.copy_text(tsv);
         }
     }
 
@@ -1513,7 +1514,7 @@ pub(in crate::app) fn draw_foundation_array(
         let tsv = array_to_tsv(&array, names);
 
         if !tsv.is_empty() {
-            ui.output_mut(|output| output.copied_text = tsv);
+            ui.copy_text(tsv);
         }
     }
 }
@@ -1810,14 +1811,14 @@ pub(in crate::app) fn draw_foundation_block_control(
                     .clicked()
                 {
                     actions.copy = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui
                     .add_enabled(count > 0, egui::Button::new("Copy entire block"))
                     .clicked()
                 {
                     actions.copy_block = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui
                     .add_enabled(count > 0, egui::Button::new("Copy block as TSV"))
@@ -1825,7 +1826,7 @@ pub(in crate::app) fn draw_foundation_block_control(
                     .clicked()
                 {
                     actions.copy_block_tsv = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 // In-place replace of the selected element — never changes
                 // the count, so it works for arrays too.
@@ -1836,7 +1837,7 @@ pub(in crate::app) fn draw_foundation_block_control(
                         .clicked()
                 {
                     actions.replace_element = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 if allow_structural {
                     if ui
@@ -1846,7 +1847,7 @@ pub(in crate::app) fn draw_foundation_block_control(
                     {
                         actions.paste_tsv = true;
 
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     match paste_gate {
@@ -1854,11 +1855,11 @@ pub(in crate::app) fn draw_foundation_block_control(
                             let noun = if n == 1 { "element" } else { "elements" };
                             if ui.button(format!("Paste {n} {noun}")).clicked() {
                                 actions.paste = true;
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.button("Replace entire block").clicked() {
                                 actions.replace_block = true;
-                                ui.close_menu();
+                                ui.close();
                             }
                         }
                         PasteGate::VersionMismatch => {
@@ -2037,14 +2038,14 @@ pub(in crate::app) fn draw_foundation_block_control(
     let body_response = if count > 0 && state.openness(ui.ctx()) > 0.0 {
         ui.add_space(-ui.spacing().item_spacing.y);
         state.show_body_unindented(ui, |ui| {
-            Frame::none()
+            Frame::NONE
                 .fill(foundation_group_bg())
-                .rounding(foundation_body_rounding())
+                .corner_radius(foundation_body_rounding())
                 .inner_margin(egui::Margin {
-                    left: 14.0 + depth as f32 * 5.0,
-                    right: 8.0,
-                    top: 8.0,
-                    bottom: 8.0,
+                    left: (14.0 + depth as f32 * 5.0) as i8,
+                    right: 8,
+                    top: 8,
+                    bottom: 8,
                 })
                 // Render the body inline — no nested ScrollArea. The single outer
                 // ScrollArea in `draw_tag_fields_scroll` owns all scrolling, so a
@@ -2074,6 +2075,7 @@ pub(in crate::app) fn draw_foundation_block_control(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
         Stroke::new(1.0_f32, foundation_block_edge()),
+        egui::StrokeKind::Middle,
     );
 
     actions
@@ -2105,9 +2107,48 @@ fn consume_mouse_wheel_ctx(ctx: &egui::Context) {
         input
             .events
             .retain(|event| !matches!(event, egui::Event::MouseWheel { .. }));
-        input.raw_scroll_delta = Vec2::ZERO;
         input.smooth_scroll_delta = Vec2::ZERO;
     });
+}
+
+/// This frame's unsmoothed wheel travel in points, summed from the raw
+/// `MouseWheel` events. egui 0.36 dropped `InputState::raw_scroll_delta`;
+/// this rebuilds it the way egui maps a wheel event: line units scaled by
+/// `line_scroll_speed`, page units by the screen height, and a wheel turned
+/// with the horizontal-scroll modifier (Shift) moving sideways only.
+pub(in crate::app) fn raw_wheel_delta(input: &egui::InputState, options: &egui::InputOptions) -> Vec2 {
+    input
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                ..
+            } => {
+                let delta = match unit {
+                    egui::MouseWheelUnit::Point => *delta,
+                    egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
+                    egui::MouseWheelUnit::Page => *delta * input.content_rect().height(),
+                };
+                let horizontal = modifiers.matches_any(options.horizontal_scroll_modifier);
+                let vertical = modifiers.matches_any(options.vertical_scroll_modifier);
+                Some(if horizontal && !vertical {
+                    egui::vec2(delta.x + delta.y, 0.0)
+                } else if vertical && !horizontal {
+                    egui::vec2(0.0, delta.x + delta.y)
+                } else {
+                    delta
+                })
+            }
+            _ => None,
+        })
+        .fold(Vec2::ZERO, |sum, delta| sum + delta)
+}
+
+fn input_options(ctx: &egui::Context) -> egui::InputOptions {
+    ctx.options(|options| options.input_options.clone())
 }
 
 /// Scale this frame's wheel/trackpad scrolling by the user's scroll speed.
@@ -2329,9 +2370,12 @@ pub(in crate::app) fn viewport_wheel_zoom(ui: &Ui, response: &egui::Response) ->
     if !response.hovered() || !claim_wheel_gesture(ui.ctx(), response.id) {
         return None;
     }
-    let scroll = ui.input(|input| input.raw_scroll_delta.y);
+    let options = input_options(ui.ctx());
+    let scroll = ui.input(|input| raw_wheel_delta(input, &options).y);
     ui.ctx().input_mut(|input| {
-        input.raw_scroll_delta = Vec2::ZERO;
+        input
+            .events
+            .retain(|event| !matches!(event, egui::Event::MouseWheel { .. }));
         input.smooth_scroll_delta = Vec2::ZERO;
     });
     let zoom_speed = ui
@@ -2427,7 +2471,12 @@ pub(in crate::app) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
     ui.painter().rect_filled(rect, 4.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0_f32, foundation_input_edge()));
+        .rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0_f32, foundation_input_edge()),
+            egui::StrokeKind::Middle,
+        );
     ui.painter().text(
         rect.left_center() + Vec2::new(5.0, 0.0),
         Align2::LEFT_CENTER,
@@ -2567,14 +2616,14 @@ pub(in crate::app) fn draw_foundation_bar(
             true,
             None,
             |ui| {
-                Frame::none()
+                Frame::NONE
                     .fill(foundation_group_bg())
-                    .rounding(foundation_body_rounding())
+                    .corner_radius(foundation_body_rounding())
                     .inner_margin(egui::Margin {
-                        left: 8.0 + depth as f32 * 6.0,
-                        right: 6.0,
-                        top: 5.0,
-                        bottom: 5.0,
+                        left: (8.0 + depth as f32 * 6.0) as i8,
+                        right: 6,
+                        top: 5,
+                        bottom: 5,
                     })
                     .show(ui, add_contents);
             },
@@ -3152,18 +3201,23 @@ mod scroll_speed_tests {
     fn scrolled(scroll_speed: f32) -> (f32, f32) {
         let ctx = egui::Context::default();
         let mut seen = (0.0, 0.0);
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 events: vec![egui::Event::MouseWheel {
+                    phase: egui::TouchPhase::Move,
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::Vec2::new(0.0, -4.0),
                     modifiers: Default::default(),
                 }],
                 ..Default::default()
             },
-            |ctx| {
-                apply_scroll_speed(ctx, scroll_speed);
-                seen = ctx.input(|input| (input.smooth_scroll_delta.y, input.raw_scroll_delta.y));
+            |_| {
+                apply_scroll_speed(&ctx, scroll_speed);
+                let options = input_options(&ctx);
+                seen = ctx.input(|input| {
+                    (input.smooth_scroll_delta.y, raw_wheel_delta(input, &options).y)
+                });
             },
         );
         seen
@@ -3186,6 +3240,7 @@ mod scroll_speed_tests {
             for frame in 0..240 {
                 let events = if frame == 0 {
                     vec![egui::Event::MouseWheel {
+                        phase: egui::TouchPhase::Move,
                         unit: egui::MouseWheelUnit::Line,
                         delta: egui::Vec2::new(0.0, -1.0),
                         modifiers: Default::default(),
@@ -3193,13 +3248,14 @@ mod scroll_speed_tests {
                 } else {
                     Vec::new()
                 };
-                let _ = ctx.run(
+                let _ = crate::app::run_ui_test(
+                    &ctx,
                     egui::RawInput {
                         events,
                         ..Default::default()
                     },
-                    |ctx| {
-                        apply_scroll_speed(ctx, scroll_speed);
+                    |_| {
+                        apply_scroll_speed(&ctx, scroll_speed);
                         total += ctx.input(|input| input.smooth_scroll_delta.y);
                     },
                 );
@@ -3232,6 +3288,7 @@ mod viewport_wheel_tests {
             // Trackpad-sized, so egui applies it this frame rather than
             // smoothing it over the next ones.
             events.push(egui::Event::MouseWheel {
+                phase: egui::TouchPhase::Move,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::Vec2::new(0.0, -4.0),
                 modifiers: Default::default(),
@@ -3239,7 +3296,8 @@ mod viewport_wheel_tests {
         }
         let mut zoom = None;
         let mut offset = 0.0;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3248,11 +3306,11 @@ mod viewport_wheel_tests {
                 events,
                 ..Default::default()
             },
-            |ctx| {
+            |ui| {
                 begin_wheel_gesture(ctx);
                 egui::CentralPanel::default()
-                    .frame(egui::Frame::none())
-                    .show(ctx, |ui| {
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
                         let output = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
                             ui.allocate_exact_size(
                                 egui::Vec2::new(400.0, 150.0),
@@ -3335,13 +3393,15 @@ mod wheel_gesture_tests {
         let mut events = vec![egui::Event::PointerMoved(pointer)];
         if wheel {
             events.push(egui::Event::MouseWheel {
+                phase: egui::TouchPhase::Move,
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::Vec2::new(0.0, -1.0),
                 modifiers: Default::default(),
             });
         }
         let mut claimed = false;
-        let _ = ctx.run(
+        let _ = crate::app::run_ui_test(
+            &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3350,9 +3410,9 @@ mod wheel_gesture_tests {
                 events,
                 ..Default::default()
             },
-            |ctx| {
+            |ui| {
                 begin_wheel_gesture(ctx);
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let response = ui.allocate_rect(rect, egui::Sense::hover());
                     claimed = dropdown_wheel_delta(ui, &response, false).is_some();
                 });

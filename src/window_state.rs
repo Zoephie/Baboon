@@ -519,7 +519,7 @@ fn capture_normal_bounds(
         return None;
     }
     let logical_per_point = pixels_per_point / native_scale;
-    let fallback_inner = ctx.screen_rect();
+    let fallback_inner = ctx.content_rect();
     let inner = viewport.inner_rect.unwrap_or(fallback_inner);
     let outer = viewport.outer_rect.unwrap_or(inner);
     let inner_size_logical = Size {

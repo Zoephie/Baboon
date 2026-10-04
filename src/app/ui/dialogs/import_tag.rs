@@ -29,11 +29,12 @@ impl Baboon {
         // will cost; opens the compatibility sheet pre-aimed at the answer.
         let mut show_compat: Option<String> = None;
         egui::Window::new("Import Tag")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("import_tag_dialog"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
-            .default_width(560.0)
+            .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
                 let dialog = self.import_tag_dialog.as_mut().unwrap();
 

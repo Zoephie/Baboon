@@ -542,12 +542,12 @@ pub(super) fn draw_tag_diff_list(
         ui.label(RichText::new("No differences.").color(subtle_dark()));
         return;
     }
-    Frame::none()
+    Frame::NONE
         .inner_margin(egui::Margin {
-            left: 10.0,
-            right: 10.0,
-            top: 4.0,
-            bottom: 8.0,
+            left: 10,
+            right: 10,
+            top: 4,
+            bottom: 8,
         })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -599,7 +599,7 @@ pub(super) fn draw_tag_diff_list(
                         )
                         .collect::<Vec<_>>()
                         .join("\n");
-                    ui.output_mut(|output| output.copied_text = text);
+                    ui.copy_text(text);
                 }
             })
         });
@@ -958,10 +958,11 @@ impl Baboon {
         let mut older_commits: Option<(usize, PathBuf)> = None;
         let mut selection_changed = false;
         egui::Window::new("Compare Tags")
+            .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("tag_diff_window"))
             .title_bar(false)
             .collapsible(false)
-            .default_width(620.0)
+            .default_width(window_width(ctx, 620.0))
             .resizable(true)
             .show(ctx, |ui| {
                 super::find::draw_icon_window_header(
@@ -1449,7 +1450,7 @@ impl Baboon {
                                         )
                                         .collect::<Vec<_>>()
                                         .join("\n");
-                                ui.output_mut(|output| output.copied_text = text);
+                                ui.copy_text(text);
                             }
                         });
                         ui.separator();

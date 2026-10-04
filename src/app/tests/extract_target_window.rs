@@ -34,7 +34,8 @@ fn frame(
     ctx: &egui::Context,
     events: Vec<egui::Event>,
 ) -> Vec<(String, egui::Rect)> {
-    let output = ctx.run(
+    let output = crate::app::run_ui_test(
+        &ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -43,7 +44,7 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ctx| app.draw_extract_target_window(ctx),
+        |_| app.draw_extract_target_window(ctx),
     );
     output
         .shapes
