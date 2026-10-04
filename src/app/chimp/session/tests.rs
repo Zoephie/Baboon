@@ -315,7 +315,7 @@ fn a_mount_restores_a_closed_checkpoint_and_a_remount_keeps_the_open_one() {
     let ctx = egui::Context::default();
     app.handle_chimp_mounted(stamp(&app), Ok(install.world.clone()), ctx.clone());
     assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_)));
-    assert!(app.model.kits[0].chimp.type_indexing);
+    assert!(app.views[app.model.kits[0].id].chimp.type_indexing);
     assert_eq!(app.chimp_activity(0), "indexing package types");
     assert_eq!(app.model.status, "Chimp recovered 1 unsaved package edit(s)");
     let chimp = &app.model.kits[0].chimp;
@@ -505,7 +505,7 @@ fn changing_the_usmap_remounts_unless_something_is_modified() {
 
     // The mount and the type index behind it may land in one frame.
     apply_until(&mut app, |app| {
-        !matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading) && !app.model.kits[0].chimp.type_indexing
+        !matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading) && !app.views[app.model.kits[0].id].chimp.type_indexing
     });
     if let ChimpMount::Failed(error) = &app.model.kits[0].chimp.mount {
         panic!("the remount failed: {error}");
@@ -514,7 +514,7 @@ fn changing_the_usmap_remounts_unless_something_is_modified() {
         unreachable!()
     };
     assert_eq!(world.packages().len(), 2);
-    let chimp = &app.model.kits[0].chimp;
+    let chimp = &app.views[app.model.kits[0].id].chimp;
     assert!(!chimp.type_indexing);
     // The synthetic class is a package import, which the type index does
     // not classify.

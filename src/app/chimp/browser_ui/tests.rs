@@ -113,7 +113,7 @@ fn the_folder_tree_opens_a_package() {
     assert!(frames.shows("Other"));
     frames.click_exact("Thing", 0, &mut draw_workspace(&mut app));
     assert_eq!(
-        app.model.kits[0].chimp.folder_selection,
+        app.views[app.model.kits[0].id].chimp.folder_selection,
         ChimpFolderSelection::Package
     );
     assert_eq!(app.model.kits[0].chimp.selected_package.as_deref(), Some(THING));
@@ -130,7 +130,7 @@ fn the_package_list_opens_and_filters() {
     let mut app = install.app_with_open(&[]);
     let mut frames = Frames::new();
     frames.click_exact("Packages", 0, &mut draw_workspace(&mut app));
-    assert_eq!(app.model.kits[0].chimp.browser, ChimpBrowser::Packages);
+    assert_eq!(app.views[app.model.kits[0].id].chimp.browser, ChimpBrowser::Packages);
     assert!(frames.shows(THING) && frames.shows(OTHER));
     frames.click_exact(OTHER, 0, &mut draw_workspace(&mut app));
     apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(OTHER));
@@ -139,12 +139,13 @@ fn the_package_list_opens_and_filters() {
     frames.type_text("thing", &mut draw_workspace(&mut app));
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     let chimp = &app.model.kits[0].chimp;
-    assert_eq!(chimp.filter, "thing");
+    let view = &app.views[app.model.kits[0].id].chimp;
+    assert_eq!(view.filter, "thing");
     let ChimpMount::Ready(world) = &chimp.mount else {
         unreachable!()
     };
     assert_eq!(
-        chimp
+        view
             .filtered_packages
             .iter()
             .map(|&index| world.packages()[index].name.as_str())
@@ -171,16 +172,16 @@ fn the_archive_list_scopes_the_tree() {
         assert!(frames.shows(text), "{text}");
     }
     frames.click("pakchunk0-Windows.utoc  ·  2 packages", &mut draw_workspace(&mut app));
-    let chimp = &app.model.kits[0].chimp;
+    let chimp = &app.views[app.model.kits[0].id].chimp;
     assert_eq!(chimp.selected_archive, Some(ChimpArchive::IoStore(0)));
     assert_eq!(chimp.browser, ChimpBrowser::Folders);
     assert!(frames.shows("Game  ·  2"));
     frames.click("Show all", &mut draw_workspace(&mut app));
-    assert_eq!(app.model.kits[0].chimp.selected_archive, None);
+    assert_eq!(app.views[app.model.kits[0].id].chimp.selected_archive, None);
 
     frames.click_exact("Archives", 0, &mut draw_workspace(&mut app));
     frames.click("pakchunk0-Windows.pak  ·  0 files", &mut draw_workspace(&mut app));
-    let chimp = &app.model.kits[0].chimp;
+    let chimp = &app.views[app.model.kits[0].id].chimp;
     assert_eq!(chimp.selected_archive, Some(ChimpArchive::Pak(0)));
     assert_eq!(chimp.folder_selection, ChimpFolderSelection::File);
     assert!(frames.shows("Select a file from a legacy .pak container."));
@@ -193,7 +194,7 @@ fn the_group_list_opens_a_package_by_type() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[]);
     // Indexed by mount order, which sorts `Other` first.
-    app.model.kits[0].chimp.package_types = vec![Some("Texture2D".to_owned()), None];
+    app.views[app.model.kits[0].id].chimp.package_types = vec![Some("Texture2D".to_owned()), None];
     let mut frames = Frames::new();
     frames.click_exact("Groups", 0, &mut draw_workspace(&mut app));
     assert!(frames.shows("Texture2D  ·  1"));
@@ -220,7 +221,7 @@ fn the_mount_status_starts_waits_and_retries() {
     assert!(frames.shows("Please wait — Chimp is starting up…"));
     apply_until(&mut app, |app| {
         matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
-            && !app.model.kits[0].chimp.type_indexing
+            && !app.views[app.model.kits[0].id].chimp.type_indexing
     });
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     assert!(frames.shows("Game  ·  2"));
@@ -232,7 +233,7 @@ fn the_mount_status_starts_waits_and_retries() {
     assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
     apply_until(&mut app, |app| {
         matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
-            && !app.model.kits[0].chimp.type_indexing
+            && !app.views[app.model.kits[0].id].chimp.type_indexing
     });
 }
 
@@ -270,7 +271,7 @@ fn real_file_types_filter_and_texture_preview() {
         );
     }
 
-    let mut browser = ChimpState {
+    let mut browser = ChimpView {
         package_types: index.package_types,
         filter: "Texture2D".to_owned(),
         ..Default::default()

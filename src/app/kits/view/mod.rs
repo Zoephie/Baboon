@@ -54,6 +54,8 @@ pub(in crate::app) struct KitView {
     /// Halo 3 only: state of this kit's Blam! import pane ([`BLAM_KEY`] in
     /// `tag_tree`).
     pub(in crate::app) blam: BlamUiState,
+    /// How the kit's Chimp surface is browsed and laid out.
+    pub(in crate::app) chimp: ChimpView,
 }
 
 impl KitView {
@@ -73,6 +75,7 @@ impl KitView {
             terminal: KitTerminal::default(),
             surface: KitSurface::Tags,
             blam: BlamUiState::default(),
+            chimp: ChimpView::default(),
         }
     }
 }

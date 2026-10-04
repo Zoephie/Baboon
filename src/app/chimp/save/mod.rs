@@ -42,7 +42,7 @@ impl Baboon {
     /// requires, for tests that draw it.
     #[cfg(test)]
     pub(in crate::app) fn open_chimp_save_dialog_for_test(&mut self, kit_index: usize) {
-        self.model.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.views[self.model.kits[kit_index].id].chimp.save_dialog = Some(ChimpSaveDialog {
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder: PathBuf::from("/no/such/Paks"),
@@ -72,7 +72,7 @@ impl Baboon {
             self.model.status = "Chimp does not have a Paks output folder".to_owned();
             return false;
         };
-        self.model.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.views[self.model.kits[kit_index].id].chimp.save_dialog = Some(ChimpSaveDialog {
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder,
@@ -195,7 +195,7 @@ impl Baboon {
         let Some(kit_index) = self
             .model.kits
             .iter()
-            .position(|kit| kit.chimp.save_dialog.is_some())
+            .position(|kit| self.views[kit.id].chimp.save_dialog.is_some())
         else {
             return;
         };
@@ -221,9 +221,7 @@ impl Baboon {
         let mut close = false;
         let mut action = None;
         let expert_mode = self.model.prefs.expert_mode;
-        let dialog = self.model.kits[kit_index]
-            .chimp
-            .save_dialog
+        let dialog = self.views[self.model.kits[kit_index].id].chimp.save_dialog
             .as_mut()
             .expect("checked above");
         // Overwriting the installed game's own containers is an expert-mode
@@ -364,7 +362,7 @@ impl Baboon {
             });
         let pending_close_action = dialog.pending_close_action.clone();
         if close || action.is_some() {
-            self.model.kits[kit_index].chimp.save_dialog = None;
+            self.views[self.model.kits[kit_index].id].chimp.save_dialog = None;
         }
         match action {
             Some(ChimpSaveAction::Export(output)) => {
@@ -937,9 +935,6 @@ impl Model {
         )
     }
 
-    pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
-        self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
-    }
 
     /// Rebuild every dirty package in the kit, recording the edit count each
     /// was rebuilt at.
@@ -965,5 +960,15 @@ impl Model {
             });
         }
         Ok(rebuilt)
+    }
+}
+
+impl Baboon {
+    /// Whether any kit has its Chimp save dialog up.
+    pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
+        self.model
+            .kits
+            .iter()
+            .any(|kit| self.views[kit.id].chimp.save_dialog.is_some())
     }
 }

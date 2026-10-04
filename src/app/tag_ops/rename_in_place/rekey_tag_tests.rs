@@ -258,8 +258,10 @@ fn every_field_of_a_kit_is_accounted_for() {
         model_browser: _,
         git_review: _,
 
-        // Chimp's side of the surface switch; see `chimp` above.
+        // Chimp's side of the surface switch and how it is browsed; see
+        // `chimp` above.
         surface: _,
+        chimp: _,
 
         // Not addressed by a tag key at all.
         blam: _,

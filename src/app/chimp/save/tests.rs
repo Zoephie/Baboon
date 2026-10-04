@@ -131,18 +131,18 @@ fn the_save_dialog_opens_only_with_modified_packages_and_a_paks_folder() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
     app.open_chimp_save_dialog(0);
-    assert!(!app.model.has_chimp_save_dialog());
+    assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.model.status, "Chimp has no modified packages to save");
 
     app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
     let source = app.model.kits[0].source.take();
     app.open_chimp_save_dialog(0);
-    assert!(!app.model.has_chimp_save_dialog());
+    assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.model.status, "Chimp does not have a Paks output folder");
 
     app.model.kits[0].source = source;
     app.open_chimp_save_dialog(0);
-    let dialog = app.model.kits[0].chimp.save_dialog.as_ref().unwrap();
+    let dialog = app.views[app.model.kits[0].id].chimp.save_dialog.as_ref().unwrap();
     assert_eq!(dialog.mode, ChimpSaveMode::ExportMod);
     assert_eq!(dialog.name, "ChimpMod");
     assert_eq!(dialog.folder, install.root, "the Paks root, with no saved preference");
@@ -150,11 +150,11 @@ fn the_save_dialog_opens_only_with_modified_packages_and_a_paks_folder() {
     assert!(dialog.pending_close_action.is_none());
 
     let elsewhere = install.root.join("Mods");
-    app.model.kits[0].chimp.save_dialog = None;
+    app.views[app.model.kits[0].id].chimp.save_dialog = None;
     app.model.prefs.chimp_output_dir = Some(elsewhere.clone());
     app.open_chimp_save_dialog(0);
     assert_eq!(
-        app.model.kits[0].chimp.save_dialog.as_ref().unwrap().folder,
+        app.views[app.model.kits[0].id].chimp.save_dialog.as_ref().unwrap().folder,
         elsewhere,
         "the last folder saved to"
     );
@@ -170,7 +170,7 @@ fn exporting_a_mod_installs_a_container_that_overrides_the_package() {
     let recovery = install.recovery_dir();
     assert!(recovery.join("manifest.json").exists());
     app.open_chimp_save_dialog(0);
-    app.model.kits[0].chimp.save_dialog.as_mut().unwrap().folder = staging.clone();
+    app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().unwrap().folder = staging.clone();
 
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_save(&mut app));
@@ -183,7 +183,7 @@ fn exporting_a_mod_installs_a_container_that_overrides_the_package() {
 
     frames.click("Export mod", &mut draw_save(&mut app));
     let output = staging.join("ChimpMod_P.utoc");
-    assert!(!app.model.has_chimp_save_dialog());
+    assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.model.prefs.chimp_output_dir.as_deref(), Some(staging.as_path()));
     assert!(app.chimp.chimp_writes.contains_key(&app.model.kits[0].id));
     assert_eq!(app.model.status, format!("Building {}…", output.display()));
@@ -253,41 +253,39 @@ fn exporting_a_mod_installs_a_container_that_overrides_the_package() {
 fn the_save_dialog_refuses_a_bad_name_and_an_unacknowledged_replace() {
     let (_install, mut app, staging) = edited();
     app.open_chimp_save_dialog(0);
-    app.model.kits[0].chimp.save_dialog.as_mut().unwrap().name = " ! ".to_owned();
-    app.model.kits[0].chimp.save_dialog.as_mut().unwrap().folder = staging.clone();
+    app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().unwrap().name = " ! ".to_owned();
+    app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().unwrap().folder = staging.clone();
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_save(&mut app));
     frames.frame(Vec::new(), &mut draw_save(&mut app));
     assert!(frames.shows("Enter a file-safe mod name."));
     frames.click("Export mod", &mut draw_save(&mut app));
-    assert!(app.model.has_chimp_save_dialog(), "disabled: nothing happens");
+    assert!(app.has_chimp_save_dialog(), "disabled: nothing happens");
 
     fs::create_dir_all(&staging).unwrap();
     for file in triplet(&staging.join("ChimpMod_P.utoc")) {
         fs::write(file, b"old").unwrap();
     }
-    app.model.kits[0].chimp.save_dialog.as_mut().unwrap().name = "ChimpMod".to_owned();
+    app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().unwrap().name = "ChimpMod".to_owned();
     frames.frame(Vec::new(), &mut draw_save(&mut app));
     assert!(frames.shows(
         "This will replace: ChimpMod_P.utoc, ChimpMod_P.ucas, ChimpMod_P.pak"
     ));
     frames.click("Export mod", &mut draw_save(&mut app));
-    assert!(app.model.has_chimp_save_dialog(), "not acknowledged: nothing happens");
+    assert!(app.has_chimp_save_dialog(), "not acknowledged: nothing happens");
     frames.click(
         "Replace the existing mod container",
         &mut draw_save(&mut app),
     );
     assert!(
-        app.model.kits[0]
-            .chimp
-            .save_dialog
+        app.views[app.model.kits[0].id].chimp.save_dialog
             .as_ref()
             .unwrap()
             .overwrite_acknowledged
     );
 
     frames.click("Cancel", &mut draw_save(&mut app));
-    assert!(!app.model.has_chimp_save_dialog());
+    assert!(!app.has_chimp_save_dialog());
     assert!(app.chimp.chimp_writes.is_empty());
     assert!(app.model.kits[0].chimp.documents[THING].dirty);
     assert_eq!(fs::read(staging.join("ChimpMod_P.utoc")).unwrap(), b"old");
@@ -310,7 +308,7 @@ fn overwriting_sources_is_an_acknowledged_expert_route() {
     assert!(frames.shows("Export mod (recommended)"));
     frames.click("Overwrite source PAKs", &mut draw_save(&mut app));
     assert_eq!(
-        app.model.kits[0].chimp.save_dialog.as_ref().unwrap().mode,
+        app.views[app.model.kits[0].id].chimp.save_dialog.as_ref().unwrap().mode,
         ChimpSaveMode::OverwriteSources
     );
     assert!(frames.shows("This replaces package indexes in the installed game containers."));
@@ -318,23 +316,21 @@ fn overwriting_sources_is_an_acknowledged_expert_route() {
     assert!(frames.shows(&utoc.display().to_string()));
     // The radio and the (disabled) action share a label.
     frames.click_nth("Overwrite source PAKs", 1, &mut draw_save(&mut app));
-    assert!(app.model.has_chimp_save_dialog(), "not acknowledged: nothing happens");
+    assert!(app.has_chimp_save_dialog(), "not acknowledged: nothing happens");
 
     frames.click(
         "I understand these source containers will be modified",
         &mut draw_save(&mut app),
     );
     assert!(
-        app.model.kits[0]
-            .chimp
-            .save_dialog
+        app.views[app.model.kits[0].id].chimp.save_dialog
             .as_ref()
             .unwrap()
             .overwrite_acknowledged
     );
     app.model.prefs.expert_mode = false;
     frames.frame(Vec::new(), &mut draw_save(&mut app));
-    let dialog = app.model.kits[0].chimp.save_dialog.as_ref().unwrap();
+    let dialog = app.views[app.model.kits[0].id].chimp.save_dialog.as_ref().unwrap();
     assert_eq!(dialog.mode, ChimpSaveMode::ExportMod);
     assert!(!dialog.overwrite_acknowledged);
     app.clear_chimp_recovery_packages(0, &[THING.to_owned()])
@@ -351,7 +347,7 @@ fn overwriting_sources_rewrites_the_container_and_remounts() {
     app.model.prefs.enable_chimp = true;
     app.open_chimp_save_dialog(0);
     {
-        let dialog = app.model.kits[0].chimp.save_dialog.as_mut().unwrap();
+        let dialog = app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().unwrap();
         dialog.mode = ChimpSaveMode::OverwriteSources;
         dialog.overwrite_acknowledged = true;
     }
@@ -361,7 +357,7 @@ fn overwriting_sources_rewrites_the_container_and_remounts() {
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_save(&mut app));
     frames.click_nth("Overwrite source PAKs", 1, &mut draw_save(&mut app));
-    assert!(!app.model.has_chimp_save_dialog());
+    assert!(!app.has_chimp_save_dialog());
     assert_eq!(app.model.status, "Overwriting 1 source container(s)…");
     assert!(app.chimp.chimp_writes.contains_key(&app.model.kits[0].id));
 
@@ -381,7 +377,7 @@ fn overwriting_sources_rewrites_the_container_and_remounts() {
         "the stale TOC is remounted"
     );
     apply_until(&mut app, |app| {
-        !matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading) && !app.model.kits[0].chimp.type_indexing
+        !matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading) && !app.views[app.model.kits[0].id].chimp.type_indexing
     });
     if let ChimpMount::Failed(error) = &app.model.kits[0].chimp.mount {
         panic!("remount failed: {error}");
@@ -416,7 +412,7 @@ fn closing_a_workspace_with_modified_packages_saves_then_closes() {
     assert!(frames.shows(THING));
     frames.click("Save Chimp Changes", &mut draw_discard(&mut app));
     assert!(app.chimp.chimp_discard_prompt.is_none());
-    let dialog = app.model.kits[0].chimp.save_dialog.as_mut().expect("the save dialog");
+    let dialog = app.views[app.model.kits[0].id].chimp.save_dialog.as_mut().expect("the save dialog");
     assert!(matches!(
         dialog.pending_close_action,
         Some(PendingCloseAction::CloseKit(_))

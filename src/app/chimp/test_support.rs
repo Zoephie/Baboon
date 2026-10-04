@@ -486,13 +486,12 @@ impl SyntheticInstall {
         let mut app = Baboon::for_test();
         app.model.kits[0].source = Some(self.source());
         app.model.kits[0].chimp.mount = ChimpMount::Ready(self.world.clone());
-        let kit = app.model.kits[0].id;
         for package in packages {
             app.model.kits[0]
                 .chimp
                 .documents
                 .insert((*package).to_owned(), self.document(package));
-            app.model.kits[0].chimp.open_document_pane(kit, package);
+            app.open_chimp_document_pane(0, package);
         }
         app
     }
@@ -548,7 +547,7 @@ pub(super) fn apply_until(app: &mut Baboon, mut done: impl FnMut(&Baboon) -> boo
                 ChimpMount::Ready(_) => "ready".to_owned(),
                 ChimpMount::Failed(error) => error.clone(),
             },
-            app.model.kits[0].chimp.type_indexing
+            app.views[app.model.kits[0].id].chimp.type_indexing
         );
         std::thread::sleep(Duration::from_millis(10));
         app.process_worker_messages(&egui::Context::default());

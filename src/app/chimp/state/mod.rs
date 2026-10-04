@@ -153,9 +153,24 @@ impl ChimpFolderNode {
     }
 }
 
+/// A kit's Chimp content: the mounted world, the open package documents and
+/// which are open or selected. How the Chimp surface is browsed and laid out
+/// is the kit view's [`ChimpView`].
 #[derive(Default)]
 pub(in crate::app) struct ChimpState {
     pub(in crate::app) mount: ChimpMount,
+    pub(in crate::app) selected_package: Option<String>,
+    pub(in crate::app) open_packages: Vec<String>,
+    pub(in crate::app) documents: HashMap<String, ChimpDocument>,
+    pub(super) loading_packages: HashSet<String>,
+}
+
+/// How a kit's Chimp surface is being browsed and laid out: the browser mode,
+/// filter and what it matched, the package-type index, selections in the
+/// browser, the document tile tree and the save dialog. Held in the kit's
+/// view, apart from the [`ChimpState`] content.
+#[derive(Default)]
+pub(in crate::app) struct ChimpView {
     pub(super) browser: ChimpBrowser,
     pub(super) filter: String,
     pub(super) filtered_for: Option<String>,
@@ -171,12 +186,8 @@ pub(in crate::app) struct ChimpState {
     pub(super) package_types: Vec<Option<String>>,
     pub(super) type_indexing: bool,
     pub(super) folder_selection: ChimpFolderSelection,
-    pub(in crate::app) selected_package: Option<String>,
     pub(super) selected_file: Option<String>,
-    pub(in crate::app) open_packages: Vec<String>,
     pub(super) document_tree: Option<egui_tiles::Tree<String>>,
-    pub(in crate::app) documents: HashMap<String, ChimpDocument>,
-    pub(super) loading_packages: HashSet<String>,
     pub(super) save_dialog: Option<ChimpSaveDialog>,
 }
 
@@ -239,13 +250,13 @@ pub(super) enum ChimpReferrerState {
     Done(ChimpReferrerScan),
 }
 
-impl ChimpState {
+impl ChimpView {
     fn ensure_document_tree(&mut self, kit: KitId) -> &mut egui_tiles::Tree<String> {
         self.document_tree
             .get_or_insert_with(|| egui_tiles::Tree::empty(chimp_tree_id(kit)))
     }
 
-    pub(super) fn open_document_pane(&mut self, kit: KitId, package: &str) {
+    pub(super) fn open_document_pane(&mut self, chimp: &mut ChimpState, kit: KitId, package: &str) {
         let tree = self.ensure_document_tree(kit);
         let existing = tree.tiles.iter().find_map(|(id, tile)| match tile {
             egui_tiles::Tile::Pane(open) if open == package => Some(*id),
@@ -268,11 +279,11 @@ impl ChimpState {
             }
             tree.make_active(|id, _| id == tile_id);
         }
-        self.selected_package = Some(package.to_owned());
-        self.sync_open_packages();
+        chimp.selected_package = Some(package.to_owned());
+        self.sync_open_packages(chimp);
     }
 
-    pub(super) fn close_document_pane(&mut self, package: &str) {
+    pub(super) fn close_document_pane(&mut self, chimp: &mut ChimpState, package: &str) {
         if let Some(tree) = self.document_tree.as_mut() {
             let tile_id = tree.tiles.iter().find_map(|(id, tile)| match tile {
                 egui_tiles::Tile::Pane(open) if open == package => Some(*id),
@@ -282,11 +293,13 @@ impl ChimpState {
                 tree.remove_recursively(tile_id);
             }
         }
-        self.sync_open_packages();
+        self.sync_open_packages(chimp);
     }
 
-    pub(super) fn sync_open_packages(&mut self) {
-        self.open_packages = self
+    /// Re-derive the open and selected packages from the tile tree, which
+    /// owns the layout.
+    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) {
+        chimp.open_packages = self
             .document_tree
             .as_ref()
             .map(|tree| {
@@ -299,12 +312,12 @@ impl ChimpState {
                     .collect()
             })
             .unwrap_or_default();
-        if self
+        if chimp
             .selected_package
             .as_ref()
-            .is_some_and(|package| !self.open_packages.contains(package))
+            .is_some_and(|package| !chimp.open_packages.contains(package))
         {
-            self.selected_package = self.open_packages.first().cloned();
+            chimp.selected_package = chimp.open_packages.first().cloned();
         }
     }
 
@@ -419,6 +432,20 @@ impl ChimpState {
 
 fn chimp_tree_id(kit: KitId) -> egui::Id {
     egui::Id::new(("chimp_document_tree", kit.0))
+}
+
+impl Baboon {
+    /// Open `package`'s document pane in a kit's Chimp layout and select it.
+    pub(super) fn open_chimp_document_pane(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.open_document_pane(&mut kit.chimp, kit.id, package);
+    }
+
+    /// Close `package`'s document pane in a kit's Chimp layout.
+    pub(super) fn close_chimp_document_pane(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.close_document_pane(&mut kit.chimp, package);
+    }
 }
 
 impl Kit {

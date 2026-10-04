@@ -185,12 +185,12 @@ fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
 
 impl Baboon {
     pub(super) fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        let Some(mut tree) = self.model.kits[kit_index].chimp.document_tree.take() else {
+        let Some(mut tree) = self.views[self.model.kits[kit_index].id].chimp.document_tree.take() else {
             crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         };
         if tree.is_empty() {
-            self.model.kits[kit_index].chimp.document_tree = Some(tree);
+            self.views[self.model.kits[kit_index].id].chimp.document_tree = Some(tree);
             crate::app::shell::frame::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         }
@@ -214,8 +214,9 @@ impl Baboon {
         let extract_texture = behavior.extract_texture.take();
         let extract_mesh = behavior.extract_mesh.take();
         let export_level = behavior.export_level.take();
-        self.model.kits[kit_index].chimp.document_tree = Some(tree);
-        self.model.kits[kit_index].chimp.sync_open_packages();
+        self.views[self.model.kits[kit_index].id].chimp.document_tree = Some(tree);
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.sync_open_packages(&mut kit.chimp);
         if let Some(package) = focused {
             self.model.kits[kit_index].chimp.selected_package = Some(package);
         }

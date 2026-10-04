@@ -118,7 +118,7 @@ impl Baboon {
         if matches!(kit.chimp.mount, ChimpMount::Loading) {
             return "still mounting".to_owned();
         }
-        if kit.chimp.type_indexing {
+        if self.views[kit.id].chimp.type_indexing {
             return "indexing package types".to_owned();
         }
         if !kit.chimp.loading_packages.is_empty() {
@@ -215,14 +215,14 @@ impl Baboon {
         let Some(index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
-        self.model.kits[index].chimp.reset_filter();
+        self.views[self.model.kits[index].id].chimp.reset_filter();
         match result {
             Ok(world) => {
                 let packages = world.packages().len();
                 let files = world.pak_files().len();
                 self.model.kits[index].chimp.mount = ChimpMount::Ready(world.clone());
-                self.model.kits[index].chimp.type_indexing = true;
-                self.model.kits[index].chimp.package_types.clear();
+                self.views[self.model.kits[index].id].chimp.type_indexing = true;
+                self.views[self.model.kits[index].id].chimp.package_types.clear();
                 self.model.status =
                     format!("Chimp indexed {packages} Unreal packages and {files} pak files");
                 self.reconcile_chimp_providers(index, &world);
@@ -299,8 +299,7 @@ impl Baboon {
                 continue;
             }
             if self.model.kits[kit_index].documents_contains_chimp(&package) {
-                let kit = self.model.kits[kit_index].id;
-                self.model.kits[kit_index].chimp.open_document_pane(kit, &package);
+                self.open_chimp_document_pane(kit_index, &package);
             } else {
                 self.begin_chimp_open_package(kit_index, package, ctx.clone());
             }
@@ -312,9 +311,8 @@ impl Baboon {
                 .take()
             && self.model.kits[kit_index].documents_contains_chimp(&active)
         {
-            let kit = self.model.kits[kit_index].id;
             self.model.kits[kit_index].chimp.selected_package = Some(active.clone());
-            self.model.kits[kit_index].chimp.open_document_pane(kit, &active);
+            self.open_chimp_document_pane(kit_index, &active);
         }
         if queued > 0 || missing > 0 {
             self.model.status = match (queued, missing) {
@@ -340,7 +338,7 @@ impl Baboon {
             .len()
             .saturating_sub(type_index.failures);
         let kinds = type_index.type_counts.len();
-        let chimp = &mut self.model.kits[index].chimp;
+        let chimp = &mut self.views[self.model.kits[index].id].chimp;
         chimp.package_types = type_index.package_types;
         chimp.type_indexing = false;
         chimp.reset_filter();
@@ -408,10 +406,7 @@ impl Baboon {
                 .chimp
                 .documents
                 .insert(package.clone(), document);
-            let kit_id = self.model.kits[kit_index].id;
-            self.model.kits[kit_index]
-                .chimp
-                .open_document_pane(kit_id, &package);
+            self.open_chimp_document_pane(kit_index, &package);
             restored += 1;
         }
         // The recovery files are left in place either way, so an edit that
@@ -645,10 +640,7 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         if self.model.kits[kit_index].documents_contains_chimp(&package) {
-            let kit_id = self.model.kits[kit_index].id;
-            self.model.kits[kit_index]
-                .chimp
-                .open_document_pane(kit_id, &package);
+            self.open_chimp_document_pane(kit_index, &package);
             return;
         }
         self.model.kits[kit_index].chimp.selected_package = Some(package.clone());
@@ -767,8 +759,7 @@ impl Baboon {
                     .chimp
                     .documents
                     .insert(package.clone(), document);
-                let kit_id = self.model.kits[index].id;
-                self.model.kits[index].chimp.open_document_pane(kit_id, &package);
+                self.open_chimp_document_pane(index, &package);
             }
             Err(error) => self.model.status = error,
         }
@@ -776,9 +767,8 @@ impl Baboon {
             && let Some(active) = self.model.kits[index].restore.pending_restore_active_chimp_package.take()
             && self.model.kits[index].documents_contains_chimp(&active)
         {
-            let kit_id = self.model.kits[index].id;
             self.model.kits[index].chimp.selected_package = Some(active.clone());
-            self.model.kits[index].chimp.open_document_pane(kit_id, &active);
+            self.open_chimp_document_pane(index, &active);
         }
         false
     }
@@ -798,7 +788,7 @@ impl Baboon {
         {
             return false;
         }
-        self.model.kits[kit_index].chimp.close_document_pane(package);
+        self.close_chimp_document_pane(kit_index, package);
         self.model.kits[kit_index].chimp.documents.remove(package);
         true
     }
