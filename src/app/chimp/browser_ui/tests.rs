@@ -92,12 +92,21 @@ fn chimp_search_matching_is_case_insensitive_without_allocating_per_package() {
     assert!(!contains_ignore_ascii_case("StaticMesh", "skeletal"));
 }
 
+/// Draw kit 0's Chimp surface and apply what it sent, as a frame does.
 fn draw_workspace(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
     move |ui| {
         let ctx = ui.ctx().clone();
+        let kit = app.model.kits[0].id;
         egui::CentralPanel::default().show(ui, |ui| {
-            app.draw_chimp_workspace(ui, &ctx, 0);
+            draw_chimp_workspace(
+                ui,
+                &cx!(app, &ctx),
+                &mut app.chimp,
+                &mut app.views[kit].chimp,
+                0,
+            );
         });
+        app.apply_commands(&ctx);
     }
 }
 

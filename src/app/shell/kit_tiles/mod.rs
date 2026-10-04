@@ -89,8 +89,16 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                         }
                     });
                 });
-            if self.app.views[self.app.model.kits[kit_index].id].surface == KitSurface::Chimp {
-                self.app.draw_chimp_workspace(ui, &self.ctx, kit_index);
+            let kit = self.app.model.kits[kit_index].id;
+            if self.app.views[kit].surface == KitSurface::Chimp {
+                let app = &mut *self.app;
+                draw_chimp_workspace(
+                    ui,
+                    &cx!(app, &self.ctx),
+                    &mut app.chimp,
+                    &mut app.views[kit].chimp,
+                    kit_index,
+                );
                 return egui_tiles::UiResponse::None;
             }
         }

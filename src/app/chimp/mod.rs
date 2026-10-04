@@ -56,6 +56,8 @@ use crate::app::mods::container_write::{
 };
 
 mod browser_ui;
+pub(in crate::app) use browser_ui::draw_chimp_workspace;
+use browser_ui::send_chimp_extractions;
 mod document_ui;
 mod edit;
 mod extract;
@@ -89,7 +91,8 @@ impl Baboon {
     /// tag, which is hidden: changing it would change something the user
     /// cannot see.
     pub(in crate::app) fn chimp_surface_is_active(&self) -> bool {
-        self.model.prefs.enable_chimp && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp
+        self.model.prefs.enable_chimp
+            && self.views[self.model.kits[self.model.active].id].surface == KitSurface::Chimp
     }
 }
 pub(in crate::app) mod prompts_window;
@@ -123,7 +126,9 @@ pub(in crate::app) enum ChimpCommand {
         pending_close_action: Option<PendingCloseAction>,
     },
     /// Open the save dialog for a kit's modified packages.
-    OpenSaveDialog { kit: KitId },
+    OpenSaveDialog {
+        kit: KitId,
+    },
     /// Write something out of an open package.
     Extract {
         kit: KitId,
@@ -131,14 +136,39 @@ pub(in crate::app) enum ChimpCommand {
         what: ChimpExtraction,
     },
     /// Find which mounted packages import `package`.
-    ScanReferrers { kit: KitId, package: String },
+    ScanReferrers {
+        kit: KitId,
+        package: String,
+    },
     /// `package`'s pane took focus: it is the one undo and the menus act on.
-    Focus { kit: KitId, package: String },
+    Focus {
+        kit: KitId,
+        package: String,
+    },
     /// Close open packages; modified ones refuse.
-    Close { kit: KitId, which: ChimpClose },
+    Close {
+        kit: KitId,
+        which: ChimpClose,
+    },
     /// Bring the kit's open packages in line with the panes its tile tree
     /// holds, which a drag or a close can have changed.
-    SyncOpenPackages { kit: KitId },
+    SyncOpenPackages {
+        kit: KitId,
+    },
+    /// Start (or retry) indexing the kit's Unreal packages.
+    Mount {
+        kit: KitId,
+    },
+    /// Open `package`, or focus its pane if it is already open.
+    Open {
+        kit: KitId,
+        package: String,
+    },
+    /// Write a legacy-pak file to where the user picks.
+    ExtractPakFile {
+        kit: KitId,
+        path: String,
+    },
 }
 
 /// What [`ChimpCommand::Extract`] writes out of a package.
@@ -161,14 +191,19 @@ pub(in crate::app) enum ChimpClose {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_chimp_command(&mut self, command: ChimpCommand, ctx: &egui::Context) {
+    pub(in crate::app) fn apply_chimp_command(
+        &mut self,
+        command: ChimpCommand,
+        ctx: &egui::Context,
+    ) {
         match command {
             ChimpCommand::PaneDrawn { kit, package, edit } => {
                 let Some(kit_index) = self.model.kit_index(kit) else {
                     return;
                 };
                 let now = ctx.input(|input| input.time);
-                let Some((world, document, pane)) = self.chimp_document_and_pane(kit_index, &package)
+                let Some((world, document, pane)) =
+                    self.chimp_document_and_pane(kit_index, &package)
                 else {
                     return;
                 };
@@ -184,7 +219,9 @@ impl Baboon {
                 prompt,
                 with_textures,
             } => self.start_chimp_mesh_export(prompt, with_textures, ctx.clone()),
-            ChimpCommand::ExportTexture(prompt) => self.start_chimp_texture_export(prompt, ctx.clone()),
+            ChimpCommand::ExportTexture(prompt) => {
+                self.start_chimp_texture_export(prompt, ctx.clone())
+            }
             ChimpCommand::ExportLevel(prompt) => self.start_chimp_level_export(prompt, ctx.clone()),
             ChimpCommand::SaveBeforeClose(prompt) => self.save_chimp_before_close(prompt),
             ChimpCommand::Discard(prompt) => self.discard_chimp_for_prompt(prompt, ctx),
@@ -206,7 +243,9 @@ impl Baboon {
                     ChimpExtraction::Package => self.extract_chimp_package(kit_index, &package),
                     ChimpExtraction::Json => self.extract_chimp_json(kit_index, &package),
                     ChimpExtraction::Export => self.extract_chimp_export(kit_index, &package),
-                    ChimpExtraction::Texture => self.begin_extract_chimp_texture(kit_index, &package),
+                    ChimpExtraction::Texture => {
+                        self.begin_extract_chimp_texture(kit_index, &package)
+                    }
                     ChimpExtraction::Mesh(format) => {
                         self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone())
                     }
@@ -230,6 +269,21 @@ impl Baboon {
                     self.close_chimp_packages(kit_index, which);
                 }
             }
+            ChimpCommand::Mount { kit } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.begin_chimp_mount(kit_index, ctx.clone());
+                }
+            }
+            ChimpCommand::Open { kit, package } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.begin_chimp_open_package(kit_index, package, ctx.clone());
+                }
+            }
+            ChimpCommand::ExtractPakFile { kit, path } => {
+                if let Some(kit_index) = self.model.kit_index(kit) {
+                    self.extract_chimp_pak_file(kit_index, &path);
+                }
+            }
             ChimpCommand::SyncOpenPackages { kit } => {
                 if let Some(kit_index) = self.model.kit_index(kit) {
                     let kit = &mut self.model.kits[kit_index];
@@ -246,7 +300,11 @@ impl Baboon {
         let mut requested = match which {
             ChimpClose::These(packages) => packages,
             ChimpClose::All => open.clone(),
-            ChimpClose::AllBut(keep) => open.iter().filter(|package| **package != keep).cloned().collect(),
+            ChimpClose::AllBut(keep) => open
+                .iter()
+                .filter(|package| **package != keep)
+                .cloned()
+                .collect(),
         };
         requested.sort();
         requested.dedup();
@@ -257,7 +315,8 @@ impl Baboon {
             }
         }
         if blocked {
-            self.model.status = "Save or discard modified Chimp packages before closing them.".to_owned();
+            self.model.status =
+                "Save or discard modified Chimp packages before closing them.".to_owned();
         }
     }
 }

@@ -247,14 +247,7 @@ pub(super) fn draw_chimp_tiles(
     if let Some(which) = close {
         cx.send(ChimpCommand::Close { kit, which });
     }
-    let extractions = [
-        extract_texture.map(|package| (package, ChimpExtraction::Texture)),
-        extract_mesh.map(|(package, format)| (package, ChimpExtraction::Mesh(format))),
-        export_level.map(|(package, format)| (package, ChimpExtraction::Level(format))),
-    ];
-    for (package, what) in extractions.into_iter().flatten() {
-        cx.send(ChimpCommand::Extract { kit, package, what });
-    }
+    send_chimp_extractions(cx, kit, extract_texture, extract_mesh, export_level);
 }
 
 /// Draw one open package's pane: its header line, its views, and whichever
