@@ -19,11 +19,22 @@ pub(in crate::app) struct Ctx<'a> {
     pub(in crate::app) model: &'a Model,
     pub(in crate::app) egui: &'a egui::Context,
     commands: &'a CommandQueue,
+    jobs: &'a Sender<WorkerMessage>,
 }
 
 impl<'a> Ctx<'a> {
-    pub(in crate::app) fn new(model: &'a Model, egui: &'a egui::Context, commands: &'a CommandQueue) -> Self {
-        Self { model, egui, commands }
+    pub(in crate::app) fn new(
+        model: &'a Model,
+        egui: &'a egui::Context,
+        commands: &'a CommandQueue,
+        jobs: &'a Sender<WorkerMessage>,
+    ) -> Self {
+        Self {
+            model,
+            egui,
+            commands,
+            jobs,
+        }
     }
 
     /// Queue `command` to run once this frame's drawing is over.
@@ -35,7 +46,29 @@ impl<'a> Ctx<'a> {
     pub(in crate::app) fn set_status(&self, status: impl Into<String>) {
         self.commands.send(Command::Status(status.into()));
     }
+
+    /// Run `job` in the background; its message comes back to the frame
+    /// that receives worker messages, and `on_panic` stands in for it if the
+    /// job panics. Starting work changes nothing a draw reads, so a draw may
+    /// do it directly; what the result changes is up to its handler.
+    pub(in crate::app) fn spawn<J, P>(&self, job: J, on_panic: P)
+    where
+        J: FnOnce() -> WorkerMessage + Send + 'static,
+        P: FnOnce(String) -> WorkerMessage + Send + 'static,
+    {
+        spawn_worker(self.jobs, self.egui, job, on_panic);
+    }
 }
+
+/// The [`Ctx`] for this frame, built from `app`'s fields so the caller can
+/// still hold a feature's state mutably beside it. A macro rather than a
+/// method because a method would borrow all of `app`.
+macro_rules! cx {
+    ($app:expr, $egui:expr) => {
+        $crate::app::context::Ctx::new(&$app.model, $egui, &$app.commands, &$app.tx)
+    };
+}
+pub(in crate::app) use cx;
 
 /// Commands sent this frame and not yet applied. Shared rather than `&mut`
 /// so the [`Ctx`] holding it can be shared too: a draw passes one `&Ctx` to
@@ -65,11 +98,18 @@ pub(in crate::app) enum Command {
     Status(String),
     Help(HelpCommand),
     Poke(PokeCommand),
+    Compare(CompareCommand),
 }
 
 impl From<HelpCommand> for Command {
     fn from(command: HelpCommand) -> Self {
         Command::Help(command)
+    }
+}
+
+impl From<CompareCommand> for Command {
+    fn from(command: CompareCommand) -> Self {
+        Command::Compare(command)
     }
 }
 
@@ -101,6 +141,7 @@ impl Baboon {
             Command::Status(status) => self.model.status = status,
             Command::Help(command) => self.apply_help_command(command),
             Command::Poke(command) => self.apply_poke_command(command),
+            Command::Compare(command) => self.apply_compare_command(command),
         }
     }
 }

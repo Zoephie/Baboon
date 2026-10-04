@@ -1581,12 +1581,16 @@ impl Baboon {
         self.draw_operation_notice_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);
-        draw_poke_window(&Ctx::new(&self.model, ctx, &self.commands), &mut self.poke);
+        draw_poke_window(&cx!(self, ctx), &mut self.poke);
         self.draw_tag_import_window(ctx);
         self.draw_cache_import_window(ctx);
-        draw_help_window(&Ctx::new(&self.model, ctx, &self.commands), &mut self.help);
+        draw_help_window(&cx!(self, ctx), &mut self.help);
         self.draw_query_results_window(ctx);
-        self.draw_tag_diff_window(ctx);
+        draw_tag_diff_window(
+            &cx!(self, ctx),
+            &mut self.compare,
+            &self.kit_tools.editing_kit_validation,
+        );
         self.draw_content_explorer_window(ctx);
         self.draw_keyword_chooser_window(ctx);
         self.draw_field_value_search_window(ctx);

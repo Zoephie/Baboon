@@ -6,7 +6,7 @@ use crate::app::shell::frame::{
     recheck_cached,
 };
 
-enum GitReviewAction {
+pub(in crate::app) enum GitReviewAction {
     Refresh,
     OpenGitHubDesktop,
     OpenRepositoryFolder,
@@ -597,92 +597,81 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
     }
 }
 
-impl Baboon {
-    pub(in crate::app) fn draw_git_review(&mut self, ui: &mut Ui, kit_index: usize) {
-        // Borrowed for the draw, which reads the review and writes only locals:
-        // the commit list, the change list and a diff of up to 5,000 rows used
-        // to be copied out every frame.
-        let state = &self.views[self.model.kits[kit_index].id].git_review;
-        let branch = state.branch.clone();
-        let repo = state.repo_root.clone();
-        // Looking for GitHub Desktop stats the disk (on macOS, every folder on
-        // PATH), so it is asked once a second rather than every frame.
-        let github_desktop =
-            recheck_cached(ui.ctx(), "github_desktop_launcher", github_desktop_launcher);
-        let commits = &state.commits;
-        let files = &state.files;
-        let selection = state.selection.clone();
-        let revision_title = selected_revision_title(&selection, commits);
-        let selected_path = state.selected_path.clone();
-        let results = &state.results;
-        let error = state.error.clone();
-        let loading = state.loading;
-        let local_count = state.local_files.len();
-        let mut commit_filter = state.commit_filter.clone();
-        let mut filter_text = state.filter.clone();
-        let mut filters = state.filters;
-        let mut swapped = state.swapped;
-        let mut action = None;
+/// The Git Review pane of `kit`, drawn from its view's review state.
+pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: &mut GitReviewState) {
+    // Read for the draw, which writes only locals until the end: the commit
+    // list, the change list and a diff of up to 5,000 rows used to be
+    // copied out every frame.
+    let branch = state.branch.clone();
+    let repo = state.repo_root.clone();
+    // Looking for GitHub Desktop stats the disk (on macOS, every folder on
+    // PATH), so it is asked once a second rather than every frame.
+    let github_desktop =
+        recheck_cached(ui.ctx(), "github_desktop_launcher", github_desktop_launcher);
+    let commits = &state.commits;
+    let files = &state.files;
+    let selection = state.selection.clone();
+    let revision_title = selected_revision_title(&selection, commits);
+    let selected_path = state.selected_path.clone();
+    let results = &state.results;
+    let error = state.error.clone();
+    let loading = state.loading;
+    let local_count = state.local_files.len();
+    let mut commit_filter = state.commit_filter.clone();
+    let mut filter_text = state.filter.clone();
+    let mut filters = state.filters;
+    let mut swapped = state.swapped;
+    let mut action = None;
 
-        Frame::NONE
-            .show(ui, |ui| {
-                // Only the page-level stack is flush. The header and each pane
-                // keep their own inner spacing, but no gap is inserted between
-                // the full-width divider and the three-pane table.
-                let inner_spacing_y = ui.spacing().item_spacing.y;
-                ui.spacing_mut().item_spacing.y = 0.0;
-                Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: 10,
-                        right: 10,
-                        top: 8,
-                        bottom: 0,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = inner_spacing_y;
-                        ui.add_space(10.0);
-                        let refresh_inline = ui.available_width()
-                            >= if github_desktop.is_some() {
-                                900.0
-                            } else {
-                                760.0
-                            };
-                        ui.horizontal(|ui| {
-                            ui.add(button_icon_image(
-                                ui,
-                                ButtonIcon::Git,
-                                text_dark(),
-                                PANE_HEADER_ICON_SIZE,
-                            ));
-                            ui.vertical(|ui| {
-                                ui.heading(
-                                    RichText::new(GIT_REVIEW_TITLE).color(text_dark()).strong(),
-                                );
-                                let location = repo
-                                    .as_ref()
-                                    .map(|path| path.display().to_string())
-                                    .unwrap_or_else(|| "No Git repository found".to_owned());
-                                ui.label(
-                                    RichText::new(if branch.is_empty() {
-                                        location
-                                    } else {
-                                        format!("{branch}  ·  {location}")
-                                    })
-                                    .small()
-                                    .color(subtle_dark()),
-                                );
-                            });
-                            if refresh_inline {
-                                git_review_header_actions(
-                                    ui,
-                                    repo.is_some(),
-                                    github_desktop.is_some(),
-                                    &mut action,
-                                );
-                            }
+    Frame::NONE
+        .show(ui, |ui| {
+            // Only the page-level stack is flush. The header and each pane
+            // keep their own inner spacing, but no gap is inserted between
+            // the full-width divider and the three-pane table.
+            let inner_spacing_y = ui.spacing().item_spacing.y;
+            ui.spacing_mut().item_spacing.y = 0.0;
+            Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: 10,
+                    right: 10,
+                    top: 8,
+                    bottom: 0,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = inner_spacing_y;
+                    ui.add_space(10.0);
+                    let refresh_inline = ui.available_width()
+                        >= if github_desktop.is_some() {
+                            900.0
+                        } else {
+                            760.0
+                        };
+                    ui.horizontal(|ui| {
+                        ui.add(button_icon_image(
+                            ui,
+                            ButtonIcon::Git,
+                            text_dark(),
+                            PANE_HEADER_ICON_SIZE,
+                        ));
+                        ui.vertical(|ui| {
+                            ui.heading(
+                                RichText::new(GIT_REVIEW_TITLE).color(text_dark()).strong(),
+                            );
+                            let location = repo
+                                .as_ref()
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_else(|| "No Git repository found".to_owned());
+                            ui.label(
+                                RichText::new(if branch.is_empty() {
+                                    location
+                                } else {
+                                    format!("{branch}  ·  {location}")
+                                })
+                                .small()
+                                .color(subtle_dark()),
+                            );
                         });
-                        if !refresh_inline {
-                            ui.add_space(8.0);
+                        if refresh_inline {
                             git_review_header_actions(
                                 ui,
                                 repo.is_some(),
@@ -690,231 +679,248 @@ impl Baboon {
                                 &mut action,
                             );
                         }
-                        ui.add_space(20.0);
                     });
-                let (divider, _) = ui.allocate_exact_size(
-                    Vec2::new(ui.available_width(), 1.0),
-                    Sense::hover(),
-                );
-                ui.painter().line_segment(
-                    [divider.left_top(), divider.right_top()],
-                    Stroke::new(1.0_f32, grid_line()),
-                );
+                    if !refresh_inline {
+                        ui.add_space(8.0);
+                        git_review_header_actions(
+                            ui,
+                            repo.is_some(),
+                            github_desktop.is_some(),
+                            &mut action,
+                        );
+                    }
+                    ui.add_space(20.0);
+                });
+            let (divider, _) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width(), 1.0),
+                Sense::hover(),
+            );
+            ui.painter().line_segment(
+                [divider.left_top(), divider.right_top()],
+                Stroke::new(1.0_f32, grid_line()),
+            );
 
-                if loading {
-                    Frame::NONE
-                        .inner_margin(egui::Margin {
-                            left: 10,
-                            right: 10,
-                            top: 0,
-                            bottom: 8,
-                        })
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(RichText::new("Reading Git…").color(subtle_dark()));
-                            });
+            if loading {
+                Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 10,
+                        top: 0,
+                        bottom: 8,
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(RichText::new("Reading Git…").color(subtle_dark()));
                         });
-                }
-                if let Some(error) = error.as_ref() {
-                    Frame::NONE
-                        .inner_margin(egui::Margin {
-                            left: 10,
-                            right: 10,
-                            top: 0,
-                            bottom: 8,
-                        })
-                        .show(ui, |ui| {
-                            ui.colored_label(Color32::from_rgb(225, 105, 105), error);
-                        });
-                }
+                    });
+            }
+            if let Some(error) = error.as_ref() {
+                Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 10,
+                        top: 0,
+                        bottom: 8,
+                    })
+                    .show(ui, |ui| {
+                        ui.colored_label(Color32::from_rgb(225, 105, 105), error);
+                    });
+            }
 
-                let width = ui.available_width();
-                let height = ui.available_height().max(120.0);
-                egui_extras::TableBuilder::new(ui)
-                    .id_salt(("git_review_columns", kit_index))
-                    .resizable(true)
-                    .vscroll(false)
-                    .column(egui_extras::Column::initial(width * 0.25).at_least(180.0))
-                    .column(egui_extras::Column::initial(width * 0.32).at_least(220.0))
-                    .column(egui_extras::Column::remainder().at_least(280.0))
-                    .body(|mut body| {
-                        body.row(height, |mut row| {
-                            row.col(|ui| {
-                                Frame::NONE.fill(editor_bg()).show(ui, |ui| {
-                                    list_header(ui, |ui| {
-                                            pane_title(ui, "Changes & Commit History");
-                                            ui.add_space(4.0);
-                                            browser_search_field(
-                                                ui,
-                                                &mut commit_filter,
-                                                "search commits",
-                                            );
-                                    });
-                                    ui.separator();
-                                    egui::ScrollArea::vertical()
-                                        .id_salt(("git_review_revisions", kit_index))
-                                        .show(ui, |ui| {
-                                        let local_selected =
-                                            selection == GitReviewSelection::Local;
-                                        let local = GitReviewCommit {
-                                            hash: String::new(),
-                                            short_hash: format!("{local_count} changed tag(s)"),
-                                            author: String::new(),
-                                            date: String::new(),
-                                            subject: "Local Changes".to_owned(),
-                                        };
-                                        if commit_row(ui, &local, local_selected).clicked() {
-                                            action = Some(GitReviewAction::SelectRevision(
-                                                GitReviewSelection::Local,
-                                            ));
-                                        }
-                                        for commit in commits
-                                            .iter()
-                                            .filter(|commit| commit_matches_filter(commit, &commit_filter))
-                                        {
-                                            let selected = matches!(&selection, GitReviewSelection::Commit(hash) if hash == &commit.hash);
-                                            if commit_row(ui, commit, selected).clicked() {
-                                                action = Some(GitReviewAction::SelectRevision(
-                                                    GitReviewSelection::Commit(
-                                                        commit.hash.clone(),
-                                                    ),
-                                                ));
-                                            }
-                                        }
-                                        });
-                                });
-                            });
-                            row.col(|ui| {
-                                let mut visible_files = Vec::new();
+            let width = ui.available_width();
+            let height = ui.available_height().max(120.0);
+            egui_extras::TableBuilder::new(ui)
+                .id_salt(("git_review_columns", kit))
+                .resizable(true)
+                .vscroll(false)
+                .column(egui_extras::Column::initial(width * 0.25).at_least(180.0))
+                .column(egui_extras::Column::initial(width * 0.32).at_least(220.0))
+                .column(egui_extras::Column::remainder().at_least(280.0))
+                .body(|mut body| {
+                    body.row(height, |mut row| {
+                        row.col(|ui| {
+                            Frame::NONE.fill(editor_bg()).show(ui, |ui| {
                                 list_header(ui, |ui| {
-                                        let (header_rect, _) = ui.allocate_exact_size(
-                                            Vec2::new(ui.available_width(), BUTTON_HEIGHT),
-                                            Sense::hover(),
-                                        );
+                                        pane_title(ui, "Changes & Commit History");
                                         ui.add_space(4.0);
-                                        browser_search_field(ui, &mut filter_text, "search tags");
-                                        let filter = filter_text.trim().to_lowercase();
-                                        visible_files = files
-                                            .iter()
-                                            .filter(|file| file.path.to_lowercase().contains(&filter))
-                                            .collect();
-                                        change_list_header(
+                                        browser_search_field(
                                             ui,
-                                            header_rect,
-                                            &visible_files,
-                                            files.len(),
-                                            !filter.is_empty(),
-                                            &revision_title,
+                                            &mut commit_filter,
+                                            "search commits",
                                         );
                                 });
                                 ui.separator();
                                 egui::ScrollArea::vertical()
-                                    .id_salt(("git_review_files", kit_index))
+                                    .id_salt(("git_review_revisions", kit))
                                     .show(ui, |ui| {
-                                        if visible_files.is_empty() {
-                                            ui.add_space(10.0);
-                                            ui.label(
-                                                RichText::new(if filter_text.trim().is_empty() {
-                                                    "No changed tags in this revision."
-                                                } else {
-                                                    "No tags match this search."
-                                                })
-                                                .color(subtle_dark()),
-                                            );
-                                        }
-                                        for file in visible_files {
-                                            let selected = selected_path.as_deref()
-                                                == Some(file.path.as_str());
-                                            let response = tag_change_row(ui, file, selected);
-                                            if response.double_clicked() {
-                                                action = Some(GitReviewAction::OpenFile(
-                                                    file.path.clone(),
-                                                ));
-                                            } else if response.clicked() {
-                                                action = Some(GitReviewAction::SelectFile(
-                                                    file.path.clone(),
-                                                ));
-                                            }
-                                        }
-                                    });
-                            });
-                            row.col(|ui| {
-                                Frame::NONE
-                                    .inner_margin(egui::Margin {
-                                        left: 10,
-                                        right: 10,
-                                        top: 8,
-                                        bottom: 8,
-                                    })
-                                    .show(ui, |ui| {
-                                        compare_pane_title(ui, selected_path.as_deref());
-                                    });
-                                ui.separator();
-                                if let Some(results) = results.as_ref() {
-                                    let (before, after) = match &selection {
-                                        GitReviewSelection::Local => ("HEAD", "Working copy"),
-                                        GitReviewSelection::Commit(_) => ("Before", "After"),
+                                    let local_selected =
+                                        selection == GitReviewSelection::Local;
+                                    let local = GitReviewCommit {
+                                        hash: String::new(),
+                                        short_hash: format!("{local_count} changed tag(s)"),
+                                        author: String::new(),
+                                        date: String::new(),
+                                        subject: "Local Changes".to_owned(),
                                     };
-                                    super::tag_compare::draw_tag_diff_list(
-                                        ui,
-                                        results,
-                                        &mut filters,
-                                        &mut swapped,
-                                        before,
-                                        after,
-                                        "git_review_tag_diff_table",
-                                    );
-                                } else {
-                                    ui.label(
-                                        RichText::new(
-                                            "Choose a tag to inspect its field changes.",
-                                        )
-                                        .color(subtle_dark()),
-                                    );
-                                }
+                                    if commit_row(ui, &local, local_selected).clicked() {
+                                        action = Some(GitReviewAction::SelectRevision(
+                                            GitReviewSelection::Local,
+                                        ));
+                                    }
+                                    for commit in commits
+                                        .iter()
+                                        .filter(|commit| commit_matches_filter(commit, &commit_filter))
+                                    {
+                                        let selected = matches!(&selection, GitReviewSelection::Commit(hash) if hash == &commit.hash);
+                                        if commit_row(ui, commit, selected).clicked() {
+                                            action = Some(GitReviewAction::SelectRevision(
+                                                GitReviewSelection::Commit(
+                                                    commit.hash.clone(),
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                    });
                             });
                         });
+                        row.col(|ui| {
+                            let mut visible_files = Vec::new();
+                            list_header(ui, |ui| {
+                                    let (header_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+                                        Sense::hover(),
+                                    );
+                                    ui.add_space(4.0);
+                                    browser_search_field(ui, &mut filter_text, "search tags");
+                                    let filter = filter_text.trim().to_lowercase();
+                                    visible_files = files
+                                        .iter()
+                                        .filter(|file| file.path.to_lowercase().contains(&filter))
+                                        .collect();
+                                    change_list_header(
+                                        ui,
+                                        header_rect,
+                                        &visible_files,
+                                        files.len(),
+                                        !filter.is_empty(),
+                                        &revision_title,
+                                    );
+                            });
+                            ui.separator();
+                            egui::ScrollArea::vertical()
+                                .id_salt(("git_review_files", kit))
+                                .show(ui, |ui| {
+                                    if visible_files.is_empty() {
+                                        ui.add_space(10.0);
+                                        ui.label(
+                                            RichText::new(if filter_text.trim().is_empty() {
+                                                "No changed tags in this revision."
+                                            } else {
+                                                "No tags match this search."
+                                            })
+                                            .color(subtle_dark()),
+                                        );
+                                    }
+                                    for file in visible_files {
+                                        let selected = selected_path.as_deref()
+                                            == Some(file.path.as_str());
+                                        let response = tag_change_row(ui, file, selected);
+                                        if response.double_clicked() {
+                                            action = Some(GitReviewAction::OpenFile(
+                                                file.path.clone(),
+                                            ));
+                                        } else if response.clicked() {
+                                            action = Some(GitReviewAction::SelectFile(
+                                                file.path.clone(),
+                                            ));
+                                        }
+                                    }
+                                });
+                        });
+                        row.col(|ui| {
+                            Frame::NONE
+                                .inner_margin(egui::Margin {
+                                    left: 10,
+                                    right: 10,
+                                    top: 8,
+                                    bottom: 8,
+                                })
+                                .show(ui, |ui| {
+                                    compare_pane_title(ui, selected_path.as_deref());
+                                });
+                            ui.separator();
+                            if let Some(results) = results.as_ref() {
+                                let (before, after) = match &selection {
+                                    GitReviewSelection::Local => ("HEAD", "Working copy"),
+                                    GitReviewSelection::Commit(_) => ("Before", "After"),
+                                };
+                                super::tag_compare::draw_tag_diff_list(
+                                    ui,
+                                    results,
+                                    &mut filters,
+                                    &mut swapped,
+                                    before,
+                                    after,
+                                    "git_review_tag_diff_table",
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(
+                                        "Choose a tag to inspect its field changes.",
+                                    )
+                                    .color(subtle_dark()),
+                                );
+                            }
+                        });
                     });
-            });
+                });
+        });
 
-        let state = &mut self.views[self.model.kits[kit_index].id].git_review;
-        state.commit_filter = commit_filter;
-        state.filter = filter_text;
-        state.filters = filters;
-        state.swapped = swapped;
+    state.commit_filter = commit_filter;
+    state.filter = filter_text;
+    state.filters = filters;
+    state.swapped = swapped;
+    if let Some(action) = action {
+        cx.send(CompareCommand::GitReview { kit, action });
+    }
+}
 
+impl Baboon {
+    /// Carry out what the Git Review pane of `kit` asked for.
+    pub(in crate::app) fn apply_git_review_action(&mut self, kit: KitId, action: GitReviewAction) {
+        let Some(kit_index) = self.model.kit_index(kit) else {
+            return;
+        };
+        let ctx = self.egui_ctx.clone();
+        let repo = self.views[kit].git_review.repo_root.clone();
         match action {
-            Some(GitReviewAction::OpenRepositoryFolder) => {
+            GitReviewAction::OpenRepositoryFolder => {
                 if let Some(repo) = repo {
                     self.open_folder_in_explorer(repo, "Repository");
                 }
             }
-            Some(GitReviewAction::OpenGitHubDesktop) => {
-                if let (Some(launcher), Some(repo)) = (github_desktop.as_ref(), repo.as_ref()) {
+            GitReviewAction::OpenGitHubDesktop => {
+                let launcher = recheck_cached(&ctx, "github_desktop_launcher", github_desktop_launcher);
+                if let (Some(launcher), Some(repo)) = (launcher.as_ref(), repo.as_ref()) {
                     self.model.status = match launcher.open(repo) {
                         Ok(()) => format!("Opening {} in GitHub Desktop", repo.display()),
                         Err(error) => format!("Could not open GitHub Desktop: {error}"),
                     };
                 }
             }
-            Some(GitReviewAction::Refresh) => {
-                self.run_git_review_job(kit_index, GitReviewJob::Refresh, ui.ctx());
+            GitReviewAction::Refresh => {
+                self.run_git_review_job(kit_index, GitReviewJob::Refresh, &ctx);
             }
-            Some(GitReviewAction::SelectRevision(selection)) => {
-                self.run_git_review_job(
-                    kit_index,
-                    GitReviewJob::SelectRevision(selection),
-                    ui.ctx(),
-                );
+            GitReviewAction::SelectRevision(selection) => {
+                self.run_git_review_job(kit_index, GitReviewJob::SelectRevision(selection), &ctx);
             }
-            Some(GitReviewAction::SelectFile(path)) => {
-                self.run_git_review_job(kit_index, GitReviewJob::SelectFile(path), ui.ctx());
+            GitReviewAction::SelectFile(path) => {
+                self.run_git_review_job(kit_index, GitReviewJob::SelectFile(path), &ctx);
             }
-            Some(GitReviewAction::OpenFile(path)) => {
+            GitReviewAction::OpenFile(path) => {
                 self.open_git_review_file(kit_index, &path);
             }
-            None => {}
         }
     }
 }

@@ -90,7 +90,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app.draw_git_review(ui, self.kit_index);
+            let app = &mut *self.app;
+            let kit = app.model.kits[self.kit_index].id;
+            let egui = ui.ctx().clone();
+            draw_git_review(&cx!(app, &egui), ui, kit, &mut app.views[kit].git_review);
             return egui_tiles::UiResponse::None;
         }
         if key == BLAM_KEY {

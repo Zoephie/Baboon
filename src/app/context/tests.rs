@@ -7,7 +7,7 @@ fn a_sent_command_changes_nothing_until_applied() {
     let mut app = Baboon::for_test();
     let egui = egui::Context::default();
     let before = app.model.status.clone();
-    Ctx::new(&app.model, &egui, &app.commands).set_status("from a draw");
+    cx!(app, &egui).set_status("from a draw");
     assert_eq!(app.model.status, before);
     app.apply_commands(&egui);
     assert_eq!(app.model.status, "from a draw");

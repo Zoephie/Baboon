@@ -287,9 +287,8 @@ pub(in crate::app) enum TagCompareGitUpdate {
 /// Run a Compare window Git read on a worker. A new job supersedes the one
 /// before it, whose result is then dropped when it lands.
 fn run_tag_compare_git(
-    tx: &Sender<WorkerMessage>,
+    cx: &Ctx,
     state: &mut TagDiffState,
-    ctx: &egui::Context,
     job: impl FnOnce() -> TagCompareGitUpdate + Send + 'static,
 ) {
     // Numbered across windows, so a window closed and reopened on another
@@ -297,9 +296,7 @@ fn run_tag_compare_git(
     static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let request = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     state.git_pending = Some(request);
-    spawn_worker(
-        tx,
-        ctx,
+    cx.spawn(
         move || WorkerMessage::TagCompareGit {
             request,
             update: Ok(job()),
@@ -728,1020 +725,1031 @@ pub(in crate::app) fn draw_tag_diff_list(
     });
 }
 
-impl Baboon {
-    fn comparison_kits(&self, game: GameId, current_root: &Path) -> Vec<ComparisonKit> {
-        let mut kits = Vec::new();
-        for profile in &self.model.prefs.custom_editing_kit_profiles {
-            if profile.game != game.as_str() {
-                continue;
-            }
-            if let Ok(layout) = self.kit_tools.editing_kit_validation.custom(&profile.id) {
-                if !same_recent_path(&layout.tags, current_root)
-                    && !kits
-                        .iter()
-                        .any(|kit: &ComparisonKit| same_recent_path(&kit.tags, &layout.tags))
-                {
-                    kits.push(ComparisonKit {
-                        name: profile.name.clone(),
-                        tags: layout.tags,
-                    });
-                }
+/// The editing kits of `game` other than the one at `current_root` that a tag
+/// can be compared against: custom profiles first, then the built-in kits.
+fn comparison_kits(
+    model: &Model,
+    validation: &EditingKitValidationCache,
+    game: GameId,
+    current_root: &Path,
+) -> Vec<ComparisonKit> {
+    let mut kits = Vec::new();
+    for profile in &model.prefs.custom_editing_kit_profiles {
+        if profile.game != game.as_str() {
+            continue;
+        }
+        if let Ok(layout) = validation.custom(&profile.id) {
+            if !same_recent_path(&layout.tags, current_root)
+                && !kits
+                    .iter()
+                    .any(|kit: &ComparisonKit| same_recent_path(&kit.tags, &layout.tags))
+            {
+                kits.push(ComparisonKit {
+                    name: profile.name.clone(),
+                    tags: layout.tags,
+                });
             }
         }
-        for shortcut in EDITING_KIT_SHORTCUTS {
-            if shortcut.game != game {
-                continue;
-            }
-            if let Some(layout) = self.kit_tools.editing_kit_validation.builtin(shortcut).layout() {
-                if !same_recent_path(&layout.tags, current_root)
-                    && !kits
-                        .iter()
-                        .any(|kit| same_recent_path(&kit.tags, &layout.tags))
-                {
-                    kits.push(ComparisonKit {
-                        name: game.display_name().to_owned(),
-                        tags: layout.tags.clone(),
-                    });
-                }
-            }
-        }
-        kits
     }
-
-    pub(in crate::app) fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
-        let Some(mut state) = self.compare.tag_diff.take() else {
-            return;
-        };
-        let diff_kit = self.model.kit_index(state.kit).unwrap_or(self.model.active);
-        let current = self.model.kits[diff_kit].parsed_tags.get(&state.a_key);
-        let group = current.map(|doc| doc.tag.group().tag);
-        let source = self.model.kits[diff_kit].source.as_ref();
-        let game = source.and_then(|source| source.game);
-        let (tags_root, definitions_root) = source
-            .and_then(|source| match &source.source {
-                TagSource::LooseFolder {
-                    root,
-                    definitions_root,
-                    ..
-                } => Some((root.as_path(), Some(definitions_root.as_path()))),
-                _ => None,
-            })
-            .unwrap_or((Path::new(""), None));
-        let git_tracked = self.model.kits[diff_kit]
-            .profile
-            .as_ref()
-            .and_then(|identity| {
-                self.model.prefs
-                    .custom_editing_kit_profiles
+    for shortcut in EDITING_KIT_SHORTCUTS {
+        if shortcut.game != game {
+            continue;
+        }
+        if let Some(layout) = validation.builtin(shortcut).layout() {
+            if !same_recent_path(&layout.tags, current_root)
+                && !kits
                     .iter()
-                    .find(|profile| profile.id == identity.id)
-            })
-            .is_some_and(|profile| profile.git_tracked);
-        let current_path = file_key_path(&state.a_key).map(Path::to_path_buf);
-        let git_available =
-            git_tracked && current_path.is_some() && !tags_root.as_os_str().is_empty();
-        if state.source == TagCompareSource::GitHistory
-            && git_available
-            && !state.git_history.loaded
-        {
-            state.git_history.loaded = true;
-            if let Some(path) = current_path.clone() {
-                let tags_root = tags_root.to_path_buf();
-                run_tag_compare_git(&self.tx, &mut state, ctx, move || {
-                    TagCompareGitUpdate::History {
-                        append: false,
-                        result: git_tag_history(&tags_root, &path, 0),
-                    }
+                    .any(|kit| same_recent_path(&kit.tags, &layout.tags))
+            {
+                kits.push(ComparisonKit {
+                    name: game.display_name().to_owned(),
+                    tags: layout.tags.clone(),
                 });
             }
         }
-        let kits = game
-            .filter(|_| !tags_root.as_os_str().is_empty())
-            .map(|game| self.comparison_kits(game, tags_root))
-            .unwrap_or_default();
-        if state
-            .comparison_kit_root
-            .as_ref()
-            .is_some_and(|root| !kits.iter().any(|kit| same_recent_path(root, &kit.tags)))
-        {
-            state.comparison_kit_root = None;
-            state.results = None;
-        }
-        let current_game = current.map(|doc| blam_tags::game::Game::of(&doc.tag));
-        let open_tags: Vec<OpenTagGroup> = self
-            .model.kits
-            .iter()
-            .filter_map(|kit| {
-                let other_source = kit.source.as_ref()?;
-                if game
-                    .zip(other_source.game)
-                    .is_some_and(|(a, b)| a != b)
-                {
-                    return None;
-                }
-                let mut tags: Vec<(String, String)> = kit
-                    .open_tabs
-                    .iter()
-                    .filter_map(|key| {
-                        if kit.id == state.kit && *key == state.a_key {
-                            return None;
-                        }
-                        let doc = kit.parsed_tags.get(key)?;
-                        if Some(doc.tag.group().tag) != group
-                            || Some(blam_tags::game::Game::of(&doc.tag)) != current_game
-                        {
-                            return None;
-                        }
-                        let label = kit
-                            .entry_for_key(key)
-                            .map(|entry| entry.display_path.clone())
-                            .unwrap_or_else(|| key_label(key).to_owned());
-                        Some((key.clone(), label))
-                    })
-                    .collect();
-                if tags.is_empty() {
-                    return None;
-                }
-                tags.sort_by(|a, b| a.1.cmp(&b.1));
-                let name = kit
-                    .profile
-                    .as_ref()
-                    .map(|profile| profile.name.clone())
-                    .unwrap_or_else(|| native_display_path(&other_source.label));
-                let location = native_display_path(&match &other_source.source {
-                    TagSource::LooseFolder { root, .. } => root.display().to_string(),
-                    _ => kit
-                        .requested_path
-                        .as_ref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| other_source.label.clone()),
-                });
-                Some(OpenTagGroup {
-                    kit: kit.id,
-                    name,
-                    location,
-                    tags,
-                })
-            })
-            .collect();
+    }
+    kits
+}
 
-        let matched = state
-            .comparison_kit_root
-            .as_ref()
-            .and_then(|root| matching_tag_path(&state.a_key, tags_root, root));
-        let selected_path = match state.source {
-            TagCompareSource::OpenTag => None,
-            TagCompareSource::File => state.b_path.clone(),
-            TagCompareSource::EditingKit => matched.clone(),
-            TagCompareSource::GitHead => None,
-            TagCompareSource::GitHistory => None,
-        };
-        let can_compare = match state.source {
-            TagCompareSource::OpenTag => {
-                state
-                    .b_kit
-                    .zip(state.b_key.as_ref())
-                    .is_some_and(|(id, key)| {
-                        open_tags.iter().any(|group| {
-                            group.kit == id && group.tags.iter().any(|(tag, _)| tag == key)
-                        })
-                    })
-            }
-            TagCompareSource::File => selected_path.as_ref().is_some_and(|path| path.is_file()),
-            TagCompareSource::EditingKit => {
-                selected_path.as_ref().is_some_and(|path| path.is_file())
-            }
-            TagCompareSource::GitHead => git_available,
-            TagCompareSource::GitHistory => {
-                git_available
-                    && state.git_history.selected.as_ref().is_some_and(|selected| {
-                        state
-                            .git_history
-                            .commits
-                            .iter()
-                            .any(|commit| &commit.hash == selected)
-                    })
-            }
-        } && current.is_some();
-        let comparison_label = match state.source {
-            TagCompareSource::OpenTag => "Open tag".to_owned(),
-            TagCompareSource::File => "Selected file".to_owned(),
-            TagCompareSource::EditingKit => kits
+/// The Compare Tags window, while one is open.
+pub(in crate::app) fn draw_tag_diff_window(
+    cx: &Ctx,
+    feature: &mut CompareFeature,
+    validation: &EditingKitValidationCache,
+) {
+    let Some(mut state) = feature.tag_diff.take() else {
+        return;
+    };
+    let ctx = cx.egui;
+    let diff_kit = cx.model.kit_index(state.kit).unwrap_or(cx.model.active);
+    let current = cx.model.kits[diff_kit].parsed_tags.get(&state.a_key);
+    let group = current.map(|doc| doc.tag.group().tag);
+    let source = cx.model.kits[diff_kit].source.as_ref();
+    let game = source.and_then(|source| source.game);
+    let (tags_root, definitions_root) = source
+        .and_then(|source| match &source.source {
+            TagSource::LooseFolder {
+                root,
+                definitions_root,
+                ..
+            } => Some((root.as_path(), Some(definitions_root.as_path()))),
+            _ => None,
+        })
+        .unwrap_or((Path::new(""), None));
+    let git_tracked = cx.model.kits[diff_kit]
+        .profile
+        .as_ref()
+        .and_then(|identity| {
+            cx.model.prefs
+                .custom_editing_kit_profiles
                 .iter()
-                .find(|kit| {
-                    state
-                        .comparison_kit_root
-                        .as_ref()
-                        .is_some_and(|root| same_recent_path(root, &kit.tags))
+                .find(|profile| profile.id == identity.id)
+        })
+        .is_some_and(|profile| profile.git_tracked);
+    let current_path = file_key_path(&state.a_key).map(Path::to_path_buf);
+    let git_available =
+        git_tracked && current_path.is_some() && !tags_root.as_os_str().is_empty();
+    if state.source == TagCompareSource::GitHistory
+        && git_available
+        && !state.git_history.loaded
+    {
+        state.git_history.loaded = true;
+        if let Some(path) = current_path.clone() {
+            let tags_root = tags_root.to_path_buf();
+            run_tag_compare_git(cx, &mut state, move || {
+                TagCompareGitUpdate::History {
+                    append: false,
+                    result: git_tag_history(&tags_root, &path, 0),
+                }
+            });
+        }
+    }
+    let kits = game
+        .filter(|_| !tags_root.as_os_str().is_empty())
+        .map(|game| comparison_kits(cx.model, validation, game, tags_root))
+        .unwrap_or_default();
+    if state
+        .comparison_kit_root
+        .as_ref()
+        .is_some_and(|root| !kits.iter().any(|kit| same_recent_path(root, &kit.tags)))
+    {
+        state.comparison_kit_root = None;
+        state.results = None;
+    }
+    let current_game = current.map(|doc| blam_tags::game::Game::of(&doc.tag));
+    let open_tags: Vec<OpenTagGroup> = cx
+        .model.kits
+        .iter()
+        .filter_map(|kit| {
+            let other_source = kit.source.as_ref()?;
+            if game
+                .zip(other_source.game)
+                .is_some_and(|(a, b)| a != b)
+            {
+                return None;
+            }
+            let mut tags: Vec<(String, String)> = kit
+                .open_tabs
+                .iter()
+                .filter_map(|key| {
+                    if kit.id == state.kit && *key == state.a_key {
+                        return None;
+                    }
+                    let doc = kit.parsed_tags.get(key)?;
+                    if Some(doc.tag.group().tag) != group
+                        || Some(blam_tags::game::Game::of(&doc.tag)) != current_game
+                    {
+                        return None;
+                    }
+                    let label = kit
+                        .entry_for_key(key)
+                        .map(|entry| entry.display_path.clone())
+                        .unwrap_or_else(|| key_label(key).to_owned());
+                    Some((key.clone(), label))
                 })
-                .map(|kit| kit.name.clone())
-                .unwrap_or_else(|| "Editing kit".to_owned()),
-            TagCompareSource::GitHead => "Git HEAD".to_owned(),
-            TagCompareSource::GitHistory => "After".to_owned(),
-        };
-        let current_label = if state.source == TagCompareSource::GitHistory {
-            "Before".to_owned()
-        } else if state.source == TagCompareSource::EditingKit {
-            self.model.kits[diff_kit]
+                .collect();
+            if tags.is_empty() {
+                return None;
+            }
+            tags.sort_by(|a, b| a.1.cmp(&b.1));
+            let name = kit
                 .profile
                 .as_ref()
                 .map(|profile| profile.name.clone())
-                .or_else(|| source.map(|source| native_display_path(&source.label)))
-                .unwrap_or_else(|| "Current tag".to_owned())
-        } else {
-            "Current tag".to_owned()
-        };
-        let mut open = true;
-        let mut browse = false;
-        let mut compare = false;
-        let had_results = state.results.is_some();
-        let mut older_commits: Option<(usize, PathBuf)> = None;
-        let mut selection_changed = false;
-        egui::Window::new("Compare Tags")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("tag_diff_window"))
-            .title_bar(false)
-            .collapsible(false)
-            .default_width(window_width(ctx, 620.0))
-            .resizable(true)
-            .show(ctx, |ui| {
-                crate::app::search::draw_icon_window_header(
-                    ui,
-                    "Compare Tags",
-                    ButtonIcon::Compare,
-                    &mut open,
-                );
-                ui.separator();
-                let label_width = ui
-                    .painter()
-                    .layout_no_wrap(
-                        "Compare Source:".to_owned(),
-                        egui::TextStyle::Body.resolve(ui.style()),
-                        text_dark(),
-                    )
-                    .size()
-                    .x;
-                let field_width = (ui.available_width() - label_width - 22.0).max(120.0);
-                let menu_path_width = (field_width - 24.0).max(40.0);
-                egui::Grid::new("tag_compare_source_grid")
-                    .num_columns(2)
-                    .spacing([14.0, 10.0])
-                    .show(ui, |ui| {
-                        ui.label(
-                            RichText::new(if state.source == TagCompareSource::GitHistory {
-                                "Tag Path:"
-                            } else {
-                                "Current Tag:"
-                            })
-                            .strong(),
-                        );
-                        path_label(
-                            ui,
-                            key_label(&state.a_key),
-                            field_width,
-                        );
-                        ui.end_row();
+                .unwrap_or_else(|| native_display_path(&other_source.label));
+            let location = native_display_path(&match &other_source.source {
+                TagSource::LooseFolder { root, .. } => root.display().to_string(),
+                _ => kit
+                    .requested_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| other_source.label.clone()),
+            });
+            Some(OpenTagGroup {
+                kit: kit.id,
+                name,
+                location,
+                tags,
+            })
+        })
+        .collect();
 
-                        ui.label(RichText::new("Compare Source:").strong());
-                        let source_name = match state.source {
-                            TagCompareSource::OpenTag => "Open Tag",
-                            TagCompareSource::File => "Browse for Tag",
-                            TagCompareSource::EditingKit => "Matching Tag in Another Kit",
-                            TagCompareSource::GitHead => "Git HEAD",
-                            TagCompareSource::GitHistory => "Git History…",
-                        };
-                        egui::ComboBox::from_id_salt("tag_compare_source")
-                            .selected_text(source_name)
-                            .width(field_width)
-                            .truncate()
-                            .show_ui(ui, |ui| {
-                                for (source, label) in [
-                                    (TagCompareSource::OpenTag, "Open Tag"),
-                                    (TagCompareSource::File, "Browse for Tag"),
-                                    (TagCompareSource::EditingKit, "Matching Tag in Another Kit"),
-                                    (TagCompareSource::GitHead, "Git HEAD"),
-                                    (TagCompareSource::GitHistory, "Git History…"),
-                                ] {
-                                    let mut text = egui::text::LayoutJob::default();
+    let matched = state
+        .comparison_kit_root
+        .as_ref()
+        .and_then(|root| matching_tag_path(&state.a_key, tags_root, root));
+    let selected_path = match state.source {
+        TagCompareSource::OpenTag => None,
+        TagCompareSource::File => state.b_path.clone(),
+        TagCompareSource::EditingKit => matched.clone(),
+        TagCompareSource::GitHead => None,
+        TagCompareSource::GitHistory => None,
+    };
+    let can_compare = match state.source {
+        TagCompareSource::OpenTag => {
+            state
+                .b_kit
+                .zip(state.b_key.as_ref())
+                .is_some_and(|(id, key)| {
+                    open_tags.iter().any(|group| {
+                        group.kit == id && group.tags.iter().any(|(tag, _)| tag == key)
+                    })
+                })
+        }
+        TagCompareSource::File => selected_path.as_ref().is_some_and(|path| path.is_file()),
+        TagCompareSource::EditingKit => {
+            selected_path.as_ref().is_some_and(|path| path.is_file())
+        }
+        TagCompareSource::GitHead => git_available,
+        TagCompareSource::GitHistory => {
+            git_available
+                && state.git_history.selected.as_ref().is_some_and(|selected| {
+                    state
+                        .git_history
+                        .commits
+                        .iter()
+                        .any(|commit| &commit.hash == selected)
+                })
+        }
+    } && current.is_some();
+    let comparison_label = match state.source {
+        TagCompareSource::OpenTag => "Open tag".to_owned(),
+        TagCompareSource::File => "Selected file".to_owned(),
+        TagCompareSource::EditingKit => kits
+            .iter()
+            .find(|kit| {
+                state
+                    .comparison_kit_root
+                    .as_ref()
+                    .is_some_and(|root| same_recent_path(root, &kit.tags))
+            })
+            .map(|kit| kit.name.clone())
+            .unwrap_or_else(|| "Editing kit".to_owned()),
+        TagCompareSource::GitHead => "Git HEAD".to_owned(),
+        TagCompareSource::GitHistory => "After".to_owned(),
+    };
+    let current_label = if state.source == TagCompareSource::GitHistory {
+        "Before".to_owned()
+    } else if state.source == TagCompareSource::EditingKit {
+        cx.model.kits[diff_kit]
+            .profile
+            .as_ref()
+            .map(|profile| profile.name.clone())
+            .or_else(|| source.map(|source| native_display_path(&source.label)))
+            .unwrap_or_else(|| "Current tag".to_owned())
+    } else {
+        "Current tag".to_owned()
+    };
+    let mut open = true;
+    let mut browse = false;
+    let mut compare = false;
+    let had_results = state.results.is_some();
+    let mut older_commits: Option<(usize, PathBuf)> = None;
+    let mut selection_changed = false;
+    egui::Window::new("Compare Tags")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("tag_diff_window"))
+        .title_bar(false)
+        .collapsible(false)
+        .default_width(window_width(ctx, 620.0))
+        .resizable(true)
+        .show(ctx, |ui| {
+            crate::app::search::draw_icon_window_header(
+                ui,
+                "Compare Tags",
+                ButtonIcon::Compare,
+                &mut open,
+            );
+            ui.separator();
+            let label_width = ui
+                .painter()
+                .layout_no_wrap(
+                    "Compare Source:".to_owned(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    text_dark(),
+                )
+                .size()
+                .x;
+            let field_width = (ui.available_width() - label_width - 22.0).max(120.0);
+            let menu_path_width = (field_width - 24.0).max(40.0);
+            egui::Grid::new("tag_compare_source_grid")
+                .num_columns(2)
+                .spacing([14.0, 10.0])
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(if state.source == TagCompareSource::GitHistory {
+                            "Tag Path:"
+                        } else {
+                            "Current Tag:"
+                        })
+                        .strong(),
+                    );
+                    path_label(
+                        ui,
+                        key_label(&state.a_key),
+                        field_width,
+                    );
+                    ui.end_row();
+
+                    ui.label(RichText::new("Compare Source:").strong());
+                    let source_name = match state.source {
+                        TagCompareSource::OpenTag => "Open Tag",
+                        TagCompareSource::File => "Browse for Tag",
+                        TagCompareSource::EditingKit => "Matching Tag in Another Kit",
+                        TagCompareSource::GitHead => "Git HEAD",
+                        TagCompareSource::GitHistory => "Git History…",
+                    };
+                    egui::ComboBox::from_id_salt("tag_compare_source")
+                        .selected_text(source_name)
+                        .width(field_width)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            for (source, label) in [
+                                (TagCompareSource::OpenTag, "Open Tag"),
+                                (TagCompareSource::File, "Browse for Tag"),
+                                (TagCompareSource::EditingKit, "Matching Tag in Another Kit"),
+                                (TagCompareSource::GitHead, "Git HEAD"),
+                                (TagCompareSource::GitHistory, "Git History…"),
+                            ] {
+                                let mut text = egui::text::LayoutJob::default();
+                                text.append(
+                                    label,
+                                    0.0,
+                                    egui::TextFormat {
+                                        font_id: egui::TextStyle::Body.resolve(ui.style()),
+                                        color: text_dark(),
+                                        ..Default::default()
+                                    },
+                                );
+                                if source == TagCompareSource::EditingKit {
                                     text.append(
-                                        label,
+                                        "\nSame path and tag in another editing kit",
                                         0.0,
                                         egui::TextFormat {
-                                            font_id: egui::TextStyle::Body.resolve(ui.style()),
-                                            color: text_dark(),
+                                            font_id: egui::TextStyle::Small.resolve(ui.style()),
+                                            color: subtle_dark(),
                                             ..Default::default()
                                         },
                                     );
-                                    if source == TagCompareSource::EditingKit {
-                                        text.append(
-                                            "\nSame path and tag in another editing kit",
-                                            0.0,
-                                            egui::TextFormat {
-                                                font_id: egui::TextStyle::Small.resolve(ui.style()),
-                                                color: subtle_dark(),
-                                                ..Default::default()
-                                            },
-                                        );
-                                    } else if source == TagCompareSource::GitHead {
-                                        text.append(
-                                            "\nSame tag in the current Git commit",
-                                            0.0,
-                                            egui::TextFormat {
-                                                font_id: egui::TextStyle::Small.resolve(ui.style()),
-                                                color: subtle_dark(),
-                                                ..Default::default()
-                                            },
-                                        );
-                                    } else if source == TagCompareSource::GitHistory {
-                                        text.append(
-                                            "\nChanges introduced by a selected commit",
-                                            0.0,
-                                            egui::TextFormat {
-                                                font_id: egui::TextStyle::Small.resolve(ui.style()),
-                                                color: subtle_dark(),
-                                                ..Default::default()
-                                            },
-                                        );
-                                    }
-                                    let changed = if matches!(
-                                        source,
-                                        TagCompareSource::GitHead | TagCompareSource::GitHistory
-                                    ) && !git_available
-                                    {
-                                        ui.add_enabled_ui(false, |ui| {
-                                            ui.selectable_value(&mut state.source, source, text)
-                                        })
-                                        .inner
-                                        .changed()
-                                    } else {
-                                        ui.selectable_value(&mut state.source, source, text)
-                                            .changed()
-                                    };
-                                    if changed {
-                                        state.results = None;
-                                        state.error = None;
-                                    }
+                                } else if source == TagCompareSource::GitHead {
+                                    text.append(
+                                        "\nSame tag in the current Git commit",
+                                        0.0,
+                                        egui::TextFormat {
+                                            font_id: egui::TextStyle::Small.resolve(ui.style()),
+                                            color: subtle_dark(),
+                                            ..Default::default()
+                                        },
+                                    );
+                                } else if source == TagCompareSource::GitHistory {
+                                    text.append(
+                                        "\nChanges introduced by a selected commit",
+                                        0.0,
+                                        egui::TextFormat {
+                                            font_id: egui::TextStyle::Small.resolve(ui.style()),
+                                            color: subtle_dark(),
+                                            ..Default::default()
+                                        },
+                                    );
                                 }
-                            });
-                        ui.end_row();
-
-                        match state.source {
-                            TagCompareSource::OpenTag => {
-                                ui.label(RichText::new("Open Tag:").strong());
-                                let selected =
-                                    state.b_kit.zip(state.b_key.as_ref()).and_then(|(id, key)| {
-                                        open_tags.iter().find(|group| group.kit == id).and_then(
-                                            |group| {
-                                                group.tags.iter().find(|(tag, _)| tag == key).map(
-                                                    |(_, label)| {
-                                                        let prefix = format!("{} — ", group.name);
-                                                        let font = egui::TextStyle::Button
-                                                            .resolve(ui.style());
-                                                        let prefix_width = ui
-                                                            .painter()
-                                                            .layout_no_wrap(
-                                                                prefix.clone(),
-                                                                font.clone(),
-                                                                text_dark(),
-                                                            )
-                                                            .size()
-                                                            .x;
-                                                        let path = path_text(
-                                                            ui,
-                                                            label,
-                                                            (field_width - 40.0 - prefix_width)
-                                                                .max(20.0),
-                                                            font,
-                                                        );
-                                                        format!("{prefix}{path}")
-                                                    },
-                                                )
-                                            },
-                                        )
-                                    });
-                                egui::ComboBox::from_id_salt("tag_diff_open_tag")
-                                    .selected_text(
-                                        selected.as_deref().unwrap_or("Select an open tag"),
-                                    )
-                                    .width(field_width)
-                                    .truncate()
-                                    .show_ui(ui, |ui| {
-                                        for (index, group) in open_tags.iter().enumerate() {
-                                            if index > 0 {
-                                                ui.separator();
-                                            }
-                                            ui.label(RichText::new(&group.name).strong())
-                                                .on_hover_text(&group.location);
-                                            let location = path_text(
-                                                ui,
-                                                &group.location,
-                                                menu_path_width,
-                                                egui::TextStyle::Small.resolve(ui.style()),
-                                            );
-                                            ui.label(
-                                                RichText::new(location)
-                                                    .small()
-                                                    .color(subtle_dark()),
-                                            )
-                                            .on_hover_text(&group.location);
-                                            for (key, label) in &group.tags {
-                                                let selected = state.b_kit == Some(group.kit)
-                                                    && state.b_key.as_ref() == Some(key);
-                                                let shown = path_text(
-                                                    ui,
-                                                    label,
-                                                    menu_path_width,
-                                                    egui::TextStyle::Body.resolve(ui.style()),
-                                                );
-                                                if ui
-                                                    .selectable_label(selected, shown)
-                                                    .on_hover_text(native_display_path(label))
-                                                    .clicked()
-                                                {
-                                                    state.b_kit = Some(group.kit);
-                                                    state.b_key = Some(key.clone());
-                                                    state.results = None;
-                                                    state.error = None;
-                                                    selection_changed = true;
-                                                }
-                                            }
-                                        }
-                                    });
-                                ui.end_row();
-                            }
-                            TagCompareSource::File => {
-                                ui.label(RichText::new("Compare With:").strong());
-                                ui.horizontal(|ui| {
-                                    let path = state
-                                        .b_path
-                                        .as_ref()
-                                        .map(|path| path.display().to_string())
-                                        .unwrap_or_else(|| "No tag selected".to_owned());
-                                    path_label(ui, &path, (field_width - 90.0).max(80.0));
-                                    if ui.button("Browse…").clicked() {
-                                        browse = true;
-                                    }
-                                });
-                                ui.end_row();
-                            }
-                            TagCompareSource::EditingKit => {
-                                ui.label(RichText::new("Editing Kit:").strong());
-                                let chosen = kits.iter().find(|kit| {
-                                    state
-                                        .comparison_kit_root
-                                        .as_ref()
-                                        .is_some_and(|root| same_recent_path(root, &kit.tags))
-                                });
-                                egui::ComboBox::from_id_salt("tag_compare_kit")
-                                    .selected_text(
-                                        chosen
-                                            .map(|kit| kit.name.as_str())
-                                            .unwrap_or("Select an editing kit"),
-                                    )
-                                    .width(field_width)
-                                    .truncate()
-                                    .show_ui(ui, |ui| {
-                                        for kit in &kits {
-                                            let selected =
-                                                state.comparison_kit_root.as_ref().is_some_and(
-                                                    |root| same_recent_path(root, &kit.tags),
-                                                );
-                                            if ui
-                                                .selectable_label(selected, &kit.name)
-                                                .on_hover_text(native_display_path(
-                                                    &kit.tags.display().to_string(),
-                                                ))
-                                                .clicked()
-                                            {
-                                                state.comparison_kit_root = Some(kit.tags.clone());
-                                                state.results = None;
-                                                state.error = None;
-                                                selection_changed = true;
-                                            }
-                                        }
-                                    });
-                                ui.end_row();
-                                ui.label(RichText::new("Compare With:").strong());
-                                let path = matched
-                                    .as_ref()
-                                    .map(|path| path.display().to_string())
-                                    .unwrap_or_else(|| "Select an editing kit".to_owned());
-                                path_label(ui, &path, field_width);
-                                ui.end_row();
-                            }
-                            TagCompareSource::GitHead => {
-                                ui.label(RichText::new("Compare With:").strong());
-                                let label = current_path
-                                    .as_ref()
-                                    .map(|path| format!("HEAD: {}", path.display()))
-                                    .unwrap_or_else(|| "No loose tag selected".to_owned());
-                                path_label(ui, &label, field_width);
-                                ui.end_row();
-                            }
-                            TagCompareSource::GitHistory => {
-                                ui.label(RichText::new("Commit:").strong());
-                                let selected = state
-                                    .git_history
-                                    .selected
-                                    .as_ref()
-                                    .and_then(|hash| {
-                                        state
-                                            .git_history
-                                            .commits
-                                            .iter()
-                                            .find(|commit| &commit.hash == hash)
+                                let changed = if matches!(
+                                    source,
+                                    TagCompareSource::GitHead | TagCompareSource::GitHistory
+                                ) && !git_available
+                                {
+                                    ui.add_enabled_ui(false, |ui| {
+                                        ui.selectable_value(&mut state.source, source, text)
                                     })
-                                    .map(commit_text)
-                                    .unwrap_or_else(|| "Select a commit".to_owned());
-                                egui::ComboBox::from_id_salt("tag_compare_git_history")
-                                    .selected_text(selected)
-                                    .width(field_width)
-                                    .truncate()
-                                    .show_ui(ui, |ui| {
-                                        for commit in &state.git_history.commits {
-                                            let selected = state.git_history.selected.as_deref()
-                                                == Some(commit.hash.as_str());
-                                            let label = commit_text(commit);
-                                            let font = egui::TextStyle::Button.resolve(ui.style());
-                                            let shown =
-                                                truncate_end(&label, menu_path_width, |text| {
-                                                    ui.painter()
+                                    .inner
+                                    .changed()
+                                } else {
+                                    ui.selectable_value(&mut state.source, source, text)
+                                        .changed()
+                                };
+                                if changed {
+                                    state.results = None;
+                                    state.error = None;
+                                }
+                            }
+                        });
+                    ui.end_row();
+
+                    match state.source {
+                        TagCompareSource::OpenTag => {
+                            ui.label(RichText::new("Open Tag:").strong());
+                            let selected =
+                                state.b_kit.zip(state.b_key.as_ref()).and_then(|(id, key)| {
+                                    open_tags.iter().find(|group| group.kit == id).and_then(
+                                        |group| {
+                                            group.tags.iter().find(|(tag, _)| tag == key).map(
+                                                |(_, label)| {
+                                                    let prefix = format!("{} — ", group.name);
+                                                    let font = egui::TextStyle::Button
+                                                        .resolve(ui.style());
+                                                    let prefix_width = ui
+                                                        .painter()
                                                         .layout_no_wrap(
-                                                            text.to_owned(),
+                                                            prefix.clone(),
                                                             font.clone(),
                                                             text_dark(),
                                                         )
                                                         .size()
-                                                        .x
-                                                });
+                                                        .x;
+                                                    let path = path_text(
+                                                        ui,
+                                                        label,
+                                                        (field_width - 40.0 - prefix_width)
+                                                            .max(20.0),
+                                                        font,
+                                                    );
+                                                    format!("{prefix}{path}")
+                                                },
+                                            )
+                                        },
+                                    )
+                                });
+                            egui::ComboBox::from_id_salt("tag_diff_open_tag")
+                                .selected_text(
+                                    selected.as_deref().unwrap_or("Select an open tag"),
+                                )
+                                .width(field_width)
+                                .truncate()
+                                .show_ui(ui, |ui| {
+                                    for (index, group) in open_tags.iter().enumerate() {
+                                        if index > 0 {
+                                            ui.separator();
+                                        }
+                                        ui.label(RichText::new(&group.name).strong())
+                                            .on_hover_text(&group.location);
+                                        let location = path_text(
+                                            ui,
+                                            &group.location,
+                                            menu_path_width,
+                                            egui::TextStyle::Small.resolve(ui.style()),
+                                        );
+                                        ui.label(
+                                            RichText::new(location)
+                                                .small()
+                                                .color(subtle_dark()),
+                                        )
+                                        .on_hover_text(&group.location);
+                                        for (key, label) in &group.tags {
+                                            let selected = state.b_kit == Some(group.kit)
+                                                && state.b_key.as_ref() == Some(key);
+                                            let shown = path_text(
+                                                ui,
+                                                label,
+                                                menu_path_width,
+                                                egui::TextStyle::Body.resolve(ui.style()),
+                                            );
                                             if ui
                                                 .selectable_label(selected, shown)
-                                                .on_hover_text(format!("{label}\n{}", commit.hash))
+                                                .on_hover_text(native_display_path(label))
                                                 .clicked()
                                             {
-                                                state.git_history.selected =
-                                                    Some(commit.hash.clone());
+                                                state.b_kit = Some(group.kit);
+                                                state.b_key = Some(key.clone());
                                                 state.results = None;
                                                 state.error = None;
                                                 selection_changed = true;
                                             }
                                         }
-                                        if state.git_history.has_more {
-                                            ui.separator();
-                                            if ui.button("Load older commits…").clicked() {
-                                                let skip = state.git_history.commits.len();
-                                                if let Some(path) = current_path.clone() {
-                                                    older_commits = Some((skip, path));
-                                                }
+                                    }
+                                });
+                            ui.end_row();
+                        }
+                        TagCompareSource::File => {
+                            ui.label(RichText::new("Compare With:").strong());
+                            ui.horizontal(|ui| {
+                                let path = state
+                                    .b_path
+                                    .as_ref()
+                                    .map(|path| path.display().to_string())
+                                    .unwrap_or_else(|| "No tag selected".to_owned());
+                                path_label(ui, &path, (field_width - 90.0).max(80.0));
+                                if ui.button("Browse…").clicked() {
+                                    browse = true;
+                                }
+                            });
+                            ui.end_row();
+                        }
+                        TagCompareSource::EditingKit => {
+                            ui.label(RichText::new("Editing Kit:").strong());
+                            let chosen = kits.iter().find(|kit| {
+                                state
+                                    .comparison_kit_root
+                                    .as_ref()
+                                    .is_some_and(|root| same_recent_path(root, &kit.tags))
+                            });
+                            egui::ComboBox::from_id_salt("tag_compare_kit")
+                                .selected_text(
+                                    chosen
+                                        .map(|kit| kit.name.as_str())
+                                        .unwrap_or("Select an editing kit"),
+                                )
+                                .width(field_width)
+                                .truncate()
+                                .show_ui(ui, |ui| {
+                                    for kit in &kits {
+                                        let selected =
+                                            state.comparison_kit_root.as_ref().is_some_and(
+                                                |root| same_recent_path(root, &kit.tags),
+                                            );
+                                        if ui
+                                            .selectable_label(selected, &kit.name)
+                                            .on_hover_text(native_display_path(
+                                                &kit.tags.display().to_string(),
+                                            ))
+                                            .clicked()
+                                        {
+                                            state.comparison_kit_root = Some(kit.tags.clone());
+                                            state.results = None;
+                                            state.error = None;
+                                            selection_changed = true;
+                                        }
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label(RichText::new("Compare With:").strong());
+                            let path = matched
+                                .as_ref()
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_else(|| "Select an editing kit".to_owned());
+                            path_label(ui, &path, field_width);
+                            ui.end_row();
+                        }
+                        TagCompareSource::GitHead => {
+                            ui.label(RichText::new("Compare With:").strong());
+                            let label = current_path
+                                .as_ref()
+                                .map(|path| format!("HEAD: {}", path.display()))
+                                .unwrap_or_else(|| "No loose tag selected".to_owned());
+                            path_label(ui, &label, field_width);
+                            ui.end_row();
+                        }
+                        TagCompareSource::GitHistory => {
+                            ui.label(RichText::new("Commit:").strong());
+                            let selected = state
+                                .git_history
+                                .selected
+                                .as_ref()
+                                .and_then(|hash| {
+                                    state
+                                        .git_history
+                                        .commits
+                                        .iter()
+                                        .find(|commit| &commit.hash == hash)
+                                })
+                                .map(commit_text)
+                                .unwrap_or_else(|| "Select a commit".to_owned());
+                            egui::ComboBox::from_id_salt("tag_compare_git_history")
+                                .selected_text(selected)
+                                .width(field_width)
+                                .truncate()
+                                .show_ui(ui, |ui| {
+                                    for commit in &state.git_history.commits {
+                                        let selected = state.git_history.selected.as_deref()
+                                            == Some(commit.hash.as_str());
+                                        let label = commit_text(commit);
+                                        let font = egui::TextStyle::Button.resolve(ui.style());
+                                        let shown =
+                                            truncate_end(&label, menu_path_width, |text| {
+                                                ui.painter()
+                                                    .layout_no_wrap(
+                                                        text.to_owned(),
+                                                        font.clone(),
+                                                        text_dark(),
+                                                    )
+                                                    .size()
+                                                    .x
+                                            });
+                                        if ui
+                                            .selectable_label(selected, shown)
+                                            .on_hover_text(format!("{label}\n{}", commit.hash))
+                                            .clicked()
+                                        {
+                                            state.git_history.selected =
+                                                Some(commit.hash.clone());
+                                            state.results = None;
+                                            state.error = None;
+                                            selection_changed = true;
+                                        }
+                                    }
+                                    if state.git_history.has_more {
+                                        ui.separator();
+                                        if ui.button("Load older commits…").clicked() {
+                                            let skip = state.git_history.commits.len();
+                                            if let Some(path) = current_path.clone() {
+                                                older_commits = Some((skip, path));
                                             }
                                         }
-                                    });
-                                ui.end_row();
-                                ui.label(RichText::new("Comparing:").strong());
-                                ui.label("Before commit → After commit");
-                                ui.end_row();
-                            }
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label(RichText::new("Comparing:").strong());
+                            ui.label("Before commit → After commit");
+                            ui.end_row();
                         }
-                    });
-                if state.source == TagCompareSource::OpenTag && open_tags.is_empty() {
+                    }
+                });
+            if state.source == TagCompareSource::OpenTag && open_tags.is_empty() {
+                ui.label(
+                    RichText::new("No other open tags of this type in a matching engine.")
+                        .color(subtle_dark()),
+                );
+            }
+            if state.source == TagCompareSource::EditingKit {
+                if tags_root.as_os_str().is_empty() || file_key_path(&state.a_key).is_none() {
                     ui.label(
-                        RichText::new("No other open tags of this type in a matching engine.")
+                        RichText::new("Matching tags require a loose editing kit tag.")
+                            .color(subtle_dark()),
+                    );
+                } else if kits.is_empty() {
+                    ui.label(
+                        RichText::new("No other configured editing kit uses this engine.")
+                            .color(subtle_dark()),
+                    );
+                } else if let Some(path) = &matched {
+                    if !path.is_file() {
+                        ui.label(
+                            RichText::new("No matching tag at this path and tag type.")
+                                .color(subtle_dark()),
+                        );
+                    }
+                }
+            }
+            if matches!(
+                state.source,
+                TagCompareSource::GitHead | TagCompareSource::GitHistory
+            ) && !git_available
+            {
+                ui.label(
+                    RichText::new(if git_tracked {
+                        "Git comparison requires a loose editing kit tag."
+                    } else {
+                        "Enable Tracked in Git in this editing kit's settings."
+                    })
+                    .color(subtle_dark()),
+                );
+            }
+            if state.source == TagCompareSource::GitHistory {
+                if let Some(error) = &state.git_history.error {
+                    ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
+                } else if state.git_history.loaded
+                    && state.git_pending.is_none()
+                    && state.git_history.commits.is_empty()
+                {
+                    ui.label(
+                        RichText::new("No commits have changed this tag at its current path.")
                             .color(subtle_dark()),
                     );
                 }
-                if state.source == TagCompareSource::EditingKit {
-                    if tags_root.as_os_str().is_empty() || file_key_path(&state.a_key).is_none() {
-                        ui.label(
-                            RichText::new("Matching tags require a loose editing kit tag.")
-                                .color(subtle_dark()),
-                        );
-                    } else if kits.is_empty() {
-                        ui.label(
-                            RichText::new("No other configured editing kit uses this engine.")
-                                .color(subtle_dark()),
-                        );
-                    } else if let Some(path) = &matched {
-                        if !path.is_file() {
-                            ui.label(
-                                RichText::new("No matching tag at this path and tag type.")
-                                    .color(subtle_dark()),
-                            );
-                        }
-                    }
-                }
-                if matches!(
-                    state.source,
-                    TagCompareSource::GitHead | TagCompareSource::GitHistory
-                ) && !git_available
-                {
-                    ui.label(
-                        RichText::new(if git_tracked {
-                            "Git comparison requires a loose editing kit tag."
-                        } else {
-                            "Enable Tracked in Git in this editing kit's settings."
-                        })
-                        .color(subtle_dark()),
-                    );
-                }
-                if state.source == TagCompareSource::GitHistory {
-                    if let Some(error) = &state.git_history.error {
-                        ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
-                    } else if state.git_history.loaded
-                        && state.git_pending.is_none()
-                        && state.git_history.commits.is_empty()
-                    {
-                        ui.label(
-                            RichText::new("No commits have changed this tag at its current path.")
-                                .color(subtle_dark()),
-                        );
-                    }
-                }
-                if state.git_pending.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(RichText::new("Reading Git…").color(subtle_dark()));
-                    });
-                }
-                if let Some(error) = &state.error {
-                    ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
-                }
-                ui.separator();
+            }
+            if state.git_pending.is_some() {
                 ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        compare = icon_text_button(ui, ButtonIcon::Compare, "Compare", can_compare)
-                            .clicked();
-                    });
+                    ui.spinner();
+                    ui.label(RichText::new("Reading Git…").color(subtle_dark()));
                 });
+            }
+            if let Some(error) = &state.error {
+                ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    compare = icon_text_button(ui, ButtonIcon::Compare, "Compare", can_compare)
+                        .clicked();
+                });
+            });
 
-                if let Some(results) = &state.results {
-                    ui.separator();
-                    if displayed_results(results, state.swapped).0.is_empty() {
-                        ui.label(RichText::new("No differences.").color(subtle_dark()));
-                    } else {
-                        ui.horizontal(|ui| {
-                            icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
-                                let history = state.source == TagCompareSource::GitHistory;
-                                ui.checkbox(
-                                    &mut state.filters.both,
-                                    if history {
-                                        "Both versions"
-                                    } else {
-                                        "Both tags"
-                                    },
-                                );
-                                ui.checkbox(
-                                    &mut state.filters.current_only,
-                                    if history {
-                                        "Before only"
-                                    } else {
-                                        "Current tag only"
-                                    },
-                                );
-                                ui.checkbox(
-                                    &mut state.filters.comparison_only,
-                                    if history {
-                                        "After only"
-                                    } else {
-                                        "Comparison tag only"
-                                    },
-                                );
-                            });
-                            if icon_text_button(ui, ButtonIcon::Swap, "Swap", true)
-                                .on_hover_text("Swap the two sides of the comparison")
-                                .clicked()
-                            {
-                                state.swapped = !state.swapped;
-                            }
-                            let (diffs, truncated) = displayed_results(results, state.swapped);
-                            let display_filters = filters_for_display(state.filters, state.swapped);
-                            let visible: Vec<&TagFieldDiff> = diffs
-                                .iter()
-                                .filter(|diff| show_diff(display_filters, diff))
-                                .collect();
-                            let count = if visible.len() == diffs.len() {
-                                format!("{} differing field(s)", visible.len())
-                            } else {
-                                format!("{} of {} differing field(s)", visible.len(), diffs.len())
-                            };
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}{}",
-                                    count,
-                                    if truncated { " (capped)" } else { "" }
-                                ))
-                                .small()
-                                .color(subtle_dark()),
-                            );
-                            if icon_text_button(ui, ButtonIcon::Copy, "Copy", !visible.is_empty())
-                                .on_hover_text("Copy the diff as tab-separated rows")
-                                .clicked()
-                            {
-                                let (left_label, right_label) = if state.swapped {
-                                    (&comparison_label, &current_label)
+            if let Some(results) = &state.results {
+                ui.separator();
+                if displayed_results(results, state.swapped).0.is_empty() {
+                    ui.label(RichText::new("No differences.").color(subtle_dark()));
+                } else {
+                    ui.horizontal(|ui| {
+                        icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
+                            let history = state.source == TagCompareSource::GitHistory;
+                            ui.checkbox(
+                                &mut state.filters.both,
+                                if history {
+                                    "Both versions"
                                 } else {
-                                    (&current_label, &comparison_label)
-                                };
-                                let text =
-                                    std::iter::once(format!("field\t{left_label}\t{right_label}"))
-                                        .chain(
-                                            visible
-                                                .iter()
-                                                .map(|d| format!("{}\t{}\t{}", d.path, d.a, d.b)),
-                                        )
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                ui.copy_text(text);
-                            }
+                                    "Both tags"
+                                },
+                            );
+                            ui.checkbox(
+                                &mut state.filters.current_only,
+                                if history {
+                                    "Before only"
+                                } else {
+                                    "Current tag only"
+                                },
+                            );
+                            ui.checkbox(
+                                &mut state.filters.comparison_only,
+                                if history {
+                                    "After only"
+                                } else {
+                                    "Comparison tag only"
+                                },
+                            );
                         });
-                        ui.separator();
-                        let (diffs, _) = displayed_results(results, state.swapped);
+                        if icon_text_button(ui, ButtonIcon::Swap, "Swap", true)
+                            .on_hover_text("Swap the two sides of the comparison")
+                            .clicked()
+                        {
+                            state.swapped = !state.swapped;
+                        }
+                        let (diffs, truncated) = displayed_results(results, state.swapped);
                         let display_filters = filters_for_display(state.filters, state.swapped);
-                        let (left_label, right_label) = if state.swapped {
-                            (&comparison_label, &current_label)
-                        } else {
-                            (&current_label, &comparison_label)
-                        };
                         let visible: Vec<&TagFieldDiff> = diffs
                             .iter()
                             .filter(|diff| show_diff(display_filters, diff))
                             .collect();
-                        if visible.is_empty() {
-                            ui.label(
-                                RichText::new("No differences match these filters.")
-                                    .color(subtle_dark()),
-                            );
+                        let count = if visible.len() == diffs.len() {
+                            format!("{} differing field(s)", visible.len())
+                        } else {
+                            format!("{} of {} differing field(s)", visible.len(), diffs.len())
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "{}{}",
+                                count,
+                                if truncated { " (capped)" } else { "" }
+                            ))
+                            .small()
+                            .color(subtle_dark()),
+                        );
+                        if icon_text_button(ui, ButtonIcon::Copy, "Copy", !visible.is_empty())
+                            .on_hover_text("Copy the diff as tab-separated rows")
+                            .clicked()
+                        {
+                            let (left_label, right_label) = if state.swapped {
+                                (&comparison_label, &current_label)
+                            } else {
+                                (&current_label, &comparison_label)
+                            };
+                            let text =
+                                std::iter::once(format!("field\t{left_label}\t{right_label}"))
+                                    .chain(
+                                        visible
+                                            .iter()
+                                            .map(|d| format!("{}\t{}\t{}", d.path, d.a, d.b)),
+                                    )
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                            ui.copy_text(text);
                         }
-                        ui.scope(|ui| {
-                            ui.visuals_mut().widgets.noninteractive.bg_stroke =
-                                Stroke::new(1.0_f32, foundation_group_edge());
-                            let width = ui.available_width();
-                            let mut header_rect: Option<egui::Rect> = None;
-                            TableBuilder::new(ui)
-                                .id_salt("tag_diff_table")
-                                .striped(true)
-                                .resizable(true)
-                                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                                .max_scroll_height(460.0)
-                                .min_scrolled_height(0.0)
-                                .column(Column::initial(width * 0.36).at_least(100.0).clip(true))
-                                .column(Column::initial(width * 0.28).at_least(80.0).clip(true))
-                                .column(Column::initial(96.0).at_least(55.0).clip(true))
-                                .column(Column::remainder().at_least(80.0).clip(true))
-                                .header(25.0, |mut header| {
-                                    for title in ["Field", left_label] {
-                                        header.col(|ui| {
-                                            let rect = ui.max_rect();
-                                            header_rect = Some(
-                                                header_rect.map_or(rect, |seen| seen.union(rect)),
-                                            );
-                                            ui.painter().with_clip_rect(rect).text(
-                                                egui::pos2(rect.left() + 8.0, rect.center().y),
-                                                egui::Align2::LEFT_CENTER,
-                                                title,
-                                                bold_font(14.0),
-                                                text_dark(),
-                                            );
-                                        });
-                                    }
+                    });
+                    ui.separator();
+                    let (diffs, _) = displayed_results(results, state.swapped);
+                    let display_filters = filters_for_display(state.filters, state.swapped);
+                    let (left_label, right_label) = if state.swapped {
+                        (&comparison_label, &current_label)
+                    } else {
+                        (&current_label, &comparison_label)
+                    };
+                    let visible: Vec<&TagFieldDiff> = diffs
+                        .iter()
+                        .filter(|diff| show_diff(display_filters, diff))
+                        .collect();
+                    if visible.is_empty() {
+                        ui.label(
+                            RichText::new("No differences match these filters.")
+                                .color(subtle_dark()),
+                        );
+                    }
+                    ui.scope(|ui| {
+                        ui.visuals_mut().widgets.noninteractive.bg_stroke =
+                            Stroke::new(1.0_f32, foundation_group_edge());
+                        let width = ui.available_width();
+                        let mut header_rect: Option<egui::Rect> = None;
+                        TableBuilder::new(ui)
+                            .id_salt("tag_diff_table")
+                            .striped(true)
+                            .resizable(true)
+                            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                            .max_scroll_height(460.0)
+                            .min_scrolled_height(0.0)
+                            .column(Column::initial(width * 0.36).at_least(100.0).clip(true))
+                            .column(Column::initial(width * 0.28).at_least(80.0).clip(true))
+                            .column(Column::initial(96.0).at_least(55.0).clip(true))
+                            .column(Column::remainder().at_least(80.0).clip(true))
+                            .header(25.0, |mut header| {
+                                for title in ["Field", left_label] {
                                     header.col(|ui| {
                                         let rect = ui.max_rect();
-                                        header_rect =
-                                            Some(header_rect.map_or(rect, |seen| seen.union(rect)));
-                                        let font = bold_font(14.0);
-                                        let text_width = ui
-                                            .painter()
-                                            .layout_no_wrap(
-                                                "Diff.".to_owned(),
-                                                font.clone(),
-                                                text_dark(),
-                                            )
-                                            .size()
-                                            .x;
-                                        ui.add_space(
-                                            ((ui.available_width() - text_width) / 2.0).max(0.0),
+                                        header_rect = Some(
+                                            header_rect.map_or(rect, |seen| seen.union(rect)),
                                         );
-                                        ui.add(egui::Label::new(RichText::new("Diff.").font(font)));
-                                    });
-                                    header.col(|ui| {
-                                        let rect = ui.max_rect();
-                                        header_rect =
-                                            Some(header_rect.map_or(rect, |seen| seen.union(rect)));
                                         ui.painter().with_clip_rect(rect).text(
                                             egui::pos2(rect.left() + 8.0, rect.center().y),
                                             egui::Align2::LEFT_CENTER,
-                                            right_label,
+                                            title,
                                             bold_font(14.0),
                                             text_dark(),
                                         );
                                     });
-                                })
-                                .body(|body| {
-                                    body.rows(24.0, visible.len(), |mut row| {
-                                        let diff = visible[row.index()];
-                                        row.col(|ui| {
-                                            ui.add_space(8.0);
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(&diff.path).monospace().small(),
-                                                )
-                                                .truncate()
-                                                .halign(egui::Align::Min),
+                                }
+                                header.col(|ui| {
+                                    let rect = ui.max_rect();
+                                    header_rect =
+                                        Some(header_rect.map_or(rect, |seen| seen.union(rect)));
+                                    let font = bold_font(14.0);
+                                    let text_width = ui
+                                        .painter()
+                                        .layout_no_wrap(
+                                            "Diff.".to_owned(),
+                                            font.clone(),
+                                            text_dark(),
+                                        )
+                                        .size()
+                                        .x;
+                                    ui.add_space(
+                                        ((ui.available_width() - text_width) / 2.0).max(0.0),
+                                    );
+                                    ui.add(egui::Label::new(RichText::new("Diff.").font(font)));
+                                });
+                                header.col(|ui| {
+                                    let rect = ui.max_rect();
+                                    header_rect =
+                                        Some(header_rect.map_or(rect, |seen| seen.union(rect)));
+                                    ui.painter().with_clip_rect(rect).text(
+                                        egui::pos2(rect.left() + 8.0, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        right_label,
+                                        bold_font(14.0),
+                                        text_dark(),
+                                    );
+                                });
+                            })
+                            .body(|body| {
+                                body.rows(24.0, visible.len(), |mut row| {
+                                    let diff = visible[row.index()];
+                                    row.col(|ui| {
+                                        ui.add_space(8.0);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&diff.path).monospace().small(),
+                                            )
+                                            .truncate()
+                                            .halign(egui::Align::Min),
+                                        );
+                                    });
+                                    row.col(|ui| {
+                                        ui.add_space(8.0);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&diff.a).color(text_dark()),
+                                            )
+                                            .truncate()
+                                            .halign(egui::Align::Min),
+                                        );
+                                    });
+                                    row.col(|ui| {
+                                        let rect = ui.max_rect();
+                                        if let Some(icon) = block_change_icon(diff) {
+                                            let icon_rect = egui::Rect::from_center_size(
+                                                rect.center(),
+                                                Vec2::splat(16.0),
                                             );
-                                        });
-                                        row.col(|ui| {
-                                            ui.add_space(8.0);
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(&diff.a).color(text_dark()),
-                                                )
-                                                .truncate()
-                                                .halign(egui::Align::Min),
+                                            paint_button_icon_at(
+                                                ui,
+                                                icon,
+                                                icon_rect,
+                                                text_dark(),
                                             );
-                                        });
-                                        row.col(|ui| {
-                                            let rect = ui.max_rect();
-                                            if let Some(icon) = block_change_icon(diff) {
-                                                let icon_rect = egui::Rect::from_center_size(
-                                                    rect.center(),
-                                                    Vec2::splat(16.0),
-                                                );
-                                                paint_button_icon_at(
-                                                    ui,
-                                                    icon,
-                                                    icon_rect,
-                                                    text_dark(),
-                                                );
-                                                ui.interact(
-                                                    rect,
-                                                    ui.id().with("delta"),
-                                                    egui::Sense::hover(),
-                                                )
-                                                .on_hover_text(format!(
-                                                    "{} in {right_label}",
-                                                    if icon == ButtonIcon::Add {
-                                                        "Added"
-                                                    } else {
-                                                        "Removed"
-                                                    }
-                                                ));
-                                            } else if let Some((direction, amount)) =
-                                                numeric_delta(diff)
-                                            {
-                                                let (arrow, color, description) = match direction {
-                                                    Ordering::Greater => {
-                                                        ("▲", good_news(), "Increased")
-                                                    }
-                                                    Ordering::Less => {
-                                                        ("▼", material_delete_text(), "Decreased")
-                                                    }
-                                                    Ordering::Equal => unreachable!(),
-                                                };
-                                                ui.painter().text(
-                                                    rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    format!("{arrow} {amount}"),
-                                                    egui::TextStyle::Body.resolve(ui.style()),
-                                                    color,
-                                                );
-                                                ui.interact(
-                                                    rect,
-                                                    ui.id().with("delta"),
-                                                    egui::Sense::hover(),
-                                                )
-                                                .on_hover_text(format!(
-                                                    "{description} in {right_label} by {amount}"
-                                                ));
-                                            }
-                                        });
-                                        row.col(|ui| {
-                                            ui.add_space(8.0);
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(&diff.b).color(text_dark()),
-                                                )
-                                                .truncate()
-                                                .halign(egui::Align::Min),
+                                            ui.interact(
+                                                rect,
+                                                ui.id().with("delta"),
+                                                egui::Sense::hover(),
+                                            )
+                                            .on_hover_text(format!(
+                                                "{} in {right_label}",
+                                                if icon == ButtonIcon::Add {
+                                                    "Added"
+                                                } else {
+                                                    "Removed"
+                                                }
+                                            ));
+                                        } else if let Some((direction, amount)) =
+                                            numeric_delta(diff)
+                                        {
+                                            let (arrow, color, description) = match direction {
+                                                Ordering::Greater => {
+                                                    ("▲", good_news(), "Increased")
+                                                }
+                                                Ordering::Less => {
+                                                    ("▼", material_delete_text(), "Decreased")
+                                                }
+                                                Ordering::Equal => unreachable!(),
+                                            };
+                                            ui.painter().text(
+                                                rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                format!("{arrow} {amount}"),
+                                                egui::TextStyle::Body.resolve(ui.style()),
+                                                color,
                                             );
-                                        });
+                                            ui.interact(
+                                                rect,
+                                                ui.id().with("delta"),
+                                                egui::Sense::hover(),
+                                            )
+                                            .on_hover_text(format!(
+                                                "{description} in {right_label} by {amount}"
+                                            ));
+                                        }
+                                    });
+                                    row.col(|ui| {
+                                        ui.add_space(8.0);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&diff.b).color(text_dark()),
+                                            )
+                                            .truncate()
+                                            .halign(egui::Align::Min),
+                                        );
                                     });
                                 });
-                            if let Some(rect) = header_rect {
-                                ui.painter().line_segment(
-                                    [rect.left_bottom(), rect.right_bottom()],
-                                    Stroke::new(1.0_f32, foundation_group_edge()),
-                                );
-                            }
-                        });
-                    }
+                            });
+                        if let Some(rect) = header_rect {
+                            ui.painter().line_segment(
+                                [rect.left_bottom(), rect.right_bottom()],
+                                Stroke::new(1.0_f32, foundation_group_edge()),
+                            );
+                        }
+                    });
                 }
-            });
+            }
+        });
 
-        if browse {
-            if let Some(group) = group {
-                let ext = group_tag_to_extension(group).unwrap_or("");
-                let mut dialog = rfd::FileDialog::new().set_title("Select tag to compare");
-                if !ext.is_empty() {
-                    dialog = dialog.add_filter(ext, &[ext]);
-                }
-                if !tags_root.as_os_str().is_empty() {
-                    dialog = dialog.set_directory(tags_root);
-                }
-                if let Some(path) = dialog.pick_file() {
-                    state.b_path = Some(path);
-                    state.results = None;
-                    state.error = None;
-                    selection_changed = true;
-                }
+    if browse {
+        if let Some(group) = group {
+            let ext = group_tag_to_extension(group).unwrap_or("");
+            let mut dialog = rfd::FileDialog::new().set_title("Select tag to compare");
+            if !ext.is_empty() {
+                dialog = dialog.add_filter(ext, &[ext]);
             }
-        }
-        if let Some((skip, path)) = older_commits {
-            let tags_root = tags_root.to_path_buf();
-            run_tag_compare_git(&self.tx, &mut state, ctx, move || {
-                TagCompareGitUpdate::History {
-                    append: true,
-                    result: git_tag_history(&tags_root, &path, skip),
-                }
-            });
-        }
-        compare |= had_results && selection_changed;
-        if compare {
-            state.results = None;
-            let selected_path = match state.source {
-                TagCompareSource::File => state.b_path.clone(),
-                TagCompareSource::EditingKit => state
-                    .comparison_kit_root
-                    .as_ref()
-                    .and_then(|root| matching_tag_path(&state.a_key, tags_root, root)),
-                _ => selected_path,
-            };
-            let a = self.model.kits[diff_kit].parsed_tags.get(&state.a_key);
-            let b = match state.source {
-                TagCompareSource::OpenTag => {
-                    selected_open_tag(&self.model.kits, state.b_kit, state.b_key.as_deref())
-                }
-                _ => None,
-            };
-            if let (Some(a), Some(b)) = (a, b) {
-                state.results = Some(comparison_results(&a.tag, b));
+            if !tags_root.as_os_str().is_empty() {
+                dialog = dialog.set_directory(tags_root);
+            }
+            if let Some(path) = dialog.pick_file() {
+                state.b_path = Some(path);
+                state.results = None;
                 state.error = None;
-            } else if state.source == TagCompareSource::GitHead {
-                if let (Some(_), Some(path), Some(group)) = (a, current_path.clone(), group) {
-                    let tags_root = tags_root.to_path_buf();
-                    let definitions_root = definitions_root.map(Path::to_path_buf);
-                    run_tag_compare_git(&self.tx, &mut state, ctx, move || {
-                        TagCompareGitUpdate::Head(
-                            git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
-                                crate::core::source::read_tag_from_bytes(
-                                    &bytes,
-                                    game,
-                                    definitions_root.as_deref(),
-                                    group,
-                                )
-                                .map_err(|error| {
-                                    format!("Could not load tag from Git HEAD: {error}")
-                                })
-                            }),
-                        )
-                    });
+                selection_changed = true;
+            }
+        }
+    }
+    if let Some((skip, path)) = older_commits {
+        let tags_root = tags_root.to_path_buf();
+        run_tag_compare_git(cx, &mut state, move || {
+            TagCompareGitUpdate::History {
+                append: true,
+                result: git_tag_history(&tags_root, &path, skip),
+            }
+        });
+    }
+    compare |= had_results && selection_changed;
+    if compare {
+        state.results = None;
+        let selected_path = match state.source {
+            TagCompareSource::File => state.b_path.clone(),
+            TagCompareSource::EditingKit => state
+                .comparison_kit_root
+                .as_ref()
+                .and_then(|root| matching_tag_path(&state.a_key, tags_root, root)),
+            _ => selected_path,
+        };
+        let a = cx.model.kits[diff_kit].parsed_tags.get(&state.a_key);
+        let b = match state.source {
+            TagCompareSource::OpenTag => {
+                selected_open_tag(&cx.model.kits, state.b_kit, state.b_key.as_deref())
+            }
+            _ => None,
+        };
+        if let (Some(a), Some(b)) = (a, b) {
+            state.results = Some(comparison_results(&a.tag, b));
+            state.error = None;
+        } else if state.source == TagCompareSource::GitHead {
+            if let (Some(_), Some(path), Some(group)) = (a, current_path.clone(), group) {
+                let tags_root = tags_root.to_path_buf();
+                let definitions_root = definitions_root.map(Path::to_path_buf);
+                run_tag_compare_git(cx, &mut state, move || {
+                    TagCompareGitUpdate::Head(
+                        git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
+                            crate::core::source::read_tag_from_bytes(
+                                &bytes,
+                                game,
+                                definitions_root.as_deref(),
+                                group,
+                            )
+                            .map_err(|error| {
+                                format!("Could not load tag from Git HEAD: {error}")
+                            })
+                        }),
+                    )
+                });
+            }
+        } else if state.source == TagCompareSource::GitHistory {
+            if let (Some(path), Some(group), Some(revision)) = (
+                current_path.clone(),
+                group,
+                state.git_history.selected.clone(),
+            ) {
+                let tags_root = tags_root.to_path_buf();
+                let definitions_root = definitions_root.map(Path::to_path_buf);
+                run_tag_compare_git(cx, &mut state, move || {
+                    TagCompareGitUpdate::Revision(git_revision_comparison(
+                        &tags_root,
+                        &path,
+                        &revision,
+                        game,
+                        definitions_root.as_deref(),
+                        group,
+                    ))
+                });
+            }
+        } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
+            match crate::core::source::read_tag_at_path(&path, game, definitions_root, group) {
+                Ok(b) if b.group().tag == group => {
+                    state.results = Some(comparison_results(&a.tag, &b));
+                    state.error = None;
                 }
-            } else if state.source == TagCompareSource::GitHistory {
-                if let (Some(path), Some(group), Some(revision)) = (
-                    current_path.clone(),
-                    group,
-                    state.git_history.selected.clone(),
-                ) {
-                    let tags_root = tags_root.to_path_buf();
-                    let definitions_root = definitions_root.map(Path::to_path_buf);
-                    run_tag_compare_git(&self.tx, &mut state, ctx, move || {
-                        TagCompareGitUpdate::Revision(git_revision_comparison(
-                            &tags_root,
-                            &path,
-                            &revision,
-                            game,
-                            definitions_root.as_deref(),
-                            group,
-                        ))
-                    });
+                Ok(_) => {
+                    state.error = Some("The selected tag has a different tag type.".to_owned())
                 }
-            } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
-                match crate::core::source::read_tag_at_path(&path, game, definitions_root, group) {
-                    Ok(b) if b.group().tag == group => {
-                        state.results = Some(comparison_results(&a.tag, &b));
-                        state.error = None;
-                    }
-                    Ok(_) => {
-                        state.error = Some("The selected tag has a different tag type.".to_owned())
-                    }
-                    Err(error) => {
-                        state.error = Some(format!("Could not load comparison tag: {error}"))
-                    }
+                Err(error) => {
+                    state.error = Some(format!("Could not load comparison tag: {error}"))
                 }
             }
-            ctx.request_repaint();
         }
-        if open {
-            self.compare.tag_diff = Some(state);
-        }
+        ctx.request_repaint();
+    }
+    if open {
+        feature.tag_diff = Some(state);
     }
 }
 

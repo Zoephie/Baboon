@@ -117,7 +117,7 @@ use ui_kit::*;
 mod model;
 use model::Model;
 mod context;
-use context::{CommandQueue, Ctx};
+use context::{CommandQueue, Ctx, cx};
 pub(crate) use shell::{StartupArguments, parse_startup_arguments};
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
