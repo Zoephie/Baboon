@@ -8,17 +8,11 @@ pub(in crate::app) use git_review::*;
 pub(in crate::app) mod git_review_window;
 pub(in crate::app) use git_review_window::{GitReviewAction, draw_git_review};
 pub(in crate::app) mod tag_compare;
-pub(in crate::app) use tag_compare::draw_tag_diff_window;
 pub(in crate::app) mod diff;
 pub(in crate::app) use diff::*;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 
-/// Tag comparison: the open Tag Compare.
-pub(in crate::app) struct CompareFeature {
-    /// "Compare Tags" (Tag Diff) window state.
-    pub(in crate::app) tag_diff: Option<TagDiffState>,
-}
 
 /// What tag comparison can be asked to do.
 pub(in crate::app) enum CompareCommand {

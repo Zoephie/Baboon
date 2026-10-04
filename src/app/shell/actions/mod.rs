@@ -138,7 +138,7 @@ impl Baboon {
             AppAction::FindReferences(key) => self.show_references_for(&key),
             AppAction::ExploreReferences(key) => self.open_content_explorer(&key),
             AppAction::CompareTags { kit, key } => {
-                self.compare.tag_diff = Some(TagDiffState {
+                self.dialogs.open(TagDiffState {
                     kit,
                     a_key: key,
                     source: TagCompareSource::OpenTag,

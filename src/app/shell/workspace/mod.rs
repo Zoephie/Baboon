@@ -317,11 +317,6 @@ impl Baboon {
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);
         draw_query_results_window(&cx!(self, ctx), &mut self.search, &mut self.references);
-        draw_tag_diff_window(
-            &cx!(self, ctx),
-            &mut self.compare,
-            &self.kit_tools.editing_kit_validation,
-        );
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);

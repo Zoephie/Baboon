@@ -231,8 +231,6 @@ pub struct Baboon {
     /// References: the content explorer, reference jumps waiting or loading,
     /// field navigation, and a referenced tag waiting to open.
     pub(in crate::app) references: ReferencesFeature,
-    /// Tag comparison: the open Tag Compare.
-    pub(in crate::app) compare: CompareFeature,
     /// The browser: the keyword chooser and a tag waiting to be revealed.
     pub(in crate::app) browser: BrowserFeature,
     /// Documents: the save-changes prompt.
@@ -481,9 +479,6 @@ impl Baboon {
                 ref_jump_loading: HashSet::new(),
                 content_explorer: None,
                 pending_open: None,
-            },
-            compare: CompareFeature {
-                tag_diff: None,
             },
             browser: BrowserFeature {
                 reveal_target: None,
