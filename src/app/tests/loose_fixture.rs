@@ -111,7 +111,10 @@ pub(super) fn ctx() -> egui::Context {
 
 /// Apply worker messages as frames would, until `done` holds.
 pub(super) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Baboon) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // Generous, because the wait is for a real worker job: on a loaded machine
+    // or a shared CI runner the full suite runs several times slower, and a
+    // 30-second budget timed out under load while passing on its own.
+    let deadline = Instant::now() + Duration::from_secs(180);
     let ctx = ctx();
     while !done(app) {
         assert!(
