@@ -350,7 +350,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) sound_has_focus: bool,
     /// Set when the user extracts sound audio to disk (per-perm or whole-tag);
     /// the app drains it to decode + write the files.
-    pub(in crate::app) sound_extract_request: &'a mut Option<super::sound_extract::ExtractRequest>,
+    pub(in crate::app) sound_extract_request:
+        &'a mut Option<crate::app::export::sound_extract::ExtractRequest>,
     /// Selected localized sound language (`None` = default), for the player's
     /// language selector + `data_<lang>\` extraction routing.
     pub(in crate::app) sound_language: Option<&'a str>,
@@ -422,7 +423,7 @@ pub(in crate::app) struct EditSinks {
     block_confirm: Option<BlockConfirm>,
     open_request: Option<OpenTagRequest>,
     sound_play_request: std::collections::VecDeque<super::audio::SoundRequest>,
-    sound_extract_request: Option<super::sound_extract::ExtractRequest>,
+    sound_extract_request: Option<crate::app::export::sound_extract::ExtractRequest>,
     ce_sound_ref_request: Option<CeSoundRefRequest>,
     tool_import: Option<ToolImportRequest>,
     shader_ops: Vec<ShaderOp>,

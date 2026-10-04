@@ -3,6 +3,7 @@
 //! review, and their windows.
 
 use super::*;
+use crate::app::export::ensure_export_directory;
 use crate::app::browser::{
     ModifiedTags, added_text, added_wash, modified_text, removed_text, removed_wash,
 };

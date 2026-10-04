@@ -32,7 +32,7 @@ use super::kit::KitId;
 mod waveform;
 pub(super) use waveform::{Waveform, channel_labels};
 
-use super::sound_extract::{ExtractRequest, ExtractSource, write_wav_pcm16};
+use crate::app::export::sound_extract::{ExtractRequest, ExtractSource, write_wav_pcm16};
 
 use crate::app::shell::worker::spawn_worker;
 

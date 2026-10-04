@@ -100,7 +100,7 @@ fn missing_bank_fixture(name: &str) -> (PathBuf, ExtractRequest, PathBuf) {
     std::fs::create_dir_all(&tags).unwrap();
     let output = root.join("data/sound/test.wav");
     let request = ExtractRequest {
-        items: vec![super::super::sound_extract::ExtractItem {
+        items: vec![crate::app::export::sound_extract::ExtractItem {
             out_path: output.clone(),
             source: ExtractSource::Bank {
                 id: Some(123),

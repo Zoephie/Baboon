@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::export::ContainerDumpReport;
 use crate::app::browser::{
     BITMAP_LIBRARY_KEY, BITMAP_LIBRARY_TITLE, Bitmaps, BrowserAction, BrowserCommand,
     BrowserFeature, BrowserMode, BrowserSort, FilterCache, FolderBrowserState, KeywordChooser,

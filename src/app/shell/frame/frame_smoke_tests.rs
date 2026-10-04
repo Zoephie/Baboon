@@ -36,6 +36,7 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::export::{ContainerDumpConfirm, ContainerDumpScope};
 use crate::app::browser::{
     ContainerFolderDialog, ContentExplorer, ExtractKind, ExtractTargetPrompt,
     LooseFolderRenameState, RenameTagState, TagNameOperation,

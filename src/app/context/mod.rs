@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::export::ExportCommand;
 use crate::app::browser::BrowserCommand;
 
 /// A draw's view of the application. Built from Baboon's fields with

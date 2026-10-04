@@ -3,6 +3,7 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::export::{ExportCommand, load_referenced_tag_from_source};
 use crate::app::browser::{
     BrowserAction, BrowserCommand, CONTEXT_MENU_WIDTH, DraggedTagRef, FieldNav,
     begin_bitmap_hovers, bitmap_hover_preview_ui, bitmap_hover_texture, context_menu_separator,
@@ -25,7 +26,7 @@ pub(super) use bitmap::*;
 mod model;
 pub(super) use model::*;
 
-use super::sound_extract::{
+use crate::app::export::sound_extract::{
     ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,
 };
 

@@ -4,6 +4,7 @@
 //! thumbnails.
 
 use super::*;
+use crate::app::export::is_scenario_group;
 
 mod filter;
 mod tree;

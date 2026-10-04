@@ -2,6 +2,7 @@
 //! and closing tabs or the app with the save-changes prompt.
 
 use super::*;
+use crate::app::export::ContainerDumpReport;
 use crate::app::browser::is_folder_pane_key;
 
 pub(in crate::app) mod selection;
