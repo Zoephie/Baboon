@@ -2,6 +2,7 @@
 //! listings (map ids, sounds by class).
 
 use super::*;
+use crate::app::help::{DefDocs, DefEntry, build_def_docs};
 use crate::app::editor::{
     clean_field_name, find_full_field_name, format_foundation_scalar_value, foundation_block_title,
     is_inherited_parent_name, is_previewable_geometry_group_for_game, jump_target_id,

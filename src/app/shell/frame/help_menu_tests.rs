@@ -4,6 +4,7 @@
 
 use super::perf_baseline_tests::Harness;
 use super::*;
+use crate::app::help::HelpWindow;
 
 fn idle(h: &mut Harness) {
     for _ in 0..4 {

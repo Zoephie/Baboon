@@ -3,6 +3,9 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::help::{
+    DefDocs, DefEntry, GroupHierarchy, build_def_docs, documentation_path, group_hierarchy,
+};
 use crate::app::export::{ExportCommand, load_referenced_tag_from_source};
 use crate::app::browser::{
     BrowserAction, BrowserCommand, CONTEXT_MENU_WIDTH, DraggedTagRef, FieldNav,

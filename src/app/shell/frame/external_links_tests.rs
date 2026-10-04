@@ -4,6 +4,7 @@
 
 use super::perf_baseline_tests::Harness;
 use super::*;
+use crate::app::help::HelpWindow;
 
 /// Click `text`'s `nth` painting and return every URL that asked to open.
 fn click(h: &mut Harness, text: &str, nth: usize) -> Vec<egui::OpenUrl> {

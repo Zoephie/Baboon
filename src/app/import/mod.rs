@@ -3,6 +3,7 @@
 //! import.
 
 use super::*;
+use crate::app::help::HelpCommand;
 use crate::app::editor::lost_focus_once;
 
 pub(in crate::app) mod tags;

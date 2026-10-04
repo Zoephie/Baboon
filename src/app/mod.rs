@@ -94,7 +94,7 @@ mod loose_fixture;
 use crate::core::created_tags::{CreatedTagLedger, CreatedTagRecord};
 use mods::container_write::ContainerLeaseId;
 mod help;
-use help::*;
+use help::{HelpDocsState, HelpFeature, TutorialsState};
 mod compare;
 use compare::*;
 mod search;

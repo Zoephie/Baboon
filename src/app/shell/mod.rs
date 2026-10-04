@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::help::{DefDocs, HelpCommand};
 use crate::app::chimp::{
     ChimpDocument, ChimpDocumentUi, ChimpFeature, ChimpLevelPhase, ChimpReferrerScan,
     ChimpTypeIndex, ChimpWritten, KitSurface, draw_chimp_workspace, format_remaining,

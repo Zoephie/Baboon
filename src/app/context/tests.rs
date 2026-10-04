@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::help::HelpWindow;
 
 /// A draw's request changes nothing until the frame applies it — which is
 /// what lets every draw in a frame see the same model.
