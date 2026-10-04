@@ -1,4 +1,4 @@
-use baboon::script_docs_import;
+mod script_docs_import;
 
 use std::path::PathBuf;
 

@@ -1,6 +1,7 @@
 //! Deterministic generator for the cross-game tag compatibility database.
 //! It owns deriving the per-field verdicts and writing them; browsing them
-//! belongs to `app::tag_compat` and conversion policy to `app::conversion`.
+//! belongs to Baboon's `app::help::tag_compat` and conversion policy to
+//! `app::import::conversion`.
 //!
 //! ## Why this is a build step and not a runtime computation
 //!

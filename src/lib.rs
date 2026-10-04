@@ -19,8 +19,6 @@ macro_rules! include_root_bytes {
 
 mod app;
 mod core;
-pub mod script_docs_import;
-pub mod tag_compat_build;
 #[cfg(test)]
 mod test_kits;
 mod window_state;

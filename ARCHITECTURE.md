@@ -19,8 +19,8 @@ engine. The split is strict:
     egui, eframe or anything in `src/app`; `core/layering_tests.rs` fails the
     build if it does.
   - `src/app` — the egui application.
-  - `src/window_state`, `src/bin`, and the build tools (`script_docs_import`,
-    `tag_compat_build`).
+  - `src/bin`: the build tools that generate `docs/script_docs.sqlite3` and
+    `docs/tag_compat.sqlite3`, each a folder holding all of its own code.
 
 During development the engine is used from a sibling checkout through a
 `[patch]` in `Cargo.toml`; a release pins it by revision.

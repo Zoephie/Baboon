@@ -1,4 +1,4 @@
-use baboon::tag_compat_build;
+mod tag_compat_build;
 
 use std::path::PathBuf;
 
