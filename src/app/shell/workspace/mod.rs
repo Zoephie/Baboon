@@ -422,7 +422,7 @@ impl Baboon {
                 .clicked()
             {
                 close_menu(ui);
-                self.clear_stash_confirm = Some(ClearStashConfirm {
+                self.mods.clear_stash_confirm = Some(ClearStashConfirm {
                     kit: self.active_kit_id(),
                     stashed,
                     unsaved,

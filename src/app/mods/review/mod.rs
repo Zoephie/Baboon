@@ -16,7 +16,7 @@ impl Baboon {
     /// worse than no list — the point of the window is that what is reviewed
     /// and what is written cannot disagree.
     pub(in crate::app) fn refresh_open_mod_review(&mut self, kit: usize) {
-        let Some(open) = self.mod_export.as_ref() else {
+        let Some(open) = self.mods.mod_export.as_ref() else {
             return;
         };
         if self.resolve_kit(open.kit) != Some(kit) {
@@ -25,7 +25,7 @@ impl Baboon {
         let Some((snapshot, rows)) = self.capture_mod_export_rows(kit) else {
             return;
         };
-        let Some(dialog) = self.mod_export.as_mut() else {
+        let Some(dialog) = self.mods.mod_export.as_mut() else {
             return;
         };
         // Whatever the user had already unticked stays unticked.
@@ -130,7 +130,7 @@ impl Baboon {
         if !review_only && !folder.as_os_str().is_empty() {
             let _ = fs::create_dir_all(&folder);
         }
-        self.mod_export = Some(ModExportDialog {
+        self.mods.mod_export = Some(ModExportDialog {
             kit: self.active_kit_id(),
             review_only,
             snapshot,
@@ -138,7 +138,7 @@ impl Baboon {
             // Whatever this session last exported, so a second export replaces
             // that mod instead of quietly making a new one beside it.
             name: self
-                .last_mod_export_name
+                .mods.last_mod_export_name
                 .clone()
                 .unwrap_or_else(|| "mymod".to_owned()),
             folder,
@@ -189,7 +189,7 @@ impl Baboon {
             error: Some(error),
             view: Default::default(),
         };
-        let Some(dialog) = self.mod_export.as_ref() else {
+        let Some(dialog) = self.mods.mod_export.as_ref() else {
             return failed("The review is no longer open".to_owned());
         };
         let Some(overlay) = dialog.snapshot.overlays.get(identity) else {
@@ -248,7 +248,7 @@ impl Baboon {
     /// it. Those two files are enough to re-run the comparison exactly.
     pub(in crate::app) fn save_review_diagnostic(&mut self, folder: PathBuf) -> Result<usize, String> {
         let Some(kit) = self
-            .mod_export
+            .mods.mod_export
             .as_ref()
             .map(|dialog| dialog.kit)
             .and_then(|kit| self.resolve_kit(kit))
@@ -256,7 +256,7 @@ impl Baboon {
             return Err("The review is no longer open".to_owned());
         };
         let identities: Vec<String> = self
-            .mod_export
+            .mods.mod_export
             .as_ref()
             .map(|dialog| dialog.rows.iter().map(|row| row.identity.clone()).collect())
             .unwrap_or_default();
@@ -266,16 +266,16 @@ impl Baboon {
             // Computed on demand, so a diagnostic does not depend on which rows
             // the user happened to expand.
             if !self
-                .mod_export
+                .mods.mod_export
                 .as_ref()
                 .is_some_and(|dialog| dialog.diffs.contains_key(&identity))
             {
                 let diff = self.diff_reviewed_tag(kit, &identity);
-                if let Some(dialog) = self.mod_export.as_mut() {
+                if let Some(dialog) = self.mods.mod_export.as_mut() {
                     dialog.diffs.insert(identity.clone(), diff);
                 }
             }
-            let Some(dialog) = self.mod_export.as_ref() else {
+            let Some(dialog) = self.mods.mod_export.as_ref() else {
                 break;
             };
             let Some(diff) = dialog.diffs.get(&identity) else {

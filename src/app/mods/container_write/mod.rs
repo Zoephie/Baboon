@@ -371,7 +371,7 @@ impl Baboon {
     ) -> Result<ContainerWriteLease, ContainerWriteFailure> {
         let target_utoc = target_utoc.to_path_buf();
         if self
-            .container_write_leases
+            .mods.container_write_leases
             .values()
             .any(|lease| lease.target_utoc == target_utoc)
         {
@@ -384,8 +384,8 @@ impl Baboon {
                 io: None,
             });
         }
-        let id = ContainerLeaseId(self.next_container_lease);
-        self.next_container_lease = self.next_container_lease.wrapping_add(1);
+        let id = ContainerLeaseId(self.mods.next_container_lease);
+        self.mods.next_container_lease = self.mods.next_container_lease.wrapping_add(1);
         let mut lease = ContainerWriteLease {
             id,
             mode,
@@ -547,7 +547,7 @@ impl Baboon {
     /// remount with. A queue nothing drained would leave that workspace idle
     /// for the rest of the session.
     pub(in crate::app) fn drain_pending_chimp_remounts(&mut self, ctx: &egui::Context) -> usize {
-        let remount: Vec<usize> = std::mem::take(&mut self.pending_chimp_remounts)
+        let remount: Vec<usize> = std::mem::take(&mut self.mods.pending_chimp_remounts)
             .into_iter()
             .filter_map(|kit| self.kit_index(kit))
             .collect();
@@ -611,8 +611,8 @@ impl Baboon {
                 }
             }
         }
-        self.pending_chimp_remounts.extend(remount);
-        self.container_write_leases.remove(&lease.id);
+        self.mods.pending_chimp_remounts.extend(remount);
+        self.mods.container_write_leases.remove(&lease.id);
         lease.settled = true;
         report
     }
@@ -625,7 +625,7 @@ impl Baboon {
         lease: ContainerWriteLease,
     ) -> ContainerLeaseId {
         let id = lease.id;
-        self.container_write_leases.insert(id, lease);
+        self.mods.container_write_leases.insert(id, lease);
         id
     }
 
@@ -633,7 +633,7 @@ impl Baboon {
         &mut self,
         id: ContainerLeaseId,
     ) -> Option<ContainerWriteLease> {
-        self.container_write_leases.remove(&id)
+        self.mods.container_write_leases.remove(&id)
     }
 
     /// Release every parked lease belonging to a workspace that has gone away,
@@ -643,7 +643,7 @@ impl Baboon {
         // release, so this is the only thing that puts it back.
         self.drain_pending_chimp_remounts(ctx);
         let orphaned: Vec<ContainerLeaseId> = self
-            .container_write_leases
+            .mods.container_write_leases
             .iter()
             .filter(|(_, lease)| {
                 lease
@@ -656,7 +656,7 @@ impl Baboon {
             .map(|(id, _)| *id)
             .collect();
         for id in orphaned {
-            if let Some(lease) = self.container_write_leases.remove(&id) {
+            if let Some(lease) = self.mods.container_write_leases.remove(&id) {
                 self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
             }
         }

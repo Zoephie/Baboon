@@ -9,7 +9,7 @@ impl Baboon {
     /// It is irreversible and can drop work stashed in earlier sessions, so it
     /// lists exactly what is about to go rather than asking in the abstract.
     pub(in crate::app) fn draw_clear_stash_confirm_window(&mut self, ctx: &egui::Context) {
-        let Some(confirm) = self.clear_stash_confirm.as_ref() else {
+        let Some(confirm) = self.mods.clear_stash_confirm.as_ref() else {
             return;
         };
         let kit = confirm.kit;
@@ -80,9 +80,9 @@ impl Baboon {
                 });
             });
         if !open || cancel {
-            self.clear_stash_confirm = None;
+            self.mods.clear_stash_confirm = None;
         } else if do_clear {
-            self.clear_stash_confirm = None;
+            self.mods.clear_stash_confirm = None;
             // Resolved rather than assumed: the workspace may have been closed
             // while the confirmation was up.
             if let Some(index) = self.resolve_kit(kit) {

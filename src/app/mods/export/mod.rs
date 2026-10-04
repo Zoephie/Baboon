@@ -402,7 +402,7 @@ impl Baboon {
                 // Written straight into the game's own folder: there is nothing
                 // to copy, so the instructions would only be noise.
                 if !in_place {
-                    self.exported_mod = Some(ExportedMod {
+                    self.mods.exported_mod = Some(ExportedMod {
                         stem,
                         directory,
                         count,

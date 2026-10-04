@@ -1083,11 +1083,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "overwrite_confirm",
-            &["overwrite_confirm"],
+            &["mods.overwrite_confirm"],
             &["mods/overwrite_confirm.rs"],
             container_kit,
             |h| {
-                h.app.overwrite_confirm = Some(OverwriteConfirm {
+                h.app.mods.overwrite_confirm = Some(OverwriteConfirm {
                     kit: active_id(h),
                     key: ce_key(),
                 });
@@ -1096,11 +1096,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "clear_stash_confirm",
-            &["clear_stash_confirm"],
+            &["mods.clear_stash_confirm"],
             &["mods/clear_stash_confirm.rs"],
             container_kit,
             |h| {
-                h.app.clear_stash_confirm = Some(ClearStashConfirm {
+                h.app.mods.clear_stash_confirm = Some(ClearStashConfirm {
                     kit: active_id(h),
                     stashed: vec![CE_TAG.to_owned()],
                     unsaved: 1,
@@ -1176,11 +1176,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "exported_mod",
-            &["exported_mod"],
+            &["mods.exported_mod"],
             &["mods/exported_mod_window.rs"],
             container_kit,
             |h| {
-                h.app.exported_mod = Some(ExportedMod {
+                h.app.mods.exported_mod = Some(ExportedMod {
                     stem: "Smoke_P".to_owned(),
                     directory: PathBuf::from("/no/such/Paks/~mods"),
                     count: 2,
@@ -1191,11 +1191,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "mod_export",
-            &["mod_export"],
+            &["mods.mod_export"],
             &["mods/mod_export_window/mod.rs"],
             container_kit,
             |h| {
-                h.app.mod_export = Some(ModExportDialog {
+                h.app.mods.mod_export = Some(ModExportDialog {
                     kit: active_id(h),
                     review_only: false,
                     snapshot: CampaignProjectSnapshot {
@@ -1396,7 +1396,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("last_update_check", "data shown in Settings"),
     ("container_dump_job", "a running job; its progress is in the status bar"),
     ("chimp_level_job", "a running job; its progress is in the status bar"),
-    ("last_mod_export_name", "remembered text"),
+    ("mods.last_mod_export_name", "remembered text"),
     ("chimp_writes", "running saves"),
     ("game_banner_textures", "texture cache keyed by game"),
     ("poke.last_poke", "undo record"),

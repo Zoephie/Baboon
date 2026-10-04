@@ -570,7 +570,7 @@ impl Baboon {
     /// guarded only the container, silently overwriting the `.ucas` and `.pak`
     /// beside it.
     pub(in crate::app) fn draw_mod_export_window(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = self.mod_export.as_ref() else {
+        let Some(dialog) = self.mods.mod_export.as_ref() else {
             return;
         };
         let kit = dialog.kit;
@@ -630,7 +630,7 @@ impl Baboon {
         // game's own packs, and the file this would write may be one of those
         // mounts — which cannot be replaced while it is mapped.
         let export_target = self
-            .mod_export
+            .mods.mod_export
             .as_ref()
             .filter(|dialog| !dialog.review_only)
             .map(ModExportDialog::output_utoc);
@@ -675,7 +675,7 @@ impl Baboon {
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
-                let Some(dialog) = self.mod_export.as_ref() else {
+                let Some(dialog) = self.mods.mod_export.as_ref() else {
                     return;
                 };
                 ui.horizontal(|ui| {
@@ -988,7 +988,7 @@ impl Baboon {
             });
 
         // Applied after the window closes its borrow of `self`.
-        if let Some(dialog) = self.mod_export.as_mut() {
+        if let Some(dialog) = self.mods.mod_export.as_mut() {
             if dialog.name != name_edit {
                 // Kept verbatim. Folding the buffer on every keystroke ate the
                 // space in "My Mod" before the second word could be typed; the
@@ -1029,7 +1029,7 @@ impl Baboon {
         // Computed outside the window, and only for rows that are open and have
         // no result yet: each one costs a container read and two parses.
         let pending: Vec<String> = self
-            .mod_export
+            .mods.mod_export
             .as_ref()
             .map(|dialog| {
                 dialog
@@ -1045,7 +1045,7 @@ impl Baboon {
         {
             for identity in pending {
                 let diff = self.diff_reviewed_tag(index, &identity);
-                if let Some(dialog) = self.mod_export.as_mut() {
+                if let Some(dialog) = self.mods.mod_export.as_mut() {
                     dialog.diffs.insert(identity, diff);
                 }
             }
@@ -1073,17 +1073,17 @@ impl Baboon {
                 .set_title("Export mod into folder")
                 .set_directory(&destination)
                 .pick_folder()
-            && let Some(dialog) = self.mod_export.as_mut()
+            && let Some(dialog) = self.mods.mod_export.as_mut()
         {
             dialog.folder = folder;
             dialog.overwrite_acknowledged = false;
         }
         if !open || cancel {
-            self.mod_export = None;
+            self.mods.mod_export = None;
             return;
         }
         if export {
-            let Some(dialog) = self.mod_export.as_ref() else {
+            let Some(dialog) = self.mods.mod_export.as_ref() else {
                 return;
             };
             let included: HashSet<String> =
@@ -1092,13 +1092,13 @@ impl Baboon {
             // Kept for the next export in this session, so replacing a mod's
             // files does not mean typing its name again.
             let remembered = dialog.name.clone();
-            self.last_mod_export_name = Some(remembered);
+            self.mods.last_mod_export_name = Some(remembered);
             let snapshot = dialog.snapshot.clone();
             // The workspace may have been closed while this was open.
             if self.focus_navigation_kit(kit) {
                 self.write_reviewed_mod(&snapshot, &included, output, ctx);
             }
-            self.mod_export = None;
+            self.mods.mod_export = None;
         }
     }
 }

@@ -371,7 +371,7 @@ fn overwriting_sources_rewrites_the_container_and_remounts() {
         "Overwrote 1 modified Unreal package(s) across 1 source container(s)"
     );
     assert!(app.chimp_writes.is_empty());
-    assert!(app.container_write_leases.is_empty(), "the lease is released");
+    assert!(app.mods.container_write_leases.is_empty(), "the lease is released");
     let document = &app.kits[0].chimp.documents[THING];
     assert!(!document.dirty);
     assert_eq!(document.original, rebuilt, "the discard baseline is the disk");

@@ -12,7 +12,7 @@ impl Baboon {
     /// line, was lost when exports moved onto projects, and the status line now
     /// clears itself after a few seconds besides.
     pub(in crate::app) fn draw_exported_mod_window(&mut self, ctx: &egui::Context) {
-        let Some(exported) = self.exported_mod.as_ref() else {
+        let Some(exported) = self.mods.exported_mod.as_ref() else {
             return;
         };
         let stem = exported.stem.clone();
@@ -107,7 +107,7 @@ impl Baboon {
             self.open_folder_in_explorer(directory, "mod");
         }
         if !open || close {
-            self.exported_mod = None;
+            self.mods.exported_mod = None;
         }
     }
 }

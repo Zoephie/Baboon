@@ -453,7 +453,7 @@ impl Baboon {
                     self.export_mod();
                 }
                 ContainerSaveRoute::ConfirmOverwriteInPlace => {
-                    self.overwrite_confirm = Some(OverwriteConfirm {
+                    self.mods.overwrite_confirm = Some(OverwriteConfirm {
                         kit: self.active_kit_id(),
                         key,
                     });

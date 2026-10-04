@@ -6,7 +6,7 @@ use super::*;
 impl Baboon {
     pub(in crate::app) fn draw_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
         let Some((kit, key)) = self
-            .overwrite_confirm
+            .mods.overwrite_confirm
             .as_ref()
             .map(|confirm| (confirm.kit, confirm.key.clone()))
         else {
@@ -82,9 +82,9 @@ impl Baboon {
                 });
             });
         if !open || cancel {
-            self.overwrite_confirm = None;
+            self.mods.overwrite_confirm = None;
         } else if do_overwrite {
-            self.overwrite_confirm = None;
+            self.mods.overwrite_confirm = None;
             // Apply the opt-out only when the user commits to the overwrite.
             if dont_ask && self.prefs.confirm_container_overwrite {
                 self.prefs.confirm_container_overwrite = false;
@@ -98,7 +98,7 @@ impl Baboon {
                 self.begin_overwrite_current_tag_in_place(&key, ctx);
             }
         } else if do_export {
-            self.overwrite_confirm = None;
+            self.mods.overwrite_confirm = None;
             if self.focus_navigation_kit(kit) {
                 self.export_mod();
             }

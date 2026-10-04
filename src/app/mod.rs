@@ -207,19 +207,6 @@ pub struct Baboon {
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
     settings_tab: SettingsTab,
-    /// Pending in-place overwrite confirmation (the tag key) for a container tag.
-    overwrite_confirm: Option<OverwriteConfirm>,
-    /// Container writes currently in flight, by lease id. A lease outlives the
-    /// UI-thread call that took it exactly when the write runs on a worker, and
-    /// the terminal `WorkerMessage` carries the id back so the completion
-    /// handler can find it. Keyed rather than stacked: two workspaces may be
-    /// writing to two different containers at the same time.
-    container_write_leases: HashMap<ContainerLeaseId, ContainerWriteLease>,
-    next_container_lease: u64,
-    /// Workspaces whose Unreal package mount a finished container write idled
-    /// and must start again. Queued rather than remounted in place because the
-    /// release runs from paths that have no `egui::Context` to spawn with.
-    pending_chimp_remounts: Vec<KitId>,
     /// Mandatory confirmation for a bulk extraction of every shipped tag.
     container_dump_confirm: Option<ContainerDumpConfirm>,
     /// The one bulk container extraction allowed to run at a time.
@@ -232,23 +219,11 @@ pub struct Baboon {
     chimp_texture_export_prompt: Option<ChimpTextureExportPrompt>,
     chimp_level_export_prompt: Option<ChimpLevelExportPrompt>,
     chimp_level_job: Option<ChimpLevelJob>,
-    /// What the last mod exported in this session was called, so exporting
-    /// again offers the same name and replaces that mod's files rather than
-    /// making the user retype it. Deliberately not persisted: it describes what
-    /// this session has been working on, not a preference.
-    last_mod_export_name: Option<String>,
     /// Kits with a Chimp save running, and the close to run once it lands.
     chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
-    /// Pending confirmation for the Campaign Evolved "clear modifications"
-    /// toolbar action, which is irreversible.
-    clear_stash_confirm: Option<ClearStashConfirm>,
     /// Pending workspace-wide Chimp discard, optionally continuing a close
     /// transaction after the packages have been restored.
     chimp_discard_prompt: Option<ChimpDiscardPrompt>,
-    /// Shown after Export Mod, explaining what to do with the files.
-    exported_mod: Option<ExportedMod>,
-    /// Review of a pending Export Mod, before anything is written.
-    mod_export: Option<ModExportDialog>,
     tool_commands: ToolCommandsUiState,
     blender_path_input: String,
     editing_kit_path_inputs: HashMap<String, String>,
@@ -369,6 +344,10 @@ pub struct Baboon {
     /// folders, delete and duplicate, the operations running per workspace, and
     /// the ledger of tags Baboon created.
     pub(in crate::app) tag_ops: TagOpsFeature,
+    /// Campaign Evolved mods: the overwrite and clear-stash prompts, container
+    /// write leases and the remounts they leave, and Export Mod with its
+    /// review.
+    pub(in crate::app) mods: ModsFeature,
 }
 
 impl Baboon {
@@ -520,10 +499,6 @@ impl Baboon {
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
-            overwrite_confirm: None,
-            container_write_leases: HashMap::new(),
-            next_container_lease: 0,
-            pending_chimp_remounts: Vec::new(),
             container_dump_confirm: None,
             container_dump_job: None,
             operation_notice: None,
@@ -531,12 +506,8 @@ impl Baboon {
             chimp_texture_export_prompt: None,
             chimp_level_export_prompt: None,
             chimp_level_job: None,
-            last_mod_export_name: None,
             chimp_writes: HashMap::new(),
-            clear_stash_confirm: None,
             chimp_discard_prompt: None,
-            exported_mod: None,
-            mod_export: None,
             tool_commands: ToolCommandsUiState::default(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
             editing_kit_path_attention: None,
@@ -664,6 +635,16 @@ impl Baboon {
                 loose_folder_rename: None,
                 container_folder_dialog: None,
                 folder_refactor: None,
+            },
+            mods: ModsFeature {
+                overwrite_confirm: None,
+                container_write_leases: HashMap::new(),
+                next_container_lease: 0,
+                pending_chimp_remounts: Vec::new(),
+                last_mod_export_name: None,
+                clear_stash_confirm: None,
+                exported_mod: None,
+                mod_export: None,
             },
         }
     }
