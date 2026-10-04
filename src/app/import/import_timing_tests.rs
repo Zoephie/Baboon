@@ -50,7 +50,7 @@ fn report_where_a_single_bitmap_conversion_spends_its_time() {
     let clock = Instant::now();
     let source = crate::core::source::read_tag_at_path(
         &source_path,
-        Some("halo3_mcc"),
+        Some(GameId::Halo3),
         Some(&definitions),
         u32::from_be_bytes(*b"bitm"),
     )

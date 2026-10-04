@@ -489,7 +489,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
-        let Some(target_game) = self.source().and_then(|source| source.game.clone()) else {
+        let Some(target_game) = self.source().and_then(|source| source.game).map(|game| game.as_str().to_owned()) else {
             self.status = "Import Tags needs a loaded editing kit with a detected game".to_owned();
             return;
         };
@@ -762,7 +762,7 @@ impl Baboon {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let tag = crate::core::source::read_tag_at_path(
                     &path,
-                    Some(&source_game),
+                    GameId::from_id(&source_game),
                     Some(&definitions_root),
                     group_tag,
                 )
@@ -1028,7 +1028,7 @@ impl Baboon {
         let definitions_root = locate_definitions_root();
         let source = TagSource::LooseFolder {
             root: plan.source_root,
-            game: Some(dialog.source_game.clone()),
+            game: GameId::from_id(&dialog.source_game),
             definitions_root: definitions_root.clone(),
         };
         let names = self

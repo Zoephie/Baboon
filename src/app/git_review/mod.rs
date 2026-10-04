@@ -201,7 +201,7 @@ fn profile_has_git_tracking(
 pub(in crate::app) struct GitReviewKit {
     source_root: PathBuf,
     definitions_root: PathBuf,
-    game: Option<String>,
+    game: Option<GameId>,
 }
 
 /// The part of [`GitReviewState`] that Git decides. A job takes a copy to a
@@ -378,7 +378,7 @@ impl GitReviewView {
             .find(|file| file.path == path)
             .ok_or_else(|| "The selected tag is no longer in this change set.".to_owned())?;
         let definitions_root = kit.definitions_root.as_path();
-        let game = kit.game.as_deref();
+        let game = kit.game;
         let load_revision = |revision: &str| -> Result<Option<TagFile>, String> {
             let object = format!("{revision}:{path}");
             let exists = background_command("git")

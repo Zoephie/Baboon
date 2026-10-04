@@ -65,7 +65,7 @@ impl Baboon {
         self.install_loaded_source(loaded);
         self.color_popup = None;
         self.function_popup = None;
-        self.apply_loaded_source_identity(game.as_deref());
+        self.apply_loaded_source_identity(game);
         if let Some((key, tag)) = initial_tag {
             let kit = &mut self.kits[self.active];
             kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
@@ -125,8 +125,8 @@ impl Baboon {
     /// Apply the per-kit identity that follows from the freshly installed
     /// source: where its terminal runs, whether the terminal starts open for
     /// this game, and which keyword sidecar it uses.
-    fn apply_loaded_source_identity(&mut self, game: Option<&str>) {
-        let terminal_open = game.is_some_and(|game| self.terminal_open_games.contains(game));
+    fn apply_loaded_source_identity(&mut self, game: Option<GameId>) {
+        let terminal_open = game.is_some_and(|game| self.terminal_open_games.contains(game.as_str()));
         let kit = &mut self.kits[self.active];
         kit.terminal_work_dir = kit
             .source
@@ -134,7 +134,7 @@ impl Baboon {
             .and_then(LoadedSourceData::kit_layout)
             .map(|layout| layout.root);
         kit.terminal_open = terminal_open;
-        kit.keywords.load_for_game(game);
+        kit.keywords.load_for_game(game.map(GameId::as_str));
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.
@@ -178,7 +178,7 @@ impl Baboon {
                         };
                         let path = crate::core::source::index_db_path();
                         thread::spawn(move || {
-                            let result = crate::core::source::save_entry_index(&game, &root, &entries)
+                            let result = crate::core::source::save_entry_index(game.as_str(), &root, &entries)
                                 .map_err(|error| error.to_string());
                             let _ = tx.send(WorkerMessage::EntryIndexSaved {
                                 stamp,

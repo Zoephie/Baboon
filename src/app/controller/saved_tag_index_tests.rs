@@ -12,7 +12,8 @@ fn a_saved_tag_updates_its_index_row_and_references() {
             .unwrap()
             .as_nanos()
     ));
-    let game = format!("save_index_{}", root.file_name().unwrap().to_string_lossy());
+    // Rows under a real game are told apart by this test's own folder.
+    let game = GameId::Halo3;
     std::fs::create_dir_all(root.join("objects")).unwrap();
     let path = root.join("objects/crate.model");
     let mut tag = TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
@@ -20,7 +21,7 @@ fn a_saved_tag_updates_its_index_row_and_references() {
     let names = TagNameIndex::default();
     let entries =
         crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
-    crate::core::source::save_entry_index(&game, &root, &entries).unwrap();
+    crate::core::source::save_entry_index(game.as_str(), &root, &entries).unwrap();
     let entry = entries[0].clone();
 
     let mut app = Baboon::for_test();
@@ -28,11 +29,11 @@ fn a_saved_tag_updates_its_index_row_and_references() {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: root.clone(),
-            game: Some(game.clone()),
+            game: Some(game),
             definitions_root: PathBuf::new(),
         },
         names: names.clone(),
-        game: Some(game.clone()),
+        game: Some(game),
         entries: entries.clone(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -49,7 +50,7 @@ fn a_saved_tag_updates_its_index_row_and_references() {
         .insert(entry.key.clone(), TagDocument::modified(tag));
 
     let saved = app.save_tag_by_key(&entry.key);
-    let refresh = crate::core::source::refresh_entry_index(&game, &root, &names);
+    let refresh = crate::core::source::refresh_entry_index(game.as_str(), &root, &names);
     let referrers = app.kits[0]
         .source
         .as_ref()
@@ -60,7 +61,7 @@ fn a_saved_tag_updates_its_index_row_and_references() {
                 .to_vec()
         });
 
-    crate::core::source::remove_test_index_rows(&game);
+    crate::core::source::remove_test_index_source(game.as_str(), &root);
     std::fs::remove_dir_all(&root).unwrap();
     assert!(saved.is_ok(), "{saved:?}");
     assert!(
@@ -84,7 +85,8 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
             .unwrap()
             .as_nanos()
     ));
-    let game = format!("save_build_{}", root.file_name().unwrap().to_string_lossy());
+    // Rows under a real game are told apart by this test's own folder.
+    let game = GameId::Halo3;
     std::fs::create_dir_all(root.join("objects")).unwrap();
     let path = root.join("objects/crate.model");
     let mut tag = TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
@@ -92,7 +94,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
     let names = TagNameIndex::default();
     let entries =
         crate::core::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
-    crate::core::source::save_entry_index(&game, &root, &entries).unwrap();
+    crate::core::source::save_entry_index(game.as_str(), &root, &entries).unwrap();
     let entry = entries[0].clone();
 
     let mut app = Baboon::for_test();
@@ -100,7 +102,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: root.clone(),
-            game: Some(game.clone()),
+            game: Some(game),
             definitions_root: PathBuf::new(),
         },
         names: names.clone(),
@@ -138,7 +140,7 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
                 .dependents_for(u32::from_be_bytes(*b"mode"), "objects\\crate")
                 .to_vec()
         });
-    crate::core::source::remove_test_index_rows(&game);
+    crate::core::source::remove_test_index_source(game.as_str(), &root);
     std::fs::remove_dir_all(&root).unwrap();
     assert!(saved.is_ok(), "{saved:?}");
     assert_eq!(referrers, Some(vec![entry.key.clone()]));
@@ -213,7 +215,8 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
             .unwrap()
             .as_nanos()
     ));
-    let game = format!("save_rmop_{}", root.file_name().unwrap().to_string_lossy());
+    // Rows under a real game are told apart by this test's own folder.
+    let game = GameId::Halo3;
     std::fs::create_dir_all(root.join("shaders")).unwrap();
     for (file, group) in [
         ("shaders/bump.render_method_option", "render_method_option"),
@@ -232,11 +235,11 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: root.clone(),
-            game: Some(game.clone()),
+            game: Some(game),
             definitions_root: PathBuf::new(),
         },
         names: names.clone(),
-        game: Some(game.clone()),
+        game: Some(game),
         entries: entries.clone(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -275,6 +278,7 @@ fn saving_a_render_method_option_drops_the_cached_ones() {
 
     let model = save(&mut app, &key_of(b"hlmt"), "model");
     let option = save(&mut app, &key_of(b"rmop"), "render_method_option");
+    crate::core::source::remove_test_index_source(game.as_str(), &root);
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(model, (false, false), "saving another group leaves them");
     assert_eq!(option, (true, true), "saving an option drops them");

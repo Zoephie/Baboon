@@ -129,10 +129,7 @@ impl Baboon {
         let selected = self.kits[kit_index].selected_key.clone();
         let modified_tags = std::sync::Arc::clone(&self.kits[kit_index].modified_tags);
         let deletable_keys = std::sync::Arc::clone(&self.kits[kit_index].deletable_keys);
-        let game = self.kits[kit_index]
-            .source
-            .as_ref()
-            .and_then(|source| source.game.clone());
+        let game = self.kits[kit_index].source.as_ref().and_then(|source| source.game);
         let sound_language = self.audio.language.clone();
         let sound_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
             if let TagSource::LooseFolder { root, .. } = &source.source {
@@ -171,10 +168,10 @@ impl Baboon {
                 set_browser_modified_tags(ui, modified_tags);
                 set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
                 set_browser_deletable_keys(ui, deletable_keys);
-                set_browser_sound_language(ui, game.as_deref(), sound_language.as_deref());
+                set_browser_sound_language(ui, game.map(GameId::as_str), sound_language.as_deref());
                 set_browser_sound_available_languages(
                     ui,
-                    game.as_deref(),
+                    game.map(GameId::as_str),
                     sound_tags_root.as_deref(),
                 );
                 set_browser_entries_scanning(ui, scanning);
@@ -415,7 +412,7 @@ impl Baboon {
         // header flickered between games as the cursor moved between panes.
         let sidebar_header = self.kits[kit_index].source.as_ref().map(|source| {
             (
-                source.game.clone(),
+                source.game,
                 source.source.origin_label(),
                 sidebar_source_path_label(&source.source),
                 self.kits[kit_index]
@@ -425,7 +422,7 @@ impl Baboon {
             )
         });
         if let Some((Some(game), _origin, path_label, profile_id)) = sidebar_header.as_ref() {
-            draw_game_banner_header(ui, self, game, path_label, profile_id.as_deref());
+            draw_game_banner_header(ui, self, game.as_str(), path_label, profile_id.as_deref());
         } else {
             ui.heading(RichText::new("Tags").color(text_dark()));
             if let Some((_, origin, _, _)) = sidebar_header.as_ref() {
@@ -467,20 +464,20 @@ impl Baboon {
             self.kits[kit_index]
                 .source
                 .as_ref()
-                .and_then(|source| source.game.clone()),
+                .and_then(|source| source.game),
         );
         set_browser_sound_language(
             ui,
             self.kits[kit_index]
                 .source
                 .as_ref()
-                .and_then(|source| source.game.as_deref()),
+                .and_then(|source| source.game.map(GameId::as_str)),
             self.audio.language.as_deref(),
         );
         let browser_game = self.kits[kit_index]
             .source
             .as_ref()
-            .and_then(|source| source.game.as_deref());
+            .and_then(|source| source.game.map(GameId::as_str));
         let browser_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 Some(root.as_path())

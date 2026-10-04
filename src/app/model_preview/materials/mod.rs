@@ -188,7 +188,7 @@ pub(crate) fn resolve_model_textures(
                 game: Some(game),
                 definitions_root,
                 ..
-            } => TagNameIndex::load_game(definitions_root, game).ok(),
+            } => TagNameIndex::load_game(definitions_root, *game).ok(),
             _ => None,
         },
         ..Default::default()

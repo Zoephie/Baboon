@@ -54,7 +54,7 @@ pub fn load_folder(
     load_resolved_folder(
         info.scan_root,
         info.label,
-        info.game.map(str::to_owned),
+        info.game,
         fallback_names,
         definitions_root,
     )
@@ -66,7 +66,7 @@ pub fn load_folder(
 pub fn load_editing_kit_layout(
     tags_root: PathBuf,
     label: String,
-    game: String,
+    game: GameId,
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
 ) -> Result<LoadedSourceData> {
@@ -82,12 +82,11 @@ pub fn load_editing_kit_layout(
 fn load_resolved_folder(
     scan_root: PathBuf,
     label: String,
-    game: Option<String>,
+    game: Option<GameId>,
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
 ) -> Result<LoadedSourceData> {
     let names = game
-        .as_deref()
         .and_then(|g| TagNameIndex::load_game(definitions_root, g).ok())
         .unwrap_or_else(|| fallback_names.clone());
     let entries = Vec::new();
@@ -95,18 +94,16 @@ fn load_resolved_folder(
         .with_context(|| format!("failed to list folders in {}", scan_root.display()))?;
     // Pre-load a saved index so Groups and search work immediately.
     let all_entries = game
-        .as_deref()
-        .and_then(|g| load_entry_index(g, &scan_root))
+        .and_then(|g| load_entry_index(g.as_str(), &scan_root))
         .unwrap_or_default();
-    let reverse_dependencies = game
-        .as_deref()
-        .and_then(|g| load_reverse_dependency_index(g, &scan_root));
+    let reverse_dependencies =
+        game.and_then(|g| load_reverse_dependency_index(g.as_str(), &scan_root));
     let group_tree = build_group_tree(&all_entries);
     Ok(LoadedSourceData {
         label,
         source: TagSource::LooseFolder {
             root: scan_root,
-            game: game.clone(),
+            game,
             definitions_root: definitions_root.to_path_buf(),
         },
         names,
@@ -184,7 +181,6 @@ pub fn load_monolithic_blob_index(
     })
 }
 
-const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
 
 /// Mounts every IoStore container in a `Paks` directory as one merged read-only
 /// source of Reach tags (Halo: Campaign Evolved). Shared tags live in
@@ -521,7 +517,7 @@ fn build_container_set(
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
 ) -> Result<LoadedSourceData> {
-    let names = TagNameIndex::load_game(definitions_root, CAMPAIGN_EVOLVED_GAME)
+    let names = TagNameIndex::load_game(definitions_root, GameId::CampaignEvolved)
         .unwrap_or_else(|_| fallback_names.clone());
 
     let mut containers: Vec<MountedContainer> = Vec::new();
@@ -707,7 +703,7 @@ fn build_container_set(
             shipped: Arc::new(shipped),
         },
         names,
-        game: Some(CAMPAIGN_EVOLVED_GAME.to_string()),
+        game: Some(GameId::CampaignEvolved),
         all_entries: Vec::new(),
         entries,
         tree,
@@ -948,7 +944,7 @@ pub fn read_entry(source: &TagSource, entry: &TagEntry) -> Result<TagFile> {
                 definitions_root,
                 ..
             },
-        ) => read_loose_tag(path, entry, game.as_deref(), definitions_root)
+        ) => read_loose_tag(path, entry, *game, definitions_root)
             .with_context(|| format!("failed to load {}", path.display())),
         (TagEntryLocation::LooseFile(path), _) => {
             read_non_classic_tag(path).with_context(|| format!("failed to load {}", path.display()))
@@ -1002,7 +998,7 @@ pub fn read_entry(source: &TagSource, entry: &TagEntry) -> Result<TagFile> {
 /// rather than the plain `TagFile::read`. `group_tag` selects the classic layout.
 pub fn read_tag_at_path(
     path: &Path,
-    game: Option<&str>,
+    game: Option<GameId>,
     definitions_root: Option<&Path>,
     group_tag: u32,
 ) -> Result<TagFile> {
@@ -1014,7 +1010,7 @@ pub fn read_tag_at_path(
         let group_name = blam_tags::paths::group_tag_to_extension(group_tag)
             .context("unknown group for classic tag layout")?;
         let def_path = definitions_root
-            .join(game)
+            .join(game.as_str())
             .join(format!("{group_name}.json"));
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
@@ -1033,7 +1029,7 @@ pub fn read_tag_at_path(
 /// `TagFile::write_to_bytes` (which writes classic format for classic tags).
 pub fn read_tag_from_bytes(
     bytes: &[u8],
-    game: Option<&str>,
+    game: Option<GameId>,
     definitions_root: Option<&Path>,
     group_tag: u32,
 ) -> Result<TagFile> {
@@ -1044,7 +1040,7 @@ pub fn read_tag_from_bytes(
         let group_name =
             group_tag_to_extension(group_tag).context("unknown group for classic tag layout")?;
         let def_path = definitions_root
-            .join(game)
+            .join(game.as_str())
             .join(format!("{group_name}.json"));
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
@@ -1057,7 +1053,7 @@ pub fn read_tag_from_bytes(
 fn read_loose_tag(
     path: &Path,
     entry: &TagEntry,
-    game: Option<&str>,
+    game: Option<GameId>,
     definitions_root: &Path,
 ) -> Result<TagFile> {
     let bytes = std::fs::read(path)?;
@@ -1072,7 +1068,7 @@ fn read_loose_tag(
             )
         })?;
         let def_path = definitions_root
-            .join(game)
+            .join(game.as_str())
             .join(format!("{group_name}.json"));
         if !def_path.is_file() {
             if !definitions_root.is_dir() {

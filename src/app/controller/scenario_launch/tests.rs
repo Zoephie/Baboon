@@ -5,11 +5,11 @@ fn loaded_source(root: PathBuf, game: &str) -> LoadedSourceData {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root,
-            game: Some(game.to_owned()),
+            game: GameId::from_id(game),
             definitions_root: PathBuf::new(),
         },
         names: TagNameIndex::default(),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),

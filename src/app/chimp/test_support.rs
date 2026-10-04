@@ -452,7 +452,7 @@ impl SyntheticInstall {
                 shipped: Default::default(),
             },
             names: TagNameIndex::default(),
-            game: Some("haloce_evolved".to_owned()),
+            game: Some(GameId::CampaignEvolved),
             entries: Vec::new(),
             tree: TagTree::default(),
             group_tree: TagTree::default(),

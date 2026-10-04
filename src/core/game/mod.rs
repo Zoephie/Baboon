@@ -29,6 +29,12 @@ pub(crate) trait GameFacts: Copy {
     fn monitor_commands(self) -> &'static [&'static str];
     /// Whether HaloScript documentation exists for the game.
     fn has_script_docs(self) -> bool;
+    /// Whether the kit's tools take `-tags_dir`/`-data_dir`, so a kit can
+    /// edit tags and data folders other than its own. Only the Halo CE and
+    /// Halo 2 tools do; the Halo 3-era tools open `tags\` and `data\` beside
+    /// themselves and take no option to change it (checked in IDA for the
+    /// Halo 3 and Reach `tool.exe`).
+    fn tools_take_folder_arguments(self) -> bool;
 }
 
 impl GameFacts for GameId {
@@ -116,6 +122,10 @@ impl GameFacts for GameId {
     fn has_script_docs(self) -> bool {
         !self.is_campaign_evolved()
     }
+
+    fn tools_take_folder_arguments(self) -> bool {
+        self.is_classic()
+    }
 }
 
 /// The game a folder name stands for: an editing kit's folder (`H3EK`, and
@@ -136,6 +146,14 @@ pub(crate) fn game_for_kit_folder(name: &str) -> Option<GameId> {
                 || (game.kit_name().is_some() && game.as_str().eq_ignore_ascii_case(name))
         })
     })
+}
+
+/// The game a saved game id names. Settings written by older builds may differ
+/// in case, so the comparison ignores it.
+pub(crate) fn game_for_saved_id(id: &str) -> Option<GameId> {
+    GameId::ALL
+        .into_iter()
+        .find(|game| game.as_str().eq_ignore_ascii_case(id))
 }
 
 /// The game a `-H3EK`-style command-line flag opens, in any case, including

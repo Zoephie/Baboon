@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use crate::core::game::GameId;
 use blam_tags::{StringIdData, TagFieldData, TagReferenceData, format_group_tag, parse_group_tag};
 use serde_json::Value;
 
@@ -122,8 +123,8 @@ impl TagNameIndex {
     }
 
     /// Loads the exact metadata index for one definition game.
-    pub fn load_game(definitions_root: &Path, game: &str) -> Result<Self> {
-        TagNameIndex::load_meta(&definitions_root.join(game).join("_meta.json"))
+    pub fn load_game(definitions_root: &Path, game: GameId) -> Result<Self> {
+        TagNameIndex::load_meta(&definitions_root.join(game.as_str()).join("_meta.json"))
     }
 
     /// Loads one `_meta.json`, retaining path context in parse errors.

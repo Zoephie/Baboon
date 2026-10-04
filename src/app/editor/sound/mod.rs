@@ -1953,7 +1953,9 @@ fn load_referenced_sound(
 ) -> Option<(TagFile, std::path::PathBuf)> {
     let tags_root = tags_root?;
     let abs = blam_tags::paths::resolve_tag_path(tags_root, rel_path, "sound");
-    let tag = crate::core::source::read_tag_at_path(&abs, game, definitions_root, group).ok()?;
+    let tag =
+        crate::core::source::read_tag_at_path(&abs, game.and_then(GameId::from_id), definitions_root, group)
+            .ok()?;
     Some((tag, abs))
 }
 

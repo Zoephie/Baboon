@@ -278,7 +278,7 @@ fn entries_for_unsupported_games(entries: Option<&Value>) -> Vec<Value> {
                     entry
                         .get("game")
                         .and_then(Value::as_str)
-                        .and_then(|game| supported_ek_game_id(game.trim()))
+                        .and_then(|game| game_for_saved_id(game.trim()))
                         .is_none()
                 })
                 .cloned()
@@ -556,7 +556,7 @@ fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
                     }
                     Some(EkFolderAlias {
                         folder_name: folder_name.to_owned(),
-                        game: supported_ek_game_id(game)?.to_owned(),
+                        game: game_for_saved_id(game)?.as_str().to_owned(),
                     })
                 })
                 .collect()
@@ -597,7 +597,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
         let Some(game) = entry
             .get("game")
             .and_then(Value::as_str)
-            .and_then(supported_ek_game_id)
+            .and_then(game_for_saved_id)
         else {
             continue;
         };
@@ -625,14 +625,14 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
                 .get(key)
                 .and_then(Value::as_str)
                 .map(str::trim)
-                .filter(|folder| !folder.is_empty() && kit_folders_are_choosable(game))
+                .filter(|folder| !folder.is_empty() && game.tools_take_folder_arguments())
                 .map(PathBuf::from)
                 .map(clean_recent_path)
         };
         let tags_folder = folder("tags_folder");
         let data_folder = folder("data_folder");
         profiles.push(CustomEditingKitProfile {
-            read_only: game != "haloce_evolved"
+            read_only: !game.is_campaign_evolved()
                 && entry
                     .get("read_only")
                     .and_then(Value::as_bool)
@@ -643,7 +643,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
                 .unwrap_or(false),
             id: id.to_owned(),
             name: name.to_owned(),
-            game: game.to_owned(),
+            game: game.as_str().to_owned(),
             root,
             icon,
             tags_folder,

@@ -90,7 +90,7 @@ pub(super) fn documentation_path(path_prefix: &str, entry_index: usize) -> Strin
 /// and merging every file's structs by GUID. Object-family tags (biped → unit →
 /// object) inherit fields whose struct definitions live in the parent files, so
 /// the chain must be walked for those fields' docs to resolve.
-pub(super) fn build_def_docs(definitions_root: &Path, game: &str, group: &str) -> DefDocs {
+pub(super) fn build_def_docs(definitions_root: &Path, game: GameId, group: &str) -> DefDocs {
     let mut docs = DefDocs::default();
     let mut visited = HashSet::new();
     let mut current = Some(group.to_owned());
@@ -98,7 +98,7 @@ pub(super) fn build_def_docs(definitions_root: &Path, game: &str, group: &str) -
         if !visited.insert(g.clone()) {
             break; // cycle guard
         }
-        let path = definitions_root.join(game).join(format!("{g}.json"));
+        let path = definitions_root.join(game.as_str()).join(format!("{g}.json"));
         let Ok(json) = std::fs::read_to_string(&path) else {
             break;
         };

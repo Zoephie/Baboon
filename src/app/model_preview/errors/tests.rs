@@ -47,7 +47,7 @@ fn read_h2_tag(path: &Path, definition: &str) -> TagFile {
 fn read_h2r_tag(path: &Path, group_tag: &[u8; 4]) -> TagFile {
     crate::core::source::read_tag_at_path(
         path,
-        Some(H2_GAME),
+        GameId::from_id(H2_GAME),
         Some(&definitions_root()),
         u32::from_be_bytes(*group_tag),
     )
@@ -57,7 +57,7 @@ fn read_h2r_tag(path: &Path, group_tag: &[u8; 4]) -> TagFile {
 fn h2_source(root: PathBuf) -> TagSource {
     TagSource::LooseFolder {
         root,
-        game: Some(H2_GAME.to_owned()),
+        game: GameId::from_id(H2_GAME),
         definitions_root: definitions_root(),
     }
 }
@@ -137,7 +137,7 @@ fn shipped_h2_model_wrapper_keeps_referenced_render_errors() {
     }
     let tag = read_h2_tag(&path, "model.json");
     let names =
-        TagNameIndex::load_game(&definitions_root(), H2_GAME).expect("load Halo 2 tag names");
+        TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap()).expect("load Halo 2 tag names");
     let source = h2_source(root);
     let entry = model_entry(path, "objects/cinematics/human/cairo/cairo.model");
     let data = load_model_preview(
@@ -264,7 +264,7 @@ fn shipped_h2r_cov_barrier_duplicate_triangle_is_a_drawable_face() {
     let model_path = root.join(r"objects\gear\covenant\military\cov_barrier\cov_barrier.model");
     let model = read_h2r_tag(&model_path, b"hlmt");
     let names =
-        TagNameIndex::load_game(&definitions_root(), H2_GAME).expect("load Halo 2 tag names");
+        TagNameIndex::load_game(&definitions_root(), GameId::from_id(H2_GAME).unwrap()).expect("load Halo 2 tag names");
     let source = h2_source(root);
     let entry = model_entry(
         model_path,

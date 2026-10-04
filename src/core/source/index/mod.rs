@@ -181,6 +181,18 @@ pub(crate) fn remove_test_index_rows(game: &str) {
     }
 }
 
+/// Drop the index rows a test wrote for one folder under a real game, leaving
+/// that game's other folders (the user's own indexes among them) alone.
+#[cfg(test)]
+pub(crate) fn remove_test_index_source(game: &str, root: &Path) {
+    if let Ok(conn) = open_index_db() {
+        let _ = conn.execute(
+            "DELETE FROM sources WHERE game = ?1 AND root_key = ?2",
+            params![game, cache_root_key(root)],
+        );
+    }
+}
+
 /// Replace one tag's rows in an existing reverse-dependency index, or remove
 /// them (`deps: None`). Like [`upsert_entry_index_row`], it does nothing for a
 /// folder with no reference index, since a partial graph would load back as a

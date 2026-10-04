@@ -213,7 +213,7 @@ fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
     };
     let source = TagSource::LooseFolder {
         root: tags_root.clone(),
-        game: Some("haloreach_mcc".to_owned()),
+        game: Some(GameId::HaloReach),
         definitions_root: std::path::PathBuf::new(),
     };
     let entry_for = |rel: &str| TagEntry {
@@ -306,7 +306,7 @@ fn a_real_kits_animation_decodes_into_frames() {
     }
     let source = TagSource::LooseFolder {
         root: tags_root,
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: std::path::PathBuf::new(),
     };
     let entry = TagEntry {
@@ -362,7 +362,7 @@ fn rotation_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
 /// check is the one a wrong conjugation fails.
 fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
     let tag = crate::core::source::read_entry(&source, &entry).expect("tag reads");
-    let names = TagNameIndex::load_game(crate::test_kits::definitions(), game).expect("tag names");
+    let names = TagNameIndex::load_game(crate::test_kits::definitions(), GameId::from_id(game).unwrap()).expect("tag names");
     let data = crate::app::model_preview::loading::load_model_preview(
         &tag,
         &entry,
@@ -443,7 +443,7 @@ fn a_halo_ce_biped_plays_its_idle() {
     }
     let source = TagSource::LooseFolder {
         root: tags.clone(),
-        game: Some("haloce_mcc".to_owned()),
+        game: Some(GameId::HaloCe),
         definitions_root: crate::test_kits::definitions().to_path_buf(),
     };
     let entry = TagEntry {
@@ -467,7 +467,7 @@ fn a_halo_2_model_plays_its_idle() {
     }
     let source = TagSource::LooseFolder {
         root: tags.clone(),
-        game: Some("halo2_mcc".to_owned()),
+        game: Some(GameId::Halo2),
         definitions_root: crate::test_kits::definitions().to_path_buf(),
     };
     let entry = TagEntry {
@@ -486,7 +486,7 @@ fn a_halo_2_model_plays_its_idle() {
 fn only_halo_ce_is_halo1_for_animation_lists() {
     let folder = |game: &str| TagSource::LooseFolder {
         root: std::path::PathBuf::from("/tags"),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         definitions_root: std::path::PathBuf::new(),
     };
     assert!(source_is_halo1(&folder("haloce_mcc")));

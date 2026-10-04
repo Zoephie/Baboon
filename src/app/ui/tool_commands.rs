@@ -10,7 +10,7 @@ impl Baboon {
         }
         let game = self
             .source()
-            .and_then(|source| source.game.as_deref())
+            .and_then(|source| source.game.map(GameId::as_str))
             .map(str::to_owned);
         if let Some(game) = game.as_deref() {
             self.ensure_tool_commands_loaded(game);

@@ -197,7 +197,7 @@ pub(in crate::app) enum ReplaceChoice {
 pub(in crate::app) struct CacheImportTarget {
     pub(in crate::app) kit: KitId,
     pub(in crate::app) label: String,
-    pub(in crate::app) game: String,
+    pub(in crate::app) game: GameId,
     pub(in crate::app) tags_root: PathBuf,
 }
 
@@ -343,7 +343,7 @@ impl Baboon {
                 Some(CacheImportTarget {
                     kit: kit.id,
                     label: source.label.clone(),
-                    game: game.clone()?,
+                    game: (*game)?,
                     tags_root: root.clone(),
                 })
             })
@@ -418,7 +418,7 @@ impl Baboon {
                     .collect(),
             ),
         };
-        let (target_game, target_tags_root) = (target.game.clone(), target.tags_root.clone());
+        let (target_game, target_tags_root) = (target.game.as_str().to_owned(), target.tags_root.clone());
         let cancel = dialog.cancel.clone();
         cancel.store(false, Ordering::Relaxed);
 

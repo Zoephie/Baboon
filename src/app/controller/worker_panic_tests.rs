@@ -47,7 +47,7 @@ fn campaign_evolved_source(root: &Path) -> LoadedSourceData {
             shipped: Default::default(),
         },
         names: TagNameIndex::default(),
-        game: Some("haloce_evolved".to_owned()),
+        game: Some(GameId::CampaignEvolved),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -83,11 +83,11 @@ fn loose_kit(app: &mut Baboon, root: &Path) {
         label: "kit".to_owned(),
         source: TagSource::LooseFolder {
             root: root.to_path_buf(),
-            game: Some("halo3_mcc".to_owned()),
+            game: Some(GameId::Halo3),
             definitions_root: PathBuf::new(),
         },
         names: TagNameIndex::default(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -144,15 +144,15 @@ fn an_import_source_check_that_panics_stops_spinning() {
 fn a_palette_read_that_panics_is_unreadable_not_loading() {
     let mut app = Baboon::for_test();
     let ctx = egui::Context::default();
-    with_panicking_workers(|| app.scenario_palettes_for_game("halo3_mcc", &ctx).is_none());
+    with_panicking_workers(|| app.scenario_palettes_for_game(GameId::Halo3, &ctx).is_none());
     assert!(matches!(
-        app.kit_tool_drag.palettes.get("halo3_mcc"),
+        app.kit_tool_drag.palettes.get(&GameId::Halo3),
         Some(PaletteTable::Loading)
     ));
 
     assert!(apply_next_worker_message(&mut app), "the read answered");
     assert!(matches!(
-        app.kit_tool_drag.palettes.get("halo3_mcc"),
+        app.kit_tool_drag.palettes.get(&GameId::Halo3),
         Some(PaletteTable::Unreadable)
     ));
 }

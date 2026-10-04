@@ -856,7 +856,7 @@ impl Baboon {
     }
 
     fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
-        let game = self.source().and_then(|source| source.game.as_deref());
+        let game = self.source().and_then(|source| source.game.map(GameId::as_str));
         let commands = monitor_commands_for_game(game);
         let enabled = !commands.is_empty();
         let ctx = ui.ctx().clone();

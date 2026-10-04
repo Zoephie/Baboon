@@ -145,7 +145,7 @@ pub(in crate::app) struct CustomEditingKitProfile {
 /// Reach `tool.exe`), so a kit editing another folder would have its tools
 /// working on a different one.
 pub(in crate::app) fn kit_folders_are_choosable(game: &str) -> bool {
-    matches!(game, "haloce_mcc" | "halo2_mcc")
+    GameId::from_id(game).is_some_and(GameFacts::tools_take_folder_arguments)
 }
 
 impl CustomEditingKitProfile {

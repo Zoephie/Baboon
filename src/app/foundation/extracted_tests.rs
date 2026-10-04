@@ -76,8 +76,8 @@ pub(in crate::app) mod tests {
     #[test]
     fn ce_collision_geometry_reference_uses_loaded_game_extension() {
         let definitions_root = locate_definitions_root();
-        let ce_names = TagNameIndex::load_game(&definitions_root, "haloce_mcc").unwrap();
-        let h3_names = TagNameIndex::load_game(&definitions_root, "halo3_mcc").unwrap();
+        let ce_names = TagNameIndex::load_game(&definitions_root, GameId::HaloCe).unwrap();
+        let h3_names = TagNameIndex::load_game(&definitions_root, GameId::Halo3).unwrap();
         let coll = parse_group_tag("coll").unwrap();
         let root = std::env::temp_dir().join(format!(
             "baboon_ce_collision_reference_test_{}",
@@ -497,11 +497,11 @@ pub(in crate::app) mod tests {
     #[test]
     fn an_object_reference_takes_every_object_type() {
         let definitions_root = locate_definitions_root();
-        let names = TagNameIndex::load_game(&definitions_root, "haloreach_mcc").unwrap();
+        let names = TagNameIndex::load_game(&definitions_root, GameId::HaloReach).unwrap();
         let hierarchy = group_hierarchy(Some(&definitions_root), Some("haloreach_mcc"));
         let docs = crate::app::field_docs::build_def_docs(
             &definitions_root,
-            "haloreach_mcc",
+            GameId::HaloReach,
             "multiplayer_object_type_list",
         );
         let allowed: Vec<u32> = docs
@@ -704,7 +704,7 @@ pub(in crate::app) mod tests {
                 shipped: std::sync::Arc::new(crate::core::source::ShippedTagIndex::default()),
             },
             names: TagNameIndex::default(),
-            game: Some("haloce_evolved".to_owned()),
+            game: Some(GameId::CampaignEvolved),
             entries: Vec::new(),
             tree: TagTree::default(),
             group_tree: TagTree::default(),
@@ -723,11 +723,11 @@ pub(in crate::app) mod tests {
             label: "H3EK".to_owned(),
             source: TagSource::LooseFolder {
                 root: PathBuf::from("C:/H3EK/tags"),
-                game: Some("halo3_mcc".to_owned()),
+                game: Some(GameId::Halo3),
                 definitions_root: PathBuf::from("C:/H3EK/definitions"),
             },
             names: TagNameIndex::default(),
-            game: Some("halo3_mcc".to_owned()),
+            game: Some(GameId::Halo3),
             entries: Vec::new(),
             tree: TagTree::default(),
             group_tree: TagTree::default(),
@@ -745,7 +745,7 @@ pub(in crate::app) mod tests {
     fn picker_resolves_structure_design_from_loaded_game_definitions() {
         let definitions_root = locate_definitions_root();
         for game in ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc", "halo4_mcc"] {
-            let names = TagNameIndex::load_game(&definitions_root, game).unwrap();
+            let names = TagNameIndex::load_game(&definitions_root, GameId::from_id(game).unwrap()).unwrap();
             let structure_design = parse_group_tag("sddt").unwrap();
             assert_eq!(
                 tag_reference_group_for_extension(

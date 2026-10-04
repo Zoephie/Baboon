@@ -8,6 +8,7 @@
 //! `BLAM_TEST_H2EK` to the kits' `tags` folders.
 
 use std::path::{Path, PathBuf};
+use crate::core::game::GameId;
 
 use blam_tags::JmsFile;
 use blam_tags::game::Game;
@@ -27,7 +28,7 @@ fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
 fn loose_source(root: &Path, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: root.to_path_buf(),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }

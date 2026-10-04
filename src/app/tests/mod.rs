@@ -353,7 +353,7 @@ fn copied_classic_definitions_load_halo2_shader_layout() {
         .join("shader.json");
     assert!(schema_path.is_file());
     TagFile::new(&schema_path).expect("copied halo2 shader schema loads");
-    let names = TagNameIndex::load_game(&locate_definitions_root(), "halo2_mcc")
+    let names = TagNameIndex::load_game(&locate_definitions_root(), GameId::Halo2)
         .expect("copied halo2 meta loads");
     assert_eq!(names.name_for(u32::from_be_bytes(*b"shad")), Some("shader"));
 }
@@ -2110,7 +2110,7 @@ fn a_classic_snapshot_restores_through_the_classic_reader() {
     bytes.resize(bytes.len() + size, 0);
     let mut tag = crate::core::source::read_tag_from_bytes(
         &bytes,
-        Some("halo2_mcc"),
+        Some(GameId::Halo2),
         Some(&definitions),
         group,
     )
@@ -2128,7 +2128,7 @@ fn a_classic_snapshot_restores_through_the_classic_reader() {
     );
     let restored = crate::core::source::read_tag_from_bytes(
         &snapshot,
-        Some("halo2_mcc"),
+        Some(GameId::Halo2),
         Some(&locate_definitions_root()),
         group,
     )

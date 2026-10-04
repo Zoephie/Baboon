@@ -19,13 +19,16 @@ fn palette<'a>(palettes: &'a [ScenarioPalette], name: &str) -> &'a ScenarioPalet
         })
 }
 
-fn shipped_games() -> Vec<String> {
+fn shipped_games() -> Vec<GameId> {
     let root = locate_definitions_root();
     let mut games = fs::read_dir(&root)
         .unwrap_or_else(|error| panic!("read {}: {error}", root.display()))
         .flatten()
         .filter(|entry| entry.path().join("scenario.json").is_file())
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            GameId::from_id(&name).unwrap_or_else(|| panic!("definitions/{name} names no game"))
+        })
         .collect::<Vec<_>>();
     games.sort();
     assert!(!games.is_empty(), "no game under {}", root.display());
@@ -39,7 +42,7 @@ fn shipped_games() -> Vec<String> {
 #[test]
 fn every_shipped_game_has_the_core_object_palettes() {
     for game in shipped_games() {
-        let palettes = scenario_palettes(&locate_definitions_root(), &game)
+        let palettes = scenario_palettes(&locate_definitions_root(), game)
             .unwrap_or_else(|error| panic!("{game}: {error}"));
         let records_groups = palettes.iter().any(|palette| !palette.groups.is_empty());
         for (name, group) in [
@@ -71,7 +74,7 @@ fn every_shipped_game_has_the_core_object_palettes() {
 /// palette anywhere, and the annotated names come out clean.
 #[test]
 fn halo3_palettes_are_named_cleanly_and_route_crates() {
-    let palettes = scenario_palettes(&locate_definitions_root(), "halo3_mcc").unwrap();
+    let palettes = scenario_palettes(&locate_definitions_root(), GameId::Halo3).unwrap();
     assert!(palette(&palettes, "crate palette").groups.contains(&BLOC));
     let for_crates = palettes_for_group(&palettes, BLOC);
     assert_eq!(for_crates.len(), 1);
@@ -94,7 +97,7 @@ fn halo3_palettes_are_named_cleanly_and_route_crates() {
 /// Halo CE has no crate palette (and no crates), but does have actors.
 #[test]
 fn halo_ce_has_actors_but_no_crate_palette() {
-    let palettes = scenario_palettes(&locate_definitions_root(), "haloce_mcc").unwrap();
+    let palettes = scenario_palettes(&locate_definitions_root(), GameId::HaloCe).unwrap();
     assert!(palettes_for_group(&palettes, BLOC).is_empty());
     palette(&palettes, "actor palette");
 }
@@ -102,14 +105,16 @@ fn halo_ce_has_actors_but_no_crate_palette() {
 /// A `#help` annotation is cut off with its text.
 #[test]
 fn halo4_playtest_palette_loses_its_help_text() {
-    let palettes = scenario_palettes(&locate_definitions_root(), "halo4_mcc").unwrap();
+    let palettes = scenario_palettes(&locate_definitions_root(), GameId::Halo4).unwrap();
     palette(&palettes, "Playtest req palette");
 }
 
 #[test]
-fn a_missing_game_names_the_file_it_wanted() {
-    let error = scenario_palettes(&locate_definitions_root(), "no_such_game").unwrap_err();
-    assert!(error.contains("no_such_game"), "{error}");
+fn a_missing_definition_names_the_file_it_wanted() {
+    let empty = crate::test_kits::unique_temp_dir("no-definitions");
+    let error = scenario_palettes(&empty, GameId::Halo3).unwrap_err();
+    let _ = fs::remove_dir_all(&empty);
+    assert!(error.contains("halo3_mcc"), "{error}");
     assert!(error.contains("scenario.json"), "{error}");
 }
 

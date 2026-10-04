@@ -98,7 +98,7 @@ fn inheritance_chain_resolves_parent_struct_docs() {
     // biped inherits acceleration scale (unit) + collision damage (object);
     // their struct lives in object.json, reached via the parent_tag chain
     // (biped → unit → obje). build_def_docs must merge it in.
-    let docs = build_def_docs(Path::new("definitions"), "halo3_mcc", "biped");
+    let docs = build_def_docs(Path::new("definitions"), GameId::Halo3, "biped");
     // The object base struct GUID (where the inherited fields live).
     let guid = parse_guid_hex("6c5aa9947a45fcf55742a488f0943380").unwrap();
     let entries = docs.entries_for(guid, "s");
@@ -186,7 +186,7 @@ fn halo2_structs_get_only_their_own_explanations() {
         eprintln!("skipping: H2 biped/definition not present");
         return;
     }
-    let docs = build_def_docs(&crate::core::bundled::locate_definitions_root(), "halo2_mcc", "biped");
+    let docs = build_def_docs(&crate::core::bundled::locate_definitions_root(), GameId::Halo2, "biped");
     let bytes = std::fs::read(tag_path).unwrap();
     let tag = blam_tags::classic::read_classic_tag_file(
         &bytes,

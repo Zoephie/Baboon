@@ -308,11 +308,11 @@ fn extraction_resolves_a_bitmap_the_grid_listed_from_the_background_index() {
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: PathBuf::from("C:/kit/tags"),
-            game: Some("halo3_mcc".to_owned()),
+            game: Some(GameId::Halo3),
             definitions_root: PathBuf::new(),
         },
         names: TagNameIndex::default(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         // Not expanded in the browser, so absent here …
         entries: Vec::new(),
         tree: TagTree::default(),

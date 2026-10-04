@@ -37,7 +37,7 @@ fn campaign_evolved_container_tags_report_their_dependencies() {
     let loaded =
         crate::core::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
             .expect("mount CE container set");
-    let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
+    let names = TagNameIndex::load_game(&definitions, GameId::CampaignEvolved)
         .expect("load Campaign Evolved tag names");
 
     // The index build and every lookup read the complete set through
@@ -88,7 +88,7 @@ fn campaign_evolved_full_reference_index_resolves_referrers() {
     let loaded =
         crate::core::source::load_iostore_container_set(paks, &TagNameIndex::default(), &definitions)
             .expect("mount CE container set");
-    let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
+    let names = TagNameIndex::load_game(&definitions, GameId::CampaignEvolved)
         .expect("load Campaign Evolved tag names");
 
     let started = std::time::Instant::now();

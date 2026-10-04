@@ -130,7 +130,7 @@ impl Baboon {
                 let model_tag = match edited_model_bytes {
                     Some(Ok(bytes)) => crate::core::source::read_tag_from_bytes(
                         &bytes,
-                        game.as_deref(),
+                        game,
                         definitions_root.as_deref(),
                         group_tag,
                     )

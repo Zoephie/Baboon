@@ -242,7 +242,7 @@ fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
             shipped: Default::default(),
         },
         names: TagNameIndex::default(),
-        game: Some("haloce_evolved".to_owned()),
+        game: Some(GameId::CampaignEvolved),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),

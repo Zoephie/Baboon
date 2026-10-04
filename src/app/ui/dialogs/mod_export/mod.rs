@@ -839,7 +839,7 @@ impl Baboon {
                                             diff,
                                             &names,
                                             row.group_tag,
-                                            game.as_deref(),
+                                            game.map(GameId::as_str),
                                             definitions_root.as_deref(),
                                             expert_mode,
                                             &row.identity,

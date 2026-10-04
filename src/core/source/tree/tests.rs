@@ -64,14 +64,14 @@ fn detect_game_from_game_id_folder_name() {
     // definitions/per-game features (incl. the doc overlay) work.
     assert_eq!(
         detect_ek_game(Path::new("/Users/x/Halo/halo3_mcc/tags/objects")),
-        Some("halo3_mcc")
+        Some(GameId::Halo3)
     );
     assert_eq!(
         detect_ek_game(Path::new("/data/haloreach_mcc/tags")),
-        Some("haloreach_mcc")
+        Some(GameId::HaloReach)
     );
     // EK-style names still work.
-    assert_eq!(detect_ek_game(Path::new("/x/H3EK/tags")), Some("halo3_mcc"));
+    assert_eq!(detect_ek_game(Path::new("/x/H3EK/tags")), Some(GameId::Halo3));
 }
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -360,7 +360,7 @@ fn entry_index_upsert_matches_a_full_rewrite() {
 
 fn loose_source(
     root: &Path,
-    game: &str,
+    game: Option<GameId>,
     entries: Vec<TagEntry>,
     all: Vec<TagEntry>,
 ) -> LoadedSourceData {
@@ -368,11 +368,11 @@ fn loose_source(
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: root.to_path_buf(),
-            game: Some(game.to_owned()),
+            game,
             definitions_root: PathBuf::new(),
         },
         names: TagNameIndex::default(),
-        game: Some(game.to_owned()),
+        game,
         entries,
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -391,7 +391,10 @@ fn loose_source(
 #[test]
 fn upserting_and_removing_an_entry_keeps_lists_and_index_consistent() {
     let root = temp_dir("upsert_entry");
-    let game = unique_game("upsert_entry");
+    // The source's game names its index rows. A real game's rows are shared
+    // with the user's own folders, so this test's are told apart by its
+    // folder and removed by it.
+    let game = GameId::Halo3.as_str();
     let check = unique_game("upsert_entry_check");
     fs::create_dir_all(root.join("objects")).unwrap();
     for name in ["a.model", "c.model"] {
@@ -399,8 +402,8 @@ fn upserting_and_removing_an_entry_keeps_lists_and_index_consistent() {
     }
     let names = TagNameIndex::default();
     let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
-    save_entry_index(&game, &root, &scanned).unwrap();
-    let mut source = loose_source(&root, &game, scanned.clone(), scanned.clone());
+    save_entry_index(game, &root, &scanned).unwrap();
+    let mut source = loose_source(&root, Some(GameId::Halo3), scanned.clone(), scanned.clone());
     let lazy_c = source
         .entries
         .iter()
@@ -431,11 +434,11 @@ fn upserting_and_removing_an_entry_keeps_lists_and_index_consistent() {
 
     let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
     save_entry_index(&check, &root, &after).unwrap();
-    let indexed = load_entry_index(&game, &root).unwrap();
+    let indexed = load_entry_index(game, &root).unwrap();
     let rewritten = load_entry_index(&check, &root).unwrap();
-    let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+    let refresh = refresh_entry_index(game, &root, &names).unwrap();
 
-    remove_test_index(&game);
+    crate::core::source::index::remove_test_index_source(game, &root);
     remove_test_index(&check);
     fs::remove_dir_all(&root).unwrap();
 
@@ -497,7 +500,7 @@ fn a_containers_entries_stay_in_natural_order() {
         },
         ..loose_source(
             Path::new("/unused"),
-            "none",
+            None,
             vec![entry("a"), entry("c")],
             Vec::new(),
         )
@@ -877,30 +880,30 @@ fn another_tags_folder_under_an_ek_root_opens_itself() {
 
 #[test]
 fn detects_supported_ek_games_from_root_or_tags_folder() {
-    assert_eq!(detect_ek_game(&PathBuf::from("HCEEK")), Some("haloce_mcc"));
+    assert_eq!(detect_ek_game(&PathBuf::from("HCEEK")), Some(GameId::HaloCe));
     assert_eq!(
         detect_ek_game(&PathBuf::from("H1EK").join("tags")),
-        Some("haloce_mcc")
+        Some(GameId::HaloCe)
     );
     assert_eq!(
         detect_ek_game(&PathBuf::from("H2EK").join("tags")),
-        Some("halo2_mcc")
+        Some(GameId::Halo2)
     );
     assert_eq!(
         detect_ek_game(&PathBuf::from("HREK")),
-        Some("haloreach_mcc")
+        Some(GameId::HaloReach)
     );
     assert_eq!(
         detect_ek_game(&PathBuf::from("H4EK").join("tags")),
-        Some("halo4_mcc")
+        Some(GameId::Halo4)
     );
     assert_eq!(
         detect_ek_game(&PathBuf::from("H3ODSTEK").join("tags")),
-        Some("halo3odst_mcc")
+        Some(GameId::Halo3Odst)
     );
     assert_eq!(
         detect_ek_game(&PathBuf::from("H3EK").join("tags")),
-        Some("halo3_mcc")
+        Some(GameId::Halo3)
     );
 }
 
@@ -917,7 +920,7 @@ fn custom_ek_alias_detects_root_folder() {
     let info = resolve_folder_root(&ek_root, &aliases).unwrap();
     fs::remove_dir_all(&root).unwrap();
 
-    assert_eq!(info.game, Some("halo2_mcc"));
+    assert_eq!(info.game, Some(GameId::Halo2));
     assert!(info.scan_root.ends_with("tags"));
     assert_eq!(info.label, "h2rek/tags (halo2_mcc)");
 }
@@ -935,7 +938,7 @@ fn custom_ek_alias_detects_tags_folder() {
     let info = resolve_folder_root(&tags_root, &aliases).unwrap();
     fs::remove_dir_all(&root).unwrap();
 
-    assert_eq!(info.game, Some("halo2_mcc"));
+    assert_eq!(info.game, Some(GameId::Halo2));
     assert!(info.scan_root.ends_with("tags"));
     assert_eq!(info.label, "tags (halo2_mcc)");
 }
@@ -950,7 +953,7 @@ fn built_in_ek_name_takes_precedence_over_alias() {
 
     let detected = detect_ek_root_with_aliases(&path, &aliases).map(|(_, game)| game);
 
-    assert_eq!(detected, Some("halo2_mcc"));
+    assert_eq!(detected, Some(GameId::Halo2));
 }
 
 /// Monolithic cache names and container logical paths carry no extension,

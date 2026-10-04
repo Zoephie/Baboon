@@ -88,7 +88,7 @@ pub(in crate::app) enum WorkerMessage {
     /// heading for Sapien. Not kit-scoped: the definitions are shared.
     /// `None` means the definition could not be read.
     ScenarioPalettesRead {
-        game: String,
+        game: GameId,
         palettes: Option<Vec<ScenarioPalette>>,
     },
     ChimpMounted {

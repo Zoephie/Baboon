@@ -266,8 +266,8 @@ impl Baboon {
 
     /// Floating window listing the results of a tag query (find-references /
     /// unreferenced). Clicking an entry opens it.
-    pub(in crate::app) fn source_game(&self) -> Option<&str> {
-        self.source().and_then(|source| source.game.as_deref())
+    pub(in crate::app) fn source_game(&self) -> Option<GameId> {
+        self.source().and_then(|source| source.game)
     }
 
     pub(in crate::app) fn source_tags_root(&self) -> Option<&std::path::Path> {

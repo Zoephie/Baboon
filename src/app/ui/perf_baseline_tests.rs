@@ -362,7 +362,7 @@ pub(super) mod fixture {
                 path: PathBuf::from("perf-synthetic"),
             },
             names: app.default_names.clone(),
-            game: Some(game.to_owned()),
+            game: GameId::from_id(game),
             tree: crate::core::source::build_tree(&entries),
             group_tree: crate::core::source::build_group_tree(&entries),
             all_entries: entries.clone(),

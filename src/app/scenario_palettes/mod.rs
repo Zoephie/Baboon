@@ -20,9 +20,9 @@ pub(in crate::app) struct ScenarioPalette {
 /// Every top-level palette block of `game`'s scenario, in definition order.
 pub(in crate::app) fn scenario_palettes(
     definitions_root: &Path,
-    game: &str,
+    game: GameId,
 ) -> Result<Vec<ScenarioPalette>, String> {
-    let path = definitions_root.join(game).join("scenario.json");
+    let path = definitions_root.join(game.as_str()).join("scenario.json");
     let bytes =
         fs::read(&path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
     let definition: Value = serde_json::from_slice(&bytes)

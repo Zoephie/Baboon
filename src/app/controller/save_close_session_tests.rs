@@ -583,7 +583,7 @@ fn a_classic_tag_round_trips_through_undo_and_save() {
     assert!(TagFile::read_from_bytes(&bytes).is_err(), "not an MCC tag");
     let saved = crate::core::source::read_tag_from_bytes(
         &bytes,
-        Some("haloce_mcc"),
+        Some(GameId::HaloCe),
         Some(&locate_definitions_root()),
         group_tag("haloce_mcc", "point_physics"),
     )

@@ -1446,8 +1446,9 @@ impl Baboon {
         let source_path = root.clone();
         let game = source
             .game
-            .clone()
-            .unwrap_or_else(|| "haloce_evolved".to_owned());
+            .unwrap_or(GameId::CampaignEvolved)
+            .as_str()
+            .to_owned();
         self.ensure_campaign_project(kit, now);
         let mut overlays = self.kits[kit]
             .campaign_project

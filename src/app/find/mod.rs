@@ -641,7 +641,7 @@ impl Baboon {
         let request_id = self.find.all_request_id;
         let stamp = self.kit_stamp();
         let tag_source = source.source.clone();
-        let documentation_source = match (&source.source, source.game.clone()) {
+        let documentation_source = match (&source.source, source.game) {
             (
                 TagSource::LooseFolder {
                     definitions_root, ..
@@ -680,7 +680,7 @@ impl Baboon {
                             Some(
                                 docs_by_group
                                     .entry(entry.group_tag)
-                                    .or_insert_with(|| build_def_docs(root, game, group)),
+                                    .or_insert_with(|| build_def_docs(root, *game, group)),
                             )
                         });
                         match crate::core::source::read_entry(&tag_source, &entry) {
@@ -756,7 +756,7 @@ impl Baboon {
             let source_game = self.kits[self.active]
                 .source
                 .as_ref()
-                .and_then(|source| source.game.as_deref());
+                .and_then(|source| source.game.map(GameId::as_str));
             if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
                 self.kits[self.active]
                     .model_previews

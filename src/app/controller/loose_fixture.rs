@@ -157,7 +157,7 @@ impl LooseKit {
     }
 
     pub(super) fn names(&self) -> TagNameIndex {
-        TagNameIndex::load_game(&locate_definitions_root(), self.game).expect("load group names")
+        TagNameIndex::load_game(&locate_definitions_root(), GameId::from_id(self.game).unwrap()).expect("load group names")
     }
 
     /// Write an MCC tag of `group` at `rel` (no extension), shaped by `edit`.
@@ -205,11 +205,11 @@ impl LooseKit {
             label: "fixture".to_owned(),
             source: TagSource::LooseFolder {
                 root: self.root.clone(),
-                game: Some(self.game.to_owned()),
+                game: GameId::from_id(self.game),
                 definitions_root: locate_definitions_root(),
             },
             names: self.names(),
-            game: Some(self.game.to_owned()),
+            game: GameId::from_id(self.game),
             entries: entries.clone(),
             tree: crate::core::source::build_folder_directory_tree(&self.root).unwrap(),
             group_tree: crate::core::source::build_group_tree(&entries),
@@ -272,7 +272,7 @@ impl LooseKit {
         let (tx, _rx) = std::sync::mpsc::channel();
         let source = TagSource::LooseFolder {
             root: self.root.clone(),
-            game: Some(self.game.to_owned()),
+            game: GameId::from_id(self.game),
             definitions_root: locate_definitions_root(),
         };
         build_reverse_dependency_index(&self.root, &source, &self.entries(), "Indexing", &tx)

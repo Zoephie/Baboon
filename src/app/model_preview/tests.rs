@@ -298,12 +298,12 @@ fn halo_ce_monitor_collision_overlay_is_drawn() {
     let definitions = crate::core::bundled::locate_definitions_root();
     let source = TagSource::LooseFolder {
         root: tags,
-        game: Some("haloce_mcc".into()),
+        game: Some(GameId::HaloCe),
         definitions_root: definitions.clone(),
     };
     let object = crate::core::source::read_tag_from_bytes(
         &std::fs::read(&biped).unwrap(),
-        Some("haloce_mcc"),
+        Some(GameId::HaloCe),
         Some(definitions.as_path()),
         u32::from_be_bytes(*b"bipd"),
     )

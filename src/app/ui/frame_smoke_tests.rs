@@ -119,7 +119,7 @@ fn loose_kit(h: &mut Harness) {
     let source = crate::core::source::load_editing_kit_layout(
         root,
         "Smoke Kit".to_owned(),
-        fixture::GAME.to_owned(),
+        GameId::from_id(fixture::GAME).unwrap(),
         &h.app.default_names,
         &locate_definitions_root(),
     )
@@ -162,7 +162,7 @@ fn container_kit(h: &mut Harness) {
             shipped: Default::default(),
         },
         names: h.app.default_names.clone(),
-        game: Some("haloce_evolved".to_owned()),
+        game: Some(GameId::CampaignEvolved),
         tree: crate::core::source::build_tree(&entries),
         group_tree: crate::core::source::build_group_tree(&entries),
         all_entries: entries.clone(),
@@ -1054,7 +1054,7 @@ fn cases() -> Vec<Case> {
                 let target = CacheImportTarget {
                     kit: active_id(h),
                     label: "Smoke Kit".to_owned(),
-                    game: fixture::GAME.to_owned(),
+                    game: GameId::from_id(fixture::GAME).unwrap(),
                     tags_root: loose_root(h),
                 };
                 h.app.cache_import_dialog = Some(CacheImportDialog {

@@ -63,7 +63,7 @@ fn source_with_one_tag() -> LoadedSourceData {
             shipped: Arc::new(shipped),
         },
         names: TagNameIndex::default(),
-        game: Some("haloce_evolved".to_owned()),
+        game: Some(GameId::CampaignEvolved),
         entries,
         tree: TagTree::default(),
         group_tree: TagTree::default(),

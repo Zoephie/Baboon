@@ -40,7 +40,7 @@ fn a_real_bsps_render_layer_keeps_uvs_tangents_and_shader_paths() {
 
     let source = TagSource::LooseFolder {
         root: tags_root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: std::path::PathBuf::new(),
     };
     for path in &candidates {

@@ -46,7 +46,7 @@ fn classic_ce_tag(group: &str) -> TagFile {
     bytes.resize(64 + size, 0);
     let tag = crate::core::source::read_tag_from_bytes(
         &bytes,
-        Some("haloce_mcc"),
+        Some(GameId::HaloCe),
         Some(&definitions),
         u32::from_be_bytes(group_tag),
     )
@@ -176,7 +176,7 @@ impl LooseKit {
     fn source(&self) -> TagSource {
         TagSource::LooseFolder {
             root: self.root.clone(),
-            game: Some(self.game.to_owned()),
+            game: GameId::from_id(self.game),
             definitions_root: crate::core::bundled::locate_definitions_root(),
         }
     }
@@ -372,7 +372,7 @@ fn a_gbxmodel_preview_loads_on_a_worker() {
             label: "synthetic".to_owned(),
             source: kit.source(),
             names: names(),
-            game: Some("haloce_mcc".to_owned()),
+            game: Some(GameId::HaloCe),
             entries: vec![entry.clone()],
             tree: TagTree::default(),
             group_tree: TagTree::default(),

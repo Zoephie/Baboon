@@ -51,11 +51,11 @@ fn loose_kit_with(tags: &Path, game: &str, chosen: Option<KitLayout>) -> Baboon 
         label: "test".to_owned(),
         source: TagSource::LooseFolder {
             root: tags.to_path_buf(),
-            game: Some(game.to_owned()),
+            game: GameId::from_id(game),
             definitions_root: PathBuf::new(),
         },
         names: TagNameIndex::default(),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),
@@ -66,7 +66,7 @@ fn loose_kit_with(tags: &Path, game: &str, chosen: Option<KitLayout>) -> Baboon 
         complete_scan: false,
         chosen_kit_layout: chosen,
     });
-    app.apply_loaded_source_identity(Some(game));
+    app.apply_loaded_source_identity(GameId::from_id(game));
     app
 }
 

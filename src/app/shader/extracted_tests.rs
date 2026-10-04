@@ -235,7 +235,7 @@ fn structural_shader_references_resolve_to_editable_reference_fields() {
     let root = std::path::PathBuf::from(root);
     let source = crate::core::source::TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
 
@@ -356,7 +356,7 @@ fn committing_a_structural_reference_rewrites_the_tag() {
     let root = std::path::PathBuf::from(root);
     let source = crate::core::source::TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let mut rmdf_cache = std::collections::HashMap::new();

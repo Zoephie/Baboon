@@ -246,7 +246,7 @@ fn a_folder_import_recreates_the_source_shape_under_the_destination() {
         FolderConversionJob {
             source: TagSource::LooseFolder {
                 root: plan.source_root,
-                game: Some("halo3_mcc".to_owned()),
+                game: Some(GameId::Halo3),
                 definitions_root: definitions.clone(),
             },
             names: TagNameIndex::load_from_definitions(&definitions),
@@ -460,7 +460,7 @@ fn a_lossy_tag_is_held_back_with_its_losses_rather_than_failed() {
     for path in lights.into_iter().take(200) {
         let Ok(tag) = crate::core::source::read_tag_at_path(
             &path,
-            Some("halo3_mcc"),
+            Some(GameId::Halo3),
             Some(&definitions),
             group_tag,
         ) else {

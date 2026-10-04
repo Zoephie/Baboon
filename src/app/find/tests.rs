@@ -176,7 +176,7 @@ fn block_targets_are_independent_from_field_names() {
 fn block_search_includes_injected_documentation_titles_and_bodies() {
     let tag = TagFile::new(test_definition_path("halo3_mcc/model.json"))
         .expect("model test definition");
-    let docs = build_def_docs(std::path::Path::new("definitions"), "halo3_mcc", "model");
+    let docs = build_def_docs(std::path::Path::new("definitions"), GameId::Halo3, "model");
     let blocks_only = FindLookIn {
         field_names: false,
         field_values: false,

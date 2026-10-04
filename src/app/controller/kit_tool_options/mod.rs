@@ -86,7 +86,7 @@ impl Baboon {
         };
         kit_tool_folder_options(
             &layout,
-            self.source().and_then(|source| source.game.as_deref()),
+            self.source().and_then(|source| source.game.map(GameId::as_str)),
         )
     }
 }

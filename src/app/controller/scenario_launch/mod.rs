@@ -26,8 +26,7 @@ pub(super) fn scenario_launch_context(
     }
 
     let game = source
-        .game
-        .as_deref()
+        .game.map(GameId::as_str)
         .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
         .ok_or_else(|| "Scenario launching requires a supported MCC editing kit".to_owned())?;
     let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -145,8 +144,7 @@ pub(in crate::app) fn scenario_launch_availability_with(
 ) -> ScenarioLaunchAvailability {
     let unsupported = ScenarioLaunchAvailability::default();
     let Some(game) = source
-        .game
-        .as_deref()
+        .game.map(GameId::as_str)
         .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
     else {
         return unsupported;

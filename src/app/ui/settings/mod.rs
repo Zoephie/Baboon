@@ -1131,7 +1131,7 @@ impl Baboon {
             draft.error = Some("Enter an editing kit name".to_owned());
             return false;
         }
-        let Some(game) = supported_ek_game_id(&draft.game).map(str::to_owned) else {
+        let Some(game) = game_for_saved_id(&draft.game).map(|game| game.as_str().to_owned()) else {
             draft.error = Some("Choose a supported editing-kit engine".to_owned());
             return false;
         };

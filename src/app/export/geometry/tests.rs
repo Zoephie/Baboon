@@ -131,7 +131,7 @@ fn a_tags_own_reference_path_drops_only_the_group_extension() {
     let root = PathBuf::from("/kits/halo3/tags");
     let source = TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: PathBuf::from("/definitions"),
     };
     let loose = |relative: &str| TagEntry {
@@ -195,7 +195,7 @@ fn standalone_collision_and_physics_export_is_posed_by_the_owning_model() {
     let root = PathBuf::from(root);
     let source = TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     // A rigged character: its collision hulls and physics shapes are stored
@@ -332,7 +332,7 @@ fn animation_graph_without_its_own_rest_pose_borrows_the_owning_models() {
     let root = PathBuf::from(root);
     let source = TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("haloreach_mcc".to_owned()),
+        game: Some(GameId::HaloReach),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     // The magnum's own graph: five gun bones, and not one `additional node
@@ -427,7 +427,7 @@ fn ce_structure_bsp_and_scenario_export_geometry() {
         .unwrap_or_else(|| panic!("no Paks dir under {}", root.display()));
 
     let definitions = crate::core::bundled::locate_definitions_root();
-    let names = crate::core::format::TagNameIndex::load_game(&definitions, "haloce_evolved")
+    let names = crate::core::format::TagNameIndex::load_game(&definitions, GameId::CampaignEvolved)
         .expect("load haloce_evolved tag-name index");
     let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
         .expect("mount CE container set");

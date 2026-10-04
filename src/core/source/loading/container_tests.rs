@@ -92,7 +92,7 @@ fn mount_container_set_and_read_tags() {
         "expected thousands of tags, got {}",
         loaded.entries.len()
     );
-    assert_eq!(loaded.game.as_deref(), Some("haloce_evolved"));
+    assert_eq!(loaded.game.map(GameId::as_str), Some("haloce_evolved"));
     let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
         panic!("expected a container set");
     };

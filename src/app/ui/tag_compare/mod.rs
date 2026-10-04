@@ -248,7 +248,7 @@ fn git_revision_comparison(
     let load_tag = |revision: &str| -> Result<Option<TagFile>, String> {
         git_tag_bytes_if_present(tags_root, path, revision)?
             .map(|bytes| {
-                let tag = crate::core::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
+                let tag = crate::core::source::read_tag_from_bytes(&bytes, game.and_then(GameId::from_id), definitions_root, group)
                     .map_err(|error| {
                         format!("Could not load tag from commit {revision}: {error}")
                     })?;
@@ -776,7 +776,7 @@ impl Baboon {
         let current = self.kits[diff_kit].parsed_tags.get(&state.a_key);
         let group = current.map(|doc| doc.tag.group().tag);
         let source = self.kits[diff_kit].source.as_ref();
-        let game = source.and_then(|source| source.game.as_deref());
+        let game = source.and_then(|source| source.game.map(GameId::as_str));
         let (tags_root, definitions_root) = source
             .and_then(|source| match &source.source {
                 TagSource::LooseFolder {
@@ -834,7 +834,7 @@ impl Baboon {
             .filter_map(|kit| {
                 let other_source = kit.source.as_ref()?;
                 if game
-                    .zip(other_source.game.as_deref())
+                    .zip(other_source.game.map(GameId::as_str))
                     .is_some_and(|(a, b)| a != b)
                 {
                     return None;
@@ -1694,7 +1694,7 @@ impl Baboon {
                             git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
                                 crate::core::source::read_tag_from_bytes(
                                     &bytes,
-                                    game.as_deref(),
+                                    game.as_deref().and_then(GameId::from_id),
                                     definitions_root.as_deref(),
                                     group,
                                 )
@@ -1726,7 +1726,7 @@ impl Baboon {
                     });
                 }
             } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
-                match crate::core::source::read_tag_at_path(&path, game, definitions_root, group) {
+                match crate::core::source::read_tag_at_path(&path, game.and_then(GameId::from_id), definitions_root, group) {
                     Ok(b) if b.group().tag == group => {
                         state.results = Some(comparison_results(&a.tag, &b));
                         state.error = None;

@@ -664,7 +664,7 @@ pub(super) fn kit_strip_label(kit: &Kit) -> String {
     if let Some(profile) = &kit.profile {
         return profile.name.clone();
     }
-    match source.game.as_deref() {
+    match source.game.map(GameId::as_str) {
         Some(game) => game_display_name(game).to_owned(),
         None => source.label.clone(),
     }

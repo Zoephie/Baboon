@@ -375,7 +375,7 @@ pub(in crate::app) struct KitToolDragState {
     /// per frame. Emptied between drags: a process id can be reused.
     pub(in crate::app) executables: HashMap<u32, Option<PathBuf>>,
     /// Palette tables per game, read from the definitions on a worker.
-    pub(in crate::app) palettes: HashMap<String, PaletteTable>,
+    pub(in crate::app) palettes: HashMap<GameId, PaletteTable>,
 }
 
 /// A game's scenario palette table on its way from the definitions.

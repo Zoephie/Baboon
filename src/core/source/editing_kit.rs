@@ -2,7 +2,7 @@
 //! It owns source identity, discovery, indexing, and source-aware reads; editor presentation and application workflow state belong elsewhere.
 
 use super::*;
-use crate::core::game::{GameId, game_for_kit_folder};
+use crate::core::game::{GameId, game_for_kit_folder, game_for_saved_id};
 
 pub(crate) fn resolve_folder_root(
     selected_root: &Path,
@@ -88,21 +88,21 @@ fn is_tags_folder(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn detect_ek_game(path: &Path) -> Option<&'static str> {
+pub(super) fn detect_ek_game(path: &Path) -> Option<GameId> {
     detect_ek_root_with_aliases(path, &[]).map(|(_, game)| game)
 }
 
 pub(super) fn detect_ek_root_with_aliases(
     path: &Path,
     aliases: &[EkFolderAlias],
-) -> Option<(PathBuf, &'static str)> {
+) -> Option<(PathBuf, GameId)> {
     let built_in = path
         .ancestors()
         .filter_map(|ancestor| {
             ancestor
                 .file_name()
                 .and_then(|name| name.to_str())
-                .and_then(|name| ek_folder_game(name).map(|game| (ancestor.to_path_buf(), game)))
+                .and_then(|name| game_for_kit_folder(name).map(|game| (ancestor.to_path_buf(), game)))
         })
         .next();
     if built_in.is_some() {
@@ -118,31 +118,21 @@ pub(super) fn detect_ek_root_with_aliases(
         .next()
 }
 
-fn ek_folder_game(name: &str) -> Option<&'static str> {
-    game_for_kit_folder(name).map(GameId::as_str)
-}
 
-fn alias_folder_game(name: &str, aliases: &[EkFolderAlias]) -> Option<&'static str> {
+fn alias_folder_game(name: &str, aliases: &[EkFolderAlias]) -> Option<GameId> {
     aliases.iter().rev().find_map(|alias| {
         let folder_name = alias.folder_name.trim();
         if folder_name.is_empty() || !folder_name.eq_ignore_ascii_case(name) {
             return None;
         }
-        supported_ek_game_id(&alias.game)
+        game_for_saved_id(&alias.game)
     })
-}
-
-pub(crate) fn supported_ek_game_id(game: &str) -> Option<&'static str> {
-    GameId::ALL
-        .into_iter()
-        .find(|id| id.as_str().eq_ignore_ascii_case(game))
-        .map(GameId::as_str)
 }
 
 fn folder_source_label(
     selected_root: &Path,
     scan_root: &Path,
-    game: Option<&'static str>,
+    game: Option<GameId>,
 ) -> String {
     let selected_label = selected_root
         .file_name()

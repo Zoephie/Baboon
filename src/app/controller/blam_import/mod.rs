@@ -83,7 +83,7 @@ impl Baboon {
             tags_root,
             asset_rel,
             asset_name,
-            schema_dir: locate_definitions_root().join(&game),
+            schema_dir: locate_definitions_root().join(game.as_str()),
             names,
             render: blam.import_render,
             prt: blam.import_prt,

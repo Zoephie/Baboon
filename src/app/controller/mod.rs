@@ -1598,7 +1598,7 @@ impl Baboon {
     pub(super) fn open_new_tag_dialog(&mut self) {
         let default_game = self
             .source()
-            .and_then(|source| source.game.as_deref())
+            .and_then(|source| source.game.map(GameId::as_str))
             .unwrap_or("halo3_mcc")
             .to_owned();
         self.new_tag_dialog = NewTagDialog {
@@ -2115,9 +2115,9 @@ impl Baboon {
     ) -> (Vec<(String, ProfileFit)>, ImportMode) {
         let target_game = self
             .source()
-            .and_then(|s| s.game.clone())
-            .unwrap_or_else(|| CAMPAIGN_EVOLVED_GAME.to_owned());
-        classify_import_source_for(&target_game, group_tag, imported)
+            .and_then(|s| s.game)
+            .unwrap_or(GameId::CampaignEvolved);
+        classify_import_source_for(target_game.as_str(), group_tag, imported)
     }
 
     /// Apply the pending import: validate the schema gate, resolve the target
@@ -2988,8 +2988,8 @@ impl Baboon {
             &ctx,
             move || WorkerMessage::EntryIndexRefreshed {
                 stamp,
-                result: crate::core::source::refresh_entry_index(&game, &root, &names)
-                    .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
+                result: crate::core::source::refresh_entry_index(game.as_str(), &root, &names)
+                    .map(|refresh| persist_entry_index_changes(game.as_str(), &root, &tag_source, refresh))
                     .map_err(|e| e.to_string()),
             },
             move |error| WorkerMessage::EntryIndexRefreshed {
@@ -3844,7 +3844,7 @@ impl Baboon {
         Some(LastSessionKit {
             source_kind,
             source_path,
-            game: source.game.clone(),
+            game: source.game.map(|game| game.as_str().to_owned()),
             profile_id: kit.profile.as_ref().map(|profile| profile.id.clone()),
             // The `.baboon` this workspace has open, if any — not its recovery
             // file, which the next session finds from the source root anyway.
@@ -4888,8 +4888,8 @@ impl Baboon {
                 let game = self.source().and_then(|source| source.game.clone());
                 let selected_language = self.audio.language.clone();
                 let shared_fmod_banks = matches!(
-                    game.as_deref(),
-                    Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+                    game,
+                    Some(GameId::Halo3 | GameId::Halo3Odst | GameId::HaloReach)
                 )
                 .then(|| {
                     blam_tags::audio::SoundBanks::open_pc_language(
@@ -4920,7 +4920,7 @@ impl Baboon {
                             &tag,
                             &abs,
                             &layout,
-                            game.as_deref(),
+                            game.map(GameId::as_str),
                             selected_language.as_deref(),
                             all_languages,
                             shared_fmod_banks.as_ref(),
@@ -5174,7 +5174,7 @@ impl Baboon {
             return;
         };
         let display_path = entry.display_path.clone();
-        let source = extract_generation_of(self.source().and_then(|s| s.game.as_deref()));
+        let source = extract_generation_of(self.source().and_then(|s| s.game.map(GameId::as_str)));
         self.extract_target = Some(ExtractTargetPrompt {
             key,
             display_path,
@@ -5407,7 +5407,7 @@ impl Baboon {
 
     pub(super) fn active_game_is_campaign_evolved(&self) -> bool {
         self.source()
-            .and_then(|source| source.game.as_deref())
+            .and_then(|source| source.game.map(GameId::as_str))
             .is_some_and(|game| game == "haloce_evolved")
     }
 
@@ -5578,7 +5578,7 @@ impl Baboon {
             return;
         };
         if let (TagSource::LooseFolder { root, .. }, Some(game)) =
-            (&source.source, source.game.as_deref())
+            (&source.source, source.game.map(GameId::as_str))
             && !source.all_entries.is_empty()
             && let Err(error) = crate::core::source::upsert_entry_with_dependencies(
                 game,
@@ -8306,11 +8306,11 @@ impl Baboon {
         // Cache key is the group's own JSON path; the docs themselves merge the
         // whole `parent_tag` inheritance chain (object-family fields live in
         // parent files).
-        let path = root.join(&game).join(format!("{group}.json"));
+        let path = root.join(game.as_str()).join(format!("{group}.json"));
         if let Some(docs) = self.def_docs_cache.get(&path) {
             return Some(docs.clone());
         }
-        let docs = Rc::new(build_def_docs(&root, &game, &group));
+        let docs = Rc::new(build_def_docs(&root, game, &group));
         self.def_docs_cache.insert(path, docs.clone());
         Some(docs)
     }
@@ -8414,7 +8414,7 @@ impl Baboon {
             .parsed_tags
             .get(key)
             .map(|doc| doc.tag.group().tag);
-        let game = self.source_game().map(str::to_owned);
+        let game = self.source_game();
         let definitions_root = self.source_definitions_root().map(Path::to_owned);
         match restored {
             Some((bytes, label)) => {
@@ -8423,7 +8423,7 @@ impl Baboon {
                     .and_then(|group_tag| {
                         crate::core::source::read_tag_from_bytes(
                             &bytes,
-                            game.as_deref(),
+                            game,
                             definitions_root.as_deref(),
                             group_tag,
                         )
@@ -8536,7 +8536,7 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game.as_deref()))
+        tag_test_executable_for_game(self.source().and_then(|s| s.game.map(GameId::as_str)))
     }
 
     pub(super) fn launch_tag_test(&mut self) {
@@ -8556,7 +8556,7 @@ impl Baboon {
         self.kits
             .get(kit)
             .and_then(|kit| kit.source.as_ref())
-            .and_then(|source| source.game.as_deref())
+            .and_then(|source| source.game.map(GameId::as_str))
             .is_some_and(sapien_supports_scenario_argument)
     }
 
@@ -8950,6 +8950,12 @@ impl Baboon {
         chosen_folders: bool,
         ctx: egui::Context,
     ) {
+        // Profiles keep the game id they were saved with; one this build does
+        // not know has no definitions to load against.
+        let Some(game) = GameId::from_id(&game) else {
+            self.status = format!("{label} is for a game this version of Baboon does not know ({game})");
+            return;
+        };
         let chosen_layout = chosen_folders.then(|| KitLayout {
             root: layout.root.clone(),
             tags: layout.tags.clone(),
@@ -8990,8 +8996,8 @@ impl Baboon {
                         && kit
                             .source
                             .as_ref()
-                            .and_then(|source| source.game.as_deref())
-                            == Some(game.as_str())
+                            .and_then(|source| source.game)
+                            == Some(game)
                 })
             {
                 self.active = index;
@@ -9175,9 +9181,9 @@ impl Baboon {
             return;
         };
         if self.kits[self.active].terminal_open {
-            self.terminal_open_games.insert(game);
+            self.terminal_open_games.insert(game.as_str().to_owned());
         } else {
-            self.terminal_open_games.remove(&game);
+            self.terminal_open_games.remove(game.as_str());
         }
     }
 
@@ -10705,7 +10711,7 @@ fn run_tag_rename_job(
     new_rel: String,
     job_label: String,
     names: TagNameIndex,
-    game: Option<String>,
+    game: Option<GameId>,
     all_entries_before: Vec<TagEntry>,
     existing_reverse_dependencies: Option<ReverseDependencyIndex>,
     tx: &Sender<WorkerMessage>,
@@ -10773,8 +10779,7 @@ fn run_tag_rename_job(
 
     // Ensure a reverse-dependency index so we only rewrite actual referrers.
     let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
-        game.as_deref()
-            .and_then(|game| crate::core::source::load_reverse_dependency_index(game, &root))
+        game.and_then(|game| crate::core::source::load_reverse_dependency_index(game.as_str(), &root))
     });
     if let Some(index) = reverse_dependencies.as_ref()
         && index.len() != all_entries_before.len()
@@ -10796,10 +10801,9 @@ fn run_tag_rename_job(
         ));
     }
     let dependency_schema_path = game
-        .as_deref()
         .map(|game| {
             locate_definitions_root()
-                .join(game)
+                .join(game.as_str())
                 .join("tag_dependency_list.json")
         })
         .filter(|path| path.is_file());
@@ -10918,7 +10922,7 @@ fn run_folder_refactor_job(
     move_folder: bool,
     label: String,
     names: TagNameIndex,
-    game: Option<String>,
+    game: Option<GameId>,
     existing_all_entries: Vec<TagEntry>,
     existing_reverse_dependencies: Option<ReverseDependencyIndex>,
     tx: &Sender<WorkerMessage>,
@@ -10973,8 +10977,7 @@ fn run_folder_refactor_job(
         existing_all_entries.clone()
     };
     let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
-        game.as_deref()
-            .and_then(|game| crate::core::source::load_reverse_dependency_index(game, &root))
+        game.and_then(|game| crate::core::source::load_reverse_dependency_index(game.as_str(), &root))
     });
     if move_folder
         && let Some(index) = reverse_dependencies.as_ref()
@@ -11002,10 +11005,9 @@ fn run_folder_refactor_job(
         ));
     }
     let dependency_schema_path = game
-        .as_deref()
         .map(|game| {
             locate_definitions_root()
-                .join(game)
+                .join(game.as_str())
                 .join("tag_dependency_list.json")
         })
         .filter(|path| path.is_file());

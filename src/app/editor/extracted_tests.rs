@@ -488,7 +488,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
 
-        let tag = crate::core::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(&tag_path, Some(GameId::Halo2), Some(defs), group)
             .expect("read H2 sound tag");
         let mut out = Vec::new();
         walk(&tag.root(), "", &mut out, 0);
@@ -575,7 +575,7 @@ mod tests {
         let group = u32::from_be_bytes(*b"soso");
         let out = std::env::temp_dir().join("baboon_ce_clear_ref.shader_model");
         let load = || {
-            crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+            crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
                 .expect("read CE shader_model tag")
         };
 
@@ -605,7 +605,7 @@ mod tests {
         // The cleared reference reads back as a null reference — an empty path,
         // the same shape a genuine stock null (e.g. the detail map) decodes to,
         // which Baboon renders as NONE.
-        let reread = crate::core::source::read_tag_at_path(&out, Some("haloce_mcc"), Some(defs), group)
+        let reread = crate::core::source::read_tag_at_path(&out, Some(GameId::HaloCe), Some(defs), group)
             .expect("reread cleared tag");
         let root = reread.root();
         let base = root
@@ -642,7 +642,7 @@ mod tests {
             return;
         }
         let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
             .expect("read CE sound tag");
         let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
         assert!(
@@ -680,7 +680,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
 
-        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
             .expect("read CE sound tag");
 
         // The tag reports Xbox-ADPCM, mono, 22050 Hz — and carries no Ogg stream.
@@ -738,7 +738,7 @@ mod tests {
             return;
         }
         let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::core::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
             .expect("read CE sound tag");
         let rows = sound_permutation_rows(&tag, None);
         assert!(!rows.is_empty(), "CE tag should have permutations");
@@ -800,7 +800,7 @@ mod tests {
         }
         let group = u32::from_be_bytes(*b"snd!");
         Some(
-            crate::core::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+            crate::core::source::read_tag_at_path(&tag_path, Some(GameId::Halo2), Some(defs), group)
                 .expect("read H2 sound tag"),
         )
     }

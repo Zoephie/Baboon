@@ -24,7 +24,7 @@ fn kit_root(env: &str, default: &str) -> Option<PathBuf> {
 fn loose_source(tags_root: PathBuf, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: tags_root,
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }

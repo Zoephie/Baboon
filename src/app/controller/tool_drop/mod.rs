@@ -150,7 +150,7 @@ impl Baboon {
                 palette: None,
             });
         };
-        let Some(palettes) = self.scenario_palettes_for_game(&game, ctx) else {
+        let Some(palettes) = self.scenario_palettes_for_game(game, ctx) else {
             return Ok(KitToolDropPlan {
                 file,
                 palette: None,
@@ -172,13 +172,13 @@ impl Baboon {
     }
 
     /// The game of the loaded editing kit whose tags folder holds `file`.
-    fn game_of_loaded_kit_containing(&self, file: &Path) -> Option<String> {
+    fn game_of_loaded_kit_containing(&self, file: &Path) -> Option<GameId> {
         (0..self.kits.len()).find_map(|kit_index| {
             let kit_root = self.editing_kit_root_for(kit_index)?;
             if !tag_within_kit(file, &kit_root) {
                 return None;
             }
-            self.kits[kit_index].source.as_ref()?.game.clone()
+            self.kits[kit_index].source.as_ref()?.game
         })
     }
 
@@ -188,31 +188,29 @@ impl Baboon {
     /// on disk, least of all with a drag in hand.
     pub(super) fn scenario_palettes_for_game(
         &mut self,
-        game: &str,
+        game: GameId,
         ctx: &egui::Context,
     ) -> Option<&[ScenarioPalette]> {
-        if !self.kit_tool_drag.palettes.contains_key(game) {
+        if !self.kit_tool_drag.palettes.contains_key(&game) {
             self.kit_tool_drag
                 .palettes
-                .insert(game.to_owned(), PaletteTable::Loading);
-            let game = game.to_owned();
-            let panic_game = game.clone();
+                .insert(game, PaletteTable::Loading);
             // A read that panicked used to leave the table `Loading` for the
             // session; it is unreadable instead, like any other failed read.
             spawn_worker(
                 &self.tx,
                 ctx,
                 move || WorkerMessage::ScenarioPalettesRead {
-                    palettes: scenario_palettes(&locate_definitions_root(), &game).ok(),
+                    palettes: scenario_palettes(&locate_definitions_root(), game).ok(),
                     game,
                 },
                 move |_| WorkerMessage::ScenarioPalettesRead {
-                    game: panic_game,
+                    game,
                     palettes: None,
                 },
             );
         }
-        match self.kit_tool_drag.palettes.get(game) {
+        match self.kit_tool_drag.palettes.get(&game) {
             Some(PaletteTable::Ready(palettes)) => Some(palettes.as_slice()),
             _ => None,
         }

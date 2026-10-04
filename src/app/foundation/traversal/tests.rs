@@ -61,7 +61,7 @@ fn matching_a_block_keeps_its_contents_visible() {
 fn documentation_body_match_is_visible_with_blocks_enabled() {
     let tag = TagFile::new(crate::app::test_definition_path("halo3_mcc/model.json"))
         .expect("model test definition");
-    let docs = build_def_docs(std::path::Path::new("definitions"), "halo3_mcc", "model");
+    let docs = build_def_docs(std::path::Path::new("definitions"), GameId::Halo3, "model");
     let filter = compute_find_field_filter(
         &tag,
         &TagNameIndex::default(),

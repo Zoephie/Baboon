@@ -604,7 +604,7 @@ impl Baboon {
 /// Exactly `haloce_mcc`: a prefix test also took Campaign Evolved
 /// (`haloce_evolved`), whose tags are Reach's and have a `.model`.
 fn source_is_halo1(source: &TagSource) -> bool {
-    matches!(source, TagSource::LooseFolder { game: Some(game), .. } if game == "haloce_mcc")
+    matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloCe), .. })
 }
 
 /// Worker half of the list request.

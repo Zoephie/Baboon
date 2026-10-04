@@ -971,7 +971,13 @@ fn decode_shader_bitmap_thumbnail(
     // Use the source-aware loader so classic (Halo CE / Halo 2) bitmaps decode
     // too — they need a JSON layout, not the plain `TagFile::read`.
     let tag =
-        crate::core::source::read_tag_at_path(&path, edit.game, edit.definitions_root, group_tag).ok()?;
+        crate::core::source::read_tag_at_path(
+            &path,
+            edit.game.and_then(GameId::from_id),
+            edit.definitions_root,
+            group_tag,
+        )
+        .ok()?;
     let data = build_bitmap_preview(&tag, 0, 0).ok()?;
     // Cap at 256px: drawn small inline (GPU downscales) and at native size in the
     // hover preview popup, matching Foundation's 256px help-popup image.
@@ -2118,7 +2124,7 @@ fn h2_template_parameter_names_from_reference(
 ) -> Option<Vec<String>> {
     let source = TagSource::LooseFolder {
         root: tags_root.to_path_buf(),
-        game: Some(game.unwrap_or("halo2_mcc").to_owned()),
+        game: Some(game.and_then(GameId::from_id).unwrap_or(GameId::Halo2)),
         definitions_root: definitions_root
             .map(std::path::Path::to_path_buf)
             .unwrap_or_else(locate_definitions_root),

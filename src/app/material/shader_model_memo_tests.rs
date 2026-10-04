@@ -12,7 +12,7 @@ fn the_shader_grid_is_built_once_per_revision() {
     let definitions_root = crate::core::bundled::locate_definitions_root();
     let source = TagSource::LooseFolder {
         root: root.clone(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: definitions_root.clone(),
     };
     let names = TagNameIndex::default();
@@ -29,7 +29,7 @@ fn the_shader_grid_is_built_once_per_revision() {
             let entry = crate::core::source::loose_file_entry(&root, item.path(), &names).ok()??;
             let tag = crate::core::source::read_tag_at_path(
                 item.path(),
-                Some("halo3_mcc"),
+                Some(GameId::Halo3),
                 Some(&definitions_root),
                 entry.group_tag,
             )

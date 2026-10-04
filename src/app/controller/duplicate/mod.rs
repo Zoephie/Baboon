@@ -804,7 +804,7 @@ fn parse_duplicate_body(
             ..
         } => crate::core::source::read_tag_from_bytes(
             bytes,
-            game.as_deref(),
+            *game,
             Some(definitions_root),
             entry.group_tag,
         )

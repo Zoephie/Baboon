@@ -8,7 +8,7 @@ fn dialog(report: Option<FolderConversionReport>) -> CacheImportDialog {
         targets: vec![CacheImportTarget {
             kit: KitId(1),
             label: "HREK".to_owned(),
-            game: "haloreach_mcc".to_owned(),
+            game: GameId::HaloReach,
             tags_root: PathBuf::from("D:/HREK/tags"),
         }],
         target_index: 0,

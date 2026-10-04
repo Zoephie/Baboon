@@ -144,7 +144,7 @@ fn a_run_told_to_keep_a_tag_does_not_write_over_it() {
             FolderConversionJob {
                 source: TagSource::LooseFolder {
                     root: source_root.clone(),
-                    game: Some("halo3_mcc".to_owned()),
+                    game: Some(GameId::Halo3),
                     definitions_root: definitions.clone(),
                 },
                 names: TagNameIndex::load_from_definitions(&definitions),
@@ -239,7 +239,7 @@ fn folder_conversion_recurses_overwrites_and_continues_after_failure() {
 
     let source = TagSource::LooseFolder {
         root: source_root,
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: definitions.clone(),
     };
     let names = TagNameIndex::load_from_definitions(&definitions);
@@ -331,7 +331,7 @@ fn a_folder_run_writes_a_renamed_class_under_its_new_name() {
 
     let source = TagSource::LooseFolder {
         root: source_root,
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         definitions_root: definitions.clone(),
     };
     let names = TagNameIndex::load_from_definitions(&definitions);

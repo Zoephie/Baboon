@@ -25,7 +25,7 @@ fn ce_kit() -> Option<(PathBuf, TagSource)> {
     }
     let source = TagSource::LooseFolder {
         root: tags.clone(),
-        game: Some("haloce_mcc".to_owned()),
+        game: Some(GameId::HaloCe),
         definitions_root: crate::test_kits::definitions().to_path_buf(),
     };
     Some((tags, source))
@@ -125,7 +125,7 @@ fn only_ce_and_halo_2_offer_bitmap_source_extraction() {
                 "haloreach_mcc",
                 "haloce_evolved",
             ] {
-                crate::app::browser::set_browser_game(ui, Some(game.to_owned()));
+                crate::app::browser::set_browser_game(ui, GameId::from_id(game));
                 if crate::app::browser::browser_game_keeps_bitmap_sources(ui) {
                     offered.push(game);
                 }

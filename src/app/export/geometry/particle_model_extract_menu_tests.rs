@@ -16,6 +16,7 @@
 //! `BLAM_TEST_H2EK` (see `crate::test_kits`).
 
 use std::path::{Path, PathBuf};
+use crate::core::game::GameId;
 
 use crate::app::browser::supports_tag_extract_menu;
 use crate::app::export::extract_geometry_for_entry;
@@ -34,7 +35,7 @@ fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
 fn loose_source(root: &Path, game: &str) -> TagSource {
     TagSource::LooseFolder {
         root: root.to_path_buf(),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     }
 }

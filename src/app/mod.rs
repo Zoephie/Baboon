@@ -39,7 +39,7 @@ use serde_json::{Value, json};
 use crate::core::bundled::{
     definitions_missing_message, locate_definitions_root, locate_help_docs_root,
 };
-use crate::core::game::{GameFacts, GameId, game_for_launch_flag};
+use crate::core::game::{GameFacts, GameId, game_for_launch_flag, game_for_saved_id};
 use crate::core::format::{TagNameIndex, format_value, group_label};
 use crate::core::process::background_command;
 use crate::core::source::{
@@ -49,7 +49,6 @@ use crate::core::source::{
     load_folder_node_entries, load_iostore_container, load_iostore_container_set,
     load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
     resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
-    supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";

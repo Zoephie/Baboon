@@ -11,6 +11,7 @@
 //! Needs `BLAM_TEST_H3EK` / `BLAM_TEST_H2EK`; skips a kit that is not set.
 
 use std::path::Path;
+use crate::core::game::GameId;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -45,11 +46,11 @@ fn fixture(tags: &Path, game: &str, rel: &str) -> Option<Fixture> {
         label: game.to_owned(),
         source: TagSource::LooseFolder {
             root: tags.to_path_buf(),
-            game: Some(game.to_owned()),
+            game: GameId::from_id(game),
             definitions_root: definitions.to_path_buf(),
         },
         names: TagNameIndex::load_from_definitions(definitions),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         entries: vec![entry.clone()],
         tree: TagTree::default(),
         group_tree: TagTree::default(),

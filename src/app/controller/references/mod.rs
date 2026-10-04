@@ -51,7 +51,7 @@ impl Baboon {
                 let to_save = index.clone();
                 thread::spawn(move || {
                     if let Err(e) =
-                        crate::core::source::save_reverse_dependency_index(&game, &root, &to_save)
+                        crate::core::source::save_reverse_dependency_index(game.as_str(), &root, &to_save)
                     {
                         eprintln!("reverse-dependency index save failed: {e}");
                     }
@@ -143,12 +143,12 @@ impl Baboon {
             source.reverse_dependencies = done.reverse_dependencies;
             if let TagSource::LooseFolder { root, .. } = &source.source {
                 if !source.all_entries.is_empty()
-                    && let Some(game) = source.game.as_deref()
+                    && let Some(game) = source.game.map(GameId::as_str)
                 {
                     let _ = crate::core::source::save_entry_index(game, root, &source.all_entries);
                 }
                 if let (Some(game), Some(reverse_dependencies)) =
-                    (source.game.as_deref(), source.reverse_dependencies.as_ref())
+                    (source.game.map(GameId::as_str), source.reverse_dependencies.as_ref())
                 {
                     let _ = crate::core::source::save_reverse_dependency_index(
                         game,

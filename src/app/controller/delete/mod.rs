@@ -434,9 +434,9 @@ impl Baboon {
     }
 
     fn delete_loose_tag(&mut self, entry: &TagEntry, path: &Path) -> Result<PathBuf, String> {
-        let game = self.source().and_then(|source| source.game.clone());
+        let game = self.source().and_then(|source| source.game);
         let destination =
-            loose_trash_destination(game.as_deref(), &entry.display_path, now_unix_secs())?;
+            loose_trash_destination(game.map(GameId::as_str), &entry.display_path, now_unix_secs())?;
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;

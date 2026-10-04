@@ -38,11 +38,11 @@ fn loose_source_with_counts(label: &str, entries: Vec<TagEntry>) -> LoadedSource
         label: label.to_owned(),
         source: TagSource::LooseFolder {
             root: PathBuf::from("C:/kit/tags"),
-            game: Some("halo3_mcc".to_owned()),
+            game: Some(GameId::Halo3),
             definitions_root: PathBuf::from("C:/kit/definitions"),
         },
         names: TagNameIndex::default(),
-        game: Some("halo3_mcc".to_owned()),
+        game: Some(GameId::Halo3),
         entries: Vec::new(),
         tree: TagTree::default(),
         group_tree: TagTree::default(),

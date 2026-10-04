@@ -96,10 +96,10 @@ fn outside_referrers_exclude_tags_inside_the_folder() {
 fn all_references(root: &Path, game: &str) -> Vec<(String, String)> {
     let source = TagSource::LooseFolder {
         root: root.to_path_buf(),
-        game: Some(game.to_owned()),
+        game: GameId::from_id(game),
         definitions_root: locate_definitions_root(),
     };
-    let names = TagNameIndex::load_game(&locate_definitions_root(), game).unwrap();
+    let names = TagNameIndex::load_game(&locate_definitions_root(), GameId::from_id(game).unwrap()).unwrap();
     let mut out = Vec::new();
     for entry in scan_folder_subtree_entries(root, Path::new(""), &names).unwrap() {
         let tag = read_entry(&source, &entry)
@@ -144,7 +144,7 @@ fn renames_and_rewrites(var: &str, game: &str, vehicle: &str, folder: &str) {
         .count();
     assert!(referenced_before > 0, "the copy references {old_prefix}");
 
-    let names = TagNameIndex::load_game(&locate_definitions_root(), game).unwrap();
+    let names = TagNameIndex::load_game(&locate_definitions_root(), GameId::from_id(game).unwrap()).unwrap();
     let (tx, _rx) = mpsc::channel();
     let rel = PathBuf::from(vehicle).join(folder);
     let done = run_folder_refactor_job(
@@ -155,7 +155,7 @@ fn renames_and_rewrites(var: &str, game: &str, vehicle: &str, folder: &str) {
         true,
         "Renaming".to_owned(),
         names,
-        Some(game.to_owned()),
+        GameId::from_id(game),
         Vec::new(),
         None,
         &tx,

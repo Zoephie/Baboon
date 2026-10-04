@@ -72,7 +72,7 @@ fn palette_addition_reaches_the_block_index_dropdown() {
             continue;
         }
         let Ok(mut tag) =
-            crate::core::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            crate::core::source::read_tag_at_path(&tag_path, GameId::from_id(game), Some(defs), group)
         else {
             eprintln!("skip {game}: could not read scenario");
             continue;
@@ -221,7 +221,7 @@ fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
             continue;
         }
         let group = u32::from_be_bytes(group_bytes);
-        let Ok(tag) = crate::core::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+        let Ok(tag) = crate::core::source::read_tag_at_path(&tag_path, GameId::from_id(game), Some(defs), group)
         else {
             eprintln!("skip {game}: unreadable");
             continue;
@@ -238,7 +238,7 @@ fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
         for struct_path in struct_paths.iter().take(40) {
             // Re-read per case: each one mutates the tag.
             let Ok(mut tag) =
-                crate::core::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                crate::core::source::read_tag_at_path(&tag_path, GameId::from_id(game), Some(defs), group)
             else {
                 continue;
             };
@@ -324,7 +324,7 @@ fn adding_an_element_grows_the_blocks_own_length() {
             continue;
         }
         let group = u32::from_be_bytes(group_bytes);
-        let Ok(tag) = crate::core::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+        let Ok(tag) = crate::core::source::read_tag_at_path(&tag_path, GameId::from_id(game), Some(defs), group)
         else {
             eprintln!("skip {game}: unreadable");
             continue;
@@ -344,7 +344,7 @@ fn adding_an_element_grows_the_blocks_own_length() {
         let mut stale = 0usize;
         for (name, before) in blocks {
             let Ok(mut tag) =
-                crate::core::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                crate::core::source::read_tag_at_path(&tag_path, GameId::from_id(game), Some(defs), group)
             else {
                 continue;
             };

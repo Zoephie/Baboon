@@ -22,6 +22,7 @@ use serde_json;
 use walkdir::WalkDir;
 
 use crate::core::format::TagNameIndex;
+use crate::core::game::GameId;
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Snapshot reported while a background loose-folder index scan is running.
@@ -115,7 +116,7 @@ pub enum TagSource {
     },
     LooseFolder {
         root: PathBuf,
-        game: Option<String>,
+        game: Option<GameId>,
         definitions_root: PathBuf,
     },
     MonolithicCache {
@@ -403,9 +404,9 @@ pub struct LoadedSourceData {
     pub label: String,
     pub source: TagSource,
     pub names: TagNameIndex,
-    /// Game identifier (e.g. "halo3_mcc"), used for the index cache filename.
-    /// None for single-file and monolithic sources.
-    pub game: Option<String>,
+    /// The game, which also names the index cache file. None for
+    /// single-file and monolithic sources.
+    pub game: Option<GameId>,
     /// Lazily-expanded entries for the folder tree (LooseFolder) or all
     /// entries for Monolithic / SingleFile sources.
     pub entries: Vec<TagEntry>,
@@ -564,7 +565,7 @@ impl LoadedSourceData {
             if !self.all_entries.is_empty() {
                 self.all_entries.retain(|existing| existing.key != key);
                 insert_entry_sorted(&mut self.all_entries, entry.clone());
-                if let Some(game) = self.game.as_deref() {
+                if let Some(game) = self.game.map(GameId::as_str) {
                     let _ = upsert_entry_index_row(game, root, &entry);
                 }
             }
@@ -587,7 +588,7 @@ impl LoadedSourceData {
         self.all_entries.retain(|entry| entry.key != key);
         let removed = self.entries.len() + self.all_entries.len() != before;
         if let (TagSource::LooseFolder { root, .. }, Some(game)) =
-            (&self.source, self.game.as_deref())
+            (&self.source, self.game.map(GameId::as_str))
         {
             let _ = delete_entry_index_row(game, root, key);
         }
@@ -776,7 +777,7 @@ impl ReverseDependencyIndex {
 pub(crate) struct FolderRootInfo {
     pub(crate) scan_root: PathBuf,
     pub(crate) label: String,
-    pub(crate) game: Option<&'static str>,
+    pub(crate) game: Option<GameId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

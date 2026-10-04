@@ -134,17 +134,21 @@ fn browser_game_id() -> egui::Id {
     egui::Id::new("browser_game_id")
 }
 
-pub(in crate::app) fn set_browser_game(ui: &Ui, game: Option<String>) {
-    ui.data_mut(|data| data.insert_temp(browser_game_id(), game.unwrap_or_default()));
+pub(in crate::app) fn set_browser_game(ui: &Ui, game: Option<GameId>) {
+    ui.data_mut(|data| data.insert_temp(browser_game_id(), game));
+}
+
+fn browser_game(ui: &Ui) -> Option<GameId> {
+    ui.data(|data| data.get_temp::<Option<GameId>>(browser_game_id()))
+        .flatten()
 }
 
 pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
-    ui.data(|data| data.get_temp::<String>(browser_game_id()))
-        .is_some_and(|game| game == "haloce_evolved")
+    browser_game(ui).is_some_and(GameId::is_campaign_evolved)
 }
 
 /// Whether the loaded game's bitmap tags keep the source image they were
-/// imported from. CE and Halo 2 keep it as a compressed color plate (1817 of
+/// imported from. Halo CE and Halo 2 keep it as a compressed color plate (1817 of
 /// the 1818 stock CE bitmaps, 4067 of the 4184 H2 ones). Halo 3 onward has a
 /// `source data` field instead, empty in all 11161 stock Halo 3 bitmaps, so
 /// there is nothing to recover there.
@@ -154,8 +158,7 @@ pub(in crate::app) fn bitmaps_keep_source_images(game: &str) -> bool {
 
 /// [`bitmaps_keep_source_images`] for the game the browser is drawing.
 pub(in crate::app) fn browser_game_keeps_bitmap_sources(ui: &Ui) -> bool {
-    ui.data(|data| data.get_temp::<String>(browser_game_id()))
-        .is_some_and(|game| bitmaps_keep_source_images(&game))
+    browser_game(ui).is_some_and(|game| bitmaps_keep_source_images(game.as_str()))
 }
 
 fn browser_sound_language_id() -> egui::Id {
