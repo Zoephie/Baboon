@@ -129,11 +129,8 @@ pub(in crate::app) fn collect_searchable_text(element: &TagStruct, blob: &mut St
         if blob.len() >= CAP {
             return;
         }
-        if let Some(block) = field.as_block() {
-            for index in 0..block.len() {
-                let Some(child) = block.element(index) else {
-                    continue;
-                };
+        if let Some(elements) = container_elements(&field) {
+            for (_, child) in elements {
                 collect_searchable_text(&child, blob, depth + 1);
                 if blob.len() >= CAP {
                     return;
@@ -155,6 +152,16 @@ pub(in crate::app) fn collect_searchable_text(element: &TagStruct, blob: &mut St
     }
 }
 
+/// A block's or an array's elements with their indices; `None` for any other
+/// field. Arrays hold fields like any block does, and the search skipped them.
+fn container_elements<'a>(field: &TagField<'a>) -> Option<Vec<(usize, TagStruct<'a>)>> {
+    if let Some(block) = field.as_block() {
+        return Some((0..block.len()).filter_map(|i| Some((i, block.element(i)?))).collect());
+    }
+    let array = field.as_array()?;
+    Some((0..array.len()).filter_map(|i| Some((i, array.element(i)?))).collect())
+}
+
 pub(in crate::app) fn append_searchable_text(blob: &mut String, text: &str) {
     if !blob.is_empty() {
         blob.push_str(" · ");
@@ -174,16 +181,12 @@ pub(in crate::app) fn first_field_value_match(
         } else {
             format!("{path}/{clean}")
         };
-        if let Some(block) = field.as_block() {
-            for index in 0..block.len() {
-                if let Some(child) = block.element(index) {
-                    if let Some(hit) = first_field_value_match(
-                        &child,
-                        query_lower,
-                        &format!("{field_path}[{index}]"),
-                    ) {
-                        return Some(hit);
-                    }
+        if let Some(elements) = container_elements(&field) {
+            for (index, child) in elements {
+                if let Some(hit) =
+                    first_field_value_match(&child, query_lower, &format!("{field_path}[{index}]"))
+                {
+                    return Some(hit);
                 }
             }
             continue;
@@ -442,6 +445,28 @@ mod field_search_tests {
         assert_eq!(blob, "first · second · third");
         assert!(!blob.starts_with(" · "));
         assert!(!blob.contains(" ·  · "));
+    }
+
+    /// Text in an array's elements is found like text in a block's. Both
+    /// the index blob and the first-match walk skipped arrays.
+    #[test]
+    fn text_inside_an_array_is_searched() {
+        let mut tag =
+            TagFile::new(crate::test_kits::definitions().join("halo3_mcc/test_tag.json")).unwrap();
+        crate::core::document::apply::apply_field_edit(
+            &mut tag,
+            "complex array[2]/string in array",
+            "needle",
+        )
+        .unwrap();
+
+        let mut blob = String::new();
+        collect_searchable_text(&tag.root(), &mut blob, 0);
+        assert!(blob.contains("needle"), "{blob}");
+        assert_eq!(
+            first_field_value_match(&tag.root(), "needle", ""),
+            Some(("complex array[2]/string in array".to_owned(), "needle".to_owned()))
+        );
     }
 
     #[test]
