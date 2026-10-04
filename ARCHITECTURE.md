@@ -45,12 +45,12 @@ During development the engine is used from a sibling checkout through a
 ## A frame
 
 eframe calls `App::logic` and then `App::ui`
-([`shell/frame`](src/app/shell/frame/mod.rs)):
+([`shell/frame`](src/app/shell/frame.rs)):
 
 1. **logic** (`run_logic`) needs no UI and also runs while the window is
    hidden: it applies finished background work (`WorkerMessage`s), runs timers
    such as autosave and recovery checkpoints, and handles a request to close.
-2. **ui** (`draw_root_ui`, [`shell/workspace`](src/app/shell/workspace/mod.rs)):
+2. **ui** (`draw_root_ui`, [`shell/workspace`](src/app/shell/workspace.rs)):
    keyboard shortcuts, the menu and status bars, the kit and tag tiles, then
    the dialogs. Last, it applies every command the draws queued, in the order
    they were sent.
@@ -111,7 +111,7 @@ trait Dialog: Any {
 - A draw opens a dialog with `cx.open_dialog(…)`; a handler with
   `dialogs.open(…)`. Opening one of the same type and instance replaces it.
 
-The smoke test (`shell/frame/frame_smoke_tests.rs`) draws every window over a
+The smoke test (`frame_smoke_tests` in `shell/frame.rs`) draws every window over a
 populated app and fails for any `impl Dialog` without a case.
 
 ## Documents and undo
@@ -126,7 +126,7 @@ bytes as their snapshots.
 ## Background work
 
 Long work runs off the UI thread through `spawn_worker` / `Ctx::spawn`
-([`shell/worker`](src/app/shell/worker/mod.rs)): the job returns a
+([`shell/worker`](src/app/shell/worker.rs)): the job returns a
 `WorkerMessage`, and if it panics a message is built from the panic instead,
 so nothing the UI marked as in flight is left that way. `run_logic` applies the
 messages each frame.
@@ -177,16 +177,17 @@ core's document and keyword types, which every feature sees.
 
 ## Tests
 
-Tests sit beside the code they test: inline as `mod tests { … }` at the
-bottom of a single-file module, or as `tests.rs` or `…_tests.rs` in a module's
-folder. Most build what they need synthetically from the bundled
+Tests sit beside the code they test: inline at the bottom of the module's
+file as `mod tests { … }` or a topic-named `mod …_tests { … }`, or as
+`tests.rs` or `…_tests.rs` files when the module is a folder with other
+children. Most build what they need synthetically from the bundled
 definitions. Tests that need a real editing kit read its location from the
 environment (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`, `BLAM_TEST_H3EK`,
 `BLAM_TEST_HREK`) and skip, by name, when it is not set; Campaign Evolved ones
 read `CE_PAKS` and are `#[ignore]`d otherwise. No tag files are checked in.
 
 Whole-frame tests drive `Baboon::run_frame` headlessly through the harness in
-`shell/frame/perf_baseline_tests.rs`.
+`perf_baseline_tests` in `shell/frame.rs`.
 
 ## Adding things
 

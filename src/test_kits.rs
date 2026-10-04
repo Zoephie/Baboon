@@ -100,12 +100,25 @@ pub(crate) fn unique_temp_dir(name: &str) -> PathBuf {
 fn product_code(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
-    while let Some(start) = rest.find("#[cfg(test)]\nmod ") {
-        out.push_str(&rest[..start]);
+    while let Some(start) = rest.find("#[cfg(test)]\n") {
         let module = &rest[start..];
         let header_end = module.find('\n').unwrap() + 1;
         let line_end = header_end + module[header_end..].find('\n').unwrap_or(0);
-        rest = if module[header_end..line_end].trim_end().ends_with('{') {
+        let declaration = &module[header_end..line_end];
+        let after_visibility = match declaration.strip_prefix("pub") {
+            Some(scoped) if scoped.starts_with('(') => {
+                scoped.split_once(") ").map_or("", |(_, rest)| rest)
+            }
+            Some(public) => public.trim_start(),
+            None => declaration,
+        };
+        if !after_visibility.starts_with("mod ") {
+            out.push_str(&rest[..start + header_end]);
+            rest = &module[header_end..];
+            continue;
+        }
+        out.push_str(&rest[..start]);
+        rest = if declaration.trim_end().ends_with('{') {
             // Through the module's closing brace, at the start of a line.
             match module.find("\n}\n") {
                 Some(end) => &module[end + 3..],
@@ -144,4 +157,25 @@ pub(crate) fn app_product_sources() -> Vec<(String, String)> {
     walk(&root, &root, &mut out);
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Inline test modules are cut, whatever their visibility; product code
+    /// under a `#[cfg(test)]` that is not a module is kept.
+    #[test]
+    fn product_code_cuts_inline_test_modules_only() {
+        let text = "fn a() {}\n\
+                    #[cfg(test)]\nmod tests {\n    fn t() {}\n}\n\
+                    #[cfg(test)]\npub(in crate::app) mod probe_tests {\n    fn p() {}\n}\n\
+                    #[cfg(test)]\nmod file_tests;\n\
+                    #[cfg(test)]\nfn helper() {}\n\
+                    fn b() {}\n";
+        assert_eq!(
+            product_code(text),
+            "fn a() {}\n\n#[cfg(test)]\nfn helper() {}\nfn b() {}\n"
+        );
+    }
 }
