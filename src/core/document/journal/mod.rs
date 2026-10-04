@@ -1,8 +1,9 @@
-//! Per-tag undo/redo journal.
+//! Per-document undo/redo journal, shared by tags and Chimp's packages.
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //!
-//! `TagFile` is not `Clone`, so snapshots are taken by serializing the tag to
-//! bytes (`write_to_bytes`) and restored by re-parsing (`read_from_bytes`). A
+//! Documents are snapshotted as the bytes that restore them
+//! ([`JournalDocument`]): a tag serialized (`write_to_bytes`) and restored by
+//! re-parsing (`read_from_bytes`), a Chimp package rebuilt and re-decoded. A
 //! snapshot is captured immediately *before* a mutating edit batch is applied,
 //! so undo restores the exact pre-edit bytes regardless of which op kinds were
 //! in the batch.
@@ -17,7 +18,7 @@ use std::sync::Arc;
 
 use blam_tags::TagFile;
 
-/// One serialized tag state plus a human-readable label for the action.
+/// One serialized document state plus a human-readable label for the action.
 ///
 /// The bytes are shared rather than owned: the session's recovery project
 /// captures the history on every autosave tick, and a stack holding a couple of
@@ -96,15 +97,30 @@ impl Default for EditJournal {
     }
 }
 
+/// A document whose state an [`EditJournal`] can snapshot: whatever bytes
+/// restore it. A tag is its serialized file; a Chimp package is its rebuilt
+/// package.
+pub(crate) trait JournalDocument {
+    /// The document's bytes as they stand, or `None` when it cannot be
+    /// serialized, in which case no step is recorded.
+    fn snapshot_bytes(&self) -> Option<Vec<u8>>;
+}
+
+impl JournalDocument for TagFile {
+    fn snapshot_bytes(&self) -> Option<Vec<u8>> {
+        self.write_to_bytes().ok()
+    }
+}
+
 impl EditJournal {
     /// Capture a pre-edit snapshot before applying a batch. No-op while already
     /// coalescing a run, so a continuous drag yields a single undo entry.
     /// Clears the redo stack (a new edit invalidates any redo history).
-    pub(crate) fn begin_edit(&mut self, tag: &TagFile, label: &str) {
+    pub(crate) fn begin_edit(&mut self, document: &impl JournalDocument, label: &str) {
         if self.coalescing {
             return;
         }
-        if let Ok(bytes) = tag.write_to_bytes() {
+        if let Some(bytes) = document.snapshot_bytes() {
             self.push_capped(Snapshot::new(Arc::new(bytes), label.to_owned()));
             self.redo.clear();
         }
@@ -150,9 +166,9 @@ impl EditJournal {
 
     /// Pop the most recent undo snapshot, recording `current` on the redo stack.
     /// Returns the bytes to restore and the action label.
-    pub(crate) fn undo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
+    pub(crate) fn undo(&mut self, current: &impl JournalDocument) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.undo.pop()?;
-        if let Ok(bytes) = current.write_to_bytes() {
+        if let Some(bytes) = current.snapshot_bytes() {
             push_capped_into(
                 &mut self.redo,
                 self.limit,
@@ -166,9 +182,9 @@ impl EditJournal {
     }
 
     /// Pop the most recent redo snapshot, recording `current` on the undo stack.
-    pub(crate) fn redo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
+    pub(crate) fn redo(&mut self, current: &impl JournalDocument) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.redo.pop()?;
-        if let Ok(bytes) = current.write_to_bytes() {
+        if let Some(bytes) = current.snapshot_bytes() {
             push_capped_into(
                 &mut self.undo,
                 self.limit,
