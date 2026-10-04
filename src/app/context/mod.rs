@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::search::SearchCommand;
 use crate::app::compare::CompareCommand;
 use crate::app::help::HelpCommand;
 use crate::app::chimp::ChimpCommand;

@@ -14,6 +14,7 @@
 
 use crate::app::loose_fixture::*;
 use super::*;
+use crate::app::search::QueryResultsWindow;
 use std::collections::BTreeSet;
 use std::time::Duration;
 

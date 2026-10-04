@@ -3,6 +3,11 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::search::{
+    FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind,
+    FindWithin, SearchCommand, find_render_cell_id, find_render_snapshot_id, find_text_ranges,
+    map_tsv_header_to_fields,
+};
 use crate::app::help::{
     DefDocs, DefEntry, GroupHierarchy, build_def_docs, documentation_path, group_hierarchy,
 };

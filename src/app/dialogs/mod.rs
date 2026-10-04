@@ -2,6 +2,7 @@
 //! It owns which dialogs are open and drawing them; what a dialog shows and what it asks for belong to the feature that defines it.
 
 use super::*;
+use crate::app::search::SearchFeature;
 use std::any::{Any, TypeId};
 
 /// A window the [`DialogHost`] owns and draws.

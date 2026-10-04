@@ -97,7 +97,7 @@ mod help;
 use help::{HelpDocsState, HelpFeature, TutorialsState};
 mod compare;
 mod search;
-use search::*;
+use search::{FindDialogState, SearchFeature};
 mod references;
 use references::*;
 pub(in crate::app) mod import;

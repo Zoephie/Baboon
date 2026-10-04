@@ -2,6 +2,7 @@
 //! jumps, and fixing a tag's dependencies.
 
 use super::*;
+use crate::app::search::QueryResultsWindow;
 use crate::core::document::value::append_field_path_for;
 use crate::app::editor::{
     OpenTagRequest, clean_field_name, field_jump_target_id, format_reference_path,
