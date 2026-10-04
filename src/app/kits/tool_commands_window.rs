@@ -453,7 +453,7 @@ impl Baboon {
                 );
             }
         });
-        if browse_clicked && let Some(path) = self.pick_tool_command_path(arg.kind) {
+        if browse_clicked && let Some(path) = pick_tool_command_path(&self.model, arg.kind) {
             value = path;
         }
         self.kit_tools.tool_commands.values.insert(key, value);
@@ -476,32 +476,35 @@ impl Baboon {
         ui.add_space(4.0);
     }
 
-    pub(in crate::app) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
-        let layout = self.model.kit_layout_for(self.model.active);
-        let kit_root = layout.as_ref().map(|layout| layout.root.clone());
-        let data_root = layout.as_ref().map(|layout| layout.data.clone());
-        let tags_root = layout.as_ref().map(|layout| layout.tags.clone());
-        let start_dir = match kind {
-            ToolCommandArgKind::PathData => data_root.as_deref(),
-            ToolCommandArgKind::PathTag => tags_root.as_deref(),
-            ToolCommandArgKind::PathFile => data_root.as_deref().or(kit_root.as_deref()),
-            _ => kit_root.as_deref(),
-        };
-        let mut dialog = rfd::FileDialog::new();
-        if let Some(start_dir) = start_dir.filter(|path| path.is_dir()) {
-            dialog = dialog.set_directory(start_dir);
-        }
-        match kind {
-            ToolCommandArgKind::PathData => dialog
-                .pick_folder()
-                .map(|path| path_arg_from_picker(&path, data_root.as_deref(), false)),
-            ToolCommandArgKind::PathTag => dialog
-                .pick_folder()
-                .map(|path| path_arg_from_picker(&path, tags_root.as_deref(), true)),
-            ToolCommandArgKind::PathFile => dialog.pick_file().map(|path| {
-                path_arg_from_picker(&path, data_root.as_deref().or(tags_root.as_deref()), false)
-            }),
-            _ => None,
-        }
+}
+
+/// Ask for a path for a tool command argument of `kind`, starting in the
+/// active kit's tags or data folder.
+pub(in crate::app) fn pick_tool_command_path(model: &Model, kind: ToolCommandArgKind) -> Option<String> {
+    let layout = model.kit_layout_for(model.active);
+    let kit_root = layout.as_ref().map(|layout| layout.root.clone());
+    let data_root = layout.as_ref().map(|layout| layout.data.clone());
+    let tags_root = layout.as_ref().map(|layout| layout.tags.clone());
+    let start_dir = match kind {
+        ToolCommandArgKind::PathData => data_root.as_deref(),
+        ToolCommandArgKind::PathTag => tags_root.as_deref(),
+        ToolCommandArgKind::PathFile => data_root.as_deref().or(kit_root.as_deref()),
+        _ => kit_root.as_deref(),
+    };
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(start_dir) = start_dir.filter(|path| path.is_dir()) {
+        dialog = dialog.set_directory(start_dir);
+    }
+    match kind {
+        ToolCommandArgKind::PathData => dialog
+            .pick_folder()
+            .map(|path| path_arg_from_picker(&path, data_root.as_deref(), false)),
+        ToolCommandArgKind::PathTag => dialog
+            .pick_folder()
+            .map(|path| path_arg_from_picker(&path, tags_root.as_deref(), true)),
+        ToolCommandArgKind::PathFile => dialog.pick_file().map(|path| {
+            path_arg_from_picker(&path, data_root.as_deref().or(tags_root.as_deref()), false)
+        }),
+        _ => None,
     }
 }

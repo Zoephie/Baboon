@@ -123,6 +123,7 @@ pub(in crate::app) enum Command {
     Export(ExportCommand),
     Mods(ModsCommand),
     TagOps(TagOpsCommand),
+    Import(ImportCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -167,6 +168,12 @@ impl From<TagOpsCommand> for Command {
     }
 }
 
+impl From<ImportCommand> for Command {
+    fn from(command: ImportCommand) -> Self {
+        Command::Import(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -202,6 +209,7 @@ impl Baboon {
             Command::Export(command) => self.apply_export_command(command),
             Command::Mods(command) => self.apply_mods_command(command),
             Command::TagOps(command) => self.apply_tag_ops_command(command),
+            Command::Import(command) => self.apply_import_command(command),
         }
     }
 }

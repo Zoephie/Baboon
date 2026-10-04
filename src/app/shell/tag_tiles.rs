@@ -102,7 +102,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app.draw_blam_pane(ui, self.kit_index);
+            let app = &mut *self.app;
+            let kit = app.model.kits[self.kit_index].id;
+            let egui = ui.ctx().clone();
+            draw_blam_pane(&cx!(app, &egui), ui, self.kit_index, &mut app.views[kit].blam);
             return egui_tiles::UiResponse::None;
         }
         let Some(entry) = self.app.model.kits[self.kit_index]

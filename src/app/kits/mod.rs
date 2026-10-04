@@ -32,6 +32,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) mod terminal_state;
 pub(in crate::app) use terminal_state::*;
 pub(in crate::app) mod tool_commands_window;
+pub(in crate::app) use tool_commands_window::pick_tool_command_path;
 pub(in crate::app) mod tools;
 pub(in crate::app) mod profiles;
 

@@ -281,32 +281,6 @@ impl Baboon {
         self.model.status = format!("Imported over {label} (unsaved)");
     }
 
-    /// If an import at `folder_rel`/`name` (group `group_tag`) would land on an
-    /// existing base-game tag, return that tag's logical path; else `None` (a new
-    /// tag). Used by the Import dialog's overwrite-vs-new banner.
-    pub(in crate::app) fn import_overwrite_target(
-        &self,
-        folder_rel: &str,
-        name: &str,
-        group_tag: u32,
-    ) -> Option<String> {
-        let folder = normalize_container_tag_rel(folder_rel);
-        let leaf = normalize_container_tag_rel(name);
-        if leaf.is_empty() {
-            return None;
-        }
-        let logical = if folder.is_empty() {
-            leaf
-        } else {
-            format!("{folder}/{leaf}")
-        };
-        match &self.model.source()?.source {
-            TagSource::IoStoreContainerSet { index, .. } => {
-                index.lookup(group_tag, &logical).map(|_| logical)
-            }
-            _ => None,
-        }
-    }
 
     /// Resolve the pending "discard unsaved edits?" import confirmation.
     pub(in crate::app) fn apply_import_discard(&mut self) {
@@ -429,5 +403,34 @@ pub(in crate::app) fn classify_import_source_for(
         // Nothing claims it. This is the dev-era layout drift the gate was
         // originally calibrated for, so keep the override available.
         None => (verdicts, native()),
+    }
+}
+
+impl Model {
+    /// If an import at `folder_rel`/`name` (group `group_tag`) would land on an
+    /// existing base-game tag, return that tag's logical path; else `None` (a new
+    /// tag). Used by the Import dialog's overwrite-vs-new banner.
+    pub(in crate::app) fn import_overwrite_target(
+        &self,
+        folder_rel: &str,
+        name: &str,
+        group_tag: u32,
+    ) -> Option<String> {
+        let folder = normalize_container_tag_rel(folder_rel);
+        let leaf = normalize_container_tag_rel(name);
+        if leaf.is_empty() {
+            return None;
+        }
+        let logical = if folder.is_empty() {
+            leaf
+        } else {
+            format!("{folder}/{leaf}")
+        };
+        match &self.source()?.source {
+            TagSource::IoStoreContainerSet { index, .. } => {
+                index.lookup(group_tag, &logical).map(|_| logical)
+            }
+            _ => None,
+        }
     }
 }

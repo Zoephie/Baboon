@@ -1,5 +1,6 @@
 //! The Import Cache Folder window: converting a monolithic cache's tags into an editing kit.
-//! It owns presentation and action collection; the conversion run and its report belong to the controller.
+//! It owns presentation and action collection; the conversion run is
+//! [`ImportCommand::StartCacheImport`], and its report comes back from the worker.
 
 use super::*;
 
@@ -524,82 +525,81 @@ fn draw_cache_import_body(
     action
 }
 
-impl Baboon {
-    /// Import Cache Folder: convert a monolithic cache's tags into an editing
-    /// kit.
-    ///
-    /// The window stays up for the whole run and keeps its report afterwards.
-    /// A run of this can reach thousands of tags — following references out of
-    /// a folder is the point — so the outcome is a document to read, not a
-    /// status-bar line to catch.
-    pub(in crate::app) fn draw_cache_import_window(&mut self, ctx: &egui::Context) {
-        if self.import.cache_import_dialog.is_none() {
-            return;
-        }
-        let mut open = true;
-        let mut action = None;
-        egui::Window::new("Import Cache Folder")
-            .constrain_to(window_work_area(ctx))
-            .id(egui::Id::new("cache_import"))
-            .open(&mut open)
-            .resizable(true)
-            .default_width(window_width(ctx, 560.0))
-            .show(ctx, |ui| {
-                if let Some(dialog) = self.import.cache_import_dialog.as_mut() {
-                    action = draw_cache_import_body(ui, ctx, dialog);
-                }
-            });
+/// Import Cache Folder: convert a monolithic cache's tags into an editing
+/// kit.
+///
+/// The window stays up for the whole run and keeps its report afterwards.
+/// A run of this can reach thousands of tags — following references out of
+/// a folder is the point — so the outcome is a document to read, not a
+/// status-bar line to catch.
+pub(in crate::app) fn draw_cache_import_window(cx: &Ctx, import: &mut ImportFeature) {
+    let ctx = cx.egui;
+    if import.cache_import_dialog.is_none() {
+        return;
+    }
+    let mut open = true;
+    let mut action = None;
+    egui::Window::new("Import Cache Folder")
+        .constrain_to(window_work_area(ctx))
+        .id(egui::Id::new("cache_import"))
+        .open(&mut open)
+        .resizable(true)
+        .default_width(window_width(ctx, 560.0))
+        .show(ctx, |ui| {
+            if let Some(dialog) = import.cache_import_dialog.as_mut() {
+                action = draw_cache_import_body(ui, ctx, dialog);
+            }
+        });
 
-        match action {
-            Some(CacheImportAction::Start) => self.start_cache_import(ctx.clone(), None),
-            Some(CacheImportAction::ImportOutside) => {
-                let picked = self
-                    .import.cache_import_dialog
-                    .as_ref()
-                    .map(|dialog| {
-                        dialog
-                            .report
-                            .as_ref()
-                            .map(|report| {
-                                report
-                                    .outside_references
-                                    .iter()
-                                    .filter(|reference| {
-                                        dialog
-                                            .outside_picked
-                                            .get(&reference.key)
-                                            .copied()
-                                            .unwrap_or(false)
-                                    })
-                                    .map(|reference| reference.key.clone())
-                                    .collect::<HashSet<String>>()
-                            })
-                            .unwrap_or_default()
-                    })
-                    .unwrap_or_default();
-                if !picked.is_empty() {
-                    self.start_cache_import(ctx.clone(), Some(picked));
-                }
+    match action {
+        Some(CacheImportAction::Start) => cx.send(ImportCommand::StartCacheImport { only: None }),
+        Some(CacheImportAction::ImportOutside) => {
+            let picked = import
+                .cache_import_dialog
+                .as_ref()
+                .map(|dialog| {
+                    dialog
+                        .report
+                        .as_ref()
+                        .map(|report| {
+                            report
+                                .outside_references
+                                .iter()
+                                .filter(|reference| {
+                                    dialog
+                                        .outside_picked
+                                        .get(&reference.key)
+                                        .copied()
+                                        .unwrap_or(false)
+                                })
+                                .map(|reference| reference.key.clone())
+                                .collect::<HashSet<String>>()
+                        })
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            if !picked.is_empty() {
+                cx.send(ImportCommand::StartCacheImport { only: Some(picked) });
             }
-            Some(CacheImportAction::ScanConflicts) => self.scan_cache_import_conflicts(ctx.clone()),
-            Some(CacheImportAction::Cancel) => {
-                if let Some(dialog) = self.import.cache_import_dialog.as_ref() {
-                    dialog.cancel.store(true, Ordering::Relaxed);
-                }
-                self.model.status = "Stopping the cache import".to_owned();
+        }
+        Some(CacheImportAction::ScanConflicts) => cx.send(ImportCommand::ScanCacheConflicts),
+        Some(CacheImportAction::Cancel) => {
+            if let Some(dialog) = import.cache_import_dialog.as_ref() {
+                dialog.cancel.store(true, Ordering::Relaxed);
             }
-            Some(CacheImportAction::Close) => self.import.cache_import_dialog = None,
-            None => {}
+            cx.set_status("Stopping the cache import");
         }
-        // A run owns its window: closing it would leave a worker writing into a
-        // kit with nothing left to report to.
-        let running = self
-            .import.cache_import_dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.running);
-        if !open && !running {
-            self.import.cache_import_dialog = None;
-        }
+        Some(CacheImportAction::Close) => import.cache_import_dialog = None,
+        None => {}
+    }
+    // A run owns its window: closing it would leave a worker writing into a
+    // kit with nothing left to report to.
+    let running = import
+        .cache_import_dialog
+        .as_ref()
+        .is_some_and(|dialog| dialog.running);
+    if !open && !running {
+        import.cache_import_dialog = None;
     }
 }
 

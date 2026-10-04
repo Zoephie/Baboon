@@ -14,9 +14,13 @@ pub(in crate::app) mod blam;
 pub(in crate::app) use blam::*;
 pub(in crate::app) mod blam_workflow;
 pub(in crate::app) mod blam_pane;
+pub(in crate::app) use blam_pane::draw_blam_pane;
 pub(in crate::app) mod import_tag_dialog;
+pub(in crate::app) use import_tag_dialog::{draw_import_discard_confirm, draw_import_tag_window};
 pub(in crate::app) mod tags_window;
+pub(in crate::app) use tags_window::draw_tag_import_window;
 pub(in crate::app) mod cache_window;
+pub(in crate::app) use cache_window::draw_cache_import_window;
 pub(in crate::app) mod single_tag;
 
 #[cfg(test)]
@@ -47,4 +51,56 @@ pub(in crate::app) struct ImportFeature {
     pub(in crate::app) import_tag_dialog: Option<ImportTagDialog>,
     /// Pending "discard unsaved edits and replace with the imported tag?" prompt.
     pub(in crate::app) import_discard_confirm: Option<PendingImport>,
+}
+
+/// What the import windows commit to. Each acts on the state its window
+/// holds.
+pub(in crate::app) enum ImportCommand {
+    /// Import Tags: work out what the chosen source is.
+    ResolveSource,
+    /// Import Tags: pick the source file or folder.
+    BrowseSourceFile,
+    BrowseSourceFolder,
+    /// Import Tags: run the import.
+    Import,
+    /// Import Tags: write the tag whose data loss the user has accepted.
+    AcceptLosses,
+    /// Import Tags: write the tags a folder run held back, same bargain.
+    AcceptHeldBack,
+    /// Import into containers: preview the conversion of the chosen tag.
+    AnalyzeTag,
+    /// Import into containers: bring the tag in.
+    ConfirmTag,
+    /// Import into containers: discard the unsaved edits it would replace.
+    Discard,
+    /// Import from a cache: run, over every tag or only `only`.
+    StartCacheImport { only: Option<HashSet<String>> },
+    /// Import from a cache: find which tags the kit already has.
+    ScanCacheConflicts,
+    /// Run the Blam! import the kit's pane is set up for.
+    BlamImport { kit: KitId },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_import_command(&mut self, command: ImportCommand) {
+        let ctx = self.egui_ctx.clone();
+        match command {
+            ImportCommand::ResolveSource => self.resolve_import_source(&ctx),
+            ImportCommand::BrowseSourceFile => self.choose_import_source_file(&ctx),
+            ImportCommand::BrowseSourceFolder => self.choose_import_source_folder(&ctx),
+            ImportCommand::Import => self.begin_tag_import(),
+            ImportCommand::AcceptLosses => self.accept_import_losses(&ctx),
+            ImportCommand::AcceptHeldBack => self.accept_held_back_imports(),
+            ImportCommand::AnalyzeTag => self.analyze_import_conversion(),
+            ImportCommand::ConfirmTag => self.confirm_import_tag(),
+            ImportCommand::Discard => self.apply_import_discard(),
+            ImportCommand::StartCacheImport { only } => self.start_cache_import(ctx, only),
+            ImportCommand::ScanCacheConflicts => self.scan_cache_import_conflicts(ctx),
+            ImportCommand::BlamImport { kit } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.begin_blam_import(index, ctx);
+                }
+            }
+        }
+    }
 }
