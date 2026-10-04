@@ -670,15 +670,15 @@ impl Baboon {
         );
         ui.checkbox(&mut self.prefs.expert_mode, "Expert mode");
         ui.separator();
-        let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
+        let terminal_enabled = self.kits[self.active].terminal.work_dir.is_some();
         if ui
             .add_enabled(
                 terminal_enabled,
-                egui::Button::selectable(self.kits[self.active].terminal_open, "Terminal"),
+                egui::Button::selectable(self.kits[self.active].terminal.open, "Terminal"),
             )
             .clicked()
         {
-            self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
+            self.kits[self.active].terminal.open = !self.kits[self.active].terminal.open;
             self.remember_terminal_open_for_game();
             close_menu(ui);
         }
@@ -1061,9 +1061,9 @@ impl Baboon {
     /// The terminal panel, when the active kit has it open.
     fn draw_terminal_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
-        if self.kits[self.active].terminal_open {
+        if self.kits[self.active].terminal.open {
             let work_dir_label = self.kits[self.active]
-                .terminal_work_dir
+                .terminal.work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
@@ -1101,7 +1101,7 @@ impl Baboon {
                                             .on_hover_text("Close terminal")
                                             .clicked()
                                         {
-                                            self.kits[self.active].terminal_open = false;
+                                            self.kits[self.active].terminal.open = false;
                                             self.remember_terminal_open_for_game();
                                         }
                                         if icon_button(

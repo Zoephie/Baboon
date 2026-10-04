@@ -2,6 +2,7 @@
 //! It owns kit identity and per-source state; global preferences, dialogs, and process-level services belong on [`Baboon`].
 
 use super::*;
+use crate::app::kits::terminal::KitTerminal;
 use crate::app::shell::session::RestorePlan;
 
 /// Stable, never-reused identity for a loaded kit.
@@ -145,11 +146,6 @@ pub(in crate::app) struct Kit {
     /// True while a background full-scan of this loose-folder source is running.
     pub(in crate::app) scanning_entries: bool,
 
-    // --- Per-kit terminal placement ---
-    pub(in crate::app) terminal_open: bool,
-    /// Working directory for terminal commands (game kit root, parent of tags/).
-    pub(in crate::app) terminal_work_dir: Option<PathBuf>,
-
     /// The path the user chose when opening this kit, as typed into the file
     /// dialog or the recents list — not the resolved scan root, which can
     /// differ (picking an editing-kit root scans its `tags/` subdirectory).
@@ -189,6 +185,9 @@ pub(in crate::app) struct Kit {
     /// loads: tags and folders, undo histories, Chimp packages, the libraries,
     /// and tags named on the command line.
     pub(in crate::app) restore: RestorePlan,
+    /// Where this kit's terminal is: whether its panel is open and the
+    /// directory its commands run in.
+    pub(in crate::app) terminal: KitTerminal,
 }
 
 impl Kit {
@@ -232,8 +231,6 @@ impl Kit {
             active_favorite_entries: Vec::new(),
             active_favorite_folders: Vec::new(),
             scanning_entries: false,
-            terminal_open: false,
-            terminal_work_dir: None,
             requested_path: None,
             profile: None,
             campaign_project: None,
@@ -252,6 +249,7 @@ impl Kit {
                 pending_restore_active_chimp_package: None,
                 pending_launch_tags: None,
             },
+            terminal: KitTerminal::default(),
         }
     }
 

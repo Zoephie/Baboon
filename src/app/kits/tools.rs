@@ -242,7 +242,7 @@ impl Baboon {
             &format!("tool bitmaps \"{data_path}\""),
             &self.active_kit_tool_folder_options(),
         );
-        self.kits[self.active].terminal_open = true;
+        self.kits[self.active].terminal.open = true;
         self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));

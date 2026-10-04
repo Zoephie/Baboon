@@ -522,13 +522,13 @@ impl Baboon {
             self.status = "A command is already running".to_owned();
             return;
         }
-        let Some(work_dir) = self.kits[self.active].terminal_work_dir.clone() else {
+        let Some(work_dir) = self.kits[self.active].terminal.work_dir.clone() else {
             self.status = "Run requires a loaded editing-kit folder".to_owned();
             return;
         };
         // Rewritten before it is echoed, so the terminal shows what really ran.
         let command = with_tool_folder_options(&command, &self.active_kit_tool_folder_options());
-        self.kits[self.active].terminal_open = true;
+        self.kits[self.active].terminal.open = true;
         self.kit_tools.terminal
             .lines
             .push(TerminalLineEntry::new(format!("> {command}")));
@@ -704,7 +704,7 @@ impl Baboon {
         let Some(game) = self.source().and_then(|s| s.game.clone()) else {
             return;
         };
-        if self.kits[self.active].terminal_open {
+        if self.kits[self.active].terminal.open {
             self.kit_tools.terminal_open_games.insert(game.as_str().to_owned());
         } else {
             self.kit_tools.terminal_open_games.remove(game.as_str());
@@ -714,3 +714,12 @@ impl Baboon {
 
 #[cfg(test)]
 mod terminal_output_tests;
+
+/// Where this kit's terminal is: whether its panel is open and the directory
+/// its commands run in.
+#[derive(Default)]
+pub(in crate::app) struct KitTerminal {
+    pub(in crate::app) open: bool,
+    /// Working directory for terminal commands (game kit root, parent of tags/).
+    pub(in crate::app) work_dir: Option<PathBuf>,
+}

@@ -84,7 +84,7 @@ fn a_kit_with_chosen_folders_uses_them_everywhere() {
     let app = loose_kit_with(&chosen.tags, "haloce_mcc", Some(chosen.clone()));
     assert_eq!(app.kit_layout_for(0), Some(chosen.clone()));
     assert_eq!(app.loaded_data_root(), Some(ek.join("data_moda")));
-    assert_eq!(app.kits[0].terminal_work_dir, Some(ek.clone()));
+    assert_eq!(app.kits[0].terminal.work_dir, Some(ek.clone()));
     assert_eq!(
         app.active_kit_tool_folder_options(),
         vec![
@@ -138,7 +138,7 @@ fn a_loaded_kits_folders_all_come_from_its_layout() {
     let app = loose_kit_at(&ek.join("tags"));
     assert_eq!(app.editing_kit_root(), Some(ek.clone()));
     assert_eq!(app.loaded_data_root(), Some(ek.join("data")));
-    assert_eq!(app.kits[0].terminal_work_dir, Some(ek.clone()));
+    assert_eq!(app.kits[0].terminal.work_dir, Some(ek.clone()));
     assert_eq!(app.kit_tool_path("sapien.exe"), Some(ek.join("sapien.exe")));
 }
 
@@ -151,7 +151,7 @@ fn a_folder_not_named_tags_has_its_parent_for_a_root_everywhere() {
     let ek = PathBuf::from("/ek/H3EK");
     assert_eq!(app.editing_kit_root(), Some(ek.clone()));
     assert_eq!(app.loaded_data_root(), Some(ek.join("data")));
-    assert_eq!(app.kits[0].terminal_work_dir, Some(ek));
+    assert_eq!(app.kits[0].terminal.work_dir, Some(ek));
 }
 
 /// The read-only check now starts from the tags folder, which is under the

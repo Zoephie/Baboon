@@ -412,7 +412,7 @@ pub(super) mod fixture {
         app: &mut Baboon,
         lines: impl IntoIterator<Item = String>,
     ) {
-        app.kits[app.active].terminal_open = true;
+        app.kits[app.active].terminal.open = true;
         app.kit_tools.terminal.lines = lines.into_iter().map(TerminalLineEntry::new).collect();
         app.kit_tools.terminal.scroll_to_bottom = true;
     }

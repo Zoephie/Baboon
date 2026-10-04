@@ -132,12 +132,12 @@ impl Baboon {
     fn apply_loaded_source_identity(&mut self, game: Option<GameId>) {
         let terminal_open = game.is_some_and(|game| self.kit_tools.terminal_open_games.contains(game.as_str()));
         let kit = &mut self.kits[self.active];
-        kit.terminal_work_dir = kit
+        kit.terminal.work_dir = kit
             .source
             .as_ref()
             .and_then(LoadedSourceData::kit_layout)
             .map(|layout| layout.root);
-        kit.terminal_open = terminal_open;
+        kit.terminal.open = terminal_open;
         kit.keywords.load_for_game(game.map(GameId::as_str));
     }
 
