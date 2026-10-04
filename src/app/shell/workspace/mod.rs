@@ -18,7 +18,7 @@ impl Baboon {
             set_dark_mode(self.model.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ui, |_ui| {});
-            self.draw_first_run_wizard(ctx);
+            draw_first_run_wizard(&cx!(self, ctx), &mut self.shell, &mut self.kit_tools);
             self.apply_commands(ctx);
             return;
         }

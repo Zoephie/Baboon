@@ -18,6 +18,7 @@ pub(in crate::app) mod workspace;
 pub(in crate::app) mod welcome;
 pub(in crate::app) use welcome::draw_welcome_screen;
 pub(in crate::app) mod first_run;
+pub(in crate::app) use first_run::{FirstRunCommand, draw_first_run_wizard};
 pub(in crate::app) mod settings;
 pub(in crate::app) use settings::{
     SettingsCommand, draw_nested_default_picker, draw_settings_window, draw_update_channel_picker,
