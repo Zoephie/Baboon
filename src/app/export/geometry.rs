@@ -146,17 +146,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
         b"scnr" => extract_scenario_geometry(source, entry, output, target),
         b"sbsp" => {
             let tag = read_entry(source, entry)?;
-            let mut notes = Vec::new();
-            let version = ass_version_for(Game::of(&tag), target, &mut notes);
-            let ass = AssFile::from_scenario_structure_bsp(&tag)?;
-            fs::create_dir_all(output)?;
-            let path = output.join(format!("{}.ASS", tag_file_stem(entry)));
-            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            ass.write_version(&mut file, version)?;
-            Ok(with_notes(
-                format!("Extracted BSP geometry {}", path.display()),
-                &notes,
-            ))
+            extract_bsp_geometry(&tag, &tag_file_stem(entry), output, target)
         }
         b"mode" | b"mod2" => {
             let tag = read_entry(source, entry)?;
@@ -1110,6 +1100,47 @@ pub(in crate::app) fn extract_animations_for_entry(
 /// Extract per-BSP scenario geometry — one ASS (Halo 2 / Halo 3) or render +
 /// collision JMS (Halo CE) per structure BSP — under
 /// `<output>/<stem>/structure/`, in-process via `blam_tags::extract`.
+/// Write a structure BSP's geometry in its own game's form, as the scenario
+/// export does for each of a level's BSPs: Halo CE as render and collision JMS,
+/// Halo 2 as a version 2 ASS, Halo 3 on as an ASS at `target`'s version. Reading
+/// every game's BSP with the Halo 3 reader failed on Halo CE and Halo 2 ones.
+fn extract_bsp_geometry(
+    tag: &TagFile,
+    stem: &str,
+    output: &Path,
+    target: Game,
+) -> anyhow::Result<String> {
+    let source = Game::of(tag);
+    let mut notes = Vec::new();
+    if source != target && matches!(source, Game::Halo1 | Game::Halo2) {
+        notes.push("level geometry is written in this game's own form".to_owned());
+    }
+    fs::create_dir_all(output)?;
+    let written = match source {
+        Game::Halo1 => blam_tags::extract::geometry::emit_ce_bsp_jms(tag, output, stem, true)?
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect(),
+        Game::Halo2 => {
+            let path = output.join(format!("{stem}.ASS"));
+            let ass = AssFile::from_scenario_structure_bsp_h2(tag)?;
+            ass.write_version(&mut std::io::BufWriter::new(fs::File::create(&path)?), 2)?;
+            vec![path]
+        }
+        _ => {
+            let version = ass_version_for(source, target, &mut notes);
+            let path = output.join(format!("{stem}.ASS"));
+            let ass = AssFile::from_scenario_structure_bsp(tag)?;
+            ass.write_version(&mut std::io::BufWriter::new(fs::File::create(&path)?), version)?;
+            vec![path]
+        }
+    };
+    Ok(with_notes(
+        format!("Extracted BSP geometry {}", display_paths(&written)),
+        &notes,
+    ))
+}
+
 pub(in crate::app) fn extract_scenario_geometry(
     source: &TagSource,
     entry: &TagEntry,
@@ -1140,6 +1171,30 @@ pub(in crate::app) fn extract_scenario_geometry(
 mod tests {
     use super::*;
     use crate::core::document::apply::{add_block_element, apply_field_edit};
+
+    /// A Halo CE or Halo 2 structure BSP extracts in its own game's form. The
+    /// single-BSP export read every BSP with the Halo 3 reader, so it failed on
+    /// both, while the same BSPs exported fine through their scenario.
+    #[test]
+    fn a_classic_structure_bsp_extracts_in_its_own_form() {
+        use blam_tags::classic::ClassicEngine;
+        let output = crate::test_kits::unique_temp_dir("classic-bsp");
+        let bsp = |definition: &str, engine| {
+            TagFile::new_classic(crate::test_kits::definitions().join(definition), engine).unwrap()
+        };
+
+        let ce = bsp("haloce_mcc/scenario_structure_bsp.json", ClassicEngine::HaloCe);
+        let message = extract_bsp_geometry(&ce, "level", &output.join("ce"), Game::Halo1)
+            .unwrap_or_else(|error| panic!("Halo CE: {error:#}"));
+        assert!(output.join("ce/level.render.jms").is_file(), "{message}");
+        assert!(output.join("ce/level.collision.jms").is_file(), "{message}");
+
+        let h2 = bsp("halo2_mcc/scenario_structure_bsp.json", ClassicEngine::Halo2V4);
+        let message = extract_bsp_geometry(&h2, "level", &output.join("h2"), Game::Halo2)
+            .unwrap_or_else(|error| panic!("Halo 2: {error:#}"));
+        assert!(output.join("h2/level.ASS").is_file(), "{message}");
+        let _ = std::fs::remove_dir_all(&output);
+    }
 
     fn add(tag: &mut TagFile, path: &str) {
         add_block_element(tag, path).unwrap_or_else(|error| panic!("add {path}: {error}"));
