@@ -727,6 +727,10 @@ mod ui_scale_slider_tests;
 #[path = "../app/tests/shader_option_reads.rs"]
 mod shader_option_read_tests;
 
+#[cfg(test)]
+#[path = "../app/tests/perf_baseline.rs"]
+mod perf_baseline;
+
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(

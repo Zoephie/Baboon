@@ -2636,7 +2636,7 @@ pub(in crate::app) fn collect_hlsl_include_keys_into(
 #[cfg(test)]
 thread_local! {
     /// Browser rows (tags and folder headers) this thread laid out.
-    pub(super) static TREE_ROWS_LAID_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(in crate::app) static TREE_ROWS_LAID_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Off lays out every row, as the tree did before it skipped any, for
     /// tests that compare the two.
     pub(super) static TREE_SKIPS_ROWS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };

@@ -1736,14 +1736,14 @@ pub(super) fn draw_terminal_output(
 }
 
 #[cfg(test)]
-mod terminal_output_tests {
+pub(in crate::app) mod terminal_output_tests {
     use super::*;
 
     thread_local! {
         /// Output lines laid out. egui skips painting offscreen labels by
         /// itself, so the painted text alone cannot show that the pane lays
         /// out only what is in view.
-        pub(super) static LINES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(in crate::app) static LINES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     fn lines(count: usize) -> Vec<TerminalLineEntry> {
