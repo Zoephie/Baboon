@@ -698,11 +698,11 @@ fn settings_window_body(
 
 impl Baboon {
     pub(in crate::app) fn draw_settings_window(&mut self, ctx: &egui::Context) {
-        if !self.settings_open {
+        if !self.shell.settings_open {
             return;
         }
 
-        let mut open = self.settings_open;
+        let mut open = self.shell.settings_open;
         egui::Window::new("Settings")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("app_settings"))
@@ -712,7 +712,7 @@ impl Baboon {
             .default_width(window_width(ctx, 760.0))
             .default_height(window_height(ctx, 640.0, false))
             .show(ctx, |ui| {
-                let mut selected = self.settings_tab;
+                let mut selected = self.shell.settings_tab;
                 settings_window_body(ui, &mut open, &mut selected, |ui, tab| match tab {
                     SettingsTab::Startup => self.draw_settings_startup_tab(ui),
                     SettingsTab::Browser => self.draw_settings_browser_tab(ui),
@@ -720,12 +720,12 @@ impl Baboon {
                     SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
                     SettingsTab::Tools => self.draw_settings_tools_tab(ui),
                 });
-                self.settings_tab = selected;
+                self.shell.settings_tab = selected;
             });
         if !open {
-            self.pending_ui_scale = self.prefs.ui_scale;
+            self.shell.pending_ui_scale = self.prefs.ui_scale;
         }
-        self.settings_open = open;
+        self.shell.settings_open = open;
         self.draw_custom_editing_kit_dialog(ctx);
         self.draw_custom_editing_kit_removal_dialog(ctx);
     }
@@ -920,8 +920,8 @@ impl Baboon {
                 .changed()
             {
                 // The previous channel's verdict says nothing about this one.
-                self.available_update = None;
-                self.last_update_check = None;
+                self.shell.available_update = None;
+                self.shell.last_update_check = None;
             }
         }
         ui.add_space(4.0);
@@ -934,7 +934,7 @@ impl Baboon {
     /// One line describing what the last check concluded, with a link when
     /// there is something to go and get.
     fn draw_update_check_result(&self, ui: &mut Ui) {
-        if let Some(update) = self.available_update.as_ref() {
+        if let Some(update) = self.shell.available_update.as_ref() {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new("Update available:")
@@ -1058,7 +1058,7 @@ impl Baboon {
                 if let Err(error) = save_gui_prefs(
                     &prefs,
                     &self.kit_tools.terminal_open_games,
-                    self.first_run_wizard.is_none(),
+                    self.shell.first_run_wizard.is_none(),
                 ) {
                     self.prefs.custom_editing_kit_profiles = previous;
                     self.status = error;
@@ -1245,8 +1245,8 @@ impl Baboon {
         }
         self.saved_prefs = prefs;
         self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-        self.custom_editing_kit_textures.remove(&id);
-        self.custom_editing_kit_texture_failures.remove(&id);
+        self.shell.custom_editing_kit_textures.remove(&id);
+        self.shell.custom_editing_kit_texture_failures.remove(&id);
         self.refresh_editing_kit_validation();
 
         if let Some(previous) = previous {
@@ -1336,8 +1336,8 @@ impl Baboon {
         }
         self.saved_prefs = prefs;
         self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-        self.custom_editing_kit_textures.remove(&removal.id);
-        self.custom_editing_kit_texture_failures.remove(&removal.id);
+        self.shell.custom_editing_kit_textures.remove(&removal.id);
+        self.shell.custom_editing_kit_texture_failures.remove(&removal.id);
         self.refresh_editing_kit_validation();
         for kit in &mut self.kits {
             if kit
@@ -1370,17 +1370,17 @@ impl Baboon {
         ui.horizontal(|ui| {
             ui.label(RichText::new("UI scale").color(subtle_dark()));
             ui.add(
-                egui::Slider::new(&mut self.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
+                egui::Slider::new(&mut self.shell.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
                     .show_value(false)
                     .clamping(egui::SliderClamping::Always),
             );
-            draw_ui_scale_input(ui, &mut self.pending_ui_scale);
+            draw_ui_scale_input(ui, &mut self.shell.pending_ui_scale);
             if ui.button("Apply").clicked() {
-                self.prefs.ui_scale = self.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+                self.prefs.ui_scale = self.shell.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
                 self.status = "UI scale applied".to_owned();
             }
             if ui.button("Reset").clicked() {
-                self.pending_ui_scale = DEFAULT_UI_SCALE;
+                self.shell.pending_ui_scale = DEFAULT_UI_SCALE;
             }
         });
         ui.horizontal(|ui| {

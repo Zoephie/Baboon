@@ -19,7 +19,7 @@ const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(2
 impl Baboon {
     pub(in crate::app) fn draw_root_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
-        if self.first_run_wizard.is_some() {
+        if self.shell.first_run_wizard.is_some() {
             ctx.set_zoom_factor(self.prefs.ui_scale);
             set_dark_mode(self.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
@@ -432,7 +432,7 @@ impl Baboon {
 
         ui.separator();
         if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
-            self.settings_open = true;
+            self.shell.settings_open = true;
             close_menu(ui);
         }
     }
@@ -716,7 +716,7 @@ impl Baboon {
             self.begin_check_for_updates(ctx.clone(), false);
             close_menu(ui);
         }
-        if let Some(update) = self.available_update.as_ref() {
+        if let Some(update) = self.shell.available_update.as_ref() {
             let label = format!("Update available: {}...", update.short_name());
             let url = update.release_url.clone();
             if ui.button(label).clicked() {
@@ -806,8 +806,8 @@ impl Baboon {
         }
         ui.separator();
         if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
-            self.settings_tab = SettingsTab::EditingKits;
-            self.settings_open = true;
+            self.shell.settings_tab = SettingsTab::EditingKits;
+            self.shell.settings_open = true;
             close_menu(ui);
         }
     }
@@ -924,7 +924,7 @@ impl Baboon {
                     // status line expires on a timer, so an update found by the
                     // silent startup check would otherwise scroll past unread;
                     // this link stays until the next check clears it.
-                    let update = self.available_update.clone();
+                    let update = self.shell.available_update.clone();
                     // Which `.baboon` this workspace's changes belong to, and
                     // where they are actually being kept. Autosave and Save write
                     // different files, and a workspace that has never been saved

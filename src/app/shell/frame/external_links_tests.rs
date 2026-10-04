@@ -72,7 +72,7 @@ fn the_help_window_links_ask_to_open_their_pages() {
 fn the_update_links_ask_to_open_the_release() {
     let release = "https://github.com/Zoephie/Baboon/releases/tag/v9.9.9";
     let mut h = Harness::new();
-    h.app.available_update = Some(UpdateCheckResult {
+    h.app.shell.available_update = Some(UpdateCheckResult {
         channel: UpdateChannel::Stable,
         latest_tag: "v9.9.9".to_owned(),
         release_url: release.to_owned(),

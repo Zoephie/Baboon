@@ -1208,11 +1208,11 @@ impl Baboon {
     pub(in crate::app) fn persist_prefs_throttled(&mut self, now: f64) {
         const CHECK_INTERVAL: f64 = 1.0;
         const RETRY_AFTER_FAILURE: f64 = 10.0;
-        if now < self.prefs_next_check_at {
+        if now < self.shell.prefs_next_check_at {
             return;
         }
         let failed = self.try_persist_prefs();
-        self.prefs_next_check_at = now
+        self.shell.prefs_next_check_at = now
             + if failed {
                 RETRY_AFTER_FAILURE
             } else {

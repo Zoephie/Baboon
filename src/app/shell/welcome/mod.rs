@@ -528,8 +528,8 @@ impl Baboon {
                 self.help.about_open = true;
             }
             Some(WelcomeAction::OpenSettings) => {
-                self.settings_tab = SettingsTab::EditingKits;
-                self.settings_open = true;
+                self.shell.settings_tab = SettingsTab::EditingKits;
+                self.shell.settings_open = true;
             }
             Some(WelcomeAction::OpenUrl(url)) => {
                 ctx.open_url(egui::OpenUrl::new_tab(url));

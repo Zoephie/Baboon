@@ -25,3 +25,40 @@ pub(in crate::app) use worker::*;
 pub(in crate::app) mod launch;
 pub(in crate::app) use launch::{CommandLineLaunch, resolve_launch_tag_entries};
 pub(crate) use launch::{StartupArguments, parse_startup_arguments};
+
+/// The shell: settings and first run, update checks, the session being
+/// restored, the operation notice, toolbar icons and game artwork, and when
+/// prefs are next checked.
+pub(in crate::app) struct ShellFeature {
+    pub(in crate::app) settings_open: bool,
+    pub(in crate::app) settings_tab: SettingsTab,
+    pub(in crate::app) pending_ui_scale: f32,
+    pub(in crate::app) first_run_wizard: Option<FirstRunWizardState>,
+    /// The most recent check's result, kept only while it is actually an
+    /// update. The status line expires on a timer, so this is what keeps the
+    /// news reachable after a silent startup check.
+    pub(in crate::app) available_update: Option<UpdateCheckResult>,
+    /// The most recent successful check, update or not, so Settings can report
+    /// the outcome after the status line has expired.
+    pub(in crate::app) last_update_check: Option<UpdateCheckResult>,
+    /// Startup-only prompt reconstructed from the prior session file.
+    pub(in crate::app) last_opened_windows: Option<LastOpenedWindowsPrompt>,
+    /// Kits whose session-restore load has not landed yet, and the one the
+    /// session named as focused. Every load ends by making its own kit active,
+    /// so the focus can only be honoured once none are outstanding.
+    pub(in crate::app) restoring_kits: HashSet<KitId>,
+    pub(in crate::app) restored_active_kit: Option<KitId>,
+    /// Result of the last container write, shown until dismissed.
+    pub(in crate::app) operation_notice: Option<OperationNotice>,
+    /// Toolbar launcher icons (decoded from embedded .ico at startup).
+    pub(in crate::app) blender_icon: Option<egui::TextureHandle>,
+    pub(in crate::app) sapien_icon: Option<egui::TextureHandle>,
+    pub(in crate::app) tag_test_icon: Option<egui::TextureHandle>,
+    pub(in crate::app) game_banner_textures: HashMap<Option<GameId>, egui::TextureHandle>,
+    pub(in crate::app) game_emblem_textures: HashMap<GameId, egui::TextureHandle>,
+    pub(in crate::app) custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
+    pub(in crate::app) custom_editing_kit_texture_failures: HashSet<String>,
+    pub(in crate::app) last_pixels_per_point: f32,
+    /// When the per-frame prefs check next runs (egui time).
+    pub(in crate::app) prefs_next_check_at: f64,
+}

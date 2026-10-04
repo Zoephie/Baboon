@@ -22,7 +22,7 @@ pub(in crate::app) fn commit_ui_scale_now(response: &egui::Response, pending: f3
 
 impl Baboon {
     pub(in crate::app) fn draw_first_run_wizard(&mut self, ctx: &egui::Context) {
-        let Some(page) = self.first_run_wizard.as_ref().map(|state| state.page) else {
+        let Some(page) = self.shell.first_run_wizard.as_ref().map(|state| state.page) else {
             return;
         };
 
@@ -49,11 +49,11 @@ impl Baboon {
         ui.add_space(8.0);
 
         let locked = self
-            .first_run_wizard
+            .shell.first_run_wizard
             .as_ref()
             .and_then(|state| state.committed_storage)
             .is_some();
-        let state = self.first_run_wizard.as_mut().expect("wizard exists");
+        let state = self.shell.first_run_wizard.as_mut().expect("wizard exists");
         ui.add_enabled_ui(!locked, |ui| {
             ui.radio_value(
                 &mut state.selected_storage,
@@ -81,7 +81,7 @@ impl Baboon {
         ui.add_space(14.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let selected = self
-                .first_run_wizard
+                .shell.first_run_wizard
                 .as_ref()
                 .and_then(|state| state.selected_storage);
             if ui
@@ -92,13 +92,13 @@ impl Baboon {
                 crate::core::storage::activate(mode);
                 match self.save_first_run_checkpoint(false) {
                     Ok(()) => {
-                        let state = self.first_run_wizard.as_mut().expect("wizard exists");
+                        let state = self.shell.first_run_wizard.as_mut().expect("wizard exists");
                         state.committed_storage = Some(mode);
                         state.page = FirstRunPage::Interface;
                         state.validation_error = None;
                     }
                     Err(error) => {
-                        self.first_run_wizard
+                        self.shell.first_run_wizard
                             .as_mut()
                             .expect("wizard exists")
                             .validation_error = Some(error);
@@ -141,11 +141,11 @@ impl Baboon {
         ui.horizontal(|ui| {
             ui.label("UI scale");
             let response = ui.add(egui::Slider::new(
-                &mut self.pending_ui_scale,
+                &mut self.shell.pending_ui_scale,
                 MIN_UI_SCALE..=MAX_UI_SCALE,
             ));
-            if commit_ui_scale_now(&response, self.pending_ui_scale, self.prefs.ui_scale) {
-                self.prefs.ui_scale = self.pending_ui_scale;
+            if commit_ui_scale_now(&response, self.shell.pending_ui_scale, self.prefs.ui_scale) {
+                self.prefs.ui_scale = self.shell.pending_ui_scale;
             }
         });
         ui.horizontal(|ui| {
@@ -169,27 +169,27 @@ impl Baboon {
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             if ui.button("Back").clicked() {
-                self.first_run_wizard.as_mut().expect("wizard exists").page = FirstRunPage::Storage;
+                self.shell.first_run_wizard.as_mut().expect("wizard exists").page = FirstRunPage::Storage;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Next").clicked() {
                     match self.save_first_run_checkpoint(false) {
                         Ok(()) => {
                             let should_detect = !self
-                                .first_run_wizard
+                                .shell.first_run_wizard
                                 .as_ref()
                                 .expect("wizard exists")
                                 .editing_kit_detection_ran;
                             if should_detect {
                                 self.auto_detect_editing_kit_paths();
                             }
-                            let state = self.first_run_wizard.as_mut().expect("wizard exists");
+                            let state = self.shell.first_run_wizard.as_mut().expect("wizard exists");
                             state.editing_kit_detection_ran = true;
                             state.validation_error = None;
                             state.page = FirstRunPage::EditingKits;
                         }
                         Err(error) => {
-                            self.first_run_wizard
+                            self.shell.first_run_wizard
                                 .as_mut()
                                 .expect("wizard exists")
                                 .validation_error = Some(error);
@@ -234,18 +234,18 @@ impl Baboon {
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             if ui.button("Back").clicked() {
-                self.first_run_wizard.as_mut().expect("wizard exists").page =
+                self.shell.first_run_wizard.as_mut().expect("wizard exists").page =
                     FirstRunPage::Interface;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Finish").clicked() {
                     match self.save_first_run_checkpoint(true) {
                         Ok(()) => {
-                            self.first_run_wizard = None;
+                            self.shell.first_run_wizard = None;
                             self.status = "Setup complete".to_owned();
                         }
                         Err(error) => {
-                            self.first_run_wizard
+                            self.shell.first_run_wizard
                                 .as_mut()
                                 .expect("wizard exists")
                                 .validation_error = Some(error);
@@ -258,7 +258,7 @@ impl Baboon {
 
     fn draw_first_run_error(&self, ui: &mut Ui) {
         if let Some(error) = self
-            .first_run_wizard
+            .shell.first_run_wizard
             .as_ref()
             .and_then(|state| state.validation_error.as_deref())
         {

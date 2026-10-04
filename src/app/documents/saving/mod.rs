@@ -147,7 +147,7 @@ impl Baboon {
                 } else {
                     format!("Extracted {} tag(s)", report.written)
                 };
-                self.operation_notice = Some(OperationNotice {
+                self.shell.operation_notice = Some(OperationNotice {
                     title: if report.cancelled {
                         "Extraction cancelled".to_owned()
                     } else {
@@ -161,7 +161,7 @@ impl Baboon {
             }
             Err(error) => {
                 self.status = format!("Extraction failed: {error}");
-                self.operation_notice = Some(OperationNotice {
+                self.shell.operation_notice = Some(OperationNotice {
                     title: "Extraction failed".to_owned(),
                     message: error,
                     failed: true,

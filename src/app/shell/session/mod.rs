@@ -175,9 +175,9 @@ impl Baboon {
             // load last. Remember the kit the session named and every kit still
             // to land, so the focus can be set once they all have.
             let restoring = self.kits[self.active].id;
-            self.restoring_kits.insert(restoring);
+            self.shell.restoring_kits.insert(restoring);
             if was_active {
-                self.restored_active_kit = Some(restoring);
+                self.shell.restored_active_kit = Some(restoring);
             }
             self.kits[self.active].pending_restore_tags = tags;
             self.kits[self.active].pending_restore_folders = folders;
@@ -241,7 +241,7 @@ impl Baboon {
     /// source has since moved, leaves the focus wherever the loads put it.
     pub(in crate::app) fn settle_restored_kit(&mut self, kit: KitId) {
         let Some(active) =
-            focus_after_restore(&mut self.restoring_kits, &mut self.restored_active_kit, kit)
+            focus_after_restore(&mut self.shell.restoring_kits, &mut self.shell.restored_active_kit, kit)
         else {
             return;
         };
@@ -342,24 +342,24 @@ impl Baboon {
     }
 
     pub(in crate::app) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
-        let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
+        let action = render_last_opened_windows_prompt(ctx, self.shell.last_opened_windows.as_mut());
         match action {
             LastOpenedWindowsAction::None => {}
             LastOpenedWindowsAction::OpenSettings => {
-                self.last_opened_windows = None;
-                self.settings_open = true;
+                self.shell.last_opened_windows = None;
+                self.shell.settings_open = true;
             }
             LastOpenedWindowsAction::Cancel { remember } => {
                 if remember {
                     self.prefs.session_restore = SessionRestore::Never;
                 }
-                self.last_opened_windows = None;
+                self.shell.last_opened_windows = None;
             }
             LastOpenedWindowsAction::Restore { kits, remember } => {
                 if remember {
                     self.prefs.session_restore = SessionRestore::Always;
                 }
-                self.last_opened_windows = None;
+                self.shell.last_opened_windows = None;
                 self.begin_last_session_restore(kits, ctx.clone());
             }
         }

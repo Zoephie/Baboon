@@ -465,27 +465,27 @@ fn cases() -> Vec<Case> {
         // --- windows over the shell ---
         case(
             "first_run_storage",
-            &["first_run_wizard"],
+            &["shell.first_run_wizard"],
             &["shell/first_run/mod.rs"],
             welcome,
-            |h| h.app.first_run_wizard = Some(FirstRunWizardState::new(None)),
+            |h| h.app.shell.first_run_wizard = Some(FirstRunWizardState::new(None)),
             &["Welcome to Baboon", "Installed mode (recommended)"],
         ),
         case(
             "first_run_interface",
-            &["first_run_wizard"],
+            &["shell.first_run_wizard"],
             &["shell/first_run/mod.rs"],
             welcome,
             |h| {
                 let mut wizard = FirstRunWizardState::new(None);
                 wizard.page = FirstRunPage::Interface;
-                h.app.first_run_wizard = Some(wizard);
+                h.app.shell.first_run_wizard = Some(wizard);
             },
             &["Welcome to Baboon", "Updates and interface"],
         ),
         case(
             "first_run_editing_kits",
-            &["first_run_wizard"],
+            &["shell.first_run_wizard"],
             &["shell/first_run/mod.rs"],
             welcome,
             |h| {
@@ -494,7 +494,7 @@ fn cases() -> Vec<Case> {
                 // Detection searches the machine for installed kits; the
                 // case is about the page, not about what is installed here.
                 wizard.editing_kit_detection_ran = true;
-                h.app.first_run_wizard = Some(wizard);
+                h.app.shell.first_run_wizard = Some(wizard);
             },
             &["Welcome to Baboon", "Detected paths fill only empty entries."],
         ),
@@ -566,56 +566,56 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "settings_startup",
-            &["settings_open", "settings_tab"],
+            &["shell.settings_open", "shell.settings_tab"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::Startup;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::Startup;
             },
             &["Settings", "When reopening Baboon with a previous session:"],
         ),
         case(
             "settings_browser",
-            &["settings_open"],
+            &["shell.settings_open"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::Browser;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::Browser;
             },
             &["Settings", "Double-click to open tags"],
         ),
         case(
             "settings_editing_kits",
-            &["settings_open"],
+            &["shell.settings_open"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::EditingKits;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::EditingKits;
             },
             &["Settings", "Auto Detect"],
         ),
         case(
             "settings_appearance",
-            &["settings_open"],
+            &["shell.settings_open"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::Appearance;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::Appearance;
             },
             &["Settings", "Angles in degrees"],
         ),
         case(
             "settings_tools",
-            &["settings_open"],
+            &["shell.settings_open"],
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::Tools;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::Tools;
             },
             &["Settings", "Chimp — Unreal mappings"],
         ),
@@ -625,8 +625,8 @@ fn cases() -> Vec<Case> {
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::EditingKits;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::EditingKits;
                 h.app.kit_tools.custom_editing_kit_draft = Some(CustomEditingKitDraft::new());
             },
             &["Editing Kit Root Folder"],
@@ -637,8 +637,8 @@ fn cases() -> Vec<Case> {
             &["shell/settings/mod.rs"],
             welcome,
             |h| {
-                h.app.settings_open = true;
-                h.app.settings_tab = SettingsTab::EditingKits;
+                h.app.shell.settings_open = true;
+                h.app.shell.settings_tab = SettingsTab::EditingKits;
                 h.app.kit_tools.custom_editing_kit_removal = Some(CustomEditingKitRemoval {
                     id: "smoke".to_owned(),
                     name: "Smoke Kit".to_owned(),
@@ -814,11 +814,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "last_opened_windows",
-            &["last_opened_windows"],
+            &["shell.last_opened_windows"],
             &["shell/session/mod.rs"],
             welcome,
             |h| {
-                h.app.last_opened_windows = Some(LastOpenedWindowsPrompt {
+                h.app.shell.last_opened_windows = Some(LastOpenedWindowsPrompt {
                     visible: true,
                     kits: vec![LastOpenedWindowsKit {
                         source_kind: LastSessionSourceKind::LooseFolder,
@@ -1258,11 +1258,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "operation_notice",
-            &["operation_notice"],
+            &["shell.operation_notice"],
             &["shell/operation_notice.rs"],
             welcome,
             |h| {
-                h.app.operation_notice = Some(OperationNotice {
+                h.app.shell.operation_notice = Some(OperationNotice {
                     title: "Smoke notice".to_owned(),
                     message: "The smoke operation finished.".to_owned(),
                     failed: false,
@@ -1392,19 +1392,19 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("window_state", "native window geometry tracker"),
     ("native_clock", "the clock of the latest input"),
     ("import.native_template_cache", "import cache"),
-    ("available_update", "data shown in Settings and the status bar"),
-    ("last_update_check", "data shown in Settings"),
+    ("shell.available_update", "data shown in Settings and the status bar"),
+    ("shell.last_update_check", "data shown in Settings"),
     ("export.container_dump_job", "a running job; its progress is in the status bar"),
     ("chimp.chimp_level_job", "a running job; its progress is in the status bar"),
     ("mods.last_mod_export_name", "remembered text"),
     ("chimp.chimp_writes", "running saves"),
-    ("game_banner_textures", "texture cache keyed by game"),
+    ("shell.game_banner_textures", "texture cache keyed by game"),
     ("poke.last_poke", "undo record"),
     ("poke.poke_direct_running", "running flag"),
     ("poke.poke_undo_running", "running flag"),
     ("kit_tools.editing_kit_path_attention", "highlights a row of the Settings window"),
     ("editor.deferred_file_action", "a queued action"),
-    ("restored_active_kit", "session restore bookkeeping"),
+    ("shell.restored_active_kit", "session restore bookkeeping"),
     ("browser.reveal_target", "a one-shot browser request"),
     ("search.field_value_searching", "running flag of the field value search"),
     ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
@@ -1413,9 +1413,9 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("editor.pending_ce_sound_ref", "a queued request"),
     ("references.pending_open", "a queued request"),
     ("kit_tools.pending_tool_import", "a queued request"),
-    ("blender_icon", "texture"),
-    ("sapien_icon", "texture"),
-    ("tag_test_icon", "texture"),
+    ("shell.blender_icon", "texture"),
+    ("shell.sapien_icon", "texture"),
+    ("shell.tag_test_icon", "texture"),
     ("editor.block_clipboard", "clipboard contents"),
     ("references.pending_ref_jump", "a queued navigation"),
     ("search.pending_find_jump", "a queued navigation"),

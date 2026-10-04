@@ -26,12 +26,12 @@ impl Baboon {
                         update_check_status(&result)
                     };
                 }
-                self.available_update = outdated.then(|| result.clone());
-                self.last_update_check = Some(result);
+                self.shell.available_update = outdated.then(|| result.clone());
+                self.shell.last_update_check = Some(result);
             }
             Err(error) => {
-                self.available_update = None;
-                self.last_update_check = None;
+                self.shell.available_update = None;
+                self.shell.last_update_check = None;
                 if !silent {
                     self.status = update_check_error_status(self.prefs.update_channel, &error);
                 }
@@ -43,7 +43,7 @@ impl Baboon {
     /// One sentence on where this build stands: the last check's verdict when
     /// there has been one, otherwise a description of what is running.
     pub(in crate::app) fn update_check_summary(&self) -> String {
-        match self.last_update_check.as_ref() {
+        match self.shell.last_update_check.as_ref() {
             Some(result) => update_check_status(result),
             None => format!("This build: {}", running_build_description()),
         }

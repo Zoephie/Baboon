@@ -771,7 +771,7 @@ impl Baboon {
 
     pub(in crate::app) fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if launcher_button(ui, self.blender_icon.as_ref(), "B", true)
+            if launcher_button(ui, self.shell.blender_icon.as_ref(), "B", true)
                 .on_hover_text("Launch Blender")
                 .clicked()
             {
@@ -781,7 +781,7 @@ impl Baboon {
             let tag_test_ready = self
                 .kit_tool_path(self.tag_test_executable())
                 .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
+            if launcher_button(ui, self.shell.tag_test_icon.as_ref(), "T", tag_test_ready)
                 .on_hover_text("Launch tag_test without an auto-start scenario")
                 .clicked()
             {
@@ -791,7 +791,7 @@ impl Baboon {
             let sapien_ready = self
                 .kit_tool_path("sapien.exe")
                 .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
+            if launcher_button(ui, self.shell.sapien_icon.as_ref(), "S", sapien_ready)
                 .on_hover_text("Launch Sapien without an auto-start scenario")
                 .clicked()
             {
@@ -1101,14 +1101,14 @@ impl Baboon {
             ctx.input_mut(|input| input.time = input.time.max(now));
         }
         self.window_state.observe(ctx);
-        if self.first_run_wizard.is_none() {
+        if self.shell.first_run_wizard.is_none() {
             self.process_worker_messages(ctx);
             self.expire_status(ctx);
         }
         // Raised by the previous frame, whose UI has since committed any edit
         // that was still focused, so the action sees it.
         self.run_deferred_file_action(ctx);
-        if self.first_run_wizard.is_none() {
+        if self.shell.first_run_wizard.is_none() {
             // Defers the close, so the UI commits a focused edit before the
             // next frame decides whether there is anything to save.
             self.handle_app_close_request(ctx);

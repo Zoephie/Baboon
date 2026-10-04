@@ -685,7 +685,7 @@ impl Baboon {
             Ok(result) => result,
             Err(error) => {
                 self.status = error.clone();
-                self.operation_notice = Some(OperationNotice {
+                self.shell.operation_notice = Some(OperationNotice {
                     title: "Rename failed".to_owned(),
                     message: error,
                     failed: true,

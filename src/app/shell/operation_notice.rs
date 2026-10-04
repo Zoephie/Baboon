@@ -5,7 +5,7 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_operation_notice_window(&mut self, ctx: &egui::Context) {
-        let Some(notice) = self.operation_notice.as_ref() else {
+        let Some(notice) = self.shell.operation_notice.as_ref() else {
             return;
         };
         let title = notice.title.clone();
@@ -52,7 +52,7 @@ impl Baboon {
                 });
             });
         if dismiss || !open {
-            self.operation_notice = None;
+            self.shell.operation_notice = None;
         }
     }
 }

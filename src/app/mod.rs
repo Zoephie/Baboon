@@ -185,14 +185,6 @@ pub struct Baboon {
     active: usize,
     /// Monotonic [`KitId`] allocator; ids are never reused.
     next_kit_id: u64,
-    /// The most recent check's result, kept only while it is actually an
-    /// update. The status line expires on a timer, so this is what keeps the
-    /// news reachable after a silent startup check.
-    available_update: Option<UpdateCheckResult>,
-    /// The most recent successful check, update or not, so Settings can report
-    /// the outcome after the status line has expired.
-    last_update_check: Option<UpdateCheckResult>,
-    pending_ui_scale: f32,
     /// The live preferences: what Settings edits and every reader consults.
     /// `browser_mode` / `browser_sort` here are only the seed a new workspace
     /// starts from — each kit keeps its own — and [`Baboon::current_prefs`]
@@ -200,16 +192,6 @@ pub struct Baboon {
     prefs: GuiPrefs,
     /// What was last written to disk, so an unchanged frame writes nothing.
     saved_prefs: GuiPrefs,
-    first_run_wizard: Option<FirstRunWizardState>,
-    settings_open: bool,
-    settings_tab: SettingsTab,
-    /// Result of the last container write, shown until dismissed.
-    operation_notice: Option<OperationNotice>,
-    /// Kits whose session-restore load has not landed yet, and the one the
-    /// session named as focused. Every load ends by making its own kit active,
-    /// so the focus can only be honoured once none are outstanding.
-    restoring_kits: HashSet<KitId>,
-    restored_active_kit: Option<KitId>,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -217,24 +199,11 @@ pub struct Baboon {
     /// cannot be bypassed by a new assignment site.
     status_shown: String,
     status_changed_at: f64,
-    /// When the per-frame prefs check next runs (egui time).
-    prefs_next_check_at: f64,
-    /// Startup-only prompt reconstructed from the prior session file.
-    last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
-    /// Toolbar launcher icons (decoded from embedded .ico at startup).
-    blender_icon: Option<egui::TextureHandle>,
-    sapien_icon: Option<egui::TextureHandle>,
-    tag_test_icon: Option<egui::TextureHandle>,
-    game_banner_textures: HashMap<Option<GameId>, egui::TextureHandle>,
-    game_emblem_textures: HashMap<GameId, egui::TextureHandle>,
-    custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
-    custom_editing_kit_texture_failures: HashSet<String>,
-    last_pixels_per_point: f32,
     /// Memory poking: the poke dialog, the record that undoes the last poke,
     /// and whether a poke or its undo is running.
     pub(in crate::app) poke: PokeFeature,
@@ -279,6 +248,10 @@ pub struct Baboon {
     pub(in crate::app) browser: BrowserFeature,
     /// Documents: the save-changes prompt.
     pub(in crate::app) documents: DocumentsFeature,
+    /// The shell: settings and first run, update checks, the session being
+    /// restored, the operation notice, toolbar icons and game artwork, and when
+    /// prefs are next checked.
+    pub(in crate::app) shell: ShellFeature,
 }
 
 impl Baboon {
@@ -414,44 +387,13 @@ impl Baboon {
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
             active: 0,
             next_kit_id: 1,
-            available_update: None,
-            last_update_check: None,
-            pending_ui_scale: prefs.ui_scale,
             saved_prefs: prefs.clone(),
             prefs: live_prefs,
-            first_run_wizard,
-            settings_open: false,
-            settings_tab: SettingsTab::Startup,
-            operation_notice: None,
-            restoring_kits: HashSet::new(),
-            restored_active_kit: None,
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
-            prefs_next_check_at: 0.0,
-            last_opened_windows,
             audio: audio::AudioState::default(),
             ce_usmap: None,
-            blender_icon: load_ico_texture(
-                &ctx,
-                "blender_icon",
-                include_root_bytes!("assets/Quick access/blender.ico"),
-            ),
-            sapien_icon: load_ico_texture(
-                &ctx,
-                "sapien_icon",
-                include_root_bytes!("assets/Quick access/sapien.ico"),
-            ),
-            tag_test_icon: load_ico_texture(
-                &ctx,
-                "tag_test_icon",
-                include_root_bytes!("assets/Quick access/tag_test.ico"),
-            ),
-            game_banner_textures: HashMap::new(),
-            game_emblem_textures: HashMap::new(),
-            custom_editing_kit_textures: HashMap::new(),
-            custom_editing_kit_texture_failures: HashSet::new(),
-            last_pixels_per_point: ctx.pixels_per_point(),
             poke: PokeFeature {
                 poke_dialog: None,
                 last_poke: None,
@@ -593,6 +535,39 @@ impl Baboon {
             documents: DocumentsFeature {
                 save_changes_prompt: SaveChangesPrompt::default(),
             },
+            shell: ShellFeature {
+                available_update: None,
+                last_update_check: None,
+                pending_ui_scale: prefs.ui_scale,
+                first_run_wizard,
+                settings_open: false,
+                settings_tab: SettingsTab::Startup,
+                operation_notice: None,
+                restoring_kits: HashSet::new(),
+                restored_active_kit: None,
+                prefs_next_check_at: 0.0,
+                last_opened_windows,
+                blender_icon: load_ico_texture(
+                    &ctx,
+                    "blender_icon",
+                    include_root_bytes!("assets/Quick access/blender.ico"),
+                ),
+                sapien_icon: load_ico_texture(
+                    &ctx,
+                    "sapien_icon",
+                    include_root_bytes!("assets/Quick access/sapien.ico"),
+                ),
+                tag_test_icon: load_ico_texture(
+                    &ctx,
+                    "tag_test_icon",
+                    include_root_bytes!("assets/Quick access/tag_test.ico"),
+                ),
+                game_banner_textures: HashMap::new(),
+                game_emblem_textures: HashMap::new(),
+                custom_editing_kit_textures: HashMap::new(),
+                custom_editing_kit_texture_failures: HashSet::new(),
+                last_pixels_per_point: ctx.pixels_per_point(),
+            },
         }
     }
 
@@ -616,16 +591,16 @@ impl Baboon {
         ctx: &egui::Context,
         game: Option<GameId>,
     ) -> Option<&egui::TextureHandle> {
-        if !self.game_banner_textures.contains_key(&game) {
+        if !self.shell.game_banner_textures.contains_key(&game) {
             let name = game.map_or("unknown", GameId::as_str);
             let texture = load_png_texture(
                 ctx,
                 &format!("game_banner_{name}"),
                 get_game_banner_bytes(game),
             )?;
-            self.game_banner_textures.insert(game, texture);
+            self.shell.game_banner_textures.insert(game, texture);
         }
-        self.game_banner_textures.get(&game)
+        self.shell.game_banner_textures.get(&game)
     }
 
     fn game_emblem_texture(
@@ -633,12 +608,12 @@ impl Baboon {
         ctx: &egui::Context,
         game: GameId,
     ) -> Option<&egui::TextureHandle> {
-        if !self.game_emblem_textures.contains_key(&game) {
+        if !self.shell.game_emblem_textures.contains_key(&game) {
             let bytes = get_game_emblem_bytes(game);
             let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
-            self.game_emblem_textures.insert(game, texture);
+            self.shell.game_emblem_textures.insert(game, texture);
         }
-        self.game_emblem_textures.get(&game)
+        self.shell.game_emblem_textures.get(&game)
     }
 
     fn custom_editing_kit_texture(
@@ -648,12 +623,12 @@ impl Baboon {
     ) -> Option<&egui::TextureHandle> {
         let relative = profile.icon.as_deref()?;
         if self
-            .custom_editing_kit_texture_failures
+            .shell.custom_editing_kit_texture_failures
             .contains(&profile.id)
         {
             return None;
         }
-        if !self.custom_editing_kit_textures.contains_key(&profile.id) {
+        if !self.shell.custom_editing_kit_textures.contains_key(&profile.id) {
             let texture = resolve_custom_icon_path(relative)
                 .ok()
                 .and_then(|absolute| fs::read(absolute).ok())
@@ -661,14 +636,14 @@ impl Baboon {
                     load_png_texture(ctx, &format!("custom_editing_kit_{}", profile.id), &bytes)
                 });
             let Some(texture) = texture else {
-                self.custom_editing_kit_texture_failures
+                self.shell.custom_editing_kit_texture_failures
                     .insert(profile.id.clone());
                 return None;
             };
-            self.custom_editing_kit_textures
+            self.shell.custom_editing_kit_textures
                 .insert(profile.id.clone(), texture);
         }
-        self.custom_editing_kit_textures.get(&profile.id)
+        self.shell.custom_editing_kit_textures.get(&profile.id)
     }
 
     /// Resolve the image shown in a loaded workspace's browser header.
@@ -700,29 +675,29 @@ impl Baboon {
 
     fn handle_pixels_per_point_change(&mut self, ctx: &egui::Context) {
         let pixels_per_point = ctx.pixels_per_point();
-        if (pixels_per_point - self.last_pixels_per_point).abs() < 0.01 {
+        if (pixels_per_point - self.shell.last_pixels_per_point).abs() < 0.01 {
             return;
         }
-        self.last_pixels_per_point = pixels_per_point;
-        self.blender_icon = load_ico_texture(
+        self.shell.last_pixels_per_point = pixels_per_point;
+        self.shell.blender_icon = load_ico_texture(
             ctx,
             "blender_icon",
             include_root_bytes!("assets/Quick access/blender.ico"),
         );
-        self.sapien_icon = load_ico_texture(
+        self.shell.sapien_icon = load_ico_texture(
             ctx,
             "sapien_icon",
             include_root_bytes!("assets/Quick access/sapien.ico"),
         );
-        self.tag_test_icon = load_ico_texture(
+        self.shell.tag_test_icon = load_ico_texture(
             ctx,
             "tag_test_icon",
             include_root_bytes!("assets/Quick access/tag_test.ico"),
         );
-        self.game_banner_textures.clear();
-        self.game_emblem_textures.clear();
-        self.custom_editing_kit_textures.clear();
-        self.custom_editing_kit_texture_failures.clear();
+        self.shell.game_banner_textures.clear();
+        self.shell.game_emblem_textures.clear();
+        self.shell.custom_editing_kit_textures.clear();
+        self.shell.custom_editing_kit_texture_failures.clear();
         ctx.request_repaint();
     }
 }

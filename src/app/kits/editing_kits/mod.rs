@@ -120,7 +120,7 @@ impl Baboon {
             &self.prefs.editing_kit_paths,
             &self.prefs.custom_editing_kit_profiles,
         );
-        self.custom_editing_kit_texture_failures.clear();
+        self.shell.custom_editing_kit_texture_failures.clear();
     }
 
     pub(in crate::app) fn refresh_builtin_editing_kit_validation(

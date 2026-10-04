@@ -564,7 +564,7 @@ impl Baboon {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
-                self.operation_notice = Some(OperationNotice {
+                self.shell.operation_notice = Some(OperationNotice {
                     title: "Delete failed".to_owned(),
                     message: error.clone(),
                     failed: true,
@@ -633,7 +633,7 @@ impl Baboon {
             }
         }
         self.forget_deleted_tag(kit_index, &result.key);
-        self.operation_notice = Some(OperationNotice {
+        self.shell.operation_notice = Some(OperationNotice {
             title: "Tag deleted".to_owned(),
             message: format!(
                 "{}\n\nRemoved from {}.\nThe UTOC changed; the retired bytes stay in the UCAS as \

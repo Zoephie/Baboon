@@ -69,13 +69,13 @@ impl Baboon {
 
     pub(in crate::app) fn launch_blender(&mut self) {
         let Some(path) = self.prefs.blender_path.clone() else {
-            self.settings_open = true;
+            self.shell.settings_open = true;
             self.status = "Set the Blender path in File > Settings first".to_owned();
             return;
         };
         if !path.is_file() {
             self.status = format!("Blender executable not found: {}", path.display());
-            self.settings_open = true;
+            self.shell.settings_open = true;
             return;
         }
         self.spawn_tool("Blender", &path, path.parent().map(Path::to_path_buf), &[]);
