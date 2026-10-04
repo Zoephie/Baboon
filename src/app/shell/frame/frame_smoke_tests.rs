@@ -1353,11 +1353,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "poke_scanning",
-            &["poke_dialog"],
+            &["poke.poke_dialog"],
             &["runtime_poke/mod.rs"],
             container_kit,
             |h| {
-                h.app.poke_dialog = Some(PokeDialog {
+                h.app.poke.poke_dialog = Some(PokeDialog {
                     kit: active_id(h),
                     key: ce_key(),
                     state: PokeDialogState::Scanning,
@@ -1367,11 +1367,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "poke_error",
-            &["poke_dialog"],
+            &["poke.poke_dialog"],
             &["runtime_poke/mod.rs"],
             container_kit,
             |h| {
-                h.app.poke_dialog = Some(PokeDialog {
+                h.app.poke.poke_dialog = Some(PokeDialog {
                     kit: active_id(h),
                     key: ce_key(),
                     state: PokeDialogState::Error("The smoke process is not running".to_owned()),
@@ -1399,9 +1399,9 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("last_mod_export_name", "remembered text"),
     ("chimp_writes", "running saves"),
     ("game_banner_textures", "texture cache keyed by game"),
-    ("last_poke", "undo record"),
-    ("poke_direct_running", "running flag"),
-    ("poke_undo_running", "running flag"),
+    ("poke.last_poke", "undo record"),
+    ("poke.poke_direct_running", "running flag"),
+    ("poke.poke_undo_running", "running flag"),
     ("editing_kit_path_attention", "highlights a row of the Settings window"),
     ("deferred_file_action", "a queued action"),
     ("restored_active_kit", "session restore bookkeeping"),
@@ -1546,16 +1546,46 @@ smoke_shards!(
 // ---------------------------------------------------------------------------
 
 /// The `Baboon` struct's fields and their types, read from `src/app/mod.rs`.
+/// A field holding one feature's state (a `…Feature` struct) stands for that
+/// struct's fields, named `field.inner`: they are where its windows live.
 fn baboon_fields() -> Vec<(String, String)> {
     let source = include_root_str!("src/app/mod.rs");
+    let sources = crate::test_kits::app_product_sources();
+    let mut out = Vec::new();
+    for (name, ty) in struct_fields(source, "pub struct Baboon {") {
+        if ty.ends_with("Feature") {
+            let header = format!("struct {ty} {{");
+            let text = sources
+                .iter()
+                .find(|(_, text)| text.contains(&header))
+                .map(|(_, text)| text.as_str())
+                .unwrap_or_else(|| panic!("`{ty}` is defined under src/app"));
+            out.extend(
+                struct_fields(text, &header)
+                    .into_iter()
+                    .map(|(inner, inner_ty)| (format!("{name}.{inner}"), inner_ty)),
+            );
+        } else {
+            out.push((name, ty));
+        }
+    }
+    out
+}
+
+/// The fields of the struct whose declaration starts with `header`.
+fn struct_fields(source: &str, header: &str) -> Vec<(String, String)> {
     let body = source
-        .split_once("pub struct Baboon {")
-        .expect("src/app/mod.rs declares `pub struct Baboon`")
+        .split_once(header)
+        .unwrap_or_else(|| panic!("no `{header}`"))
         .1;
     let body = &body[..body.find("\n}\n").expect("the struct ends")];
     body.lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with("//"))
+        .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
+        .map(|line| match line.strip_prefix("pub(") {
+            Some(rest) => rest.split_once(") ").map_or(line, |(_, field)| field),
+            None => line,
+        })
         .filter_map(|line| {
             let (name, ty) = line.split_once(':')?;
             let name = name.trim();

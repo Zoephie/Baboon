@@ -271,7 +271,7 @@ fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
 
     // A clone held while a job that snapshots the source is running.
     let held = archive(&app);
-    app.poke_direct_running = true;
+    app.poke.poke_direct_running = true;
     let (result, mapped) = unmap(&mut app);
     let failure = result.expect_err("a held archive cannot be released");
     assert_eq!(failure.phase, LeasePhase::Unmap);
@@ -289,7 +289,7 @@ fn a_second_holder_of_a_mounted_archive_refuses_the_unmap() {
     assert!(mapped, "nothing was released");
 
     // The same clone with no job to name: counted, not guessed at.
-    app.poke_direct_running = false;
+    app.poke.poke_direct_running = false;
     let (result, _) = unmap(&mut app);
     let failure = result.expect_err("still held");
     assert!(failure.holders.is_empty(), "{failure}");

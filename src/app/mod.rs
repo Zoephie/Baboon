@@ -288,12 +288,6 @@ pub struct Baboon {
     exported_mod: Option<ExportedMod>,
     /// Review of a pending Export Mod, before anything is written.
     mod_export: Option<ModExportDialog>,
-    /// Read-only preflight and confirmation for a transient CU2 runtime poke.
-    poke_dialog: Option<PokeDialog>,
-    /// One guarded, process-bound undo record. Never persisted to a project.
-    last_poke: Option<LastPoke>,
-    poke_direct_running: bool,
-    poke_undo_running: bool,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -423,6 +417,9 @@ pub struct Baboon {
     /// and walked off the UI thread and never cached as a document: it is not
     /// open, so there is no tab to keep it for.
     ref_jump_loading: HashSet<usize>,
+    /// Memory poking: the poke dialog, the record that undoes the last poke,
+    /// and whether a poke or its undo is running.
+    pub(in crate::app) poke: PokeFeature,
 }
 
 impl Baboon {
@@ -605,10 +602,6 @@ impl Baboon {
             chimp_discard_prompt: None,
             exported_mod: None,
             mod_export: None,
-            poke_dialog: None,
-            last_poke: None,
-            poke_direct_running: false,
-            poke_undo_running: false,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
@@ -709,6 +702,12 @@ impl Baboon {
             custom_editing_kit_texture_failures: HashSet::new(),
             last_pixels_per_point: ctx.pixels_per_point(),
             block_clipboard: None,
+            poke: PokeFeature {
+                poke_dialog: None,
+                last_poke: None,
+                poke_direct_running: false,
+                poke_undo_running: false,
+            },
         }
     }
 

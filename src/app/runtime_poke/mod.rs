@@ -2600,7 +2600,7 @@ mod platform {
 impl Baboon {
     pub(super) fn reset_runtime_poke_source_state(&mut self) {
         platform::clear_runtime_cache();
-        self.poke_dialog = None;
+        self.poke.poke_dialog = None;
     }
 
     pub(super) fn can_poke_current_tag(&self) -> bool {
@@ -2654,7 +2654,7 @@ impl Baboon {
             entries: source_data.full_entry_set().to_vec(),
             entry,
             edited_bytes,
-            prior: self.last_poke.clone(),
+            prior: self.poke.last_poke.clone(),
         })
     }
 
@@ -2666,7 +2666,7 @@ impl Baboon {
             self.begin_poke_current_tag_direct(ctx);
             return;
         }
-        if self.poke_direct_running || self.poke_undo_running {
+        if self.poke.poke_direct_running || self.poke.poke_undo_running {
             self.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
@@ -2688,7 +2688,7 @@ impl Baboon {
         } = request;
         let tx = self.tx.clone();
         self.status = "Preparing runtime poke…".to_owned();
-        self.poke_dialog = Some(PokeDialog {
+        self.poke.poke_dialog = Some(PokeDialog {
             kit,
             key: key.clone(),
             state: PokeDialogState::Scanning,
@@ -2713,7 +2713,7 @@ impl Baboon {
     }
 
     pub(super) fn begin_poke_current_tag_direct(&mut self, ctx: egui::Context) {
-        if self.poke_direct_running || self.poke_undo_running || self.poke_dialog.is_some() {
+        if self.poke.poke_direct_running || self.poke.poke_undo_running || self.poke.poke_dialog.is_some() {
             self.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
@@ -2733,7 +2733,7 @@ impl Baboon {
             edited_bytes,
             prior,
         } = request;
-        self.poke_direct_running = true;
+        self.poke.poke_direct_running = true;
         self.status = "Poking current tag…".to_owned();
         let panic_key = key.clone();
         spawn_worker(
@@ -2759,7 +2759,7 @@ impl Baboon {
     }
 
     fn confirm_poke(&mut self, ctx: egui::Context) {
-        let Some(dialog) = self.poke_dialog.as_mut() else {
+        let Some(dialog) = self.poke.poke_dialog.as_mut() else {
             return;
         };
         let PokeDialogState::Ready(plan) = &dialog.state else {
@@ -2788,15 +2788,15 @@ impl Baboon {
     }
 
     pub(super) fn begin_undo_last_poke(&mut self, ctx: egui::Context) {
-        if self.poke_undo_running || self.poke_direct_running || self.poke_dialog.is_some() {
+        if self.poke.poke_undo_running || self.poke.poke_direct_running || self.poke.poke_dialog.is_some() {
             self.status = "A runtime poke or undo is already in progress".to_owned();
             return;
         }
-        let Some(last) = self.last_poke.take() else {
+        let Some(last) = self.poke.last_poke.take() else {
             self.status = "There is no runtime poke to undo".to_owned();
             return;
         };
-        self.poke_undo_running = true;
+        self.poke.poke_undo_running = true;
         // Kept for a panic: the record was taken to run the undo, and an undo
         // that panicked used to lose it, leaving the game patched with no way
         // back. Its writes restore the original bytes, so offering it again
@@ -2822,7 +2822,7 @@ impl Baboon {
         key: String,
         result: Result<PokePlan, String>,
     ) {
-        let Some(dialog) = self.poke_dialog.as_ref() else {
+        let Some(dialog) = self.poke.poke_dialog.as_ref() else {
             return;
         };
         if dialog.kit != kit || dialog.key != key {
@@ -2849,7 +2849,7 @@ impl Baboon {
                 (PokeDialogState::Error(error), status)
             }
         };
-        if let Some(dialog) = self.poke_dialog.as_mut() {
+        if let Some(dialog) = self.poke.poke_dialog.as_mut() {
             dialog.state = state;
         }
         self.status = status;
@@ -2862,7 +2862,7 @@ impl Baboon {
         result: Result<(LastPoke, PokeReport), String>,
     ) {
         let current = self
-            .poke_dialog
+            .poke.poke_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.kit == kit && dialog.key == key);
         if !current {
@@ -2870,13 +2870,13 @@ impl Baboon {
         }
         match result {
             Ok((last, report)) => {
-                self.last_poke = Some(last);
+                self.poke.last_poke = Some(last);
                 self.status = report.status();
-                self.poke_dialog = None;
+                self.poke.poke_dialog = None;
             }
             Err(error) => {
                 self.status = format!("Poke failed: {error}");
-                if let Some(dialog) = self.poke_dialog.as_mut() {
+                if let Some(dialog) = self.poke.poke_dialog.as_mut() {
                     dialog.state = PokeDialogState::Error(error);
                 }
             }
@@ -2889,7 +2889,7 @@ impl Baboon {
         key: String,
         result: Result<Option<(LastPoke, PokeReport)>, String>,
     ) {
-        self.poke_direct_running = false;
+        self.poke.poke_direct_running = false;
         let current = self
             .kits
             .iter()
@@ -2900,7 +2900,7 @@ impl Baboon {
         }
         match result {
             Ok(Some((last, report))) => {
-                self.last_poke = Some(last);
+                self.poke.last_poke = Some(last);
                 self.status = report.status();
             }
             Ok(None) => {
@@ -2917,7 +2917,7 @@ impl Baboon {
         result: Result<PokeReport, String>,
         unapplied: Option<LastPoke>,
     ) {
-        self.poke_undo_running = false;
+        self.poke.poke_undo_running = false;
         match result {
             Ok(report) => self.status = report.status(),
             Err(error) => {
@@ -2927,9 +2927,9 @@ impl Baboon {
                 // An undo that crashed is the exception: its record comes back
                 // so the game is not left patched with no way to undo it.
                 if let Some(record) = unapplied
-                    && self.last_poke.is_none()
+                    && self.poke.last_poke.is_none()
                 {
-                    self.last_poke = Some(record);
+                    self.poke.last_poke = Some(record);
                     self.status.push_str("; it can be tried again");
                 }
             }
@@ -2938,7 +2938,7 @@ impl Baboon {
 
     pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
         let mut dont_ask = !self.prefs.confirm_runtime_poke;
-        let Some(dialog) = self.poke_dialog.as_ref() else {
+        let Some(dialog) = self.poke.poke_dialog.as_ref() else {
             return;
         };
         // A poke that never ran reports as cancelled; an error already put its
@@ -3026,7 +3026,7 @@ impl Baboon {
                 }
             });
         if !open || close {
-            self.poke_dialog = None;
+            self.poke.poke_dialog = None;
             if cancellable {
                 self.status = "Runtime poke cancelled".to_owned();
             }
@@ -3044,3 +3044,14 @@ impl Baboon {
 
 #[cfg(test)]
 mod tests;
+
+/// Memory poking: the poke dialog, the record that undoes the last poke, and
+/// whether a poke or its undo is running.
+pub(in crate::app) struct PokeFeature {
+    /// Read-only preflight and confirmation for a transient CU2 runtime poke.
+    pub(in crate::app) poke_dialog: Option<PokeDialog>,
+    /// One guarded, process-bound undo record. Never persisted to a project.
+    pub(in crate::app) last_poke: Option<LastPoke>,
+    pub(in crate::app) poke_direct_running: bool,
+    pub(in crate::app) poke_undo_running: bool,
+}

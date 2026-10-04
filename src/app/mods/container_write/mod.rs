@@ -759,7 +759,7 @@ impl Baboon {
             ),
             ("a level export", self.chimp_level_job.is_some()),
             ("a Chimp save", self.chimp_writes.contains_key(&kit_id)),
-            ("a runtime poke", self.poke_direct_running),
+            ("a runtime poke", self.poke.poke_direct_running),
             (
                 "the field-value index build",
                 self.kits[kit_index].field_index.is_building(),

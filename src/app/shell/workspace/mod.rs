@@ -256,9 +256,9 @@ impl Baboon {
                 close_menu(ui);
                 self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
             }
-            if self.last_poke.is_some()
+            if self.poke.last_poke.is_some()
                 && ui
-                    .add_enabled(!self.poke_undo_running, egui::Button::new("Undo Last Poke"))
+                    .add_enabled(!self.poke.poke_undo_running, egui::Button::new("Undo Last Poke"))
                     .on_hover_text("Restore the bytes from Baboon's last verified runtime poke")
                     .clicked()
             {
