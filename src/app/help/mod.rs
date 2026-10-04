@@ -1,4 +1,5 @@
-//! Help: the in-app documentation window, tutorials, HaloScript docs, field docs, tag compatibility and map names.
+//! Help: the in-app documentation window, tutorials, HaloScript docs, field
+//! docs, tag compatibility and map names.
 
 use super::*;
 

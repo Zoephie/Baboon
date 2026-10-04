@@ -2,9 +2,10 @@
 //! It owns presentation and request collection; analysing and writing the conversion belong to the controller.
 
 use super::*;
+use crate::app::ui::dialogs::draw_conversion_report;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_import_tag_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_import_tag_window(&mut self, ctx: &egui::Context) {
         if self.import_tag_dialog.is_none() {
             return;
         }
@@ -284,7 +285,7 @@ impl Baboon {
         }
     }
 
-    pub(in crate::app::ui) fn draw_import_discard_confirm(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_import_discard_confirm(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.import_discard_confirm.as_ref() else {
             return;
         };

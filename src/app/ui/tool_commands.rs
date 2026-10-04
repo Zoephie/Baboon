@@ -476,7 +476,7 @@ impl Baboon {
         ui.add_space(4.0);
     }
 
-    pub(super) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
+    pub(in crate::app) fn pick_tool_command_path(&self, kind: ToolCommandArgKind) -> Option<String> {
         let layout = self.kit_layout_for(self.active);
         let kit_root = layout.as_ref().map(|layout| layout.root.clone());
         let data_root = layout.as_ref().map(|layout| layout.data.clone());

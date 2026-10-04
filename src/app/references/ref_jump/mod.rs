@@ -1,4 +1,5 @@
-//! Jumping from a reference to the tag and field it names, and from a tag to every place that references it.
+//! Jumping from a reference to the tag and field it names, and from a tag to
+//! every place that references it.
 
 use super::*;
 

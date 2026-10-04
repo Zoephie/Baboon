@@ -1001,7 +1001,7 @@ fn cases() -> Vec<Case> {
         case(
             "import_tag",
             &["import_tag_dialog"],
-            &["ui/dialogs/import_tag.rs"],
+            &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
                 h.app.import_tag_dialog = Some(ImportTagDialog {
@@ -1026,7 +1026,7 @@ fn cases() -> Vec<Case> {
         case(
             "import_discard_confirm",
             &["import_discard_confirm"],
-            &["ui/dialogs/import_tag.rs"],
+            &["import/import_tag_dialog.rs"],
             container_kit,
             |h| {
                 h.app.import_discard_confirm = Some(PendingImport {
@@ -1040,7 +1040,7 @@ fn cases() -> Vec<Case> {
         case(
             "tag_import",
             &["tag_import_dialog"],
-            &["ui/dialogs/tag_import.rs"],
+            &["import/tags_window.rs"],
             loose_kit,
             |h| h.app.open_tag_import_dialog(Some("objects".to_owned())),
             &["Import Tags"],
@@ -1048,7 +1048,7 @@ fn cases() -> Vec<Case> {
         case(
             "cache_import",
             &["cache_import_dialog"],
-            &["ui/dialogs/cache_import/mod.rs"],
+            &["import/cache_window/mod.rs"],
             loose_kit,
             |h| {
                 let target = CacheImportTarget {

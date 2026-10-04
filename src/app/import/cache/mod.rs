@@ -213,7 +213,7 @@ impl Baboon {
     /// Refuses up front rather than opening an empty window: with no loose kit
     /// loaded there is nowhere for the tags to go, and finding that out after
     /// choosing a folder is a worse way to learn it.
-    pub(super) fn open_cache_import_dialog(&mut self, prefix: String) {
+    pub(in crate::app) fn open_cache_import_dialog(&mut self, prefix: String) {
         if self.cache_import_dialog.is_some() {
             self.status = "A cache import is already open".to_owned();
             return;
@@ -272,7 +272,7 @@ impl Baboon {
     /// another keeps one place to read what happened, and a single tag can
     /// still reach for others -- the outside-reference question is the same
     /// question whether one tag asked it or a thousand.
-    pub(super) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
+    pub(in crate::app) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
         if self.cache_import_dialog.is_some() {
             self.status = "A cache import is already open".to_owned();
             return;
@@ -363,7 +363,7 @@ impl Baboon {
     /// `only` names the tags to convert instead of the folder — the second run,
     /// after the user has seen what the folder reached for and ticked which of
     /// it to bring.
-    pub(super) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
+    pub(in crate::app) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
         if let Some(index) = self
             .cache_import_dialog
             .as_ref()
@@ -495,7 +495,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn handle_cache_import_progress(
+    pub(in crate::app) fn handle_cache_import_progress(
         &mut self,
         progress: FolderConversionProgress,
     ) -> bool {
@@ -516,7 +516,7 @@ impl Baboon {
     /// the run errs towards keeping: [`ReplacePolicy::Chosen`] is keyed by the
     /// source tag, so a tag whose extension turned out to differ is one that
     /// was not at the path the scan checked, and so was never at risk.
-    pub(super) fn scan_cache_import_conflicts(&mut self, ctx: egui::Context) {
+    pub(in crate::app) fn scan_cache_import_conflicts(&mut self, ctx: egui::Context) {
         let Some(dialog) = self.cache_import_dialog.as_ref() else {
             return;
         };
@@ -601,7 +601,7 @@ impl Baboon {
 
     /// Take the scan's answer, ticked, because replacing is what the importer
     /// has always done and keeping something is the deliberate choice.
-    pub(super) fn handle_cache_import_conflicts(
+    pub(in crate::app) fn handle_cache_import_conflicts(
         &mut self,
         stamp: KitStamp,
         conflicts: Result<Vec<OutsideReference>, String>,
@@ -630,7 +630,7 @@ impl Baboon {
         true
     }
 
-    pub(super) fn handle_cache_import_finished(
+    pub(in crate::app) fn handle_cache_import_finished(
         &mut self,
         stamp: KitStamp,
         result: Result<FolderConversionReport, String>,

@@ -1,4 +1,5 @@
-//! Searching tags: Find, the field-value index and search, and the source listings (map ids, sounds by class).
+//! Searching tags: Find, the field-value index and search, and the source
+//! listings (map ids, sounds by class).
 
 use super::*;
 
@@ -13,5 +14,4 @@ pub(in crate::app) use field_index::*;
 pub(in crate::app) mod field_search;
 pub(in crate::app) use field_search::*;
 pub(in crate::app) mod result_windows;
-
 pub(in crate::app) mod listings;

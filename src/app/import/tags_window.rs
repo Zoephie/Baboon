@@ -2,6 +2,10 @@
 //! It owns presentation and action collection; measuring, converting, and writing belong to the controller and its workers.
 
 use super::*;
+use crate::app::ui::dialogs::draw_folder_import_report;
+use crate::app::ui::dialogs::draw_conversion_report;
+use crate::app::ui::is_file_cached;
+use crate::app::ui::recheck_cached;
 
 /// What the Import Tags window asked for this frame.
 ///
@@ -31,7 +35,7 @@ impl Baboon {
     /// the user gave rather than a decision they should have to make first. The
     /// slow parts — measuring the source and building the preview — run on
     /// workers, so a path naming a whole kit's tag tree does not stall a frame.
-    pub(in crate::app::ui) fn draw_tag_import_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_tag_import_window(&mut self, ctx: &egui::Context) {
         if self.tag_import_dialog.is_none() {
             return;
         }

@@ -1,4 +1,5 @@
-//! Building the reverse-dependency index, listing unreferenced tags, and fixing a tag's broken dependencies against the tags that exist.
+//! Building the reverse-dependency index, listing unreferenced tags, and fixing
+//! a tag's broken dependencies against the tags that exist.
 
 use super::*;
 use crate::app::controller::terminal::trim_terminal_lines;

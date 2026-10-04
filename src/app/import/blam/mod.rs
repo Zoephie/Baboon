@@ -8,14 +8,14 @@ use super::*;
 /// `collision` (collision_model), `physics` (physics_model), and `structure`
 /// (structure_bsp).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct BlamFolderScan {
-    pub(super) render: bool,
-    pub(super) collision: bool,
-    pub(super) physics: bool,
-    pub(super) structure: bool,
+pub(in crate::app) struct BlamFolderScan {
+    pub(in crate::app) render: bool,
+    pub(in crate::app) collision: bool,
+    pub(in crate::app) physics: bool,
+    pub(in crate::app) structure: bool,
 }
 
-pub(super) fn detect_blam_folders(asset_folder: &Path) -> BlamFolderScan {
+pub(in crate::app) fn detect_blam_folders(asset_folder: &Path) -> BlamFolderScan {
     BlamFolderScan {
         render: asset_folder.join("render").is_dir(),
         collision: asset_folder.join("collision").is_dir(),
@@ -53,29 +53,29 @@ pub(in crate::app) struct BlamLogLine {
 /// lines each, so this is a backstop, not a working limit.
 const BLAM_LOG_CAP: usize = 1000;
 
-pub(super) struct BlamUiState {
+pub(in crate::app) struct BlamUiState {
     /// Asset folder relative to the kit's `data` folder, backslash form, the
     /// same shape tool commands take.
-    pub(super) asset_path: String,
+    pub(in crate::app) asset_path: String,
     /// The asset path the folder scan last ran against. `None` forces a rescan
     /// on the next frame the panel draws, so ticks follow the typed path
     /// without touching the disk every frame.
-    pub(super) scanned_path: Option<String>,
-    pub(super) scan: BlamFolderScan,
-    pub(super) import_render: bool,
-    pub(super) import_collision: bool,
-    pub(super) import_physics: bool,
-    pub(super) import_structure: bool,
-    pub(super) import_prt: bool,
+    pub(in crate::app) scanned_path: Option<String>,
+    pub(in crate::app) scan: BlamFolderScan,
+    pub(in crate::app) import_render: bool,
+    pub(in crate::app) import_collision: bool,
+    pub(in crate::app) import_physics: bool,
+    pub(in crate::app) import_structure: bool,
+    pub(in crate::app) import_prt: bool,
     /// An import is running on a worker thread; the Import button is held
     /// down until its result message lands.
-    pub(super) running: bool,
+    pub(in crate::app) running: bool,
     /// Shown in the panel's status bar: the current step while an import
     /// runs, a short tally once it lands.
-    pub(super) status: String,
+    pub(in crate::app) status: String,
     /// The pane's log window: every step of the current (or last) import,
     /// cleared when a new one starts.
-    pub(super) log: Vec<BlamLogLine>,
+    pub(in crate::app) log: Vec<BlamLogLine>,
 }
 
 impl Default for BlamUiState {
@@ -101,7 +101,7 @@ impl BlamUiState {
     /// Re-detect the asset's source folders and re-seed the tick boxes from
     /// what is actually on disk: a present folder starts ticked, a missing one
     /// is unticked (and the panel disables it).
-    pub(super) fn rescan(&mut self, asset_folder: &Path) {
+    pub(in crate::app) fn rescan(&mut self, asset_folder: &Path) {
         self.scan = detect_blam_folders(asset_folder);
         self.import_render = self.scan.render;
         self.import_collision = self.scan.collision;
@@ -110,11 +110,11 @@ impl BlamUiState {
         self.scanned_path = Some(self.asset_path.trim().to_owned());
     }
 
-    pub(super) fn anything_selected(&self) -> bool {
+    pub(in crate::app) fn anything_selected(&self) -> bool {
         self.import_render || self.import_collision || self.import_physics || self.import_structure
     }
 
-    pub(super) fn push_log(&mut self, kind: BlamLogKind, text: String) {
+    pub(in crate::app) fn push_log(&mut self, kind: BlamLogKind, text: String) {
         if self.log.len() >= BLAM_LOG_CAP {
             self.log.remove(0);
         }

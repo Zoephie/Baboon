@@ -3,7 +3,6 @@
 
 use super::*;
 
-mod cache_import;
 mod chimp_prompts;
 mod clear_stash_confirm;
 mod container_dump_confirm;
@@ -12,7 +11,6 @@ mod container_folder;
 mod delete_confirm;
 mod exported_mod;
 mod extract_target;
-mod import_tag;
 mod keyword_chooser;
 mod loose_folder_rename;
 mod mod_export;
@@ -20,7 +18,6 @@ mod new_tag;
 mod operation_notice;
 mod overwrite_confirm;
 mod rename_tag;
-mod tag_import;
 mod tsv_paste;
 
 pub(in crate::app) use mod_export::DiffNode;
@@ -33,7 +30,7 @@ pub(in crate::app) use mod_export::DiffNode;
 /// what the schema defaults to, nothing else. Started-from-a-kit-tag is the
 /// exception, taken only for the handful of groups whose schema cannot express
 /// them, and it is worth naming because that tag's layout revision came with it.
-fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
+pub(in crate::app) fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
     ui.label(
         RichText::new(format!(
             "Imported {} tag(s): {} from the definitions, {} from a kit tag. {} failed, {} ignored.",
@@ -134,7 +131,7 @@ fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
 /// Shared by the single-tag import preview and the Campaign Evolved import
 /// dialog: both answer the same question — what will this conversion cost — and
 /// two copies would drift.
-fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str) {
+pub(in crate::app) fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str) {
     egui::Grid::new(format!("{salt}_summary"))
         .num_columns(2)
         .spacing([20.0, 3.0])

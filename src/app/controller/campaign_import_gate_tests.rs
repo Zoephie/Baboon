@@ -28,6 +28,7 @@
 //! struct graph. These tests pin the hole and that it is now closed.
 
 use super::*;
+use crate::app::import::single_tag::classify_import_source_for;
 
 fn definitions() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions")

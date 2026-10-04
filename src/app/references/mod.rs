@@ -1,4 +1,5 @@
-//! References: the reverse-dependency index, the content explorer, reference jumps, and fixing a tag's dependencies.
+//! References: the reverse-dependency index, the content explorer, reference
+//! jumps, and fixing a tag's dependencies.
 
 use super::*;
 

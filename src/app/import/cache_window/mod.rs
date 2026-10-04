@@ -2,6 +2,7 @@
 //! It owns presentation and action collection; the conversion run and its report belong to the controller.
 
 use super::*;
+use crate::app::ui::dialogs::draw_folder_import_report;
 
 /// What the Import Cache Folder window asks for, collected during the render
 /// pass and applied after it.
@@ -532,7 +533,7 @@ impl Baboon {
     /// A run of this can reach thousands of tags — following references out of
     /// a folder is the point — so the outcome is a document to read, not a
     /// status-bar line to catch.
-    pub(in crate::app::ui) fn draw_cache_import_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_cache_import_window(&mut self, ctx: &egui::Context) {
         if self.cache_import_dialog.is_none() {
             return;
         }

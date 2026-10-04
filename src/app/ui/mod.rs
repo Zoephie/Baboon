@@ -4,9 +4,8 @@
 use super::controller::open_terminal_log;
 use super::*;
 
-mod blam;
 mod browser_panel;
-mod dialogs;
+pub(in crate::app) mod dialogs;
 pub(in crate::app) use dialogs::DiffNode;
 mod first_run;
 mod kit_tiles;

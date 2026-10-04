@@ -4,6 +4,7 @@
 //! It owns application actions and async coordination; presentation lives in `ui/blam.rs`, folder detection in `app/blam/mod.rs`, and the importers in `blam-tags`.
 
 use super::*;
+use crate::app::controller::register_created_tag_in_source;
 
 /// Everything the worker needs, snapshotted on the UI thread so the job never
 /// reads `Baboon` state.
@@ -139,7 +140,7 @@ impl Baboon {
     }
 
     /// Returns true when the message was stale (its kit closed or reloaded).
-    pub(super) fn handle_blam_import_progress(
+    pub(in crate::app) fn handle_blam_import_progress(
         &mut self,
         stamp: KitStamp,
         kind: BlamLogKind,
@@ -157,7 +158,7 @@ impl Baboon {
     }
 
     /// Returns true when the message was stale (its kit closed or reloaded).
-    pub(super) fn handle_blam_import_finished(
+    pub(in crate::app) fn handle_blam_import_finished(
         &mut self,
         stamp: KitStamp,
         outcomes: Vec<(String, Result<String, String>)>,

@@ -12,11 +12,11 @@ fn blam_import_fill() -> Color32 {
 impl Baboon {
     /// The Blam! surface only covers Halo 3 pipelines for now, so both the
     /// Tools menu entry and the surface strip answer to the kit's game.
-    pub(super) fn active_kit_is_halo3(&self) -> bool {
+    pub(in crate::app) fn active_kit_is_halo3(&self) -> bool {
         self.kit_is_halo3(self.active)
     }
 
-    pub(super) fn kit_is_halo3(&self, kit_index: usize) -> bool {
+    pub(in crate::app) fn kit_is_halo3(&self, kit_index: usize) -> bool {
         self.kits[kit_index]
             .source
             .as_ref()
@@ -25,7 +25,7 @@ impl Baboon {
 
     /// The Blam! pane: a [`BLAM_KEY`] tile in the kit's tag tree, so it drags,
     /// splits, and resizes like any open tag.
-    pub(super) fn draw_blam_pane(&mut self, ui: &mut Ui, kit_index: usize) {
+    pub(in crate::app) fn draw_blam_pane(&mut self, ui: &mut Ui, kit_index: usize) {
         let kit_id = self.kits[kit_index].id;
         let data_root = self.kit_layout_for(kit_index).map(|layout| layout.data);
 

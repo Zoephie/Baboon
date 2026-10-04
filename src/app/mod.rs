@@ -104,18 +104,10 @@ mod shader;
 use shader::*;
 mod material;
 use material::*;
-mod conversion;
-use conversion::*;
-mod import;
-use import::*;
-mod cache_import;
-use cache_import::*;
 mod model_preview;
 use model_preview::*;
 mod tool_commands;
 use tool_commands::*;
-mod blam;
-use blam::*;
 mod tag_icons;
 use tag_icons::*;
 mod button_icons;
@@ -139,7 +131,7 @@ mod scenario_palettes;
 use scenario_palettes::*;
 mod chimp;
 use chimp::*;
-mod controller;
+pub(in crate::app) mod controller;
 use controller::{ContainerLeaseId, ContainerWriteLease, CreatedTagLedger, CreatedTagRecord};
 mod help;
 use help::*;
@@ -149,7 +141,9 @@ mod search;
 use search::*;
 mod references;
 use references::*;
-mod ui;
+pub(in crate::app) mod import;
+use import::*;
+pub(in crate::app) mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

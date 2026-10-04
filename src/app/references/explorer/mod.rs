@@ -1,4 +1,5 @@
-//! The content explorer: browsing a tag's references and referrers, with history.
+//! The content explorer: browsing a tag's references and referrers, with
+//! history.
 
 use super::*;
 
