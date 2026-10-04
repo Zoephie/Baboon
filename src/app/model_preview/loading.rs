@@ -2414,3 +2414,7 @@ mod particle_model_preview;
 #[cfg(test)]
 #[path = "../tests/model_preview_worker.rs"]
 mod model_preview_worker;
+
+#[cfg(test)]
+#[path = "../tests/model_preview_loading.rs"]
+mod synthetic_loading;
