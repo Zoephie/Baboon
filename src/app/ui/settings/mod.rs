@@ -354,9 +354,9 @@ fn draw_editing_kit_form(
             .selected_text(game_display_name(&draft.game))
             .width(columns[1].available_width())
             .show_ui(&mut columns[1], |ui| {
-                for (label, game) in SUPPORTED_EK_GAMES {
+                for game in GameId::ALL {
                     if ui
-                        .selectable_value(&mut draft.game, (*game).to_owned(), *label)
+                        .selectable_value(&mut draft.game, game.as_str().to_owned(), game.display_name())
                         .changed()
                     {
                         refill_kit_folders(draft);

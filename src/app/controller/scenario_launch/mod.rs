@@ -5,15 +5,6 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SCENARIO_GROUP_TAG: u32 = u32::from_be_bytes(*b"scnr");
-const SUPPORTED_SCENARIO_LAUNCH_GAMES: &[&str] = &[
-    "haloce_mcc",
-    "halo2_mcc",
-    "halo3_mcc",
-    "halo3odst_mcc",
-    "haloreach_mcc",
-    "halo4_mcc",
-    "halo2amp_mcc",
-];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ScenarioLaunchContext {
@@ -37,7 +28,7 @@ pub(super) fn scenario_launch_context(
     let game = source
         .game
         .as_deref()
-        .filter(|game| SUPPORTED_SCENARIO_LAUNCH_GAMES.contains(game))
+        .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
         .ok_or_else(|| "Scenario launching requires a supported MCC editing kit".to_owned())?;
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Err("Scenario launching requires a loaded loose editing-kit folder".to_owned());
@@ -117,15 +108,7 @@ pub(super) fn scenario_launch_context(
 /// can never do this should not offer a control for it, greyed out or
 /// otherwise.
 pub(super) fn sapien_supports_scenario_argument(game: &str) -> bool {
-    matches!(
-        game,
-        "halo2_mcc"
-            | "halo3_mcc"
-            | "halo3odst_mcc"
-            | "haloreach_mcc"
-            | "halo4_mcc"
-            | "halo2amp_mcc"
-    )
+    GameId::from_id(game).is_some_and(GameFacts::sapien_takes_scenario_argument)
 }
 
 /// What a kit can launch a scenario in, decided without reference to any one
@@ -164,7 +147,7 @@ pub(in crate::app) fn scenario_launch_availability_with(
     let Some(game) = source
         .game
         .as_deref()
-        .filter(|game| SUPPORTED_SCENARIO_LAUNCH_GAMES.contains(game))
+        .filter(|game| GameId::from_id(game).is_some_and(GameFacts::launches_scenarios))
     else {
         return unsupported;
     };
@@ -184,11 +167,7 @@ pub(in crate::app) fn scenario_launch_availability_with(
 }
 
 pub(super) fn scenario_startup_command(game: &str, scenario_path: &str) -> String {
-    let command = if game == "haloce_mcc" {
-        "map_name"
-    } else {
-        "game_start"
-    };
+    let command = GameId::from_id(game).map_or("game_start", GameFacts::scenario_startup_command);
     let argument = if scenario_path.chars().any(char::is_whitespace) || scenario_path.contains(';')
     {
         format!("\"{scenario_path}\"")
@@ -199,16 +178,9 @@ pub(super) fn scenario_startup_command(game: &str, scenario_path: &str) -> Strin
 }
 
 pub(super) fn tag_test_executable_for_game(game: Option<&str>) -> &'static str {
-    match game {
-        Some("haloce_mcc") => "halo_tag_test.exe",
-        Some("halo2_mcc") => "halo2_tag_test.exe",
-        Some("halo3_mcc") => "halo3_tag_test.exe",
-        Some("halo3odst_mcc") => "atlas_tag_test.exe",
-        Some("haloreach_mcc") => "reach_tag_test.exe",
-        Some("halo4_mcc") => "halo4_tag_test.exe",
-        Some("halo2amp_mcc") => "halo2a_tag_test.exe",
-        _ => "tag_test.exe",
-    }
+    game.and_then(GameId::from_id)
+        .and_then(GameFacts::tag_test_executable)
+        .unwrap_or("tag_test.exe")
 }
 
 pub(super) fn update_scenario_startup_file(path: &Path, command: &str) -> Result<(), String> {

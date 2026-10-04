@@ -52,16 +52,8 @@ where
 }
 
 fn command_line_kit(flag: &str) -> Option<(&'static str, &'static str)> {
-    match flag.to_ascii_uppercase().as_str() {
-        "-HCEEK" | "-H1EK" => Some(("haloce_mcc", "HCEEK")),
-        "-H2EK" => Some(("halo2_mcc", "H2EK")),
-        "-H3EK" => Some(("halo3_mcc", "H3EK")),
-        "-H3ODSTEK" => Some(("halo3odst_mcc", "H3ODSTEK")),
-        "-HREK" => Some(("haloreach_mcc", "HREK")),
-        "-H4EK" => Some(("halo4_mcc", "H4EK")),
-        "-H2AMPEK" | "-H2AEK" => Some(("halo2amp_mcc", "H2AMPEK")),
-        _ => None,
-    }
+    let game = game_for_launch_flag(flag)?;
+    Some((game.as_str(), game.kit_name()?))
 }
 
 pub(super) struct ResolvedLaunchPaths {

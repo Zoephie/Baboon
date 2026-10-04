@@ -39,11 +39,12 @@ use serde_json::{Value, json};
 use crate::core::bundled::{
     definitions_missing_message, locate_definitions_root, locate_help_docs_root,
 };
+use crate::core::game::{GameFacts, GameId, game_for_launch_flag};
 use crate::core::format::{TagNameIndex, format_value, group_label};
 use crate::core::process::background_command;
 use crate::core::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, KitLayout, LoadedSourceData,
-    NewContainerTemplate, ReverseDependencyIndex, SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation,
+    NewContainerTemplate, ReverseDependencyIndex, TagEntry, TagEntryLocation,
     TagSource, TagTree, TagTreeNode, load_editing_kit_layout, load_folder,
     load_folder_node_entries, load_iostore_container, load_iostore_container_set,
     load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,

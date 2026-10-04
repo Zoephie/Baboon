@@ -1,6 +1,8 @@
 //! Game display names and embedded banner/emblem asset mappings.
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 
+use crate::core::game::{GameFacts, GameId};
+
 pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
     match game {
         "haloce_mcc" => include_root_bytes!("assets/Game Icons/ce.png"),
@@ -36,23 +38,14 @@ pub(super) fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
 }
 
 pub(super) fn game_display_name(game: &str) -> &'static str {
-    match game {
-        "haloce_mcc" => "Halo: Combat Evolved",
-        "halo2_mcc" => "Halo 2",
-        "halo2amp_mcc" => "Halo 2 Anniversary Multiplayer",
-        "halo3_mcc" => "Halo 3",
-        "halo3odst_mcc" => "Halo 3: ODST",
-        "haloreach_mcc" => "Halo: Reach",
-        "halo4_mcc" => "Halo 4",
-        "haloce_evolved" => "Halo: Campaign Evolved",
-        _ => "Unknown Game",
-    }
+    GameId::from_id(game).map_or("Unknown Game", GameFacts::display_name)
 }
 
 /// Platform/edition suffix shown after the game name (e.g. "MCC", "PC").
 pub(super) fn game_platform_label(game: &str) -> &'static str {
-    match game {
-        "haloce_evolved" => "PC",
-        _ => "MCC",
+    if GameId::from_id(game) == Some(GameId::CampaignEvolved) {
+        "PC"
+    } else {
+        "MCC"
     }
 }

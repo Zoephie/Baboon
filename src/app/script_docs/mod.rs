@@ -6,15 +6,10 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 const SCRIPT_DOCS_FILE: &str = "script_docs.sqlite3";
 const SCRIPT_DOCS_SCHEMA_VERSION: i64 = 1;
 
-pub(super) const SCRIPT_DOC_GAMES: [(&str, &str); 7] = [
-    ("haloce_mcc", "Halo: Combat Evolved"),
-    ("halo2_mcc", "Halo 2"),
-    ("halo2amp_mcc", "Halo 2: Anniversary Multiplayer"),
-    ("halo3_mcc", "Halo 3"),
-    ("halo3odst_mcc", "Halo 3: ODST"),
-    ("haloreach_mcc", "Halo: Reach"),
-    ("halo4_mcc", "Halo 4"),
-];
+/// The games with HaloScript documentation, in the order the help lists them.
+pub(super) fn script_doc_games() -> impl Iterator<Item = GameId> {
+    GameId::ALL.into_iter().filter(|game| game.has_script_docs())
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ScriptDocCategory {
@@ -109,7 +104,7 @@ impl Default for ScriptDocsUiState {
     fn default() -> Self {
         Self {
             database: ScriptDocsDatabase::Unloaded,
-            game: SCRIPT_DOC_GAMES[0].0.to_owned(),
+            game: GameId::HaloCe.as_str().to_owned(),
             category: ScriptDocCategory::Functions,
             network_filter: ScriptDocNetworkFilter::All,
             search: String::new(),

@@ -662,58 +662,9 @@ fn sidebar_source_path_label(source: &TagSource) -> String {
     }
 }
 
-const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
-    (
-        "halo2_mcc",
-        &[
-            "monitor-bitmaps",
-            "monitor-bitmaps-data-and-tags",
-            "monitor-models",
-            "monitor-structures",
-        ],
-    ),
-    (
-        "halo3_mcc",
-        &[
-            "monitor-bitmaps",
-            "monitor-models",
-            "monitor-models-draft",
-            "monitor-strings",
-            "monitor-structures",
-        ],
-    ),
-    (
-        "halo3odst_mcc",
-        &[
-            "monitor-bitmaps",
-            "monitor-models",
-            "monitor-models-draft",
-            "monitor-strings",
-            "monitor-structures",
-        ],
-    ),
-    (
-        "haloreach_mcc",
-        &[
-            "monitor-bitmaps",
-            "monitor-models",
-            "monitor-models-draft",
-            "monitor-strings",
-        ],
-    ),
-    ("halo4_mcc", &["monitor-bitmaps", "monitor-strings"]),
-    ("haloce_mcc", &[]),
-];
-
 fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
-    let Some(game) = game else {
-        return &[];
-    };
-    MONITOR_COMMANDS_BY_GAME
-        .iter()
-        .find(|(candidate, _)| *candidate == game)
-        .map(|(_, commands)| *commands)
-        .unwrap_or(&[])
+    game.and_then(GameId::from_id)
+        .map_or(&[], GameFacts::monitor_commands)
 }
 
 #[cfg(test)]

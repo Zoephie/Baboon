@@ -785,17 +785,6 @@ pub(crate) struct EkFolderAlias {
     pub(crate) game: String,
 }
 
-pub(crate) const SUPPORTED_EK_GAMES: &[(&str, &str)] = &[
-    ("Halo CE", "haloce_mcc"),
-    ("Halo 2", "halo2_mcc"),
-    ("Halo 2 Anniversary Multiplayer", "halo2amp_mcc"),
-    ("Halo 3", "halo3_mcc"),
-    ("Halo 3 ODST", "halo3odst_mcc"),
-    ("Halo Reach", "haloreach_mcc"),
-    ("Halo 4", "halo4_mcc"),
-    ("Halo: Campaign Evolved", "haloce_evolved"),
-];
-
 #[derive(Default)]
 /// Root of a browser tree whose entry indices address the owning entry vector.
 /// Reusing a tree with a different entry vector is invalid even when paths look

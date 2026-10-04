@@ -79,15 +79,17 @@ impl Baboon {
             ui.label(RichText::new("Game").color(subtle_dark()));
             egui::ComboBox::from_id_salt("script_docs_game")
                 .selected_text(
-                    SCRIPT_DOC_GAMES
-                        .iter()
-                        .find(|(id, _)| *id == self.script_docs.game)
-                        .map(|(_, title)| *title)
-                        .unwrap_or("Unknown game"),
+                    script_doc_games()
+                        .find(|game| game.as_str() == self.script_docs.game)
+                        .map_or("Unknown game", GameFacts::display_name),
                 )
                 .show_ui(ui, |ui| {
-                    for (id, title) in SCRIPT_DOC_GAMES {
-                        ui.selectable_value(&mut self.script_docs.game, id.to_owned(), title);
+                    for game in script_doc_games() {
+                        ui.selectable_value(
+                            &mut self.script_docs.game,
+                            game.as_str().to_owned(),
+                            game.display_name(),
+                        );
                     }
                 });
             ui.separator();

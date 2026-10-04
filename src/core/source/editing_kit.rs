@@ -2,6 +2,7 @@
 //! It owns source identity, discovery, indexing, and source-aware reads; editor presentation and application workflow state belong elsewhere.
 
 use super::*;
+use crate::core::game::{GameId, game_for_kit_folder};
 
 pub(crate) fn resolve_folder_root(
     selected_root: &Path,
@@ -118,19 +119,7 @@ pub(super) fn detect_ek_root_with_aliases(
 }
 
 fn ek_folder_game(name: &str) -> Option<&'static str> {
-    // Recognize both the editing-kit folder names (e.g. `H3EK`) and the
-    // canonical game-id folder names (e.g. `halo3_mcc`) — users often keep tags
-    // under a folder named after the game, not the EK.
-    match name.to_ascii_uppercase().as_str() {
-        "HCEEK" | "H1EK" | "HALOCEEK" | "HALOCE_MCC" => Some("haloce_mcc"),
-        "H2EK" | "HALO2EK" | "HALO2_MCC" => Some("halo2_mcc"),
-        "HREK" | "HALOREACH_MCC" => Some("haloreach_mcc"),
-        "H4EK" | "HALO4_MCC" => Some("halo4_mcc"),
-        "H3ODSTEK" | "HALO3ODST_MCC" => Some("halo3odst_mcc"),
-        "H3EK" | "HALO3_MCC" => Some("halo3_mcc"),
-        "H2AMPEK" | "H2AEK" | "HALO2AMP_MCC" => Some("halo2amp_mcc"),
-        _ => None,
-    }
+    game_for_kit_folder(name).map(GameId::as_str)
 }
 
 fn alias_folder_game(name: &str, aliases: &[EkFolderAlias]) -> Option<&'static str> {
@@ -144,9 +133,10 @@ fn alias_folder_game(name: &str, aliases: &[EkFolderAlias]) -> Option<&'static s
 }
 
 pub(crate) fn supported_ek_game_id(game: &str) -> Option<&'static str> {
-    SUPPORTED_EK_GAMES
-        .iter()
-        .find_map(|(_, id)| id.eq_ignore_ascii_case(game).then_some(*id))
+    GameId::ALL
+        .into_iter()
+        .find(|id| id.as_str().eq_ignore_ascii_case(game))
+        .map(GameId::as_str)
 }
 
 fn folder_source_label(
