@@ -478,6 +478,10 @@ pub(in crate::app) struct FolderRefactorFinished {
     pub(in crate::app) reverse_dependencies: Option<ReverseDependencyIndex>,
     pub(in crate::app) old_to_new_keys: HashMap<String, String>,
     pub(in crate::app) moved: bool,
+    /// For a folder that moved (rename or move, not copy), its old and new
+    /// paths relative to the tags root, so what is keyed by folder rather than
+    /// by tag (favorite folders) can follow it.
+    pub(in crate::app) moved_folder: Option<(PathBuf, PathBuf)>,
 }
 
 pub(in crate::app) struct FolderRefactorUiState {

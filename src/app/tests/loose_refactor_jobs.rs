@@ -389,11 +389,13 @@ fn renaming_a_folder_moves_its_tags_and_rewrites_referrers_outside_it() {
         app.prefs.editing_kit_favorites[0].tags,
         vec![PathBuf::from("objects/crates/crate.render_model")]
     );
-    // BUG: a favorited folder does not follow the rename. Only tag favorites
-    // are remapped; the folder's is then pruned as missing, so the favorite
-    // is lost rather than moved.
-    assert!(app.prefs.editing_kit_favorites[0].folders.is_empty());
-    assert!(app.kits[0].active_favorite_folders.is_empty());
+    // A favorited folder follows the rename, as its tags do. It used to be
+    // left at the old path and then pruned as missing, losing the favorite.
+    assert_eq!(
+        app.prefs.editing_kit_favorites[0].folders,
+        vec![PathBuf::from("objects/crates")]
+    );
+    assert_eq!(app.kits[0].active_favorite_folders.len(), 1);
 }
 
 #[test]

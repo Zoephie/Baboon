@@ -2600,7 +2600,12 @@ impl Baboon {
     /// finished background refactor, which may well land while the user is in
     /// another workspace — and then it resolved the wrong root and remapped the
     /// wrong workspace's favorites with this one's rename map.
-    fn remap_favorites_for_kit(&mut self, kit: usize, old_to_new_keys: &HashMap<String, String>) {
+    fn remap_favorites_for_kit(
+        &mut self,
+        kit: usize,
+        old_to_new_keys: &HashMap<String, String>,
+        moved_folder: Option<(&Path, &Path)>,
+    ) {
         let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
@@ -2612,6 +2617,21 @@ impl Baboon {
             &mut self.prefs.editing_kit_favorites[index].tags,
             old_to_new_keys,
         );
+        if let Some((from, to)) = moved_folder {
+            remap_favorite_folders(&mut self.prefs.editing_kit_favorites[index].folders, from, to);
+            let mut unique_folders: Vec<PathBuf> = Vec::new();
+            self.prefs.editing_kit_favorites[index].folders.retain(|path| {
+                if unique_folders
+                    .iter()
+                    .any(|existing| same_recent_path(existing, path))
+                {
+                    false
+                } else {
+                    unique_folders.push(path.clone());
+                    true
+                }
+            });
+        }
         let mut unique: Vec<PathBuf> = Vec::new();
         self.prefs.editing_kit_favorites[index].tags.retain(|path| {
             if unique
@@ -11788,6 +11808,7 @@ fn run_tag_rename_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: true,
+        moved_folder: None,
     })
 }
 
@@ -12025,6 +12046,15 @@ fn run_folder_refactor_job(
         reverse_dependencies,
         old_to_new_keys,
         moved: move_folder,
+        moved_folder: move_folder.then(|| {
+            (
+                source_rel.clone(),
+                destination
+                    .strip_prefix(&root)
+                    .unwrap_or(&destination)
+                    .to_path_buf(),
+            )
+        }),
     })
 }
 
@@ -12755,6 +12785,58 @@ fn same_entry_key(a: &str, b: &str) -> bool {
     #[cfg(not(windows))]
     {
         a == b
+    }
+}
+
+/// Favorite folders at or under `from` follow it to `to` (both relative to the
+/// tags root). Folders are compared component by component ignoring case, the
+/// way tag paths are, and keep the case of the part below the moved folder.
+fn remap_favorite_folders(folders: &mut [PathBuf], from: &Path, to: &Path) {
+    let from: Vec<String> = from
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+    for folder in folders {
+        let parts: Vec<_> = folder.components().collect();
+        if parts.len() < from.len()
+            || !parts
+                .iter()
+                .zip(&from)
+                .all(|(part, wanted)| part.as_os_str().to_string_lossy().to_ascii_lowercase() == *wanted)
+        {
+            continue;
+        }
+        let mut moved = to.to_path_buf();
+        for part in &parts[from.len()..] {
+            moved.push(part);
+        }
+        *folder = moved;
+    }
+}
+
+#[cfg(test)]
+mod favorite_folder_tests {
+    use super::remap_favorite_folders;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn favorite_folders_at_or_under_a_moved_folder_follow_it() {
+        let mut folders = vec![
+            PathBuf::from("objects/props"),
+            PathBuf::from("Objects/Props/Barrels"),
+            PathBuf::from("objects/propsheet"),
+            PathBuf::from("levels/test"),
+        ];
+        remap_favorite_folders(&mut folders, Path::new("objects/props"), Path::new("levels/crates"));
+        assert_eq!(
+            folders,
+            vec![
+                PathBuf::from("levels/crates"),
+                PathBuf::from("levels/crates/Barrels"),
+                PathBuf::from("objects/propsheet"),
+                PathBuf::from("levels/test"),
+            ]
+        );
     }
 }
 

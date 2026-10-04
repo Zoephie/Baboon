@@ -159,7 +159,11 @@ impl Baboon {
             }
         }
         if done.moved {
-            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys);
+            let moved_folder = done
+                .moved_folder
+                .as_ref()
+                .map(|(from, to)| (from.as_path(), to.as_path()));
+            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys, moved_folder);
             self.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
         }
         let kit = &mut self.kits[kit_index];
