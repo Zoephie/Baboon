@@ -12,6 +12,11 @@ env:
   # an old CMake; allow the runners' modern CMake (4.x) to configure it.
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
+# TODO(restructure): Cargo.toml's `[patch]` points blam-tags at a sibling
+# checkout (`../blam-tags/blam-tags`) that does not exist on the runners, so
+# these jobs resolve only once the patch is replaced by a `rev` bump of the
+# blam-tags dependency, as it is before every PR.
+
 jobs:
   build:
     name: ${{ matrix.os }}
@@ -62,3 +67,60 @@ jobs:
         run: cargo test --all-targets
         env:
           CMAKE_GENERATOR: Ninja
+
+      # Correctness can depend on the build profile (overflow checks and debug
+      # assertions are off in release), and release is what ships.
+      - name: Test (release)
+        if: runner.os == 'Windows'
+        run: cargo test --all-targets --release
+        env:
+          CMAKE_GENERATOR: Ninja
+
+  lint:
+    name: clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows lints the Windows-only code, Linux the rest.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          for source_file in /etc/apt/sources.list.d/*; do
+            if grep -q 'dl.google.com/linux/chrome' "$source_file"; then
+              sudo mv "$source_file" "$source_file.disabled"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libasound2-dev libxcb1-dev
+
+      - name: Install Windows CMake generator
+        if: runner.os == 'Windows'
+        run: choco install ninja --no-progress -y
+
+      - name: Use Ninja for CMake
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+
+      # The rules in clippy.toml (no panicking enum readers) are enforced.
+      - name: Clippy (enforced rules)
+        run: cargo clippy --all-targets -- -A clippy::all -D clippy::disallowed_methods
+
+      # Everything else is reported, not enforced: the code has a few hundred
+      # existing warnings. Switch this to `-- -D warnings` once it has none.
+      - name: Clippy (report only)
+        continue-on-error: true
+        run: cargo clippy --all-targets
