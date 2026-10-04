@@ -1,5 +1,4 @@
-#[path = "../script_docs_import.rs"]
-mod script_docs_import;
+use baboon::script_docs_import;
 
 use std::path::PathBuf;
 

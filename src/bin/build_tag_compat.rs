@@ -1,5 +1,4 @@
-#[path = "../tag_compat_build.rs"]
-mod tag_compat_build;
+use baboon::tag_compat_build;
 
 use std::path::PathBuf;
 
