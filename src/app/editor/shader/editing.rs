@@ -692,7 +692,17 @@ enum H2RangeControl {
     Create { op: H2ShaderParamOp, data: Vec<u8> },
 }
 
+/// The range control a row offers, for a scalar function only: a color
+/// function's bytes 4-19 hold its colors, not a range, so a range written there
+/// overwrote color slot 1 (the engine's `set_clamp_range` refuses the same).
 fn h2_range_control_for_row(row: &ShaderGridRow) -> Option<H2RangeControl> {
+    h2_range_control_candidate(row).filter(|control| {
+        let (H2RangeControl::Existing { data, .. } | H2RangeControl::Create { data, .. }) = control;
+        !h2_is_color_function(data)
+    })
+}
+
+fn h2_range_control_candidate(row: &ShaderGridRow) -> Option<H2RangeControl> {
     if let Some(function) = row
         .function
         .as_ref()
@@ -779,26 +789,40 @@ fn h2_initial_function_data_from_op(op: &H2ShaderParamOp) -> Option<Vec<u8>> {
 pub(super) fn h2_function_range_enabled(data: &[u8]) -> bool {
     data.get(1)
         .copied()
-        .is_some_and(|flags| flags & FunctionFlags::RANGE != 0)
+        .is_some_and(|flags| flags & h2_flags::RANGE != 0)
 }
 
 pub(super) fn h2_function_range_value(data: &[u8]) -> Option<f32> {
     Some(f32::from_le_bytes(data.get(8..12)?.try_into().ok()?))
 }
 
+use blam_tags::tag_function::h2::flags as h2_flags;
+
+/// Whether H2 function bytes describe a color function: the flags' high nibble
+/// is its color count, zero for a scalar.
+fn h2_is_color_function(data: &[u8]) -> bool {
+    data.get(1)
+        .is_some_and(|flags| flags >> h2_flags::COLOR_GRAPH_TYPE_SHIFT != 0)
+}
+
+/// `data` with its range turned on or off and its range value set. A color
+/// function is returned unchanged: it has no range.
 pub(super) fn h2_function_data_with_range(
     data: &[u8],
     enabled: bool,
     value: Option<f32>,
 ) -> Vec<u8> {
+    if h2_is_color_function(data) {
+        return data.to_vec();
+    }
     let mut next = data.to_vec();
     if next.len() < 12 {
         next.resize(12, 0);
     }
     if enabled {
-        next[1] |= FunctionFlags::RANGE;
+        next[1] |= h2_flags::RANGE;
     } else {
-        next[1] &= !FunctionFlags::RANGE;
+        next[1] &= !h2_flags::RANGE;
     }
     if let Some(value) = value {
         next[8..12].copy_from_slice(&value.to_le_bytes());

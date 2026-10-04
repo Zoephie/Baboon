@@ -805,19 +805,31 @@ fn h2ek_shader_standard_rows_use_guerilla_widgets() {
 fn h2ek_shader_range_flag_updates_same_length_function_data() {
     let mut data = vec![0; 28];
     data[0] = 1;
-    data[1] = FunctionFlags::GPU;
     data[4..8].copy_from_slice(&1.0f32.to_le_bytes());
     data[8..12].copy_from_slice(&1.0f32.to_le_bytes());
 
     let ranged = h2_function_data_with_range_for_test(&data, true, Some(2.5));
     assert_eq!(ranged.len(), data.len());
     assert_eq!(h2_function_data_range_for_test(&ranged), (true, Some(2.5)));
-    assert_eq!(ranged[1] & FunctionFlags::GPU, FunctionFlags::GPU);
+    assert_eq!(ranged[4..8], data[4..8], "the range minimum is left alone");
 
     let unranged = h2_function_data_with_range_for_test(&ranged, false, None);
     assert_eq!(unranged.len(), data.len());
     assert_eq!(h2_function_data_range_for_test(&unranged).0, false);
-    assert_eq!(unranged[1] & FunctionFlags::GPU, FunctionFlags::GPU);
+}
+
+/// A color function's bytes 4-19 are its color slots, not a range: a range
+/// edit wrote its value over color slot 1 and set the range flag on a function
+/// that has none. It now leaves a color function alone.
+#[test]
+fn h2ek_shader_range_edit_leaves_a_color_function_alone() {
+    let mut data = vec![0; 28];
+    data[0] = 1;
+    data[1] = 2 << 4;
+    data[4..8].copy_from_slice(&0xFF11_2233u32.to_le_bytes());
+    data[8..12].copy_from_slice(&0xFF44_5566u32.to_le_bytes());
+
+    assert_eq!(h2_function_data_with_range_for_test(&data, true, Some(2.5)), data);
 }
 
 #[test]
