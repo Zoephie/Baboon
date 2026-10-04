@@ -279,32 +279,15 @@ fn draw_animation_combo(
         .unwrap_or("<None>");
     let popup_id = ui.make_persistent_id(("model_animation_popup", entry_key));
     let open = ui.memory(|memory| memory.is_popup_open(popup_id));
-    let response = ui
-        .scope(|ui| {
-            if open {
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    ui.visuals().widgets.open.weak_bg_fill;
-            }
-            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
-        })
-        .inner;
-    let foreground = if ui.is_enabled() {
-        text_dark()
-    } else {
-        ui.visuals().widgets.noninteractive.fg_stroke.color
-    };
-    ui.painter().text(
-        response.rect.left_center() + Vec2::new(8.0, 0.0),
-        Align2::LEFT_CENTER,
-        truncate_for_cell(selected_text, response.rect.width() - 36.0),
-        FontId::proportional(12.0),
-        foreground,
+    let response = picker_button(
+        ui,
+        popup_id,
+        selected_text,
+        animations.len(),
+        width,
+        text_dark(),
+        !animations.is_empty(),
     );
-    let arrow_rect = egui::Rect::from_center_size(
-        egui::pos2(response.rect.right() - 12.0, response.rect.center().y),
-        Vec2::splat(BUTTON_ICON_SIZE),
-    );
-    paint_button_icon_at(ui, ButtonIcon::Down, arrow_rect, foreground);
     let just_opened = response.clicked() && !open;
     if response.clicked() {
         ui.memory_mut(|memory| memory.toggle_popup(popup_id));
@@ -315,51 +298,43 @@ fn draw_animation_combo(
         &response,
         egui::popup::PopupCloseBehavior::CloseOnClickOutside,
         |ui| {
-            ui.set_min_width(width.max(240.0));
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut playback.filter)
-                    .hint_text(placeholder_text("search animations…"))
-                    .desired_width(320.0),
-            );
-            if just_opened {
-                search.request_focus();
-            }
+            picker_popup_width(ui, &response);
+            let filter_changed =
+                picker_search_field(ui, &mut playback.filter, "search animations…", just_opened);
             ui.separator();
             let filter = playback.filter.trim().to_ascii_lowercase();
-            egui::ScrollArea::vertical()
-                .max_height(300.0)
-                .show(ui, |ui| {
-                    let mut shown = 0;
-                    for (index, row) in animations.iter().enumerate() {
-                        if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
-                            continue;
-                        }
-                        shown += 1;
-                        let label = if row.playable {
-                            format!("{}  ({} · {} frames)", row.name, row.kind, row.frame_count)
-                        } else {
-                            format!("{}  (no data)", row.name)
-                        };
-                        if ui
-                            .add_enabled(
-                                row.playable,
-                                egui::SelectableLabel::new(playback.selected == Some(index), label),
-                            )
-                            .clicked()
-                        {
-                            playback.selected = Some(index);
-                            playback.pose = None;
-                            playback.time = 0.0;
-                            playback.playing = false;
-                            playback.stopped = false;
-                            playback.error = None;
-                            ui.memory_mut(|memory| memory.close_popup());
-                        }
+            picker_results(ui, 300.0, filter_changed, |ui| {
+                let mut shown = 0;
+                for (index, row) in animations.iter().enumerate() {
+                    if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
+                        continue;
                     }
-                    if shown == 0 {
-                        ui.label(RichText::new("No animations match.").color(subtle_dark()));
+                    shown += 1;
+                    let label = if row.playable {
+                        format!("{}  ({} · {} frames)", row.name, row.kind, row.frame_count)
+                    } else {
+                        format!("{}  (no data)", row.name)
+                    };
+                    if ui
+                        .add_enabled(
+                            row.playable,
+                            egui::SelectableLabel::new(playback.selected == Some(index), label),
+                        )
+                        .clicked()
+                    {
+                        playback.selected = Some(index);
+                        playback.pose = None;
+                        playback.time = 0.0;
+                        playback.playing = false;
+                        playback.stopped = false;
+                        playback.error = None;
+                        ui.memory_mut(|memory| memory.close_popup());
                     }
-                });
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No animations match.").color(subtle_dark()));
+                }
+            });
         },
     );
 }
@@ -1643,6 +1618,65 @@ mod tests {
             MODEL_SETUP_EXTRA_HEADER_HEIGHT
         );
         assert_eq!(model_setup_extra_header_height(680.0), 0.0);
+    }
+
+    #[test]
+    fn animation_picker_expands_after_clearing_search() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_style(foundation_style());
+        let animations = (0..40)
+            .map(|index| PreviewAnimationEntry {
+                name: format!("animation {index}"),
+                frame_count: 30,
+                kind: "jma",
+                playable: true,
+            })
+            .collect::<Vec<_>>();
+        let mut playback = PreviewAnimationPlayback::default();
+        let frame = |playback: &mut PreviewAnimationPlayback| {
+            let mut popup_id = None;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let id = ui
+                            .make_persistent_id(("model_animation_popup", "test_animation_picker"));
+                        ui.memory_mut(|memory| memory.open_popup(id));
+                        popup_id = Some(id);
+                        draw_animation_combo(
+                            ui,
+                            "test_animation_picker",
+                            &animations,
+                            playback,
+                            240.0,
+                        );
+                    });
+                },
+            );
+            ctx.memory(|memory| memory.area_rect(popup_id.unwrap()).unwrap().height())
+        };
+        for _ in 0..5 {
+            frame(&mut playback);
+        }
+        let full_height = frame(&mut playback);
+        playback.filter = "animation 39".to_owned();
+        for _ in 0..5 {
+            frame(&mut playback);
+        }
+        let filtered_height = frame(&mut playback);
+        assert!(full_height - filtered_height > 150.0);
+        playback.filter.clear();
+        for _ in 0..5 {
+            frame(&mut playback);
+        }
+        assert!((frame(&mut playback) - full_height).abs() < 1.0);
     }
 
     #[test]

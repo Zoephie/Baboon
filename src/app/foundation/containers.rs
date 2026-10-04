@@ -1901,74 +1901,42 @@ pub(in crate::app) fn draw_foundation_block_control(
 
         // Instance selector dropdown — built lazily (only when open).
         let combo_width = foundation_selected_width(row_width);
-        if has_sel {
-            let (combo_response, wheel_delta) = combo_box_with_scroll(
+        {
+            // Include the count so changed blocks retire the popup's old sizing.
+            let popup_id = ui.make_persistent_id((
+                "block_instance",
+                view_scope,
+                tag_key,
+                path_salt,
+                depth,
+                count,
+            ));
+            let (response, selection, popup_open) = searchable_block_selector(
                 ui,
-                // The element count is part of the id on purpose. A
-                // popup's `Area` and `ScrollArea` remember their size
-                // in egui memory under this id, and the remembered
-                // size becomes the space the content is laid out in --
-                // so once the list grew past the size the popup had
-                // when it was last open, it stayed at the old size and
-                // scrolled instead of growing. Keying on the count
-                // retires that memory the moment the list changes.
-                //
-                // This is also why closing and reopening the tag
-                // "fixed" it: a reopened tag lands in a new tile, whose
-                // `view_scope` is already part of this id.
-                egui::ComboBox::from_id_salt((
-                    "block_instance",
-                    view_scope,
-                    tag_key,
-                    path_salt,
-                    depth,
-                    count,
-                ))
-                .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
-                .width(combo_width),
-                |ui| {
-                    selector_active |= ui.rect_contains_pointer(ui.max_rect());
-                    // Adding an element selects it, so opening the list
-                    // scrolled to the top hid the very entry that was
-                    // just added when the list outgrew the popup.
-                    let just_opened = combo_popup_just_opened(ui);
-                    for i in 0..count {
-                        let row = ui.selectable_label(i == selected_index, element_label(i));
-                        if just_opened && i == selected_index {
-                            row.scroll_to_me(Some(egui::Align::Center));
-                        }
-                        if row.clicked() {
-                            actions.new_selection = Some(i);
-                        }
-                    }
-                },
+                popup_id,
+                selected_label,
+                selected_index,
+                count,
+                combo_width,
+                &element_label,
             );
-            selector_active |=
-                combo_response.response.hovered() || combo_response.response.has_focus();
+            if let Some(index) = selection {
+                actions.new_selection = Some(index);
+            }
+            // Search owns keyboard input while the popup is open.
+            selector_active |= !popup_open && (response.hovered() || response.has_focus());
+            let wheel_delta = dropdown_wheel_delta(ui, &response, popup_open);
             if let Some(delta) = wheel_delta {
                 if let Some(next) = combo_scroll_next_index(selected_index, count, delta) {
                     actions.new_selection = Some(next);
                 }
             }
-        } else {
-            foundation_header_value_cell(ui, "NONE", combo_width);
         }
 
         // Next stepper follows the selected reference string.
         if foundation_header_stepper_clicked(ui, ">", has_sel && selected_index + 1 < count) {
             actions.new_selection = Some(selected_index + 1);
         }
-
-        // Index readout.
-        ui.label(
-            RichText::new(if has_sel {
-                format!("[{selected_index}]")
-            } else {
-                "[--]".to_owned()
-            })
-            .color(foundation_block_text())
-            .small(),
-        );
 
         if let Some(size_label) = block_size_label {
             ui.label(
@@ -2154,6 +2122,423 @@ pub(in crate::app) fn combo_popup_just_opened(ui: &Ui) -> bool {
     let last = ui.data(|data| data.get_temp::<u64>(id));
     ui.data_mut(|data| data.insert_temp(id, now));
     !matches!(last, Some(previous) if previous + 1 >= now)
+}
+
+/// Animation Player-style picker with a fixed search field and scrollable rows.
+/// Labels are only built while open; filtered rows retain their block indices.
+#[allow(clippy::too_many_arguments)]
+fn searchable_block_selector(
+    ui: &mut Ui,
+    popup_id: egui::Id,
+    selected_label: &str,
+    selected_index: usize,
+    count: usize,
+    width: f32,
+    element_label: &impl Fn(usize) -> String,
+) -> (egui::Response, Option<usize>, bool) {
+    searchable_block_selector_with_none(
+        ui,
+        popup_id,
+        selected_label,
+        selected_index,
+        count,
+        width,
+        element_label,
+        None,
+    )
+}
+
+/// `usize::MAX` represents the optional unassigned reference row.
+#[allow(clippy::too_many_arguments)]
+fn searchable_block_selector_with_none(
+    ui: &mut Ui,
+    popup_id: egui::Id,
+    selected_label: &str,
+    selected_index: usize,
+    count: usize,
+    width: f32,
+    element_label: &impl Fn(usize) -> String,
+    none_label: Option<&str>,
+) -> (egui::Response, Option<usize>, bool) {
+    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let response = picker_button(
+        ui,
+        popup_id,
+        selected_label,
+        count,
+        width,
+        foundation_block_text(),
+        count > 0 || none_label.is_some(),
+    );
+    let just_opened = response.clicked() && !open;
+    if response.clicked() {
+        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+    }
+    let popup_open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let mut selection = None;
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            picker_popup_width(ui, &response);
+            let filter_id = popup_id.with("entry_search");
+            let mut filter = ui
+                .data(|data| data.get_temp::<String>(filter_id))
+                .unwrap_or_default();
+            let filter_changed =
+                picker_search_field(ui, &mut filter, "search entries…", just_opened);
+            ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+            ui.separator();
+            let query = filter.trim().to_lowercase();
+            picker_results(ui, COMBO_POPUP_MAX_HEIGHT, filter_changed, |ui| {
+                let mut shown = 0;
+                if let Some(label) = none_label
+                    && (query.is_empty() || label.to_lowercase().contains(&query))
+                {
+                    shown += 1;
+                    let row = ui.selectable_label(selected_index == usize::MAX, label);
+                    if just_opened && query.is_empty() && selected_index == usize::MAX {
+                        row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if row.clicked() {
+                        selection = Some(usize::MAX);
+                        ui.memory_mut(|memory| memory.close_popup());
+                    }
+                }
+                for index in 0..count {
+                    let label = element_label(index);
+                    if !query.is_empty() && !label.to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    shown += 1;
+                    let row = ui.selectable_label(index == selected_index, label);
+                    if just_opened && query.is_empty() && index == selected_index {
+                        row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if row.clicked() {
+                        selection = Some(index);
+                        ui.memory_mut(|memory| memory.close_popup());
+                    }
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No entries match.").color(subtle_dark()));
+                }
+            });
+        },
+    );
+    (response, selection, popup_open)
+}
+
+#[cfg(test)]
+mod searchable_block_selector_tests {
+    use super::*;
+
+    #[test]
+    fn picker_popup_matches_button_width_with_long_entries_and_reference_none() {
+        for width in [150.0, 300.0, 700.0] {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            ctx.set_style(foundation_style());
+            let popup_id = egui::Id::new("reference_picker_width");
+            let mut button_rect = egui::Rect::NOTHING;
+            ctx.memory_mut(|memory| memory.open_popup(popup_id));
+            for query in ["", "missing", ""] {
+                ctx.data_mut(|data| {
+                    data.insert_temp(popup_id.with("entry_search"), query.to_owned())
+                });
+                for _ in 0..5 {
+                    let _ = ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                Vec2::new(1000.0, 800.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                button_rect = searchable_block_selector_with_none(
+                                    ui,
+                                    popup_id,
+                                    "<none>",
+                                    usize::MAX,
+                                    2,
+                                    width,
+                                    &|index| {
+                                        format!(
+                                            "{index}. {}",
+                                            "very long block entry name ".repeat(8)
+                                        )
+                                    },
+                                    Some("<none>"),
+                                )
+                                .0
+                                .rect;
+                            });
+                        },
+                    );
+                }
+                let popup_rect = ctx.memory(|memory| memory.area_rect(popup_id).unwrap());
+                assert!(
+                    (popup_rect.width() - button_rect.width()).abs() < 1.0,
+                    "button {button_rect:?}, popup {popup_rect:?}, query {query}"
+                );
+            }
+            // Unassigning remains available even when the referenced block is empty.
+            let mut choice = None;
+            let frame = |events, choice: &mut Option<usize>| {
+                ctx.run(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            *choice = searchable_block_selector_with_none(
+                                ui,
+                                popup_id,
+                                "<none>",
+                                usize::MAX,
+                                0,
+                                width,
+                                &|_| unreachable!("empty blocks have no entry labels"),
+                                Some("<none>"),
+                            )
+                            .1;
+                        });
+                    },
+                )
+            };
+            let output = frame(Vec::new(), &mut choice);
+            let pos = output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape)
+                        if shape.galley.text() == "<none>"
+                            && shape.pos.y > button_rect.bottom() =>
+                    {
+                        Some(shape.pos + shape.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .expect("unassigned row");
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(
+                vec![egui::Event::PointerMoved(pos), pointer(true)],
+                &mut choice,
+            );
+            frame(vec![pointer(false)], &mut choice);
+            assert_eq!(choice, Some(usize::MAX));
+        }
+    }
+
+    #[test]
+    fn clearing_search_restores_the_full_popup_height() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_style(foundation_style());
+        let popup_id = egui::Id::new("test_block_search_resize");
+        let frame = |events| {
+            let mut response = None;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        response = Some(searchable_block_selector(
+                            ui,
+                            popup_id,
+                            "0. entry 0",
+                            0,
+                            40,
+                            240.0,
+                            &|index| format!("{index}. entry {index}"),
+                        ));
+                    });
+                },
+            );
+            response.unwrap().0
+        };
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let pos = frame(Vec::new()).rect.center();
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        frame(vec![pointer(pos, false)]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        let height = || ctx.memory(|memory| memory.area_rect(popup_id).unwrap().height());
+        let full_height = height();
+        frame(vec![egui::Event::Text("entry 39".to_owned())]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        let filtered_height = height();
+        assert!(
+            full_height - filtered_height > 200.0,
+            "filtering should hug its single result"
+        );
+        let search_id = ctx
+            .memory(|memory| memory.focused())
+            .expect("search has focus");
+        let search = ctx.read_response(search_id).unwrap();
+        let clear_response = ctx
+            .read_response(search_id.with("clear_search"))
+            .expect("clear control exists");
+        assert!(
+            (clear_response.rect.right() - search.rect.right()).abs() < 0.1,
+            "clear control must reach the search field's outer right edge"
+        );
+        let clear_pos = clear_response.rect.center();
+        frame(vec![
+            egui::Event::PointerMoved(clear_pos),
+            pointer(clear_pos, true),
+        ]);
+        frame(vec![pointer(clear_pos, false)]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
+                .as_deref(),
+            Some(""),
+            "search {:?}; clear {:?}",
+            search.rect,
+            ctx.read_response(search_id.with("clear_search"))
+        );
+        assert!(
+            ctx.memory(|memory| memory.is_popup_open(popup_id)),
+            "clearing keeps the picker open"
+        );
+        assert!(
+            (height() - full_height).abs() < 1.0,
+            "the cleared popup must recover its original height"
+        );
+    }
+
+    #[test]
+    fn typing_filters_without_closing_and_selects_the_original_entry_index() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_style(foundation_style());
+        let popup_id = egui::Id::new("test_block_search");
+        let labels_built = std::cell::Cell::new(0);
+        let labels = ["0. minor", "1. major", "2. minor veteran"];
+        let frame = |events| {
+            let mut result = None;
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        result = Some(searchable_block_selector(
+                            ui,
+                            popup_id,
+                            labels[0],
+                            0,
+                            labels.len(),
+                            240.0,
+                            &|index| {
+                                labels_built.set(labels_built.get() + 1);
+                                labels[index].to_owned()
+                            },
+                        ));
+                    });
+                },
+            );
+            (result.unwrap(), output)
+        };
+        let ((response, _, _), _) = frame(Vec::new());
+        assert_eq!(
+            labels_built.get(),
+            0,
+            "closed pickers must build no list labels"
+        );
+        let button_pos = response.rect.center();
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(vec![
+            egui::Event::PointerMoved(button_pos),
+            pointer(button_pos, true),
+        ]);
+        frame(vec![pointer(button_pos, false)]);
+        frame(Vec::new());
+        let ((_, _, open), output) = frame(vec![egui::Event::Text("VETERAN".to_owned())]);
+        assert!(open, "typing must keep the popup open");
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
+                .as_deref(),
+            Some("VETERAN")
+        );
+        let text_rect = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == text => {
+                        Some(egui::Rect::from_min_size(shape.pos, shape.galley.size()))
+                    }
+                    _ => None,
+                })
+        };
+        assert!(
+            text_rect(labels[1]).is_none(),
+            "nonmatching entries must be hidden"
+        );
+        assert!(
+            text_rect("(3)").is_some(),
+            "the count is the block total, not the number of matches"
+        );
+        let row_pos = text_rect(labels[2])
+            .expect("case-insensitive search match")
+            .center();
+        frame(vec![
+            egui::Event::PointerMoved(row_pos),
+            pointer(row_pos, true),
+        ]);
+        let ((_, selection, _), _) = frame(vec![pointer(row_pos, false)]);
+        assert_eq!(
+            selection,
+            Some(2),
+            "filtered results must preserve the source index"
+        );
+        assert!(!ctx.memory(|memory| memory.is_popup_open(popup_id)));
+        ctx.data_mut(|data| {
+            data.insert_temp(popup_id.with("entry_search"), "no such entry".to_owned())
+        });
+        ctx.memory_mut(|memory| memory.open_popup(popup_id));
+        let (_, output) = frame(Vec::new());
+        assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape,
+            egui::Shape::Text(shape) if shape.galley.text() == "No entries match.")));
+    }
 }
 
 pub(in crate::app) fn combo_box_with_scroll<R>(
@@ -2422,24 +2807,6 @@ pub(in crate::app) fn foundation_selected_width(row_width: f32) -> f32 {
     (row_width - 190.0 - 24.0 * 3.0 - 54.0 * 5.0 - 92.0).clamp(120.0, 420.0)
 }
 
-pub(in crate::app) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_width: f32) {
-    let width = ui.available_width().min(max_width).max(180.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
-    ui.painter().rect_filled(rect, 4.0, foundation_input());
-    ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0_f32, foundation_input_edge()));
-    ui.painter().text(
-        rect.left_center() + Vec2::new(5.0, 0.0),
-        Align2::LEFT_CENTER,
-        truncate_for_cell(text, width - 10.0),
-        FontId::proportional(12.0),
-        text_dark(),
-    );
-    if response.hovered() {
-        response.on_hover_text(text);
-    }
-}
-
 /// Interactive variant that reports whether the button was clicked.
 pub(in crate::app) fn foundation_header_button_clicked(
     ui: &mut Ui,
@@ -2681,37 +3048,46 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 
         if editable {
             let mut new_index: Option<i64> = None;
-            let (_, wheel_delta) = combo_box_with_scroll(
+            let block = std::cell::OnceCell::new();
+            let popup_id = ui.make_persistent_id((
+                "block_index",
+                edit.view_scope,
+                edit.tag_key,
+                path,
+                target.len,
+            ));
+            let (response, selection, popup_open) = searchable_block_selector_with_none(
                 ui,
-                // Keyed on the option count for the same reason as the
-                // instance selector above: adding a palette entry must not
-                // leave the popup at the size it had before.
-                egui::ComboBox::from_id_salt(("block_index", path, target.len))
-                    .selected_text(truncate_for_cell(&selected_text, 280.0))
-                    .width(300.0),
-                |ui| {
-                    // Same as the instance selector: open showing what is
-                    // selected, not the top of a long palette.
-                    let just_opened = combo_popup_just_opened(ui);
-                    let none_row = ui.selectable_label(current < 0, "<none>");
-                    if just_opened && current < 0 {
-                        none_row.scroll_to_me(Some(egui::Align::Center));
-                    }
-                    if none_row.clicked() {
-                        new_index = Some(-1);
-                    }
-                    let labels = block_index_target_labels(root, target, names);
-                    for (i, label) in labels.iter().enumerate() {
-                        let row = ui.selectable_label(current == i as i64, label);
-                        if just_opened && current == i as i64 {
-                            row.scroll_to_me(Some(egui::Align::Center));
-                        }
-                        if row.clicked() {
-                            new_index = Some(i as i64);
-                        }
-                    }
+                popup_id,
+                &selected_text,
+                if in_range {
+                    current as usize
+                } else {
+                    usize::MAX
                 },
+                target.len,
+                300.0,
+                &|index| {
+                    let block = block.get_or_init(|| {
+                        root.and_then(|root| root.field_path(target_block_path))
+                            .and_then(|field| field.as_block())
+                    });
+                    block_element_dropdown_label(
+                        block.as_ref().and_then(|block| block.element(index)),
+                        names,
+                        index,
+                    )
+                },
+                Some("<none>"),
             );
+            if let Some(index) = selection {
+                new_index = Some(if index == usize::MAX {
+                    -1
+                } else {
+                    index as i64
+                });
+            }
+            let wheel_delta = dropdown_wheel_delta(ui, &response, popup_open);
             if let Some(delta) = wheel_delta {
                 if let Some(next) = combo_scroll_next_i64(current, -1, target.len as i64 - 1, delta)
                 {

@@ -65,7 +65,6 @@ const BROWSER_SEARCH_RADIUS: f32 = BROWSER_SEARCH_HEIGHT * 0.5;
 const BROWSER_SEARCH_ICON_SIZE: f32 = 16.0;
 const BROWSER_SEARCH_LEFT_PADDING: f32 = 4.0;
 const BROWSER_SEARCH_ICON_TEXT_GAP: f32 = 8.0;
-const BROWSER_SEARCH_RIGHT_PADDING: f32 = 8.0;
 
 /// Width of the title column when pane actions can remain beside it. Returning
 /// `None` is the shared signal for tag and folder headers to put actions below
@@ -114,9 +113,20 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
         Sense::click(),
     );
 
+    let clear_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.right() - BROWSER_SEARCH_LEFT_PADDING - BROWSER_SEARCH_ICON_SIZE * 0.5,
+            rect.center().y,
+        ),
+        Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
+    );
+
     let edit_rect = egui::Rect::from_min_max(
         egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
-        egui::pos2(rect.right() - BROWSER_SEARCH_RIGHT_PADDING, rect.bottom()),
+        egui::pos2(
+            clear_rect.left() - BROWSER_SEARCH_ICON_TEXT_GAP,
+            rect.bottom(),
+        ),
     );
     let edit_response = ui.put(
         edit_rect,
@@ -131,9 +141,23 @@ fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Re
     if icon_response.clicked() {
         edit_response.request_focus();
     }
-    let response = background_response
+    let mut response = background_response
         .union(icon_response)
         .union(edit_response.clone());
+    if !value.is_empty() {
+        let clear = search_clear_control_at(
+            ui,
+            clear_rect,
+            edit_response.id.with("clear_search"),
+            BROWSER_SEARCH_ICON_SIZE * 0.5,
+        );
+        if clear.clicked() {
+            value.clear();
+            edit_response.request_focus();
+            response.mark_changed();
+        }
+        response = response.union(clear);
+    }
     ui.painter().rect_stroke(
         rect,
         BROWSER_SEARCH_RADIUS,
