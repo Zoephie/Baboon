@@ -22,10 +22,10 @@ fn shipped_tutorial_catalog_and_thumbnail_are_valid() {
         .collect::<Vec<_>>();
     assert_eq!(campaign_evolved.len(), 2);
     for shortcut in EDITING_KIT_SHORTCUTS {
-        if shortcut.game != "haloce_evolved" {
+        if !shortcut.game.is_campaign_evolved() {
             for category in TUTORIAL_CATEGORIES {
                 assert_eq!(
-                    catalog.entries_for(shortcut.game, category).count(),
+                    catalog.entries_for(shortcut.game.as_str(), category).count(),
                     0,
                     "{} {} should currently have an empty tutorial section",
                     shortcut.game,

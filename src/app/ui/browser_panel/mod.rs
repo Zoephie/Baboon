@@ -422,7 +422,7 @@ impl Baboon {
             )
         });
         if let Some((Some(game), _origin, path_label, profile_id)) = sidebar_header.as_ref() {
-            draw_game_banner_header(ui, self, game.as_str(), path_label, profile_id.as_deref());
+            draw_game_banner_header(ui, self, *game, path_label, profile_id.as_deref());
         } else {
             ui.heading(RichText::new("Tags").color(text_dark()));
             if let Some((_, origin, _, _)) = sidebar_header.as_ref() {

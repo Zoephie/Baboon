@@ -3,7 +3,6 @@
 
 use super::*;
 
-const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
 const CAMPAIGN_EVOLVED_INSTALL_FOLDER: &str = "Halo Campaign Evolved";
 
 /// Converts legacy game-keyed entries and discovered installs to ordinary profiles.
@@ -15,7 +14,7 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
     let mut added = 0;
     for (index, shortcut) in EDITING_KIT_SHORTCUTS.into_iter().enumerate() {
         let Some(path) = paths
-            .get(shortcut.game)
+            .get(shortcut.game.as_str())
             .filter(|path| !path.as_os_str().is_empty())
         else {
             continue;
@@ -49,7 +48,7 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
             git_tracked: false,
             id,
             name: shortcut.label.to_owned(),
-            game: shortcut.game.to_owned(),
+            game: shortcut.game.as_str().to_owned(),
             root,
             icon: None,
             tags_folder: None,
@@ -73,22 +72,22 @@ where
     let mut detected = HashMap::new();
     for common_root in common_roots {
         let campaign_evolved = common_root.join(CAMPAIGN_EVOLVED_INSTALL_FOLDER);
-        if !detected.contains_key(CAMPAIGN_EVOLVED_GAME)
+        if !detected.contains_key(GameId::CampaignEvolved.as_str())
             && crate::core::source::find_paks_dir(&campaign_evolved).is_some()
         {
-            detected.insert(CAMPAIGN_EVOLVED_GAME.to_owned(), campaign_evolved);
+            detected.insert(GameId::CampaignEvolved.as_str().to_owned(), campaign_evolved);
         }
 
         for shortcut in EDITING_KIT_SHORTCUTS {
-            if shortcut.game == CAMPAIGN_EVOLVED_GAME {
+            if shortcut.game.is_campaign_evolved() {
                 continue;
             }
-            if detected.contains_key(shortcut.game) {
+            if detected.contains_key(shortcut.game.as_str()) {
                 continue;
             }
             let candidate = common_root.join(shortcut.label);
             if candidate.is_dir() && candidate.join("tags").is_dir() {
-                detected.insert(shortcut.game.to_owned(), candidate);
+                detected.insert(shortcut.game.as_str().to_owned(), candidate);
             }
         }
     }
@@ -105,17 +104,17 @@ pub(super) fn apply_detected_editing_kit_paths(
     let mut added = 0;
     for shortcut in EDITING_KIT_SHORTCUTS {
         let has_existing = editing_kit_paths
-            .get(shortcut.game)
+            .get(shortcut.game.as_str())
             .is_some_and(|path| !path.as_os_str().is_empty());
         if has_existing {
             continue;
         }
-        let Some(path) = detected.get(shortcut.game) else {
+        let Some(path) = detected.get(shortcut.game.as_str()) else {
             continue;
         };
-        editing_kit_paths.insert(shortcut.game.to_owned(), path.clone());
-        editing_kit_path_inputs.insert(shortcut.game.to_owned(), path.display().to_string());
-        if editing_kit_path_attention.as_deref() == Some(shortcut.game) {
+        editing_kit_paths.insert(shortcut.game.as_str().to_owned(), path.clone());
+        editing_kit_path_inputs.insert(shortcut.game.as_str().to_owned(), path.display().to_string());
+        if editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) {
             *editing_kit_path_attention = None;
         }
         added += 1;

@@ -152,13 +152,13 @@ pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
 /// the 1818 stock CE bitmaps, 4067 of the 4184 H2 ones). Halo 3 onward has a
 /// `source data` field instead, empty in all 11161 stock Halo 3 bitmaps, so
 /// there is nothing to recover there.
-pub(in crate::app) fn bitmaps_keep_source_images(game: &str) -> bool {
-    matches!(game, "haloce_mcc" | "halo2_mcc")
+pub(in crate::app) fn bitmaps_keep_source_images(game: GameId) -> bool {
+    game.is_classic()
 }
 
 /// [`bitmaps_keep_source_images`] for the game the browser is drawing.
 pub(in crate::app) fn browser_game_keeps_bitmap_sources(ui: &Ui) -> bool {
-    browser_game(ui).is_some_and(|game| bitmaps_keep_source_images(game.as_str()))
+    browser_game(ui).is_some_and(bitmaps_keep_source_images)
 }
 
 fn browser_sound_language_id() -> egui::Id {

@@ -349,14 +349,14 @@ fn load_editing_kit_paths(value: &Value) -> HashMap<String, PathBuf> {
     };
     for shortcut in EDITING_KIT_SHORTCUTS {
         let Some(path) = entries
-            .get(shortcut.game)
+            .get(shortcut.game.as_str())
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|path| !path.is_empty())
         else {
             continue;
         };
-        paths.insert(shortcut.game.to_owned(), PathBuf::from(path));
+        paths.insert(shortcut.game.as_str().to_owned(), PathBuf::from(path));
     }
     paths
 }

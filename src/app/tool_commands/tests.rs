@@ -40,7 +40,7 @@ fn parses_generated_tool_command_json_shape() {
 
 #[test]
 fn loads_generated_h3_tool_commands() {
-    let commands = load_tool_commands("halo3_mcc").unwrap();
+    let commands = load_tool_commands(GameId::Halo3).unwrap();
     let bitmaps = commands
         .iter()
         .find(|command| command.name == "bitmaps")
@@ -52,15 +52,15 @@ fn loads_generated_h3_tool_commands() {
 
 #[test]
 fn h3odst_reuses_h3_tool_commands() {
-    let h3 = crate::core::tool_commands::get_tool_commands_json("halo3_mcc").unwrap();
-    let odst = crate::core::tool_commands::get_tool_commands_json("halo3odst_mcc").unwrap();
+    let h3 = crate::core::tool_commands::get_tool_commands_json(GameId::Halo3).unwrap();
+    let odst = crate::core::tool_commands::get_tool_commands_json(GameId::Halo3Odst).unwrap();
 
     assert_eq!(h3, odst);
 }
 
 #[test]
 fn halo4_has_empty_embedded_catalog() {
-    let commands = load_tool_commands("halo4_mcc").unwrap();
+    let commands = load_tool_commands(GameId::Halo4).unwrap();
 
     assert!(commands.is_empty());
 }

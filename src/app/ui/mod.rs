@@ -560,11 +560,11 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
 fn draw_game_banner_header(
     ui: &mut Ui,
     app: &mut Baboon,
-    game: &str,
+    game: GameId,
     path_label: &str,
     profile_id: Option<&str>,
 ) {
-    let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
+    let texture = app.workspace_banner_texture(ui.ctx(), Some(game), profile_id);
     let title = profile_id
         .and_then(|id| {
             app.prefs
@@ -576,13 +576,13 @@ fn draw_game_banner_header(
         .unwrap_or_else(|| {
             format!(
                 "Tags - {} ({})",
-                game_display_name(game),
+                game.display_name(),
                 game_platform_label(game)
             )
         });
     let read_only = app.prefs.custom_editing_kit_profiles.iter().any(|profile| {
         profile.read_only
-            && profile.game != "haloce_evolved"
+            && !profile.is_campaign_evolved()
             && (profile_id == Some(profile.id.as_str())
                 || profile.is_read_only_for(None, Some(Path::new(path_label))))
     });

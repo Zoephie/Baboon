@@ -5,7 +5,7 @@ use std::ffi::OsString;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommandLineLaunch {
-    pub(crate) game: &'static str,
+    pub(crate) game: GameId,
     pub(crate) kit_label: &'static str,
     pub(crate) tag_paths: Vec<PathBuf>,
 }
@@ -51,9 +51,9 @@ where
     })
 }
 
-fn command_line_kit(flag: &str) -> Option<(&'static str, &'static str)> {
+fn command_line_kit(flag: &str) -> Option<(GameId, &'static str)> {
     let game = game_for_launch_flag(flag)?;
-    Some((game.as_str(), game.kit_name()?))
+    Some((game, game.kit_name()?))
 }
 
 pub(super) struct ResolvedLaunchPaths {

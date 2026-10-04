@@ -73,7 +73,7 @@ fn a_new_campaign_evolved_tag_carries_the_shipped_generation() {
         CAMPAIGN_EVOLVED_GENERATION,
         "TagFile::new stamps a Campaign Evolved tag from its definitions folder"
     );
-    apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
+    apply_editing_kit_mcc_header(&mut tag, GameId::CampaignEvolved.as_str()).expect("CE is a known game");
     assert_eq!(generation(&tag), CAMPAIGN_EVOLVED_GENERATION);
 }
 
@@ -92,8 +92,8 @@ fn campaign_evolved_carries_the_same_generation_as_reach() {
             tag.header.version,
         )
     };
-    assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), stamp("haloreach_mcc"));
-    assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), CAMPAIGN_EVOLVED_GENERATION);
+    assert_eq!(stamp(GameId::CampaignEvolved.as_str()), stamp("haloreach_mcc"));
+    assert_eq!(stamp(GameId::CampaignEvolved.as_str()), CAMPAIGN_EVOLVED_GENERATION);
 }
 
 /// Adding Campaign Evolved must not have moved the editing-kit games.
@@ -195,7 +195,7 @@ fn an_imported_tag_is_restamped_for_campaign_evolved() {
         "the fixture has to start wrong for this to prove anything"
     );
 
-    apply_editing_kit_mcc_header(&mut foreign, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
+    apply_editing_kit_mcc_header(&mut foreign, GameId::CampaignEvolved.as_str()).expect("CE is a known game");
     assert_eq!(
         (
             foreign.header.build_version,
@@ -207,7 +207,7 @@ fn an_imported_tag_is_restamped_for_campaign_evolved() {
 
     // And a zeroed header — what an older Baboon wrote — restamps too.
     let mut zeroed = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
-    apply_editing_kit_mcc_header(&mut zeroed, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
+    apply_editing_kit_mcc_header(&mut zeroed, GameId::CampaignEvolved.as_str()).expect("CE is a known game");
     assert_eq!(
         (
             zeroed.header.build_version,

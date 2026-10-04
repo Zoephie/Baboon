@@ -924,7 +924,7 @@ impl Default for NewTagDialog {
     fn default() -> Self {
         Self {
             kit: None,
-            game: "halo3_mcc".to_owned(),
+            game: GameId::Halo3.as_str().to_owned(),
             rel_path: String::new(),
             output_path: None,
             groups: Vec::new(),

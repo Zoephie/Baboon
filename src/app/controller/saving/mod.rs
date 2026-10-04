@@ -317,7 +317,7 @@ pub(in crate::app) fn available_definition_games() -> Vec<String> {
     games.sort();
     games.dedup();
     if games.is_empty() {
-        games.push("halo3_mcc".to_owned());
+        games.push(GameId::Halo3.as_str().to_owned());
     }
     games
 }

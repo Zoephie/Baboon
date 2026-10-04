@@ -82,7 +82,7 @@ fn every_builtin_flag_and_alias_is_case_insensitive() {
         else {
             panic!("{flag} should parse");
         };
-        assert_eq!(launch.game, game);
+        assert_eq!(launch.game.as_str(), game);
     }
 }
 

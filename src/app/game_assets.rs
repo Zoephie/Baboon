@@ -3,47 +3,49 @@
 
 use crate::core::game::{GameFacts, GameId};
 
-pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
+/// The banner for a game, or Halo CE's for a game id this build does not know.
+pub(super) fn get_game_banner_bytes(game: Option<GameId>) -> &'static [u8] {
+    let Some(game) = game else {
+        return include_root_bytes!("assets/Game Icons/ce.png");
+    };
     match game {
-        "haloce_mcc" => include_root_bytes!("assets/Game Icons/ce.png"),
-        "halo2_mcc" => include_root_bytes!("assets/Game Icons/h2.png"),
-        "halo2amp_mcc" => include_root_bytes!("assets/Game Icons/h2amp.png"),
-        "halo3_mcc" => include_root_bytes!("assets/Game Icons/h3.png"),
-        "halo3odst_mcc" => include_root_bytes!("assets/Game Icons/h3odst.png"),
-        "haloreach_mcc" => include_root_bytes!("assets/Game Icons/reach.png"),
-        "halo4_mcc" => include_root_bytes!("assets/Game Icons/h4.png"),
-        "haloce_evolved" => {
+        GameId::HaloCe => include_root_bytes!("assets/Game Icons/ce.png"),
+        GameId::Halo2 => include_root_bytes!("assets/Game Icons/h2.png"),
+        GameId::Halo2Amp => include_root_bytes!("assets/Game Icons/h2amp.png"),
+        GameId::Halo3 => include_root_bytes!("assets/Game Icons/h3.png"),
+        GameId::Halo3Odst => include_root_bytes!("assets/Game Icons/h3odst.png"),
+        GameId::HaloReach => include_root_bytes!("assets/Game Icons/reach.png"),
+        GameId::Halo4 => include_root_bytes!("assets/Game Icons/h4.png"),
+        GameId::CampaignEvolved => {
             include_root_bytes!("assets/Game Icons/campaignevolved.png")
         }
-        _ => include_root_bytes!("assets/Game Icons/ce.png"),
     }
 }
 
 /// Compact engine emblems used by editing-kit links on the welcome screen.
 /// These intentionally remain separate from the larger game banner artwork.
-pub(super) fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
+pub(super) fn get_game_emblem_bytes(game: GameId) -> &'static [u8] {
     match game {
-        "haloce_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h1.png")),
-        "halo2_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h2.png")),
-        "halo2amp_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h2a.png")),
-        "halo3_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h3.png")),
-        "halo3odst_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h3odst.png")),
-        "haloreach_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/hreach.png")),
-        "halo4_mcc" => Some(include_root_bytes!("assets/Game Icons/emblems/h4.png")),
-        "haloce_evolved" => Some(include_root_bytes!(
-            "assets/Game Icons/emblems/campaignevolved.png"
-        )),
-        _ => None,
+        GameId::HaloCe => include_root_bytes!("assets/Game Icons/emblems/h1.png"),
+        GameId::Halo2 => include_root_bytes!("assets/Game Icons/emblems/h2.png"),
+        GameId::Halo2Amp => include_root_bytes!("assets/Game Icons/emblems/h2a.png"),
+        GameId::Halo3 => include_root_bytes!("assets/Game Icons/emblems/h3.png"),
+        GameId::Halo3Odst => include_root_bytes!("assets/Game Icons/emblems/h3odst.png"),
+        GameId::HaloReach => include_root_bytes!("assets/Game Icons/emblems/hreach.png"),
+        GameId::Halo4 => include_root_bytes!("assets/Game Icons/emblems/h4.png"),
+        GameId::CampaignEvolved => include_root_bytes!("assets/Game Icons/emblems/campaignevolved.png"),
     }
 }
 
+/// The display name for a saved game id, which may be one this build does not
+/// know; a [`GameId`] in hand has [`GameFacts::display_name`].
 pub(super) fn game_display_name(game: &str) -> &'static str {
     GameId::from_id(game).map_or("Unknown Game", GameFacts::display_name)
 }
 
 /// Platform/edition suffix shown after the game name (e.g. "MCC", "PC").
-pub(super) fn game_platform_label(game: &str) -> &'static str {
-    if GameId::from_id(game) == Some(GameId::CampaignEvolved) {
+pub(super) fn game_platform_label(game: GameId) -> &'static str {
+    if game.is_campaign_evolved() {
         "PC"
     } else {
         "MCC"

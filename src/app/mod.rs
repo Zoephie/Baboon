@@ -398,7 +398,7 @@ pub struct Baboon {
     folder_refactor: Option<FolderRefactorUiState>,
     show_entry_index_wait_notice: bool,
     terminal: TerminalState,
-    /// Game identifiers (e.g. "halo3_mcc") for which the user has chosen to
+    /// Game ids (`halo3_mcc`, saved as written) for which the user has chosen to
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     terminal_open_games: HashSet<String>,
     saved_terminal_open_games: HashSet<String>,
@@ -434,8 +434,8 @@ pub struct Baboon {
     blender_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
-    game_banner_textures: HashMap<String, egui::TextureHandle>,
-    game_emblem_textures: HashMap<String, egui::TextureHandle>,
+    game_banner_textures: HashMap<Option<GameId>, egui::TextureHandle>,
+    game_emblem_textures: HashMap<GameId, egui::TextureHandle>,
     custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
     custom_editing_kit_texture_failures: HashSet<String>,
     last_pixels_per_point: f32,
@@ -649,7 +649,7 @@ impl Baboon {
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
             tutorials: TutorialsState::load(&ctx),
-            tutorials_game: "haloce_evolved".to_owned(),
+            tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
             tutorials_category: TutorialCategory::ThreeD,
             script_docs: ScriptDocsUiState::default(),
             tag_compat: TagCompatUiState::default(),
@@ -766,30 +766,31 @@ impl Baboon {
     fn game_banner_texture(
         &mut self,
         ctx: &egui::Context,
-        game: &str,
+        game: Option<GameId>,
     ) -> Option<&egui::TextureHandle> {
-        if !self.game_banner_textures.contains_key(game) {
+        if !self.game_banner_textures.contains_key(&game) {
+            let name = game.map_or("unknown", GameId::as_str);
             let texture = load_png_texture(
                 ctx,
-                &format!("game_banner_{game}"),
+                &format!("game_banner_{name}"),
                 get_game_banner_bytes(game),
             )?;
-            self.game_banner_textures.insert(game.to_owned(), texture);
+            self.game_banner_textures.insert(game, texture);
         }
-        self.game_banner_textures.get(game)
+        self.game_banner_textures.get(&game)
     }
 
     fn game_emblem_texture(
         &mut self,
         ctx: &egui::Context,
-        game: &str,
+        game: GameId,
     ) -> Option<&egui::TextureHandle> {
-        if !self.game_emblem_textures.contains_key(game) {
-            let bytes = get_game_emblem_bytes(game)?;
+        if !self.game_emblem_textures.contains_key(&game) {
+            let bytes = get_game_emblem_bytes(game);
             let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
-            self.game_emblem_textures.insert(game.to_owned(), texture);
+            self.game_emblem_textures.insert(game, texture);
         }
-        self.game_emblem_textures.get(game)
+        self.game_emblem_textures.get(&game)
     }
 
     fn custom_editing_kit_texture(
@@ -831,7 +832,7 @@ impl Baboon {
     fn workspace_banner_texture(
         &mut self,
         ctx: &egui::Context,
-        game: &str,
+        game: Option<GameId>,
         profile_id: Option<&str>,
     ) -> Option<egui::TextureHandle> {
         let profile = profile_id.and_then(|profile_id| {
@@ -904,9 +905,9 @@ fn editing_kit_path_inputs(paths: &HashMap<String, PathBuf>) -> HashMap<String, 
         .into_iter()
         .map(|shortcut| {
             (
-                shortcut.game.to_owned(),
+                shortcut.game.as_str().to_owned(),
                 paths
-                    .get(shortcut.game)
+                    .get(shortcut.game.as_str())
                     .map(|path| path.display().to_string())
                     .unwrap_or_default(),
             )

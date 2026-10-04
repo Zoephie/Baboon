@@ -117,7 +117,7 @@ impl Baboon {
         self.new_tag_dialog.authorability = None;
         // Only Campaign Evolved has native classes standing behind its groups.
         // Everywhere else a new tag is a file, and there is nothing to refuse.
-        if self.new_tag_dialog.game != "haloce_evolved" {
+        if self.new_tag_dialog.game != GameId::CampaignEvolved.as_str() {
             return;
         }
         let Some(group) = self

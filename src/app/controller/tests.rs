@@ -286,7 +286,7 @@ fn write_classic_ce_tag(path: &Path, group: &[u8; 4]) {
 fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
     let common = unique_test_dir("ek-detect-all");
     for shortcut in EDITING_KIT_SHORTCUTS {
-        if shortcut.game == "haloce_evolved" {
+        if shortcut.game.is_campaign_evolved() {
             continue;
         }
         std::fs::create_dir_all(common.join(shortcut.label).join("tags")).unwrap();
@@ -302,12 +302,12 @@ fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
     let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
 
     for shortcut in EDITING_KIT_SHORTCUTS {
-        let expected = if shortcut.game == "haloce_evolved" {
+        let expected = if shortcut.game.is_campaign_evolved() {
             common.join("Halo Campaign Evolved")
         } else {
             common.join(shortcut.label)
         };
-        assert_eq!(detected.get(shortcut.game), Some(&expected));
+        assert_eq!(detected.get(shortcut.game.as_str()), Some(&expected));
     }
     let _ = std::fs::remove_dir_all(common);
 }

@@ -1265,9 +1265,10 @@ fn detect_import_game(
     // carries no embedded layout to compare against anything.
     if let Some((_, engine)) = ClassicHeader::parse(&bytes) {
         let game = match engine {
-            ClassicEngine::HaloCe => "haloce_mcc",
-            _ => "halo2_mcc",
-        };
+            ClassicEngine::HaloCe => GameId::HaloCe,
+            _ => GameId::Halo2,
+        }
+        .as_str();
         return Some((
             game.to_owned(),
             format!("The tag's classic header says {engine:?}"),

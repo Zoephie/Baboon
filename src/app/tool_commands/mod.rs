@@ -34,7 +34,7 @@ pub(super) enum ToolCommandArgKind {
 #[derive(Default)]
 pub(super) struct ToolCommandsUiState {
     pub(super) open: bool,
-    pub(super) catalog_game: Option<String>,
+    pub(super) catalog_game: Option<GameId>,
     pub(super) commands: Vec<ToolCommand>,
     pub(super) error: Option<String>,
     pub(super) selected: Option<String>,
@@ -42,7 +42,7 @@ pub(super) struct ToolCommandsUiState {
     pub(super) optional_open: bool,
 }
 
-pub(super) fn load_tool_commands(game: &str) -> Result<Vec<ToolCommand>, String> {
+pub(super) fn load_tool_commands(game: GameId) -> Result<Vec<ToolCommand>, String> {
     let text = crate::core::tool_commands::get_tool_commands_json(game)
         .ok_or_else(|| format!("No tool command catalog is embedded for {game}"))?;
     parse_tool_commands_json(text).map_err(|error| {

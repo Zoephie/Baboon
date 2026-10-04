@@ -4,7 +4,7 @@ use super::*;
 fn editing_kit_shortcuts_include_expected_profiles() {
     let pairs: Vec<(&str, &str)> = EDITING_KIT_SHORTCUTS
         .iter()
-        .map(|shortcut| (shortcut.label, shortcut.game))
+        .map(|shortcut| (shortcut.label, shortcut.game.as_str()))
         .collect();
 
     assert_eq!(

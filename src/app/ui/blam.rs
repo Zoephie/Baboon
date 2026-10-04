@@ -20,7 +20,7 @@ impl Baboon {
         self.kits[kit_index]
             .source
             .as_ref()
-            .is_some_and(|source| source.game.map(GameId::as_str) == Some("halo3_mcc"))
+            .is_some_and(|source| source.game == Some(GameId::Halo3))
     }
 
     /// The Blam! pane: a [`BLAM_KEY`] tile in the kit's tag tree, so it drags,

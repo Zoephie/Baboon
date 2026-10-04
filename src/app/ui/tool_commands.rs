@@ -8,11 +8,8 @@ impl Baboon {
         if !self.tool_commands.open {
             return;
         }
-        let game = self
-            .source()
-            .and_then(|source| source.game.map(GameId::as_str))
-            .map(str::to_owned);
-        if let Some(game) = game.as_deref() {
+        let game = self.source_game();
+        if let Some(game) = game {
             self.ensure_tool_commands_loaded(game);
         }
 
@@ -168,11 +165,11 @@ impl Baboon {
         self.tool_commands.open = open;
     }
 
-    pub(super) fn ensure_tool_commands_loaded(&mut self, game: &str) {
-        if self.tool_commands.catalog_game.as_deref() == Some(game) {
+    pub(super) fn ensure_tool_commands_loaded(&mut self, game: GameId) {
+        if self.tool_commands.catalog_game == Some(game) {
             return;
         }
-        self.tool_commands.catalog_game = Some(game.to_owned());
+        self.tool_commands.catalog_game = Some(game);
         match load_tool_commands(game) {
             Ok(commands) => {
                 self.tool_commands.error = None;

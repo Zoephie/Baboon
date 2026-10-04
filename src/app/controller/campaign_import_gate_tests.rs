@@ -129,7 +129,7 @@ fn nested_struct_size(tag: &TagFile, wanted: &str) -> Option<usize> {
 fn a_reach_animation_graph_is_classified_as_needing_conversion() {
     let reach = tag_from("haloreach_mcc", "model_animation_graph");
     let group_tag = group_tag_of("haloce_evolved", "model_animation_graph");
-    let (verdicts, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &reach);
+    let (verdicts, mode) = classify_import_source_for(GameId::CampaignEvolved.as_str(), group_tag, &reach);
 
     match mode {
         ImportMode::Convert { source_game, draft } => {
@@ -152,7 +152,7 @@ fn a_reach_animation_graph_is_classified_as_needing_conversion() {
         fit("haloreach_mcc").is_identical(),
         "Reach claims it outright"
     );
-    match fit(CAMPAIGN_EVOLVED_GAME) {
+    match fit(GameId::CampaignEvolved.as_str()) {
         // The walk reports the *first* divergence in declaration order, which is
         // `animation_graph_node_block` under `definitions/skeleton nodes` --
         // Reach carries two extra flag bytes there. It is one of the four
@@ -173,7 +173,7 @@ fn a_reach_animation_graph_is_classified_as_needing_conversion() {
 fn a_campaign_evolved_tag_still_imports_natively() {
     let evolved = tag_from("haloce_evolved", "model_animation_graph");
     let group_tag = group_tag_of("haloce_evolved", "model_animation_graph");
-    let (_, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &evolved);
+    let (_, mode) = classify_import_source_for(GameId::CampaignEvolved.as_str(), group_tag, &evolved);
 
     match mode {
         ImportMode::Native {
@@ -202,7 +202,7 @@ fn a_campaign_evolved_tag_still_imports_natively() {
 fn a_group_both_games_agree_on_imports_natively() {
     let reach = tag_from("haloreach_mcc", "sound_looping");
     let group_tag = group_tag_of("haloce_evolved", "sound_looping");
-    let (verdicts, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &reach);
+    let (verdicts, mode) = classify_import_source_for(GameId::CampaignEvolved.as_str(), group_tag, &reach);
 
     assert!(
         matches!(mode, ImportMode::Native { .. }),
@@ -231,7 +231,7 @@ fn a_real_hrek_animation_graph_imports_as_a_conversion() {
 
     // 1. The gate recognizes it as another game's tag rather than waving it
     //    through on a root-struct match.
-    let (verdicts, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &imported);
+    let (verdicts, mode) = classify_import_source_for(GameId::CampaignEvolved.as_str(), group_tag, &imported);
     let ImportMode::Convert { source_game, .. } = mode else {
         panic!("a real Reach animation graph must not import as native bytes: {verdicts:?}");
     };
@@ -241,7 +241,7 @@ fn a_real_hrek_animation_graph_imports_as_a_conversion() {
     let draft = analyze_conversion(
         &imported,
         &source_game,
-        CAMPAIGN_EVOLVED_GAME,
+        GameId::CampaignEvolved.as_str(),
         &locate_definitions_root(),
         None,
     )
@@ -255,7 +255,7 @@ fn a_real_hrek_animation_graph_imports_as_a_conversion() {
 
     // 3. And what lands parses, at the destination's generation.
     let mut landed = draft.tag;
-    apply_editing_kit_mcc_header(&mut landed, CAMPAIGN_EVOLVED_GAME).expect("stamp it");
+    apply_editing_kit_mcc_header(&mut landed, GameId::CampaignEvolved.as_str()).expect("stamp it");
     let written = landed.write_to_bytes().expect("serialize what would land");
     let reopened = TagFile::read_from_bytes(&written).expect("the paks would be able to read it");
     assert_eq!(reopened.header.group_tag, group_tag);
@@ -267,14 +267,14 @@ fn a_real_hrek_animation_graph_imports_as_a_conversion() {
 fn a_campaign_evolved_only_group_is_claimed_by_nothing_else() {
     let evolved = tag_from("haloce_evolved", "skull_globals");
     let group_tag = group_tag_of("haloce_evolved", "skull_globals");
-    let (verdicts, _) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &evolved);
+    let (verdicts, _) = classify_import_source_for(GameId::CampaignEvolved.as_str(), group_tag, &evolved);
 
     assert_eq!(
         verdicts
             .iter()
             .map(|(game, _)| game.as_str())
             .collect::<Vec<_>>(),
-        vec![CAMPAIGN_EVOLVED_GAME],
+        vec![GameId::CampaignEvolved.as_str()],
         "skull_globals exists only in Campaign Evolved",
     );
 }
@@ -304,7 +304,7 @@ fn the_spartans_animation_graph_converts_whole() {
     let draft = analyze_conversion(
         &source,
         "haloreach_mcc",
-        CAMPAIGN_EVOLVED_GAME,
+        GameId::CampaignEvolved.as_str(),
         &locate_definitions_root(),
         None,
     )
@@ -347,7 +347,7 @@ fn the_whole_hrek_animation_corpus_converts() {
         match analyze_conversion(
             &source,
             "haloreach_mcc",
-            CAMPAIGN_EVOLVED_GAME,
+            GameId::CampaignEvolved.as_str(),
             &definitions,
             None,
         ) {
@@ -408,7 +408,7 @@ fn a_reach_model_converts_despite_campaign_evolved_having_no_render_model() {
     let draft = analyze_conversion(
         &source,
         "haloreach_mcc",
-        CAMPAIGN_EVOLVED_GAME,
+        GameId::CampaignEvolved.as_str(),
         &locate_definitions_root(),
         None,
     )
@@ -444,7 +444,7 @@ fn the_hrek_objects_tree_converts() {
         return;
     }
     let definitions = locate_definitions_root();
-    let ce_groups: std::collections::HashSet<String> = load_new_tag_groups(CAMPAIGN_EVOLVED_GAME)
+    let ce_groups: std::collections::HashSet<String> = load_new_tag_groups(GameId::CampaignEvolved.as_str())
         .expect("Campaign Evolved definitions")
         .into_iter()
         .map(|group| group.name)
@@ -475,7 +475,7 @@ fn the_hrek_objects_tree_converts() {
         match analyze_conversion(
             &source,
             "haloreach_mcc",
-            CAMPAIGN_EVOLVED_GAME,
+            GameId::CampaignEvolved.as_str(),
             &definitions,
             None,
         ) {

@@ -114,7 +114,7 @@ pub(in crate::app) struct EditingKitFavorites {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) label: &'static str,
-    pub(in crate::app) game: &'static str,
+    pub(in crate::app) game: GameId,
     pub(in crate::app) fallback: &'static str,
 }
 
@@ -149,6 +149,17 @@ pub(in crate::app) fn kit_folders_are_choosable(game: &str) -> bool {
 }
 
 impl CustomEditingKitProfile {
+    /// The profile's game, or `None` for a game id this build does not know.
+    pub(in crate::app) fn game_id(&self) -> Option<GameId> {
+        GameId::from_id(&self.game)
+    }
+
+    /// Whether the profile is for Campaign Evolved, whose installs are never
+    /// read-only or Git-tracked in Baboon's sense.
+    pub(in crate::app) fn is_campaign_evolved(&self) -> bool {
+        self.game_id().is_some_and(GameId::is_campaign_evolved)
+    }
+
     /// Whether this profile names a tags or data folder of its own.
     pub(in crate::app) fn has_chosen_folders(&self) -> bool {
         kit_folders_are_choosable(&self.game)
@@ -164,7 +175,7 @@ impl CustomEditingKitProfile {
     ) -> bool {
         let scope = self.read_only_scope();
         self.read_only
-            && self.game != "haloce_evolved"
+            && !self.is_campaign_evolved()
             && (identity.is_some_and(|identity| identity.id == self.id)
                 || root.is_some_and(|root| {
                     root.ancestors()
@@ -229,13 +240,18 @@ pub(in crate::app) struct CustomEditingKitRemoval {
 }
 
 impl CustomEditingKitDraft {
+    /// Whether the draft's chosen game is Campaign Evolved.
+    pub(in crate::app) fn is_campaign_evolved(&self) -> bool {
+        GameId::from_id(&self.game).is_some_and(GameId::is_campaign_evolved)
+    }
+
     pub(in crate::app) fn new() -> Self {
         Self {
             read_only: false,
             git_tracked: false,
             editing_id: None,
             name: String::new(),
-            game: "halo2_mcc".to_owned(),
+            game: GameId::Halo2.as_str().to_owned(),
             root_input: String::new(),
             tags_folder_input: String::new(),
             data_folder_input: String::new(),
@@ -279,42 +295,42 @@ fn folder_input(folder: Option<&Path>) -> String {
 pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 8] = [
     EditingKitShortcut {
         label: "HCEEK",
-        game: "haloce_mcc",
+        game: GameId::HaloCe,
         fallback: "CE",
     },
     EditingKitShortcut {
         label: "H2EK",
-        game: "halo2_mcc",
+        game: GameId::Halo2,
         fallback: "H2",
     },
     EditingKitShortcut {
         label: "H3EK",
-        game: "halo3_mcc",
+        game: GameId::Halo3,
         fallback: "H3",
     },
     EditingKitShortcut {
         label: "H3ODSTEK",
-        game: "halo3odst_mcc",
+        game: GameId::Halo3Odst,
         fallback: "ODST",
     },
     EditingKitShortcut {
         label: "HREK",
-        game: "haloreach_mcc",
+        game: GameId::HaloReach,
         fallback: "R",
     },
     EditingKitShortcut {
         label: "H4EK",
-        game: "halo4_mcc",
+        game: GameId::Halo4,
         fallback: "H4",
     },
     EditingKitShortcut {
         label: "H2AMPEK",
-        game: "halo2amp_mcc",
+        game: GameId::Halo2Amp,
         fallback: "H2A",
     },
     EditingKitShortcut {
         label: "Campaign Evolved",
-        game: "haloce_evolved",
+        game: GameId::CampaignEvolved,
         fallback: "HCE",
     },
 ];

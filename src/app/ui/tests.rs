@@ -227,7 +227,7 @@ fn custom_header_inputs_use_standard_hover_and_focus_strokes() {
 #[test]
 fn editing_kit_menu_uses_each_shortcut_once_in_reverse_engine_order() {
     let games: Vec<&str> = editing_kit_menu_shortcuts()
-        .map(|shortcut| shortcut.game)
+        .map(|shortcut| shortcut.game.as_str())
         .collect();
 
     assert_eq!(
@@ -291,7 +291,7 @@ fn editing_kit_menu_filters_invalid_built_ins_without_reordering_valid_ones() {
     let validation = EditingKitValidationCache::new(&paths, &[]);
     let games = visible_builtin_editing_kit_shortcuts(&validation)
         .into_iter()
-        .map(|shortcut| shortcut.game)
+        .map(|shortcut| shortcut.game.as_str())
         .collect::<Vec<_>>();
     assert_eq!(games, vec!["halo4_mcc", "halo2_mcc"]);
     let _ = std::fs::remove_dir_all(root);
@@ -347,7 +347,7 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
     ));
     assert!(matches!(
         entries[2],
-        EditingKitMenuEntry::BuiltIn(shortcut) if shortcut.game == "halo2_mcc"
+        EditingKitMenuEntry::BuiltIn(shortcut) if shortcut.game == GameId::Halo2
     ));
     assert_eq!(entries.len(), 3);
     let _ = std::fs::remove_dir_all(root);
@@ -358,7 +358,7 @@ fn editing_kit_menu_games_have_distinct_embedded_primary_icons() {
     let mut icons: HashSet<&'static [u8]> = HashSet::new();
 
     for shortcut in editing_kit_menu_shortcuts() {
-        let bytes = get_game_banner_bytes(shortcut.game);
+        let bytes = get_game_banner_bytes(Some(shortcut.game));
         let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
             .unwrap_or_else(|error| panic!("{} icon is not a valid PNG: {error}", shortcut.game));
         assert_eq!(

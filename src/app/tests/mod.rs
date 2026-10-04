@@ -172,26 +172,20 @@ fn tag_ref_path_helpers() {
 
 #[test]
 fn engine_emblems_are_separate_from_game_banners() {
-    assert!(get_game_emblem_bytes("haloce_mcc").is_some());
-    assert!(get_game_emblem_bytes("halo2_mcc").is_some());
-    assert!(get_game_emblem_bytes("haloce_evolved").is_some());
+    // Every game has an emblem, distinct from its banner and from the others.
+    let emblems: std::collections::HashSet<_> =
+        GameId::ALL.iter().map(|game| get_game_emblem_bytes(*game)).collect();
+    assert_eq!(emblems.len(), GameId::ALL.len());
     assert_ne!(
-        get_game_emblem_bytes("halo2_mcc"),
-        get_game_emblem_bytes("halo2amp_mcc")
-    );
-    assert!(get_game_emblem_bytes("unknown").is_none());
-    assert_ne!(
-        get_game_emblem_bytes("haloce_mcc"),
-        Some(get_game_banner_bytes("haloce_mcc"))
+        get_game_emblem_bytes(GameId::HaloCe),
+        get_game_banner_bytes(Some(GameId::HaloCe))
     );
     assert_ne!(
-        get_game_banner_bytes("haloce_evolved"),
-        get_game_banner_bytes("haloce_mcc")
+        get_game_banner_bytes(Some(GameId::CampaignEvolved)),
+        get_game_banner_bytes(Some(GameId::HaloCe))
     );
-    assert_ne!(
-        get_game_emblem_bytes("haloce_evolved"),
-        get_game_emblem_bytes("haloce_mcc")
-    );
+    // A saved id this build does not know falls back to Halo CE's banner.
+    assert_eq!(get_game_banner_bytes(None), get_game_banner_bytes(Some(GameId::HaloCe)));
 }
 
 #[test]

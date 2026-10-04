@@ -28,17 +28,17 @@ fn a_destination_is_tidied_into_a_relative_tag_path() {
 fn import_sources_are_the_profiles_that_convert_into_this_kit() {
     let into_reach = import_sources_for("haloreach_mcc");
     assert!(into_reach.contains(&"halo3_mcc"));
-    assert!(into_reach.contains(&CAMPAIGN_EVOLVED_GAME));
+    assert!(into_reach.contains(&GameId::CampaignEvolved.as_str()));
     assert!(!into_reach.contains(&"haloreach_mcc"));
 
-    let into_evolved = import_sources_for(CAMPAIGN_EVOLVED_GAME);
+    let into_evolved = import_sources_for(GameId::CampaignEvolved.as_str());
     assert_eq!(into_evolved, vec![CAMPAIGN_EVOLVED_PARENT]);
 
     let into_halo3 = import_sources_for("halo3_mcc");
     assert!(into_halo3.contains(&"haloce_mcc"));
     assert!(into_halo3.contains(&"halo2_mcc"));
     assert!(
-        !into_halo3.contains(&CAMPAIGN_EVOLVED_GAME),
+        !into_halo3.contains(&GameId::CampaignEvolved.as_str()),
         "Campaign Evolved converts only with Reach"
     );
 }

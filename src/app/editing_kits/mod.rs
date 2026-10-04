@@ -47,10 +47,10 @@ impl EditingKitValidationCache {
             .into_iter()
             .map(|shortcut| {
                 (
-                    shortcut.game.to_owned(),
+                    shortcut.game.as_str().to_owned(),
                     validate_builtin_editing_kit(
                         shortcut,
-                        paths.get(shortcut.game).map(PathBuf::as_path),
+                        paths.get(shortcut.game.as_str()).map(PathBuf::as_path),
                     ),
                 )
             })
@@ -77,7 +77,7 @@ impl EditingKitValidationCache {
     ) -> EditingKitPathStatus {
         let status = validate_builtin_editing_kit(shortcut, configured);
         self.built_ins
-            .insert(shortcut.game.to_owned(), status.clone());
+            .insert(shortcut.game.as_str().to_owned(), status.clone());
         status
     }
 
@@ -95,7 +95,7 @@ impl EditingKitValidationCache {
 
     pub(super) fn builtin(&self, shortcut: EditingKitShortcut) -> EditingKitPathStatus {
         self.built_ins
-            .get(shortcut.game)
+            .get(shortcut.game.as_str())
             .cloned()
             .unwrap_or(EditingKitPathStatus::Unconfigured)
     }
@@ -131,7 +131,7 @@ impl Baboon {
             shortcut,
             self.prefs
                 .editing_kit_paths
-                .get(shortcut.game)
+                .get(shortcut.game.as_str())
                 .map(PathBuf::as_path),
         )
     }
@@ -161,7 +161,7 @@ pub(super) fn validate_builtin_editing_kit(
     let Some(path) = configured.filter(|path| !path.as_os_str().is_empty()) else {
         return EditingKitPathStatus::Unconfigured;
     };
-    if shortcut.game == "haloce_evolved" {
+    if shortcut.game.is_campaign_evolved() {
         return match crate::core::source::find_paks_dir(path) {
             Some(paks) => EditingKitPathStatus::Ready(EditingKitLayout {
                 root: path.to_path_buf(),
@@ -190,7 +190,7 @@ pub(super) fn validate_editing_kit_profile_layout(
 ) -> Result<EditingKitLayout, String> {
     let shortcut = EDITING_KIT_SHORTCUTS
         .into_iter()
-        .find(|shortcut| shortcut.game == game)
+        .find(|shortcut| shortcut.game.as_str() == game)
         .ok_or_else(|| "Choose a supported editing-kit engine".to_owned())?;
     match validate_builtin_editing_kit(shortcut, Some(path)) {
         EditingKitPathStatus::Ready(layout) => Ok(layout),

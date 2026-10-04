@@ -248,7 +248,7 @@ pub(super) fn classify_import_source_for(
         .iter()
         .filter(|(game, fit)| fit.is_identical() && game != target_game)
         .map(|(game, _)| game.clone())
-        .min_by_key(|game| (game != "haloreach_mcc", game.clone()));
+        .min_by_key(|game| (game != GameId::HaloReach.as_str(), game.clone()));
 
     match foreign {
         Some(source_game) => (
@@ -1480,7 +1480,7 @@ impl Baboon {
             self.prefs
                 .custom_editing_kit_profiles
                 .iter()
-                .filter(|profile| profile.game == "haloce_evolved")
+                .filter(|profile| profile.is_campaign_evolved())
                 .find_map(|profile| crate::core::source::find_paks_dir(&profile.root))
         })
     }
@@ -1598,8 +1598,9 @@ impl Baboon {
     pub(super) fn open_new_tag_dialog(&mut self) {
         let default_game = self
             .source()
-            .and_then(|source| source.game.map(GameId::as_str))
-            .unwrap_or("halo3_mcc")
+            .and_then(|source| source.game)
+            .unwrap_or(GameId::Halo3)
+            .as_str()
             .to_owned();
         self.new_tag_dialog = NewTagDialog {
             kit: Some(self.active_kit_id()),
@@ -1854,7 +1855,7 @@ impl Baboon {
             Ok(mut tag) => {
                 // `TagFile::new` zeroes the whole file-header generation; the
                 // simulation expects Campaign Evolved's.
-                if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+                if let Err(error) = apply_editing_kit_mcc_header(&mut tag, GameId::CampaignEvolved.as_str()) {
                     self.new_tag_dialog.error = Some(error);
                     return;
                 }
@@ -2091,7 +2092,7 @@ impl Baboon {
         match analyze_conversion(
             source,
             &source_game,
-            CAMPAIGN_EVOLVED_GAME,
+            GameId::CampaignEvolved.as_str(),
             &locate_definitions_root(),
             None,
         ) {
@@ -2211,7 +2212,7 @@ impl Baboon {
         // tag authored for another kit, or by a Baboon old enough to leave the
         // header zeroed, would otherwise land in the paks claiming a generation
         // the simulation never ships.
-        if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+        if let Err(error) = apply_editing_kit_mcc_header(&mut tag, GameId::CampaignEvolved.as_str()) {
             dialog.error = Some(error);
             return;
         }
@@ -5174,7 +5175,7 @@ impl Baboon {
             return;
         };
         let display_path = entry.display_path.clone();
-        let source = extract_generation_of(self.source().and_then(|s| s.game.map(GameId::as_str)));
+        let source = self.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
         self.extract_target = Some(ExtractTargetPrompt {
             key,
             display_path,
@@ -5406,9 +5407,7 @@ impl Baboon {
     }
 
     pub(super) fn active_game_is_campaign_evolved(&self) -> bool {
-        self.source()
-            .and_then(|source| source.game.map(GameId::as_str))
-            .is_some_and(|game| game == "haloce_evolved")
+        self.source_game().is_some_and(GameId::is_campaign_evolved)
     }
 
     /// Starts potentially expensive source or export work off the UI thread.
@@ -8744,12 +8743,12 @@ impl Baboon {
         shortcut: EditingKitShortcut,
         ctx: egui::Context,
     ) {
-        let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game).cloned() else {
+        let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned() else {
             if let Some(profile) = self
                 .prefs
                 .custom_editing_kit_profiles
                 .iter()
-                .find(|profile| profile.game == shortcut.game)
+                .find(|profile| profile.game == shortcut.game.as_str())
                 .cloned()
             {
                 self.load_custom_editing_kit_profile(profile, ctx);
@@ -8768,13 +8767,13 @@ impl Baboon {
             self.prompt_for_editing_kit_path(shortcut, status.message());
             return;
         };
-        if shortcut.game == "haloce_evolved" {
+        if shortcut.game.is_campaign_evolved() {
             self.begin_load_folder_path(path, ctx);
         } else {
             self.begin_load_editing_kit_layout(
                 layout,
-                shortcut.game.to_owned(),
-                game_display_name(shortcut.game).to_owned(),
+                shortcut.game.as_str().to_owned(),
+                shortcut.game.display_name().to_owned(),
                 None,
                 false,
                 ctx,
@@ -8806,13 +8805,13 @@ impl Baboon {
             .and_then(|tag| {
                 let tag = canonical_or_clean(tag);
                 profiles.iter().find(|profile| {
-                    profile.game == shortcut.game && tag.starts_with(profile_tags_folder(profile))
+                    profile.game == shortcut.game.as_str() && tag.starts_with(profile_tags_folder(profile))
                 })
             })
             .or_else(|| {
                 profiles
                     .iter()
-                    .find(|profile| profile.game == shortcut.game)
+                    .find(|profile| profile.game == shortcut.game.as_str())
             })
             .cloned();
         if let Some(profile) = profile
@@ -8829,7 +8828,7 @@ impl Baboon {
         }
         let Some(path) = profile
             .map(|profile| profile.root)
-            .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game).cloned())
+            .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned())
         else {
             self.status = format!(
                 "Command line: set the {} path in Settings before launching tags",
@@ -8847,8 +8846,8 @@ impl Baboon {
         self.kits[self.active].pending_launch_tags = Some(launch.tag_paths);
         self.begin_load_editing_kit_layout(
             layout,
-            shortcut.game.to_owned(),
-            game_display_name(shortcut.game).to_owned(),
+            shortcut.game.as_str().to_owned(),
+            shortcut.game.display_name().to_owned(),
             None,
             false,
             ctx,
@@ -8913,7 +8912,7 @@ impl Baboon {
                 return false;
             }
         };
-        if profile.game == "haloce_evolved" {
+        if profile.is_campaign_evolved() {
             self.begin_load_folder_path(profile.root.clone(), ctx);
             self.kits[self.active].profile = Some(EditingKitProfileIdentity {
                 id: profile.id,
@@ -9048,13 +9047,13 @@ impl Baboon {
     }
 
     pub(super) fn choose_editing_kit_path(&mut self, shortcut: EditingKitShortcut) {
-        let title = if shortcut.game == "haloce_evolved" {
+        let title = if shortcut.game.is_campaign_evolved() {
             "Select Campaign Evolved Install or Paks Folder".to_owned()
         } else {
             format!("Select {} Editing Kit Folder", shortcut.label)
         };
         let mut dialog = rfd::FileDialog::new().set_title(title);
-        if let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game) {
+        if let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game.as_str()) {
             if path.is_dir() {
                 dialog = dialog.set_directory(path);
             } else if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
@@ -9064,10 +9063,10 @@ impl Baboon {
         if let Some(path) = dialog.pick_folder() {
             self.prefs
                 .editing_kit_paths
-                .insert(shortcut.game.to_owned(), path.clone());
+                .insert(shortcut.game.as_str().to_owned(), path.clone());
             self.editing_kit_path_inputs
-                .insert(shortcut.game.to_owned(), path.display().to_string());
-            if self.editing_kit_path_attention.as_deref() == Some(shortcut.game) {
+                .insert(shortcut.game.as_str().to_owned(), path.display().to_string());
+            if self.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) {
                 self.editing_kit_path_attention = None;
             }
             self.status = format!("{} path set to {}", shortcut.label, path.display());
@@ -9107,9 +9106,9 @@ impl Baboon {
     fn prompt_for_editing_kit_path(&mut self, shortcut: EditingKitShortcut, status: String) {
         self.settings_open = true;
         self.settings_tab = SettingsTab::EditingKits;
-        self.editing_kit_path_attention = Some(shortcut.game.to_owned());
+        self.editing_kit_path_attention = Some(shortcut.game.as_str().to_owned());
         self.editing_kit_path_inputs
-            .entry(shortcut.game.to_owned())
+            .entry(shortcut.game.as_str().to_owned())
             .or_default();
         self.status = status;
     }
@@ -11875,13 +11874,3 @@ mod prefs_throttle_tests;
 #[cfg(test)]
 mod in_place_overwrite_tests;
 
-/// The tag generation a kit's game id belongs to — the one its tools import.
-/// Halo CE and Halo 2 are their own; every later engine, Campaign Evolved
-/// included, shares Halo 3's formats.
-pub(super) fn extract_generation_of(game_id: Option<&str>) -> blam_tags::game::Game {
-    match game_id {
-        Some("haloce_mcc") => blam_tags::game::Game::Halo1,
-        Some("halo2_mcc") => blam_tags::game::Game::Halo2,
-        _ => blam_tags::game::Game::Halo3,
-    }
-}

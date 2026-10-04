@@ -217,7 +217,7 @@ impl Baboon {
                                                                 let texture = self
                                                                     .workspace_banner_texture(
                                                                         ctx,
-                                                                        &profile.game,
+                                                                        profile.game_id(),
                                                                         Some(&profile.id),
                                                                     );
                                                                 let image = match texture {
@@ -238,8 +238,7 @@ impl Baboon {
                                                                     ui,
                                                                     &profile.name,
                                                                     profile.read_only
-                                                                        && profile.game
-                                                                            != "haloce_evolved",
+                                                                        && !profile.is_campaign_evolved(),
                                                                     TextStyle::Button
                                                                         .resolve(ui.style())
                                                                         .size,
@@ -279,7 +278,7 @@ impl Baboon {
                                                                 let path = self
                                                                     .prefs
                                                                     .editing_kit_paths
-                                                                    .get(shortcut.game)
+                                                                    .get(shortcut.game.as_str())
                                                                     .cloned();
                                                                 let image = texture.map_or_else(
                                                                     || {
@@ -302,9 +301,7 @@ impl Baboon {
                                                                 let label = welcome_image_button(
                                                                     ui,
                                                                     image,
-                                                                    game_display_name(
-                                                                        shortcut.game,
-                                                                    ),
+                                                                    shortcut.game.display_name(),
                                                                     text_dark(),
                                                                     true,
                                                                 );

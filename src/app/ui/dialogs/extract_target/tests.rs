@@ -3,7 +3,6 @@
 //! and Cancel drops the request.
 
 use super::*;
-use crate::app::controller::extract_generation_of;
 
 fn app() -> Baboon {
     Baboon::assemble(
@@ -77,8 +76,8 @@ fn click(app: &mut Baboon, ctx: &egui::Context, labels: &[(String, egui::Rect)],
 
 #[test]
 fn the_kit_s_game_is_the_default_and_marked() {
-    assert_eq!(extract_generation_of(Some("haloce_mcc")), Game::Halo1);
-    assert_eq!(extract_generation_of(Some("halo2_mcc")), Game::Halo2);
+    assert_eq!(GameId::HaloCe.generation(), Game::Halo1);
+    assert_eq!(GameId::Halo2.generation(), Game::Halo2);
     for id in [
         "halo3_mcc",
         "halo3odst_mcc",
@@ -87,7 +86,7 @@ fn the_kit_s_game_is_the_default_and_marked() {
         "halo2amp_mcc",
         "haloce_evolved",
     ] {
-        assert_eq!(extract_generation_of(Some(id)), Game::Halo3, "{id}");
+        assert_eq!(GameId::from_id(id).unwrap().generation(), Game::Halo3, "{id}");
     }
     let mut app = app();
     app.extract_target = Some(prompt(Game::Halo2));

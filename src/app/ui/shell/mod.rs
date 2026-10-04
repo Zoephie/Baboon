@@ -743,7 +743,7 @@ impl Baboon {
                             format!("{} is unavailable: {error}", profile.name)
                         });
                     let texture =
-                        self.workspace_banner_texture(ui.ctx(), &profile.game, Some(&profile.id));
+                        self.workspace_banner_texture(ui.ctx(), profile.game_id(), Some(&profile.id));
                     let response = editing_kit_menu_row_with_read_only(
                         ui,
                         &profile.name,
@@ -751,7 +751,7 @@ impl Baboon {
                         texture.as_ref(),
                         texture.is_none(),
                         enabled,
-                        profile.read_only && profile.game != "haloce_evolved",
+                        profile.read_only && !profile.is_campaign_evolved(),
                     );
                     let response = if enabled {
                         response.on_hover_text(tooltip)
@@ -764,17 +764,17 @@ impl Baboon {
                     }
                 }
                 EditingKitMenuEntry::BuiltIn(shortcut) => {
-                    let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+                    let texture = self.game_banner_texture(ui.ctx(), Some(shortcut.game)).cloned();
                     let configured_path = self
                         .prefs
                         .editing_kit_paths
-                        .get(shortcut.game)
+                        .get(shortcut.game.as_str())
                         .expect("validated built-in path");
                     let tooltip =
                         format!("Load {} from {}", shortcut.label, configured_path.display());
                     if editing_kit_menu_row(
                         ui,
-                        game_display_name(shortcut.game),
+                        shortcut.game.display_name(),
                         shortcut.fallback,
                         texture.as_ref(),
                         false,

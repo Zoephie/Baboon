@@ -625,12 +625,12 @@ fn draw_tutorials_tab(
                         for shortcut in EDITING_KIT_SHORTCUTS {
                             if ui
                                 .selectable_label(
-                                    selected_game == shortcut.game,
-                                    game_display_name(shortcut.game),
+                                    selected_game.as_str() == shortcut.game.as_str(),
+                                    shortcut.game.display_name(),
                                 )
                                 .clicked()
                             {
-                                *selected_game = shortcut.game.to_owned();
+                                *selected_game = shortcut.game.as_str().to_owned();
                             }
                         }
                     });

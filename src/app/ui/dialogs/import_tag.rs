@@ -271,7 +271,7 @@ impl Baboon {
                 .unwrap_or_default();
             self.tag_compat.ensure_loaded(&locate_help_docs_root());
             self.tag_compat
-                .focus(&source_game, CAMPAIGN_EVOLVED_GAME, &group);
+                .focus(&source_game, GameId::CampaignEvolved.as_str(), &group);
             self.help_panel_tab = HelpPanelTab::TagCompat;
             self.about_open = true;
         }

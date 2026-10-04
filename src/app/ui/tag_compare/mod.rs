@@ -749,7 +749,7 @@ impl Baboon {
             }
         }
         for shortcut in EDITING_KIT_SHORTCUTS {
-            if shortcut.game != game.as_str() {
+            if shortcut.game != game {
                 continue;
             }
             if let Some(layout) = self.editing_kit_validation.builtin(shortcut).layout() {

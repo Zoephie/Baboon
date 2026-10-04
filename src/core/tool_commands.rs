@@ -1,13 +1,17 @@
 //! Compile-time access to the generated editing-kit command catalogs.
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 
-pub fn get_tool_commands_json(game: &str) -> Option<&'static str> {
+use crate::core::game::GameId;
+
+/// The kit tool's command catalog for `game`. ODST's tool takes Halo 3's
+/// commands; Halo 2 Anniversary Multiplayer and Campaign Evolved have none.
+pub fn get_tool_commands_json(game: GameId) -> Option<&'static str> {
     match game {
-        "haloce_mcc" => Some(include_root_str!("tool_commands/haloce_mcc.json")),
-        "halo2_mcc" => Some(include_root_str!("tool_commands/halo2_mcc.json")),
-        "halo3_mcc" | "halo3odst_mcc" => Some(include_root_str!("tool_commands/halo3_mcc.json")),
-        "haloreach_mcc" => Some(include_root_str!("tool_commands/haloreach_mcc.json")),
-        "halo4_mcc" => Some(include_root_str!("tool_commands/halo4_mcc.json")),
-        _ => None,
+        GameId::HaloCe => Some(include_root_str!("tool_commands/haloce_mcc.json")),
+        GameId::Halo2 => Some(include_root_str!("tool_commands/halo2_mcc.json")),
+        GameId::Halo3 | GameId::Halo3Odst => Some(include_root_str!("tool_commands/halo3_mcc.json")),
+        GameId::HaloReach => Some(include_root_str!("tool_commands/haloreach_mcc.json")),
+        GameId::Halo4 => Some(include_root_str!("tool_commands/halo4_mcc.json")),
+        GameId::Halo2Amp | GameId::CampaignEvolved => None,
     }
 }

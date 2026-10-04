@@ -334,7 +334,7 @@ fn draw_editing_kit_form(
         title,
         &draft.root_input,
         texture,
-        draft.read_only && draft.game != "haloce_evolved",
+        draft.read_only && !draft.is_campaign_evolved(),
     );
     ui.add_space(12.0);
     ui.columns(2, |columns| {
@@ -468,7 +468,7 @@ fn draw_editing_kit_form(
             .small()
             .color(subtle_dark()),
     );
-    if draft.game != "haloce_evolved" {
+    if !draft.is_campaign_evolved() {
         ui.add_space(8.0);
         editing_kit_field_label(ui, "Options");
         ui.checkbox(&mut draft.read_only, "Read-Only");
@@ -734,15 +734,15 @@ impl Baboon {
     ) {
         let trimmed = input.trim().to_owned();
         if trimmed.is_empty() {
-            self.prefs.editing_kit_paths.remove(shortcut.game);
+            self.prefs.editing_kit_paths.remove(shortcut.game.as_str());
         } else {
             self.prefs
                 .editing_kit_paths
-                .insert(shortcut.game.to_owned(), PathBuf::from(&trimmed));
+                .insert(shortcut.game.as_str().to_owned(), PathBuf::from(&trimmed));
         }
         self.editing_kit_path_inputs
-            .insert(shortcut.game.to_owned(), input);
-        if self.editing_kit_path_attention.as_deref() == Some(shortcut.game) && !trimmed.is_empty()
+            .insert(shortcut.game.as_str().to_owned(), input);
+        if self.editing_kit_path_attention.as_deref() == Some(shortcut.game.as_str()) && !trimmed.is_empty()
         {
             self.editing_kit_path_attention = None;
         }
@@ -1014,7 +1014,7 @@ impl Baboon {
                 .editing_kit_validation
                 .custom_icon_error(&profile.id)
                 .map(str::to_owned);
-            let texture = self.workspace_banner_texture(ui.ctx(), &profile.game, Some(&profile.id));
+            let texture = self.workspace_banner_texture(ui.ctx(), profile.game_id(), Some(&profile.id));
             let (load, edit, remove) = ui
                 .push_id(&profile.id, |ui| {
                     editing_kit_card_with_read_only(
@@ -1025,7 +1025,7 @@ impl Baboon {
                         validation.as_ref().err().map(String::as_str),
                         warning.as_deref(),
                         Some(&profile.id),
-                        profile.read_only && profile.game != "haloce_evolved",
+                        profile.read_only && !profile.is_campaign_evolved(),
                     )
                 })
                 .inner;
@@ -1080,7 +1080,7 @@ impl Baboon {
         let mut open = true;
         let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
         let texture =
-            custom_texture.or_else(|| self.game_banner_texture(ctx, &draft.game).cloned());
+            custom_texture.or_else(|| self.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
         let mut actions = EditingKitFormActions::default();
         egui::Window::new(title)
             .constrain_to(window_work_area(ctx))
@@ -1131,12 +1131,12 @@ impl Baboon {
             draft.error = Some("Enter an editing kit name".to_owned());
             return false;
         }
-        let Some(game) = game_for_saved_id(&draft.game).map(|game| game.as_str().to_owned()) else {
+        let Some(game) = game_for_saved_id(&draft.game) else {
             draft.error = Some("Choose a supported editing-kit engine".to_owned());
             return false;
         };
         let root_input = PathBuf::from(draft.root_input.trim());
-        let choosable = kit_folders_are_choosable(&game);
+        let choosable = game.tools_take_folder_arguments();
         let folder_input = |input: &str| {
             Some(input.trim())
                 .filter(|input| choosable && !input.is_empty())
@@ -1146,7 +1146,7 @@ impl Baboon {
         let data_input = folder_input(&draft.data_folder_input);
         let layout = match validate_kit_layout(
             &root_input,
-            &game,
+            game.as_str(),
             tags_input.as_deref(),
             data_input.as_deref(),
         ) {
@@ -1206,11 +1206,11 @@ impl Baboon {
             }
         };
         let profile = CustomEditingKitProfile {
-            read_only: draft.read_only && game != "haloce_evolved",
-            git_tracked: draft.git_tracked && game != "haloce_evolved",
+            read_only: draft.read_only && !game.is_campaign_evolved(),
+            git_tracked: draft.git_tracked && !game.is_campaign_evolved(),
             id: id.clone(),
             name: name.clone(),
-            game,
+            game: game.as_str().to_owned(),
             root: layout.root,
             icon,
             tags_folder,

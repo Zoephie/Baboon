@@ -210,7 +210,7 @@ impl Baboon {
                 for shortcut in EDITING_KIT_SHORTCUTS {
                     let mut input = self
                         .editing_kit_path_inputs
-                        .get(shortcut.game)
+                        .get(shortcut.game.as_str())
                         .cloned()
                         .unwrap_or_default();
                     ui.horizontal(|ui| {

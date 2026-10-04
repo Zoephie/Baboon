@@ -1398,6 +1398,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("chimp_level_job", "a running job; its progress is in the status bar"),
     ("last_mod_export_name", "remembered text"),
     ("chimp_writes", "running saves"),
+    ("game_banner_textures", "texture cache keyed by game"),
     ("last_poke", "undo record"),
     ("poke_direct_running", "running flag"),
     ("poke_undo_running", "running flag"),

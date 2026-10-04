@@ -822,7 +822,7 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
             "Unsupported Baboon project version {version} (expected {CAMPAIGN_PROJECT_VERSION})"
         ));
     }
-    if game != "haloce_evolved" {
+    if game != GameId::CampaignEvolved.as_str() {
         return Err(format!("Project is for unsupported game '{game}'"));
     }
 
@@ -2035,7 +2035,7 @@ impl Baboon {
         };
         let source_path = if crate::core::source::find_paks_dir(&snapshot.source_path).is_some() {
             snapshot.source_path.clone()
-        } else if let Some(configured) = self.prefs.editing_kit_paths.get("haloce_evolved")
+        } else if let Some(configured) = self.prefs.editing_kit_paths.get(GameId::CampaignEvolved.as_str())
             && crate::core::source::find_paks_dir(configured).is_some()
         {
             configured.clone()

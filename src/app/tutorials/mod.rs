@@ -138,7 +138,7 @@ fn validate_tutorial_catalog(catalog: &TutorialCatalog) -> Result<(), String> {
     for (index, tutorial) in catalog.tutorials.iter().enumerate() {
         if !EDITING_KIT_SHORTCUTS
             .iter()
-            .any(|shortcut| shortcut.game == tutorial.game)
+            .any(|shortcut| shortcut.game.as_str() == tutorial.game)
         {
             return Err(format!(
                 "tutorial {index} uses unknown game id {:?}",

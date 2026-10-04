@@ -90,9 +90,9 @@ fn validation_cache_changes_only_when_refreshed() {
     fs::create_dir_all(root.join("tags")).unwrap();
     let shortcut = EDITING_KIT_SHORTCUTS
         .into_iter()
-        .find(|shortcut| shortcut.game == "halo3_mcc")
+        .find(|shortcut| shortcut.game == GameId::Halo3)
         .unwrap();
-    let paths = HashMap::from([(shortcut.game.to_owned(), root.clone())]);
+    let paths = HashMap::from([(shortcut.game.as_str().to_owned(), root.clone())]);
     let mut cache = EditingKitValidationCache::new(&paths, &[]);
     assert!(cache.builtin(shortcut).layout().is_some());
 
@@ -130,10 +130,10 @@ fn built_in_validation_keeps_existing_tags_only_contract() {
     fs::create_dir_all(root.join("tags")).unwrap();
     let shortcut = EDITING_KIT_SHORTCUTS
         .into_iter()
-        .find(|shortcut| shortcut.game == "halo3_mcc")
+        .find(|shortcut| shortcut.game == GameId::Halo3)
         .unwrap();
     let status = validate_builtin_editing_kit(shortcut, Some(&root));
-    assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
+    assert!(validate_editing_kit_profile_layout(&root, shortcut.game.as_str()).is_ok());
     // Read on Windows only, but the `expect` is the check everywhere.
     #[cfg_attr(not(windows), allow(unused_variables))]
     let layout = status.layout().expect("built-in layout should be ready");
@@ -150,7 +150,7 @@ fn campaign_evolved_validation_requires_discoverable_paks() {
     let root = temp_dir("campaign-evolved");
     let shortcut = EDITING_KIT_SHORTCUTS
         .into_iter()
-        .find(|shortcut| shortcut.game == "haloce_evolved")
+        .find(|shortcut| shortcut.game.is_campaign_evolved())
         .unwrap();
     assert!(matches!(
         validate_builtin_editing_kit(shortcut, Some(&root)),
@@ -164,7 +164,7 @@ fn campaign_evolved_validation_requires_discoverable_paks() {
         validate_builtin_editing_kit(shortcut, Some(&root)),
         EditingKitPathStatus::Ready(_)
     ));
-    assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
+    assert!(validate_editing_kit_profile_layout(&root, shortcut.game.as_str()).is_ok());
     let _ = fs::remove_dir_all(root);
 }
 
