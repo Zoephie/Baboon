@@ -3,6 +3,7 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::kits::{KitId, KitStamp, KitView, KitsCommand};
 use crate::app::references::ReferencesCommand;
 use crate::app::search::{
     FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind,

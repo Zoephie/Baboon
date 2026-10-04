@@ -107,7 +107,7 @@ use mods::ModsFeature;
 pub(in crate::app) mod tag_ops;
 use tag_ops::TagOpsFeature;
 pub(in crate::app) mod kits;
-use kits::*;
+use kits::{EditingKitValidationCache, Kit, KitId, KitView, KitViews, KitsFeature, TerminalState};
 pub(in crate::app) mod documents;
 use documents::*;
 pub(in crate::app) mod shell;

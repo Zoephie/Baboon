@@ -2,6 +2,7 @@
 //! review share.
 
 use super::*;
+use crate::app::kits::{EditingKitValidationCache, Kit, KitId};
 use crate::core::document::value::{append_field_path, extension_to_group_tag};
 use crate::app::browser::native_display_path;
 

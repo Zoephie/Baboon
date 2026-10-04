@@ -7,9 +7,9 @@
 //! though it worked. These tests are the cheapest place to catch that.
 
 use super::*;
+use crate::app::kits::{KitView, tag_tree_id};
 use crate::app::mods::TagHistory;
 use crate::app::editor::{AppliedFindFilter, EditorCaches};
-use crate::app::kits::KitView;
 use crate::app::browser::KitBrowser;
 use crate::app::shell::session::RestorePlan;
 

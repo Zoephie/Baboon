@@ -8,6 +8,7 @@
 //! never panic on the geometry a shipped tag can hold.
 
 use super::*;
+use crate::app::kits::{KitMut, tag_tree_id};
 use crate::app::import::BLAM_KEY;
 
 fn entry(display_path: &str, group: &[u8; 4], group_name: Option<&str>) -> TagEntry {

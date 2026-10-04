@@ -6,6 +6,7 @@
 //! feature's state mutably.
 
 use super::*;
+use crate::app::kits::Kit;
 
 /// The application model: open kits and the active one, the live preferences,
 /// the default tag names and the status line.

@@ -3,6 +3,14 @@
 //! around the features.
 
 use super::*;
+use crate::app::kits::{
+    EditingKitValidationCache, Kit, KitId, KitStamp, KitView, KitViews, KitsCommand, KitsFeature,
+    RECOMMENDED_CUSTOM_ICON_SIZE, ScenarioPalette, ScenarioTool, TerminalLineEntry,
+    TerminalLineSeverity, ToolCommandsUiState, copy_custom_icon, custom_profile_tags_conflicts,
+    default_kit_folder_name, folder_to_store, kit_folder_candidates, kit_strip_label,
+    profile_location, remove_unreferenced_custom_icon, resolve_custom_icon_path, tag_tree_id,
+    validate_custom_icon_source, validate_kit_layout,
+};
 use crate::app::tag_ops::{DuplicateBackupPaths, install_root_for_paks};
 use crate::app::mods::{ClearStashConfirm, TagHistory};
 use crate::app::import::{

@@ -27,7 +27,7 @@ use blam_tags::audio::{DecodedPcm, SoundBanks, WwiseBanks, decode_subsound, down
 use eframe::egui;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 
-use super::kit::KitId;
+use crate::app::kits::kit::KitId;
 
 mod waveform;
 pub(super) use waveform::{Waveform, channel_labels};

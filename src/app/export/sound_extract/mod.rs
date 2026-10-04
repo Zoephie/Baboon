@@ -91,7 +91,7 @@ pub(in crate::app) fn sanitize_component(name: &str) -> String {
     let trimmed = cleaned.trim().trim_matches('.');
     if trimmed.is_empty() {
         "sound".to_owned()
-    } else if crate::app::is_windows_reserved_name(trimmed) {
+    } else if crate::app::kits::is_windows_reserved_name(trimmed) {
         format!("_{trimmed}")
     } else {
         trimmed.to_owned()

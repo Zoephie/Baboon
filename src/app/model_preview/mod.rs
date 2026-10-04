@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use crate::app::kits::KitStamp;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
     clean_field_name, clean_field_name_basic, combo_box_with_scroll, combo_scroll_next_index,

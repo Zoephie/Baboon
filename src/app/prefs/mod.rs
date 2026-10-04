@@ -3,6 +3,7 @@
 
 use crate::app::kits::detect::add_standard_editing_kit_profiles;
 use super::*;
+use crate::app::kits::safe_custom_icon_relative_path;
 use crate::app::editor::default_color_swatches;
 use crate::app::browser::{BrowserMode, BrowserSort};
 

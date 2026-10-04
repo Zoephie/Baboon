@@ -8,6 +8,7 @@
 //! evicting.
 
 use super::*;
+use crate::app::kits::{KitMut, tag_tree_id};
 
 fn entry(display_path: &str, group: &[u8; 4], group_name: Option<&str>) -> TagEntry {
     TagEntry {

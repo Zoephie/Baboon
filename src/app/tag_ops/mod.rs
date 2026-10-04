@@ -3,6 +3,7 @@
 //! inside a Campaign Evolved container.
 
 use super::*;
+use crate::app::kits::{Kit, KitId, KitMut, KitStamp, KitView, is_windows_reserved_name};
 use crate::app::mods::{ContainerWriteMode, ContainerWriteOutcome};
 use blam_tags::convert::{CLASSIC_CONVERSION_GAMES, CONVERSION_PROFILES, apply_editing_kit_mcc_header};
 use crate::app::references::{

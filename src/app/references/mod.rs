@@ -2,6 +2,7 @@
 //! jumps, and fixing a tag's dependencies.
 
 use super::*;
+use crate::app::kits::{KitId, KitStamp, TerminalLineEntry};
 use crate::app::search::QueryResultsWindow;
 use crate::core::document::value::append_field_path_for;
 use crate::app::editor::{
