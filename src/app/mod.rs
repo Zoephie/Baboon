@@ -467,7 +467,7 @@ impl Baboon {
                 reveal_target: None,
             },
             documents: DocumentsFeature {
-                save_changes_prompt: SaveChangesPrompt::default(),
+                allow_app_close_once: false,
             },
             shell: ShellFeature {
                 available_update: None,

@@ -7,16 +7,18 @@ pub(in crate::app) mod selection;
 pub(in crate::app) mod saving;
 pub(in crate::app) use saving::ordered_unique_keys;
 pub(in crate::app) mod close;
-pub(in crate::app) use close::{SaveChangesPromptAction, draw_save_changes_prompt};
+pub(in crate::app) use close::SaveChangesPromptAction;
 pub(in crate::app) mod undo;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 
-/// Documents: the save-changes prompt.
+/// Documents: the close in progress. Its save-changes prompt is a dialog in
+/// the host.
 pub(in crate::app) struct DocumentsFeature {
-    /// Modal close transaction; the pending action is executed only after every
-    /// selected dirty document has been saved or discard is confirmed.
-    pub(in crate::app) save_changes_prompt: SaveChangesPrompt,
+    /// Let the next request to close the app through without the prompt: set
+    /// once the prompt has been answered and the app is closing for real. See
+    /// [`Baboon::handle_app_close_request`].
+    pub(in crate::app) allow_app_close_once: bool,
 }
 
 /// What the document windows can be asked to do.

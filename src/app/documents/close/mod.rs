@@ -109,7 +109,7 @@ impl Baboon {
         // Chimp's recovery checkpoints wait for edits to pause; one still
         // waiting when the app or a workspace closes would be lost.
         self.flush_all_chimp_checkpoints();
-        if self.documents.save_changes_prompt.visible
+        if self.dialogs.get::<SaveChangesPrompt>().is_some()
             || self.dialogs.get::<ChimpDiscardPrompt>().is_some()
             || self.has_chimp_save_dialog()
         {
@@ -166,17 +166,15 @@ impl Baboon {
                 .project.active
                 .as_ref()
                 .map(|project| project.recovery_path.clone());
-            self.documents.save_changes_prompt = SaveChangesPrompt {
-                visible: true,
+            self.dialogs.open(SaveChangesPrompt {
                 can_stash,
                 dirty_tags,
                 pending_action: action,
                 error: None,
-                allow_app_close_once: self.documents.save_changes_prompt.allow_app_close_once,
                 stash_file,
                 stashed,
                 confirm_discard: false,
-            };
+            });
             return;
         }
 
@@ -198,8 +196,8 @@ impl Baboon {
         if !ctx.input(|input| input.viewport().close_requested()) {
             return;
         }
-        if self.documents.save_changes_prompt.allow_app_close_once {
-            self.documents.save_changes_prompt.allow_app_close_once = false;
+        if self.documents.allow_app_close_once {
+            self.documents.allow_app_close_once = false;
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -209,7 +207,7 @@ impl Baboon {
             self.model.status = "Wait for the folder move/rename to finish before closing".to_owned();
             return;
         }
-        if self.documents.save_changes_prompt.visible
+        if self.dialogs.get::<SaveChangesPrompt>().is_some()
             || self.dialogs.get::<ChimpDiscardPrompt>().is_some()
             || self.has_chimp_save_dialog()
         {
@@ -248,7 +246,7 @@ impl Baboon {
                 } else {
                     clear_last_session();
                 }
-                self.documents.save_changes_prompt.allow_app_close_once = true;
+                self.documents.allow_app_close_once = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             PendingCloseAction::CloseTab(key) => self.close_tab(&key),
@@ -286,21 +284,23 @@ impl Baboon {
     }
 
     /// Carry out the save-changes prompt's answer.
+    ///
+    /// The prompt is taken out of the host while it is, and put back when it
+    /// stays up: an armed discard, or a save or stash that failed.
     pub(in crate::app) fn apply_save_changes_prompt_action(&mut self, action: SaveChangesPromptAction, ctx: &egui::Context) {
+        let Some(mut prompt) = self.dialogs.close::<SaveChangesPrompt>() else {
+            return;
+        };
         match action {
-            SaveChangesPromptAction::None => {}
-            SaveChangesPromptAction::Cancel => {
-                self.documents.save_changes_prompt.visible = false;
-                self.documents.save_changes_prompt.dirty_tags.clear();
-                self.documents.save_changes_prompt.error = None;
-                self.documents.save_changes_prompt.confirm_discard = false;
-            }
+            SaveChangesPromptAction::None => self.dialogs.open(prompt),
+            SaveChangesPromptAction::Cancel => {}
             // Arming, not acting: the click that deletes is the next one.
             SaveChangesPromptAction::ConfirmDiscard => {
-                self.documents.save_changes_prompt.confirm_discard = true;
+                prompt.confirm_discard = true;
+                self.dialogs.open(prompt);
             }
             SaveChangesPromptAction::StashForMod => {
-                let action = self.documents.save_changes_prompt.pending_action.clone();
+                let action = prompt.pending_action.clone();
                 let now = ctx.input(|input| input.time);
                 match self.checkpoint_campaign_project(self.model.active, now) {
                     Ok(_) => {
@@ -308,17 +308,13 @@ impl Baboon {
                         // longer unsaved work: leaving them dirty would prompt
                         // again on the next close and, for a CloseApp walking
                         // several kits, would never terminate.
-                        for entry in &self.documents.save_changes_prompt.dirty_tags {
+                        for entry in &prompt.dirty_tags {
                             if let Some(document) =
                                 self.model.kits[self.model.active].parsed_tags.get_mut(&entry.tag_id)
                             {
                                 document.dirty.clear();
                             }
                         }
-                        self.documents.save_changes_prompt.visible = false;
-                        self.documents.save_changes_prompt.dirty_tags.clear();
-                        self.documents.save_changes_prompt.error = None;
-                        self.documents.save_changes_prompt.confirm_discard = false;
                         self.model.status = match self.model.kits[self.model.active]
                             .project.active
                             .as_ref()
@@ -335,13 +331,13 @@ impl Baboon {
                         self.request_close_action(action, ctx);
                     }
                     Err(error) => {
-                        self.documents.save_changes_prompt.error =
-                            Some(format!("Could not stash into the project: {error}"));
+                        prompt.error = Some(format!("Could not stash into the project: {error}"));
+                        self.dialogs.open(prompt);
                     }
                 }
             }
             SaveChangesPromptAction::DontSave => {
-                let action = self.documents.save_changes_prompt.pending_action.clone();
+                let action = prompt.pending_action.clone();
                 // Discarding is explicit, so drop the dirty flags the prompt
                 // listed. Without this, a CloseApp that spans several kits
                 // would see the same unsaved work again and re-prompt forever.
@@ -352,8 +348,7 @@ impl Baboon {
                 // workspace's own recovery file; a `.baboon` the user opened or
                 // saved is never written by a close.
                 let kit = self.model.active;
-                let tag_ids: Vec<String> = self
-                    .documents.save_changes_prompt
+                let tag_ids: Vec<String> = prompt
                     .dirty_tags
                     .iter()
                     .map(|entry| entry.tag_id.clone())
@@ -377,10 +372,6 @@ impl Baboon {
                 if let Err(error) = self.checkpoint_campaign_project(kit, now) {
                     self.model.status = format!("Could not update the Campaign Evolved project: {error}");
                 }
-                self.documents.save_changes_prompt.visible = false;
-                self.documents.save_changes_prompt.dirty_tags.clear();
-                self.documents.save_changes_prompt.error = None;
-                self.documents.save_changes_prompt.confirm_discard = false;
                 self.request_close_action(action, ctx);
             }
             SaveChangesPromptAction::Save(tag_ids) => {
@@ -430,10 +421,7 @@ impl Baboon {
                     }
                 }
                 if errors.is_empty() {
-                    let action = self.documents.save_changes_prompt.pending_action.clone();
-                    self.documents.save_changes_prompt.visible = false;
-                    self.documents.save_changes_prompt.dirty_tags.clear();
-                    self.documents.save_changes_prompt.error = None;
+                    let action = prompt.pending_action.clone();
                     self.model.status = if saved.is_empty() {
                         "No files selected to save".to_owned()
                     } else {
@@ -442,14 +430,15 @@ impl Baboon {
                     self.request_close_action(action, ctx);
                 } else {
                     let message = format!("Save failed: {}", errors.join("; "));
-                    let pending_action = self.documents.save_changes_prompt.pending_action.clone();
-                    self.documents.save_changes_prompt.dirty_tags =
-                        self.model.dirty_tags_for_close_action(&pending_action);
+                    prompt.dirty_tags = self
+                        .model
+                        .dirty_tags_for_close_action(&prompt.pending_action);
                     // A failed save leaves the prompt up, and an armed discard
                     // has no business surviving into it.
-                    self.documents.save_changes_prompt.confirm_discard = false;
+                    prompt.confirm_discard = false;
                     self.model.status = message.clone();
-                    self.documents.save_changes_prompt.error = Some(message);
+                    prompt.error = Some(message);
+                    self.dialogs.open(prompt);
                 }
             }
         }
@@ -510,12 +499,16 @@ pub(in crate::app) fn discard_button(can_stash: bool, confirmed: bool) -> Discar
     }
 }
 
-/// The save-changes prompt, while it is up. Its answer is carried out once
-/// drawing is over.
-pub(in crate::app) fn draw_save_changes_prompt(cx: &Ctx, documents: &mut DocumentsFeature) {
-    let action = render_save_changes_prompt(cx.egui, &mut documents.save_changes_prompt);
-    if !matches!(action, SaveChangesPromptAction::None) {
-        cx.send(DocumentsCommand::SaveChangesPrompt(action));
+/// The save-changes prompt. It stays up until its answer is carried out once
+/// drawing is over; that takes it back from the host, and puts it back if
+/// the answer leaves it up.
+impl Dialog for SaveChangesPrompt {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let action = render_save_changes_prompt(cx.egui, self);
+        if !matches!(action, SaveChangesPromptAction::None) {
+            cx.send(DocumentsCommand::SaveChangesPrompt(action));
+        }
+        true
     }
 }
 
@@ -523,10 +516,6 @@ pub(in crate::app) fn render_save_changes_prompt(
     ctx: &egui::Context,
     prompt: &mut SaveChangesPrompt,
 ) -> SaveChangesPromptAction {
-    if !prompt.visible {
-        return SaveChangesPromptAction::None;
-    }
-
     let mut action = SaveChangesPromptAction::None;
     egui::Window::new("Baboon - Save Changes?")
         .collapsible(false)

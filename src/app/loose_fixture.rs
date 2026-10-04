@@ -327,7 +327,7 @@ impl PromptDriver {
     ) -> Vec<(String, egui::Rect)> {
         self.time += 0.1;
         let output = crate::app::run_ui_test(&self.ctx, screen(events, self.time), |ui| {
-            draw_save_changes_prompt(&cx!(app, ui.ctx()), &mut app.documents);
+            app.dialogs.draw(&cx!(app, ui.ctx()), &app_reads!(app));
             // What the prompt answered runs once drawing is over, inside the
             // same pass as in a frame, so a close it re-issues is in this
             // pass's output.

@@ -36,7 +36,6 @@ pub(in crate::app) struct ChimpDiscardPrompt {
 /// app exit; the next native close request is then allowed through instead of
 /// being vetoed and prompting again.
 pub(in crate::app) struct SaveChangesPrompt {
-    pub(in crate::app) visible: bool,
     /// Whether this workspace can hold edits in a Baboon project rather than
     /// writing them into the game. Container sources can; a loose kit has
     /// nowhere to stash to, so it is offered Save or nothing.
@@ -44,7 +43,6 @@ pub(in crate::app) struct SaveChangesPrompt {
     pub(in crate::app) dirty_tags: Vec<DirtyTagEntry>,
     pub(in crate::app) pending_action: PendingCloseAction,
     pub(in crate::app) error: Option<String>,
-    pub(in crate::app) allow_app_close_once: bool,
     /// Where discarding would delete from, and how many of the listed tags have
     /// a stashed copy there. Discarding on a stashing workspace is not "close
     /// without writing anything" — it deletes rows out of a file that persists
@@ -57,18 +55,3 @@ pub(in crate::app) struct SaveChangesPrompt {
     pub(in crate::app) confirm_discard: bool,
 }
 
-impl Default for SaveChangesPrompt {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            can_stash: false,
-            dirty_tags: Vec::new(),
-            pending_action: PendingCloseAction::CloseApp,
-            error: None,
-            allow_app_close_once: false,
-            stash_file: None,
-            stashed: 0,
-            confirm_discard: false,
-        }
-    }
-}

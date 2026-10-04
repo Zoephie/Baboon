@@ -86,7 +86,6 @@ impl Baboon {
     /// Settle what this frame queued after every window has drawn: prompts,
     /// pending opens and field navigation, and the sound drains.
     fn process_frame_requests(&mut self, ctx: &egui::Context) {
-        draw_save_changes_prompt(&cx!(self, ctx), &mut self.documents);
         draw_last_opened_windows_prompt(&cx!(self, ctx), &mut self.shell);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);

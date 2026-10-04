@@ -811,19 +811,23 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "save_changes_prompt",
-            &["documents.save_changes_prompt"],
+            &["dialog:SaveChangesPrompt"],
             &["documents/close/mod.rs"],
             memory_kit,
             |h| {
-                h.app.documents.save_changes_prompt = SaveChangesPrompt {
-                    visible: true,
+                h.app.dialogs.open(SaveChangesPrompt {
+                    can_stash: false,
                     dirty_tags: vec![DirtyTagEntry {
                         path: "objects/smoke.biped".to_owned(),
                         tag_id: biped_key(),
                         checked: true,
                     }],
-                    ..Default::default()
-                };
+                    pending_action: PendingCloseAction::CloseApp,
+                    error: None,
+                    stash_file: None,
+                    stashed: 0,
+                    confirm_discard: false,
+                });
             },
             &["Baboon - Save Changes?", "objects/smoke.biped"],
         ),
@@ -1422,6 +1426,10 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("shell.restored_active_kit", "session restore bookkeeping"),
     ("browser.reveal_target", "a one-shot browser request"),
     ("search.field_value_searching", "running flag of the field value search"),
+    (
+        "documents.allow_app_close_once",
+        "lets the confirmed second app-close request through",
+    ),
     ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),
     ("export.pending_sound_extract", "a queued request"),
