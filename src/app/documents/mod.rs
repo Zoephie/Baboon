@@ -2,6 +2,7 @@
 //! and closing tabs or the app with the save-changes prompt.
 
 use super::*;
+use crate::app::shell::{OperationNotice, WorkerMessage, spawn_worker};
 use crate::app::kits::{
     KitId, KitStamp, TerminalLineEntry, document_edits_are_saveable, is_render_method_layout_group,
     tag_tree_id, trim_terminal_lines,

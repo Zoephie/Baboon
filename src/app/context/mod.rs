@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use super::*;
+use crate::app::shell::{AppAction, FirstRunCommand, SettingsCommand, WorkerMessage, spawn_worker};
 use crate::app::documents::DocumentsCommand;
 use crate::app::kits::KitsCommand;
 use crate::app::tag_ops::TagOpsCommand;

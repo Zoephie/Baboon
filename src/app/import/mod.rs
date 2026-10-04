@@ -3,6 +3,7 @@
 //! import.
 
 use super::*;
+use crate::app::shell::{FolderConversionProgress, WorkerMessage, spawn_worker};
 use crate::app::kits::{KitId, KitStamp, ToolCommandArgKind, pick_tool_command_path};
 use crate::app::help::HelpCommand;
 use crate::app::editor::lost_focus_once;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::shell::apply_next_worker_message;
 
 /// A save rebuilds packages on the UI thread and writes them on a worker.
 /// An edit that lands in between is not in what was written, so that

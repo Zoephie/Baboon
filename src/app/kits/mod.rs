@@ -4,6 +4,10 @@
 //! scenarios, and dropping tags on the tools.
 
 use super::*;
+use crate::app::shell::{
+    CommandLineLaunch, EntryIndexProgressState, IndexingNotice, ReferenceIndexProgressState,
+    SettingsWindow, WorkerMessage, resolve_launch_tag_entries, spawn_worker,
+};
 use crate::app::import::BlamUiState;
 use crate::app::references::read_entry_dependencies;
 use crate::app::search::FieldValueIndex;

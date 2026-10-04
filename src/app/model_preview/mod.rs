@@ -2,6 +2,7 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use crate::app::shell::{WorkerMessage, spawn_background, spawn_worker};
 use crate::app::kits::KitStamp;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,

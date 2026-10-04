@@ -464,10 +464,13 @@ fn an_autosave_that_panics_is_no_longer_in_flight() {
     app.model.kits[0].project.active = Some(project);
 
     let ctx = egui::Context::default();
-    crate::app::with_panicking_workers(|| {
+    crate::app::shell::with_panicking_workers(|| {
         write_campaign_project_in_background(&app.tx, &ctx, write)
     });
-    assert!(crate::app::apply_next_worker_message(&mut app), "the autosave answered");
+    assert!(
+        crate::app::shell::apply_next_worker_message(&mut app),
+        "the autosave answered"
+    );
     let project = app.model.kits[0].project.active.as_ref().unwrap();
     assert_eq!(project.save_in_flight, None);
     assert!(app.model.status.contains("crashed"), "{}", app.model.status);

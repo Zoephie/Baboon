@@ -3,6 +3,7 @@
 //! review, and their windows.
 
 use super::*;
+use crate::app::shell::{WorkerMessage, spawn_worker};
 use crate::app::kits::{KitId, KitStamp, tag_tree_id};
 use crate::app::compare::{TagFieldDiff, describe_tag, diff_tags};
 use crate::app::chimp::ChimpMount;

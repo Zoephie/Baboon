@@ -4,6 +4,7 @@
 //! thumbnails.
 
 use super::*;
+use crate::app::shell::WorkerMessage;
 use crate::app::kits::{KitId, KitStamp, KitToolDropTarget, KitView, ScenarioPalette};
 use crate::app::compare::{CompareCommand, GIT_REVIEW_TITLE};
 use crate::app::editor::{

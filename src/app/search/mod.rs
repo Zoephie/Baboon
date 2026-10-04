@@ -2,6 +2,7 @@
 //! listings (map ids, sounds by class).
 
 use super::*;
+use crate::app::shell::{FieldValueMatch, WorkerMessage, spawn_worker};
 use crate::app::kits::{KitId, KitStamp};
 use crate::app::help::{DefDocs, DefEntry, build_def_docs};
 use crate::app::editor::{

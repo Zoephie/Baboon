@@ -2,6 +2,7 @@
 //! It owns which dialogs are open and drawing them; what a dialog shows and what it asks for belong to the feature that defines it.
 
 use super::*;
+use crate::app::shell::ShellFeature;
 use crate::app::kits::KitsFeature;
 use crate::app::search::SearchFeature;
 use std::any::{Any, TypeId};

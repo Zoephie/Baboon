@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::shell::apply_next_worker_message;
 
 /// Edits schedule one recovery checkpoint for when they pause, instead of
 /// a full rebuild and write per keystroke.

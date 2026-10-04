@@ -4,6 +4,7 @@
 //! container, and the windows that choose what and where.
 
 use super::*;
+use crate::app::shell::{ContainerDumpJob, WorkerMessage, spawn_export, spawn_worker};
 use crate::app::kits::{KitId, KitStamp};
 use crate::app::editor::material::clean_field_key;
 use crate::app::references::dependency_entry_reference_path;

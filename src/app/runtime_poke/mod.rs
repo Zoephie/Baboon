@@ -12,6 +12,7 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
 use super::*;
+use crate::app::shell::{WorkerMessage, spawn_worker};
 use crate::app::kits::KitId;
 use crate::app::compare::{element_fingerprint, shallow_fingerprint};
 

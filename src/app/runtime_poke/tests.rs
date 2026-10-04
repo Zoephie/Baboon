@@ -910,11 +910,14 @@ fn an_undo_that_panics_keeps_the_record_and_settles() {
     let mut app = Baboon::for_test();
     app.poke.last_poke = Some(last_poke_for_test(patch_for_test(), vec![1]));
     let ctx = egui::Context::default();
-    crate::app::with_panicking_workers(|| app.begin_undo_last_poke(ctx.clone()));
+    crate::app::shell::with_panicking_workers(|| app.begin_undo_last_poke(ctx.clone()));
     assert!(app.poke.poke_undo_running);
     assert!(app.poke.last_poke.is_none(), "taken to run the undo");
 
-    assert!(crate::app::apply_next_worker_message(&mut app), "the undo answered");
+    assert!(
+        crate::app::shell::apply_next_worker_message(&mut app),
+        "the undo answered"
+    );
     assert!(!app.poke.poke_undo_running, "no longer running");
     assert!(app.poke.last_poke.is_some(), "the record came back");
     assert!(app.model.status.contains("tried again"), "{}", app.model.status);
@@ -931,13 +934,16 @@ fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
         state: PokeDialogState::Ready(plan),
     });
     let ctx = egui::Context::default();
-    crate::app::with_panicking_workers(|| app.confirm_poke(ctx.clone()));
+    crate::app::shell::with_panicking_workers(|| app.confirm_poke(ctx.clone()));
     assert!(matches!(
         app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
         Some(PokeDialogState::Writing)
     ));
 
-    assert!(crate::app::apply_next_worker_message(&mut app), "the write answered");
+    assert!(
+        crate::app::shell::apply_next_worker_message(&mut app),
+        "the write answered"
+    );
     assert!(matches!(
         app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
         Some(PokeDialogState::Error(_))

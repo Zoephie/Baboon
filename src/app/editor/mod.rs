@@ -3,6 +3,7 @@
 //! model), the edits they collect and how the app applies them.
 
 use super::*;
+use crate::app::shell::{WorkerMessage, draw_keyword_bar, draw_scenario_launcher_buttons, spawn_worker};
 use crate::app::documents::PendingCloseAction;
 use crate::app::kits::{KitId, KitStamp, KitView, KitsCommand};
 use crate::app::references::ReferencesCommand;
