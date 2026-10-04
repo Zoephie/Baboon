@@ -1504,9 +1504,8 @@ pub(super) fn halo1_object_collision_overlay(
     object_tag: &TagFile,
     source: &TagSource,
 ) -> Option<RenderModelPreview> {
-    let root = object_tag.root();
-    let model_reference = tag_ref_path(&root, "model")?;
-    let collision_reference = tag_ref_path(&root, "collision model")?;
+    let model_reference = halo1_object_reference(object_tag, "model")?;
+    let collision_reference = halo1_object_reference(object_tag, "collision model")?;
     let render =
         load_referenced_tag_from_source(source, &model_reference, "gbxmodel", b"mod2").ok()?;
     let collision = load_referenced_tag_from_source(

@@ -3,6 +3,171 @@
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::app) struct BrowserSearchScope {
+    pub tags: bool,
+    pub folders: bool,
+    pub keywords: bool,
+}
+impl Default for BrowserSearchScope {
+    fn default() -> Self {
+        Self {
+            tags: true,
+            folders: false,
+            keywords: false,
+        }
+    }
+}
+impl BrowserSearchScope {
+    pub(in crate::app) fn hint(self) -> String {
+        let names: Vec<_> = [
+            (self.tags, "tags"),
+            (self.folders, "folders"),
+            (self.keywords, "keywords"),
+        ]
+        .into_iter()
+        .filter_map(|(on, name)| on.then_some(name))
+        .collect();
+        let targets = if names.len() == 3 {
+            format!("{}, {} & {}", names[0], names[1], names[2])
+        } else {
+            names.join(" & ")
+        };
+        format!("search {targets}")
+    }
+}
+
+pub(in crate::app) fn search_scope_controls(ui: &mut Ui, scope: &mut BrowserSearchScope) {
+    context_menu_separator(ui);
+    ui.label(RichText::new("Search in").color(subtle_dark()));
+    ui.checkbox(&mut scope.tags, "Tags");
+    ui.checkbox(&mut scope.folders, "Folders");
+    ui.checkbox(&mut scope.keywords, "Keywords");
+    // A search always has at least one target.
+    if !scope.tags && !scope.folders && !scope.keywords {
+        scope.tags = true;
+    }
+}
+
+/// Parsed once per search, then matched without per-entry lowercase strings.
+pub(in crate::app) struct ScopedSearchQuery {
+    branches: Vec<Vec<String>>,
+}
+impl ScopedSearchQuery {
+    pub(in crate::app) fn new(query: &str) -> Self {
+        Self {
+            branches: query
+                .split('|')
+                .map(|branch| {
+                    branch
+                        .split_whitespace()
+                        .map(str::to_ascii_lowercase)
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+    fn matches(&self, matches_term: impl Fn(&str) -> bool) -> bool {
+        let mut had_term = false;
+        for branch in &self.branches {
+            had_term |= !branch.is_empty();
+            if !branch.is_empty() && branch.iter().all(|term| matches_term(term)) {
+                return true;
+            }
+        }
+        !had_term
+    }
+    pub(in crate::app) fn entry(
+        &self,
+        entry: &TagEntry,
+        scope: BrowserSearchScope,
+        keywords: &[String],
+    ) -> bool {
+        let split = entry.display_path.rfind(['/', '\\']);
+        let filename = split
+            .map(|at| &entry.display_path[at + 1..])
+            .unwrap_or(&entry.display_path);
+        let parents = split.map(|at| &entry.display_path[..at]).unwrap_or("");
+        let group_bytes = entry.group_tag.to_be_bytes();
+        let fourcc = std::str::from_utf8(&group_bytes).unwrap_or("");
+        self.matches(|term| {
+            (scope.tags
+                && (search_term_matches(term, filename)
+                    || (!term.starts_with('^')
+                        && !term.ends_with('$')
+                        && (search_term_matches(term, fourcc)
+                            || search_term_matches(
+                                term,
+                                entry.group_name.as_deref().unwrap_or(""),
+                            )))))
+                || (scope.folders
+                    && parents
+                        .split(['/', '\\'])
+                        .any(|part| search_term_matches(term, part)))
+                || (scope.keywords
+                    && keywords
+                        .iter()
+                        .any(|keyword| search_term_matches(term, keyword)))
+        })
+    }
+    pub(in crate::app) fn folder(&self, path: &str) -> bool {
+        self.matches(|term| {
+            path.split(['/', '\\'])
+                .any(|part| search_term_matches(term, part))
+        })
+    }
+}
+fn search_term_matches(term: &str, text: &str) -> bool {
+    let start = term.starts_with('^');
+    let end = term.ends_with('$') && term.len() > 1;
+    let inner = term.trim_start_matches('^');
+    let inner = if end {
+        &inner[..inner.len().saturating_sub(1)]
+    } else {
+        inner
+    };
+    if inner.is_empty() {
+        return true;
+    }
+    match (start, end) {
+        (true, true) => text.eq_ignore_ascii_case(inner),
+        (true, false) => text
+            .get(..inner.len())
+            .is_some_and(|text| text.eq_ignore_ascii_case(inner)),
+        (false, true) => text
+            .get(text.len().saturating_sub(inner.len())..)
+            .is_some_and(|text| text.eq_ignore_ascii_case(inner)),
+        (false, false) => contains_ignore_ascii_case(text, inner),
+    }
+}
+pub(in crate::app) fn scoped_entry_matches(
+    entry: &TagEntry,
+    filter: &str,
+    scope: BrowserSearchScope,
+    keywords: &[String],
+) -> bool {
+    ScopedSearchQuery::new(filter).entry(entry, scope, keywords)
+}
+pub(in crate::app) fn scoped_folder_matches(path: &str, filter: &str) -> bool {
+    ScopedSearchQuery::new(filter).folder(path)
+}
+
+/// The prefix is normalized once by the search job, not once per tag.
+pub(in crate::app) fn search_entry_is_beneath(entry: &TagEntry, prefix: &str) -> bool {
+    prefix.is_empty()
+        || (entry.display_path.len() > prefix.len()
+            && entry
+                .display_path
+                .as_bytes()
+                .iter()
+                .take(prefix.len())
+                .zip(prefix.as_bytes())
+                .all(|(a, b)| {
+                    let a = if *a == b'\\' { b'/' } else { *a };
+                    a.eq_ignore_ascii_case(b)
+                }))
+}
+
 pub(in crate::app) fn node_matches(node: &TagTreeNode, entries: &[TagEntry], filter: &str) -> bool {
     node.entries
         .iter()
@@ -145,6 +310,7 @@ pub(in crate::app) fn browser_filter_warning(filter: &str) -> Option<String> {
 /// Collect the indices of all entries matching `filter`, in display order.
 /// Called only when the cached query changes (see [`FilterCache`]), not per
 /// frame, so the O(N) lowercase scan happens at most once per keystroke.
+#[cfg(test)]
 pub(in crate::app) fn compute_filter_matches(entries: &[TagEntry], filter: &str) -> Vec<usize> {
     let filter_lower = filter.to_ascii_lowercase();
     entries
@@ -161,6 +327,50 @@ mod tests {
     use crate::source::{TagEntry, TagEntryLocation};
     use std::path::PathBuf;
 
+    #[test]
+    fn prepared_browser_matcher_handles_large_kits_without_changing_results() {
+        let entries: Vec<_> = (0..60_000)
+            .map(|index| {
+                let mut e = entry(
+                    &format!("objects/weapons/rifle{index}.render_model"),
+                    b"mode",
+                );
+                e.group_name = Some("render_model".into());
+                e
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let baseline = entries
+            .iter()
+            .filter(|entry| entry_matches(entry, "rifle mode"))
+            .count();
+        let baseline_time = started.elapsed();
+        let query = ScopedSearchQuery::new("rifle mode");
+        let started = std::time::Instant::now();
+        let prepared = entries
+            .iter()
+            .filter(|entry| {
+                query.entry(
+                    entry,
+                    BrowserSearchScope {
+                        tags: true,
+                        folders: false,
+                        keywords: false,
+                    },
+                    &[],
+                )
+            })
+            .count();
+        let prepared_time = started.elapsed();
+        assert_eq!(baseline, prepared);
+        assert_eq!(prepared, 60_000);
+        eprintln!(
+            "60,000 tags: legacy matcher {:.2} ms, prepared matcher {:.2} ms",
+            baseline_time.as_secs_f64() * 1000.0,
+            prepared_time.as_secs_f64() * 1000.0
+        );
+    }
+
     fn entry(display_path: &str, group: &[u8; 4]) -> TagEntry {
         TagEntry {
             key: display_path.to_owned(),
@@ -169,6 +379,112 @@ mod tests {
             group_name: None,
             location: TagEntryLocation::LooseFile(PathBuf::from(display_path)),
         }
+    }
+
+    #[test]
+    fn search_scopes_match_folders_keywords_and_combined_terms() {
+        let e = entry("objects/brute/armor.bitmap", b"bitm");
+        let tags = BrowserSearchScope {
+            tags: true,
+            folders: false,
+            keywords: false,
+        };
+        let folders = BrowserSearchScope {
+            tags: false,
+            folders: true,
+            keywords: false,
+        };
+        let keywords = BrowserSearchScope {
+            tags: false,
+            folders: false,
+            keywords: true,
+        };
+        let words = vec!["needs work".into(), "paddy".into()];
+        assert!(scoped_entry_matches(&e, "armor", tags, &words));
+        assert!(!scoped_entry_matches(&e, "brute", tags, &words));
+        assert!(scoped_entry_matches(&e, "^BRUTE$", folders, &words));
+        assert!(!scoped_entry_matches(&e, "armor", folders, &words));
+        assert!(scoped_entry_matches(&e, "needs work", keywords, &words));
+        assert!(!scoped_entry_matches(&e, "armor", keywords, &words));
+        assert!(scoped_entry_matches(
+            &e,
+            "brute armor paddy",
+            BrowserSearchScope {
+                tags: true,
+                folders: true,
+                keywords: true
+            },
+            &words
+        ));
+        assert!(scoped_entry_matches(&e, "wrong | paddy", keywords, &words));
+        assert_eq!(folders.hint(), "search folders");
+        assert_eq!(
+            BrowserSearchScope {
+                tags: true,
+                folders: false,
+                keywords: true
+            }
+            .hint(),
+            "search tags & keywords"
+        );
+        assert_eq!(BrowserSearchScope::default().hint(), "search tags");
+    }
+
+    #[test]
+    fn scoped_cache_tracks_keyword_edits_and_keeps_empty_folder_matches() {
+        let root =
+            std::env::temp_dir().join(format!("baboon-folder-search-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("empty_brute/nested")).unwrap();
+        let mut cache = FilterCache::default();
+        let e = entry("objects/armor.bitmap", b"bitm");
+        let mut keywords = std::collections::BTreeMap::new();
+        cache.refresh_scoped(
+            1,
+            "brute",
+            &[e.clone()],
+            false,
+            Path::new(""),
+            Some(&root),
+            BrowserSearchScope {
+                tags: false,
+                folders: true,
+                keywords: false,
+            },
+            &keywords,
+        );
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.tree.children[0].label, "empty_brute");
+        assert_eq!(cache.tree.children[0].children[0].label, "nested");
+        let keyword_scope = BrowserSearchScope {
+            tags: false,
+            folders: false,
+            keywords: true,
+        };
+        cache.refresh_scoped(
+            1,
+            "wip",
+            &[e.clone()],
+            false,
+            Path::new("objects"),
+            None,
+            keyword_scope,
+            &keywords,
+        );
+        assert!(cache.entries.is_empty());
+        keywords.insert(e.key.clone(), vec!["wip".into()]);
+        cache.refresh_scoped(
+            1,
+            "wip",
+            &[e.clone()],
+            false,
+            Path::new("objects"),
+            None,
+            keyword_scope,
+            &keywords,
+        );
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.tree.entries, vec![0]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

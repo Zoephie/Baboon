@@ -77,6 +77,46 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
     }
 }
 
+/// Whether a painted hover popup may show this frame, timed as egui 0.29
+/// times its own tooltips (`Response::should_show_hover_ui`): not until the
+/// pointer has rested for `tooltip_delay`, not after a click until the
+/// pointer moves again, and at once while one was shown within
+/// `tooltip_grace_time`, so moving along the rows keeps the popup up.
+/// Call it only for a hovered response: showing is what starts the grace.
+pub(in crate::app) fn hover_popup_due(ui: &Ui) -> bool {
+    let ctx = ui.ctx();
+    let interaction = ctx.style().interaction.clone();
+    let (now, since_scroll, since_click, since_move) = ctx.input(|input| {
+        (
+            input.time,
+            input.time_since_last_scroll(),
+            input.pointer.time_since_last_click(),
+            input.pointer.time_since_last_movement(),
+        )
+    });
+    if since_scroll < interaction.tooltip_delay {
+        ctx.request_repaint_after_secs(interaction.tooltip_delay - since_scroll);
+        return false;
+    }
+    // Clicking a row and resting there should not raise its popup.
+    if since_click < since_move + 0.1 {
+        return false;
+    }
+    let shown_id = egui::Id::new("baboon_hover_popup_shown");
+    let recently_shown = ctx
+        .data(|data| data.get_temp::<f64>(shown_id))
+        .is_some_and(|shown| now - shown < f64::from(interaction.tooltip_grace_time));
+    if !recently_shown {
+        let still_for = since_scroll.min(since_move).min(since_click);
+        if still_for < interaction.tooltip_delay {
+            ctx.request_repaint_after_secs(interaction.tooltip_delay - still_for);
+            return false;
+        }
+    }
+    ctx.data_mut(|data| data.insert_temp(shown_id, now));
+    true
+}
+
 /// Hover text for a drag source, which egui's own tooltips cannot be.
 ///
 /// An egui 0.29 tooltip is an `Area`, and once one has shown, the next
@@ -88,7 +128,7 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
 /// instead: pure painting on a Tooltip-order layer. A painter registers no
 /// widgets and no area, so nothing exists for a press to land on.
 pub(in crate::app) fn hover_tooltip_beside_pointer(ui: &Ui, response: &egui::Response, text: &str) {
-    if !response.hovered() || response.dragged() {
+    if !response.hovered() || response.dragged() || !hover_popup_due(ui) {
         return;
     }
     let Some(pointer) = ui.ctx().pointer_latest_pos() else {
@@ -266,6 +306,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Duplicate" => Some(ButtonIcon::Duplicate),
         "Delete" => Some(ButtonIcon::Garbage),
         "Move" => Some(ButtonIcon::Move),
+        "Copy To" => Some(ButtonIcon::Copy),
         "Open with File Explorer" => Some(ButtonIcon::FileExplorer),
         "Add to Favorites" | "Remove from Favorites" => Some(ButtonIcon::Favourite),
         "Copy Tag Path" => Some(ButtonIcon::CopyPath),
@@ -510,6 +551,15 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
             ui.close_menu();
         }
+        if is_bitmap_group(entry.group_tag)
+            && browser_game_keeps_bitmap_sources(ui)
+            && context_menu_button(ui, "Extract bitmap source...")
+                .on_hover_text(BITMAP_SOURCE_HOVER)
+                .clicked()
+        {
+            action = Some(BrowserAction::ExtractBitmapSource(entry.key.clone()));
+            ui.close_menu();
+        }
         if crate::app::editor::is_sound_group(entry.group_tag) {
             let language = browser_sound_language(ui);
             let localized = sound_key_may_have_languages(&entry.key);
@@ -583,11 +633,15 @@ fn entry_filename_lower(entry: &TagEntry) -> String {
 /// Reorder a node's entry indices for display. `Natural` borrows the input with
 /// no allocation; `Name`/`Type` clone-and-sort.
 fn ordered_indices<'a>(
+    ui: &Ui,
     indices: &'a [usize],
     entries: &[TagEntry],
     sort: BrowserSort,
 ) -> std::borrow::Cow<'a, [usize]> {
     use std::borrow::Cow;
+    if let Some(indices) = table_order_entries(ui, indices, entries) {
+        return Cow::Owned(indices);
+    }
     match sort {
         BrowserSort::Natural => Cow::Borrowed(indices),
         // `sort_by_cached_key`, not `sort_by`: the key is a freshly lowercased
@@ -612,7 +666,10 @@ fn ordered_indices<'a>(
     }
 }
 
-fn ordered_child_indices(children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
+fn ordered_child_indices(ui: &Ui, children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
+    if let Some(indices) = table_order_folders(ui, children) {
+        return indices;
+    }
     let mut indices: Vec<usize> = (0..children.len()).collect();
     if !matches!(sort, BrowserSort::Natural) {
         indices.sort_by_cached_key(|&index| children[index].label.to_ascii_lowercase());
@@ -716,68 +773,66 @@ pub(in crate::app) fn draw_tree(
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     let child_sort = if groups_mode {
         BrowserSort::Natural
     } else {
         sort
     };
-    for index in ordered_child_indices(&tree.children, child_sort) {
+    for index in ordered_child_indices(ui, &tree.children, child_sort) {
         let node = &tree.children[index];
-        clicked = clicked.or_else(|| {
-            draw_tree_node(
-                ui,
-                node,
-                entries,
-                selected,
-                filter,
-                expand_folders,
-                show_prefixes,
-                double_click_to_open,
-                groups_mode,
-                reveal,
-                sort,
-                folders_before_tags,
-                favorite_keys,
-                is_container,
-            )
-        });
+        let action = draw_tree_node(
+            ui,
+            node,
+            entries,
+            selected,
+            filter,
+            expand_folders,
+            show_prefixes,
+            double_click_to_open,
+            groups_mode,
+            reveal,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+            is_container,
+        );
+        clicked = clicked.or(action);
     }
     if folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     // Last, so it covers whatever the tree left over. Groups mode is excluded
     // for the same reason the folder menu is: a group node's path is a label,
     // not a folder, and there is no root to author into.
     if is_container && !groups_mode {
-        clicked = clicked.or_else(|| draw_container_root_target(ui));
+        let action = draw_container_root_target(ui);
+        clicked = clicked.or(action);
     }
     clicked
 }
@@ -806,58 +861,55 @@ pub(in crate::app) fn draw_tree_lazy(
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
-    for index in ordered_child_indices(&tree.children, sort) {
+    for index in ordered_child_indices(ui, &tree.children, sort) {
         let node = &mut tree.children[index];
-        clicked = clicked.or_else(|| {
-            draw_tree_node_lazy(
-                ui,
-                node,
-                entries,
-                group_tree.as_deref_mut(),
-                root,
-                names,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                status_update,
-                reveal,
-                sort,
-                folders_before_tags,
-                favorite_keys,
-            )
-        });
+        let action = draw_tree_node_lazy(
+            ui,
+            node,
+            entries,
+            group_tree.as_deref_mut(),
+            root,
+            names,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            status_update,
+            reveal,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     if folders_before_tags {
-        clicked = clicked.or_else(|| {
-            draw_entry_list(
-                ui,
-                &tree.entries,
-                entries,
-                selected,
-                filter,
-                show_prefixes,
-                double_click_to_open,
-                reveal.and_then(Reveal::leaf_key),
-                sort,
-                favorite_keys,
-            )
-        });
+        let action = draw_entry_list(
+            ui,
+            &tree.entries,
+            entries,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            reveal.and_then(Reveal::leaf_key),
+            sort,
+            favorite_keys,
+        );
+        clicked = clicked.or(action);
     }
     clicked
 }
@@ -1079,87 +1131,65 @@ fn draw_tree_node_lazy_block(
             }
             let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
             if !folders_before_tags {
+                let action = draw_entry_list(
+                    ui,
+                    &node.entries,
+                    entries,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    leaf_key,
+                    sort,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
-                } else {
-                    let _ = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
-            for index in ordered_child_indices(&node.children, sort) {
+            for index in ordered_child_indices(ui, &node.children, sort) {
                 let child = &mut node.children[index];
+                let action = draw_tree_node_lazy(
+                    ui,
+                    child,
+                    entries,
+                    group_tree.as_deref_mut(),
+                    root,
+                    names,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    status_update,
+                    inner_reveal,
+                    sort,
+                    folders_before_tags,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_tree_node_lazy(
-                        ui,
-                        child,
-                        entries,
-                        group_tree.as_deref_mut(),
-                        root,
-                        names,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        status_update,
-                        inner_reveal,
-                        sort,
-                        folders_before_tags,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
             if folders_before_tags {
+                let action = draw_entry_list(
+                    ui,
+                    &node.entries,
+                    entries,
+                    selected,
+                    filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    leaf_key,
+                    sort,
+                    favorite_keys,
+                );
                 if clicked.is_none() {
-                    clicked = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
-                } else {
-                    let _ = draw_entry_list(
-                        ui,
-                        &node.entries,
-                        entries,
-                        selected,
-                        filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        leaf_key,
-                        sort,
-                        favorite_keys,
-                    );
+                    clicked = action;
                 }
             }
         },
     );
+    paint_folder_columns(ui, response.rect, None, Some(&node.rel_path));
     hover_tooltip_beside_pointer(
         ui,
         &response,
@@ -1172,9 +1202,14 @@ fn draw_tree_node_lazy_block(
                 .iter()
                 .any(|path| paths_match_case_insensitive(path, &node.rel_path))
         });
-        if let Some(action) =
-            loose_folder_primary_menu_items(ui, &node.rel_path, &node.label, favorited, false)
-        {
+        if let Some(action) = loose_folder_primary_menu_items(
+            ui,
+            &node.rel_path,
+            &node.label,
+            favorited,
+            false,
+            |ui| folder_extract_menu_button(ui, node, entries, false, true),
+        ) {
             clicked = Some(action);
         }
         // The same action the tag menu offers, aimed at the folder rather than a
@@ -1197,9 +1232,6 @@ fn draw_tree_node_lazy_block(
                 label: node.label.clone(),
             });
             ui.close_menu();
-        }
-        if let Some(action) = folder_extract_menu_button(ui, node, entries, false, true) {
-            clicked = Some(action);
         }
     });
     if response.double_clicked() {
@@ -1285,82 +1317,59 @@ fn draw_tree_node_block(
     let body = |ui: &mut Ui| {
         let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
         if !folders_before_tags {
+            let action = draw_entry_list(
+                ui,
+                &node.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                leaf_key,
+                sort,
+                favorite_keys,
+            );
             if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
+                clicked = action;
             }
         }
-        for index in ordered_child_indices(&node.children, sort) {
+        for index in ordered_child_indices(ui, &node.children, sort) {
             let child = &node.children[index];
+            let action = draw_tree_node(
+                ui,
+                child,
+                entries,
+                selected,
+                filter,
+                expand_folders,
+                show_prefixes,
+                double_click_to_open,
+                groups_mode,
+                inner_reveal,
+                sort,
+                folders_before_tags,
+                favorite_keys,
+                is_container,
+            );
             if clicked.is_none() {
-                clicked = draw_tree_node(
-                    ui,
-                    child,
-                    entries,
-                    selected,
-                    filter,
-                    expand_folders,
-                    show_prefixes,
-                    double_click_to_open,
-                    groups_mode,
-                    inner_reveal,
-                    sort,
-                    folders_before_tags,
-                    favorite_keys,
-                    is_container,
-                );
+                clicked = action;
             }
         }
         if folders_before_tags {
+            let action = draw_entry_list(
+                ui,
+                &node.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                leaf_key,
+                sort,
+                favorite_keys,
+            );
             if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                    favorite_keys,
-                );
+                clicked = action;
             }
         }
     };
@@ -1391,6 +1400,7 @@ fn draw_tree_node_block(
         )
     };
     if !groups_mode {
+        paint_folder_columns(ui, header_response.rect, None, Some(&node.rel_path));
         hover_tooltip_beside_pointer(
             ui,
             &header_response,
@@ -1411,6 +1421,7 @@ fn draw_tree_node_block(
                 &node.label,
                 favorited,
                 browser_is_folder_pane(ui),
+                |ui| folder_extract_menu_button(ui, node, entries, false, false),
             ) {
                 clicked = Some(action);
             }
@@ -1497,8 +1508,9 @@ fn draw_tree_node_block(
         // A group node is not a real folder, so only Folders mode may offer a
         // raw container-folder extraction. Type-specific bulk exports remain
         // valid in either view, matching their previous availability.
-        if let Some(action) =
-            folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false)
+        if (groups_mode || favorite_keys.is_none())
+            && let Some(action) =
+                folder_extract_menu_button(ui, node, entries, is_container && !groups_mode, false)
         {
             clicked = Some(action);
         }
@@ -1513,7 +1525,7 @@ fn draw_tree_node_block(
     clicked
 }
 
-fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
+pub(in crate::app) fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
     a.to_string_lossy()
         .replace('\\', "/")
         .eq_ignore_ascii_case(&b.to_string_lossy().replace('\\', "/"))
@@ -1773,8 +1785,23 @@ fn folder_extract_menu_from_keys(
                 })
                 .inner;
             if bitmap_response.clicked() {
-                action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys));
+                action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys.clone()));
                 ui.close_menu();
+            }
+            if browser_game_keeps_bitmap_sources(ui) {
+                let source_response = ui
+                    .add_enabled_ui(bitmap_count > 0, |ui| {
+                        context_menu_button(
+                            ui,
+                            &format!("Extract {bitmap_qualifier}bitmap sources... ({bitmap_count})"),
+                        )
+                    })
+                    .inner
+                    .on_hover_text(BITMAP_SOURCE_HOVER);
+                if source_response.clicked() {
+                    action = Some(BrowserAction::ExtractBitmapSourceFolder(bitmap_keys));
+                    ui.close_menu();
+                }
             }
 
             let sound_count = sound_keys.len();
@@ -1904,14 +1931,15 @@ fn folder_extract_menu_from_keys(
 /// The leading actions shared by loose folders wherever they appear. Keeping
 /// this sequence in one place prevents Favorites, the sidebar, and folder tabs
 /// from silently losing different commands as the menu evolves.
-fn loose_folder_primary_menu_items(
+pub(in crate::app) fn loose_folder_primary_menu_items(
     ui: &mut Ui,
     rel_path: &Path,
     label: &str,
     favorited: Option<bool>,
     open_in_new_tab: bool,
+    extract: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
 ) -> Option<BrowserAction> {
-    let mut action = None;
+    let mut action = loose_folder_transfer_menu_items(ui, rel_path, label);
     if let Some(favorited) = favorited {
         if context_menu_button(
             ui,
@@ -1926,10 +1954,6 @@ fn loose_folder_primary_menu_items(
             action = Some(BrowserAction::ToggleFolderFavorite(rel_path.to_path_buf()));
             ui.close_menu();
         }
-        context_menu_separator(ui);
-    }
-    if let Some(transfer) = loose_folder_transfer_menu_items(ui, rel_path, label) {
-        action = Some(transfer);
     }
     if open_in_new_tab {
         if context_menu_button(ui, "Open in new tab").clicked() {
@@ -1941,8 +1965,15 @@ fn loose_folder_primary_menu_items(
             ui.close_menu();
         }
     }
-    // Explorer and clipboard-path commands form the next section at every
-    // right-click entry point that consumes this shared primary block.
+    if favorited.is_some() || open_in_new_tab {
+        context_menu_separator(ui);
+    }
+    if let Some(import) = loose_folder_import_menu_item(ui, rel_path) {
+        action = Some(import);
+    }
+    if let Some(extract) = extract(ui) {
+        action = Some(extract);
+    }
     context_menu_separator(ui);
     action
 }
@@ -1954,20 +1985,42 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
     rel_path: &Path,
     label: &str,
 ) -> Option<BrowserAction> {
-    if context_menu_button(ui, "Move to...").clicked() {
+    const GAP: f32 = 4.0;
+    let width = (ui.available_width() - GAP * 2.0) / 3.0;
+    let enabled = !rel_path.as_os_str().is_empty();
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        if context_menu_primary_button(ui, "Rename", enabled, width)
+            .on_hover_text("Rename this folder and update every reference to the tags inside it")
+            .clicked()
+        {
+            action = Some(BrowserAction::RenameLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+        if context_menu_primary_button(ui, "Move", enabled, width).clicked() {
+            action = Some(BrowserAction::MoveLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+        if context_menu_primary_button(ui, "Copy To", enabled, width).clicked() {
+            action = Some(BrowserAction::CopyLooseFolder {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+            });
+        }
+    });
+    if action.is_some() {
         ui.close_menu();
-        return Some(BrowserAction::MoveLooseFolder {
-            rel_path: rel_path.to_path_buf(),
-            label: label.to_owned(),
-        });
     }
-    if context_menu_button(ui, "Copy to...").clicked() {
-        ui.close_menu();
-        return Some(BrowserAction::CopyLooseFolder {
-            rel_path: rel_path.to_path_buf(),
-            label: label.to_owned(),
-        });
-    }
+    context_menu_separator(ui);
+    action
+}
+
+fn loose_folder_import_menu_item(ui: &mut Ui, rel_path: &Path) -> Option<BrowserAction> {
     // Import is intentionally not Expert-gated: converting content from
     // another game is a primary folder operation and confirms before writing.
     if context_menu_button(ui, "Import tags here...")
@@ -1982,6 +2035,149 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
         });
     }
     None
+}
+
+#[cfg(test)]
+mod folder_primary_action_tests {
+    use super::*;
+
+    #[test]
+    fn favorite_precedes_import_and_extract_without_duplicate_dividers() {
+        for open_in_new_tab in [false, true] {
+            let ctx = egui::Context::default();
+            let output = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    style_tag_context_menu(ui);
+                    loose_folder_primary_menu_items(
+                        ui,
+                        Path::new("objects/brute"),
+                        "brute",
+                        Some(false),
+                        open_in_new_tab,
+                        |ui| {
+                            context_menu_button(ui, "Extract >");
+                            None
+                        },
+                    );
+                    context_menu_button(ui, "Copy Folder Path");
+                });
+            });
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.job.text.as_str(), text.pos.y)),
+                    _ => None,
+                })
+                .collect();
+            let y = |label| labels.iter().find(|(text, _)| *text == label).unwrap().1;
+            assert!(y("Add to Favorites") < y("Import tags here..."));
+            assert!(y("Import tags here...") < y("Extract >"));
+            let separators: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y => {
+                        Some(points[0].y)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(separators.len(), 3, "one divider between each section");
+            assert!(
+                separators
+                    .iter()
+                    .any(|s| *s > y("Add to Favorites") && *s < y("Import tags here..."))
+            );
+            assert!(
+                !separators
+                    .iter()
+                    .any(|s| *s > y("Import tags here...") && *s < y("Extract >"))
+            );
+        }
+    }
+
+    #[test]
+    fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
+        for header in [false, true] {
+            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
+                let ctx = egui::Context::default();
+                let row_width = std::cell::Cell::new(0.0);
+                let frame = |events| {
+                    let mut action = None;
+                    let output = ctx.run(
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                style_tag_context_menu(ui);
+                                ui.set_width(CONTEXT_MENU_WIDTH);
+                                row_width.set(ui.available_width());
+                                action = if header {
+                                    loose_folder_transfer_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                    )
+                                } else {
+                                    loose_folder_primary_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                        Some(false),
+                                        true,
+                                        |_| None,
+                                    )
+                                };
+                            });
+                        },
+                    );
+                    (output, action)
+                };
+                let (output, _) = frame(Vec::new());
+                let buttons: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.height() > 40.0 && rect.rect.height() < 70.0 =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(buttons.len(), 3);
+                for button in &buttons {
+                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
+                    assert_eq!(button.top(), buttons[0].top());
+                }
+                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
+                let pos = buttons[index].center();
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                let event = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(vec![event(true)]);
+                let (_, action) = frame(vec![event(false)]);
+                assert!(
+                    match (label, action) {
+                        ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
+                        | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
+                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
+                            rel_path == Path::new("objects/brute"),
+                        _ => false,
+                    },
+                    "{label} did not dispatch (header={header})"
+                );
+            }
+        }
+    }
 }
 
 /// Colour for a folder row: marked when anything beneath it carries edits that
@@ -2238,7 +2434,13 @@ fn show_folder_tree_header<R>(
                 (ButtonIcon::FolderClosed, disclosure_triangle_blue())
             };
             paint_button_icon_at(ui, icon, icon_rect, color);
-            let content = icon_response.union(ui.label(RichText::new(label).color(label_color)));
+            let name = egui::Label::new(RichText::new(label).color(label_color));
+            let name = if folder_table_active(ui) {
+                name.truncate()
+            } else {
+                name
+            };
+            let content = icon_response.union(ui.add(name));
             (
                 toggle.union(content),
                 (toggle_clicked, icon_rect.center().x),
@@ -2291,6 +2493,11 @@ fn show_full_width_browser_row<R>(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.set_min_height(ui.spacing().interact_size.y);
+            let clip = folder_name_clip(ui);
+            if clip != ui.clip_rect() {
+                ui.set_max_width((clip.right() - ui.cursor().left()).max(0.0));
+                ui.set_clip_rect(clip);
+            }
             add_content(ui)
         },
     );
@@ -2643,7 +2850,7 @@ pub(in crate::app) fn draw_entry_list(
     sort: BrowserSort,
     favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
-    let ordered = ordered_indices(entry_indices, entries, sort);
+    let ordered = ordered_indices(ui, entry_indices, entries, sort);
     let matching: std::borrow::Cow<'_, [usize]> = if filter.is_empty() {
         ordered
     } else {
@@ -2800,7 +3007,7 @@ pub(in crate::app) fn draw_entry(
         } else {
             leaf_label.to_owned()
         };
-        ui.painter().text(
+        ui.painter().with_clip_rect(folder_name_clip(ui)).text(
             row_rect.left_center() + Vec2::new(disclosure_offset + icon_size + 5.0, 0.0),
             Align2::LEFT_CENTER,
             label,
@@ -2812,6 +3019,7 @@ pub(in crate::app) fn draw_entry(
                 _ => text_dark(),
             },
         );
+        paint_folder_columns(ui, row_rect, Some(entry), None);
     }
     if response.dragged()
         && let Some(pointer_pos) = ui.ctx().pointer_interact_pos()
@@ -3041,19 +3249,26 @@ pub(in crate::app) fn draw_favorites(
     show_prefixes: bool,
     double_click_to_open: bool,
     favorite_keys: &HashSet<String>,
+    search_scope: BrowserSearchScope,
+    keywords: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> (Option<BrowserAction>, bool) {
     let favorite_folders = browser_favorite_folders(ui).unwrap_or_default();
     let folder_matches = |path: &Path| {
         filter.is_empty()
-            || path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.to_ascii_lowercase()
-                        .contains(&filter.to_ascii_lowercase())
-                })
+            || (search_scope.folders && scoped_folder_matches(&path.to_string_lossy(), filter))
     };
-    if !entries.iter().any(|entry| entry_matches(entry, filter))
+    let entry_matches = |entry: &TagEntry| {
+        scoped_entry_matches(
+            entry,
+            filter,
+            search_scope,
+            keywords
+                .get(&entry.key)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+    };
+    if !entries.iter().any(entry_matches)
         && !favorite_folders.iter().any(|path| folder_matches(path))
     {
         return (None, false);
@@ -3095,6 +3310,19 @@ pub(in crate::app) fn draw_favorites(
                     &label,
                     Some(true),
                     browser_is_folder_pane(ui),
+                    |ui| {
+                        let subtree = crate::source::build_tree_beneath(folder_entries, folder);
+                        let folder_node = TagTreeNode {
+                            label: label.clone(),
+                            rel_path: folder.clone(),
+                            children: subtree.children,
+                            children_loaded: true,
+                            entries: subtree.entries,
+                            entries_loaded: true,
+                            pending: false,
+                        };
+                        folder_extract_menu_button(ui, &folder_node, folder_entries, false, true)
+                    },
                 ) {
                     action = Some(folder_action);
                 }
@@ -3114,26 +3342,6 @@ pub(in crate::app) fn draw_favorites(
                     ui.close_menu();
                 }
                 context_menu_separator(ui);
-                // Favorite folders do not own a tree node in this section.
-                // Rebuild only their loaded subtree while the menu is open so
-                // the shared extraction menu can collect the same keys as a
-                // manually navigated folder without doing I/O on right-click.
-                let subtree = crate::source::build_tree_beneath(folder_entries, folder);
-                let folder_node = TagTreeNode {
-                    label: label.clone(),
-                    rel_path: folder.clone(),
-                    children: subtree.children,
-                    children_loaded: true,
-                    entries: subtree.entries,
-                    entries_loaded: true,
-                    pending: false,
-                };
-                if let Some(folder_action) =
-                    folder_extract_menu_button(ui, &folder_node, folder_entries, false, true)
-                {
-                    action = Some(folder_action);
-                }
-                context_menu_separator(ui);
                 if context_menu_button(ui, "Dump folder to JSON...").clicked() {
                     action = Some(BrowserAction::DumpLooseFolderJson {
                         rel_path: folder.clone(),
@@ -3144,7 +3352,7 @@ pub(in crate::app) fn draw_favorites(
             });
         }
         for entry in entries {
-            if !entry_matches(entry, filter) {
+            if !entry_matches(entry) {
                 continue;
             }
             let row_action = draw_entry(
@@ -3605,6 +3813,95 @@ mod tests {
         );
     }
 
+    /// The path popup waits for the pointer to rest, as egui's own tooltips
+    /// do, then follows the pointer from row to row without waiting again,
+    /// and a click hides it until the pointer moves.
+    #[test]
+    fn the_path_popup_waits_for_the_pointer_to_rest() {
+        let ctx = egui::Context::default();
+        let rows = std::cell::Cell::new([egui::Rect::NOTHING; 2]);
+        let mut time = 0.0;
+        let mut frame = |dt: f64, events: Vec<egui::Event>| -> Vec<String> {
+            time += dt;
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 400.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut rects = [egui::Rect::NOTHING; 2];
+                        for (index, rect) in rects.iter_mut().enumerate() {
+                            let (row, response) = ui.allocate_exact_size(
+                                Vec2::new(240.0, 20.0),
+                                Sense::click_and_drag(),
+                            );
+                            *rect = row;
+                            hover_tooltip_beside_pointer(ui, &response, &format!("path/{index}"));
+                        }
+                        rows.set(rects);
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("path/") => {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        frame(0.0, Vec::new());
+        let [first, second] = rows.get().map(|row| row.center());
+        let delay = f64::from(egui::Style::default().interaction.tooltip_delay);
+        // egui counts the pointer as moving only once it has a few positions
+        // behind it, as a real mouse does: slide in from the empty space to
+        // the right of the rows rather than jumping onto one.
+        for x in [500.0, 430.0, 360.0, 290.0] {
+            frame(
+                0.01,
+                vec![egui::Event::PointerMoved(egui::pos2(x, first.y))],
+            );
+        }
+        assert!(
+            frame(0.01, vec![egui::Event::PointerMoved(first)]).is_empty(),
+            "the popup showed the moment the pointer arrived"
+        );
+        assert!(
+            frame(delay * 0.5, Vec::new()).is_empty(),
+            "the popup showed before the pointer had rested"
+        );
+        assert_eq!(frame(delay * 0.6, Vec::new()), ["path/0"]);
+        assert_eq!(
+            frame(0.01, vec![egui::Event::PointerMoved(second)]),
+            ["path/1"],
+            "moving to the next row while a popup is up should not wait again"
+        );
+        let button = |pressed| egui::Event::PointerButton {
+            pos: second,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(0.01, vec![button(true)]);
+        assert!(
+            frame(0.01, vec![button(false)]).is_empty(),
+            "a click should hide the popup"
+        );
+        assert!(
+            frame(delay * 2.0, Vec::new()).is_empty(),
+            "resting after a click should not bring the popup back"
+        );
+    }
+
     /// Control for the regression test below: the same pointer script against
     /// a bare egui drag source, no Baboon code. Proves the synthetic events
     /// can start a drag at all, so the test below indicts `draw_entry` rather
@@ -3946,6 +4243,8 @@ mod tests {
 
     #[test]
     fn folder_context_commands_have_matching_icons() {
+        assert_eq!(context_menu_icon("Rename"), Some(ButtonIcon::Rename));
+        assert_eq!(context_menu_icon("Copy To"), Some(ButtonIcon::Copy));
         assert_eq!(context_menu_icon("Move to..."), Some(ButtonIcon::Move));
         assert_eq!(context_menu_icon("Copy to..."), Some(ButtonIcon::Copy));
         assert_eq!(
@@ -4179,6 +4478,10 @@ pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
     path.set_file_name(format!("{file_name}.json"));
     path
 }
+
+/// What "Extract bitmap source" does, where its menu items offer it.
+const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
+     .tif that tool bitmaps can import again. Existing files are left alone.";
 
 pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
     group_tag == u32::from_be_bytes(*b"bitm")

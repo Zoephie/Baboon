@@ -10,16 +10,31 @@ pub(in crate::app) fn is_object_family_group(group_tag: u32) -> bool {
             | b"vehi" // vehicle
             | b"weap" // weapon
             | b"eqip" // equipment
+            | b"garb" // garbage
             | b"scen" // scenery
             | b"mach" // device_machine
             | b"ctrl" // device_control
+            | b"lifi" // device_light_fixture
             | b"crat" // crate
             | b"bloc" // crate-like block
             | b"ssce" // sound_scenery
             | b"gint" // giant
             | b"proj" // projectile
+            | b"plac" // placeholder
             | b"obje" // object (base)
     )
+}
+
+/// A Halo CE object tag's own reference (`model`, `animation graph`,
+/// `collision model`, …). A child group opens with its parent's struct, so
+/// the object fields sit under `unit/object`, `item/object`, `device/object`
+/// or, for a direct child, `object`.
+pub(in crate::app) fn halo1_object_reference(tag: &TagFile, field: &str) -> Option<String> {
+    const PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
+    let root = tag.root();
+    PARENTS
+        .iter()
+        .find_map(|parent| tag_ref_path(&root, &format!("{parent}/{field}")))
 }
 
 /// Show the connected `.model` reference at the top of object-family tags

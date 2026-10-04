@@ -8,6 +8,7 @@ use super::*;
 pub(super) enum ButtonIcon {
     Add,
     About,
+    AssetBrowser,
     Browse,
     Cache,
     ChangeAdded,
@@ -84,6 +85,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
         ButtonIcon::Add => include_str!("../../assets/Button Icons/Add.svg"),
         ButtonIcon::About => include_str!("../../assets/Button Icons/About.svg"),
+        ButtonIcon::AssetBrowser => include_str!("../../assets/Button Icons/Asset Browser.svg"),
         ButtonIcon::Browse => include_str!("../../assets/Button Icons/Browse.svg"),
         ButtonIcon::Cache => include_str!("../../assets/Button Icons/Cache.svg"),
         ButtonIcon::ChangeAdded => include_str!("../../assets/Button Icons/change-added.svg"),

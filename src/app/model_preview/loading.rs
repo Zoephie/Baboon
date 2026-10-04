@@ -243,7 +243,7 @@ pub(super) fn load_model_preview(
         let Some(source) = source else {
             return Err("Halo CE object preview requires a loaded source.".to_owned());
         };
-        let reference = tag_ref_path(&model_tag.root(), "model")
+        let reference = halo1_object_reference(model_tag, "model")
             .ok_or("This object references no gbxmodel.")?;
         let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
             .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;

@@ -208,6 +208,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         tag_tree: _,
         pending_restore_tags: _,
         keywords: _,
+        search_scope: _,
 
         // Dropped or invalidated by it, deliberately.
         edit_buffers: _,

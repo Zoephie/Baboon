@@ -422,9 +422,9 @@ pub(in crate::app) mod tests {
             group_tag_and_name: Some((collision_model, r"objects\foo\foo".to_owned())),
         };
 
-        assert!(tag_reference_group_allowed(&empty, render_model));
-        assert!(tag_reference_group_allowed(&matching, render_model));
-        assert!(!tag_reference_group_allowed(&mismatched, render_model));
+        assert!(tag_reference_group_allowed(&empty, &[render_model]));
+        assert!(tag_reference_group_allowed(&matching, &[render_model]));
+        assert!(!tag_reference_group_allowed(&mismatched, &[render_model]));
     }
 
     #[test]
@@ -441,9 +441,138 @@ pub(in crate::app) mod tests {
         };
 
         assert_eq!(
-            tag_reference_required_group(&meta, None),
-            Some(structure_design)
+            tag_reference_accepted_groups(&meta, None, &GroupHierarchy::default()),
+            Some(vec![structure_design])
         );
+    }
+
+    /// What the schema allows decides, not the group the field happens to
+    /// point at; with no schema list the current group does, and with
+    /// neither anything goes.
+    #[test]
+    fn the_schema_not_the_current_target_decides_the_accepted_groups() {
+        let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some("haloreach_mcc"));
+        let object = parse_group_tag("obje").unwrap();
+        let scenery = parse_group_tag("scen").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let meta = |allowed| FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let pointing_at_scenery = (scenery, r"objects\levels\crate\crate".to_owned());
+        let accepted = tag_reference_accepted_groups(
+            &meta(vec![object]),
+            Some(&pointing_at_scenery),
+            &hierarchy,
+        )
+        .unwrap();
+        assert!(
+            accepted.contains(&weapon),
+            "a field pointing at scenery refused a weapon"
+        );
+        assert_eq!(
+            tag_reference_accepted_groups(
+                &meta(Vec::new()),
+                Some(&pointing_at_scenery),
+                &hierarchy
+            ),
+            Some(vec![scenery])
+        );
+        assert_eq!(
+            tag_reference_accepted_groups(&meta(Vec::new()), None, &hierarchy),
+            None
+        );
+    }
+
+    /// Issue #46: Reach's multiplayer object type list `object` field allows
+    /// `object`, and must take every object type — a `.weapon` picked in the
+    /// browse dialog, a typed `weap:` reference — while still refusing what
+    /// is not an object.
+    #[test]
+    fn an_object_reference_takes_every_object_type() {
+        let definitions_root = locate_definitions_root();
+        let names = TagNameIndex::load_game(&definitions_root, "haloreach_mcc").unwrap();
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some("haloreach_mcc"));
+        let docs = crate::app::field_docs::build_def_docs(
+            &definitions_root,
+            "haloreach_mcc",
+            "multiplayer_object_type_list",
+        );
+        let allowed: Vec<u32> = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Field {
+                    clean_name,
+                    tag_reference_allowed,
+                    ..
+                } if clean_name == "object" => Some(tag_reference_allowed.clone()),
+                _ => None,
+            })
+            .expect("no object field in the multiplayer object type list");
+        assert_eq!(allowed, [parse_group_tag("obje").unwrap()]);
+        let meta = FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta, None, &hierarchy).unwrap();
+        for (extension, group) in [
+            ("biped", "bipd"),
+            ("weapon", "weap"),
+            ("scenery", "scen"),
+            ("vehicle", "vehi"),
+        ] {
+            assert_eq!(
+                tag_reference_group_for_extension(extension, Some(&accepted), Some(&names)),
+                Ok(parse_group_tag(group).unwrap()),
+                "{extension}"
+            );
+        }
+        // The browse dialog filters on all of them, under the schema's name.
+        let (filter_name, extensions) =
+            tag_reference_dialog_filter(Some(&accepted), Some(&names)).unwrap();
+        assert_eq!(filter_name, "object");
+        for extension in [
+            "biped",
+            "weapon",
+            "scenery",
+            "vehicle",
+            "equipment",
+            "crate",
+        ] {
+            assert!(
+                extensions.iter().any(|e| e == extension),
+                "the dialog hides .{extension}"
+            );
+        }
+        assert!(!extensions.iter().any(|e| e == "bitmap"));
+        let refused = tag_reference_group_for_extension("bitmap", Some(&accepted), Some(&names));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|message| message.starts_with("Selected tag must be a object (")),
+            "{refused:?}"
+        );
+
+        let mut pending = Vec::new();
+        commit_tag_reference_input(
+            &mut pending,
+            None,
+            "object types[0]/object",
+            "weap:objects\\weapons\\rifle\\assault_rifle\\assault_rifle".to_owned(),
+            Some(&accepted),
+            Some(&names),
+        );
+        assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
     }
 
     #[test]
@@ -620,7 +749,7 @@ pub(in crate::app) mod tests {
             assert_eq!(
                 tag_reference_group_for_extension(
                     "structure_design",
-                    Some(structure_design),
+                    Some(&[structure_design]),
                     Some(&names),
                 )
                 .unwrap(),
@@ -696,22 +825,6 @@ pub(in crate::app) mod tests {
         assert_eq!(foundation_selected_width(1_000.0), 376.0);
         assert_eq!(foundation_selected_width(500.0), 120.0);
         assert_eq!(foundation_selected_width(2_000.0), 420.0);
-    }
-
-    #[test]
-    fn semantic_short_index_target_names_cover_damage_sections() {
-        let cases = [
-            ("parent variant", Some("variants")),
-            ("variant", Some("variants")),
-            ("parent node", Some("nodes")),
-            ("damage section", Some("damage sections")),
-            ("indirect damage section", Some("damage sections")),
-            ("runtime region index", None),
-        ];
-
-        for (field_name, expected) in cases {
-            assert_eq!(semantic_short_index_target_key(field_name), expected);
-        }
     }
 
     /// Expand/collapse-all is a direct instruction about the whole tag, so it
@@ -830,7 +943,6 @@ pub(in crate::app) mod tests {
                             "control points[0]/position",
                             edit,
                             None,
-                            None,
                             300.0,
                         );
                     });
@@ -854,7 +966,7 @@ pub(in crate::app) mod tests {
     fn color_channels_are_typed_into_directly() {
         // Float ARGB: the first cell is alpha.
         let mut light = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
-        let path = "color/color lower bound";
+        let path = "color lower bound";
         let pending = type_into_first_value_cell(&light, path, "0.25");
         assert_eq!(pending.len(), 1, "one committed edit for the whole color");
         assert_eq!(pending[0].path, path);
@@ -867,12 +979,13 @@ pub(in crate::app) mod tests {
         }
 
         // Packed ARGB: edited in the same 0-1 channels the row shows, stored as bytes.
-        let mut fog = TagFile::new(crate::app::test_definition_path("haloce_mcc/fog.json")).unwrap();
-        let path = "screen layers color";
-        let pending = type_into_first_value_cell(&fog, path, "1");
+        let mut hud =
+            TagFile::new(crate::app::test_definition_path("haloce_mcc/grenade_hud_interface.json")).unwrap();
+        let path = "override icon color";
+        let pending = type_into_first_value_cell(&hud, path, "1");
         assert_eq!(pending.len(), 1);
-        crate::app::apply_field_edit(&mut fog, path, &pending[0].input).unwrap();
-        match fog.root().field_path(path).unwrap().value() {
+        crate::app::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
+        match hud.root().field_path(path).unwrap().value() {
             Some(TagFieldData::ArgbColor(c)) => assert_eq!(c.0, 0xFF00_0000),
             other => panic!("expected a packed ARGB color, got {other:?}"),
         }
@@ -897,7 +1010,7 @@ pub(in crate::app) mod tests {
                         let meta = field_display_meta(field.name());
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
-                            &TagNameIndex::default(), 0, path, edit, None, None, 300.0,
+                            &TagNameIndex::default(), 0, path, edit, None, 300.0,
                         );
                     });
                 });

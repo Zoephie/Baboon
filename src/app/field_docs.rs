@@ -62,6 +62,12 @@ impl DefDocs {
             .unwrap_or(&[])
     }
 
+    /// Every entry of every struct, in no particular order.
+    #[cfg(test)]
+    pub(in crate::app) fn all_entries(&self) -> impl Iterator<Item = &DefEntry> {
+        self.by_struct.values().flatten()
+    }
+
     pub(super) fn entries_for_struct(&self, tag_struct: &TagStruct<'_>) -> &[DefEntry] {
         let definition = tag_struct.definition();
         self.entries_for(definition.guid(), definition.name())
@@ -227,6 +233,126 @@ fn parse_guid_hex(s: &str) -> Option<[u8; 16]> {
         *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
     }
     Some(out)
+}
+
+/// Which tag groups inherit from which, for one game: `biped` → `unit` →
+/// `object`, every shader type → `render_method`. A tag reference whose
+/// schema allows a parent group takes any group descended from it, the way
+/// Foundation offers every object type for an `object` field.
+#[derive(Debug, Default)]
+pub(in crate::app) struct GroupHierarchy {
+    parents: HashMap<u32, u32>,
+}
+
+impl GroupHierarchy {
+    /// Read each group's `tag` and `parent_tag` from the game's definitions.
+    /// Both sit at the top of a definition file, so only its head is read.
+    fn load(definitions_root: &Path, game: &str) -> Self {
+        use std::io::Read;
+        let mut parents = HashMap::new();
+        let mut by_name: HashMap<String, u32> = HashMap::new();
+        let mut named_parents: Vec<(u32, String)> = Vec::new();
+        let Ok(dir) = std::fs::read_dir(definitions_root.join(game)) else {
+            return Self::default();
+        };
+        for entry in dir.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "json")
+                || path.file_name().is_some_and(|name| name == "_meta.json")
+            {
+                continue;
+            }
+            let mut head = Vec::with_capacity(1024);
+            if std::fs::File::open(&path)
+                .and_then(|file| file.take(1024).read_to_end(&mut head))
+                .is_err()
+            {
+                continue;
+            }
+            let head = String::from_utf8_lossy(&head);
+            let value = |key: &str| {
+                let at = head.find(&format!("\"{key}\""))?;
+                let rest = &head[at + key.len() + 2..];
+                let open = rest.find('"')? + 1;
+                let close = rest[open..].find('"')? + open;
+                Some(rest[open..close].to_owned())
+            };
+            let Some(tag) = value("tag").as_deref().and_then(blam_tags::parse_group_tag) else {
+                continue;
+            };
+            if let Some(name) = value("name") {
+                by_name.insert(name, tag);
+            }
+            if let Some(parent) = value("parent_tag").filter(|parent| !parent.is_empty()) {
+                named_parents.push((tag, parent));
+            }
+        }
+        // A parent is a four-character group tag (`obje`, `rm  `), or now and
+        // then a group name.
+        for (tag, parent) in named_parents {
+            let parent = by_name.get(&parent).copied().or_else(|| {
+                (parent.len() == 4)
+                    .then(|| blam_tags::parse_group_tag(&parent))
+                    .flatten()
+            });
+            if let Some(parent) = parent {
+                parents.insert(tag, parent);
+            }
+        }
+        Self { parents }
+    }
+
+    /// Whether `group` is `ancestor` or descends from it.
+    pub(in crate::app) fn is_a(&self, group: u32, ancestor: u32) -> bool {
+        let mut current = group;
+        for _ in 0..=self.parents.len() {
+            if current == ancestor {
+                return true;
+            }
+            match self.parents.get(&current) {
+                Some(&parent) => current = parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// `groups` and every group descended from any of them, each once: the
+    /// groups a reference allowing `groups` takes.
+    pub(in crate::app) fn expand(&self, groups: &[u32]) -> Vec<u32> {
+        let mut out: Vec<u32> = groups.to_vec();
+        let mut children: Vec<u32> = self
+            .parents
+            .keys()
+            .copied()
+            .filter(|child| groups.iter().any(|&group| self.is_a(*child, group)))
+            .filter(|child| !groups.contains(child))
+            .collect();
+        children.sort_unstable();
+        out.extend(children);
+        out
+    }
+}
+
+/// The game's group hierarchy, read once per definitions folder and game.
+pub(in crate::app) fn group_hierarchy(
+    definitions_root: Option<&Path>,
+    game: Option<&str>,
+) -> std::sync::Arc<GroupHierarchy> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Cache = Mutex<HashMap<(std::path::PathBuf, String), Arc<GroupHierarchy>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let (Some(root), Some(game)) = (definitions_root, game) else {
+        return Arc::default();
+    };
+    let cache = CACHE.get_or_init(Default::default);
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry((root.to_path_buf(), game.to_owned()))
+        .or_insert_with(|| Arc::new(GroupHierarchy::load(root, game)))
+        .clone()
 }
 
 #[cfg(test)]
@@ -486,5 +612,43 @@ mod tests {
         let at = |name: &str| order.iter().position(|n| *n == name).unwrap();
         assert!(at("Applying collision damage") < at("Apply collision damage scale"));
         assert!(at("Game collision damage parameters") < at("min game acc (default)"));
+    }
+
+    /// Reach's object family and shader types, read from its definitions:
+    /// an `object` reference takes every object type, a `unit` one only units.
+    #[test]
+    fn the_group_hierarchy_expands_a_parent_to_its_descendants() {
+        let hierarchy =
+            GroupHierarchy::load(&crate::app::locate_definitions_root(), "haloreach_mcc");
+        let tag = |s: &str| blam_tags::parse_group_tag(s).unwrap();
+        assert!(hierarchy.is_a(tag("bipd"), tag("unit")));
+        assert!(hierarchy.is_a(tag("bipd"), tag("obje")), "two levels up");
+        assert!(!hierarchy.is_a(tag("weap"), tag("unit")));
+
+        let objects = hierarchy.expand(&[tag("obje")]);
+        assert_eq!(
+            objects[0],
+            tag("obje"),
+            "the allowed group itself comes first"
+        );
+        for group in [
+            "bipd", "vehi", "weap", "eqip", "scen", "mach", "ctrl", "proj", "crea",
+        ] {
+            assert!(
+                objects.contains(&tag(group)),
+                "object does not take {group}"
+            );
+        }
+        assert!(!objects.contains(&tag("bitm")));
+
+        let units = hierarchy.expand(&[tag("unit")]);
+        assert!(units.contains(&tag("bipd")) && units.contains(&tag("vehi")));
+        assert!(!units.contains(&tag("weap")));
+
+        let shaders = hierarchy.expand(&[tag("rm  ")]);
+        assert!(shaders.contains(&tag("rmsh")) && shaders.contains(&tag("rmtr")));
+
+        // A leaf group stands alone.
+        assert_eq!(hierarchy.expand(&[tag("bitm")]), [tag("bitm")]);
     }
 }

@@ -70,6 +70,7 @@ fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
         &loose_source(&root, "haloreach_mcc"),
         &entry_for(&root, rel, b"pmdf"),
         &out,
+        blam_tags::game::Game::Halo3,
     )
     .expect("extract particle geometry");
     assert!(
@@ -137,6 +138,7 @@ fn extracting_a_halo2_particle_model_keeps_its_object_names() {
         &loose_source(&root, "halo2_mcc"),
         &entry_for(&root, rel, b"PRTM"),
         &out,
+        blam_tags::game::Game::Halo2,
     )
     .expect("extract particle geometry");
     assert!(
