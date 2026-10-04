@@ -72,7 +72,7 @@ impl Baboon {
                 // That was previously counted into a status line and dropped;
                 // it is a row here, so it is at least visible.
                 let resolvable = self
-                    .campaign_entry_for_identity(exporting, &overlay.identity)
+                    .model.campaign_entry_for_identity(exporting, &overlay.identity)
                     .is_some();
                 let kind = classify_overlay(
                     resolvable,
@@ -81,9 +81,9 @@ impl Baboon {
                     // not read shipped payloads it has no use for.
                     resolvable
                         && overlay.kind == CampaignProjectTagKind::Existing
-                        && self.overlay_matches_shipped(exporting, overlay),
+                        && self.model.overlay_matches_shipped(exporting, overlay),
                 );
-                let overridden_by = self.mod_serving_tag(exporting, &overlay.identity);
+                let overridden_by = self.model.mod_serving_tag(exporting, &overlay.identity);
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
@@ -149,27 +149,7 @@ impl Baboon {
         });
     }
 
-    /// Whether a stashed overlay is byte-for-byte what the game already ships.
-    ///
-    /// Answered on bytes rather than by diffing parsed tags: a diff can come
-    /// back empty for two tags that are not identical (a field the differ does
-    /// not reach), and "nothing to export" has to mean *nothing*, not "nothing
-    /// I looked at".
-    ///
-    /// A tag only a mod provides has no shipped counterpart, so it is never
-    /// unchanged -- there is nothing for it to be identical to.
-    pub(in crate::app) fn overlay_matches_shipped(&self, kit: usize, overlay: &CampaignProjectOverlay) -> bool {
-        let Some(entry) = self.campaign_entry_for_identity(kit, &overlay.identity) else {
-            return false;
-        };
-        let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return false;
-        };
-        matches!(
-            crate::core::source::read_shipped_entry_bytes(&source.source, &entry),
-            Ok(Some(bytes)) if bytes == *overlay.bytes
-        )
-    }
+
 
     /// Compute the field differences for one reviewed tag, against the tag as
     /// the game ships it.
@@ -195,7 +175,7 @@ impl Baboon {
         let Some(overlay) = dialog.snapshot.overlays.get(identity) else {
             return failed("This tag is no longer in the export".to_owned());
         };
-        let Some(entry) = self.campaign_entry_for_identity(kit, identity) else {
+        let Some(entry) = self.model.campaign_entry_for_identity(kit, identity) else {
             return failed("This tag is no longer in the source".to_owned());
         };
         let Some(source) = self.model.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
@@ -371,5 +351,29 @@ pub(in crate::app) fn wrapper_origin_for(
         TagEntryLocation::Container { .. } => Some(WrapperOrigin::Copy),
         TagEntryLocation::NewContainer { .. } => Some(WrapperOrigin::Template),
         _ => None,
+    }
+}
+
+impl Model {
+    /// Whether a stashed overlay is byte-for-byte what the game already ships.
+    ///
+    /// Answered on bytes rather than by diffing parsed tags: a diff can come
+    /// back empty for two tags that are not identical (a field the differ does
+    /// not reach), and "nothing to export" has to mean *nothing*, not "nothing
+    /// I looked at".
+    ///
+    /// A tag only a mod provides has no shipped counterpart, so it is never
+    /// unchanged -- there is nothing for it to be identical to.
+    pub(in crate::app) fn overlay_matches_shipped(&self, kit: usize, overlay: &CampaignProjectOverlay) -> bool {
+        let Some(entry) = self.campaign_entry_for_identity(kit, &overlay.identity) else {
+            return false;
+        };
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        matches!(
+            crate::core::source::read_shipped_entry_bytes(&source.source, &entry),
+            Ok(Some(bytes)) if bytes == *overlay.bytes
+        )
     }
 }

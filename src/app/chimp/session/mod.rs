@@ -351,18 +351,10 @@ impl Baboon {
 
 
 
-    fn load_chimp_recovery_manifest(
-        &self,
-        kit_index: usize,
-    ) -> Option<(PathBuf, ChimpRecoveryManifest)> {
-        let directory = self.model.chimp_recovery_dir(kit_index)?;
-        let text = fs::read_to_string(directory.join("manifest.json")).ok()?;
-        let manifest = serde_json::from_str(&text).ok()?;
-        Some((directory, manifest))
-    }
+
 
     fn restore_chimp_recovery(&mut self, kit_index: usize, world: &Arc<World>) {
-        let Some((directory, manifest)) = self.load_chimp_recovery_manifest(kit_index) else {
+        let Some((directory, manifest)) = self.model.load_chimp_recovery_manifest(kit_index) else {
             return;
         };
         let expected_source = self.model.kits[kit_index]
@@ -524,7 +516,7 @@ impl Baboon {
             .map(|source| source.source.root_path().display().to_string())
             .unwrap_or_default();
         let mut manifest = self
-            .load_chimp_recovery_manifest(kit_index)
+            .model.load_chimp_recovery_manifest(kit_index)
             .map(|(_, manifest)| manifest)
             .unwrap_or_default();
         manifest.source = source;
@@ -541,7 +533,7 @@ impl Baboon {
         kit_index: usize,
         packages: &[String],
     ) -> Result<(), String> {
-        let Some((directory, mut manifest)) = self.load_chimp_recovery_manifest(kit_index) else {
+        let Some((directory, mut manifest)) = self.model.load_chimp_recovery_manifest(kit_index) else {
             return Ok(());
         };
         let mut removed_files = Vec::new();
@@ -863,5 +855,17 @@ impl Model {
                 .iter()
                 .map(|(key, document)| (key.as_str(), document.dirty)),
         )
+    }
+}
+
+impl Model {
+    fn load_chimp_recovery_manifest(
+        &self,
+        kit_index: usize,
+    ) -> Option<(PathBuf, ChimpRecoveryManifest)> {
+        let directory = self.chimp_recovery_dir(kit_index)?;
+        let text = fs::read_to_string(directory.join("manifest.json")).ok()?;
+        let manifest = serde_json::from_str(&text).ok()?;
+        Some((directory, manifest))
     }
 }

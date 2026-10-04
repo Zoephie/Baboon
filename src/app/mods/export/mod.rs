@@ -17,22 +17,7 @@ impl Baboon {
         self.open_mod_review(false);
     }
 
-    /// The mounted mod currently serving this tag, if the mount resolved it to
-    /// one rather than to the game's own pack.
-    pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
-        let source = self.model.kits.get(kit)?.source.as_ref()?;
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return None;
-        };
-        let entry = self.campaign_entry_for_identity(kit, identity)?;
-        let TagEntryLocation::Container { container, .. } = &entry.location else {
-            return None;
-        };
-        containers
-            .get(*container)
-            .filter(|container| container.is_mod)
-            .map(|container| container.chunk_label.clone())
-    }
+
 
 
 
@@ -90,7 +75,7 @@ impl Baboon {
             if !included.contains(&overlay.identity) {
                 continue;
             }
-            let Some(entry) = self.campaign_entry_for_identity(exporting, &overlay.identity) else {
+            let Some(entry) = self.model.campaign_entry_for_identity(exporting, &overlay.identity) else {
                 skipped += 1;
                 continue;
             };
@@ -166,7 +151,7 @@ impl Baboon {
                         containers,
                         package,
                         overlay.bytes.len() as u64,
-                        || self.find_container_template_in(exporting, *group_tag),
+                        || self.model.find_container_template_in(exporting, *group_tag),
                     ) else {
                         skipped += 1;
                         continue;
@@ -510,5 +495,24 @@ impl Model {
             .filter_map(|index| containers.get(index))
             .map(|container| container.chunk_label.clone())
             .collect()
+    }
+}
+
+impl Model {
+    /// The mounted mod currently serving this tag, if the mount resolved it to
+    /// one rather than to the game's own pack.
+    pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let entry = self.campaign_entry_for_identity(kit, identity)?;
+        let TagEntryLocation::Container { container, .. } = &entry.location else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
     }
 }

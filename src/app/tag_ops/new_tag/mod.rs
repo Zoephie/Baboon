@@ -227,7 +227,7 @@ impl Baboon {
             return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
         }
         let template =
-            new_container_template_for(self.find_container_template(group_tag), group_name)?;
+            new_container_template_for(self.model.find_container_template(group_tag), group_name)?;
         let package = new_container_package(logical, group_name);
         let key = new_tag_entry_key(&package);
         if self.model.kits[self.model.active].parsed_tags.contains_key(&key)
@@ -346,31 +346,9 @@ impl Baboon {
         ))
     }
 
-    /// Find an existing container tag of `group_tag` and return its owning
-    /// container index plus its `.uasset` container path — the package template
-    /// for a new tag of the same group.
-    pub(in crate::app) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
-        self.find_container_template_in(self.model.active, group_tag)
-    }
 
-    /// A specific kit's template. Project recovery names its kit: the container
-    /// a stashed new tag is modelled on has to come from the source that tag
-    /// belongs to, not from whichever kit happens to be focused.
-    ///
-    /// Returning `None` is an ordinary answer, not a failure: it means the game
-    /// ships no tag of this group, and the caller derives the wrapper instead.
-    /// See [`pick_container_template`] for why no other group can stand in.
-    pub(in crate::app) fn find_container_template_in(
-        &self,
-        kit: usize,
-        group_tag: u32,
-    ) -> Option<(usize, String)> {
-        let source = self.model.kits.get(kit)?.source.as_ref()?;
-        pick_container_template(
-            source.entries.iter().chain(source.all_entries.iter()),
-            group_tag,
-        )
-    }
+
+
 
     /// Register an in-memory (unsaved) container tag: insert it into the browser
     /// entries, rebuild the folder + group trees so it shows up, open it in a
@@ -801,5 +779,33 @@ impl NewTagDialog {
                 self.error = Some(error);
             }
         }
+    }
+}
+
+impl Model {
+    /// Find an existing container tag of `group_tag` and return its owning
+    /// container index plus its `.uasset` container path — the package template
+    /// for a new tag of the same group.
+    pub(in crate::app) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
+        self.find_container_template_in(self.active, group_tag)
+    }
+
+    /// A specific kit's template. Project recovery names its kit: the container
+    /// a stashed new tag is modelled on has to come from the source that tag
+    /// belongs to, not from whichever kit happens to be focused.
+    ///
+    /// Returning `None` is an ordinary answer, not a failure: it means the game
+    /// ships no tag of this group, and the caller derives the wrapper instead.
+    /// See [`pick_container_template`] for why no other group can stand in.
+    pub(in crate::app) fn find_container_template_in(
+        &self,
+        kit: usize,
+        group_tag: u32,
+    ) -> Option<(usize, String)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        pick_container_template(
+            source.entries.iter().chain(source.all_entries.iter()),
+            group_tag,
+        )
     }
 }

@@ -39,7 +39,7 @@ fn a_dotted_container_tag_answers_to_its_old_identity_too() {
     };
     app.install_loaded_source(source(vec![entry("levels/v1.2/bitmaps/rock")]));
     let found = |app: &Baboon, identity: &str| {
-        app.campaign_entry_for_identity(0, identity)
+        app.model.campaign_entry_for_identity(0, identity)
             .map(|entry| entry.display_path)
     };
     assert_eq!(

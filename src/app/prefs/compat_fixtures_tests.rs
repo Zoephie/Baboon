@@ -381,19 +381,19 @@ fn compat_campaign_identities() {
     app.install_loaded_source(mounted(vec![rock.clone()]));
     for tab in &tabs[..2] {
         assert_eq!(
-            app.campaign_entry_for_identity(0, tab).map(|entry| entry.key),
+            app.model.campaign_entry_for_identity(0, tab).map(|entry| entry.key),
             Some(rock.key.clone()),
             "{tab}"
         );
     }
-    assert!(app.campaign_entry_for_identity(0, tabs[2]).is_none());
+    assert!(app.model.campaign_entry_for_identity(0, tabs[2]).is_none());
     // Two tags that had the same old identity: neither is guessed.
     app.install_loaded_source(mounted(vec![
         rock.clone(),
         container("levels/v1.3/bitmaps/rock", b"bitm", "bitmap"),
     ]));
-    assert!(app.campaign_entry_for_identity(0, tabs[1]).is_none());
-    assert!(app.campaign_entry_for_identity(0, tabs[0]).is_some());
+    assert!(app.model.campaign_entry_for_identity(0, tabs[1]).is_none());
+    assert!(app.model.campaign_entry_for_identity(0, tabs[0]).is_some());
 }
 
 #[test]

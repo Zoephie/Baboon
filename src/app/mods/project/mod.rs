@@ -1204,28 +1204,7 @@ impl Baboon {
 
 
 
-    pub(in crate::app) fn campaign_entry_for_identity(
-        &self,
-        kit: usize,
-        identity: &str,
-    ) -> Option<TagEntry> {
-        let source = self.model.kits[kit].source.as_ref()?;
-        let entries = || source.entries.iter().chain(source.all_entries.iter());
-        if let Some(entry) = entries().find(|entry| {
-            campaign_entry_project_parts(entry)
-                .is_some_and(|(candidate, _, _, _)| candidate == identity)
-        }) {
-            return Some(entry.clone());
-        }
-        // An identity recorded before dotted names were displayed whole. Taken
-        // only when exactly one tag had it, since the old form could collide.
-        let mut legacy = entries()
-            .filter(|entry| legacy_campaign_identity(entry).as_deref() == Some(identity));
-        let entry = legacy.next()?;
-        legacy
-            .all(|other| other.key == entry.key)
-            .then(|| entry.clone())
-    }
+
 
     fn ensure_campaign_project(&mut self, kit: usize, now: f64) {
         if !self.model.current_source_is_campaign_project_capable(kit)
@@ -1280,69 +1259,7 @@ impl Baboon {
         }
     }
 
-    /// Rebuild the browser entry for a stashed new tag, and parse its bytes.
-    ///
-    /// `None` when this kit cannot place it: the group name, the template
-    /// container and the parse all have to succeed, and the first two depend on
-    /// how far the source has loaded. Shared by both restore paths -- the
-    /// recovery file adopted at mount and `File > Open Baboon Project` -- because
-    /// the entry a new tag is registered under decides whether it resolves at
-    /// export, and two copies of that derivation is how one path came to build it
-    /// and the other not to.
-    fn new_overlay_entry(&self, kit: usize, overlay: &CampaignProjectOverlay) -> OverlayAdoption {
-        // The names and the template come off the source: before it has
-        // loaded, this is a "not yet" rather than a "no".
-        if self.model.kits[kit].source.is_none() {
-            return OverlayAdoption::NotYet;
-        }
-        let Some(group_name) = self.model.kits[kit]
-            .names
-            .name_for(overlay.group_tag)
-            .map(str::to_owned)
-        else {
-            return OverlayAdoption::Failed(format!(
-                "its group {} is not one this game's definitions know",
-                format_group_tag(overlay.group_tag)
-            ));
-        };
-        // A stashed tag of a group the game ships none of has no donor to point
-        // back at, and recovering it must not depend on finding one — otherwise
-        // the tag survives the save and vanishes on reopen.
-        let template = match crate::app::tag_ops::new_tag::new_container_template_for(
-            self.find_container_template_in(kit, overlay.group_tag),
-            &group_name,
-        ) {
-            Ok(template) => template,
-            Err(error) => return OverlayAdoption::Failed(error),
-        };
-        let tag = match TagFile::read_from_bytes(&overlay.bytes) {
-            Ok(tag) => tag,
-            Err(error) => {
-                return OverlayAdoption::Failed(format!("its stashed bytes do not parse: {error}"));
-            }
-        };
-        let extension = group_tag_to_extension(overlay.group_tag)
-            .unwrap_or(group_name.as_str())
-            .to_owned();
-        let package = overlay
-            .package
-            .clone()
-            .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
-        OverlayAdoption::Ready(
-            TagEntry {
-                key: crate::core::tag_key::new_tag_entry_key(&package),
-                display_path: format!("{}.{}", overlay.logical_path, extension),
-                group_tag: overlay.group_tag,
-                group_name: Some(group_name),
-                location: TagEntryLocation::NewContainer {
-                    template,
-                    package,
-                    group_tag: overlay.group_tag,
-                },
-            },
-            tag,
-        )
-    }
+
 
     /// Put stashed new tags back into the browser.
     ///
@@ -1374,7 +1291,7 @@ impl Baboon {
         let mut failed = Vec::new();
         for overlay in queued {
             if self
-                .campaign_entry_for_identity(kit, &overlay.identity)
+                .model.campaign_entry_for_identity(kit, &overlay.identity)
                 .is_some()
             {
                 continue;
@@ -1383,7 +1300,7 @@ impl Baboon {
             // and this runs every frame: one overlay that could never be placed
             // redid the entry scans and the tag parse every frame, for good.
             // Its bytes stay stashed in the project either way.
-            let (entry, tag) = match self.new_overlay_entry(kit, &overlay) {
+            let (entry, tag) = match self.model.new_overlay_entry(kit, &overlay) {
                 OverlayAdoption::Ready(entry, tag) => (entry, tag),
                 OverlayAdoption::NotYet => {
                     still_pending.push(overlay);
@@ -1621,7 +1538,7 @@ impl Baboon {
             .map(|project| project.overlays.keys().cloned().collect())
             .unwrap_or_default();
         for identity in identities {
-            if let Some(entry) = self.campaign_entry_for_identity(kit, &identity) {
+            if let Some(entry) = self.model.campaign_entry_for_identity(kit, &identity) {
                 modified.insert(&entry);
             }
         }
@@ -2069,7 +1986,7 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         for overlay in new_overlays {
-            let OverlayAdoption::Ready(entry, tag) = self.new_overlay_entry(kit, &overlay) else {
+            let OverlayAdoption::Ready(entry, tag) = self.model.new_overlay_entry(kit, &overlay) else {
                 missing += 1;
                 continue;
             };
@@ -2082,7 +1999,7 @@ impl Baboon {
             if identity_to_key.contains_key(&tab.identity) {
                 continue;
             }
-            let Some(entry) = self.campaign_entry_for_identity(kit, &tab.identity) else {
+            let Some(entry) = self.model.campaign_entry_for_identity(kit, &tab.identity) else {
                 missing += 1;
                 continue;
             };
@@ -2274,5 +2191,94 @@ impl Model {
             .collect();
         paths.sort();
         paths
+    }
+}
+
+impl Model {
+    pub(in crate::app) fn campaign_entry_for_identity(
+        &self,
+        kit: usize,
+        identity: &str,
+    ) -> Option<TagEntry> {
+        let source = self.kits[kit].source.as_ref()?;
+        let entries = || source.entries.iter().chain(source.all_entries.iter());
+        if let Some(entry) = entries().find(|entry| {
+            campaign_entry_project_parts(entry)
+                .is_some_and(|(candidate, _, _, _)| candidate == identity)
+        }) {
+            return Some(entry.clone());
+        }
+        // An identity recorded before dotted names were displayed whole. Taken
+        // only when exactly one tag had it, since the old form could collide.
+        let mut legacy = entries()
+            .filter(|entry| legacy_campaign_identity(entry).as_deref() == Some(identity));
+        let entry = legacy.next()?;
+        legacy
+            .all(|other| other.key == entry.key)
+            .then(|| entry.clone())
+    }
+
+    /// Rebuild the browser entry for a stashed new tag, and parse its bytes.
+    ///
+    /// `None` when this kit cannot place it: the group name, the template
+    /// container and the parse all have to succeed, and the first two depend on
+    /// how far the source has loaded. Shared by both restore paths -- the
+    /// recovery file adopted at mount and `File > Open Baboon Project` -- because
+    /// the entry a new tag is registered under decides whether it resolves at
+    /// export, and two copies of that derivation is how one path came to build it
+    /// and the other not to.
+    fn new_overlay_entry(&self, kit: usize, overlay: &CampaignProjectOverlay) -> OverlayAdoption {
+        // The names and the template come off the source: before it has
+        // loaded, this is a "not yet" rather than a "no".
+        if self.kits[kit].source.is_none() {
+            return OverlayAdoption::NotYet;
+        }
+        let Some(group_name) = self.kits[kit]
+            .names
+            .name_for(overlay.group_tag)
+            .map(str::to_owned)
+        else {
+            return OverlayAdoption::Failed(format!(
+                "its group {} is not one this game's definitions know",
+                format_group_tag(overlay.group_tag)
+            ));
+        };
+        // A stashed tag of a group the game ships none of has no donor to point
+        // back at, and recovering it must not depend on finding one — otherwise
+        // the tag survives the save and vanishes on reopen.
+        let template = match crate::app::tag_ops::new_tag::new_container_template_for(
+            self.find_container_template_in(kit, overlay.group_tag),
+            &group_name,
+        ) {
+            Ok(template) => template,
+            Err(error) => return OverlayAdoption::Failed(error),
+        };
+        let tag = match TagFile::read_from_bytes(&overlay.bytes) {
+            Ok(tag) => tag,
+            Err(error) => {
+                return OverlayAdoption::Failed(format!("its stashed bytes do not parse: {error}"));
+            }
+        };
+        let extension = group_tag_to_extension(overlay.group_tag)
+            .unwrap_or(group_name.as_str())
+            .to_owned();
+        let package = overlay
+            .package
+            .clone()
+            .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
+        OverlayAdoption::Ready(
+            TagEntry {
+                key: crate::core::tag_key::new_tag_entry_key(&package),
+                display_path: format!("{}.{}", overlay.logical_path, extension),
+                group_tag: overlay.group_tag,
+                group_name: Some(group_name),
+                location: TagEntryLocation::NewContainer {
+                    template,
+                    package,
+                    group_tag: overlay.group_tag,
+                },
+            },
+            tag,
+        )
     }
 }

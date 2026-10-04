@@ -359,7 +359,7 @@ impl Baboon {
                 containers,
                 package,
                 bytes.len() as u64,
-                || self.find_container_template(*group_tag),
+                || self.model.find_container_template(*group_tag),
             ) {
                 Ok(bytes) => bytes,
                 Err(error) => {

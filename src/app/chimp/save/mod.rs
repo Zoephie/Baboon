@@ -416,31 +416,7 @@ impl Baboon {
         }
     }
 
-    /// Rebuild every dirty package in the kit, recording the edit count each
-    /// was rebuilt at.
-    fn rebuild_dirty_chimp_documents(
-        &self,
-        kit_index: usize,
-        world: &World,
-    ) -> Result<Vec<ChimpRebuilt>, String> {
-        let mut rebuilt = Vec::new();
-        for (package, document) in self.model.kits[kit_index]
-            .chimp
-            .documents
-            .iter()
-            .filter(|(_, document)| document.dirty)
-        {
-            let (bytes, store) = rebuild_chimp_document(world, document)?;
-            rebuilt.push(ChimpRebuilt {
-                package: package.clone(),
-                provider: document.provider.clone(),
-                bytes,
-                store,
-                edits: document.edits,
-            });
-        }
-        Ok(rebuilt)
-    }
+
 
     /// Start a Chimp save. Returns false when nothing was started, in which
     /// case a pending close is the caller's to settle now; otherwise it is
@@ -465,7 +441,7 @@ impl Baboon {
             return false;
         };
         let world = world.clone();
-        let rebuilt = match self.rebuild_dirty_chimp_documents(kit_index, &world) {
+        let rebuilt = match self.model.rebuild_dirty_chimp_documents(kit_index, &world) {
             Ok(rebuilt) => rebuilt,
             Err(error) => {
                 self.model.status = error;
@@ -963,5 +939,33 @@ impl Model {
 
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
         self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
+    }
+}
+
+impl Model {
+    /// Rebuild every dirty package in the kit, recording the edit count each
+    /// was rebuilt at.
+    fn rebuild_dirty_chimp_documents(
+        &self,
+        kit_index: usize,
+        world: &World,
+    ) -> Result<Vec<ChimpRebuilt>, String> {
+        let mut rebuilt = Vec::new();
+        for (package, document) in self.kits[kit_index]
+            .chimp
+            .documents
+            .iter()
+            .filter(|(_, document)| document.dirty)
+        {
+            let (bytes, store) = rebuild_chimp_document(world, document)?;
+            rebuilt.push(ChimpRebuilt {
+                package: package.clone(),
+                provider: document.provider.clone(),
+                bytes,
+                store,
+                edits: document.edits,
+            });
+        }
+        Ok(rebuilt)
     }
 }
