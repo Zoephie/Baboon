@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 /// `text`, cut from the start with an ellipsis until `measure` says it fits.
-pub(super) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
+pub(in crate::app) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
     if measure(text) <= max_width {
         return text.to_owned();
     }
@@ -26,7 +26,7 @@ pub(super) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) 
 }
 
 /// `text`, cut from the end with an ellipsis until `measure` says it fits.
-pub(super) fn truncate_end(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
+pub(in crate::app) fn truncate_end(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
     if measure(text) <= max_width {
         return text.to_owned();
     }
@@ -529,7 +529,7 @@ fn block_change_icon(diff: &TagFieldDiff) -> Option<ButtonIcon> {
 /// Draw the reusable field/before/delta/after results view used by Compare
 /// Tags and by Git Review. Keeping the presentation here makes Git history
 /// comparisons read exactly like the editor's ordinary semantic tag diff.
-pub(super) fn draw_tag_diff_list(
+pub(in crate::app) fn draw_tag_diff_list(
     ui: &mut Ui,
     results: &TagDiffResults,
     filters: &mut TagDiffFilters,
@@ -768,7 +768,7 @@ impl Baboon {
         kits
     }
 
-    pub(super) fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
         let Some(mut state) = self.tag_diff.take() else {
             return;
         };
@@ -965,7 +965,7 @@ impl Baboon {
             .default_width(window_width(ctx, 620.0))
             .resizable(true)
             .show(ctx, |ui| {
-                super::find::draw_icon_window_header(
+                crate::app::ui::draw_icon_window_header(
                     ui,
                     "Compare Tags",
                     ButtonIcon::Compare,

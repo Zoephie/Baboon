@@ -671,7 +671,7 @@ fn cases() -> Vec<Case> {
         case(
             "tag_compare",
             &["tag_diff"],
-            &["ui/tag_compare/mod.rs"],
+            &["compare/tag_compare/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);

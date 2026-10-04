@@ -16,8 +16,6 @@ mod bitmap;
 pub(super) use bitmap::*;
 mod model;
 pub(super) use model::*;
-mod diff;
-pub(super) use diff::*;
 
 use super::sound_extract::{
     ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,

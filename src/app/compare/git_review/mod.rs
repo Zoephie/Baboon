@@ -416,7 +416,7 @@ impl GitReviewView {
             }
         };
         Ok(
-            crate::app::ui::tag_compare::comparison_results_with_missing(
+            crate::app::compare::tag_compare::comparison_results_with_missing(
                 before.as_ref(),
                 after.as_ref(),
             ),
@@ -453,7 +453,7 @@ impl GitReviewState {
 }
 
 impl Baboon {
-    pub(super) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
+    pub(in crate::app) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
         self.kits.get(kit).is_some_and(|kit| {
             matches!(
                 kit.source.as_ref().map(|source| &source.source),
@@ -465,7 +465,7 @@ impl Baboon {
         })
     }
 
-    pub(super) fn open_git_review(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn open_git_review(&mut self, ctx: &egui::Context) {
         let kit = self.active;
         if !matches!(
             self.kits[kit].source.as_ref().map(|source| &source.source),

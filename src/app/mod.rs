@@ -132,8 +132,6 @@ mod bitmap_browser;
 use bitmap_browser::*;
 mod model_browser;
 use model_browser::*;
-mod git_review;
-use git_review::*;
 mod audio;
 mod sound_extract;
 use sound_extract::*;
@@ -149,6 +147,8 @@ mod controller;
 use controller::{ContainerLeaseId, ContainerWriteLease, CreatedTagLedger, CreatedTagRecord};
 mod help;
 use help::*;
+mod compare;
+use compare::*;
 mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a

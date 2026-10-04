@@ -11,7 +11,6 @@ pub(in crate::app) use dialogs::DiffNode;
 mod find;
 pub(in crate::app) use find::{draw_icon_window_header, draw_icon_window_header_without_close};
 mod first_run;
-mod git_review;
 mod kit_tiles;
 mod loading;
 pub(in crate::app) use loading::{
@@ -21,15 +20,14 @@ mod recents;
 mod search_windows;
 mod settings;
 mod shell;
-pub(in crate::app) mod tag_compare;
 mod tag_pane;
 mod tag_tiles;
 mod tool_commands;
 mod welcome;
 
-const PANE_HEADER_ICON_SIZE: f32 = 32.0;
-const PANE_HEADER_SECTION_GAP: f32 = 20.0;
-const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
+pub(in crate::app) const PANE_HEADER_ICON_SIZE: f32 = 32.0;
+pub(in crate::app) const PANE_HEADER_SECTION_GAP: f32 = 20.0;
+pub(in crate::app) const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
 
 /// The shared loaded-workspace state for a canvas that has no open document.
 pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
@@ -54,7 +52,7 @@ pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
         ui.label(RichText::new(detail).color(subtle_dark()));
     });
 }
-const PANE_HEADER_ACTION_GAP: f32 = 4.0;
+pub(in crate::app) const PANE_HEADER_ACTION_GAP: f32 = 4.0;
 const PANE_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
 const PANE_HEADER_MIN_LEFT_WIDTH: f32 = 200.0;
 const PANE_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
@@ -91,7 +89,7 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
 
 /// The shared browser search field. Its icon lives inside the 24-point pill so
 /// the compact sidebar and a wide folder pane use exactly the same geometry.
-fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
+pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
     let width = ui.available_width().max(BROWSER_SEARCH_HEIGHT);
     let (rect, background_response) =
         ui.allocate_exact_size(Vec2::new(width, BROWSER_SEARCH_HEIGHT), Sense::hover());

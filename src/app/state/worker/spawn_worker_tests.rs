@@ -37,16 +37,15 @@ fn the_test_helper_applies_results_in_arrival_order() {
 /// from a thread of its own, which is what let a panic skip the report.
 #[test]
 fn exports_report_only_through_spawn_export() {
-    for (file, text) in [
-        ("controller/mod.rs", include_root_str!("src/app/controller/mod.rs")),
-        ("chimp/extract/mod.rs", include_root_str!("src/app/chimp/extract/mod.rs")),
-    ] {
+    let sources = crate::test_kits::app_product_sources();
+    for (file, text) in &sources {
         assert!(
             !text.contains("send(WorkerMessage::ExportFinished("),
             "{file} sends ExportFinished itself"
         );
-        assert!(text.contains("spawn_export("), "{file}: the scan is not looking");
     }
+    let callers = sources.iter().filter(|(_, text)| text.contains("spawn_export(")).count();
+    assert!(callers >= 2, "spawn_export found in {callers} files; the scan is not looking");
 }
 
 /// A worker that panics still answers, so whatever the UI marked as in

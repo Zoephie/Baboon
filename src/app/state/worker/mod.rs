@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::app::controller::{InPlaceOverwrite, InPlaceOverwriteJob};
-use crate::app::ui::tag_compare::TagCompareGitUpdate;
+use crate::app::compare::tag_compare::TagCompareGitUpdate;
 
 /// Completed in-place Campaign Evolved duplicate, ready for UI-thread source
 /// and document registration.

@@ -95,3 +95,29 @@ pub(crate) fn unique_temp_dir(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("create a temporary test directory");
     dir
 }
+
+/// Every shipped source file under `src/app`, as `(path relative to src/app,
+/// text)`: test files (`tests.rs`, `*_tests.rs`, anything under a `tests`
+/// folder) are left out. For tests that check a rule across the code, so
+/// that moving code between files cannot take it out of their sight.
+pub(crate) fn app_product_sources() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.is_dir() {
+                if name != "tests" {
+                    walk(&path, root, out);
+                }
+            } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
+                let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
+    let mut out = Vec::new();
+    walk(&root, &root, &mut out);
+    out.sort();
+    out
+}

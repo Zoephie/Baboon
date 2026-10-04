@@ -11,15 +11,10 @@ mod classic_h2;
 /// off Windows, so this checks the launches themselves.
 #[test]
 fn helper_programs_launch_through_background_command() {
-    let files = [
-        ("git_review/mod.rs", include_root_str!("src/app/git_review/mod.rs")),
-        ("ui/tag_compare/mod.rs", include_root_str!("src/app/ui/tag_compare/mod.rs")),
-        ("controller/terminal/mod.rs", include_root_str!("src/app/controller/terminal/mod.rs")),
-        ("controller/updates/mod.rs", include_root_str!("src/app/controller/updates/mod.rs")),
-    ];
     let mut bare = Vec::new();
     let mut routed = 0;
-    for (file, text) in files {
+    for (file, text) in crate::test_kits::app_product_sources() {
+        let text = text.as_str();
         // Test code launches git to build fixtures; only what ships counts.
         let shipped = text.split("#[cfg(test)]").next().unwrap_or(text);
         for program in ["git", "taskkill", "powershell.exe", "cmd"] {

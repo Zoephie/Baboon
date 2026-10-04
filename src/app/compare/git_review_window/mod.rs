@@ -1,6 +1,10 @@
 //! The Git Review pane: tag-only working-tree changes and commit history.
 
 use super::*;
+use crate::app::ui::{
+    PANE_HEADER_ACTION_GAP, PANE_HEADER_ICON_SIZE, PANE_HEADER_SECTION_GAP, browser_search_field,
+    recheck_cached,
+};
 
 enum GitReviewAction {
     Refresh,
@@ -594,7 +598,7 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
 }
 
 impl Baboon {
-    pub(super) fn draw_git_review(&mut self, ui: &mut Ui, kit_index: usize) {
+    pub(in crate::app) fn draw_git_review(&mut self, ui: &mut Ui, kit_index: usize) {
         // Borrowed for the draw, which reads the review and writes only locals:
         // the commit list, the change list and a diff of up to 5,000 rows used
         // to be copied out every frame.
