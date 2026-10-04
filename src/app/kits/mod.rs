@@ -32,7 +32,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) mod terminal_state;
 pub(in crate::app) use terminal_state::*;
 pub(in crate::app) mod tool_commands_window;
-pub(in crate::app) use tool_commands_window::pick_tool_command_path;
+pub(in crate::app) use tool_commands_window::{draw_tool_commands_window, pick_tool_command_path};
 pub(in crate::app) mod tools;
 pub(in crate::app) mod profiles;
 
@@ -76,10 +76,12 @@ pub(in crate::app) enum KitsCommand {
     },
     /// Run a tool import a field asked for, once it can start.
     QueueToolImport(ToolImportRequest),
+    /// Run a tool command line in the terminal.
+    RunToolCommand(String),
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_kits_command(&mut self, command: KitsCommand) {
+    pub(in crate::app) fn apply_kits_command(&mut self, command: KitsCommand, ctx: &egui::Context) {
         match command {
             KitsCommand::LaunchScenario { kit, key, tool } => {
                 let Some(index) = self.model.kit_index(kit) else {
@@ -92,6 +94,7 @@ impl Baboon {
                 }
             }
             KitsCommand::QueueToolImport(request) => self.kit_tools.pending_tool_import = Some(request),
+            KitsCommand::RunToolCommand(command) => self.submit_terminal_command(command, ctx.clone()),
         }
     }
 }

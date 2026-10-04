@@ -258,7 +258,7 @@ impl Baboon {
             Command::Documents(command) => self.apply_documents_command(command, ctx),
             Command::Editor(command) => self.apply_editor_command(command, ctx),
             Command::Browser(command) => self.apply_browser_command(command, ctx),
-            Command::Kits(command) => self.apply_kits_command(command),
+            Command::Kits(command) => self.apply_kits_command(command, ctx),
             Command::Audio(command) => self.apply_audio_command(command),
         }
     }

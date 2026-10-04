@@ -1470,7 +1470,7 @@ impl Baboon {
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {
         draw_tag_reference_picker_window(&cx!(self, ctx), &mut self.editor);
         self.draw_settings_window(ctx);
-        self.draw_tool_commands_window(ctx);
+        draw_tool_commands_window(&cx!(self, ctx), &mut self.kit_tools);
         draw_new_tag_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_import_tag_window(&cx!(self, ctx), &mut self.import);
         draw_import_discard_confirm(&cx!(self, ctx), &mut self.import);
