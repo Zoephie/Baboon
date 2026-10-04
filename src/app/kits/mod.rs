@@ -4,6 +4,7 @@
 //! scenarios, and dropping tags on the tools.
 
 use super::*;
+use crate::app::references::read_entry_dependencies;
 use crate::app::search::FieldValueIndex;
 use crate::app::compare::GitReviewState;
 use crate::app::chimp::{ChimpState, ChimpView, KitSurface};

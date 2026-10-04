@@ -6,6 +6,7 @@
 //! run against files a test can read back, without any editing kit installed.
 
 use super::*;
+use crate::app::references::build_reverse_dependency_index;
 use crate::core::document::apply::{DeferredOps, UndoStep};
 use blam_tags::fields::{TagFieldData, TagReferenceData};
 use std::sync::Mutex;

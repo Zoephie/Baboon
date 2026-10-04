@@ -99,7 +99,7 @@ mod compare;
 mod search;
 use search::{FindDialogState, SearchFeature};
 mod references;
-use references::*;
+use references::ReferencesFeature;
 pub(in crate::app) mod import;
 use import::*;
 pub(in crate::app) mod mods;

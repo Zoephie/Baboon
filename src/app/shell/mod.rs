@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::references::ReferencesFeature;
 use crate::app::search::{FieldValueSearchWindow, FindOccurrence, SearchFeature};
 use crate::app::compare::{
     GIT_REVIEW_KEY, GIT_REVIEW_TITLE, GitHistoryState, GitReviewView, TagCompareSource,

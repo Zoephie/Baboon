@@ -4,6 +4,7 @@
 //! container, and the windows that choose what and where.
 
 use super::*;
+use crate::app::references::dependency_entry_reference_path;
 use crate::app::editor::clean_field_name;
 use crate::app::browser::{
     ExtractKind, ExtractTargetPrompt, is_bitmap_tag, is_hlsl_include_group, is_hlsl_include_tag,

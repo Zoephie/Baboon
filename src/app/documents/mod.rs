@@ -2,6 +2,7 @@
 //! and closing tabs or the app with the save-changes prompt.
 
 use super::*;
+use crate::app::references::collect_tag_dependency_refs;
 use crate::app::chimp::ChimpLevelPhase;
 use crate::core::document::value::unsaveable_reason;
 use crate::app::editor::{ColorPopupWindow, DeferredFileAction, FunctionPopupWindow, format_byte_count};

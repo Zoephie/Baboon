@@ -3,6 +3,10 @@
 //! inside a Campaign Evolved container.
 
 use super::*;
+use crate::app::references::{
+    build_reverse_dependency_index, collect_tag_dependency_refs, collect_tag_references,
+    dependency_entry_reference_path, read_entry_dependencies, reference_path_from_abs_file,
+};
 use crate::app::editor::{
     H2TemplateCache, combo_box_with_scroll, combo_scroll_next_index, lost_focus_once,
 };
