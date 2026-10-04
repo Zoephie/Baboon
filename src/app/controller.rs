@@ -11624,6 +11624,20 @@ fn run_tag_rename_job(
     if new_path == old_path {
         return Err("New path is the same as the current one".to_owned());
     }
+    // Tag paths ignore case, so a change of case alone renames nothing: no
+    // reference would change. Refused by name, as a folder rename is, rather
+    // than left to the file system — a case-insensitive one refuses it only
+    // because the destination "exists" (it is the tag itself), and a
+    // case-sensitive one would go ahead and rewrite every referrer.
+    if new_path
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&old_path.to_string_lossy())
+    {
+        return Err(
+            "Tag paths ignore case, so changing only the case would not change any reference"
+                .to_owned(),
+        );
+    }
     if new_path.exists() {
         return Err(format!(
             "A tag already exists at the destination: {}",

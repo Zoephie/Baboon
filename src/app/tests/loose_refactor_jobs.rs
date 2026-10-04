@@ -217,17 +217,13 @@ fn moving_a_tag_into_another_folder_rewrites_its_referrers() {
 }
 
 /// Tag paths ignore case, so a rename that only changes case is no rename at
-/// all. On a case-insensitive file system the job refuses it because the
-/// destination "exists" -- it is the tag itself.
-// BUG: nothing else refuses it. On a case-sensitive file system (Linux) the
-// job goes ahead and rewrites every reference to the new spelling.
+/// all: it is refused by name on every file system. It used to be refused only
+/// where the file system ignores case (the destination "existed": it was the
+/// tag itself), and on a case-sensitive one the job went ahead and rewrote
+/// every reference to the new spelling.
 #[test]
-fn a_case_only_tag_rename_is_refused_where_the_file_system_ignores_case() {
+fn a_case_only_tag_rename_is_refused_on_every_file_system() {
     let kit = kit("refactor-case-only");
-    let probe = kit.root.join("CaseProbe");
-    fs::write(&probe, b"").unwrap();
-    let case_insensitive = kit.root.join("caseprobe").exists();
-    fs::remove_file(&probe).unwrap();
     let entries = kit.entries();
     let entry = entries
         .iter()
@@ -248,20 +244,17 @@ fn a_case_only_tag_rename_is_refused_where_the_file_system_ignores_case() {
         &tx,
     );
 
-    if case_insensitive {
-        let error = result.err().expect("refused");
-        assert!(
-            error.starts_with("A tag already exists at the destination: "),
-            "{error}"
-        );
-        assert_eq!(
-            render_reference(&kit, USER).as_deref(),
-            Some("objects\\props\\crate"),
-            "nothing rewritten"
-        );
-    } else {
-        assert!(result.is_ok(), "goes ahead on a case-sensitive file system");
-    }
+    let error = result.err().expect("refused");
+    assert!(
+        error.starts_with("Tag paths ignore case"),
+        "refused by name, not by the file system: {error}"
+    );
+    assert_eq!(
+        render_reference(&kit, USER).as_deref(),
+        Some("objects\\props\\crate"),
+        "nothing rewritten"
+    );
+    assert!(kit.root.join(RENDER).is_file(), "the tag was not moved");
 
     // Renaming a folder to a case variant is refused by name, everywhere.
     assert_eq!(
