@@ -27,10 +27,17 @@ impl Baboon {
         let menu = self.menu_state(ctx);
         let active = self.model.kits[self.model.active].id;
         draw_menu_bar(&cx!(self, ctx), ui, &menu, &mut self.views[active]);
-        self.draw_status_bar(ui);
-        self.draw_entry_index_wait_notice(ctx);
+        draw_status_bar(
+            &cx!(self, ctx),
+            ui,
+            self.export.container_dump_job.as_ref(),
+            self.tag_ops.folder_refactor.as_ref(),
+            self.shell.available_update.as_ref(),
+        );
+        draw_entry_index_wait_notice(&cx!(self, ctx), &mut self.kit_tools);
         // Terminal panel — rendered AFTER status so it sits above it.
-        self.draw_terminal_panel(ui);
+        let active = self.model.kits[self.model.active].id;
+        draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
         set_window_work_area(ctx, ui.available_rect_before_wrap());
 
         egui::CentralPanel::default()
@@ -57,425 +64,8 @@ impl Baboon {
         self.apply_commands(ctx);
     }
 
-    /// The status bar: the status line, index and job progress, the update
-    /// link and the workspace's project.
-    fn draw_status_bar(&mut self, ui: &mut egui::Ui) {
-        let ctx = &ui.ctx().clone();
-        egui::Panel::bottom("status")
-            .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
-                left: 6,
-                right: 6,
-                top: 2,
-                bottom: 2,
-            }))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Status").strong());
-                    ui.separator();
-                    if self.model.kits[self.model.active].scanning_entries {
-                        let progress = self.model.kits[self.model.active].index_jobs.entry_progress.as_ref();
-                        let label = progress
-                            .map(|progress| progress.label.as_str())
-                            .unwrap_or("Indexing tags...");
-                        ui.label(RichText::new(label).strong());
-                        if let Some(progress) = progress {
-                            let fraction = if progress.total == 0 {
-                                0.0
-                            } else {
-                                progress.processed as f32 / progress.total as f32
-                            };
-                            let text = if progress.total == 0 {
-                                "Discovering files...".to_owned()
-                            } else {
-                                format!(
-                                    "{} / {} files, {} tags",
-                                    progress.processed, progress.total, progress.matched
-                                )
-                            };
-                            draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
-                        }
-                    } else if self.model.kits[self.model.active].index_jobs.building_references {
-                        let progress = self.model.kits[self.model.active]
-                            .index_jobs
-                            .reference_progress
-                            .as_ref();
-                        let label = progress
-                            .map(|progress| progress.label.as_str())
-                            .unwrap_or("Building reference index...");
-                        ui.label(RichText::new(label).strong());
-                        if let Some(progress) = progress {
-                            let fraction = if progress.total == 0 {
-                                0.0
-                            } else {
-                                progress.processed as f32 / progress.total as f32
-                            };
-                            let text = format!("{} / {} tags", progress.processed, progress.total);
-                            draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
-                        }
-                    } else {
-                        ui.label(&self.model.status);
-                    }
-                    // Additive rather than part of the chain above: the
-                    // extraction outlives whatever the user does next, and its
-                    // bar is the only place a cancel is reachable from.
-                    if let Some(job) = &self.export.container_dump_job {
-                        let (fraction, done, total) = (job.fraction(), job.done, job.total);
-                        let remaining = job.remaining();
-                        ui.separator();
-                        ui.label(RichText::new("Extracting tags").strong())
-                            // Where it is writing. The folder was chosen minutes
-                            // ago in a native dialog and is nowhere else on
-                            // screen once the confirm has closed.
-                            .on_hover_text(format!("Writing to {}", job.output.display()));
-                        draw_index_progress_bar(
-                            ui,
-                            220.0,
-                            Some(fraction),
-                            &format!("{done} / {total} tags"),
-                        );
-                        if let Some(remaining) = remaining {
-                            ui.label(
-                                RichText::new(format!("{} left", format_remaining(remaining)))
-                                    .color(subtle_dark())
-                                    .small(),
-                            );
-                        }
-                        if ui.small_button("Cancel").clicked() {
-                            job.cancel.store(true, Ordering::Relaxed);
-                        }
-                        // A few times a second moves the bar and the estimate;
-                        // every frame kept the app at full frame rate for the
-                        // whole of a multi-minute extraction.
-                        ctx.request_repaint_after(PROGRESS_REPAINT);
-                    }
-                    if let Some(progress) = &self.tag_ops.folder_refactor {
-                        ui.separator();
-                        ui.label(RichText::new(&progress.label).strong());
-                        let mut bar = if let Some(value) = progress.progress {
-                            egui::ProgressBar::new(value.clamp(0.0, 1.0))
-                        } else {
-                            egui::ProgressBar::new(0.0).animate(true)
-                        };
-                        bar = bar
-                            .desired_width(180.0)
-                            .text(RichText::new(&progress.phase).color(text_dark()));
-                        ui.add(bar);
-                        // An indeterminate bar asks for its own frames while
-                        // it animates.
-                        ctx.request_repaint_after(PROGRESS_REPAINT);
-                    }
-                    // Anchored to the right edge, out of the way of the status
-                    // text and the progress bars that share this row. The
-                    // status line expires on a timer, so an update found by the
-                    // silent startup check would otherwise scroll past unread;
-                    // this link stays until the next check clears it.
-                    let update = self.shell.available_update.clone();
-                    // Which `.baboon` this workspace's changes belong to, and
-                    // where they are actually being kept. Autosave and Save write
-                    // different files, and a workspace that has never been saved
-                    // writes only the recovery file — none of which was visible
-                    // anywhere before.
-                    let project = self
-                        .model.current_source_is_campaign_project_capable(self.model.active)
-                        .then(|| self.model.kits[self.model.active].project.active.as_ref())
-                        .flatten()
-                        // A workspace with neither a project file nor a stash has
-                        // nothing to say here, and saying it anyway on every
-                        // Campaign Evolved kit would just be furniture.
-                        .filter(|project| {
-                            project.project_path.is_some() || !project.overlays.is_empty()
-                        })
-                        .map(|project| {
-                            let mut hover = match project.project_path.as_deref() {
-                                Some(path) => format!("Baboon project: {}", path.display()),
-                                None => "This workspace has no saved Baboon project yet — use \
-                                         File > Save Baboon Project"
-                                    .to_owned(),
-                            };
-                            hover.push_str(&format!(
-                                "\nAutosaved to {}",
-                                project.recovery_path.display()
-                            ));
-                            (format!("Project: {}", project.label()), hover)
-                        });
-                    if update.is_some() || project.is_some() {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if let Some(update) = update {
-                                let label = format!("Update available: {}", update.short_name());
-                                let hover = match update.channel {
-                                    UpdateChannel::Stable => "Open the release page on GitHub",
-                                    UpdateChannel::Development => {
-                                        "Open the latest development build on GitHub"
-                                    }
-                                };
-                                // An explicit colour beats the app-wide
-                                // `override_text_color`, which would otherwise
-                                // flatten both this and the link colour to
-                                // ordinary body text. `strong()` only brightens;
-                                // the weight comes from the bold family, at the
-                                // body size of the row it sits in.
-                                ui.hyperlink_to(
-                                    RichText::new(label)
-                                        .font(bold_font(12.0))
-                                        .color(good_news()),
-                                    &update.release_url,
-                                )
-                                .on_hover_text(hover);
-                            }
-                            if let Some((label, hover)) = project {
-                                ui.label(RichText::new(label).small().color(subtle_dark()))
-                                    .on_hover_text(hover);
-                            }
-                        });
-                    }
-                });
-            });
-    }
 
-    /// The "please wait" window shown while the active kit is still indexing.
-    fn draw_entry_index_wait_notice(&mut self, ctx: &egui::Context) {
-        if self.kit_tools.show_entry_index_wait_notice
-            && (self.model.kits[self.model.active].scanning_entries
-                || self.model.kits[self.model.active].index_jobs.references_for_entry_index)
-        {
-            let mut open = self.kit_tools.show_entry_index_wait_notice;
-            let mut hide_notice = false;
-            egui::Window::new("Indexing")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    ui.set_min_width(360.0);
-                    ui.label("Please wait until indexing is completed for best compatibility.");
-                    ui.add_space(8.0);
-                    if self.model.kits[self.model.active].scanning_entries {
-                        let progress = self.model.kits[self.model.active].index_jobs.entry_progress.as_ref();
-                        let label = progress
-                            .map(|progress| progress.label.as_str())
-                            .unwrap_or("Indexing tags...");
-                        ui.label(RichText::new(label).strong());
-                        if let Some(progress) = progress {
-                            let fraction = if progress.total == 0 {
-                                0.0
-                            } else {
-                                progress.processed as f32 / progress.total as f32
-                            };
-                            let text = if progress.total == 0 {
-                                "Discovering files...".to_owned()
-                            } else {
-                                format!(
-                                    "{} / {} files, {} tags",
-                                    progress.processed, progress.total, progress.matched
-                                )
-                            };
-                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
-                        }
-                    } else if self.model.kits[self.model.active].index_jobs.references_for_entry_index {
-                        ui.label(RichText::new("Building reference index...").strong());
-                        if let Some(progress) = self.model.kits[self.model.active]
-                            .index_jobs
-                            .reference_progress
-                            .as_ref()
-                        {
-                            let fraction = if progress.total == 0 {
-                                0.0
-                            } else {
-                                progress.processed as f32 / progress.total as f32
-                            };
-                            let text = format!("{} / {} tags", progress.processed, progress.total);
-                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
-                        } else {
-                            draw_index_progress_bar(
-                                ui,
-                                330.0,
-                                None,
-                                "Scanning tag dependencies...",
-                            );
-                        }
-                    }
-                    ui.add_space(8.0);
-                    if ui.button("Hide").clicked() {
-                        hide_notice = true;
-                    }
-                });
-            self.kit_tools.show_entry_index_wait_notice = open && !hide_notice;
-        }
-    }
 
-    /// The terminal panel, when the active kit has it open.
-    fn draw_terminal_panel(&mut self, ui: &mut egui::Ui) {
-        let ctx = &ui.ctx().clone();
-        if self.views[self.model.kits[self.model.active].id].terminal.open {
-            let work_dir_label = self.views[self.model.kits[self.model.active].id]
-                .terminal.work_dir
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            egui::Panel::bottom("terminal")
-                .resizable(true)
-                .default_size(180.0)
-                .size_range(90.0..=600.0)
-                .frame(
-                    Frame::NONE
-                        .fill(foundation_group_bg())
-                        .inner_margin(egui::Margin {
-                            left: 6,
-                            right: 6,
-                            top: 4,
-                            bottom: 4,
-                        }),
-                )
-                .show(ui, |ui| {
-                    // Header pinned to the top of the panel.
-                    egui::Panel::top("terminal_header")
-                        .frame(Frame::NONE)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.strong(RichText::new("Terminal").color(text_dark()));
-                                ui.small(
-                                    RichText::new(&work_dir_label)
-                                        .color(subtle_dark())
-                                        .monospace(),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .small_button("×")
-                                            .on_hover_text("Close terminal")
-                                            .clicked()
-                                        {
-                                            self.views[self.model.kits[self.model.active].id].terminal.open = false;
-                                            self.remember_terminal_open_for_game();
-                                        }
-                                        if icon_button(
-                                            ui,
-                                            ButtonIcon::Clear,
-                                            "Clear terminal",
-                                            true,
-                                            text_dark(),
-                                        )
-                                        .clicked()
-                                        {
-                                            self.kit_tools.terminal.lines.clear();
-                                        }
-                                        let open_log_enabled =
-                                            self.kit_tools.terminal.last_log_path.is_some();
-                                        let mut open_log_button = ui.add_enabled(
-                                            open_log_enabled,
-                                            egui::Button::new(
-                                                RichText::new("Open full log").small(),
-                                            ),
-                                        );
-                                        if let Some(path) = self.kit_tools.terminal.last_log_path.as_ref() {
-                                            open_log_button = open_log_button
-                                                .on_hover_text(path.display().to_string());
-                                        }
-                                        if open_log_button.clicked()
-                                            && let Some(path) = self.kit_tools.terminal.last_log_path.clone()
-                                            && let Err(error) = open_terminal_log(&path)
-                                        {
-                                            self.model.status = error;
-                                        }
-                                        if self.kit_tools.terminal.running {
-                                            if self.kit_tools.terminal.process.is_some()
-                                                && ui.small_button("Stop").clicked()
-                                            {
-                                                self.stop_terminal_command();
-                                            }
-                                            let running_label = self
-                                                .kit_tools.terminal
-                                                .running_command
-                                                .as_deref()
-                                                .unwrap_or("running...");
-                                            ui.small(
-                                                RichText::new(running_label)
-                                                    .color(subtle_dark())
-                                                    .monospace(),
-                                            );
-                                        }
-                                    },
-                                );
-                            });
-                            ui.add_space(2.0);
-                        });
-
-                    // Input row pinned to the bottom of the panel.
-                    egui::Panel::bottom("terminal_input")
-                        .frame(Frame::NONE)
-                        .show(ui, |ui| {
-                            ui.add_space(2.0);
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(">").monospace().color(subtle_dark()));
-                                // Reserve a fixed width for the Run button on
-                                // the right; the TextEdit fills the rest. (Do
-                                // NOT wrap the button in a right_to_left layout
-                                // — that consumes all remaining width and leaves
-                                // nothing for the input field.)
-                                let button_w = 52.0;
-                                let text_w = (ui.available_width() - button_w - 8.0).max(40.0);
-                                let resp = ui.add_enabled(
-                                    !self.kit_tools.terminal.running,
-                                    egui::TextEdit::singleline(&mut self.kit_tools.terminal.input)
-                                        .desired_width(text_w)
-                                        .font(egui::TextStyle::Monospace)
-                                        .hint_text(placeholder_text("tool <command> …")),
-                                );
-                                if self.kit_tools.terminal.refocus_input && !self.kit_tools.terminal.running {
-                                    resp.request_focus();
-                                    self.kit_tools.terminal.refocus_input = false;
-                                }
-                                let run_clicked = ui
-                                    .add_enabled(!self.kit_tools.terminal.running, egui::Button::new("Run"))
-                                    .clicked();
-                                let enter = lost_focus_once(&resp)
-                                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                if resp.has_focus() && !self.kit_tools.terminal.running {
-                                    let recall = ui.input(|i| {
-                                        if i.key_pressed(egui::Key::ArrowUp) {
-                                            -1
-                                        } else if i.key_pressed(egui::Key::ArrowDown) {
-                                            1
-                                        } else {
-                                            0
-                                        }
-                                    });
-                                    if recall != 0 {
-                                        self.recall_terminal_history(recall);
-                                        resp.request_focus();
-                                    }
-                                }
-                                if run_clicked || enter {
-                                    self.begin_terminal_command(ctx.clone());
-                                    // Refocus the input so the user can keep typing.
-                                    resp.request_focus();
-                                }
-                            });
-                        });
-
-                    // Output fills the remaining center space. The CentralPanel
-                    // bounds the scroll area exactly, so there's no available_height
-                    // feedback to fight the resize handle.
-                    egui::CentralPanel::default()
-                        .frame(
-                            Frame::NONE
-                                .fill(Color32::from_rgb(24, 24, 23))
-                                .inner_margin(egui::Margin {
-                                    left: 6,
-                                    right: 6,
-                                    top: 4,
-                                    bottom: 4,
-                                }),
-                        )
-                        .show(ui, |ui| {
-                            let want_scroll_bottom = self.kit_tools.terminal.scroll_to_bottom;
-                            self.kit_tools.terminal.scroll_to_bottom = false;
-                            draw_terminal_output(ui, &self.kit_tools.terminal.lines, want_scroll_bottom);
-                        });
-                });
-        }
-    }
 
     /// The kit a confirmed popup applies to: the one it was opened from, or
     /// none if that kit has closed since, so the edit is dropped rather than
@@ -731,7 +321,7 @@ impl Baboon {
         self.draw_chimp_mesh_texture_prompt(ctx);
         self.draw_chimp_texture_export_prompt(ctx);
         self.draw_chimp_level_export_prompt(ctx);
-        self.draw_operation_notice_window(ctx);
+        draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_mod_export_window(&cx!(self, ctx), &mut self.mods);
         draw_exported_mod_window(&cx!(self, ctx), &mut self.mods);
@@ -757,52 +347,10 @@ impl Baboon {
         draw_container_folder_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_loose_folder_rename_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_extract_target_window(&cx!(self, ctx), &mut self.export);
-        self.draw_folder_refactor_lock(ctx);
+        draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
         end_wheel_gesture(ctx);
     }
 
-    /// While a folder move or rename runs, cover the whole window with a layer
-    /// that takes every click, drag and scroll, and show its progress on it.
-    ///
-    /// The job rewrites tags on disk from a snapshot taken when it started; an
-    /// edit, save or second refactor in the meantime would be overwritten or
-    /// would race it. Drawn last and in the foreground so no window or panel
-    /// sits above it.
-    fn draw_folder_refactor_lock(&mut self, ctx: &egui::Context) {
-        let Some(progress) = &self.tag_ops.folder_refactor else {
-            return;
-        };
-        let screen = ctx.content_rect();
-        egui::Area::new(egui::Id::new("folder_refactor_lock"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                let (rect, _) =
-                    ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
-                ui.painter()
-                    .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
-                let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
-                    Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_width(panel.width());
-                        ui.label(RichText::new(&progress.label).strong().color(text_dark()));
-                        ui.add_space(4.0);
-                        let bar = match progress.progress {
-                            Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
-                            None => egui::ProgressBar::new(0.0).animate(true),
-                        };
-                        ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new("Baboon is locked until references are updated.")
-                                .color(subtle_dark())
-                                .small(),
-                        );
-                    });
-                });
-            });
-        ctx.request_repaint_after(PROGRESS_REPAINT);
-    }
 }
 
 pub(in crate::app) fn recent_folder_menu_label(path: &Path) -> String {
@@ -915,3 +463,477 @@ mod folder_refactor_lock_tests;
 
 #[cfg(test)]
 mod popup_kit_stamp_tests;
+
+/// The status bar: the status line, index and job progress, the update
+/// link and the workspace's project.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_status_bar(
+    cx: &Ctx,
+    ui: &mut egui::Ui,
+    container_dump: Option<&ContainerDumpJob>,
+    folder_refactor: Option<&FolderRefactorUiState>,
+    available_update: Option<&UpdateCheckResult>,
+) {
+    let ctx = &ui.ctx().clone();
+    egui::Panel::bottom("status")
+        .frame(Frame::NONE.fill(menu_bar()).inner_margin(egui::Margin {
+            left: 6,
+            right: 6,
+            top: 2,
+            bottom: 2,
+        }))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Status").strong());
+                ui.separator();
+                if cx.model.kits[cx.model.active].scanning_entries {
+                    let progress = cx.model.kits[cx.model.active].index_jobs.entry_progress.as_ref();
+                    let label = progress
+                        .map(|progress| progress.label.as_str())
+                        .unwrap_or("Indexing tags...");
+                    ui.label(RichText::new(label).strong());
+                    if let Some(progress) = progress {
+                        let fraction = if progress.total == 0 {
+                            0.0
+                        } else {
+                            progress.processed as f32 / progress.total as f32
+                        };
+                        let text = if progress.total == 0 {
+                            "Discovering files...".to_owned()
+                        } else {
+                            format!(
+                                "{} / {} files, {} tags",
+                                progress.processed, progress.total, progress.matched
+                            )
+                        };
+                        draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
+                    }
+                } else if cx.model.kits[cx.model.active].index_jobs.building_references {
+                    let progress = cx.model.kits[cx.model.active]
+                        .index_jobs
+                        .reference_progress
+                        .as_ref();
+                    let label = progress
+                        .map(|progress| progress.label.as_str())
+                        .unwrap_or("Building reference index...");
+                    ui.label(RichText::new(label).strong());
+                    if let Some(progress) = progress {
+                        let fraction = if progress.total == 0 {
+                            0.0
+                        } else {
+                            progress.processed as f32 / progress.total as f32
+                        };
+                        let text = format!("{} / {} tags", progress.processed, progress.total);
+                        draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
+                    }
+                } else {
+                    ui.label(&cx.model.status);
+                }
+                // Additive rather than part of the chain above: the
+                // extraction outlives whatever the user does next, and its
+                // bar is the only place a cancel is reachable from.
+                if let Some(job) = container_dump {
+                    let (fraction, done, total) = (job.fraction(), job.done, job.total);
+                    let remaining = job.remaining();
+                    ui.separator();
+                    ui.label(RichText::new("Extracting tags").strong())
+                        // Where it is writing. The folder was chosen minutes
+                        // ago in a native dialog and is nowhere else on
+                        // screen once the confirm has closed.
+                        .on_hover_text(format!("Writing to {}", job.output.display()));
+                    draw_index_progress_bar(
+                        ui,
+                        220.0,
+                        Some(fraction),
+                        &format!("{done} / {total} tags"),
+                    );
+                    if let Some(remaining) = remaining {
+                        ui.label(
+                            RichText::new(format!("{} left", format_remaining(remaining)))
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    }
+                    if ui.small_button("Cancel").clicked() {
+                        job.cancel.store(true, Ordering::Relaxed);
+                    }
+                    // A few times a second moves the bar and the estimate;
+                    // every frame kept the app at full frame rate for the
+                    // whole of a multi-minute extraction.
+                    ctx.request_repaint_after(PROGRESS_REPAINT);
+                }
+                if let Some(progress) = folder_refactor {
+                    ui.separator();
+                    ui.label(RichText::new(&progress.label).strong());
+                    let mut bar = if let Some(value) = progress.progress {
+                        egui::ProgressBar::new(value.clamp(0.0, 1.0))
+                    } else {
+                        egui::ProgressBar::new(0.0).animate(true)
+                    };
+                    bar = bar
+                        .desired_width(180.0)
+                        .text(RichText::new(&progress.phase).color(text_dark()));
+                    ui.add(bar);
+                    // An indeterminate bar asks for its own frames while
+                    // it animates.
+                    ctx.request_repaint_after(PROGRESS_REPAINT);
+                }
+                // Anchored to the right edge, out of the way of the status
+                // text and the progress bars that share this row. The
+                // status line expires on a timer, so an update found by the
+                // silent startup check would otherwise scroll past unread;
+                // this link stays until the next check clears it.
+                let update = available_update.cloned();
+                // Which `.baboon` this workspace's changes belong to, and
+                // where they are actually being kept. Autosave and Save write
+                // different files, and a workspace that has never been saved
+                // writes only the recovery file — none of which was visible
+                // anywhere before.
+                let project = cx
+                    .model.current_source_is_campaign_project_capable(cx.model.active)
+                    .then(|| cx.model.kits[cx.model.active].project.active.as_ref())
+                    .flatten()
+                    // A workspace with neither a project file nor a stash has
+                    // nothing to say here, and saying it anyway on every
+                    // Campaign Evolved kit would just be furniture.
+                    .filter(|project| {
+                        project.project_path.is_some() || !project.overlays.is_empty()
+                    })
+                    .map(|project| {
+                        let mut hover = match project.project_path.as_deref() {
+                            Some(path) => format!("Baboon project: {}", path.display()),
+                            None => "This workspace has no saved Baboon project yet — use \
+                                     File > Save Baboon Project"
+                                .to_owned(),
+                        };
+                        hover.push_str(&format!(
+                            "\nAutosaved to {}",
+                            project.recovery_path.display()
+                        ));
+                        (format!("Project: {}", project.label()), hover)
+                    });
+                if update.is_some() || project.is_some() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(update) = update {
+                            let label = format!("Update available: {}", update.short_name());
+                            let hover = match update.channel {
+                                UpdateChannel::Stable => "Open the release page on GitHub",
+                                UpdateChannel::Development => {
+                                    "Open the latest development build on GitHub"
+                                }
+                            };
+                            // An explicit colour beats the app-wide
+                            // `override_text_color`, which would otherwise
+                            // flatten both this and the link colour to
+                            // ordinary body text. `strong()` only brightens;
+                            // the weight comes from the bold family, at the
+                            // body size of the row it sits in.
+                            ui.hyperlink_to(
+                                RichText::new(label)
+                                    .font(bold_font(12.0))
+                                    .color(good_news()),
+                                &update.release_url,
+                            )
+                            .on_hover_text(hover);
+                        }
+                        if let Some((label, hover)) = project {
+                            ui.label(RichText::new(label).small().color(subtle_dark()))
+                                .on_hover_text(hover);
+                        }
+                    });
+                }
+            });
+        });
+}
+
+/// The "please wait" window shown while the active kit is still indexing.
+pub(in crate::app) fn draw_entry_index_wait_notice(cx: &Ctx, kit_tools: &mut KitsFeature) {
+    let ctx = cx.egui;
+    if kit_tools.show_entry_index_wait_notice
+        && (cx.model.kits[cx.model.active].scanning_entries
+            || cx.model.kits[cx.model.active].index_jobs.references_for_entry_index)
+    {
+        let mut open = kit_tools.show_entry_index_wait_notice;
+        let mut hide_notice = false;
+        egui::Window::new("Indexing")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.label("Please wait until indexing is completed for best compatibility.");
+                ui.add_space(8.0);
+                if cx.model.kits[cx.model.active].scanning_entries {
+                    let progress = cx.model.kits[cx.model.active].index_jobs.entry_progress.as_ref();
+                    let label = progress
+                        .map(|progress| progress.label.as_str())
+                        .unwrap_or("Indexing tags...");
+                    ui.label(RichText::new(label).strong());
+                    if let Some(progress) = progress {
+                        let fraction = if progress.total == 0 {
+                            0.0
+                        } else {
+                            progress.processed as f32 / progress.total as f32
+                        };
+                        let text = if progress.total == 0 {
+                            "Discovering files...".to_owned()
+                        } else {
+                            format!(
+                                "{} / {} files, {} tags",
+                                progress.processed, progress.total, progress.matched
+                            )
+                        };
+                        draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
+                    }
+                } else if cx.model.kits[cx.model.active].index_jobs.references_for_entry_index {
+                    ui.label(RichText::new("Building reference index...").strong());
+                    if let Some(progress) = cx.model.kits[cx.model.active]
+                        .index_jobs
+                        .reference_progress
+                        .as_ref()
+                    {
+                        let fraction = if progress.total == 0 {
+                            0.0
+                        } else {
+                            progress.processed as f32 / progress.total as f32
+                        };
+                        let text = format!("{} / {} tags", progress.processed, progress.total);
+                        draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
+                    } else {
+                        draw_index_progress_bar(
+                            ui,
+                            330.0,
+                            None,
+                            "Scanning tag dependencies...",
+                        );
+                    }
+                }
+                ui.add_space(8.0);
+                if ui.button("Hide").clicked() {
+                    hide_notice = true;
+                }
+            });
+        kit_tools.show_entry_index_wait_notice = open && !hide_notice;
+    }
+}
+
+/// The terminal panel, when the active kit has it open.
+pub(in crate::app) fn draw_terminal_panel(
+    cx: &Ctx,
+    ui: &mut egui::Ui,
+    kit_tools: &mut KitsFeature,
+    view: &mut KitView,
+) {
+    if view.terminal.open {
+        let work_dir_label = view
+            .terminal.work_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        egui::Panel::bottom("terminal")
+            .resizable(true)
+            .default_size(180.0)
+            .size_range(90.0..=600.0)
+            .frame(
+                Frame::NONE
+                    .fill(foundation_group_bg())
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 6,
+                        top: 4,
+                        bottom: 4,
+                    }),
+            )
+            .show(ui, |ui| {
+                // Header pinned to the top of the panel.
+                egui::Panel::top("terminal_header")
+                    .frame(Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(RichText::new("Terminal").color(text_dark()));
+                            ui.small(
+                                RichText::new(&work_dir_label)
+                                    .color(subtle_dark())
+                                    .monospace(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Close terminal")
+                                        .clicked()
+                                    {
+                                        cx.send(KitsCommand::CloseTerminal);
+                                    }
+                                    if icon_button(
+                                        ui,
+                                        ButtonIcon::Clear,
+                                        "Clear terminal",
+                                        true,
+                                        text_dark(),
+                                    )
+                                    .clicked()
+                                    {
+                                        kit_tools.terminal.lines.clear();
+                                    }
+                                    let open_log_enabled =
+                                        kit_tools.terminal.last_log_path.is_some();
+                                    let mut open_log_button = ui.add_enabled(
+                                        open_log_enabled,
+                                        egui::Button::new(
+                                            RichText::new("Open full log").small(),
+                                        ),
+                                    );
+                                    if let Some(path) = kit_tools.terminal.last_log_path.as_ref() {
+                                        open_log_button = open_log_button
+                                            .on_hover_text(path.display().to_string());
+                                    }
+                                    if open_log_button.clicked()
+                                        && let Some(path) = kit_tools.terminal.last_log_path.clone()
+                                        && let Err(error) = open_terminal_log(&path)
+                                    {
+                                        cx.set_status(error);
+                                    }
+                                    if kit_tools.terminal.running {
+                                        if kit_tools.terminal.process.is_some()
+                                            && ui.small_button("Stop").clicked()
+                                        {
+                                            cx.send(KitsCommand::StopTerminal);
+                                        }
+                                        let running_label = kit_tools
+                                            .terminal
+                                            .running_command
+                                            .as_deref()
+                                            .unwrap_or("running...");
+                                        ui.small(
+                                            RichText::new(running_label)
+                                                .color(subtle_dark())
+                                                .monospace(),
+                                        );
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(2.0);
+                    });
+
+                // Input row pinned to the bottom of the panel.
+                egui::Panel::bottom("terminal_input")
+                    .frame(Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(">").monospace().color(subtle_dark()));
+                            // Reserve a fixed width for the Run button on
+                            // the right; the TextEdit fills the rest. (Do
+                            // NOT wrap the button in a right_to_left layout
+                            // — that consumes all remaining width and leaves
+                            // nothing for the input field.)
+                            let button_w = 52.0;
+                            let text_w = (ui.available_width() - button_w - 8.0).max(40.0);
+                            let resp = ui.add_enabled(
+                                !kit_tools.terminal.running,
+                                egui::TextEdit::singleline(&mut kit_tools.terminal.input)
+                                    .desired_width(text_w)
+                                    .font(egui::TextStyle::Monospace)
+                                    .hint_text(placeholder_text("tool <command> …")),
+                            );
+                            if kit_tools.terminal.refocus_input && !kit_tools.terminal.running {
+                                resp.request_focus();
+                                kit_tools.terminal.refocus_input = false;
+                            }
+                            let run_clicked = ui
+                                .add_enabled(!kit_tools.terminal.running, egui::Button::new("Run"))
+                                .clicked();
+                            let enter = lost_focus_once(&resp)
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if resp.has_focus() && !kit_tools.terminal.running {
+                                let recall = ui.input(|i| {
+                                    if i.key_pressed(egui::Key::ArrowUp) {
+                                        -1
+                                    } else if i.key_pressed(egui::Key::ArrowDown) {
+                                        1
+                                    } else {
+                                        0
+                                    }
+                                });
+                                if recall != 0 {
+                                    kit_tools.terminal.recall_history(recall);
+                                    resp.request_focus();
+                                }
+                            }
+                            if run_clicked || enter {
+                                cx.send(KitsCommand::RunTerminalInput);
+                                // Refocus the input so the user can keep typing.
+                                resp.request_focus();
+                            }
+                        });
+                    });
+
+                // Output fills the remaining center space. The CentralPanel
+                // bounds the scroll area exactly, so there's no available_height
+                // feedback to fight the resize handle.
+                egui::CentralPanel::default()
+                    .frame(
+                        Frame::NONE
+                            .fill(Color32::from_rgb(24, 24, 23))
+                            .inner_margin(egui::Margin {
+                                left: 6,
+                                right: 6,
+                                top: 4,
+                                bottom: 4,
+                            }),
+                    )
+                    .show(ui, |ui| {
+                        let want_scroll_bottom = kit_tools.terminal.scroll_to_bottom;
+                        kit_tools.terminal.scroll_to_bottom = false;
+                        draw_terminal_output(ui, &kit_tools.terminal.lines, want_scroll_bottom);
+                    });
+            });
+    }
+}
+
+/// While a folder move or rename runs, cover the whole window with a layer
+/// that takes every click, drag and scroll, and show its progress on it.
+///
+/// The job rewrites tags on disk from a snapshot taken when it started; an
+/// edit, save or second refactor in the meantime would be overwritten or
+/// would race it. Drawn last and in the foreground so no window or panel
+/// sits above it.
+pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refactor: Option<&FolderRefactorUiState>) {
+    let Some(progress) = folder_refactor else {
+        return;
+    };
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("folder_refactor_lock"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            let (rect, _) =
+                ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+            ui.painter()
+                .rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+            let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(360.0, 96.0));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
+                Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(panel.width());
+                    ui.label(RichText::new(&progress.label).strong().color(text_dark()));
+                    ui.add_space(4.0);
+                    let bar = match progress.progress {
+                        Some(value) => egui::ProgressBar::new(value.clamp(0.0, 1.0)),
+                        None => egui::ProgressBar::new(0.0).animate(true),
+                    };
+                    ui.add(bar.text(RichText::new(&progress.phase).color(text_dark())));
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("Baboon is locked until references are updated.")
+                            .color(subtle_dark())
+                            .small(),
+                    );
+                });
+            });
+        });
+    ctx.request_repaint_after(PROGRESS_REPAINT);
+}

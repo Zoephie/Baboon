@@ -48,7 +48,7 @@ fn button_sees_click(locked: bool) -> bool {
                 rect.set(response.rect);
                 clicked.set(clicked.get() | response.clicked());
             });
-            app.draw_folder_refactor_lock(&ctx);
+            draw_folder_refactor_lock(&ctx, app.tag_ops.folder_refactor.as_ref());
         });
     };
     frame(Vec::new(), &mut app);

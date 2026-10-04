@@ -24,7 +24,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) use loading::centered_loading_state;
 pub(in crate::app) mod recents;
 pub(in crate::app) mod operation_notice;
-pub(in crate::app) use operation_notice::OperationNotice;
+pub(in crate::app) use operation_notice::{OperationNotice, draw_operation_notice_window};
 pub(in crate::app) mod worker;
 pub(in crate::app) use worker::*;
 pub(in crate::app) mod launch;

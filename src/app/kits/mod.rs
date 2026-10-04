@@ -78,6 +78,12 @@ pub(in crate::app) enum KitsCommand {
     QueueToolImport(ToolImportRequest),
     /// Run a tool command line in the terminal.
     RunToolCommand(String),
+    /// Run what is typed into the terminal's input line.
+    RunTerminalInput,
+    /// Stop the terminal's running command.
+    StopTerminal,
+    /// Close the focused kit's terminal, remembering that for its game.
+    CloseTerminal,
 }
 
 impl Baboon {
@@ -95,6 +101,13 @@ impl Baboon {
             }
             KitsCommand::QueueToolImport(request) => self.kit_tools.pending_tool_import = Some(request),
             KitsCommand::RunToolCommand(command) => self.submit_terminal_command(command, ctx.clone()),
+            KitsCommand::RunTerminalInput => self.begin_terminal_command(ctx.clone()),
+            KitsCommand::StopTerminal => self.stop_terminal_command(),
+            KitsCommand::CloseTerminal => {
+                let active = self.model.kits[self.model.active].id;
+                self.views[active].terminal.open = false;
+                self.remember_terminal_open_for_game();
+            }
         }
     }
 }

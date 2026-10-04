@@ -485,30 +485,6 @@ impl Baboon {
         self.spawn_terminal_command(command, ctx);
     }
 
-    pub(in crate::app) fn recall_terminal_history(&mut self, delta: i32) {
-        let len = self.kit_tools.terminal.history.len();
-        if len == 0 {
-            return;
-        }
-
-        let next = match self.kit_tools.terminal.history_cursor {
-            Some(index) => index as i32 + delta,
-            None if delta < 0 => len as i32 - 1,
-            None => return,
-        };
-
-        if next < 0 {
-            self.kit_tools.terminal.history_cursor = Some(0);
-            self.kit_tools.terminal.input = self.kit_tools.terminal.history[0].clone();
-        } else if next >= len as i32 {
-            self.kit_tools.terminal.history_cursor = None;
-            self.kit_tools.terminal.input.clear();
-        } else {
-            let next = next as usize;
-            self.kit_tools.terminal.history_cursor = Some(next);
-            self.kit_tools.terminal.input = self.kit_tools.terminal.history[next].clone();
-        }
-    }
 
     /// Run `command` in the editing-kit root, streaming output to the terminal
     /// panel. Shared by the terminal input and the geometry Import button.
@@ -722,4 +698,33 @@ pub(in crate::app) struct KitTerminal {
     pub(in crate::app) open: bool,
     /// Working directory for terminal commands (game kit root, parent of tags/).
     pub(in crate::app) work_dir: Option<PathBuf>,
+}
+
+impl TerminalState {
+    /// Step the input through the command history: `delta` back (-1) or
+    /// forward (1), past the newest back to an empty line.
+    pub(in crate::app) fn recall_history(&mut self, delta: i32) {
+        let len = self.history.len();
+        if len == 0 {
+            return;
+        }
+
+        let next = match self.history_cursor {
+            Some(index) => index as i32 + delta,
+            None if delta < 0 => len as i32 - 1,
+            None => return,
+        };
+
+        if next < 0 {
+            self.history_cursor = Some(0);
+            self.input = self.history[0].clone();
+        } else if next >= len as i32 {
+            self.history_cursor = None;
+            self.input.clear();
+        } else {
+            let next = next as usize;
+            self.history_cursor = Some(next);
+            self.input = self.history[next].clone();
+        }
+    }
 }
