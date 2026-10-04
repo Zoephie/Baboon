@@ -36,6 +36,7 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::documents::{ChimpDiscardPrompt, DirtyTagEntry, SaveChangesPrompt};
 use crate::app::tag_ops::{ContainerDuplicateConfirm, DeleteConfirm, DeleteKind};
 use crate::app::mods::{
     CampaignProjectSnapshot, ExportedMod, ModExportChange, ModExportDialog, ModExportRow,

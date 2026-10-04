@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use crate::app::documents::{PendingCloseAction, ordered_unique_keys};
 use crate::app::kits::{
     EditingKitValidationCache, Kit, KitId, KitStamp, KitView, KitViews, KitsCommand, KitsFeature,
     RECOMMENDED_CUSTOM_ICON_SIZE, ScenarioPalette, ScenarioTool, TerminalLineEntry,

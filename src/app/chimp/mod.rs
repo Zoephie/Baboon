@@ -5,6 +5,7 @@
 //! state; none of those concepts are forced through the editing-kit/tag model.
 
 use super::*;
+use crate::app::documents::{ChimpDiscardPrompt, PendingCloseAction};
 use crate::app::kits::{Kit, KitId, KitStamp};
 use crate::app::mods::sanitize_mod_name;
 use crate::app::editor::{draw_bitmap_preview_data, lost_focus_once};

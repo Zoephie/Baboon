@@ -12,6 +12,7 @@
 
 use crate::app::loose_fixture::*;
 use super::*;
+use crate::app::documents::{PendingCloseAction, SaveChangesPrompt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 

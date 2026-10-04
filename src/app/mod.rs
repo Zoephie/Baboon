@@ -109,7 +109,7 @@ use tag_ops::TagOpsFeature;
 pub(in crate::app) mod kits;
 use kits::{EditingKitValidationCache, Kit, KitId, KitView, KitViews, KitsFeature, TerminalState};
 pub(in crate::app) mod documents;
-use documents::*;
+use documents::DocumentsFeature;
 pub(in crate::app) mod shell;
 use shell::*;
 mod ui_kit;
