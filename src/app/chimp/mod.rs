@@ -50,7 +50,7 @@ use blam_tags::iostore::world::{CE_HEADER_VERSION, CE_TOC_VERSION, PackageProvid
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::controller::{
+use crate::app::mods::container_write::{
     ContainerWriteMode, ContainerWriteOutcome, container_triplet as triplet,
     remove_container_triplet,
 };

@@ -4,7 +4,7 @@
 use super::*;
 
 impl Baboon {
-    pub(in crate::app::ui) fn draw_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
         let Some((kit, key)) = self
             .overwrite_confirm
             .as_ref()

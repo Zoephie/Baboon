@@ -225,7 +225,7 @@ fn compat_prefs() {
 
 #[test]
 fn compat_projects() {
-    use crate::app::project::{
+    use crate::app::mods::project::{
         ProjectScope, is_campaign_recovery_file, load_campaign_project, save_campaign_project,
     };
     let project = samples().join("project");
@@ -344,7 +344,7 @@ fn compat_campaign_identities() {
 
     // The project file holding both spellings, against a mounted source with
     // one dotted tag in it.
-    let snap = crate::app::project::load_campaign_project(
+    let snap = crate::app::mods::project::load_campaign_project(
         &samples().join("project/user_project.dotted_identities.baboon"),
     )
     .expect("dotted identities");

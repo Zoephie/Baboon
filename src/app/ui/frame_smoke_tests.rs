@@ -1084,7 +1084,7 @@ fn cases() -> Vec<Case> {
         case(
             "overwrite_confirm",
             &["overwrite_confirm"],
-            &["ui/dialogs/overwrite_confirm.rs"],
+            &["mods/overwrite_confirm.rs"],
             container_kit,
             |h| {
                 h.app.overwrite_confirm = Some(OverwriteConfirm {
@@ -1097,7 +1097,7 @@ fn cases() -> Vec<Case> {
         case(
             "clear_stash_confirm",
             &["clear_stash_confirm"],
-            &["ui/dialogs/clear_stash_confirm.rs"],
+            &["mods/clear_stash_confirm.rs"],
             container_kit,
             |h| {
                 h.app.clear_stash_confirm = Some(ClearStashConfirm {
@@ -1177,7 +1177,7 @@ fn cases() -> Vec<Case> {
         case(
             "exported_mod",
             &["exported_mod"],
-            &["ui/dialogs/exported_mod.rs"],
+            &["mods/exported_mod_window.rs"],
             container_kit,
             |h| {
                 h.app.exported_mod = Some(ExportedMod {
@@ -1192,7 +1192,7 @@ fn cases() -> Vec<Case> {
         case(
             "mod_export",
             &["mod_export"],
-            &["ui/dialogs/mod_export/mod.rs"],
+            &["mods/mod_export_window/mod.rs"],
             container_kit,
             |h| {
                 h.app.mod_export = Some(ModExportDialog {

@@ -2,7 +2,7 @@
 //! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
 
 use super::*;
-use crate::app::controller::{InPlaceOverwrite, InPlaceOverwriteJob};
+use crate::app::mods::in_place::{InPlaceOverwrite, InPlaceOverwriteJob};
 use crate::app::compare::tag_compare::TagCompareGitUpdate;
 
 /// Completed in-place Campaign Evolved duplicate, ready for UI-thread source

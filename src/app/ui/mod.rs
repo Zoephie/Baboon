@@ -6,7 +6,6 @@ use super::*;
 
 mod browser_panel;
 pub(in crate::app) mod dialogs;
-pub(in crate::app) use dialogs::DiffNode;
 mod first_run;
 mod kit_tiles;
 mod loading;

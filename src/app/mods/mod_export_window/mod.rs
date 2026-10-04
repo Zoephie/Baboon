@@ -569,7 +569,7 @@ impl Baboon {
     /// `_P` that gives it priority over the game's own containers. It also
     /// guarded only the container, silently overwriting the `.ucas` and `.pak`
     /// beside it.
-    pub(in crate::app::ui) fn draw_mod_export_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_mod_export_window(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.mod_export.as_ref() else {
             return;
         };

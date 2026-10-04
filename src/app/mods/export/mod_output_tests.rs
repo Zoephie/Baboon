@@ -1,4 +1,9 @@
 use super::*;
+use crate::app::mods::review::classify_overlay;
+use crate::app::mods::export::default_mod_export_folder;
+use crate::app::mods::in_place::ContainerSaveRoute;
+use crate::app::mods::in_place::container_save_route;
+use crate::app::mods::export::mod_output_path;
 
 #[test]
 fn a_mod_is_written_into_a_folder_of_its_own_under_mods() {

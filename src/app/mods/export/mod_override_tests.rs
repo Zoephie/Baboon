@@ -8,6 +8,7 @@
 //! of itself.
 
 use super::*;
+use crate::app::mods::review::wrapper_origin_for;
 
 static PAKS: std::sync::LazyLock<&'static str> =
     std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
@@ -577,7 +578,7 @@ fn an_export_over_a_mounted_container_is_detected() {
 /// re-encodes identically, leaves the document flagged with nothing to show.
 #[test]
 fn an_overlay_identical_to_the_shipped_tag_is_not_a_change() {
-    use super::super::controller::classify_overlay;
+    use crate::app::mods::review::classify_overlay;
 
     assert_eq!(
         classify_overlay(true, CampaignProjectTagKind::Existing, true),

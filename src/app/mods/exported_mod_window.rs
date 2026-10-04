@@ -11,7 +11,7 @@ impl Baboon {
     /// then has nothing to load. The instruction used to live in the status
     /// line, was lost when exports moved onto projects, and the status line now
     /// clears itself after a few seconds besides.
-    pub(in crate::app::ui) fn draw_exported_mod_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_exported_mod_window(&mut self, ctx: &egui::Context) {
         let Some(exported) = self.exported_mod.as_ref() else {
             return;
         };

@@ -953,7 +953,7 @@ fn remove_chimp_triplet(path: &Path) {
 }
 
 fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> {
-    super::controller::swap_container_triplet(temporary, output)
+    crate::app::mods::container_write::swap_container_triplet(temporary, output)
         .map_err(|failure| failure.to_string())
 }
 

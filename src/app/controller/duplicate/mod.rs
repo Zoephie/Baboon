@@ -215,15 +215,15 @@ fn exact_container_provider(entry: &TagEntry) -> Result<(usize, String), String>
 /// The `.uasset` wrapper a container tag's `.ubulk` payload belongs to, as the
 /// mount recorded it.
 #[derive(Clone, Debug)]
-pub(super) struct ResolvedUasset {
+pub(in crate::app) struct ResolvedUasset {
     /// Which mounted container actually carries the wrapper.
-    pub(super) container: usize,
+    pub(in crate::app) container: usize,
     /// The path in its **original case**. The IoStore directory index is
     /// case-sensitive, so this string is only ever one taken from a real entry
     /// — never one this code assembled.
-    pub(super) rel_path: String,
+    pub(in crate::app) rel_path: String,
     /// How it was found, for the diagnostic.
-    pub(super) how: &'static str,
+    pub(in crate::app) how: &'static str,
 }
 
 /// Find the `.uasset` wrapper paired with a `.ubulk` payload.
@@ -243,7 +243,7 @@ pub(super) struct ResolvedUasset {
 /// So ask the indexes that recorded the real paths first, and only fall back to
 /// assembling one. Nothing assembled is ever handed to a read: each step
 /// returns a string taken from an entry that exists.
-pub(super) fn resolve_source_uasset(
+pub(in crate::app) fn resolve_source_uasset(
     containers: &[crate::core::source::MountedContainer],
     packages: &crate::core::source::ContainerPackageIndex,
     target: usize,

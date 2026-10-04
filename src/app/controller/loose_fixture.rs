@@ -12,15 +12,15 @@ use std::time::{Duration, Instant};
 
 /// Held by every test that writes or reads the per-process last-session file
 /// or the shared prefs, which all tests in one run share.
-pub(super) static SESSION_FILE: Mutex<()> = Mutex::new(());
+pub(in crate::app) static SESSION_FILE: Mutex<()> = Mutex::new(());
 
-pub(super) fn session_file_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(in crate::app) fn session_file_lock() -> std::sync::MutexGuard<'static, ()> {
     SESSION_FILE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-pub(super) fn definition(game: &str, group: &str) -> PathBuf {
+pub(in crate::app) fn definition(game: &str, group: &str) -> PathBuf {
     locate_definitions_root()
         .join(game)
         .join(format!("{group}.json"))
@@ -28,7 +28,7 @@ pub(super) fn definition(game: &str, group: &str) -> PathBuf {
 
 /// A group's tag, read from its definition rather than spelled out, so a
 /// fixture cannot disagree with the schema it was built from.
-pub(super) fn group_tag(game: &str, group: &str) -> u32 {
+pub(in crate::app) fn group_tag(game: &str, group: &str) -> u32 {
     let text = fs::read_to_string(definition(game, group)).expect("read the group's definition");
     let value: Value = serde_json::from_str(&text).expect("parse the group's definition");
     let tag = value
@@ -51,7 +51,7 @@ fn ek_folder(game: &str) -> &'static str {
 }
 
 /// Set a root-level tag reference.
-pub(super) fn set_reference(tag: &mut TagFile, field: &str, group: u32, path: &str) {
+pub(in crate::app) fn set_reference(tag: &mut TagFile, field: &str, group: u32, path: &str) {
     tag.root_mut()
         .field_mut(field)
         .unwrap_or_else(|| panic!("no `{field}` field"))
@@ -62,7 +62,7 @@ pub(super) fn set_reference(tag: &mut TagFile, field: &str, group: u32, path: &s
 }
 
 /// A root-level tag reference's path, as the tag holds it.
-pub(super) fn reference_of(tag: &TagFile, field: &str) -> Option<String> {
+pub(in crate::app) fn reference_of(tag: &TagFile, field: &str) -> Option<String> {
     match tag.root().field_path(field)?.value()? {
         TagFieldData::TagReference(reference) => {
             reference.group_tag_and_name.map(|(_, path)| path)
@@ -72,7 +72,7 @@ pub(super) fn reference_of(tag: &TagFile, field: &str) -> Option<String> {
 }
 
 /// A root-level real's value.
-pub(super) fn real_of(tag: &TagFile, field: &str) -> Option<f32> {
+pub(in crate::app) fn real_of(tag: &TagFile, field: &str) -> Option<f32> {
     match tag.root().field_path(field)?.value()? {
         TagFieldData::Real(value) => Some(value),
         _ => None,
@@ -81,7 +81,7 @@ pub(super) fn real_of(tag: &TagFile, field: &str) -> Option<f32> {
 
 /// A classic Halo CE tag of `group` with every body field zeroed: the 64-byte
 /// header and a body exactly as long as the group's root struct reads.
-pub(super) fn classic_ce_bytes(group: &str) -> Vec<u8> {
+pub(in crate::app) fn classic_ce_bytes(group: &str) -> Vec<u8> {
     let tag = group_tag("haloce_mcc", group);
     let mut bytes = vec![0u8; 64];
     bytes[36..40].copy_from_slice(&tag.to_be_bytes());
@@ -105,12 +105,12 @@ pub(super) fn classic_ce_bytes(group: &str) -> Vec<u8> {
 }
 
 /// A fresh context, for calls that only need one to hand.
-pub(super) fn ctx() -> egui::Context {
+pub(in crate::app) fn ctx() -> egui::Context {
     egui::Context::default()
 }
 
 /// Apply worker messages as frames would, until `done` holds.
-pub(super) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Baboon) -> bool) {
+pub(in crate::app) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Baboon) -> bool) {
     // Generous, because the wait is for a real worker job: on a loaded machine
     // or a shared CI runner the full suite runs several times slower, and a
     // 30-second budget timed out under load while passing on its own.
@@ -130,7 +130,7 @@ pub(super) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Bab
 }
 
 /// Apply whatever worker messages arrive within `quiet` of each other.
-pub(super) fn drain_messages(app: &mut Baboon, quiet: Duration) {
+pub(in crate::app) fn drain_messages(app: &mut Baboon, quiet: Duration) {
     let ctx = ctx();
     while let Ok(message) = app.rx.recv_timeout(quiet) {
         app.apply_worker_message(message, &ctx);
@@ -139,14 +139,14 @@ pub(super) fn drain_messages(app: &mut Baboon, quiet: Duration) {
 }
 
 /// A temporary `<EK>/tags` folder for one game, removed on drop.
-pub(super) struct LooseKit {
-    pub(super) base: PathBuf,
-    pub(super) root: PathBuf,
-    pub(super) game: &'static str,
+pub(in crate::app) struct LooseKit {
+    pub(in crate::app) base: PathBuf,
+    pub(in crate::app) root: PathBuf,
+    pub(in crate::app) game: &'static str,
 }
 
 impl LooseKit {
-    pub(super) fn new(name: &str, game: &'static str) -> Self {
+    pub(in crate::app) fn new(name: &str, game: &'static str) -> Self {
         // Canonical, so a key made from this path agrees with one made from
         // its canonical form (the temp dir is `/var` -> `/private/var` on
         // macOS); a real kit's root has no such alias.
@@ -156,12 +156,12 @@ impl LooseKit {
         Self { base, root, game }
     }
 
-    pub(super) fn names(&self) -> TagNameIndex {
+    pub(in crate::app) fn names(&self) -> TagNameIndex {
         TagNameIndex::load_game(&locate_definitions_root(), GameId::from_id(self.game).unwrap()).expect("load group names")
     }
 
     /// Write an MCC tag of `group` at `rel` (no extension), shaped by `edit`.
-    pub(super) fn write_mcc(
+    pub(in crate::app) fn write_mcc(
         &self,
         rel: &str,
         group: &str,
@@ -177,7 +177,7 @@ impl LooseKit {
     }
 
     /// Write a zeroed classic Halo CE tag of `group` at `rel`.
-    pub(super) fn write_classic_ce(&self, rel: &str, group: &str) -> PathBuf {
+    pub(in crate::app) fn write_classic_ce(&self, rel: &str, group: &str) -> PathBuf {
         assert_eq!(self.game, "haloce_mcc");
         let path = self.root.join(format!("{rel}.{group}"));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -185,13 +185,13 @@ impl LooseKit {
         path
     }
 
-    pub(super) fn entries(&self) -> Vec<TagEntry> {
+    pub(in crate::app) fn entries(&self) -> Vec<TagEntry> {
         crate::core::source::scan_folder_subtree_entries(&self.root, Path::new(""), &self.names())
             .expect("scan the fixture")
     }
 
     /// The key the folder scan gives the tag at `rel_with_extension`.
-    pub(super) fn key(&self, rel_with_extension: &str) -> String {
+    pub(in crate::app) fn key(&self, rel_with_extension: &str) -> String {
         loose_file_entry(&self.root, &self.root.join(rel_with_extension), &self.names())
             .unwrap()
             .unwrap_or_else(|| panic!("{rel_with_extension} does not probe as a tag"))
@@ -199,7 +199,7 @@ impl LooseKit {
     }
 
     /// The source a completed folder load of this kit would hand over.
-    pub(super) fn source(&self) -> LoadedSourceData {
+    pub(in crate::app) fn source(&self) -> LoadedSourceData {
         let entries = self.entries();
         LoadedSourceData {
             label: "fixture".to_owned(),
@@ -222,12 +222,12 @@ impl LooseKit {
         }
     }
 
-    pub(super) fn install(&self, app: &mut Baboon) {
+    pub(in crate::app) fn install(&self, app: &mut Baboon) {
         app.install_loaded_source(self.source());
     }
 
     /// Open the tag at `rel_with_extension` and wait for its document.
-    pub(super) fn open(&self, app: &mut Baboon, rel_with_extension: &str) -> String {
+    pub(in crate::app) fn open(&self, app: &mut Baboon, rel_with_extension: &str) -> String {
         let key = self.key(rel_with_extension);
         app.select_entry(key.clone(), ctx());
         pump_until(app, &format!("{rel_with_extension} to load"), |app| {
@@ -245,7 +245,7 @@ impl Drop for LooseKit {
 
 /// Edit one field of an open document through the editor's own entry point,
 /// as one undo step.
-pub(super) fn edit_field(app: &mut Baboon, key: &str, path: &str, input: &str) {
+pub(in crate::app) fn edit_field(app: &mut Baboon, key: &str, path: &str, input: &str) {
     let ops = DeferredOps {
         pending: vec![PendingFieldEdit {
             path: path.to_owned(),
@@ -262,13 +262,13 @@ pub(super) fn edit_field(app: &mut Baboon, key: &str, path: &str, input: &str) {
     }
 }
 
-pub(super) fn app() -> Baboon {
+pub(in crate::app) fn app() -> Baboon {
     Baboon::for_test()
 }
 
 impl LooseKit {
     /// The reference index a full build over this kit makes.
-    pub(super) fn index(&self) -> ReverseDependencyIndex {
+    pub(in crate::app) fn index(&self) -> ReverseDependencyIndex {
         let (tx, _rx) = std::sync::mpsc::channel();
         let source = TagSource::LooseFolder {
             root: self.root.clone(),
@@ -279,7 +279,7 @@ impl LooseKit {
     }
 
     /// [`Self::install`], with the reference index already built.
-    pub(super) fn install_indexed(&self, app: &mut Baboon) {
+    pub(in crate::app) fn install_indexed(&self, app: &mut Baboon) {
         let mut source = self.source();
         source.reverse_dependencies = Some(self.index());
         app.install_loaded_source(source);
@@ -287,7 +287,7 @@ impl LooseKit {
 }
 
 /// Input for one frame on a 1000x800 screen at `time`.
-pub(super) fn screen(events: Vec<egui::Event>, time: f64) -> egui::RawInput {
+pub(in crate::app) fn screen(events: Vec<egui::Event>, time: f64) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -300,19 +300,19 @@ pub(super) fn screen(events: Vec<egui::Event>, time: f64) -> egui::RawInput {
 }
 
 /// Draws the save prompt frame after frame, with an advancing clock.
-pub(super) struct PromptDriver {
-    pub(super) ctx: egui::Context,
-    pub(super) time: f64,
+pub(in crate::app) struct PromptDriver {
+    pub(in crate::app) ctx: egui::Context,
+    pub(in crate::app) time: f64,
     /// Every command the frames sent the root viewport.
-    pub(super) commands: Vec<egui::ViewportCommand>,
+    pub(in crate::app) commands: Vec<egui::ViewportCommand>,
 }
 
 impl PromptDriver {
-    pub(super) fn new() -> Self {
+    pub(in crate::app) fn new() -> Self {
         Self::on(egui::Context::default(), 1.0)
     }
 
-    pub(super) fn on(ctx: egui::Context, time: f64) -> Self {
+    pub(in crate::app) fn on(ctx: egui::Context, time: f64) -> Self {
         Self {
             ctx,
             time,
@@ -320,7 +320,7 @@ impl PromptDriver {
         }
     }
 
-    pub(super) fn frame(
+    pub(in crate::app) fn frame(
         &mut self,
         app: &mut Baboon,
         events: Vec<egui::Event>,
@@ -344,7 +344,7 @@ impl PromptDriver {
     }
 
     /// Where the button labelled exactly `label` is drawn now.
-    pub(super) fn find(
+    pub(in crate::app) fn find(
         &mut self,
         app: &mut Baboon,
         label: &str,
@@ -361,7 +361,7 @@ impl PromptDriver {
 
     /// Click the prompt button labelled exactly `label`: slide onto it over a
     /// few frames, press, release.
-    pub(super) fn click(&mut self, app: &mut Baboon, label: &str) {
+    pub(in crate::app) fn click(&mut self, app: &mut Baboon, label: &str) {
         // A window lays itself out unseen on its first frame.
         self.frame(app, Vec::new());
         let mut pos = self.find(app, label, Vec::new());
@@ -381,7 +381,7 @@ impl PromptDriver {
 }
 
 /// The commands a frame sent the root viewport.
-pub(super) fn root_commands(output: &egui::FullOutput) -> Vec<egui::ViewportCommand> {
+pub(in crate::app) fn root_commands(output: &egui::FullOutput) -> Vec<egui::ViewportCommand> {
     output
         .viewport_output
         .get(&egui::ViewportId::ROOT)

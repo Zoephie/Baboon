@@ -87,8 +87,6 @@ use crate::core::document::TagDocument;
 #[cfg(test)]
 use crate::core::document::Dirty;
 use crate::core::document::apply::{BlockIndexTarget, block_index_value};
-mod project;
-use project::*;
 use crate::core::keywords::*;
 mod prefs;
 use prefs::*;
@@ -130,7 +128,8 @@ use scenario_palettes::*;
 mod chimp;
 use chimp::*;
 pub(in crate::app) mod controller;
-use controller::{ContainerLeaseId, ContainerWriteLease, CreatedTagLedger, CreatedTagRecord};
+use controller::{CreatedTagLedger, CreatedTagRecord};
+use mods::container_write::{ContainerLeaseId, ContainerWriteLease};
 mod help;
 use help::*;
 mod compare;
@@ -141,7 +140,9 @@ mod references;
 use references::*;
 pub(in crate::app) mod import;
 use import::*;
-pub(in crate::app) mod ui;
+pub(in crate::app) mod mods;
+use mods::*;
+mod ui;
 
 /// One headless egui pass for a test. egui 0.36 debug-panics when a
 /// `FullOutput` with unapplied texture deltas is dropped, and a test has no

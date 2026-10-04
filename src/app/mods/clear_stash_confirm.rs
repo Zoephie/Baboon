@@ -8,7 +8,7 @@ impl Baboon {
     ///
     /// It is irreversible and can drop work stashed in earlier sessions, so it
     /// lists exactly what is about to go rather than asking in the abstract.
-    pub(in crate::app::ui) fn draw_clear_stash_confirm_window(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_clear_stash_confirm_window(&mut self, ctx: &egui::Context) {
         let Some(confirm) = self.clear_stash_confirm.as_ref() else {
             return;
         };

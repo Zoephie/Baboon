@@ -4,21 +4,16 @@
 use super::*;
 
 mod chimp_prompts;
-mod clear_stash_confirm;
 mod container_duplicate_confirm;
 mod container_folder;
 mod delete_confirm;
-mod exported_mod;
 mod keyword_chooser;
 mod loose_folder_rename;
-mod mod_export;
 mod new_tag;
 mod operation_notice;
-mod overwrite_confirm;
 mod rename_tag;
 mod tsv_paste;
 
-pub(in crate::app) use mod_export::DiffNode;
 
 /// What a folder import actually wrote, grouped by how much can be claimed for
 /// it.

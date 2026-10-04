@@ -10,7 +10,7 @@
 //! telling a stashed tag apart from the shipped one, need an install
 //! (`mod_override_tests.rs` covers those against `BLAM_TEST_CE`).
 
-use super::loose_fixture::*;
+use crate::app::controller::loose_fixture::*;
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;

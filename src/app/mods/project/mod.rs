@@ -9,11 +9,11 @@ use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-pub(super) const CAMPAIGN_PROJECT_VERSION: i64 = 1;
-pub(super) const CAMPAIGN_PROJECT_AUTOSAVE_SECS: f64 = 0.75;
+pub(in crate::app) const CAMPAIGN_PROJECT_VERSION: i64 = 1;
+pub(in crate::app) const CAMPAIGN_PROJECT_AUTOSAVE_SECS: f64 = 0.75;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CampaignProjectTagKind {
+pub(in crate::app) enum CampaignProjectTagKind {
     Existing,
     New,
 }
@@ -36,51 +36,51 @@ impl CampaignProjectTagKind {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CampaignProjectTab {
-    pub(super) identity: String,
-    pub(super) label: String,
-    pub(super) group_tag: u32,
-    pub(super) logical_path: String,
-    pub(super) kind: CampaignProjectTagKind,
-    pub(super) package: Option<String>,
-    pub(super) floating: bool,
+pub(in crate::app) struct CampaignProjectTab {
+    pub(in crate::app) identity: String,
+    pub(in crate::app) label: String,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) logical_path: String,
+    pub(in crate::app) kind: CampaignProjectTagKind,
+    pub(in crate::app) package: Option<String>,
+    pub(in crate::app) floating: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CampaignProjectOverlay {
-    pub(super) identity: String,
-    pub(super) group_tag: u32,
-    pub(super) logical_path: String,
-    pub(super) kind: CampaignProjectTagKind,
-    pub(super) package: Option<String>,
+pub(in crate::app) struct CampaignProjectOverlay {
+    pub(in crate::app) identity: String,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) logical_path: String,
+    pub(in crate::app) kind: CampaignProjectTagKind,
+    pub(in crate::app) package: Option<String>,
     /// Shared, not owned: the overlay map is cloned two or three times per
     /// autosave tick, and a workspace stashing a 105 MiB tag paid a full copy
     /// each time.
-    pub(super) bytes: Arc<Vec<u8>>,
+    pub(in crate::app) bytes: Arc<Vec<u8>>,
     /// Hashed once, where the bytes are produced. The project fingerprint is
     /// taken over these rather than over the bytes themselves: a workspace
     /// holding a 105 MiB animation graph cost 230 ms a tick to re-hash, twice a
     /// second, purely to learn nothing had changed.
-    pub(super) digest: [u8; 32],
+    pub(in crate::app) digest: [u8; 32],
 }
 
 /// One tag's undo and redo stacks as the session holds them, oldest first.
 #[derive(Clone, Debug, Default)]
-pub(super) struct TagHistory {
-    pub(super) undo: Vec<HistoryStep>,
-    pub(super) redo: Vec<HistoryStep>,
+pub(in crate::app) struct TagHistory {
+    pub(in crate::app) undo: Vec<HistoryStep>,
+    pub(in crate::app) redo: Vec<HistoryStep>,
     /// The owning journal's change counter when this was captured, so a save
     /// can tell "nothing has happened since" without looking at the snapshots.
-    pub(super) revision: u64,
+    pub(in crate::app) revision: u64,
 }
 
 /// One undoable step: what it was called, and the tag bytes it restores.
 #[derive(Clone, Debug)]
-pub(super) struct HistoryStep {
+pub(in crate::app) struct HistoryStep {
     /// The journal snapshot's id; see [`crate::app::Snapshot::id`].
-    pub(super) id: u64,
-    pub(super) label: String,
-    pub(super) bytes: Arc<Vec<u8>>,
+    pub(in crate::app) id: u64,
+    pub(in crate::app) label: String,
+    pub(in crate::app) bytes: Arc<Vec<u8>>,
 }
 
 /// How many steps of one stack a restored session gets back.
@@ -89,7 +89,7 @@ pub(super) struct HistoryStep {
 /// tag, the recovery file is rewritten as you edit, and the value of persisted
 /// history falls off a cliff after the last handful of actions — nobody
 /// reopens a workspace to undo their sixtieth-from-last change.
-pub(super) const HISTORY_STEP_LIMIT: usize = 16;
+pub(in crate::app) const HISTORY_STEP_LIMIT: usize = 16;
 
 /// The total bytes of history one workspace may write to its recovery file.
 ///
@@ -97,7 +97,7 @@ pub(super) const HISTORY_STEP_LIMIT: usize = 16;
 /// would be a quarter-gigabyte written repeatedly while the user edits. The
 /// newest steps are kept and the oldest dropped, so what survives is the part
 /// anyone would actually reach for.
-pub(super) const HISTORY_BYTE_BUDGET: usize = 64 * 1024 * 1024;
+pub(in crate::app) const HISTORY_BYTE_BUDGET: usize = 64 * 1024 * 1024;
 
 /// Trim captured history to what may be written, newest first.
 ///
@@ -105,7 +105,7 @@ pub(super) const HISTORY_BYTE_BUDGET: usize = 64 * 1024 * 1024;
 /// bound the recovery file, and a per-tag budget multiplies by however many tags
 /// happen to be open. Steps are dropped oldest-first, and a stack keeps its
 /// order.
-pub(super) fn trim_history_for_disk(
+pub(in crate::app) fn trim_history_for_disk(
     history: &mut BTreeMap<String, TagHistory>,
     step_limit: usize,
     byte_budget: usize,
@@ -155,26 +155,26 @@ pub(super) fn trim_history_for_disk(
     history.retain(|_, entry| !entry.undo.is_empty() || !entry.redo.is_empty());
 }
 
-pub(super) fn overlay_digest(bytes: &[u8]) -> [u8; 32] {
+pub(in crate::app) fn overlay_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hasher.finalize().into()
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CampaignProjectSnapshot {
-    pub(super) game: String,
-    pub(super) source_path: PathBuf,
-    pub(super) selected_identity: Option<String>,
-    pub(super) tabs: Vec<CampaignProjectTab>,
-    pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
+pub(in crate::app) struct CampaignProjectSnapshot {
+    pub(in crate::app) game: String,
+    pub(in crate::app) source_path: PathBuf,
+    pub(in crate::app) selected_identity: Option<String>,
+    pub(in crate::app) tabs: Vec<CampaignProjectTab>,
+    pub(in crate::app) overlays: HashMap<String, CampaignProjectOverlay>,
     /// Each open tag's undo/redo stacks, so reopening the workspace reopens the
     /// session rather than just the files. Written to this workspace's own
     /// recovery project and to a project the user names, never to the sidecar
     /// beside an exported mod — that one travels to whoever installs the mod,
     /// and an author's step-by-step editing trail is neither their business nor
     /// something they should have to download.
-    pub(super) history: BTreeMap<String, TagHistory>,
+    pub(in crate::app) history: BTreeMap<String, TagHistory>,
     /// Folders the user made in the container that no tag has landed in yet.
     ///
     /// A pak's directory index cannot encode a directory with no file beneath
@@ -182,13 +182,13 @@ pub(super) struct CampaignProjectSnapshot {
     /// the next launch. Like history, they are the author's own organisation
     /// rather than mod content, so they are not written to the sidecar beside an
     /// exported mod.
-    pub(super) folders: std::collections::BTreeSet<String>,
+    pub(in crate::app) folders: std::collections::BTreeSet<String>,
 }
 
 impl CampaignProjectSnapshot {
     /// Each overlay's digest, by identity — what the overlays table holds once
     /// this snapshot has been written.
-    pub(super) fn digests(&self) -> SavedProjectState {
+    pub(in crate::app) fn digests(&self) -> SavedProjectState {
         SavedProjectState {
             overlays: self
                 .overlays
@@ -215,7 +215,7 @@ impl CampaignProjectSnapshot {
     /// One digest over the whole session history, so a save can skip the
     /// history altogether when no journal has moved. When one has, only its
     /// new steps are written; see `write_history`.
-    pub(super) fn history_digest(&self) -> [u8; 32] {
+    pub(in crate::app) fn history_digest(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
         for (identity, entry) in &self.history {
             hasher.update(identity.as_bytes());
@@ -229,7 +229,7 @@ impl CampaignProjectSnapshot {
         hasher.finalize().into()
     }
 
-    pub(super) fn fingerprint(&self) -> Vec<u8> {
+    pub(in crate::app) fn fingerprint(&self) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(self.game.as_bytes());
         hasher.update(self.source_path.to_string_lossy().as_bytes());
@@ -267,17 +267,17 @@ impl CampaignProjectSnapshot {
 /// What a written project left on disk, so the next write can skip what has
 /// not changed.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct SavedProjectState {
+pub(in crate::app) struct SavedProjectState {
     /// Each overlay's digest, by identity — rows whose bytes match are left
     /// alone rather than rewritten.
-    pub(super) overlays: HashMap<String, [u8; 32]>,
+    pub(in crate::app) overlays: HashMap<String, [u8; 32]>,
     /// One digest over the whole history, so a save can skip it when nothing
     /// moved.
-    pub(super) history: [u8; 32],
+    pub(in crate::app) history: [u8; 32],
     /// Every history row, `(identity, step id) → (is redo, position)`. A save
     /// writes the bytes of a step only when it is not already here, and moves
     /// the rest by updating two integers.
-    pub(super) history_rows: HashMap<(String, u64), (bool, usize)>,
+    pub(in crate::app) history_rows: HashMap<(String, u64), (bool, usize)>,
 }
 
 /// Which kind of `.baboon` is being written.
@@ -286,14 +286,14 @@ pub(super) struct SavedProjectState {
 /// project is this workspace's own state, while a sidecar is published beside a
 /// mod for other people.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ProjectScope {
+pub(in crate::app) enum ProjectScope {
     /// This workspace's recovery file, or a project the user saved.
     Session,
     /// The `.baboon` written next to an exported mod's containers.
     ModSidecar,
 }
 
-pub(super) struct ActiveCampaignProject {
+pub(in crate::app) struct ActiveCampaignProject {
     /// Where this workspace autosaves. Always derived from the mounted source
     /// — never a file the user picked.
     ///
@@ -302,35 +302,35 @@ pub(super) struct ActiveCampaignProject {
     /// exported mod's sidecar became a live, self-overwriting file the moment it
     /// was opened, and declining to save at exit deleted the stashed rows out of
     /// it. Autosave now only ever writes the recovery file.
-    pub(super) recovery_path: PathBuf,
+    pub(in crate::app) recovery_path: PathBuf,
     /// The `.baboon` this workspace is associated with: what `File > Open
     /// Baboon Project` opened, or where `Save Baboon Project As...` last wrote.
     /// It is the target of `File > Save Baboon Project`, and nothing else
     /// writes to it.
-    pub(super) project_path: Option<PathBuf>,
-    pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
+    pub(in crate::app) project_path: Option<PathBuf>,
+    pub(in crate::app) overlays: HashMap<String, CampaignProjectOverlay>,
     /// Document key -> the `Dirty` revision its overlay bytes were written
     /// from, so an untouched document is never serialized twice.
     /// Keyed by `content_stamp()`, not the bare revision: a reloaded
     /// document starts again from revision 0, and a revision alone could take
     /// it for the document it replaced and keep that one's stale bytes.
-    pub(super) captured_revisions: HashMap<String, (u64, u64)>,
+    pub(in crate::app) captured_revisions: HashMap<String, (u64, u64)>,
     /// What the recovery file holds, by identity, so a save writes only the rows
     /// whose bytes changed instead of replacing every overlay.
     ///
     /// `None` when that is unknown — a fresh workspace, or a project imported
     /// from a file the recovery has never seen — and the next write then
     /// replaces every row rather than merging into whatever was there.
-    pub(super) saved_digests: Option<SavedProjectState>,
+    pub(in crate::app) saved_digests: Option<SavedProjectState>,
     /// What an in-flight write will leave on disk, promoted to `saved_digests`
     /// once it reports success.
-    pub(super) pending_digests: Option<SavedProjectState>,
-    pub(super) last_saved_fingerprint: Vec<u8>,
-    pub(super) next_autosave_at: f64,
-    pub(super) revision: u64,
-    pub(super) save_in_flight: Option<u64>,
-    pub(super) write_lock: Arc<Mutex<()>>,
-    pub(super) latest_write_revision: Arc<AtomicU64>,
+    pub(in crate::app) pending_digests: Option<SavedProjectState>,
+    pub(in crate::app) last_saved_fingerprint: Vec<u8>,
+    pub(in crate::app) next_autosave_at: f64,
+    pub(in crate::app) revision: u64,
+    pub(in crate::app) save_in_flight: Option<u64>,
+    pub(in crate::app) write_lock: Arc<Mutex<()>>,
+    pub(in crate::app) latest_write_revision: Arc<AtomicU64>,
     /// Stashed *new* tags adopted from the recovery file that still have no
     /// entry in the browser.
     ///
@@ -342,11 +342,11 @@ pub(super) struct ActiveCampaignProject {
     /// than adopted on the spot: the recovery file is picked up as soon as the
     /// source mounts, which can be before the names and container templates the
     /// entry needs are loaded.
-    pub(super) pending_new_overlays: Vec<CampaignProjectOverlay>,
+    pub(in crate::app) pending_new_overlays: Vec<CampaignProjectOverlay>,
 }
 
 impl ActiveCampaignProject {
-    pub(super) fn fresh(recovery_path: PathBuf, now: f64) -> Self {
+    pub(in crate::app) fn fresh(recovery_path: PathBuf, now: f64) -> Self {
         Self {
             recovery_path,
             project_path: None,
@@ -368,7 +368,7 @@ impl ActiveCampaignProject {
 
     /// The recovery file's own contents, picked back up. Its digests are exactly
     /// what is stored there, and it needs no rewrite until something changes.
-    pub(super) fn adopted(
+    pub(in crate::app) fn adopted(
         recovery_path: PathBuf,
         snapshot: &CampaignProjectSnapshot,
         now: f64,
@@ -385,7 +385,7 @@ impl ActiveCampaignProject {
     /// claim otherwise: leaving either behind would let the first autosave
     /// conclude there was nothing to write and merge these overlays into
     /// whatever the last workspace left at that path.
-    pub(super) fn imported(
+    pub(in crate::app) fn imported(
         recovery_path: PathBuf,
         project_path: PathBuf,
         snapshot: &CampaignProjectSnapshot,
@@ -429,7 +429,7 @@ impl ActiveCampaignProject {
     /// What to show as this workspace's project, and where its edits actually
     /// live. The recovery file is not something the user named, so it is
     /// described rather than presented as an open document.
-    pub(super) fn label(&self) -> String {
+    pub(in crate::app) fn label(&self) -> String {
         match self.project_path.as_deref() {
             Some(path) => path
                 .file_name()
@@ -440,14 +440,14 @@ impl ActiveCampaignProject {
     }
 }
 
-pub(super) struct PendingCampaignProject {
-    pub(super) path: PathBuf,
+pub(in crate::app) struct PendingCampaignProject {
+    pub(in crate::app) path: PathBuf,
     /// The project to open once the source mounts. `None` stages the path as
     /// this workspace's save target *without* reading it back in, which is what
     /// a session restore wants: the workspace's recovery file is always the
     /// fresher copy of the same edits, so re-importing the `.baboon` the user
     /// happened to have open would overwrite newer work with older.
-    pub(super) snapshot: Option<CampaignProjectSnapshot>,
+    pub(in crate::app) snapshot: Option<CampaignProjectSnapshot>,
 }
 
 /// Where a Campaign Evolved kit autosaves its recovery project.
@@ -456,7 +456,7 @@ pub(super) struct PendingCampaignProject {
 /// two files rather than overwriting each other, and so a kit finds its own
 /// recovery again on the next launch. `None` keeps the original unqualified
 /// name for a kit with no source path to key on.
-pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
+pub(in crate::app) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     let Some(root) = source_root else {
         return crate::core::storage::data_path("campaign_evolved_recovery.baboon");
     };
@@ -470,13 +470,13 @@ pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     crate::core::storage::data_path(&format!("{CAMPAIGN_RECOVERY_STEM}-{tag}.baboon"))
 }
 
-pub(super) const CAMPAIGN_RECOVERY_STEM: &str = "campaign_evolved_recovery";
+pub(in crate::app) const CAMPAIGN_RECOVERY_STEM: &str = "campaign_evolved_recovery";
 
 /// Whether `path` is one of Baboon's own recovery files rather than a `.baboon`
 /// the user named. Recovery files are an implementation detail of a workspace —
 /// they are not offered as a save target, and a session that recorded one back
 /// when the two were the same file must not be read as having a project open.
-pub(super) fn is_campaign_recovery_file(path: &Path) -> bool {
+pub(in crate::app) fn is_campaign_recovery_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with(CAMPAIGN_RECOVERY_STEM))
@@ -604,7 +604,7 @@ fn insert_history_step(
 /// alone. Rewriting every overlay meant editing a 4 MiB scenario also rewrote
 /// the 105 MiB animation graph stashed beside it. Pass `None` when the file's
 /// contents are unknown — every overlay is replaced, as before.
-pub(super) fn save_campaign_project(
+pub(in crate::app) fn save_campaign_project(
     path: &Path,
     snapshot: &CampaignProjectSnapshot,
     on_disk: Option<&SavedProjectState>,
@@ -806,7 +806,7 @@ fn read_project_folders(connection: &Connection) -> std::collections::BTreeSet<S
         .collect()
 }
 
-pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapshot, String> {
+pub(in crate::app) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapshot, String> {
     let connection = Connection::open(path)
         .map_err(|error| format!("Could not open project {}: {error}", path.display()))?;
     let (version, game, source_path, selected_identity): (i64, String, String, Option<String>) =
@@ -1073,7 +1073,7 @@ fn legacy_campaign_identity(entry: &TagEntry) -> Option<String> {
     (!stem.is_empty()).then(|| format!("{:08x}:{stem}", entry.group_tag))
 }
 
-pub(super) fn campaign_entry_project_parts(
+pub(in crate::app) fn campaign_entry_project_parts(
     entry: &TagEntry,
 ) -> Option<(String, String, CampaignProjectTagKind, Option<String>)> {
     campaign_entry_project_parts_with(entry, None)
@@ -1089,7 +1089,7 @@ pub(super) fn campaign_entry_project_parts(
 /// field override against a package that only exists inside the mod it was
 /// copied into. With it, the copy is what it actually is: new content, with
 /// its own package identity, that an export writes whole.
-pub(super) fn campaign_entry_project_parts_with(
+pub(in crate::app) fn campaign_entry_project_parts_with(
     entry: &TagEntry,
     authored_package: Option<String>,
 ) -> Option<(String, String, CampaignProjectTagKind, Option<String>)> {
@@ -1116,7 +1116,7 @@ impl Baboon {
     /// that a copy was made and is already what gates deletion. Resolved by the
     /// container's `.utoc` path and the payload's own path, so a copy stays
     /// recognisable across remounts that reorder the container list.
-    pub(super) fn authored_package_for_entry(
+    pub(in crate::app) fn authored_package_for_entry(
         &self,
         kit: usize,
         entry: &TagEntry,
@@ -1146,7 +1146,7 @@ impl Baboon {
     /// read back off disk. Taking the history rather than copying it means a
     /// document reopened later in the same session does not get a second, stale
     /// copy of it.
-    pub(super) fn apply_pending_history(&mut self, kit: usize, key: &str) {
+    pub(in crate::app) fn apply_pending_history(&mut self, kit: usize, key: &str) {
         let Some(history) = self.kits[kit].pending_history.remove(key) else {
             return;
         };
@@ -1171,7 +1171,7 @@ impl Baboon {
     /// exist — and only dirty documents are captured. Without this the copy is
     /// invisible to Export Mod until it is edited, and a mod exported under a
     /// different name would silently leave it behind.
-    pub(super) fn stash_authored_tag(
+    pub(in crate::app) fn stash_authored_tag(
         &mut self,
         kit: usize,
         entry: &TagEntry,
@@ -1202,14 +1202,14 @@ impl Baboon {
         );
     }
 
-    pub(super) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
+    pub(in crate::app) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
         self.kits[kit]
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
     }
 
-    pub(super) fn campaign_entry_for_identity(
+    pub(in crate::app) fn campaign_entry_for_identity(
         &self,
         kit: usize,
         identity: &str,
@@ -1431,7 +1431,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn capture_campaign_project(
+    pub(in crate::app) fn capture_campaign_project(
         &mut self,
         kit: usize,
         now: f64,
@@ -1592,7 +1592,7 @@ impl Baboon {
     /// the dirty documents' keys and the stashed overlays' identities. Both are
     /// small — a handful of entries — so building and comparing it every frame
     /// is far cheaper than the entry lookups the rebuild performs.
-    pub(super) fn refresh_modified_tags(&mut self, kit: usize) {
+    pub(in crate::app) fn refresh_modified_tags(&mut self, kit: usize) {
         let mut signature: Vec<String> = self.kits[kit]
             .parsed_tags
             .iter()
@@ -1640,7 +1640,7 @@ impl Baboon {
     /// Overlays are otherwise only ever inserted: without this, clearing a
     /// document's dirty flag left the edited bytes in the project and reopening
     /// the tag brought them straight back.
-    pub(super) fn forget_campaign_overlay(&mut self, kit: usize, key: &str) -> bool {
+    pub(in crate::app) fn forget_campaign_overlay(&mut self, kit: usize, key: &str) -> bool {
         let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
             return false;
         };
@@ -1655,7 +1655,7 @@ impl Baboon {
 
     /// Whether this kit's project has bytes stashed for `key` — that is, whether
     /// discarding the document would also delete something from disk.
-    pub(super) fn tag_has_stashed_overlay(&self, kit: usize, key: &str) -> bool {
+    pub(in crate::app) fn tag_has_stashed_overlay(&self, kit: usize, key: &str) -> bool {
         let Some(entry) = self.entry_for_key_in(kit, key) else {
             return false;
         };
@@ -1670,7 +1670,7 @@ impl Baboon {
 
     /// Forget every stashed overlay in this kit's project, returning how many
     /// tags were carrying one.
-    pub(super) fn forget_all_campaign_overlays(&mut self, kit: usize) -> usize {
+    pub(in crate::app) fn forget_all_campaign_overlays(&mut self, kit: usize) -> usize {
         let Some(project) = self.kits[kit].campaign_project.as_mut() else {
             return 0;
         };
@@ -1680,7 +1680,7 @@ impl Baboon {
     }
 
     /// Identities of the tags this kit currently has stashed, as display paths.
-    pub(super) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
+    pub(in crate::app) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
         let Some(project) = self.kits[kit].campaign_project.as_ref() else {
             return Vec::new();
         };
@@ -1696,7 +1696,7 @@ impl Baboon {
     /// Throw away everything this workspace has not written into the game:
     /// every stashed overlay and every unsaved document. The tags then reload
     /// exactly as the game ships them.
-    pub(super) fn clear_campaign_stash(&mut self, kit: usize, ctx: &egui::Context) {
+    pub(in crate::app) fn clear_campaign_stash(&mut self, kit: usize, ctx: &egui::Context) {
         self.active = kit;
         let stashed = self.forget_all_campaign_overlays(kit);
         let open = self.kits[kit].open_tabs.clone();
@@ -1727,7 +1727,7 @@ impl Baboon {
         };
     }
 
-    pub(super) fn checkpoint_campaign_project(
+    pub(in crate::app) fn checkpoint_campaign_project(
         &mut self,
         kit: usize,
         now: f64,
@@ -1770,7 +1770,7 @@ impl Baboon {
     /// Autosave every kit's project, not just the focused one — a project left
     /// in a background workspace must keep checkpointing or its edits are the
     /// ones lost to a crash.
-    pub(super) fn maybe_autosave_campaign_projects(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn maybe_autosave_campaign_projects(&mut self, ctx: &egui::Context) {
         for kit in 0..self.kits.len() {
             self.maybe_autosave_campaign_project(kit, ctx);
         }
@@ -1857,7 +1857,7 @@ impl Baboon {
         }
     }
 
-    pub(super) fn handle_campaign_project_saved(
+    pub(in crate::app) fn handle_campaign_project_saved(
         &mut self,
         revision: u64,
         path: PathBuf,
@@ -1899,7 +1899,7 @@ impl Baboon {
         false
     }
 
-    pub(super) fn begin_open_campaign_project(&mut self, ctx: egui::Context) {
+    pub(in crate::app) fn begin_open_campaign_project(&mut self, ctx: egui::Context) {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Open Baboon Project")
             .add_filter("Baboon project", &["baboon"])
@@ -1918,7 +1918,7 @@ impl Baboon {
     /// usually fresher. Reading the `.baboon` back in would replace this
     /// session's stashed edits with whatever state the file was last explicitly
     /// saved in.
-    pub(super) fn queue_campaign_project_target(&mut self, kit: usize, path: PathBuf) {
+    pub(in crate::app) fn queue_campaign_project_target(&mut self, kit: usize, path: PathBuf) {
         // Sessions written before the recovery file and the project file were
         // separate recorded the recovery path here. It is not a project the user
         // named, and offering it as a save target would be wrong.
@@ -1933,7 +1933,7 @@ impl Baboon {
 
     /// Write this workspace's project to its associated `.baboon`, asking for a
     /// destination when it has none yet.
-    pub(super) fn save_campaign_project_file(&mut self, kit: usize, now: f64) {
+    pub(in crate::app) fn save_campaign_project_file(&mut self, kit: usize, now: f64) {
         let Some(path) = self.kits[kit]
             .campaign_project
             .as_ref()
@@ -1945,7 +1945,7 @@ impl Baboon {
         self.write_campaign_project_file(kit, path, now);
     }
 
-    pub(super) fn save_campaign_project_file_as(&mut self, kit: usize, now: f64) {
+    pub(in crate::app) fn save_campaign_project_file_as(&mut self, kit: usize, now: f64) {
         if !self.current_source_is_campaign_project_capable(kit) {
             self.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
@@ -2025,7 +2025,7 @@ impl Baboon {
         self.status = format!("Saved {count} modified tag(s) to {}", path.display());
     }
 
-    pub(super) fn begin_open_campaign_project_path(&mut self, path: PathBuf, ctx: egui::Context) {
+    pub(in crate::app) fn begin_open_campaign_project_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let snapshot = match load_campaign_project(&path) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -2058,7 +2058,7 @@ impl Baboon {
         });
     }
 
-    pub(super) fn apply_pending_campaign_project(
+    pub(in crate::app) fn apply_pending_campaign_project(
         &mut self,
         kit: usize,
         now: f64,
@@ -2199,7 +2199,7 @@ impl Baboon {
         };
     }
 
-    pub(super) fn load_campaign_overlay_for_key(&mut self, kit: usize, key: &str) -> bool {
+    pub(in crate::app) fn load_campaign_overlay_for_key(&mut self, kit: usize, key: &str) -> bool {
         if self.kits[kit].parsed_tags.contains_key(key) {
             return true;
         }
@@ -2251,3 +2251,6 @@ enum OverlayAdoption {
 
 #[cfg(test)]
 mod overlay_adoption_tests;
+
+#[cfg(test)]
+mod campaign_project_round_trip_tests;

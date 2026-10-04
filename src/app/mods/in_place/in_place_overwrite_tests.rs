@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::mods::in_place::InPlaceOverwrite;
+use crate::app::mods::in_place::InPlaceOverwriteJob;
 
 fn job(app: &Baboon, dirty_revision: u64) -> InPlaceOverwriteJob {
     InPlaceOverwriteJob {
