@@ -96,9 +96,33 @@ pub(crate) fn unique_temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// `text` without its top-level `#[cfg(test)] mod … { … }` blocks.
+fn product_code(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("#[cfg(test)]\nmod ") {
+        out.push_str(&rest[..start]);
+        let module = &rest[start..];
+        let header_end = module.find('\n').unwrap() + 1;
+        let line_end = header_end + module[header_end..].find('\n').unwrap_or(0);
+        rest = if module[header_end..line_end].trim_end().ends_with('{') {
+            // Through the module's closing brace, at the start of a line.
+            match module.find("\n}\n") {
+                Some(end) => &module[end + 3..],
+                None => "",
+            }
+        } else {
+            &module[line_end..]
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Every shipped source file under `src/app`, as `(path relative to src/app,
 /// text)`: test files (`tests.rs`, `*_tests.rs`, anything under a `tests`
-/// folder) are left out. For tests that check a rule across the code, so
+/// folder) are left out, and so are the inline `#[cfg(test)] mod … { … }`
+/// blocks of the rest. For tests that check a rule across the code, so
 /// that moving code between files cannot take it out of their sight.
 pub(crate) fn app_product_sources() -> Vec<(String, String)> {
     fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
@@ -111,7 +135,7 @@ pub(crate) fn app_product_sources() -> Vec<(String, String)> {
                 }
             } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
                 let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+                out.push((rel, product_code(&std::fs::read_to_string(&path).unwrap())));
             }
         }
     }

@@ -1,0 +1,4043 @@
+//! Campaign Evolved CU2 runtime poking.
+//!
+//! This module intentionally implements constrained patching, not tag
+//! injection. It can alter bytes in allocations the game already owns, but it
+//! never allocates remote memory, changes page protection, resizes a block or
+//! data payload, or registers a new tag.
+//!
+//! Everything above `platform` — the profiles, the planner, the transaction
+//! engine — is plain byte work, but only the Windows `platform` drives it
+//! against a live process. Elsewhere only the tests reach it, so a non-Windows
+//! build would report the lot as dead; Windows builds still lint it.
+#![cfg_attr(not(windows), allow(dead_code))]
+
+use super::*;
+use crate::app::shell::{WorkerMessage, spawn_worker};
+use crate::app::kits::KitId;
+use crate::app::compare::{element_fingerprint, shallow_fingerprint};
+
+const PROCESS_NAME: &str = "HaloCampaignEvolved.exe";
+const TAG_DLL_NAME: &str = "HaloSimulation_tag_release.dll";
+const TAG_ENTRY_SIZE: usize = 0x30;
+const TAG_ENTRY_GROUP_OFFSET: u64 = 0x04;
+const TAG_ENTRY_NAME_OFFSET: u64 = 0x10;
+const TAG_ENTRY_ROOT_OFFSET: u64 = 0x18;
+const MAX_RUNTIME_TAGS: usize = 0x1_0000;
+const MAX_RUNTIME_NAME: usize = 4096;
+const RUNTIME_PAGE_SIZE: u64 = 0x1000;
+const MAX_RUNTIME_NAME_POOL_SPAN: usize = 64 * 1024 * 1024;
+const STRING_ID_BUCKET_COUNT: usize = 1_046_528;
+const STRING_ID_MAX_ENTRIES: usize = 523_264;
+const STRING_ID_VALUE_SIZE: usize = 4;
+const STRING_ID_TABLE_HEADER_SIZE: usize = 0x38;
+const STRING_ID_NODE_SIZE: usize = 0x1c;
+const STRING_ID_STORAGE_CAPACITY: usize = 26_163_200;
+const STRING_ID_MAX_NAME_BYTES: usize = 127;
+const STRING_ID_BUILTIN_COUNT: usize = 2_678;
+const STRING_ID_SET_ZERO_BUILTIN_COUNT: u32 = 1_068;
+
+#[derive(Clone, Copy, Debug)]
+pub(in crate::app) struct RuntimeBuildProfile {
+    pub(in crate::app) label: &'static str,
+    /// Recorded with the measurement, never consulted: see [`PROFILES`].
+    #[allow(dead_code)]
+    host_sha256: &'static str,
+    dll_sha256: &'static str,
+    tag_table_pointer_rva: u64,
+    segment_table_rva: u64,
+    string_id_storage_rva: u64,
+    string_id_storage_used_rva: u64,
+    string_id_strings_rva: u64,
+    string_id_count_rva: u64,
+    string_id_mapping_table_rva: u64,
+    string_id_builtin_table_rva: u64,
+}
+
+/// Every build the runtime poker knows how to address, newest first.
+///
+/// A build is selected by the SHA-256 of the tag module alone — that is the
+/// image every RVA below is an offset into. `host_sha256` records which
+/// executable the measurement was taken against and is not consulted, which is
+/// what lets one set of RVAs serve both the Steam and XboxApp packagings of the
+/// same tag module. The RVAs mean nothing for any other tag module.
+const PROFILES: &[RuntimeBuildProfile] = &[
+    STEAM_2026_08_11_PROFILE,
+    STEAM_2026_07_25_PROFILE,
+    CU2_PROFILE,
+    CU2_XBOXAPP_PROFILE,
+];
+
+/// Tag module built 2026-08-11.
+///
+/// Every RVA below is *the same value* as the 2026-07-25 profile, which is a
+/// claim that has to be earned rather than assumed. The two modules are the
+/// same size to the byte with every section at the same virtual address, and
+/// `.reloc` is identical, so no relocated pointer changed address. `.text` got
+/// one 16-byte insertion at 0x1C0AA0, displacing everything up to 0x5C75EC by
+/// +0x10 and leaving the rest in place. Measured against that:
+///
+/// * Each address here is reached by exactly as many RIP-relative instructions
+///   in the new module as in the old (1244, 3776, 11, 12, 7, 9, 12 and 2
+///   respectively), matching one-for-one under the +0x10 displacement. A global
+///   that had moved would have lost every reference to its old address.
+/// * All 53 `string_id` reference sites sit in functions that disassemble
+///   instruction-for-instruction identically once the code shift is normalised
+///   away, so the hardcoded bucket/entry/storage/builtin constants above still
+///   describe this build.
+/// * 32,639 of 33,052 `.pdata` functions are identical under that
+///   normalisation; every remaining difference is either in the two churn
+///   clusters at the shift boundaries or trailing jump-table data decoded as
+///   code, none of it structural.
+const STEAM_2026_08_11_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "Steam post-CU2 (tag module 2026.08.11)",
+    host_sha256: "EB1DACA659207F2B5C8A6FD922917195AE9C8AE19E771E396E08906282A4B152",
+    dll_sha256: "C8C144404ADF61A9DE821C996682A7E66ABADD7E530397D3BBDE31C123203BF7",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
+
+/// Tag module built 2026-07-25 (the update that shipped after CU2). The game
+/// embeds no build number, so the label carries the tag module's PE date.
+const STEAM_2026_07_25_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "Steam post-CU2 (tag module 2026.07.25)",
+    host_sha256: "4D20DC56611B29CD710D591C86CF5DE55B914EB986838C42E719B82CCD367753",
+    dll_sha256: "82B8A3A006BA3F981D6857DC7F4E4E929AE5282587F31F92F77A3FA78F4B2DAC",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
+
+const CU2_XBOXAPP_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "XboxApp post-CU2 (tag module 2026.07.25)",
+    host_sha256: "n/a",
+    dll_sha256: "6F34B317BB5CDDE87A1A0DB4D5CAFADC78C3C2C9EC6658819FAE11D9F666C595",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
+
+const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "Steam CU2 2026.06.26.1097863.1",
+    host_sha256: "0670FAA751E2553940B90DF6BE43D3B0FF59EA87F22155CF3C3FE9D439367F1D",
+    dll_sha256: "8EE1A37F6F0BC89241F47946546EDCA798962F81E2D06B386196BC75DE991705",
+    tag_table_pointer_rva: 0x0182_E1E8,
+    segment_table_rva: 0x02C2_DCC0,
+    string_id_storage_rva: 0x0135_8470,
+    string_id_storage_used_rva: 0x0135_8478,
+    string_id_strings_rva: 0x0135_8480,
+    string_id_count_rva: 0x0135_8488,
+    string_id_mapping_table_rva: 0x0135_84A0,
+    string_id_builtin_table_rva: 0x0083_0060,
+};
+
+impl RuntimeBuildProfile {
+    fn rvas(&self) -> [u64; 8] {
+        [
+            self.tag_table_pointer_rva,
+            self.segment_table_rva,
+            self.string_id_storage_rva,
+            self.string_id_storage_used_rva,
+            self.string_id_strings_rva,
+            self.string_id_count_rva,
+            self.string_id_mapping_table_rva,
+            self.string_id_builtin_table_rva,
+        ]
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeIdentity {
+    process_id: u32,
+    creation_time: u64,
+    module_base: u64,
+    tag_table: u64,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeTag {
+    path: String,
+    group_tag: u32,
+    handle: u32,
+    entry_address: u64,
+    name_pointer: u64,
+    root_descriptor: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct RuntimeTagIndex {
+    identity: RuntimeIdentity,
+    tags: Vec<RuntimeTag>,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeStringIdIndex {
+    by_name: HashMap<Vec<u8>, u32>,
+}
+
+impl RuntimeStringIdIndex {
+    fn resolve(&self, name: &str) -> Result<u32, String> {
+        let Some(normalized) = normalize_string_id_name(name)? else {
+            return Ok(u32::MAX);
+        };
+        self.by_name.get(&normalized).copied().ok_or_else(|| {
+            let normalized = String::from_utf8_lossy(&normalized);
+            format!(
+                "'{normalized}' is not registered in the running game; it cannot be poked (restart into a build that loads it)"
+            )
+        })
+    }
+}
+
+impl RuntimeTagIndex {
+    fn find(&self, path: &str, group_tag: u32) -> Result<&RuntimeTag, String> {
+        let path = normalize_tag_path(path);
+        let mut matches = self
+            .tags
+            .iter()
+            .filter(|tag| tag.group_tag == group_tag && normalize_tag_path(&tag.path) == path);
+        let first = matches
+            .next()
+            .ok_or_else(|| "tag is not loaded".to_owned())?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "runtime tag lookup is ambiguous for {} ({})",
+                path,
+                format_group_tag(group_tag)
+            ));
+        }
+        Ok(first)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct PokePatch {
+    pub(in crate::app) address: u64,
+    pub(in crate::app) expected: Vec<u8>,
+    pub(in crate::app) edited: Vec<u8>,
+    pub(in crate::app) field_path: String,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct PokePlan {
+    profile: RuntimeBuildProfile,
+    identity: RuntimeIdentity,
+    tag_path: String,
+    group_tag: u32,
+    tag_handle: u32,
+    tag_entry_address: u64,
+    tag_name_pointer: u64,
+    root_address: u64,
+    pub(in crate::app) patches: Vec<PokePatch>,
+    chain_originals: Vec<Option<Vec<u8>>>,
+}
+
+impl PokePlan {
+    pub(in crate::app) fn byte_count(&self) -> usize {
+        self.patches.iter().map(|patch| patch.edited.len()).sum()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct LastPoke {
+    plan: PokePlan,
+    originals: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct PokeReport {
+    pub(in crate::app) written_fields: usize,
+    pub(in crate::app) written_bytes: usize,
+    pub(in crate::app) skipped_fields: usize,
+    pub(in crate::app) message: String,
+}
+
+impl PokeReport {
+    fn status(&self) -> String {
+        format!(
+            "{}: {} field(s), {} byte(s), {} no-op(s)",
+            self.message, self.written_fields, self.written_bytes, self.skipped_fields
+        )
+    }
+}
+
+pub(in crate::app) struct PokeDialog {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) key: String,
+    pub(in crate::app) state: PokeDialogState,
+}
+
+pub(in crate::app) enum PokeDialogState {
+    Scanning,
+    Ready(PokePlan),
+    Writing,
+    Error(String),
+}
+
+struct PokeRequest {
+    kit: KitId,
+    key: String,
+    source: TagSource,
+    entries: Vec<TagEntry>,
+    entry: TagEntry,
+    edited_bytes: Vec<u8>,
+    prior: Option<LastPoke>,
+}
+
+trait RuntimeMemory {
+    fn read(&self, address: u64, length: usize) -> Result<Vec<u8>, String>;
+    fn is_writable(&self, address: u64, length: usize) -> Result<bool, String>;
+    fn resolve_offset(&self, encoded: u32) -> Result<u64, String>;
+}
+
+trait RuntimeWriteMemory: RuntimeMemory {
+    fn write(&self, address: u64, bytes: &[u8]) -> Result<(), String>;
+}
+
+fn checked_add(address: u64, offset: u64) -> Result<u64, String> {
+    address
+        .checked_add(offset)
+        .ok_or_else(|| "runtime pointer arithmetic overflow".to_owned())
+}
+
+fn checked_index(base: u64, index: usize, stride: usize) -> Result<u64, String> {
+    let offset = index
+        .checked_mul(stride)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| "runtime pointer arithmetic overflow".to_owned())?;
+    checked_add(base, offset)
+}
+
+fn runtime_name_pool_bounds(pointers: &[u64]) -> Result<Option<(u64, usize)>, String> {
+    let Some(minimum) = pointers.iter().copied().min() else {
+        return Ok(None);
+    };
+    let maximum = pointers.iter().copied().max().unwrap();
+    if minimum == 0 {
+        return Ok(None);
+    }
+    let start = minimum & !(RUNTIME_PAGE_SIZE - 1);
+    let end = checked_add(maximum, MAX_RUNTIME_NAME as u64)?
+        .checked_add(RUNTIME_PAGE_SIZE - 1)
+        .ok_or_else(|| "runtime pointer arithmetic overflow".to_owned())?
+        & !(RUNTIME_PAGE_SIZE - 1);
+    let length = usize::try_from(
+        end.checked_sub(start)
+            .ok_or_else(|| "runtime pointer arithmetic overflow".to_owned())?,
+    )
+    .map_err(|_| "runtime name pool is too large".to_owned())?;
+    Ok((length <= MAX_RUNTIME_NAME_POOL_SPAN).then_some((start, length)))
+}
+
+fn runtime_name_from_pool(pool_start: u64, pool: &[u8], pointer: u64) -> Result<String, String> {
+    let offset = usize::try_from(
+        pointer
+            .checked_sub(pool_start)
+            .ok_or_else(|| "runtime tag name pointer is outside the name pool".to_owned())?,
+    )
+    .map_err(|_| "runtime tag name pointer is outside the name pool".to_owned())?;
+    let tail = pool
+        .get(offset..)
+        .ok_or_else(|| "runtime tag name pointer is outside the name pool".to_owned())?;
+    let end = tail
+        .iter()
+        .take(MAX_RUNTIME_NAME)
+        .position(|byte| *byte == 0)
+        .ok_or_else(|| "runtime tag name is not terminated".to_owned())?;
+    std::str::from_utf8(&tail[..end])
+        .map(str::to_owned)
+        .map_err(|_| "runtime tag name is not UTF-8".to_owned())
+}
+
+fn encoded_offset_parts(encoded: u32) -> Result<(usize, u64), String> {
+    if encoded == u32::MAX {
+        return Err("null encoded runtime offset".to_owned());
+    }
+    Ok((
+        (encoded >> 28) as usize,
+        u64::from(encoded)
+            .checked_mul(4)
+            .ok_or_else(|| "runtime pointer arithmetic overflow".to_owned())?,
+    ))
+}
+
+fn read_u32(memory: &dyn RuntimeMemory, address: u64) -> Result<u32, String> {
+    let bytes = memory.read(address, 4)?;
+    Ok(u32::from_le_bytes(
+        bytes.try_into().expect("four bytes requested"),
+    ))
+}
+
+fn read_u64(memory: &dyn RuntimeMemory, address: u64) -> Result<u64, String> {
+    let bytes = memory.read(address, 8)?;
+    Ok(u64::from_le_bytes(
+        bytes.try_into().expect("eight bytes requested"),
+    ))
+}
+
+const RUNTIME_CACHE_STALE: &str = "runtime address cache is stale";
+
+fn should_refresh_runtime_index(error: &str) -> bool {
+    error.starts_with(RUNTIME_CACHE_STALE) || error == "tag is not loaded"
+}
+
+fn loaded_reference_positions(live: &[u8], index: &RuntimeTagIndex, group_tag: u32) -> Vec<usize> {
+    live.chunks_exact(4)
+        .enumerate()
+        .filter_map(|(index_in_field, chunk)| {
+            let handle = u32::from_le_bytes(chunk.try_into().unwrap());
+            index
+                .tags
+                .iter()
+                .any(|tag| tag.handle == handle && tag.group_tag == group_tag)
+                .then_some(index_in_field * 4)
+        })
+        .collect()
+}
+
+fn validate_runtime_tag_entry(memory: &dyn RuntimeMemory, tag: &RuntimeTag) -> Result<(), String> {
+    let entry = memory
+        .read(tag.entry_address, TAG_ENTRY_ROOT_OFFSET as usize)
+        .map_err(|error| format!("{RUNTIME_CACHE_STALE}: {error}"))?;
+    let salt = u16::from_le_bytes(entry[0..2].try_into().unwrap());
+    let group_offset = TAG_ENTRY_GROUP_OFFSET as usize;
+    let name_offset = TAG_ENTRY_NAME_OFFSET as usize;
+    let group_tag = u32::from_le_bytes(entry[group_offset..group_offset + 4].try_into().unwrap());
+    let name_pointer = u64::from_le_bytes(entry[name_offset..name_offset + 8].try_into().unwrap());
+    if (u32::from(salt) << 16) != tag.handle & 0xffff_0000
+        || group_tag != tag.group_tag
+        || name_pointer != tag.name_pointer
+    {
+        return Err(RUNTIME_CACHE_STALE.to_owned());
+    }
+    Ok(())
+}
+
+fn normalize_tag_path(path: &str) -> String {
+    let mut normalized = path
+        .trim_matches('\0')
+        .trim()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    while normalized.starts_with('/') {
+        normalized.remove(0);
+    }
+    loop {
+        let mut stripped = false;
+        for prefix in ["meteorite/content/", "content/", "game/tags/", "tags/"] {
+            if let Some(rest) = normalized.strip_prefix(prefix) {
+                normalized = rest.to_owned();
+                stripped = true;
+                break;
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+    if let Some((stem, extension)) = normalized.rsplit_once('/')
+        && let Some((file, _)) = extension.rsplit_once('.')
+    {
+        normalized = format!("{stem}/{file}");
+    } else if let Some((file, _)) = normalized.rsplit_once('.') {
+        normalized = file.to_owned();
+    }
+    normalized.trim_matches('/').to_owned()
+}
+
+fn field_path(parent: &str, field: TagField<'_>) -> String {
+    let name = field.display_name();
+    let component = if name.is_empty() {
+        format!("{}#{}", field.type_name(), field.ordinal())
+    } else {
+        format!("{}#{}", name, field.ordinal())
+    };
+    if parent.is_empty() {
+        component
+    } else {
+        format!("{parent}/{component}")
+    }
+}
+
+fn field_span(st: TagStruct<'_>, field: TagField<'_>) -> Result<(usize, usize), String> {
+    let start = field.definition().offset() as usize;
+    if start > st.size() {
+        return Err(format!("schema offset is outside {}", st.name()));
+    }
+    let end = st
+        .fields_all()
+        .map(|other| other.definition().offset() as usize)
+        .filter(|&offset| offset > start)
+        .min()
+        .unwrap_or(st.size());
+    if end < start || end > st.size() {
+        return Err(format!("schema field size is invalid in {}", st.name()));
+    }
+    Ok((start, end - start))
+}
+
+fn raw_span<'a>(st: TagStruct<'a>, start: usize, length: usize) -> Result<&'a [u8], String> {
+    st.raw()
+        .get(start..start.saturating_add(length))
+        .ok_or_else(|| format!("tag data for {} is truncated", st.name()))
+}
+
+fn probe_inline_scalars(
+    memory: &dyn RuntimeMemory,
+    baseline: TagStruct<'_>,
+    live_address: u64,
+    parent_path: &str,
+    compared: &mut usize,
+) -> Result<(), String> {
+    for field in baseline.fields_all() {
+        if *compared >= 2 {
+            break;
+        }
+        let path = field_path(parent_path, field);
+        let (offset, span) = field_span(baseline, field)?;
+        let field_address = checked_add(live_address, offset as u64)?;
+        match field.field_type() {
+            TagFieldType::Struct => {
+                if let Some(nested) = field.as_struct() {
+                    probe_inline_scalars(memory, nested, field_address, &path, compared)?;
+                }
+            }
+            TagFieldType::Array => {
+                if let Some(array) = field.as_array() {
+                    let element_size = array.definition().struct_definition().size();
+                    for index in 0..array.len() {
+                        if *compared >= 2 {
+                            break;
+                        }
+                        let element_address = checked_index(field_address, index, element_size)?;
+                        probe_inline_scalars(
+                            memory,
+                            array.element(index).unwrap(),
+                            element_address,
+                            &format!("{path}[{index}]"),
+                            compared,
+                        )?;
+                    }
+                }
+            }
+            TagFieldType::Block
+            | TagFieldType::Data
+            | TagFieldType::TagReference
+            | TagFieldType::StringId
+            | TagFieldType::OldStringId
+            | TagFieldType::PageableResource
+            | TagFieldType::ApiInterop
+            | TagFieldType::VertexBuffer
+            | TagFieldType::Pointer
+            | TagFieldType::NonCacheRuntimeValue
+            | TagFieldType::Custom
+            | TagFieldType::Unknown
+            | TagFieldType::Pad
+            | TagFieldType::UselessPad
+            | TagFieldType::Skip
+            | TagFieldType::Explanation
+            | TagFieldType::Terminator => {}
+            _ => {
+                let shipped = raw_span(baseline, offset, span)?;
+                if shipped.is_empty() {
+                    continue;
+                }
+                let live = memory.read(field_address, span)?;
+                if live != shipped {
+                    return Err(format!(
+                        "live scalar probe does not match the shipped tag at {path}"
+                    ));
+                }
+                *compared += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn field_debug_value(field: TagField<'_>) -> String {
+    format!("{:?}", field.value())
+}
+
+fn string_id_text(field: TagField<'_>) -> Result<String, String> {
+    match field.value() {
+        Some(TagFieldData::StringId(value)) | Some(TagFieldData::OldStringId(value)) => {
+            Ok(value.string)
+        }
+        _ => Err(format!(
+            "missing string-id value at {}",
+            field.display_name()
+        )),
+    }
+}
+
+fn normalize_string_id_bytes(name: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    if name.is_empty() {
+        return Ok(None);
+    }
+    if name.len() > STRING_ID_MAX_NAME_BYTES {
+        return Err(format!(
+            "string id name is longer than {STRING_ID_MAX_NAME_BYTES} bytes"
+        ));
+    }
+    let mut bytes = name.to_vec();
+    for byte in &mut bytes {
+        *byte = match *byte {
+            b'A'..=b'Z' => *byte + (b'a' - b'A'),
+            b' ' | b'-' => b'_',
+            byte => byte,
+        };
+    }
+    Ok(Some(bytes))
+}
+
+fn normalize_string_id_name(name: &str) -> Result<Option<Vec<u8>>, String> {
+    normalize_string_id_bytes(name.as_bytes())
+}
+
+fn string_id_storage_name(storage: &[u8], offset: u32) -> Result<&[u8], String> {
+    let offset =
+        usize::try_from(offset).map_err(|_| "string id storage offset overflow".to_owned())?;
+    let tail = storage
+        .get(offset..)
+        .ok_or_else(|| "string id storage offset is outside the name blob".to_owned())?;
+    let length = tail
+        .iter()
+        .take(STRING_ID_MAX_NAME_BYTES + 1)
+        .position(|byte| *byte == 0)
+        .ok_or_else(|| "runtime string id name is not terminated within 128 bytes".to_owned())?;
+    Ok(&tail[..length])
+}
+
+fn parse_runtime_string_id_table(
+    table_address: u64,
+    table: &[u8],
+    storage: &[u8],
+    expected_count: usize,
+) -> Result<RuntimeStringIdIndex, String> {
+    if table.len() < STRING_ID_TABLE_HEADER_SIZE {
+        return Err("runtime string id mapping table header is truncated".to_owned());
+    }
+    let bucket_count = u32::from_le_bytes(table[0..4].try_into().unwrap()) as usize;
+    let max_entries = u32::from_le_bytes(table[4..8].try_into().unwrap()) as usize;
+    let value_size = u64::from_le_bytes(table[8..16].try_into().unwrap()) as usize;
+    if bucket_count != STRING_ID_BUCKET_COUNT
+        || max_entries != STRING_ID_MAX_ENTRIES
+        || value_size != STRING_ID_VALUE_SIZE
+    {
+        return Err("unsupported runtime string id mapping-table layout".to_owned());
+    }
+    if expected_count == 0 {
+        return Err("runtime string id registry is not initialized".to_owned());
+    }
+    if expected_count > max_entries {
+        return Err("runtime string id count exceeds the mapping-table capacity".to_owned());
+    }
+    let buckets_size = bucket_count
+        .checked_mul(8)
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    let nodes_start = STRING_ID_TABLE_HEADER_SIZE
+        .checked_add(buckets_size)
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    let allocation_size = nodes_start
+        .checked_add(
+            max_entries
+                .checked_mul(STRING_ID_NODE_SIZE)
+                .ok_or_else(|| "runtime string id table size overflow".to_owned())?,
+        )
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    if table.len() != allocation_size {
+        return Err("runtime string id mapping-table allocation is truncated".to_owned());
+    }
+
+    let mut visited = HashSet::with_capacity(expected_count);
+    let mut by_name = HashMap::with_capacity(expected_count);
+    for bucket in 0..bucket_count {
+        let bucket_offset = STRING_ID_TABLE_HEADER_SIZE + bucket * 8;
+        let mut node_address =
+            u64::from_le_bytes(table[bucket_offset..bucket_offset + 8].try_into().unwrap());
+        while node_address != 0 {
+            if visited.len() >= max_entries || !visited.insert(node_address) {
+                return Err("runtime string id mapping table contains a corrupt chain".to_owned());
+            }
+            let node_offset = usize::try_from(
+                node_address
+                    .checked_sub(table_address)
+                    .ok_or_else(|| "runtime string id node precedes its allocation".to_owned())?,
+            )
+            .map_err(|_| "runtime string id node offset overflow".to_owned())?;
+            if node_offset < nodes_start
+                || (node_offset - nodes_start) % STRING_ID_NODE_SIZE != 0
+                || node_offset
+                    .checked_add(STRING_ID_NODE_SIZE)
+                    .is_none_or(|end| end > table.len())
+            {
+                return Err("runtime string id node is outside its allocation".to_owned());
+            }
+            let key = u64::from_le_bytes(table[node_offset..node_offset + 8].try_into().unwrap());
+            let id = u32::try_from(key)
+                .map_err(|_| "runtime string id mapping key exceeds 32 bits".to_owned())?;
+            node_address = u64::from_le_bytes(
+                table[node_offset + 0x10..node_offset + 0x18]
+                    .try_into()
+                    .unwrap(),
+            );
+            let storage_offset = u32::from_le_bytes(
+                table[node_offset + 0x18..node_offset + 0x1c]
+                    .try_into()
+                    .unwrap(),
+            );
+            let name = string_id_storage_name(storage, storage_offset).map_err(|error| {
+                let offset = storage_offset as usize;
+                let preview = storage
+                    .get(offset..offset.saturating_add(32).min(storage.len()))
+                    .unwrap_or_default();
+                format!(
+                    "{error} for string id 0x{id:08X} at storage offset 0x{storage_offset:08X}: {preview:02X?}"
+                )
+            })?;
+            let normalized = normalize_string_id_bytes(name)?.unwrap_or_default();
+            if normalized != name {
+                let name = String::from_utf8_lossy(name);
+                return Err(format!(
+                    "runtime string id registry contains an unnormalized name: {name}"
+                ));
+            }
+            if let Some(previous) = by_name.insert(normalized.clone(), id)
+                && previous != id
+            {
+                let normalized = String::from_utf8_lossy(&normalized);
+                return Err(format!(
+                    "runtime string id registry maps '{normalized}' to multiple ids"
+                ));
+            }
+        }
+    }
+    if visited.len() != expected_count || by_name.len() != expected_count {
+        return Err(format!(
+            "runtime string id registry count mismatch: expected {expected_count}, found {}",
+            by_name.len()
+        ));
+    }
+    Ok(RuntimeStringIdIndex { by_name })
+}
+
+fn resources_equal(before: TagResource<'_>, after: TagResource<'_>) -> bool {
+    std::mem::discriminant(&before.kind()) == std::mem::discriminant(&after.kind())
+        && before.inline_bytes() == after.inline_bytes()
+        && before.exploded_payload() == after.exploded_payload()
+        && before.xsync_payload() == after.xsync_payload()
+        && match (before.as_struct(), after.as_struct()) {
+            (Some(before), Some(after)) => structs_equal(before, after),
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+fn structs_equal(before: TagStruct<'_>, after: TagStruct<'_>) -> bool {
+    if before.size() != after.size() || before.raw() != after.raw() {
+        return false;
+    }
+    let before_fields: Vec<_> = before.fields_all().collect();
+    let after_fields: Vec<_> = after.fields_all().collect();
+    if before_fields.len() != after_fields.len() {
+        return false;
+    }
+    before_fields.into_iter().zip(after_fields).all(
+        |(before_field, after_field)| match before_field.field_type() {
+            TagFieldType::Struct => match (before_field.as_struct(), after_field.as_struct()) {
+                (Some(before), Some(after)) => structs_equal(before, after),
+                (None, None) => true,
+                _ => false,
+            },
+            TagFieldType::Array => match (before_field.as_array(), after_field.as_array()) {
+                (Some(before), Some(after)) if before.len() == after.len() => (0..before.len())
+                    .all(|index| {
+                        structs_equal(
+                            before.element(index).unwrap(),
+                            after.element(index).unwrap(),
+                        )
+                    }),
+                (None, None) => true,
+                _ => false,
+            },
+            TagFieldType::Block => match (before_field.as_block(), after_field.as_block()) {
+                (Some(before), Some(after)) if before.len() == after.len() => (0..before.len())
+                    .all(|index| {
+                        structs_equal(
+                            before.element(index).unwrap(),
+                            after.element(index).unwrap(),
+                        )
+                    }),
+                (None, None) => true,
+                _ => false,
+            },
+            TagFieldType::Data => before_field.as_data() == after_field.as_data(),
+            TagFieldType::PageableResource => {
+                match (before_field.as_resource(), after_field.as_resource()) {
+                    (Some(before), Some(after)) => resources_equal(before, after),
+                    (None, None) => true,
+                    _ => false,
+                }
+            }
+            _ => field_debug_value(before_field) == field_debug_value(after_field),
+        },
+    )
+}
+
+fn unique_permutation_reordered(before: &[u64], after: &[u64]) -> bool {
+    if before.len() != after.len() || before == after {
+        return false;
+    }
+    let before_unique: HashSet<u64> = before.iter().copied().collect();
+    let after_unique: HashSet<u64> = after.iter().copied().collect();
+    before_unique.len() == before.len()
+        && after_unique.len() == after.len()
+        && before_unique == after_unique
+}
+
+fn validate_poke_structure(
+    baseline: TagStruct<'_>,
+    edited: TagStruct<'_>,
+    parent_path: &str,
+) -> Result<(), String> {
+    if baseline.size() != edited.size() {
+        return Err(format!("structural edit cannot be poked at {parent_path}"));
+    }
+    let baseline_fields: Vec<_> = baseline.fields_all().collect();
+    let edited_fields: Vec<_> = edited.fields_all().collect();
+    if baseline_fields.len() != edited_fields.len() {
+        return Err(format!("schema mismatch at {parent_path}"));
+    }
+    for (before_field, after_field) in baseline_fields.into_iter().zip(edited_fields) {
+        if before_field.field_type() != after_field.field_type()
+            || before_field.definition().offset() != after_field.definition().offset()
+        {
+            return Err(format!("schema mismatch at {parent_path}"));
+        }
+        let path = field_path(parent_path, before_field);
+        match before_field.field_type() {
+            TagFieldType::Struct => {
+                let before = before_field
+                    .as_struct()
+                    .ok_or_else(|| format!("missing shipped struct at {path}"))?;
+                let after = after_field
+                    .as_struct()
+                    .ok_or_else(|| format!("missing edited struct at {path}"))?;
+                validate_poke_structure(before, after, &path)?;
+            }
+            TagFieldType::Array => {
+                let before = before_field
+                    .as_array()
+                    .ok_or_else(|| format!("missing shipped fixed array at {path}"))?;
+                let after = after_field
+                    .as_array()
+                    .ok_or_else(|| format!("missing edited fixed array at {path}"))?;
+                if before.len() != after.len() {
+                    return Err(format!("structural edit cannot be poked at {path}"));
+                }
+                for index in 0..before.len() {
+                    validate_poke_structure(
+                        before.element(index).unwrap(),
+                        after.element(index).unwrap(),
+                        &format!("{path}[{index}]"),
+                    )?;
+                }
+            }
+            TagFieldType::Block => {
+                let before = before_field.as_block();
+                let after = after_field.as_block();
+                let before_len = before.map_or(0, |block| block.len());
+                let after_len = after.map_or(0, |block| block.len());
+                if before_len != after_len {
+                    return Err(format!("structural edit cannot be poked at {path}"));
+                }
+                let (Some(before), Some(after)) = (before, after) else {
+                    continue;
+                };
+                let before_full: Vec<u64> = (0..before_len)
+                    .map(|index| element_fingerprint(before.element(index)))
+                    .collect();
+                let after_full: Vec<u64> = (0..after_len)
+                    .map(|index| element_fingerprint(after.element(index)))
+                    .collect();
+                let before_shallow: Vec<u64> = (0..before_len)
+                    .map(|index| shallow_fingerprint(before.element(index)))
+                    .collect();
+                let after_shallow: Vec<u64> = (0..after_len)
+                    .map(|index| shallow_fingerprint(after.element(index)))
+                    .collect();
+                if unique_permutation_reordered(&before_full, &after_full)
+                    || unique_permutation_reordered(&before_shallow, &after_shallow)
+                {
+                    return Err(format!("block reorder cannot be poked at {path}"));
+                }
+                for index in 0..before_len {
+                    validate_poke_structure(
+                        before.element(index).unwrap(),
+                        after.element(index).unwrap(),
+                        &format!("{path}[{index}]"),
+                    )?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn append_patch(
+    memory: &dyn RuntimeMemory,
+    patches: &mut Vec<PokePatch>,
+    prior: Option<&LastPoke>,
+    address: u64,
+    expected: &[u8],
+    edited: &[u8],
+    path: &str,
+) -> Result<(), String> {
+    let prior_patch = prior.and_then(|last| {
+        last.plan.patches.iter().find(|patch| {
+            patch.address == address
+                && patch.edited.len() == edited.len()
+                && patch.field_path == path
+        })
+    });
+    if expected == edited && prior_patch.is_none() {
+        return Ok(());
+    }
+    let live = memory.read(address, expected.len())?;
+    let effective_expected = if live == expected || live == edited {
+        expected
+    } else if let Some(prior_patch) = prior_patch.filter(|patch| live == patch.edited) {
+        prior_patch.edited.as_slice()
+    } else {
+        return Err(format!(
+            "live value conflicts with the shipped tag at {path}"
+        ));
+    };
+    if live == edited && expected == edited {
+        return Ok(());
+    }
+    if !memory.is_writable(address, expected.len())? {
+        return Err(format!("destination is not writable at {path}"));
+    }
+    patches.push(PokePatch {
+        address,
+        expected: effective_expected.to_vec(),
+        edited: edited.to_vec(),
+        field_path: path.to_owned(),
+    });
+    Ok(())
+}
+
+fn append_string_id_patch(
+    memory: &dyn RuntimeMemory,
+    patches: &mut Vec<PokePatch>,
+    prior: Option<&LastPoke>,
+    string_ids: &RuntimeStringIdIndex,
+    address: u64,
+    before: &str,
+    after: &str,
+    path: &str,
+) -> Result<(), String> {
+    let expected = string_ids
+        .resolve(before)
+        .map_err(|error| format!("shipped {error} at {path}"))?;
+    let edited = string_ids
+        .resolve(after)
+        .map_err(|error| format!("{error} at {path}"))?;
+    append_patch(
+        memory,
+        patches,
+        prior,
+        address,
+        &expected.to_le_bytes(),
+        &edited.to_le_bytes(),
+        path,
+    )
+}
+
+fn rollback<M: RuntimeWriteMemory + ?Sized>(
+    memory: &M,
+    completed: &[(u64, Vec<u8>)],
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for (address, bytes) in completed.iter().rev() {
+        if let Err(error) = memory.write(*address, bytes) {
+            failures.push(error);
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+fn apply_transaction<M: RuntimeWriteMemory + ?Sized>(
+    memory: &M,
+    patches: &[PokePatch],
+) -> Result<(Vec<Vec<u8>>, PokeReport), String> {
+    let mut originals = Vec::with_capacity(patches.len());
+    for patch in patches {
+        let live = memory.read(patch.address, patch.expected.len())?;
+        if live != patch.expected && live != patch.edited {
+            return Err(format!("live value conflict at {}", patch.field_path));
+        }
+        if !memory.is_writable(patch.address, patch.edited.len())? {
+            return Err(format!(
+                "destination is not writable at {}",
+                patch.field_path
+            ));
+        }
+        originals.push(live);
+    }
+
+    let mut completed: Vec<(u64, Vec<u8>)> = Vec::new();
+    let mut written_fields = 0usize;
+    let mut written_bytes = 0usize;
+    let mut skipped_fields = 0usize;
+    for (index, patch) in patches.iter().enumerate() {
+        let current = match memory.read(patch.address, patch.expected.len()) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return match rollback(memory, &completed) {
+                    Ok(()) => Err(format!(
+                        "poke pre-write check failed at {}: {error}; completed writes were rolled back",
+                        patch.field_path
+                    )),
+                    Err(rollback_error) => Err(format!(
+                        "poke pre-write check failed at {}: {error}; rollback also failed: {rollback_error}",
+                        patch.field_path
+                    )),
+                };
+            }
+        };
+        if current != patch.expected && current != patch.edited {
+            return match rollback(memory, &completed) {
+                Ok(()) => Err(format!(
+                    "live value changed during poke at {}; completed writes were rolled back",
+                    patch.field_path
+                )),
+                Err(rollback_error) => Err(format!(
+                    "live value changed during poke at {}; rollback also failed: {rollback_error}",
+                    patch.field_path
+                )),
+            };
+        }
+        originals[index] = current;
+        if originals[index] == patch.edited {
+            skipped_fields += 1;
+            continue;
+        }
+        let attempt = memory.write(patch.address, &patch.edited).and_then(|()| {
+            let verified = memory.read(patch.address, patch.edited.len())?;
+            (verified == patch.edited)
+                .then_some(())
+                .ok_or_else(|| "write verification failed".to_owned())
+        });
+        if let Err(error) = attempt {
+            let current_restore = memory.write(patch.address, &originals[index]);
+            return match rollback(memory, &completed) {
+                Ok(()) if current_restore.is_ok() => Err(format!(
+                    "poke failed at {}: {error}; all attempted writes were rolled back",
+                    patch.field_path
+                )),
+                Err(rollback_error) => Err(format!(
+                    "poke failed at {}: {error}; rollback also failed: {rollback_error}",
+                    patch.field_path
+                )),
+                Ok(()) => Err(format!(
+                    "poke failed at {}: {error}; the failing write could not be restored: {}",
+                    patch.field_path,
+                    current_restore.unwrap_err()
+                )),
+            };
+        }
+        completed.push((patch.address, originals[index].clone()));
+        written_fields += 1;
+        written_bytes += patch.edited.len();
+    }
+    Ok((
+        originals,
+        PokeReport {
+            written_fields,
+            written_bytes,
+            skipped_fields,
+            message: "Poke complete".to_owned(),
+        },
+    ))
+}
+
+fn undo_transaction<M: RuntimeWriteMemory + ?Sized>(
+    memory: &M,
+    patches: &[PokePatch],
+    originals: &[Vec<u8>],
+) -> Result<PokeReport, String> {
+    if patches.len() != originals.len() {
+        return Err("undo record is inconsistent".to_owned());
+    }
+    for patch in patches {
+        let live = memory.read(patch.address, patch.edited.len())?;
+        if live != patch.edited {
+            return Err(format!(
+                "cannot undo because live memory changed at {}",
+                patch.field_path
+            ));
+        }
+    }
+    let mut completed: Vec<(u64, Vec<u8>)> = Vec::new();
+    for (index, patch) in patches.iter().enumerate() {
+        let original = &originals[index];
+        if original == &patch.edited {
+            continue;
+        }
+        let current = match memory.read(patch.address, patch.edited.len()) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return match rollback(memory, &completed) {
+                    Ok(()) => Err(format!(
+                        "undo pre-write check failed at {}: {error}; restored bytes were re-applied",
+                        patch.field_path
+                    )),
+                    Err(rollback_error) => Err(format!(
+                        "undo pre-write check failed at {}: {error}; undo rollback also failed: {rollback_error}",
+                        patch.field_path
+                    )),
+                };
+            }
+        };
+        if current != patch.edited {
+            return match rollback(memory, &completed) {
+                Ok(()) => Err(format!(
+                    "live memory changed during undo at {}; restored bytes were re-applied",
+                    patch.field_path
+                )),
+                Err(rollback_error) => Err(format!(
+                    "live memory changed during undo at {}; undo rollback also failed: {rollback_error}",
+                    patch.field_path
+                )),
+            };
+        }
+        let attempt = memory.write(patch.address, original).and_then(|()| {
+            let verified = memory.read(patch.address, original.len())?;
+            (verified == *original)
+                .then_some(())
+                .ok_or_else(|| "undo verification failed".to_owned())
+        });
+        if let Err(error) = attempt {
+            let current_restore = memory.write(patch.address, &patch.edited);
+            return match rollback(memory, &completed) {
+                Ok(()) if current_restore.is_ok() => Err(format!(
+                    "undo failed at {}: {error}; already-restored bytes were re-applied",
+                    patch.field_path
+                )),
+                Err(rollback_error) => Err(format!(
+                    "undo failed at {}: {error}; undo rollback also failed: {rollback_error}",
+                    patch.field_path
+                )),
+                Ok(()) => Err(format!(
+                    "undo failed at {}: {error}; the failing restore could not be re-applied: {}",
+                    patch.field_path,
+                    current_restore.unwrap_err()
+                )),
+            };
+        }
+        completed.push((patch.address, patch.edited.clone()));
+    }
+    Ok(PokeReport {
+        written_fields: completed.len(),
+        written_bytes: completed.iter().map(|(_, bytes)| bytes.len()).sum(),
+        skipped_fields: patches.len() - completed.len(),
+        message: "Undo complete".to_owned(),
+    })
+}
+
+struct Planner<'a> {
+    memory: &'a dyn RuntimeMemory,
+    index: &'a RuntimeTagIndex,
+    string_ids: &'a RuntimeStringIdIndex,
+    prior: Option<&'a LastPoke>,
+    patches: Vec<PokePatch>,
+}
+
+impl Planner<'_> {
+    fn plan_struct(
+        &mut self,
+        baseline: TagStruct<'_>,
+        edited: TagStruct<'_>,
+        live_address: u64,
+        parent_path: &str,
+    ) -> Result<(), String> {
+        if baseline.size() != edited.size() {
+            return Err(format!("structural edit cannot be poked at {parent_path}"));
+        }
+        let baseline_fields: Vec<_> = baseline.fields_all().collect();
+        let edited_fields: Vec<_> = edited.fields_all().collect();
+        if baseline_fields.len() != edited_fields.len() {
+            return Err(format!("schema mismatch at {parent_path}"));
+        }
+        for (before_field, after_field) in baseline_fields.into_iter().zip(edited_fields) {
+            if before_field.field_type() != after_field.field_type()
+                || before_field.definition().offset() != after_field.definition().offset()
+            {
+                return Err(format!("schema mismatch at {parent_path}"));
+            }
+            let path = field_path(parent_path, before_field);
+            let (offset, span) = field_span(baseline, before_field)?;
+            let field_address = checked_add(live_address, offset as u64)?;
+            match before_field.field_type() {
+                TagFieldType::Struct => {
+                    let before = before_field
+                        .as_struct()
+                        .ok_or_else(|| format!("missing shipped struct at {path}"))?;
+                    let after = after_field
+                        .as_struct()
+                        .ok_or_else(|| format!("missing edited struct at {path}"))?;
+                    self.plan_struct(before, after, field_address, &path)?;
+                }
+                TagFieldType::Array => {
+                    self.plan_array(before_field, after_field, field_address, &path)?;
+                }
+                TagFieldType::Block => {
+                    self.plan_block(before_field, after_field, field_address, &path)?;
+                }
+                TagFieldType::Data => {
+                    self.plan_data(before_field, after_field, field_address, span, &path)?;
+                }
+                TagFieldType::TagReference => {
+                    self.plan_reference(before_field, after_field, field_address, span, &path)?;
+                }
+                TagFieldType::PageableResource => {
+                    let before = before_field.as_resource();
+                    let after = after_field.as_resource();
+                    let unchanged = match (before, after) {
+                        (Some(before), Some(after)) => resources_equal(before, after),
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    if !unchanged {
+                        return Err(format!("pageable-resource edit cannot be poked at {path}"));
+                    }
+                }
+                TagFieldType::StringId | TagFieldType::OldStringId => {
+                    let before = string_id_text(before_field)?;
+                    let after = string_id_text(after_field)?;
+                    if before != after {
+                        append_string_id_patch(
+                            self.memory,
+                            &mut self.patches,
+                            self.prior,
+                            self.string_ids,
+                            field_address,
+                            &before,
+                            &after,
+                            &path,
+                        )?;
+                    } else if let Some((_, original)) = self.prior.and_then(|last| {
+                        last.plan
+                            .patches
+                            .iter()
+                            .enumerate()
+                            .find(|(_, patch)| {
+                                patch.address == field_address
+                                    && patch.field_path == path
+                                    && patch.edited.len() == 4
+                            })
+                            .and_then(|(index, patch)| {
+                                last.originals.get(index).map(|original| (patch, original))
+                            })
+                    }) {
+                        append_patch(
+                            self.memory,
+                            &mut self.patches,
+                            self.prior,
+                            field_address,
+                            original,
+                            original,
+                            &path,
+                        )?;
+                    }
+                }
+                TagFieldType::ApiInterop
+                | TagFieldType::VertexBuffer
+                | TagFieldType::Pointer
+                | TagFieldType::NonCacheRuntimeValue
+                | TagFieldType::Unknown => {
+                    let before = raw_span(baseline, offset, span)?;
+                    let after = raw_span(edited, offset, span)?;
+                    if before != after
+                        || field_debug_value(before_field) != field_debug_value(after_field)
+                    {
+                        return Err(format!("unverified field representation at {path}"));
+                    }
+                }
+                TagFieldType::Pad
+                | TagFieldType::UselessPad
+                | TagFieldType::Skip
+                | TagFieldType::Explanation
+                | TagFieldType::Custom
+                | TagFieldType::Terminator => {}
+                _ => {
+                    let before = raw_span(baseline, offset, span)?;
+                    let after = raw_span(edited, offset, span)?;
+                    if before == after
+                        && field_debug_value(before_field) != field_debug_value(after_field)
+                    {
+                        return Err(format!("unverified field representation at {path}"));
+                    }
+                    append_patch(
+                        self.memory,
+                        &mut self.patches,
+                        self.prior,
+                        field_address,
+                        before,
+                        after,
+                        &path,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn plan_array(
+        &mut self,
+        before_field: TagField<'_>,
+        after_field: TagField<'_>,
+        live_address: u64,
+        path: &str,
+    ) -> Result<(), String> {
+        let before = before_field
+            .as_array()
+            .ok_or_else(|| format!("missing shipped fixed array at {path}"))?;
+        let after = after_field
+            .as_array()
+            .ok_or_else(|| format!("missing edited fixed array at {path}"))?;
+        if before.len() != after.len() {
+            return Err(format!("structural edit cannot be poked at {path}"));
+        }
+        let element_size = before.definition().struct_definition().size();
+        if element_size != after.definition().struct_definition().size() {
+            return Err(format!("schema mismatch at {path}"));
+        }
+        for index in 0..before.len() {
+            let before_element = before
+                .element(index)
+                .ok_or_else(|| format!("missing shipped array element at {path}[{index}]"))?;
+            let after_element = after
+                .element(index)
+                .ok_or_else(|| format!("missing edited array element at {path}[{index}]"))?;
+            let element_address = checked_index(live_address, index, element_size)?;
+            self.plan_struct(
+                before_element,
+                after_element,
+                element_address,
+                &format!("{path}[{index}]"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn plan_block(
+        &mut self,
+        before_field: TagField<'_>,
+        after_field: TagField<'_>,
+        descriptor_address: u64,
+        path: &str,
+    ) -> Result<(), String> {
+        let before = before_field.as_block();
+        let after = after_field.as_block();
+        let before_len = before.map_or(0, |block| block.len());
+        let after_len = after.map_or(0, |block| block.len());
+        if before_len != after_len {
+            return Err(format!("structural edit cannot be poked at {path}"));
+        }
+        let descriptor = self.memory.read(descriptor_address, 12)?;
+        let live_count = u32::from_le_bytes(descriptor[0..4].try_into().unwrap()) as usize;
+        if live_count != before_len {
+            return Err(format!("stale live block count at {path}"));
+        }
+        if before_len == 0 {
+            return Ok(());
+        }
+        let encoded_data = u32::from_le_bytes(descriptor[4..8].try_into().unwrap());
+        let encoded_definition = u32::from_le_bytes(descriptor[8..12].try_into().unwrap());
+        let data_address = self.memory.resolve_offset(encoded_data)?;
+        let definition_address = self.memory.resolve_offset(encoded_definition)?;
+        self.memory
+            .read(definition_address, 1)
+            .map_err(|_| format!("live block definition pointer is unreadable at {path}"))?;
+        let before = before.unwrap();
+        let after = after.unwrap();
+        if before.element_size() != after.element_size() {
+            return Err(format!("structural edit cannot be poked at {path}"));
+        }
+        for index in 0..before_len {
+            let element_address = checked_index(data_address, index, before.element_size())?;
+            self.plan_struct(
+                before.element(index).unwrap(),
+                after.element(index).unwrap(),
+                element_address,
+                &format!("{path}[{index}]"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn plan_data(
+        &mut self,
+        before_field: TagField<'_>,
+        after_field: TagField<'_>,
+        descriptor_address: u64,
+        span: usize,
+        path: &str,
+    ) -> Result<(), String> {
+        let before = before_field
+            .as_data()
+            .ok_or_else(|| format!("missing shipped data at {path}"))?;
+        let after = after_field
+            .as_data()
+            .ok_or_else(|| format!("missing edited data at {path}"))?;
+        if before.len() != after.len() {
+            return Err(format!("resized data cannot be poked at {path}"));
+        }
+        if before.is_empty() {
+            return if before == after {
+                Ok(())
+            } else {
+                Err(format!("empty data cannot be replaced at {path}"))
+            };
+        }
+        let descriptor = self.memory.read(descriptor_address, span)?;
+        let length =
+            u32::try_from(before.len()).map_err(|_| format!("data is too large at {path}"))?;
+        if !descriptor
+            .chunks_exact(4)
+            .any(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()) == length)
+        {
+            return Err(format!("live data length was not found at {path}"));
+        }
+        let mut descriptor_addresses = Vec::new();
+        let mut candidates = Vec::new();
+        for chunk in descriptor.chunks_exact(4) {
+            let encoded = u32::from_le_bytes(chunk.try_into().unwrap());
+            let Ok(address) = self.memory.resolve_offset(encoded) else {
+                continue;
+            };
+            descriptor_addresses.push(address);
+            let Ok(live) = self.memory.read(address, before.len()) else {
+                continue;
+            };
+            if live == before || live == after {
+                candidates.push(address);
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        let trusted_prior = self.prior.and_then(|last| {
+            let mut matches = last.plan.patches.iter().filter(|patch| {
+                patch.field_path == path
+                    && patch.edited.len() == before.len()
+                    && descriptor_addresses.contains(&patch.address)
+                    && self
+                        .memory
+                        .read(patch.address, patch.edited.len())
+                        .is_ok_and(|live| live == patch.edited)
+            });
+            let first = matches.next();
+            first.filter(|_| matches.next().is_none())
+        });
+        if let Some(prior_patch) = trusted_prior {
+            candidates.clear();
+            candidates.push(prior_patch.address);
+        } else if before == after {
+            return Ok(());
+        }
+        if candidates.len() != 1 {
+            return Err(format!(
+                "live data descriptor layout is not uniquely verified at {path}"
+            ));
+        }
+        append_patch(
+            self.memory,
+            &mut self.patches,
+            self.prior,
+            candidates[0],
+            before,
+            after,
+            path,
+        )
+    }
+
+    fn reference_handle(
+        &self,
+        reference: Option<(u32, String)>,
+        path: &str,
+    ) -> Result<u32, String> {
+        match reference {
+            None => Ok(u32::MAX),
+            Some((group, name)) => {
+                let tag = self
+                    .index
+                    .find(&name, group)
+                    .map_err(|_| format!("referenced tag is not loaded at {path}: {name}"))?;
+                validate_runtime_tag_entry(self.memory, tag)?;
+                Ok(tag.handle)
+            }
+        }
+    }
+
+    fn plan_reference(
+        &mut self,
+        before_field: TagField<'_>,
+        after_field: TagField<'_>,
+        field_address: u64,
+        span: usize,
+        path: &str,
+    ) -> Result<(), String> {
+        let before = match before_field.value() {
+            Some(TagFieldData::TagReference(reference)) => reference.group_tag_and_name,
+            _ => return Err(format!("missing shipped tag reference at {path}")),
+        };
+        let after = match after_field.value() {
+            Some(TagFieldData::TagReference(reference)) => reference.group_tag_and_name,
+            _ => return Err(format!("missing edited tag reference at {path}")),
+        };
+        let unchanged = before == after;
+        let reference_group = after.as_ref().or(before.as_ref()).map(|(group, _)| *group);
+        let field_end = checked_add(field_address, span as u64)?;
+        let has_prior_patch = self.prior.is_some_and(|last| {
+            last.plan.patches.iter().any(|patch| {
+                patch.field_path == path
+                    && patch.edited.len() == 4
+                    && patch.address >= field_address
+                    && checked_add(patch.address, 4).is_ok_and(|end| end <= field_end)
+            })
+        });
+        if unchanged && !has_prior_patch {
+            return Ok(());
+        }
+        let expected = self.reference_handle(before, path)?;
+        let edited = self.reference_handle(after, path)?;
+        let live = self.memory.read(field_address, span)?;
+        let positions: Vec<usize> = live
+            .chunks_exact(4)
+            .enumerate()
+            .filter_map(|(index, chunk)| {
+                (u32::from_le_bytes(chunk.try_into().unwrap()) == expected).then_some(index * 4)
+            })
+            .collect();
+        let edited_positions: Vec<usize> = live
+            .chunks_exact(4)
+            .enumerate()
+            .filter_map(|(index, chunk)| {
+                (u32::from_le_bytes(chunk.try_into().unwrap()) == edited).then_some(index * 4)
+            })
+            .collect();
+        let loaded_positions = reference_group
+            .map(|group| loaded_reference_positions(&live, self.index, group))
+            .unwrap_or_default();
+        let trusted_prior = self.prior.and_then(|last| {
+            let mut matches = last.plan.patches.iter().filter(|patch| {
+                patch.field_path == path
+                    && patch.edited.len() == 4
+                    && patch.address >= field_address
+                    && checked_add(patch.address, 4).is_ok_and(|end| end <= field_end)
+                    && self
+                        .memory
+                        .read(patch.address, 4)
+                        .is_ok_and(|current| current == patch.edited)
+            });
+            let first = matches.next();
+            first.filter(|_| matches.next().is_none())
+        });
+        let (address, recovered_live_reference) = if let Some(prior_patch) = trusted_prior {
+            (prior_patch.address, false)
+        } else if unchanged {
+            return Ok(());
+        } else if positions.len() == 1 {
+            (checked_add(field_address, positions[0] as u64)?, false)
+        } else if edited_positions.len() == 1 {
+            (
+                checked_add(field_address, edited_positions[0] as u64)?,
+                false,
+            )
+        } else if !has_prior_patch && loaded_positions.len() == 1 {
+            (
+                checked_add(field_address, loaded_positions[0] as u64)?,
+                true,
+            )
+        } else {
+            return Err(format!(
+                "live tag-reference representation is not uniquely verified at {path}"
+            ));
+        };
+        if recovered_live_reference {
+            let current = self.memory.read(address, 4)?;
+            if !self.memory.is_writable(address, 4)? {
+                return Err(format!("destination is not writable at {path}"));
+            }
+            self.patches.push(PokePatch {
+                address,
+                expected: current,
+                edited: edited.to_le_bytes().to_vec(),
+                field_path: path.to_owned(),
+            });
+            return Ok(());
+        }
+        append_patch(
+            self.memory,
+            &mut self.patches,
+            self.prior,
+            address,
+            &expected.to_le_bytes(),
+            &edited.to_le_bytes(),
+            path,
+        )
+    }
+}
+
+fn root_data_address(
+    memory: &dyn RuntimeMemory,
+    tag: &RuntimeTag,
+    expected_size: usize,
+) -> Result<u64, String> {
+    let descriptor = memory.read(tag.root_descriptor, 12)?;
+    let count = u32::from_le_bytes(descriptor[0..4].try_into().unwrap());
+    if count != 1 {
+        return Err("load a mission first (root tag block is unavailable)".to_owned());
+    }
+    let data = memory.resolve_offset(u32::from_le_bytes(descriptor[4..8].try_into().unwrap()))?;
+    let definition =
+        memory.resolve_offset(u32::from_le_bytes(descriptor[8..12].try_into().unwrap()))?;
+    memory
+        .read(definition, 1)
+        .map_err(|_| "root block definition is unreadable".to_owned())?;
+    memory
+        .read(data, expected_size)
+        .map_err(|_| "root tag data is unreadable".to_owned())?;
+    Ok(data)
+}
+
+fn compile_plan(
+    memory: &dyn RuntimeMemory,
+    profile: RuntimeBuildProfile,
+    index: RuntimeTagIndex,
+    string_ids: &RuntimeStringIdIndex,
+    baseline: &TagFile,
+    edited: &TagFile,
+    tag_path: &str,
+    group_tag: u32,
+    prior: Option<&LastPoke>,
+) -> Result<PokePlan, String> {
+    let live_tag = index.find(tag_path, group_tag)?.clone();
+    validate_runtime_tag_entry(memory, &live_tag)?;
+    let root_address = root_data_address(memory, &live_tag, baseline.root().size())?;
+    let normalized_path = normalize_tag_path(tag_path);
+    let prior = prior.filter(|last| {
+        last.originals.len() == last.plan.patches.len()
+            && last.plan.identity == index.identity
+            && last.plan.tag_path == normalized_path
+            && last.plan.group_tag == group_tag
+            && last.plan.tag_handle == live_tag.handle
+            && last.plan.tag_entry_address == live_tag.entry_address
+            && last.plan.tag_name_pointer == live_tag.name_pointer
+            && last.plan.root_address == root_address
+    });
+    let mut planner = Planner {
+        memory,
+        index: &index,
+        string_ids,
+        prior,
+        patches: Vec::new(),
+    };
+    planner.plan_struct(baseline.root(), edited.root(), root_address, "")?;
+    planner
+        .patches
+        .sort_by_key(|patch| (patch.address, patch.edited.len()));
+    for pair in planner.patches.windows(2) {
+        let first_end = checked_add(pair[0].address, pair[0].edited.len() as u64)?;
+        if first_end > pair[1].address {
+            return Err(format!(
+                "overlapping runtime patches at {} and {}",
+                pair[0].field_path, pair[1].field_path
+            ));
+        }
+    }
+    let chain_originals = planner
+        .patches
+        .iter()
+        .map(|patch| {
+            prior.and_then(|last| {
+                last.plan
+                    .patches
+                    .iter()
+                    .position(|prior_patch| {
+                        prior_patch.address == patch.address
+                            && prior_patch.edited.len() == patch.edited.len()
+                            && prior_patch.field_path == patch.field_path
+                    })
+                    .and_then(|index| last.originals.get(index).cloned())
+            })
+        })
+        .collect();
+    Ok(PokePlan {
+        profile,
+        identity: index.identity.clone(),
+        tag_path: normalized_path,
+        group_tag,
+        tag_handle: live_tag.handle,
+        tag_entry_address: live_tag.entry_address,
+        tag_name_pointer: live_tag.name_pointer,
+        root_address,
+        patches: planner.patches,
+        chain_originals,
+    })
+}
+
+#[cfg(windows)]
+mod platform {
+    use super::*;
+    use sha2::{Digest, Sha256};
+    use std::ffi::c_void;
+    use std::fs::File;
+    use std::io::Read;
+    use std::mem::size_of;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+    use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
+    use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, PROCESSENTRY32W,
+        Process32FirstW, Process32NextW, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::System::Memory::{
+        MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
+        PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
+    };
+    use windows::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION,
+        PROCESS_VM_READ, PROCESS_VM_WRITE,
+    };
+
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    struct ProcessMemory {
+        handle: OwnedHandle,
+        identity: RuntimeIdentity,
+        profile: RuntimeBuildProfile,
+        segment_table: u64,
+    }
+
+    static RUNTIME_INDEX_CACHE: OnceLock<Mutex<Option<RuntimeTagIndex>>> = OnceLock::new();
+    static VERIFIED_PROCESS_CACHE: OnceLock<Mutex<Option<VerifiedProcess>>> = OnceLock::new();
+
+    /// A process whose two binaries have already been hashed, so a repeat
+    /// attach can skip re-hashing 245 MiB. The profile is cached alongside the
+    /// identity because it is the result of that hashing.
+    #[derive(Clone, Copy)]
+    struct VerifiedProcess {
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+        profile: RuntimeBuildProfile,
+    }
+
+    fn index_cache() -> &'static Mutex<Option<RuntimeTagIndex>> {
+        RUNTIME_INDEX_CACHE.get_or_init(|| Mutex::new(None))
+    }
+
+    fn cache_guard() -> std::sync::MutexGuard<'static, Option<RuntimeTagIndex>> {
+        index_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn verified_process_cache() -> &'static Mutex<Option<VerifiedProcess>> {
+        VERIFIED_PROCESS_CACHE.get_or_init(|| Mutex::new(None))
+    }
+
+    fn verified_profile(
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+    ) -> Option<RuntimeBuildProfile> {
+        verified_process_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .filter(|verified| {
+                verified.process_id == process_id
+                    && verified.creation_time == creation_time
+                    && verified.module_base == module_base
+            })
+            .map(|verified| verified.profile)
+    }
+
+    fn store_verified_process(
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+        profile: RuntimeBuildProfile,
+    ) {
+        *verified_process_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(VerifiedProcess {
+            process_id,
+            creation_time,
+            module_base,
+            profile,
+        });
+    }
+
+    fn cached_index(identity: &RuntimeIdentity) -> Option<RuntimeTagIndex> {
+        cache_guard()
+            .as_ref()
+            .filter(|index| index.identity == *identity)
+            .cloned()
+    }
+
+    fn cached_identity_matches(identity: &RuntimeIdentity) -> bool {
+        cache_guard()
+            .as_ref()
+            .is_some_and(|index| index.identity == *identity)
+    }
+
+    fn store_cached_index(index: RuntimeTagIndex) {
+        *cache_guard() = Some(index);
+    }
+
+    fn clear_cached_index() {
+        *cache_guard() = None;
+    }
+
+    pub(super) fn clear_runtime_cache() {
+        clear_cached_index();
+    }
+
+    impl RuntimeMemory for ProcessMemory {
+        fn read(&self, address: u64, length: usize) -> Result<Vec<u8>, String> {
+            if length == 0 {
+                return Ok(Vec::new());
+            }
+            self.query_region(address, length, false)?;
+            let mut bytes = vec![0u8; length];
+            let mut read = 0usize;
+            unsafe {
+                ReadProcessMemory(
+                    self.handle.0,
+                    address as *const c_void,
+                    bytes.as_mut_ptr().cast(),
+                    length,
+                    Some(&mut read),
+                )
+                .map_err(|error| format!("could not read game memory: {error}"))?;
+            }
+            if read != length {
+                return Err("short read from game memory".to_owned());
+            }
+            Ok(bytes)
+        }
+
+        fn is_writable(&self, address: u64, length: usize) -> Result<bool, String> {
+            self.query_region(address, length, true).map(|_| true)
+        }
+
+        fn resolve_offset(&self, encoded: u32) -> Result<u64, String> {
+            let (segment, byte_offset) = encoded_offset_parts(encoded)?;
+            let segment_entry = checked_index(self.segment_table, segment, 8)?;
+            let base = read_u64(self, segment_entry)?;
+            if base == 0 {
+                return Err("runtime segment is not loaded".to_owned());
+            }
+            checked_add(base, byte_offset)
+        }
+    }
+
+    impl ProcessMemory {
+        fn query_region(&self, address: u64, length: usize, write: bool) -> Result<(), String> {
+            let end = checked_add(address, length as u64)?;
+            let mut cursor = address;
+            while cursor < end {
+                let mut info = MEMORY_BASIC_INFORMATION::default();
+                let returned = unsafe {
+                    VirtualQueryEx(
+                        self.handle.0,
+                        Some(cursor as *const c_void),
+                        &mut info,
+                        size_of::<MEMORY_BASIC_INFORMATION>(),
+                    )
+                };
+                if returned == 0 || info.State != MEM_COMMIT {
+                    return Err("runtime pointer references uncommitted memory".to_owned());
+                }
+                let protection = info.Protect;
+                if protection.contains(PAGE_GUARD) || protection.contains(PAGE_NOACCESS) {
+                    return Err("runtime pointer references inaccessible memory".to_owned());
+                }
+                if write
+                    && ![
+                        PAGE_READWRITE,
+                        PAGE_WRITECOPY,
+                        PAGE_EXECUTE_READWRITE,
+                        PAGE_EXECUTE_WRITECOPY,
+                    ]
+                    .iter()
+                    .any(|allowed| protection.contains(*allowed))
+                {
+                    return Err("runtime destination is not writable".to_owned());
+                }
+                let base = info.BaseAddress as usize as u64;
+                let region_end = checked_add(base, info.RegionSize as u64)?;
+                if region_end <= cursor {
+                    return Err("invalid runtime memory region".to_owned());
+                }
+                cursor = region_end.min(end);
+            }
+            Ok(())
+        }
+    }
+
+    impl RuntimeWriteMemory for ProcessMemory {
+        fn write(&self, address: u64, bytes: &[u8]) -> Result<(), String> {
+            self.query_region(address, bytes.len(), true)?;
+            let mut written = 0usize;
+            unsafe {
+                WriteProcessMemory(
+                    self.handle.0,
+                    address as *const c_void,
+                    bytes.as_ptr().cast(),
+                    bytes.len(),
+                    Some(&mut written),
+                )
+                .map_err(|error| format!("could not write game memory: {error}"))?;
+            }
+            if written != bytes.len() {
+                return Err("short write to game memory".to_owned());
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct ModuleInfo {
+        name: String,
+        path: PathBuf,
+        base: u64,
+        size: usize,
+    }
+
+    fn wide_string(value: &[u16]) -> String {
+        let end = value
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(value.len());
+        String::from_utf16_lossy(&value[..end])
+    }
+
+    fn process_ids() -> Result<Vec<u32>, String> {
+        let snapshot = OwnedHandle(unsafe {
+            CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+                .map_err(|error| format!("could not enumerate processes: {error}"))?
+        });
+        let mut entry = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ids = Vec::new();
+        if unsafe { Process32FirstW(snapshot.0, &mut entry) }.is_ok() {
+            loop {
+                if wide_string(&entry.szExeFile).eq_ignore_ascii_case(PROCESS_NAME) {
+                    ids.push(entry.th32ProcessID);
+                }
+                if unsafe { Process32NextW(snapshot.0, &mut entry) }.is_err() {
+                    break;
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    fn modules(process_id: u32) -> Result<Vec<ModuleInfo>, String> {
+        let snapshot = OwnedHandle(unsafe {
+            CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id)
+                .map_err(|error| format!("could not enumerate game modules: {error}"))?
+        });
+        let mut entry = MODULEENTRY32W {
+            dwSize: size_of::<MODULEENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut modules = Vec::new();
+        if unsafe { Module32FirstW(snapshot.0, &mut entry) }.is_ok() {
+            loop {
+                modules.push(ModuleInfo {
+                    name: wide_string(&entry.szModule),
+                    path: PathBuf::from(wide_string(&entry.szExePath)),
+                    base: entry.modBaseAddr as usize as u64,
+                    size: entry.modBaseSize as usize,
+                });
+                if unsafe { Module32NextW(snapshot.0, &mut entry) }.is_err() {
+                    break;
+                }
+            }
+        }
+        Ok(modules)
+    }
+
+    fn sha256(path: &Path) -> Result<String, String> {
+        let mut file = File::open(path)
+            .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 1024 * 1024];
+        loop {
+            let count = file
+                .read(&mut buffer)
+                .map_err(|error| format!("could not hash {}: {error}", path.display()))?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        Ok(format!("{:X}", hasher.finalize()))
+    }
+
+    fn creation_time(handle: HANDLE) -> Result<u64, String> {
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        unsafe {
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+                .map_err(|error| format!("could not identify game process: {error}"))?;
+        }
+        Ok((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
+    }
+
+    fn attach(write: bool) -> Result<(ProcessMemory, ModuleInfo), String> {
+        let ids = process_ids()?;
+        let process_id = match ids.as_slice() {
+            [] => return Err("game not running".to_owned()),
+            [only] => *only,
+            _ => return Err("multiple matching game processes are running".to_owned()),
+        };
+        let modules = modules(process_id)?;
+        modules
+            .iter()
+            .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
+            .ok_or_else(|| "game executable module is missing".to_owned())?;
+        let dll = modules
+            .iter()
+            .find(|module| module.name.eq_ignore_ascii_case(TAG_DLL_NAME))
+            .cloned()
+            .ok_or_else(|| "load a mission first (tag module is not loaded)".to_owned())?;
+        let mut rights = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ;
+        if write {
+            rights |= PROCESS_VM_WRITE | PROCESS_VM_OPERATION;
+        }
+        let handle = OwnedHandle(unsafe {
+            OpenProcess(rights, false, process_id)
+                .map_err(|error| format!("could not open game process: {error}"))?
+        });
+        let creation_time = creation_time(handle.0)?;
+        let profile = match verified_profile(process_id, creation_time, dll.base) {
+            Some(profile) => profile,
+            None => {
+                clear_cached_index();
+                let host_sha256 = modules
+                    .iter()
+                    .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
+                    .and_then(|module| sha256(&module.path).ok());
+                let dll_sha256 = sha256(&dll.path)?;
+                println!(
+                    "Game executable SHA256: {}",
+                    host_sha256.as_deref().unwrap_or("unknown")
+                );
+                println!("Tag module SHA256: {}", dll_sha256);
+                let profile = *PROFILES
+                    .iter()
+                    .find(|profile| {
+                        profile.dll_sha256 == dll_sha256
+                    })
+                    .ok_or_else(|| {
+                        format!("Unsupported game build, please check you have the latest game and Baboon version.")
+                    })?;
+
+                println!("Profile selected: {}", profile.label);
+                store_verified_process(process_id, creation_time, dll.base, profile);
+                profile
+            }
+        };
+        let table_pointer = checked_add(dll.base, profile.tag_table_pointer_rva)?;
+        if profile.rvas().iter().any(|rva| *rva >= dll.size as u64) {
+            return Err("unsupported tag module layout".to_owned());
+        }
+        let provisional = ProcessMemory {
+            handle,
+            identity: RuntimeIdentity {
+                process_id,
+                creation_time,
+                module_base: dll.base,
+                tag_table: 0,
+            },
+            profile,
+            segment_table: checked_add(dll.base, profile.segment_table_rva)?,
+        };
+        let tag_table = read_u64(&provisional, table_pointer)?;
+        if tag_table == 0 {
+            return Err("load a mission first (tag table is empty)".to_owned());
+        }
+        let mut memory = provisional;
+        memory.identity.tag_table = tag_table;
+        if !cached_identity_matches(&memory.identity) {
+            clear_cached_index();
+        }
+        Ok((memory, dll))
+    }
+
+    fn read_c_string(memory: &ProcessMemory, address: u64) -> Result<String, String> {
+        if address == 0 {
+            return Err("runtime tag has a null name".to_owned());
+        }
+        let mut bytes = Vec::new();
+        let mut cursor = address;
+        while bytes.len() < MAX_RUNTIME_NAME {
+            let chunk = memory.read(cursor, 64)?;
+            if let Some(end) = chunk.iter().position(|&byte| byte == 0) {
+                bytes.extend_from_slice(&chunk[..end]);
+                return String::from_utf8(bytes)
+                    .map_err(|_| "runtime tag name is not UTF-8".to_owned());
+            }
+            bytes.extend_from_slice(&chunk);
+            cursor = checked_add(cursor, chunk.len() as u64)?;
+        }
+        Err("runtime tag name is not terminated".to_owned())
+    }
+
+    fn discover_index(memory: &ProcessMemory) -> Result<RuntimeTagIndex, String> {
+        let object = memory.identity.tag_table;
+        let element_size = read_u32(memory, checked_add(object, 0x20)?)? as usize;
+        let maximum = read_u32(memory, checked_add(object, 0x2c)?)? as usize;
+        let high_water = read_u32(memory, checked_add(object, 0x44)?)? as usize;
+        let used = read_u32(memory, checked_add(object, 0x48)?)? as usize;
+        let entries = read_u64(memory, checked_add(object, 0x50)?)?;
+        let bitset = read_u64(memory, checked_add(object, 0x58)?)?;
+        if element_size != TAG_ENTRY_SIZE
+            || maximum == 0
+            || maximum > MAX_RUNTIME_TAGS
+            || high_water > maximum
+            || used > high_water
+            || entries == 0
+            || bitset == 0
+        {
+            return Err("unsupported live tag-table layout".to_owned());
+        }
+        let bits = memory.read(bitset, high_water.div_ceil(8))?;
+        let entries_length = high_water
+            .checked_mul(TAG_ENTRY_SIZE)
+            .ok_or_else(|| "runtime tag-table size overflow".to_owned())?;
+        let entry_bytes = memory.read(entries, entries_length)?;
+        struct PendingTag {
+            index: usize,
+            salt: u16,
+            group_tag: u32,
+            name_pointer: u64,
+            entry_address: u64,
+        }
+
+        let mut pending = Vec::with_capacity(used);
+        for index in 0..high_water {
+            if bits[index / 8] & (1 << (index % 8)) == 0 {
+                continue;
+            }
+            let entry = checked_index(entries, index, TAG_ENTRY_SIZE)?;
+            let entry_offset = index * TAG_ENTRY_SIZE;
+            let bytes = &entry_bytes[entry_offset..entry_offset + TAG_ENTRY_SIZE];
+            let group_offset = TAG_ENTRY_GROUP_OFFSET as usize;
+            let name_offset = TAG_ENTRY_NAME_OFFSET as usize;
+            let salt = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
+            let group_tag =
+                u32::from_le_bytes(bytes[group_offset..group_offset + 4].try_into().unwrap());
+            let name_pointer =
+                u64::from_le_bytes(bytes[name_offset..name_offset + 8].try_into().unwrap());
+            pending.push(PendingTag {
+                index,
+                salt,
+                group_tag,
+                name_pointer,
+                entry_address: entry,
+            });
+        }
+        let pointers: Vec<u64> = pending.iter().map(|tag| tag.name_pointer).collect();
+        let name_pool = runtime_name_pool_bounds(&pointers)?.and_then(|(start, length)| {
+            memory.read(start, length).ok().map(|bytes| (start, bytes))
+        });
+        let mut tags = Vec::with_capacity(used);
+        for pending in pending {
+            let path = match &name_pool {
+                Some((start, bytes)) => {
+                    runtime_name_from_pool(*start, bytes, pending.name_pointer)?
+                }
+                None => read_c_string(memory, pending.name_pointer)?,
+            };
+            let handle = (u32::from(pending.salt) << 16) | pending.index as u32;
+            tags.push(RuntimeTag {
+                path,
+                group_tag: pending.group_tag,
+                handle,
+                entry_address: pending.entry_address,
+                name_pointer: pending.name_pointer,
+                root_descriptor: checked_add(pending.entry_address, TAG_ENTRY_ROOT_OFFSET)?,
+            });
+        }
+        if tags.len() != used {
+            return Err("live tag-table allocation map is inconsistent".to_owned());
+        }
+        Ok(RuntimeTagIndex {
+            identity: memory.identity.clone(),
+            tags,
+        })
+    }
+
+    fn validate_baseline_sample(
+        memory: &ProcessMemory,
+        index: &RuntimeTagIndex,
+        tag: &RuntimeTag,
+        baseline: &TagFile,
+    ) -> Result<bool, String> {
+        let root = baseline.root();
+        let live_root = root_data_address(memory, tag, root.size())?;
+        let mut compared = 0usize;
+        probe_inline_scalars(memory, root, live_root, "", &mut compared)?;
+        if index.find(&tag.path, tag.group_tag)?.entry_address != tag.entry_address {
+            return Err("runtime tag index changed during discovery".to_owned());
+        }
+        Ok(compared > 0)
+    }
+
+    fn validate_discovery(
+        memory: &ProcessMemory,
+        index: &RuntimeTagIndex,
+        source: &TagSource,
+        entries: &[TagEntry],
+        current_path: &str,
+        current_group: u32,
+        current_baseline: &TagFile,
+    ) -> Result<(), String> {
+        let current = index.find(current_path, current_group)?;
+        let mut groups = HashSet::new();
+        let mut validated = 0usize;
+        if validate_baseline_sample(memory, index, current, current_baseline)? {
+            groups.insert(current_group);
+            validated += 1;
+        }
+        for entry in entries {
+            if validated >= 3 || groups.contains(&entry.group_tag) {
+                continue;
+            }
+            if entry.group_tag == current_group
+                && normalize_tag_path(&entry.display_path) == normalize_tag_path(current_path)
+            {
+                continue;
+            }
+            let Ok(live) = index.find(&entry.display_path, entry.group_tag) else {
+                continue;
+            };
+            let Ok(baseline) = read_entry(source, entry) else {
+                continue;
+            };
+            if validate_baseline_sample(memory, index, live, &baseline)? {
+                groups.insert(entry.group_tag);
+                validated += 1;
+            }
+        }
+        if validated < 3 {
+            return Err(
+                "load a mission first (not enough known tag groups passed the discovery probe)"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    fn build_runtime_string_id_index(
+        memory: &ProcessMemory,
+    ) -> Result<RuntimeStringIdIndex, String> {
+        let address = |rva| checked_add(memory.identity.module_base, rva);
+        let storage_address = read_u64(memory, address(memory.profile.string_id_storage_rva)?)?;
+        let storage_used =
+            read_u32(memory, address(memory.profile.string_id_storage_used_rva)?)? as usize;
+        let strings_address = read_u64(memory, address(memory.profile.string_id_strings_rva)?)?;
+        let count = read_u32(memory, address(memory.profile.string_id_count_rva)?)? as usize;
+        let table_address = read_u64(memory, address(memory.profile.string_id_mapping_table_rva)?)?;
+        if storage_address == 0 || strings_address == 0 || table_address == 0 || count == 0 {
+            return Err("runtime string id registry is not initialized".to_owned());
+        }
+        if storage_used == 0 || storage_used > STRING_ID_STORAGE_CAPACITY {
+            return Err("runtime string id name storage has an invalid size".to_owned());
+        }
+        if count < STRING_ID_BUILTIN_COUNT || count > STRING_ID_MAX_ENTRIES {
+            return Err(
+                "runtime string id registry count is outside the supported range".to_owned(),
+            );
+        }
+
+        let header = memory.read(table_address, STRING_ID_TABLE_HEADER_SIZE)?;
+        let bucket_count = u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
+        let max_entries = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+        let value_size = u64::from_le_bytes(header[8..16].try_into().unwrap()) as usize;
+        if bucket_count != STRING_ID_BUCKET_COUNT
+            || max_entries != STRING_ID_MAX_ENTRIES
+            || value_size != STRING_ID_VALUE_SIZE
+        {
+            return Err("unsupported runtime string id mapping-table layout".to_owned());
+        }
+        let allocation_size = STRING_ID_TABLE_HEADER_SIZE
+            .checked_add(
+                bucket_count
+                    .checked_mul(8)
+                    .ok_or_else(|| "runtime string id table size overflow".to_owned())?,
+            )
+            .and_then(|size| {
+                max_entries
+                    .checked_mul(STRING_ID_NODE_SIZE)
+                    .and_then(|nodes| size.checked_add(nodes))
+            })
+            .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+        let table = memory.read(table_address, allocation_size)?;
+        let storage = memory.read(storage_address, storage_used)?;
+        let index = parse_runtime_string_id_table(table_address, &table, &storage, count)?;
+
+        let strings_size = count
+            .checked_mul(8)
+            .ok_or_else(|| "runtime string id pointer table size overflow".to_owned())?;
+        let strings = memory.read(strings_address, strings_size)?;
+        let builtins_address = address(memory.profile.string_id_builtin_table_rva)?;
+        let builtins = memory.read(
+            builtins_address,
+            STRING_ID_BUILTIN_COUNT
+                .checked_mul(16)
+                .ok_or_else(|| "runtime built-in string id table size overflow".to_owned())?,
+        )?;
+        for registration_index in 0..count {
+            let pointer_offset = registration_index * 8;
+            let name_pointer = u64::from_le_bytes(
+                strings[pointer_offset..pointer_offset + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let storage_offset =
+                u32::try_from(name_pointer.checked_sub(storage_address).ok_or_else(|| {
+                    "runtime string id pointer precedes the name storage".to_owned()
+                })?)
+                .map_err(|_| "runtime string id pointer is outside the name storage".to_owned())?;
+            let name = string_id_storage_name(&storage, storage_offset)?;
+            let expected = if registration_index < STRING_ID_BUILTIN_COUNT {
+                let offset = registration_index * 16;
+                u32::from_le_bytes(builtins[offset..offset + 4].try_into().unwrap())
+            } else {
+                STRING_ID_SET_ZERO_BUILTIN_COUNT
+                    .checked_add(
+                        u32::try_from(registration_index - STRING_ID_BUILTIN_COUNT)
+                            .map_err(|_| "dynamic string id index overflow".to_owned())?,
+                    )
+                    .ok_or_else(|| "dynamic string id index overflow".to_owned())?
+            };
+            let normalized = normalize_string_id_bytes(name)?.unwrap_or_default();
+            if index.by_name.get(&normalized) != Some(&expected) {
+                let normalized = String::from_utf8_lossy(&normalized);
+                return Err(format!(
+                    "runtime string id registration cross-check failed at index {registration_index} ({normalized})"
+                ));
+            }
+        }
+        Ok(index)
+    }
+
+    pub(super) fn prepare(
+        source: TagSource,
+        entries: Vec<TagEntry>,
+        entry: TagEntry,
+        edited_bytes: Vec<u8>,
+        prior: Option<LastPoke>,
+    ) -> Result<PokePlan, String> {
+        let baseline = read_entry(&source, &entry)
+            .map_err(|error| format!("could not read shipped tag: {error:#}"))?;
+        let edited = TagFile::read_from_bytes(&edited_bytes)
+            .map_err(|error| format!("could not snapshot edited tag: {error}"))?;
+        if baseline.header.group_tag != edited.header.group_tag
+            || edited.header.group_tag != entry.group_tag
+        {
+            return Err("edited tag group does not match the shipped tag".to_owned());
+        }
+        validate_poke_structure(baseline.root(), edited.root(), "")?;
+        let (memory, _) = attach(false)?;
+        let string_ids = build_runtime_string_id_index(&memory)?;
+        if let Some(index) = cached_index(&memory.identity) {
+            match compile_plan(
+                &memory,
+                memory.profile,
+                index,
+                &string_ids,
+                &baseline,
+                &edited,
+                &entry.display_path,
+                entry.group_tag,
+                prior.as_ref(),
+            ) {
+                Ok(plan) => return Ok(plan),
+                Err(error) if should_refresh_runtime_index(&error) => {
+                    clear_cached_index();
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        let index = discover_index(&memory)?;
+        validate_discovery(
+            &memory,
+            &index,
+            &source,
+            &entries,
+            &entry.display_path,
+            entry.group_tag,
+            &baseline,
+        )?;
+        store_cached_index(index.clone());
+        compile_plan(
+            &memory,
+            memory.profile,
+            index,
+            &string_ids,
+            &baseline,
+            &edited,
+            &entry.display_path,
+            entry.group_tag,
+            prior.as_ref(),
+        )
+    }
+
+    fn validate_identity(memory: &ProcessMemory, plan: &PokePlan) -> Result<(), String> {
+        if memory.identity != plan.identity {
+            return Err("game process or tag table changed; run preflight again".to_owned());
+        }
+        let tag = RuntimeTag {
+            path: plan.tag_path.clone(),
+            group_tag: plan.group_tag,
+            handle: plan.tag_handle,
+            entry_address: plan.tag_entry_address,
+            name_pointer: plan.tag_name_pointer,
+            root_descriptor: checked_add(plan.tag_entry_address, TAG_ENTRY_ROOT_OFFSET)?,
+        };
+        if validate_runtime_tag_entry(memory, &tag).is_err()
+            || root_data_address(memory, &tag, 1)? != plan.root_address
+        {
+            return Err("live tag allocation changed; run preflight again".to_owned());
+        }
+        Ok(())
+    }
+
+    pub(super) fn execute(plan: PokePlan) -> Result<(LastPoke, PokeReport), String> {
+        let (memory, _) = attach(true)?;
+        validate_identity(&memory, &plan)?;
+        let (mut originals, report) = apply_transaction(&memory, &plan.patches)?;
+        for (original, chain_original) in originals.iter_mut().zip(&plan.chain_originals) {
+            if let Some(chain_original) = chain_original {
+                *original = chain_original.clone();
+            }
+        }
+        Ok((LastPoke { plan, originals }, report))
+    }
+
+    pub(super) fn undo(last: LastPoke) -> Result<PokeReport, String> {
+        let (memory, _) = attach(true)?;
+        validate_identity(&memory, &last.plan)?;
+        undo_transaction(&memory, &last.plan.patches, &last.originals)
+    }
+
+    #[cfg(test)]
+    pub(super) fn manual_read_only_discovery() -> Result<usize, String> {
+        let (memory, _) = attach(false)?;
+        discover_index(&memory).map(|index| index.tags.len())
+    }
+
+    #[cfg(test)]
+    pub(super) fn manual_read_only_string_id_index_diagnostic() -> Result<String, String> {
+        let (memory, _) = attach(false)?;
+        let index = build_runtime_string_id_index(&memory)?;
+        let warthog = index.resolve("warthog_d")?;
+        let fork = index.resolve("fork_d")?;
+        Ok(format!(
+            "{} registered string ids; warthog_d=0x{warthog:08X}; fork_d=0x{fork:08X}; all {} built-ins cross-checked",
+            index.by_name.len(),
+            STRING_ID_BUILTIN_COUNT
+        ))
+    }
+
+    #[cfg(test)]
+    pub(super) fn manual_read_only_root_diagnostic(path: &str) -> Result<String, String> {
+        let (memory, _) = attach(false)?;
+        let index = match cached_index(&memory.identity) {
+            Some(index) => index,
+            None => {
+                let index = discover_index(&memory)?;
+                store_cached_index(index.clone());
+                index
+            }
+        };
+        let normalized = normalize_tag_path(path);
+        let tag = index
+            .tags
+            .iter()
+            .find(|tag| normalize_tag_path(&tag.path) == normalized)
+            .ok_or_else(|| "tag is not loaded".to_owned())?;
+        let descriptor = memory.read(tag.root_descriptor, 12)?;
+        let count = u32::from_le_bytes(descriptor[0..4].try_into().unwrap());
+        let data = u32::from_le_bytes(descriptor[4..8].try_into().unwrap());
+        let definition = u32::from_le_bytes(descriptor[8..12].try_into().unwrap());
+        let describe = |encoded: u32| -> Result<String, String> {
+            let (segment, byte_offset) = encoded_offset_parts(encoded)?;
+            let segment_entry = checked_index(memory.segment_table, segment, 8)?;
+            let base = read_u64(&memory, segment_entry)?;
+            let resolved = checked_add(base, byte_offset)?;
+            let readable = memory
+                .read(resolved, 1)
+                .map(|bytes| format!("yes ({:02X})", bytes[0]))
+                .unwrap_or_else(|error| format!("no ({error})"));
+            Ok(format!(
+                "encoded=0x{encoded:08X} segment={segment} base=0x{base:X} byte_offset=0x{byte_offset:X} resolved=0x{resolved:X} readable={readable}"
+            ))
+        };
+        Ok(format!(
+            "entry=0x{:X} descriptor=0x{:X} count={count}\ndata: {}\ndefinition: {}",
+            tag.entry_address,
+            tag.root_descriptor,
+            describe(data)?,
+            describe(definition)?
+        ))
+    }
+
+    #[cfg(test)]
+    pub(super) fn manual_read_only_cache_diagnostic() -> Result<String, String> {
+        use std::time::Instant;
+
+        clear_cached_index();
+        let cold_started = Instant::now();
+        let (memory, _) = attach(false)?;
+        let index = discover_index(&memory)?;
+        let count = index.tags.len();
+        store_cached_index(index);
+        let cold = cold_started.elapsed();
+
+        clear_runtime_cache();
+        let reopened_started = Instant::now();
+        let (memory, _) = attach(false)?;
+        let reopened_index = discover_index(&memory)?;
+        if reopened_index.tags.len() != count {
+            return Err("runtime index changed while testing source reopen".to_owned());
+        }
+        store_cached_index(reopened_index);
+        let reopened = reopened_started.elapsed();
+
+        let warm_started = Instant::now();
+        let (memory, _) = attach(false)?;
+        cached_index(&memory.identity)
+            .ok_or_else(|| "runtime address cache was not reused".to_owned())?;
+        let warm = warm_started.elapsed();
+        Ok(format!(
+            "{count} tags; cold={}ms reopened={}ms warm={}ms",
+            cold.as_millis(),
+            reopened.as_millis(),
+            warm.as_millis()
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+mod platform {
+    use super::*;
+
+    pub(super) fn clear_runtime_cache() {}
+
+    pub(super) fn prepare(
+        _source: TagSource,
+        _entries: Vec<TagEntry>,
+        _entry: TagEntry,
+        _edited_bytes: Vec<u8>,
+        _prior: Option<LastPoke>,
+    ) -> Result<PokePlan, String> {
+        Err("Runtime poking is only available on Windows".to_owned())
+    }
+
+    pub(super) fn execute(_plan: PokePlan) -> Result<(LastPoke, PokeReport), String> {
+        Err("Runtime poking is only available on Windows".to_owned())
+    }
+
+    pub(super) fn undo(_last: LastPoke) -> Result<PokeReport, String> {
+        Err("Runtime poking is only available on Windows".to_owned())
+    }
+}
+
+impl Baboon {
+    pub(super) fn reset_runtime_poke_source_state(&mut self) {
+        platform::clear_runtime_cache();
+        self.dialogs.close::<PokeDialog>();
+    }
+
+
+
+    fn current_poke_request(&self) -> Result<PokeRequest, String> {
+        if !cfg!(windows) {
+            return Err("Runtime poking is only available on Windows".to_owned());
+        }
+        let key = self.model.kits[self.model.active]
+            .selected_key
+            .clone()
+            .ok_or_else(|| "No tag selected".to_owned())?;
+        let entry = self
+            .model.entry_for_key(&key)
+            .cloned()
+            .ok_or_else(|| "Selected tag is no longer in the source".to_owned())?;
+        if !matches!(entry.location, TagEntryLocation::Container { .. }) {
+            return Err(match entry.location {
+                TagEntryLocation::NewContainer { .. } => {
+                    "New tags cannot be poked; export them as a mod".to_owned()
+                }
+                _ => "Poke Current Tag is only for Campaign Evolved container tags".to_owned(),
+            });
+        }
+        let source_data = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .ok_or_else(|| "No source loaded".to_owned())?;
+        let document = self.model.kits[self.model.active]
+            .parsed_tags
+            .get(&key)
+            .ok_or_else(|| "Load the selected tag before poking".to_owned())?;
+        let edited_bytes = document
+            .tag
+            .write_to_bytes()
+            .map_err(|error| format!("Could not snapshot edited tag: {error}"))?;
+        Ok(PokeRequest {
+            kit: self.model.active_kit_id(),
+            key,
+            source: source_data.source.clone(),
+            entries: source_data.full_entry_set().to_vec(),
+            entry,
+            edited_bytes,
+            prior: self.poke.last_poke.clone(),
+        })
+    }
+
+    /// The single entry point for File → Poke Current Tag and Ctrl+P. Whether
+    /// the preflight plan is shown for confirmation first is the user's
+    /// `confirm_runtime_poke` preference, not a property of how it was invoked.
+    pub(super) fn begin_poke_current_tag(&mut self, ctx: egui::Context) {
+        if !self.model.prefs.confirm_runtime_poke {
+            self.begin_poke_current_tag_direct(ctx);
+            return;
+        }
+        if self.poke.poke_direct_running || self.poke.poke_undo_running {
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
+            return;
+        }
+        let request = match self.current_poke_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.model.status = error;
+                return;
+            }
+        };
+        let PokeRequest {
+            kit,
+            key,
+            source,
+            entries,
+            entry,
+            edited_bytes,
+            prior,
+        } = request;
+        let tx = self.tx.clone();
+        self.model.status = "Preparing runtime poke…".to_owned();
+        self.dialogs.open(PokeDialog {
+            kit,
+            key: key.clone(),
+            state: PokeDialogState::Scanning,
+        });
+        // Every poke job goes through `spawn_worker`, so one that panics still
+        // answers and its dialog or running flag settles.
+        let panic_key = key.clone();
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || WorkerMessage::PokePreflightFinished {
+                kit,
+                key,
+                result: platform::prepare(source, entries, entry, edited_bytes, prior),
+            },
+            move |error| WorkerMessage::PokePreflightFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
+    }
+
+    pub(super) fn begin_poke_current_tag_direct(&mut self, ctx: egui::Context) {
+        if self.poke.poke_direct_running
+            || self.poke.poke_undo_running
+            || self.dialogs.get::<PokeDialog>().is_some()
+        {
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
+            return;
+        }
+        let request = match self.current_poke_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.model.status = format!("Poke failed: {error}");
+                return;
+            }
+        };
+        let PokeRequest {
+            kit,
+            key,
+            source,
+            entries,
+            entry,
+            edited_bytes,
+            prior,
+        } = request;
+        self.poke.poke_direct_running = true;
+        self.model.status = "Poking current tag…".to_owned();
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = platform::prepare(source, entries, entry, edited_bytes, prior)
+                    .and_then(|plan| {
+                        if plan.patches.is_empty() {
+                            Ok(None)
+                        } else {
+                            platform::execute(plan).map(Some)
+                        }
+                    });
+                WorkerMessage::PokeDirectFinished { kit, key, result }
+            },
+            move |error| WorkerMessage::PokeDirectFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
+    }
+
+    fn confirm_poke(&mut self, ctx: egui::Context) {
+        let Some(dialog) = self.dialogs.get_mut::<PokeDialog>() else {
+            return;
+        };
+        let PokeDialogState::Ready(plan) = &dialog.state else {
+            return;
+        };
+        let plan = plan.clone();
+        let kit = dialog.kit;
+        let key = dialog.key.clone();
+        dialog.state = PokeDialogState::Writing;
+        self.model.status = "Poking current tag…".to_owned();
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::PokeWriteFinished {
+                kit,
+                key,
+                result: platform::execute(plan),
+            },
+            move |error| WorkerMessage::PokeWriteFinished {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
+    }
+
+    pub(super) fn begin_undo_last_poke(&mut self, ctx: egui::Context) {
+        if self.poke.poke_undo_running
+            || self.poke.poke_direct_running
+            || self.dialogs.get::<PokeDialog>().is_some()
+        {
+            self.model.status = "A runtime poke or undo is already in progress".to_owned();
+            return;
+        }
+        let Some(last) = self.poke.last_poke.take() else {
+            self.model.status = "There is no runtime poke to undo".to_owned();
+            return;
+        };
+        self.poke.poke_undo_running = true;
+        // Kept for a panic: the record was taken to run the undo, and an undo
+        // that panicked used to lose it, leaving the game patched with no way
+        // back. Its writes restore the original bytes, so offering it again
+        // is safe.
+        let record = last.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::PokeUndoFinished {
+                result: platform::undo(last),
+                unapplied: None,
+            },
+            move |error| WorkerMessage::PokeUndoFinished {
+                result: Err(error),
+                unapplied: Some(record),
+            },
+        );
+    }
+
+    pub(super) fn handle_poke_preflight(
+        &mut self,
+        kit: KitId,
+        key: String,
+        result: Result<PokePlan, String>,
+    ) {
+        let Some(dialog) = self.dialogs.get::<PokeDialog>() else {
+            return;
+        };
+        if dialog.kit != kit || dialog.key != key {
+            return;
+        }
+        // Mirror the outcome to the status line as well as the dialog, so the
+        // two poke paths report the same way and the result survives the
+        // dialog being dismissed.
+        let (state, status) = match result {
+            Ok(plan) => {
+                let status = if plan.patches.is_empty() {
+                    "Runtime poke preflight: no changed fields".to_owned()
+                } else {
+                    format!(
+                        "Runtime poke ready: {} field change(s), {} byte(s)",
+                        plan.patches.len(),
+                        plan.byte_count()
+                    )
+                };
+                (PokeDialogState::Ready(plan), status)
+            }
+            Err(error) => {
+                let status = format!("Poke failed: {error}");
+                (PokeDialogState::Error(error), status)
+            }
+        };
+        if let Some(dialog) = self.dialogs.get_mut::<PokeDialog>() {
+            dialog.state = state;
+        }
+        self.model.status = status;
+    }
+
+    pub(super) fn handle_poke_write(
+        &mut self,
+        kit: KitId,
+        key: String,
+        result: Result<(LastPoke, PokeReport), String>,
+    ) {
+        let current = self
+            .dialogs
+            .get::<PokeDialog>()
+            .is_some_and(|dialog| dialog.kit == kit && dialog.key == key);
+        if !current {
+            return;
+        }
+        match result {
+            Ok((last, report)) => {
+                self.poke.last_poke = Some(last);
+                self.model.status = report.status();
+                self.dialogs.close::<PokeDialog>();
+            }
+            Err(error) => {
+                self.model.status = format!("Poke failed: {error}");
+                if let Some(dialog) = self.dialogs.get_mut::<PokeDialog>() {
+                    dialog.state = PokeDialogState::Error(error);
+                }
+            }
+        }
+    }
+
+    pub(super) fn handle_poke_direct(
+        &mut self,
+        kit: KitId,
+        key: String,
+        result: Result<Option<(LastPoke, PokeReport)>, String>,
+    ) {
+        self.poke.poke_direct_running = false;
+        let current = self
+            .model.kits
+            .iter()
+            .find(|candidate| candidate.id == kit)
+            .is_some_and(|candidate| candidate.parsed_tags.contains_key(&key));
+        if !current {
+            return;
+        }
+        match result {
+            Ok(Some((last, report))) => {
+                self.poke.last_poke = Some(last);
+                self.model.status = report.status();
+            }
+            Ok(None) => {
+                self.model.status = "Poke complete: no changed fields".to_owned();
+            }
+            Err(error) => {
+                self.model.status = format!("Poke failed: {error}");
+            }
+        }
+    }
+
+    pub(super) fn handle_poke_undo(
+        &mut self,
+        result: Result<PokeReport, String>,
+        unapplied: Option<LastPoke>,
+    ) {
+        self.poke.poke_undo_running = false;
+        match result {
+            Ok(report) => self.model.status = report.status(),
+            Err(error) => {
+                self.model.status = format!("Undo Last Poke failed: {error}");
+                // A failed undo is intentionally not offered again. Its
+                // process-bound state may now be only partially applicable.
+                // An undo that crashed is the exception: its record comes back
+                // so the game is not left patched with no way to undo it.
+                if let Some(record) = unapplied
+                    && self.poke.last_poke.is_none()
+                {
+                    self.poke.last_poke = Some(record);
+                    self.model.status.push_str("; it can be tried again");
+                }
+            }
+        }
+    }
+}
+
+/// The poke window, while a poke is being planned, confirmed or written.
+impl Dialog for PokeDialog {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let dialog = &*self;
+        let ctx = cx.egui;
+        let mut dont_ask = !cx.model.prefs.confirm_runtime_poke;
+        // A poke that never ran reports as cancelled; an error already put its
+        // own message on the status line, so closing that must not erase it.
+        let cancellable = matches!(
+            dialog.state,
+            PokeDialogState::Scanning | PokeDialogState::Ready(_)
+        );
+        let mut open = true;
+        let mut confirm = false;
+        let mut close = false;
+        egui::Window::new("Poke Current Tag")
+            .constrain_to(window_work_area(ctx))
+            .collapsible(false)
+            .resizable(true)
+            .default_width(window_width(ctx, 620.0))
+            .open(&mut open)
+            .show(ctx, |ui| match &dialog.state {
+                PokeDialogState::Scanning => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(
+                            "Resolving the live tag, validating the game build, and building a read-only plan…",
+                        );
+                    });
+                }
+                PokeDialogState::Writing => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Writing and verifying runtime memory…");
+                    });
+                }
+                PokeDialogState::Error(error) => {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                    ui.add_space(8.0);
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                }
+                PokeDialogState::Ready(plan) => {
+                    ui.label(format!(
+                        "Process: {} (PID {})",
+                        PROCESS_NAME, plan.identity.process_id
+                    ));
+                    ui.label(format!("Build: {}", plan.profile.label));
+                    ui.label(format!(
+                        "Live tag: {}.{}",
+                        plan.tag_path,
+                        format_group_tag(plan.group_tag)
+                    ));
+                    ui.label(format!(
+                        "{} supported field change(s), {} byte(s)",
+                        plan.patches.len(),
+                        plan.byte_count()
+                    ));
+                    ui.separator();
+                    if plan.patches.is_empty() {
+                        ui.label("The current tag already matches the shipped runtime values.");
+                    } else {
+                        ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                            for patch in &plan.patches {
+                                ui.label(format!(
+                                    "{} — {} byte(s) at 0x{:X}",
+                                    patch.field_path,
+                                    patch.edited.len(),
+                                    patch.address
+                                ));
+                            }
+                        });
+                    }
+                    ui.separator();
+                    ui.checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!plan.patches.is_empty(), egui::Button::new("Poke"))
+                            .clicked()
+                        {
+                            confirm = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
+            });
+        if !open || close {
+            if cancellable {
+                cx.set_status("Runtime poke cancelled");
+            }
+            return false;
+        }
+        // Left open for the poke, which reports into it.
+        if confirm {
+            cx.send(PokeCommand::Confirm {
+                stop_asking: dont_ask,
+            });
+        }
+        true
+    }
+}
+
+/// What the poke window can ask for.
+pub(in crate::app) enum PokeCommand {
+    /// Write the plan on show. With `stop_asking`, also turn the confirmation
+    /// off for later pokes — applied only here, when the user commits, so
+    /// cancelling out of the dialog never disarms the next one.
+    Confirm { stop_asking: bool },
+}
+
+impl Baboon {
+    pub(in crate::app) fn apply_poke_command(&mut self, command: PokeCommand, ctx: &egui::Context) {
+        match command {
+            PokeCommand::Confirm { stop_asking } => {
+                if stop_asking && self.model.prefs.confirm_runtime_poke {
+                    self.model.prefs.confirm_runtime_poke = false;
+                    self.persist_prefs_if_changed();
+                }
+                self.confirm_poke(ctx.clone());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::document::apply::{add_block_element, apply_field_edit};
+    use std::cell::{Cell, RefCell};
+
+    struct MockMemory {
+        bytes: RefCell<Vec<u8>>,
+        fail_write: Cell<Option<usize>>,
+        writes: Cell<usize>,
+        writable: Cell<bool>,
+    }
+
+    impl MockMemory {
+        fn new(bytes: Vec<u8>) -> Self {
+            Self {
+                bytes: RefCell::new(bytes),
+                fail_write: Cell::new(None),
+                writes: Cell::new(0),
+                writable: Cell::new(true),
+            }
+        }
+
+        fn fail_once_at(&self, write: usize) {
+            self.fail_write.set(Some(write));
+            self.writes.set(0);
+        }
+
+        fn snapshot(&self) -> Vec<u8> {
+            self.bytes.borrow().clone()
+        }
+    }
+
+    impl RuntimeMemory for MockMemory {
+        fn read(&self, address: u64, length: usize) -> Result<Vec<u8>, String> {
+            let start = usize::try_from(address).map_err(|_| "bad mock address".to_owned())?;
+            self.bytes
+                .borrow()
+                .get(start..start.saturating_add(length))
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| "bad mock read".to_owned())
+        }
+
+        fn is_writable(&self, _address: u64, _length: usize) -> Result<bool, String> {
+            Ok(self.writable.get())
+        }
+
+        fn resolve_offset(&self, encoded: u32) -> Result<u64, String> {
+            let (_, byte_offset) = encoded_offset_parts(encoded)?;
+            Ok(byte_offset)
+        }
+    }
+
+    impl RuntimeWriteMemory for MockMemory {
+        fn write(&self, address: u64, bytes: &[u8]) -> Result<(), String> {
+            let attempt = self.writes.get();
+            self.writes.set(attempt + 1);
+            if self.fail_write.get() == Some(attempt) {
+                self.fail_write.set(None);
+                return Err("injected write failure".to_owned());
+            }
+            let start = usize::try_from(address).map_err(|_| "bad mock address".to_owned())?;
+            let end = start
+                .checked_add(bytes.len())
+                .ok_or_else(|| "bad mock write".to_owned())?;
+            let mut memory = self.bytes.borrow_mut();
+            let destination = memory
+                .get_mut(start..end)
+                .ok_or_else(|| "bad mock write".to_owned())?;
+            destination.copy_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    fn transaction_patches() -> Vec<PokePatch> {
+        vec![
+            PokePatch {
+                address: 0,
+                expected: vec![1, 1],
+                edited: vec![9, 9],
+                field_path: "a".to_owned(),
+            },
+            PokePatch {
+                address: 4,
+                expected: vec![2, 2],
+                edited: vec![8, 8],
+                field_path: "b".to_owned(),
+            },
+            PokePatch {
+                address: 8,
+                expected: vec![3, 3],
+                edited: vec![7, 7],
+                field_path: "c".to_owned(),
+            },
+        ]
+    }
+
+    fn last_poke_for_test(patch: PokePatch, original: Vec<u8>) -> LastPoke {
+        LastPoke {
+            plan: PokePlan {
+                profile: CU2_PROFILE,
+                identity: RuntimeIdentity {
+                    process_id: 1,
+                    creation_time: 2,
+                    module_base: 3,
+                    tag_table: 4,
+                },
+                tag_path: "objects/test".to_owned(),
+                group_tag: u32::from_be_bytes(*b"test"),
+                tag_handle: 5,
+                tag_entry_address: 6,
+                tag_name_pointer: 7,
+                root_address: 8,
+                patches: vec![patch],
+                chain_originals: vec![None],
+            },
+            originals: vec![original],
+        }
+    }
+
+    /// The profile table is searched by tag-module hash and the first match wins,
+    /// so a duplicate hash would silently shadow a profile, and a hash written in
+    /// the wrong case or length would never match at all — either way the profile
+    /// is dead code that looks alive.
+    #[test]
+    fn profile_table_hashes_are_unique_and_comparable() {
+        let mut seen = Vec::new();
+        for profile in PROFILES {
+            assert_eq!(
+                profile.dll_sha256.len(),
+                64,
+                "{} has a malformed tag-module hash",
+                profile.label
+            );
+            assert!(
+                profile
+                    .dll_sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'A'..=b'F').contains(&byte)),
+                "{} must spell its tag-module hash in uppercase hex to match `format!(\"{{:X}}\")`",
+                profile.label
+            );
+            assert!(
+                !seen.contains(&profile.dll_sha256),
+                "{} repeats a tag-module hash already claimed by an earlier profile",
+                profile.label
+            );
+            seen.push(profile.dll_sha256);
+        }
+    }
+
+    #[test]
+    fn checked_rva_math_rejects_overflow() {
+        assert_eq!(
+            checked_add(0x1_8000_0000, 0x0182_e1e8).unwrap(),
+            0x1_8182_e1e8
+        );
+        assert!(checked_add(u64::MAX, 1).is_err());
+        assert!(checked_index(u64::MAX - 3, 1, 8).is_err());
+    }
+
+    #[test]
+    fn runtime_name_pool_is_bounded_and_parsed_from_one_snapshot() {
+        assert_eq!(runtime_name_pool_bounds(&[]).unwrap(), None);
+        assert_eq!(
+            runtime_name_pool_bounds(&[0x1234, 0x5678]).unwrap(),
+            Some((0x1000, 0x6000))
+        );
+        assert_eq!(
+            runtime_name_pool_bounds(&[0x1000, 0x1000 + MAX_RUNTIME_NAME_POOL_SPAN as u64]).unwrap(),
+            None
+        );
+        assert!(runtime_name_pool_bounds(&[u64::MAX]).is_err());
+
+        let mut pool = vec![0u8; 32];
+        pool[4..15].copy_from_slice(b"objects/foo");
+        assert_eq!(
+            runtime_name_from_pool(0x1000, &pool, 0x1004).unwrap(),
+            "objects/foo"
+        );
+        assert!(runtime_name_from_pool(0x1000, &pool, 0x0fff).is_err());
+    }
+
+    #[test]
+    fn only_stale_or_missing_current_tags_refresh_the_runtime_index() {
+        assert!(should_refresh_runtime_index(RUNTIME_CACHE_STALE));
+        assert!(should_refresh_runtime_index(
+            "runtime address cache is stale: unreadable"
+        ));
+        assert!(should_refresh_runtime_index("tag is not loaded"));
+        assert!(!should_refresh_runtime_index(
+            "referenced tag is not loaded at barrels/projectile"
+        ));
+    }
+
+    #[test]
+    fn encoded_offset_uses_top_nibble_and_word_units() {
+        struct Memory;
+        impl RuntimeMemory for Memory {
+            fn read(&self, _address: u64, _length: usize) -> Result<Vec<u8>, String> {
+                unreachable!()
+            }
+            fn is_writable(&self, _address: u64, _length: usize) -> Result<bool, String> {
+                Ok(true)
+            }
+            fn resolve_offset(&self, encoded: u32) -> Result<u64, String> {
+                let bases = [0x1000u64, 0x8000];
+                let (segment, byte_offset) = encoded_offset_parts(encoded)?;
+                checked_add(bases[segment], byte_offset)
+            }
+        }
+        assert_eq!(Memory.resolve_offset(0x0000_0003).unwrap(), 0x100c);
+        assert_eq!(Memory.resolve_offset(0x1000_0003).unwrap(), 0x4000_800c);
+        assert_eq!(
+            encoded_offset_parts(0xa123_4567).unwrap(),
+            (10, 0x2_848d_159c)
+        );
+        assert_eq!(
+            encoded_offset_parts(0xebd8_5054).unwrap(),
+            (14, 0x3_af61_4150)
+        );
+        assert_eq!(
+            checked_add(0x7ffb_4000_0000, 0x3_af61_4150).unwrap(),
+            0x7ffe_ef61_4150
+        );
+        assert!(encoded_offset_parts(u32::MAX).is_err());
+    }
+
+    #[test]
+    fn path_normalization_matches_runtime_and_browser_forms() {
+        assert_eq!(
+            normalize_tag_path(r"\Game\Tags\Objects\Weapons\Pistol.weapon"),
+            "objects/weapons/pistol"
+        );
+        assert_eq!(
+            normalize_tag_path("/Meteorite/Content/Tags/levels/a/scenario.scenario"),
+            "levels/a/scenario"
+        );
+        assert_eq!(normalize_tag_path("objects/a/biped"), "objects/a/biped");
+    }
+
+    #[test]
+    fn lookup_requires_path_and_group() {
+        let index = RuntimeTagIndex {
+            identity: RuntimeIdentity {
+                process_id: 1,
+                creation_time: 2,
+                module_base: 3,
+                tag_table: 4,
+            },
+            tags: vec![
+                RuntimeTag {
+                    path: "objects/a".to_owned(),
+                    group_tag: 10,
+                    handle: 1,
+                    entry_address: 100,
+                    name_pointer: 1_000,
+                    root_descriptor: 124,
+                },
+                RuntimeTag {
+                    path: "objects/a".to_owned(),
+                    group_tag: 11,
+                    handle: 2,
+                    entry_address: 200,
+                    name_pointer: 2_000,
+                    root_descriptor: 224,
+                },
+            ],
+        };
+        assert_eq!(index.find("objects/a.weapon", 10).unwrap().handle, 1);
+        assert_eq!(index.find("objects/a.weapon", 11).unwrap().handle, 2);
+        assert!(index.find("objects/a.weapon", 12).is_err());
+    }
+
+    #[test]
+    fn loaded_reference_handle_uniquely_recovers_its_field_position() {
+        let index = RuntimeTagIndex {
+            identity: RuntimeIdentity {
+                process_id: 1,
+                creation_time: 2,
+                module_base: 3,
+                tag_table: 4,
+            },
+            tags: vec![
+                RuntimeTag {
+                    path: "objects/projectiles/flak_bolt".to_owned(),
+                    group_tag: u32::from_be_bytes(*b"proj"),
+                    handle: 0x1234_0056,
+                    entry_address: 100,
+                    name_pointer: 1_000,
+                    root_descriptor: 124,
+                },
+                RuntimeTag {
+                    path: "objects/effects/flak".to_owned(),
+                    group_tag: u32::from_be_bytes(*b"effe"),
+                    handle: 0x4321_0065,
+                    entry_address: 200,
+                    name_pointer: 2_000,
+                    root_descriptor: 224,
+                },
+            ],
+        };
+        let mut live = vec![0u8; 16];
+        live[8..12].copy_from_slice(&0x1234_0056u32.to_le_bytes());
+        live[12..16].copy_from_slice(&0x4321_0065u32.to_le_bytes());
+        assert_eq!(
+            loaded_reference_positions(&live, &index, u32::from_be_bytes(*b"proj")),
+            vec![8]
+        );
+        assert_eq!(
+            loaded_reference_positions(&live, &index, u32::from_be_bytes(*b"effe")),
+            vec![12]
+        );
+    }
+
+    #[test]
+    fn cached_tag_address_is_rejected_when_its_entry_identity_changes() {
+        let mut bytes = vec![0u8; 128];
+        let entry = 32usize;
+        bytes[entry..entry + 2].copy_from_slice(&0x1234u16.to_le_bytes());
+        bytes[entry + TAG_ENTRY_GROUP_OFFSET as usize..entry + TAG_ENTRY_GROUP_OFFSET as usize + 4]
+            .copy_from_slice(&0x7061_6577u32.to_le_bytes());
+        bytes[entry + TAG_ENTRY_NAME_OFFSET as usize..entry + TAG_ENTRY_NAME_OFFSET as usize + 8]
+            .copy_from_slice(&0x7788u64.to_le_bytes());
+        let memory = MockMemory::new(bytes);
+        let tag = RuntimeTag {
+            path: "objects/a".to_owned(),
+            group_tag: 0x7061_6577,
+            handle: 0x1234_0007,
+            entry_address: entry as u64,
+            name_pointer: 0x7788,
+            root_descriptor: (entry as u64) + TAG_ENTRY_ROOT_OFFSET,
+        };
+        validate_runtime_tag_entry(&memory, &tag).unwrap();
+
+        memory.bytes.borrow_mut()[entry + TAG_ENTRY_GROUP_OFFSET as usize] ^= 1;
+        assert_eq!(
+            validate_runtime_tag_entry(&memory, &tag).unwrap_err(),
+            RUNTIME_CACHE_STALE
+        );
+    }
+
+    #[test]
+    fn reference_only_edit_inside_a_block_is_not_structural() {
+        let mut baseline =
+            TagFile::new(test_definition_path("haloreach_mcc/material_effects.json")).unwrap();
+        add_block_element(&mut baseline, "effects").unwrap();
+        add_block_element(&mut baseline, "effects[0]/effects").unwrap();
+        apply_field_edit(
+            &mut baseline,
+            "effects[0]/effects[0]/tag (effect or sound)",
+            "effects\\weapons\\first.effect",
+        )
+        .unwrap();
+
+        let bytes = baseline.write_to_bytes().unwrap();
+        let mut edited = TagFile::read_from_bytes(&bytes).unwrap();
+        apply_field_edit(
+            &mut edited,
+            "effects[0]/effects[0]/tag (effect or sound)",
+            "effects\\weapons\\second.effect",
+        )
+        .unwrap();
+
+        validate_poke_structure(baseline.root(), edited.root(), "").unwrap();
+    }
+
+    #[test]
+    fn changed_block_count_is_structural() {
+        let baseline =
+            TagFile::new(test_definition_path("haloreach_mcc/material_effects.json")).unwrap();
+        let bytes = baseline.write_to_bytes().unwrap();
+        let mut edited = TagFile::read_from_bytes(&bytes).unwrap();
+        add_block_element(&mut edited, "effects").unwrap();
+
+        let error = validate_poke_structure(baseline.root(), edited.root(), "").unwrap_err();
+        assert!(error.contains("structural edit cannot be poked"), "{error}");
+    }
+
+    #[test]
+    fn reorder_classifier_does_not_treat_content_edits_as_reorders() {
+        assert!(!unique_permutation_reordered(&[1, 2], &[1, 3]));
+        assert!(unique_permutation_reordered(&[1, 2], &[2, 1]));
+        assert!(!unique_permutation_reordered(&[1, 1], &[1, 1]));
+        assert!(!unique_permutation_reordered(&[1, 1], &[1, 2]));
+    }
+
+    #[test]
+    fn preflight_conflict_blocks_all_writes() {
+        let memory = MockMemory::new(vec![1, 1, 0, 0, 5, 5, 0, 0, 3, 3]);
+        let result = apply_transaction(&memory, &transaction_patches());
+        assert!(result.unwrap_err().contains("live value conflict"));
+        assert_eq!(memory.writes.get(), 0);
+        assert_eq!(memory.snapshot(), vec![1, 1, 0, 0, 5, 5, 0, 0, 3, 3]);
+    }
+
+    #[test]
+    fn trusted_previous_poke_can_be_replaced_or_reverted() {
+        let prior_patch = PokePatch {
+            address: 0,
+            expected: vec![1],
+            edited: vec![2],
+            field_path: "projectile".to_owned(),
+        };
+        let prior = last_poke_for_test(prior_patch, vec![1]);
+
+        let memory = MockMemory::new(vec![2]);
+        let mut replacement = Vec::new();
+        append_patch(
+            &memory,
+            &mut replacement,
+            Some(&prior),
+            0,
+            &[1],
+            &[3],
+            "projectile",
+        )
+        .unwrap();
+        assert_eq!(replacement[0].expected, vec![2]);
+        assert_eq!(replacement[0].edited, vec![3]);
+
+        let mut revert = Vec::new();
+        append_patch(
+            &memory,
+            &mut revert,
+            Some(&prior),
+            0,
+            &[1],
+            &[1],
+            "projectile",
+        )
+        .unwrap();
+        assert_eq!(revert[0].expected, vec![2]);
+        assert_eq!(revert[0].edited, vec![1]);
+    }
+
+    #[test]
+    fn string_id_patch_uses_verified_runtime_values() {
+        let memory = MockMemory::new(0x0000_17d2u32.to_le_bytes().to_vec());
+        let string_ids = RuntimeStringIdIndex {
+            by_name: HashMap::from([
+                (b"warthog_d".to_vec(), 0x0000_17d2),
+                (b"fork_d".to_vec(), 0x0000_1677),
+            ]),
+        };
+        let mut patches = Vec::new();
+        append_string_id_patch(
+            &memory,
+            &mut patches,
+            None,
+            &string_ids,
+            0,
+            "warthog_d",
+            "fork_d",
+            "unit/seats[0]/label",
+        )
+        .unwrap();
+
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].expected, 0x0000_17d2u32.to_le_bytes());
+        assert_eq!(patches[0].edited, 0x0000_1677u32.to_le_bytes());
+    }
+
+    #[test]
+    fn string_id_patch_rejects_unloaded_or_conflicting_values() {
+        let string_ids = RuntimeStringIdIndex {
+            by_name: HashMap::from([(b"warthog_d".to_vec(), 0x0000_17d2)]),
+        };
+        let memory = MockMemory::new(0x0000_17d2u32.to_le_bytes().to_vec());
+        let missing = append_string_id_patch(
+            &memory,
+            &mut Vec::new(),
+            None,
+            &string_ids,
+            0,
+            "warthog_d",
+            "not_loaded",
+            "label",
+        )
+        .unwrap_err();
+        assert!(missing.contains("is not registered"), "{missing}");
+
+        let string_ids = RuntimeStringIdIndex {
+            by_name: HashMap::from([
+                (b"warthog_d".to_vec(), 0x0000_17d2),
+                (b"fork_d".to_vec(), 0x0000_1677),
+            ]),
+        };
+        let memory = MockMemory::new(0x0000_2222u32.to_le_bytes().to_vec());
+        let conflict = append_string_id_patch(
+            &memory,
+            &mut Vec::new(),
+            None,
+            &string_ids,
+            0,
+            "warthog_d",
+            "fork_d",
+            "label",
+        )
+        .unwrap_err();
+        assert!(conflict.contains("live value conflicts"), "{conflict}");
+    }
+
+    #[test]
+    fn string_id_names_use_engine_normalization_and_none_encoding() {
+        let string_ids = RuntimeStringIdIndex {
+            by_name: HashMap::from([(b"fork_d".to_vec(), 0x0000_1677)]),
+        };
+        assert_eq!(string_ids.resolve("FORK-D").unwrap(), 0x0000_1677);
+        assert_eq!(string_ids.resolve("fork d").unwrap(), 0x0000_1677);
+        assert_eq!(string_ids.resolve("").unwrap(), u32::MAX);
+        assert!(string_ids.resolve(&"x".repeat(128)).is_err());
+    }
+
+    #[test]
+    fn engine_string_id_hashtable_parser_walks_nodes_and_rejects_corrupt_chains() {
+        let table_address = 0x0000_0001_0000_0000u64;
+        let buckets_size = STRING_ID_BUCKET_COUNT * 8;
+        let nodes_start = STRING_ID_TABLE_HEADER_SIZE + buckets_size;
+        let allocation_size = nodes_start + STRING_ID_MAX_ENTRIES * STRING_ID_NODE_SIZE;
+        let mut table = vec![0u8; allocation_size];
+        table[0..4].copy_from_slice(&(STRING_ID_BUCKET_COUNT as u32).to_le_bytes());
+        table[4..8].copy_from_slice(&(STRING_ID_MAX_ENTRIES as u32).to_le_bytes());
+        table[8..16].copy_from_slice(&(STRING_ID_VALUE_SIZE as u64).to_le_bytes());
+
+        let node_address = table_address + nodes_start as u64;
+        table[STRING_ID_TABLE_HEADER_SIZE..STRING_ID_TABLE_HEADER_SIZE + 8]
+            .copy_from_slice(&node_address.to_le_bytes());
+        table[nodes_start..nodes_start + 8].copy_from_slice(&0x0000_1677u64.to_le_bytes());
+        table[nodes_start + 0x18..nodes_start + 0x1c].copy_from_slice(&0u32.to_le_bytes());
+
+        let parsed = parse_runtime_string_id_table(table_address, &table, b"fork_d\0", 1).unwrap();
+        assert_eq!(parsed.by_name.len(), 1);
+        assert_eq!(parsed.resolve("fork_d").unwrap(), 0x0000_1677);
+
+        table[nodes_start + 0x10..nodes_start + 0x18].copy_from_slice(&node_address.to_le_bytes());
+        let error = parse_runtime_string_id_table(table_address, &table, b"fork_d\0", 1).unwrap_err();
+        assert!(error.contains("corrupt chain"), "{error}");
+    }
+
+    #[test]
+    fn previous_poke_does_not_allow_an_unrelated_live_value() {
+        let prior = last_poke_for_test(
+            PokePatch {
+                address: 0,
+                expected: vec![1],
+                edited: vec![2],
+                field_path: "projectile".to_owned(),
+            },
+            vec![1],
+        );
+        let memory = MockMemory::new(vec![4]);
+        let error = append_patch(
+            &memory,
+            &mut Vec::new(),
+            Some(&prior),
+            0,
+            &[1],
+            &[3],
+            "projectile",
+        )
+        .unwrap_err();
+        assert!(error.contains("conflicts with the shipped tag"), "{error}");
+    }
+
+    #[test]
+    fn already_edited_values_are_idempotent_and_undo_is_safe() {
+        let memory = MockMemory::new(vec![1, 1, 0, 0, 8, 8, 0, 0, 3, 3]);
+        let patches = transaction_patches();
+        let (originals, report) = apply_transaction(&memory, &patches).unwrap();
+        assert_eq!(report.written_fields, 2);
+        assert_eq!(report.skipped_fields, 1);
+        assert_eq!(memory.snapshot(), vec![9, 9, 0, 0, 8, 8, 0, 0, 7, 7]);
+        let undo = undo_transaction(&memory, &patches, &originals).unwrap();
+        assert_eq!(undo.written_fields, 2);
+        assert_eq!(memory.snapshot(), vec![1, 1, 0, 0, 8, 8, 0, 0, 3, 3]);
+    }
+
+    #[test]
+    fn every_forward_write_failure_rolls_back_in_reverse() {
+        let original = vec![1, 1, 0, 0, 2, 2, 0, 0, 3, 3];
+        for fail_at in 0..3 {
+            let memory = MockMemory::new(original.clone());
+            memory.fail_once_at(fail_at);
+            let error = apply_transaction(&memory, &transaction_patches()).unwrap_err();
+            assert!(error.contains("rolled back"), "{error}");
+            assert_eq!(memory.snapshot(), original, "failure at write {fail_at}");
+        }
+    }
+
+    #[test]
+    fn undo_failure_reapplies_already_restored_bytes() {
+        let original = vec![1, 1, 0, 0, 2, 2, 0, 0, 3, 3];
+        let memory = MockMemory::new(original);
+        let patches = transaction_patches();
+        let (originals, _) = apply_transaction(&memory, &patches).unwrap();
+        let edited = memory.snapshot();
+        memory.fail_once_at(1);
+        let error = undo_transaction(&memory, &patches, &originals).unwrap_err();
+        assert!(error.contains("re-applied"), "{error}");
+        assert_eq!(memory.snapshot(), edited);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_process_memory_smoke_uses_a_controlled_local_buffer() {
+        use std::ffi::c_void;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
+        use windows::Win32::System::Threading::{
+            GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION,
+            PROCESS_VM_READ, PROCESS_VM_WRITE,
+        };
+
+        let mut controlled = [1u8, 2, 3, 4];
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION
+                    | PROCESS_VM_READ
+                    | PROCESS_VM_WRITE
+                    | PROCESS_VM_OPERATION,
+                false,
+                GetCurrentProcessId(),
+            )
+            .unwrap()
+        };
+        let mut read_back = [0u8; 4];
+        unsafe {
+            ReadProcessMemory(
+                handle,
+                controlled.as_ptr().cast::<c_void>(),
+                read_back.as_mut_ptr().cast::<c_void>(),
+                read_back.len(),
+                None,
+            )
+            .unwrap();
+        }
+        assert_eq!(read_back, controlled);
+        let replacement = [9u8, 8, 7, 6];
+        unsafe {
+            WriteProcessMemory(
+                handle,
+                controlled.as_mut_ptr().cast::<c_void>(),
+                replacement.as_ptr().cast::<c_void>(),
+                replacement.len(),
+                None,
+            )
+            .unwrap();
+        }
+        assert_eq!(controlled, replacement);
+        unsafe {
+            CloseHandle(handle).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires the exact supported Campaign Evolved CU2 build with a mission loaded"]
+    fn manual_cu2_enumerates_live_tags_without_writing() {
+        let count = platform::manual_read_only_discovery().unwrap();
+        assert!(count > 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires the exact supported Campaign Evolved CU2 build with a mission loaded"]
+    fn manual_cu2_reports_a_live_root_descriptor_without_writing() {
+        for path in [
+            "objects/weapons/rifle/assault_rifle/assault_rifle",
+            "objects/weapons/support_high/rocket_launcher/projectiles/rocket_launcher_rocket",
+        ] {
+            eprintln!(
+                "{path}\n{}",
+                platform::manual_read_only_root_diagnostic(path).unwrap()
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires the exact supported Campaign Evolved CU2 build with a mission loaded"]
+    fn manual_cu2_reuses_validated_runtime_address_cache_without_writing() {
+        eprintln!("{}", platform::manual_read_only_cache_diagnostic().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires the exact supported Campaign Evolved CU2 build with a mission loaded"]
+    fn manual_cu2_reads_and_cross_checks_engine_string_id_registry_without_writing() {
+        eprintln!(
+            "{}",
+            platform::manual_read_only_string_id_index_diagnostic().unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "temporarily writes and immediately restores the live CU2 assault-rifle projectile reference"]
+    fn manual_cu2_pokes_and_undoes_assault_rifle_projectile_reference() {
+        fn find_reference_path(st: TagStruct<'_>, parent: &str, wanted_name: &str) -> Option<String> {
+            for field in st.fields_all() {
+                let path = field_path(parent, field);
+                if field.field_type() == TagFieldType::TagReference
+                    && field.clean_name().eq_ignore_ascii_case(wanted_name)
+                {
+                    return Some(path);
+                }
+                if let Some(nested) = field.as_struct()
+                    && let Some(found) = find_reference_path(nested, &path, wanted_name)
+                {
+                    return Some(found);
+                }
+                if let Some(array) = field.as_array() {
+                    for index in 0..array.len() {
+                        if let Some(found) = find_reference_path(
+                            array.element(index).unwrap(),
+                            &format!("{path}[{index}]"),
+                            wanted_name,
+                        ) {
+                            return Some(found);
+                        }
+                    }
+                }
+                if let Some(block) = field.as_block() {
+                    for index in 0..block.len() {
+                        if let Some(found) = find_reference_path(
+                            block.element(index).unwrap(),
+                            &format!("{path}[{index}]"),
+                            wanted_name,
+                        ) {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        let paks = std::env::var_os("CE_PAKS")
+            .map(PathBuf::from)
+            .expect("set CE_PAKS to Meteorite/Content/Paks");
+        let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = TagNameIndex::load_from_definitions(&definitions);
+        let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
+            .expect("mount Campaign Evolved containers");
+        let weapon_group = u32::from_be_bytes(*b"weap");
+        let entry = loaded
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.group_tag == weapon_group
+                    && normalize_tag_path(&entry.display_path)
+                        == "objects/weapons/rifle/assault_rifle/assault_rifle"
+            })
+            .cloned()
+            .expect("find assault_rifle.weapon");
+        let mut edited = read_entry(&loaded.source, &entry).expect("read shipped assault rifle");
+        let projectile_path = find_reference_path(edited.root(), "", "projectile")
+            .expect("find projectile tag-reference field");
+        apply_field_edit(
+            &mut edited,
+            &projectile_path,
+            "objects/weapons/support_high/rocket_launcher/projectiles/rocket_launcher_rocket.projectile",
+        )
+        .expect("edit projectile reference");
+        let edited_bytes = edited.write_to_bytes().expect("snapshot edited tag");
+        let first_plan = platform::prepare(
+            loaded.source.clone(),
+            loaded.entries.clone(),
+            entry.clone(),
+            edited_bytes,
+            None,
+        )
+        .expect("build live poke plan");
+        assert_eq!(
+            first_plan.patches.len(),
+            1,
+            "expected one reference-handle patch"
+        );
+        assert!(
+            first_plan.patches[0].field_path.contains("projectile"),
+            "unexpected patch: {}",
+            first_plan.patches[0].field_path
+        );
+
+        let (first_last, first_report) =
+            platform::execute(first_plan).expect("write or verify first projectile reference");
+
+        apply_field_edit(
+            &mut edited,
+            &projectile_path,
+            "objects/characters/hunter/hunter_fuel_rod/projectiles/hunter_fuel_rod_bolt.projectile",
+        )
+        .expect("edit projectile reference a second time");
+        let second_bytes = edited.write_to_bytes().expect("snapshot second edit");
+        let second_plan = match platform::prepare(
+            loaded.source.clone(),
+            loaded.entries.clone(),
+            entry,
+            second_bytes,
+            Some(first_last.clone()),
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                platform::undo(first_last).expect("restore first poke after second preflight failure");
+                panic!("build chained live poke plan: {error}");
+            }
+        };
+        assert_eq!(
+            second_plan.patches.len(),
+            1,
+            "expected one chained reference-handle patch"
+        );
+        let (second_last, second_report) = match platform::execute(second_plan) {
+            Ok(result) => result,
+            Err(error) => {
+                platform::undo(first_last).expect("restore first poke after second write failure");
+                panic!("write and verify second projectile reference: {error}");
+            }
+        };
+        let undo_report = platform::undo(second_last)
+            .expect("restore and verify the projectile reference from before the chain");
+        assert!(first_report.written_fields <= 1);
+        assert_eq!(second_report.written_fields, 1);
+        assert_eq!(undo_report.written_fields, 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires Campaign Evolved containers and the exact supported CU2 build"]
+    fn manual_cu2_pokes_and_undoes_loaded_string_id() {
+        use std::time::Instant;
+
+        let paks = std::env::var_os("CE_PAKS")
+            .map(PathBuf::from)
+            .expect("set CE_PAKS to Meteorite/Content/Paks");
+        let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = TagNameIndex::load_from_definitions(&definitions);
+        let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
+            .expect("mount Campaign Evolved containers");
+        let vehicle_group = u32::from_be_bytes(*b"vehi");
+        let entry = loaded
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.group_tag == vehicle_group
+                    && normalize_tag_path(&entry.display_path)
+                        == "objects/vehicles/human/warthog/warthog"
+            })
+            .cloned()
+            .expect("find warthog vehicle tag");
+        let baseline = read_entry(&loaded.source, &entry).expect("read warthog vehicle tag");
+        let original_bytes = baseline
+            .write_to_bytes()
+            .expect("snapshot shipped warthog tag");
+        let mut edited = TagFile::read_from_bytes(&original_bytes).expect("copy warthog vehicle tag");
+        apply_field_edit(&mut edited, "unit#0/seats#79[0]/label#1", "fork_d")
+            .expect("edit warthog driver seat label");
+
+        platform::clear_runtime_cache();
+        let started = Instant::now();
+        let plan = platform::prepare(
+            loaded.source.clone(),
+            loaded.entries.clone(),
+            entry.clone(),
+            edited.write_to_bytes().expect("snapshot warthog tag"),
+            None,
+        )
+        .expect("prepare warthog string-id poke");
+        let preflight = started.elapsed();
+        assert_eq!(plan.patches.len(), 1);
+        assert_eq!(plan.byte_count(), 4);
+        assert_eq!(plan.patches[0].expected, 0x0000_17d2u32.to_le_bytes());
+        assert_eq!(plan.patches[0].edited, 0x0000_1677u32.to_le_bytes());
+
+        let (first_last, first_report) =
+            platform::execute(plan).expect("poke warthog driver seat label");
+        let revert = platform::prepare(
+            loaded.source.clone(),
+            loaded.entries.clone(),
+            entry,
+            original_bytes,
+            Some(first_last),
+        )
+        .expect("prepare chained string-id revert");
+        assert_eq!(revert.patches.len(), 1);
+        assert_eq!(revert.patches[0].expected, 0x0000_1677u32.to_le_bytes());
+        assert_eq!(revert.patches[0].edited, 0x0000_17d2u32.to_le_bytes());
+        let (last, revert_report) =
+            platform::execute(revert).expect("restore warthog driver seat label");
+        let undo = platform::undo(last).expect("verify chained string-id undo");
+        assert_eq!(first_report.written_fields, 1);
+        assert_eq!(revert_report.written_fields, 1);
+        assert_eq!(undo.written_fields, 0);
+        eprintln!("cold string-id preflight: {}ms", preflight.as_millis());
+    }
+
+    fn patch_for_test() -> PokePatch {
+        PokePatch {
+            address: 0,
+            expected: vec![1],
+            edited: vec![2],
+            field_path: "a".to_owned(),
+        }
+    }
+
+    /// The undo takes the record of the last poke to run. An undo that panicked
+    /// used to lose it with the thread, leaving the game patched with nothing to
+    /// undo it with, and left the undo marked running for good.
+    #[test]
+    fn an_undo_that_panics_keeps_the_record_and_settles() {
+        let mut app = Baboon::for_test();
+        app.poke.last_poke = Some(last_poke_for_test(patch_for_test(), vec![1]));
+        let ctx = egui::Context::default();
+        crate::app::shell::with_panicking_workers(|| app.begin_undo_last_poke(ctx.clone()));
+        assert!(app.poke.poke_undo_running);
+        assert!(app.poke.last_poke.is_none(), "taken to run the undo");
+
+        assert!(
+            crate::app::shell::apply_next_worker_message(&mut app),
+            "the undo answered"
+        );
+        assert!(!app.poke.poke_undo_running, "no longer running");
+        assert!(app.poke.last_poke.is_some(), "the record came back");
+        assert!(app.model.status.contains("tried again"), "{}", app.model.status);
+    }
+
+    /// A confirmed poke that panicked left its dialog on "Writing" for good.
+    #[test]
+    fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
+        let mut app = Baboon::for_test();
+        let plan = last_poke_for_test(patch_for_test(), vec![1]).plan;
+        app.dialogs.open(PokeDialog {
+            kit: app.model.kits[0].id,
+            key: "file:objects/test".to_owned(),
+            state: PokeDialogState::Ready(plan),
+        });
+        let ctx = egui::Context::default();
+        crate::app::shell::with_panicking_workers(|| app.confirm_poke(ctx.clone()));
+        assert!(matches!(
+            app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
+            Some(PokeDialogState::Writing)
+        ));
+
+        assert!(
+            crate::app::shell::apply_next_worker_message(&mut app),
+            "the write answered"
+        );
+        assert!(matches!(
+            app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
+            Some(PokeDialogState::Error(_))
+        ));
+    }
+}
+
+/// Memory poking: the record that undoes the last poke, and whether a poke or
+/// its undo is running. The poke dialog is in the host.
+pub(in crate::app) struct PokeFeature {
+    /// One guarded, process-bound undo record. Never persisted to a project.
+    pub(in crate::app) last_poke: Option<LastPoke>,
+    pub(in crate::app) poke_direct_running: bool,
+    pub(in crate::app) poke_undo_running: bool,
+}
+
+impl Model {
+    pub(super) fn can_poke_current_tag(&self) -> bool {
+        cfg!(windows)
+            && self
+                .selected_entry()
+                .is_some_and(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+            && self
+                .kits
+                .get(self.active)
+                .and_then(|kit| kit.selected_key.as_ref())
+                .is_some_and(|key| self.kits[self.active].parsed_tags.contains_key(key))
+    }
+}

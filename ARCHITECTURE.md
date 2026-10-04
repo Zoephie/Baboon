@@ -59,7 +59,7 @@ While the first-run wizard is open it draws alone.
 
 ## Drawing: `Ctx` and commands
 
-A draw is given a [`Ctx`](src/app/context/mod.rs) — the model read-only, the
+A draw is given a [`Ctx`](src/app/context.rs) — the model read-only, the
 egui context, the command queue and the job channel — and holds its own
 feature's state mutably:
 
@@ -87,7 +87,7 @@ Some rules that follow from this:
 
 ## Dialogs
 
-Every window over the workspaces is a [`Dialog`](src/app/dialogs/mod.rs) in the
+Every window over the workspaces is a [`Dialog`](src/app/dialogs.rs) in the
 `DialogHost`:
 
 ```rust
@@ -143,7 +143,8 @@ after the user switched workspace still lands in the right one.
 ## Features
 
 `src/app` is a folder per feature, each with a `mod.rs` whose top comment says
-what it owns and what it leaves to others:
+what it owns and what it leaves to others. A module that is one file with its
+tests is `foo.rs`, not a folder:
 
 | Folder | What it is |
 | --- | --- |
@@ -176,8 +177,9 @@ core's document and keyword types, which every feature sees.
 
 ## Tests
 
-Tests sit beside the code they test, as `tests.rs` or `…_tests.rs` in the
-module's folder. Most build what they need synthetically from the bundled
+Tests sit beside the code they test: inline as `mod tests { … }` at the
+bottom of a single-file module, or as `tests.rs` or `…_tests.rs` in a module's
+folder. Most build what they need synthetically from the bundled
 definitions. Tests that need a real editing kit read its location from the
 environment (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`, `BLAM_TEST_H3EK`,
 `BLAM_TEST_HREK`) and skip, by name, when it is not set; Campaign Evolved ones

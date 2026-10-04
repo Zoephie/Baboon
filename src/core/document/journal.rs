@@ -1,0 +1,345 @@
+//! Per-document undo/redo journal, shared by tags and Chimp's packages.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
+//!
+//! Documents are snapshotted as the bytes that restore them
+//! ([`JournalDocument`]): a tag serialized (`write_to_bytes`) and restored by
+//! re-parsing (`read_from_bytes`), a Chimp package rebuilt and re-decoded. A
+//! snapshot is captured immediately *before* a mutating edit batch is applied,
+//! so undo restores the exact pre-edit bytes regardless of which op kinds were
+//! in the batch.
+//!
+//! Continuous edits (e.g. dragging a slider that commits every frame) are
+//! coalesced into a single undo entry via [`EditJournal::begin_edit`] /
+//! [`EditJournal::end_edit_window`]: the first frame of a run captures one
+//! snapshot, later frames are skipped until a frame with no edits closes the
+//! window.
+
+use std::sync::Arc;
+
+use blam_tags::TagFile;
+
+/// One serialized document state plus a human-readable label for the action.
+///
+/// The bytes are shared rather than owned: the session's recovery project
+/// captures the history on every autosave tick, and a stack holding a couple of
+/// Campaign Evolved animation graphs would otherwise be copied wholesale twice
+/// a second.
+#[derive(Clone)]
+pub(crate) struct Snapshot {
+    /// Unique to this step for as long as it exists, in memory or in a
+    /// recovery file. The recovery project keys its history rows by it, so an
+    /// autosave writes only the steps it has not written before: an undo stack
+    /// shifts by one on every edit, and when rows were keyed by position every
+    /// save rewrote every step — each one a whole serialized tag.
+    pub(crate) id: u64,
+    pub(crate) bytes: Arc<Vec<u8>>,
+    pub(crate) label: String,
+}
+
+/// The next snapshot id. Never reused within a process, and raised past every
+/// id read back from a recovery file, so a new step cannot take the id of one
+/// already on disk.
+static NEXT_SNAPSHOT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl Snapshot {
+    pub(crate) fn new(bytes: Arc<Vec<u8>>, label: String) -> Self {
+        Self {
+            id: NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            bytes,
+            label,
+        }
+    }
+
+    /// A step read back from a recovery file, keeping the id it was saved
+    /// under.
+    pub(crate) fn restored(id: u64, bytes: Arc<Vec<u8>>, label: String) -> Self {
+        NEXT_SNAPSHOT_ID.fetch_max(id.saturating_add(1), std::sync::atomic::Ordering::Relaxed);
+        Self { id, bytes, label }
+    }
+}
+
+/// A fresh id for a step read back from a file that stored none.
+pub(crate) fn next_snapshot_id() -> u64 {
+    NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) struct EditJournal {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    limit: usize,
+    /// Ceiling on the bytes one stack may hold. A snapshot is a whole
+    /// serialized tag, and Campaign Evolved ships a 105 MiB animation graph --
+    /// 64 of those is 6.7 GB. Depth still applies; whichever bound is reached
+    /// first drops the oldest entry.
+    byte_limit: usize,
+    /// True while a run of consecutive edit frames is being coalesced into the
+    /// single snapshot already pushed for this run.
+    coalescing: bool,
+    /// Bumped whenever either stack changes.
+    ///
+    /// Lets the session's recovery project skip its history entirely when
+    /// nothing moved, without comparing the stacks step by step. Same trick as
+    /// [`Dirty::revision`], and for the same reason: answering it by hashing
+    /// the snapshots would only move the cost from the disk to the CPU.
+    revision: u64,
+}
+
+impl Default for EditJournal {
+    fn default() -> Self {
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+            limit: 64,
+            byte_limit: 256 * 1024 * 1024,
+            coalescing: false,
+            revision: 0,
+        }
+    }
+}
+
+/// A document whose state an [`EditJournal`] can snapshot: whatever bytes
+/// restore it. A tag is its serialized file; a Chimp package is its rebuilt
+/// package.
+pub(crate) trait JournalDocument {
+    /// The document's bytes as they stand, or `None` when it cannot be
+    /// serialized, in which case no step is recorded.
+    fn snapshot_bytes(&self) -> Option<Vec<u8>>;
+}
+
+impl JournalDocument for TagFile {
+    fn snapshot_bytes(&self) -> Option<Vec<u8>> {
+        self.write_to_bytes().ok()
+    }
+}
+
+impl EditJournal {
+    /// Capture a pre-edit snapshot before applying a batch. No-op while already
+    /// coalescing a run, so a continuous drag yields a single undo entry.
+    /// Clears the redo stack (a new edit invalidates any redo history).
+    pub(crate) fn begin_edit(&mut self, document: &impl JournalDocument, label: &str) {
+        if self.coalescing {
+            return;
+        }
+        if let Some(bytes) = document.snapshot_bytes() {
+            self.push_capped(Snapshot::new(Arc::new(bytes), label.to_owned()));
+            self.redo.clear();
+        }
+        self.coalescing = true;
+    }
+
+    /// The stacks as they stand, for the session's recovery project. Oldest
+    /// first, matching the in-memory order.
+    pub(crate) fn stacks(&self) -> (&[Snapshot], &[Snapshot]) {
+        (&self.undo, &self.redo)
+    }
+
+    /// How many times either stack has changed. See [`EditJournal::revision`].
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Seed a journal from a restored session.
+    ///
+    /// Replaces rather than merges: a freshly opened document has no history of
+    /// its own, and restoring into one that somehow did would interleave two
+    /// unrelated edit trails.
+    pub(crate) fn restore(&mut self, undo: Vec<Snapshot>, redo: Vec<Snapshot>) {
+        self.undo = undo;
+        self.redo = redo;
+        self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Close the current coalescing window (call on a frame with no edits), so
+    /// the next edit starts a fresh undo entry.
+    pub(crate) fn end_edit_window(&mut self) {
+        self.coalescing = false;
+    }
+
+    pub(crate) fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub(crate) fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Pop the most recent undo snapshot, recording `current` on the redo stack.
+    /// Returns the bytes to restore and the action label.
+    pub(crate) fn undo(&mut self, current: &impl JournalDocument) -> Option<(Arc<Vec<u8>>, String)> {
+        let snapshot = self.undo.pop()?;
+        if let Some(bytes) = current.snapshot_bytes() {
+            push_capped_into(
+                &mut self.redo,
+                self.limit,
+                self.byte_limit,
+                Snapshot::new(Arc::new(bytes), snapshot.label.clone()),
+            );
+        }
+        self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
+        Some((snapshot.bytes, snapshot.label))
+    }
+
+    /// Pop the most recent redo snapshot, recording `current` on the undo stack.
+    pub(crate) fn redo(&mut self, current: &impl JournalDocument) -> Option<(Arc<Vec<u8>>, String)> {
+        let snapshot = self.redo.pop()?;
+        if let Some(bytes) = current.snapshot_bytes() {
+            push_capped_into(
+                &mut self.undo,
+                self.limit,
+                self.byte_limit,
+                Snapshot::new(Arc::new(bytes), snapshot.label.clone()),
+            );
+        }
+        self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
+        Some((snapshot.bytes, snapshot.label))
+    }
+
+    fn push_capped(&mut self, snapshot: Snapshot) {
+        push_capped_into(&mut self.undo, self.limit, self.byte_limit, snapshot);
+        self.revision = self.revision.wrapping_add(1);
+    }
+}
+
+fn push_capped_into(
+    stack: &mut Vec<Snapshot>,
+    limit: usize,
+    byte_limit: usize,
+    snapshot: Snapshot,
+) {
+    stack.push(snapshot);
+    // Always keep the newest entry, even on its own over budget: dropping it
+    // would mean an edit that cannot be undone at all.
+    while stack.len() > 1
+        && (stack.len() > limit || stack.iter().map(|s| s.bytes.len()).sum::<usize>() > byte_limit)
+    {
+        stack.remove(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use blam_tags::TagFile;
+
+    use super::*;
+
+    fn fresh_model() -> TagFile {
+        TagFile::new("definitions/halo2_mcc/model.json").unwrap()
+    }
+
+    /// One edit that changes the tag's bytes: a new variant element.
+    fn add_variant(tag: &mut TagFile) {
+        tag.root_mut()
+            .field_mut("variants")
+            .and_then(|mut field| field.as_block_mut().map(|mut block| block.add_element()))
+            .expect("a model has a variants block");
+    }
+
+    /// A snapshot is a whole serialized tag, and Campaign Evolved ships a
+    /// 105 MiB animation graph. Depth alone let the journal reach gigabytes, so
+    /// the byte budget evicts first -- but never the newest entry, or the edit
+    /// just made could not be undone.
+    #[test]
+    fn the_journal_evicts_on_bytes_before_depth() {
+        let mut stack = Vec::new();
+        let budget = 1000;
+        for i in 0..5 {
+            push_capped_into(
+                &mut stack,
+                64,
+                budget,
+                Snapshot::new(Arc::new(vec![0; 400]), format!("edit {i}")),
+            );
+        }
+        assert_eq!(stack.len(), 2, "400 x 2 fits in 1000, 400 x 3 does not");
+        assert_eq!(stack.last().unwrap().label, "edit 4", "the newest survives");
+
+        // One entry over budget on its own is still kept: losing it would mean
+        // an edit with no way back.
+        let mut lone = Vec::new();
+        push_capped_into(
+            &mut lone,
+            64,
+            budget,
+            Snapshot::new(Arc::new(vec![0; budget * 4]), "huge".to_owned()),
+        );
+        assert_eq!(lone.len(), 1);
+    }
+
+    #[test]
+    fn undo_then_redo_round_trips_exact_bytes() {
+        let mut tag = fresh_model();
+        let original = tag.write_to_bytes().unwrap();
+        let mut journal = EditJournal::default();
+        assert!(!journal.can_undo());
+
+        journal.begin_edit(&tag, "Add variant");
+        add_variant(&mut tag);
+        let edited = tag.write_to_bytes().unwrap();
+        assert_ne!(original, edited);
+        assert!(journal.can_undo());
+
+        // Undo restores the pre-edit bytes and arms redo.
+        let (bytes, label) = journal.undo(&tag).unwrap();
+        assert_eq!(label, "Add variant");
+        assert_eq!(*bytes, original);
+        tag = TagFile::read_from_bytes(&bytes).unwrap();
+        assert_eq!(tag.write_to_bytes().unwrap(), original);
+        assert!(!journal.can_undo());
+        assert!(journal.can_redo());
+
+        // Redo restores the post-edit bytes.
+        let (bytes, _) = journal.redo(&tag).unwrap();
+        assert_eq!(*bytes, edited);
+        assert!(journal.can_undo());
+    }
+
+    #[test]
+    fn consecutive_edits_coalesce_into_one_entry() {
+        let tag = fresh_model();
+        let mut journal = EditJournal::default();
+        journal.begin_edit(&tag, "first");
+        journal.begin_edit(&tag, "second"); // same window → no new snapshot
+        assert!(journal.undo(&tag).is_some());
+        assert!(!journal.can_undo());
+    }
+
+    #[test]
+    fn end_edit_window_starts_a_new_entry() {
+        let tag = fresh_model();
+        let mut journal = EditJournal::default();
+        journal.begin_edit(&tag, "first");
+        journal.end_edit_window();
+        journal.begin_edit(&tag, "second");
+        // Two distinct entries now exist.
+        assert!(journal.undo(&tag).is_some());
+        assert!(journal.can_undo());
+    }
+
+    /// A step keeps its id through undo and a restart, and a step made after
+    /// a restore cannot take an id the restored file already holds.
+    #[test]
+    fn steps_keep_their_ids_and_new_ones_never_collide() {
+        let restored = Snapshot::restored(1_000_000, Arc::new(vec![1]), "old".to_owned());
+        assert_eq!(restored.id, 1_000_000);
+        let fresh = Snapshot::new(Arc::new(vec![2]), "new".to_owned());
+        assert!(fresh.id > restored.id);
+
+        let mut tag = fresh_model();
+        let mut journal = EditJournal::default();
+        journal.begin_edit(&tag, "edit");
+        let pushed = journal.stacks().0[0].id;
+        add_variant(&mut tag);
+        journal.end_edit_window();
+        journal.undo(&tag);
+        assert_ne!(
+            journal.stacks().1[0].id,
+            pushed,
+            "the redo step is a new step"
+        );
+    }
+}

@@ -491,7 +491,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_storage",
             &["dialog:FirstRunWizardState"],
-            &["shell/first_run/mod.rs"],
+            &["shell/first_run.rs"],
             welcome,
             |h| {
                 h.app
@@ -503,7 +503,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_interface",
             &["dialog:FirstRunWizardState"],
-            &["shell/first_run/mod.rs"],
+            &["shell/first_run.rs"],
             welcome,
             |h| {
                 let mut wizard = FirstRunWizardState::new(None, &h.app.model.prefs);
@@ -515,7 +515,7 @@ fn cases() -> Vec<Case> {
         case(
             "first_run_editing_kits",
             &["dialog:FirstRunWizardState"],
-            &["shell/first_run/mod.rs"],
+            &["shell/first_run.rs"],
             welcome,
             |h| {
                 let mut wizard = FirstRunWizardState::new(None, &h.app.model.prefs);
@@ -699,7 +699,7 @@ fn cases() -> Vec<Case> {
         case(
             "tag_compare",
             &["dialog:TagDiffState"],
-            &["compare/tag_compare/mod.rs"],
+            &["compare/tag_compare.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
@@ -751,7 +751,7 @@ fn cases() -> Vec<Case> {
         case(
             "query_results",
             &["dialog:QueryResultsWindow"],
-            &["search/result_windows/mod.rs"],
+            &["search/result_windows.rs"],
             memory_kit,
             |h| {
                 let entries = h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries[..3]
@@ -770,7 +770,7 @@ fn cases() -> Vec<Case> {
         case(
             "field_value_search",
             &["dialog:FieldValueSearchWindow"],
-            &["search/result_windows/mod.rs"],
+            &["search/result_windows.rs"],
             loose_kit,
             |h| h.app.dialogs.open(FieldValueSearchWindow::default()),
             &["Search Field Values"],
@@ -798,7 +798,7 @@ fn cases() -> Vec<Case> {
         case(
             "colour_popup",
             &["dialog:ColorPopupWindow"],
-            &["editor/material/color_picker/mod.rs"],
+            &["editor/material/color_picker.rs"],
             memory_kit,
             |h| {
                 let kit = active_id(h);
@@ -1312,7 +1312,7 @@ fn cases() -> Vec<Case> {
         case(
             "extract_target",
             &["dialog:ExtractTargetPrompt"],
-            &["export/extract_target_window/mod.rs"],
+            &["export/extract_target_window.rs"],
             memory_kit,
             |h| {
                 h.app.dialogs.open(ExtractTargetPrompt {
@@ -1328,7 +1328,7 @@ fn cases() -> Vec<Case> {
         case(
             "chimp_discard",
             &["dialog:ChimpDiscardPrompt"],
-            &["chimp/save/mod.rs"],
+            &["chimp/save.rs"],
             container_kit,
             |h| {
                 h.app.dialogs.open(ChimpDiscardPrompt {
@@ -1343,7 +1343,7 @@ fn cases() -> Vec<Case> {
         case(
             "chimp_save",
             &["dialog:ChimpSaveDialog"],
-            &["chimp/save/mod.rs"],
+            &["chimp/save.rs"],
             container_kit,
             |h| {
                 let kit = h.app.model.active;
@@ -1393,7 +1393,7 @@ fn cases() -> Vec<Case> {
         case(
             "poke_scanning",
             &["dialog:PokeDialog"],
-            &["runtime_poke/mod.rs"],
+            &["runtime_poke.rs"],
             container_kit,
             |h| {
                 h.app.dialogs.open(PokeDialog {
@@ -1407,7 +1407,7 @@ fn cases() -> Vec<Case> {
         case(
             "poke_error",
             &["dialog:PokeDialog"],
-            &["runtime_poke/mod.rs"],
+            &["runtime_poke.rs"],
             container_kit,
             |h| {
                 h.app.dialogs.open(PokeDialog {
@@ -1620,7 +1620,7 @@ fn baboon_fields() -> Vec<(String, String)> {
     // The dialog host's windows are not fields: each `impl Dialog` is one,
     // named `dialog:Type`.
     for (_, text) in &sources {
-        for rest in product_code(text).split("impl Dialog for ").skip(1) {
+        for rest in text.split("impl Dialog for ").skip(1) {
             let name: String = rest
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
@@ -1665,29 +1665,6 @@ fn looks_like_a_window(ty: &str) -> bool {
             .any(|suffix| leaf.ends_with(suffix))
 }
 
-/// `text` without its top-level `#[cfg(test)] mod … { … }` blocks.
-fn product_code(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("#[cfg(test)]\nmod ") {
-        out.push_str(&rest[..start]);
-        let module = &rest[start..];
-        let header_end = module.find('\n').unwrap() + 1;
-        let line_end = header_end + module[header_end..].find('\n').unwrap_or(0);
-        rest = if module[header_end..line_end].trim_end().ends_with('{') {
-            // Through the module's closing brace, at the start of a line.
-            match module.find("\n}\n") {
-                Some(end) => &module[end + 3..],
-                None => "",
-            }
-        } else {
-            &module[line_end..]
-        };
-    }
-    out.push_str(rest);
-    out
-}
-
 /// Whether `code` calls `egui::Window::new`, however it is imported, and not
 /// merely a constructor whose name ends in `Window`, like `HelpWindow::new`.
 fn opens_a_window(code: &str) -> bool {
@@ -1702,33 +1679,11 @@ fn opens_a_window(code: &str) -> bool {
 /// Files under `src/app/` (relative, `/`-separated) whose product code
 /// calls `egui::Window::new`.
 fn window_sources() -> Vec<String> {
-    fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                if path.file_name().is_some_and(|name| name == "tests") {
-                    continue;
-                }
-                walk(&path, root, out);
-            } else if path.extension().is_some_and(|ext| ext == "rs")
-                && !path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name == "tests.rs" || name.ends_with("_tests.rs"))
-            {
-                let text = std::fs::read_to_string(&path).unwrap();
-                if opens_a_window(&product_code(&text)) {
-                    let rel = path.strip_prefix(root).unwrap();
-                    out.push(rel.to_string_lossy().replace('\\', "/"));
-                }
-            }
-        }
-    }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
-    let mut out = Vec::new();
-    walk(&root, &root, &mut out);
-    out.sort();
-    out
+    crate::test_kits::app_product_sources()
+        .into_iter()
+        .filter(|(_, text)| opens_a_window(text))
+        .map(|(file, _)| file)
+        .collect()
 }
 
 /// Everything the registry is missing or names wrongly, given the struct's
