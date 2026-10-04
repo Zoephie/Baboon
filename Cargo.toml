@@ -86,3 +86,9 @@ debug = false
 [profile.dev.package.audiopus_sys]
 opt-level = 1
 debug = false
+
+# Development only: the restructure branch builds against the sibling blam-tags
+# checkout's `restructure` branch. Replaced by a `rev` bump of the pinned
+# dependency above when the engine changes are pushed.
+[patch."https://github.com/camden-smallwood/blam-tags"]
+blam-tags = { path = "../blam-tags/blam-tags" }

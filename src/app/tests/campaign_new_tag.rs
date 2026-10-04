@@ -46,10 +46,14 @@ fn group_tag_of(group: &str) -> u32 {
         .group_tag
 }
 
-/// `TagFile::new` zeroes the whole file-header generation, and nothing stamped
-/// Campaign Evolved's over it — the CE arm was simply missing from
-/// `apply_editing_kit_mcc_header`, which only knew the five MCC games. An
-/// unstamped tag parses in Baboon and is unlike anything the game ships.
+/// A new Campaign Evolved tag carries the generation the game ships, both as
+/// `TagFile::new` builds it and after New Tag stamps it again.
+///
+/// The engine stamps it itself now: it takes the game from the definitions
+/// folder, which `TagFile::new` used to read from `_meta.json` (where Campaign
+/// Evolved calls itself `halocampaignevolved`, a name no table knew, so the
+/// header stayed zeroed). Baboon's own stamp, from the profile's game, must
+/// agree with it rather than undo it.
 ///
 /// The values are measured, not chosen: all 12,289 shipped CE tag blobs read
 /// `1 / 2 / 0xffffffff`, across all 101 groups, with no variation. See
@@ -57,24 +61,20 @@ fn group_tag_of(group: &str) -> u32 {
 #[test]
 fn a_new_campaign_evolved_tag_carries_the_shipped_generation() {
     let mut tag = TagFile::new(definition("cinematic_scene")).expect("build from the CE schema");
-    assert_eq!(
+    let generation = |tag: &TagFile| {
         (
             tag.header.build_version,
             tag.header.build_number,
-            tag.header.version
-        ),
-        (0, 0, 0),
-        "TagFile::new starts at zero, which is what makes the stamp necessary"
+            tag.header.version,
+        )
+    };
+    assert_eq!(
+        generation(&tag),
+        CAMPAIGN_EVOLVED_GENERATION,
+        "TagFile::new stamps a Campaign Evolved tag from its definitions folder"
     );
     apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
-    assert_eq!(
-        (
-            tag.header.build_version,
-            tag.header.build_number,
-            tag.header.version
-        ),
-        CAMPAIGN_EVOLVED_GENERATION
-    );
+    assert_eq!(generation(&tag), CAMPAIGN_EVOLVED_GENERATION);
 }
 
 /// Campaign Evolved's generation is Halo Reach's, because a CE `.ubulk` *is* a
@@ -129,11 +129,19 @@ fn adding_campaign_evolved_left_the_editing_kit_games_alone() {
 fn a_game_with_no_known_generation_is_still_rejected() {
     for game in ["", "haloce_evolved_x", "halo5", "haloce"] {
         let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+        // Start from a blank generation so any stamp at all shows: the engine
+        // already stamps a CE-schema tag with Reach's values, which a wrong
+        // stamp could repeat unseen.
+        tag.header.build_version = 0;
+        tag.header.build_number = 0;
+        tag.header.version = 0;
+        let before = (tag.header.build_version, tag.header.build_number, tag.header.version);
         assert!(
             apply_editing_kit_mcc_header(&mut tag, game).is_err(),
             "{game:?} should have no known tag-header defaults"
         );
-        assert_eq!(tag.header.build_version, 0, "{game:?} was stamped anyway");
+        let after = (tag.header.build_version, tag.header.build_number, tag.header.version);
+        assert_eq!(after, before, "{game:?} changed the header anyway");
     }
 }
 
@@ -148,13 +156,19 @@ fn a_game_with_no_known_generation_is_still_rejected() {
 fn a_classic_profile_is_left_unstamped_without_failing() {
     for game in ["haloce_mcc", "halo2_mcc"] {
         let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+        // Start from a blank generation so any stamp at all shows: the engine
+        // already stamps a CE-schema tag with Reach's values, which a wrong
+        // stamp could repeat unseen.
+        tag.header.build_version = 0;
+        tag.header.build_number = 0;
+        tag.header.version = 0;
+        let before = (tag.header.build_version, tag.header.build_number, tag.header.version);
         assert!(
             apply_editing_kit_mcc_header(&mut tag, game).is_ok(),
             "{game:?} should be a no-op, not an error"
         );
-        assert_eq!(tag.header.build_version, 0, "{game:?} was stamped anyway");
-        assert_eq!(tag.header.build_number, 0, "{game:?} was stamped anyway");
-        assert_eq!(tag.header.version, 0, "{game:?} was stamped anyway");
+        let after = (tag.header.build_version, tag.header.build_number, tag.header.version);
+        assert_eq!(after, before, "{game:?} changed the header anyway");
     }
 }
 
