@@ -443,3 +443,7 @@ pub(super) fn build_shader_editor_model(
 #[cfg(test)]
 #[path = "shader/tests.rs"]
 mod extracted_tests;
+
+#[cfg(test)]
+#[path = "tests/shader_grid_frames.rs"]
+mod shader_grid_frames;
