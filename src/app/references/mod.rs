@@ -22,16 +22,6 @@ pub(in crate::app) struct ReferencesFeature {
     /// Active reference-jump navigation: force ancestor blocks open and glow the
     /// exact referencing field until its glow window expires.
     pub(in crate::app) field_nav: Option<FieldNav>,
-    /// Which referrer rows in the "References to X" popup are expanded to show
-    /// their per-occurrence list. Keyed by row index; reset per references query.
-    pub(in crate::app) ref_jump_expanded: HashSet<usize>,
-    /// Lazily-computed occurrences per expanded referrer row. A present-but-empty
-    /// vec means "walked, none found"; absence means "not yet walked (loading)".
-    pub(in crate::app) ref_jump_occurrences: HashMap<usize, Vec<RefOccurrence>>,
-    /// Referrer rows whose occurrences a worker is computing. The tag is read
-    /// and walked off the UI thread and never cached as a document: it is not
-    /// open, so there is no tab to keep it for.
-    pub(in crate::app) ref_jump_loading: HashSet<usize>,
     /// Pending "open referenced tag in a new tab" request.
     pub(in crate::app) pending_open: Option<OpenTagRequest>,
 }

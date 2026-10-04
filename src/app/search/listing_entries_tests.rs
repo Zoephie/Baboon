@@ -58,9 +58,9 @@ fn a_source_listing_is_read_off_the_ui_thread() {
 
     app.show_sounds_by_class(&ctx);
     let waiting = app
-        .search.query_results
-        .as_ref()
-        .and_then(|results| results.note.clone());
+        .dialogs
+        .get::<QueryResultsWindow>()
+        .and_then(|window| window.results.note.clone());
     let message = app
         .rx
         .recv_timeout(std::time::Duration::from_secs(10))
@@ -69,7 +69,11 @@ fn a_source_listing_is_read_off_the_ui_thread() {
     app.process_worker_messages(&ctx);
 
     assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));
-    let results = app.search.query_results.expect("results");
+    let results = app
+        .dialogs
+        .close::<QueryResultsWindow>()
+        .expect("results")
+        .results;
     assert_eq!(
         results.title, "Sounds by class (0)",
         "the one sound is unreadable"

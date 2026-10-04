@@ -93,61 +93,57 @@ impl Baboon {
         ctx.request_repaint();
     }
 
-    /// Populate `ref_jump_occurrences` for any expanded, uncached referrer row in
-    /// the current "References to X" popup. Parsed referrers are walked in place;
-    /// unparsed ones trigger a background load and stay uncached ("loading…").
+    /// Walk the occurrences of any expanded, unwalked row of the open
+    /// "References to X" results. Open referrers are walked in place; the rest
+    /// are read and walked on a worker, and show as loading until it answers.
     pub(in crate::app) fn refresh_ref_jump_occurrences(&mut self, ctx: &egui::Context) {
-        let Some((group_tag, rel_path)) = self
-            .search.query_results
-            .as_ref()
-            .and_then(|results| results.ref_target.clone())
-        else {
+        let Some(window) = self.dialogs.get::<QueryResultsWindow>() else {
             return;
         };
-        // Snapshot (row, key) for expanded-but-uncached rows before borrowing
-        // `parsed_tags` / triggering loads.
-        let pending: Vec<(usize, String)> = self
-            .search.query_results
-            .as_ref()
-            .map(|results| {
-                self.references.ref_jump_expanded
-                    .iter()
-                    .filter(|index| !self.references.ref_jump_occurrences.contains_key(index))
-                    .filter_map(|&index| {
-                        results
-                            .entries
-                            .get(index)
-                            .map(|entry| (index, entry.key.clone()))
-                    })
-                    .collect()
+        let Some((group_tag, rel_path)) = window.results.ref_target.clone() else {
+            return;
+        };
+        let pending: Vec<(usize, String)> = window
+            .expanded
+            .iter()
+            .filter(|index| !window.occurrences.contains_key(index))
+            .filter_map(|&index| {
+                window
+                    .results
+                    .entries
+                    .get(index)
+                    .map(|entry| (index, entry.key.clone()))
             })
-            .unwrap_or_default();
+            .collect();
 
         let target = normalize_ref(&rel_path);
         for (index, key) in pending {
+            let Some(window) = self.dialogs.get_mut::<QueryResultsWindow>() else {
+                return;
+            };
             if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) {
                 let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
-                self.references.ref_jump_occurrences.insert(index, occurrences);
+                window.occurrences.insert(index, occurrences);
                 continue;
             }
             // Not open: read and walk it on a worker. This used to go through
             // the tab loader, which drops results for tags without a tab, so
             // the row asked again as soon as each load finished — forever.
-            if !self.references.ref_jump_loading.insert(index) {
+            if !window.loading.insert(index) {
                 continue;
             }
             let Some(entry) = self.model.entry_for_key(&key).cloned() else {
-                self.references.ref_jump_loading.remove(&index);
-                self.references.ref_jump_occurrences.insert(index, Vec::new());
+                window.loading.remove(&index);
+                window.occurrences.insert(index, Vec::new());
                 continue;
             };
             let Some(source_kind) = self.model.source().map(|source| source.source.clone()) else {
-                self.references.ref_jump_loading.remove(&index);
+                window.loading.remove(&index);
                 continue;
             };
             let kit = self.model.active_kit_id();
-            // The popup's own target, as `handle_ref_jump_occurrences` compares
-            // it; the walk matches against the normalized form.
+            // The results' own target, as `handle_ref_jump_occurrences`
+            // compares it; the walk matches against the normalized form.
             let query_target = (group_tag, rel_path.clone());
             let normalized = target.clone();
             let (panic_key, panic_target) = (key.clone(), query_target.clone());
@@ -178,8 +174,8 @@ impl Baboon {
         }
     }
 
-    /// Applies `WorkerMessage::RefJumpOccurrences`. Dropped unless the popup
-    /// still shows the same target with the same tag in that row.
+    /// Applies `WorkerMessage::RefJumpOccurrences`. Dropped unless the results
+    /// still show the same target with the same tag in that row.
     pub(in crate::app) fn handle_ref_jump_occurrences(
         &mut self,
         kit: KitId,
@@ -188,15 +184,17 @@ impl Baboon {
         target: (u32, String),
         result: Result<Vec<RefOccurrence>, String>,
     ) -> bool {
-        self.references.ref_jump_loading.remove(&index);
+        let Some(window) = self.dialogs.get_mut::<QueryResultsWindow>() else {
+            return true;
+        };
+        window.loading.remove(&index);
         let current = kit == self.model.active_kit_id()
-            && self.search.query_results.as_ref().is_some_and(|results| {
-                results.ref_target.as_ref() == Some(&target)
-                    && results
-                        .entries
-                        .get(index)
-                        .is_some_and(|entry| entry.key == key)
-            });
+            && window.results.ref_target.as_ref() == Some(&target)
+            && window
+                .results
+                .entries
+                .get(index)
+                .is_some_and(|entry| entry.key == key);
         if !current {
             return true;
         }
@@ -207,7 +205,7 @@ impl Baboon {
                 Vec::new()
             }
         };
-        self.references.ref_jump_occurrences.insert(index, occurrences);
+        window.occurrences.insert(index, occurrences);
         false
     }
 

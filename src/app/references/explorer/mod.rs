@@ -102,9 +102,6 @@ impl Baboon {
             return;
         };
         // Fresh query — drop any expander state from a previous references popup.
-        self.references.ref_jump_expanded.clear();
-        self.references.ref_jump_occurrences.clear();
-        self.references.ref_jump_loading.clear();
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.
@@ -115,24 +112,24 @@ impl Baboon {
                 let note = entries
                     .is_empty()
                     .then(|| "No other tags reference this tag.".to_owned());
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: self.model.active_kit_id(),
                     title,
                     entries,
                     annotations: Vec::new(),
                     note,
                     ref_target,
-                });
+                }));
             }
             None => {
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: self.model.active_kit_id(),
                     title,
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(self.model.reference_index_unavailable_note()),
                     ref_target: None,
-                });
+                }));
             }
         }
     }

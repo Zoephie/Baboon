@@ -68,24 +68,24 @@ impl Baboon {
                 let note = entries
                     .is_empty()
                     .then(|| "Every tag is referenced by at least one other tag.".to_owned());
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: self.model.active_kit_id(),
                     title: format!("Unreferenced tags ({})", entries.len()),
                     entries,
                     annotations: Vec::new(),
                     note,
                     ref_target: None,
-                });
+                }));
             }
             None => {
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: self.model.active_kit_id(),
                     title: "Unreferenced tags".to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(self.model.reference_index_unavailable_note()),
                     ref_target: None,
-                });
+                }));
             }
         }
     }

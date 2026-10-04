@@ -729,20 +729,20 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "query_results",
-            &["search.query_results"],
+            &["dialog:QueryResultsWindow"],
             &["search/result_windows/mod.rs"],
             memory_kit,
             |h| {
                 let entries = h.app.model.kits[h.app.model.active].source.as_ref().unwrap().entries[..3]
                     .to_vec();
-                h.app.search.query_results = Some(TagQueryResults {
+                h.app.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: active_id(h),
                     title: "Smoke Query Results".to_owned(),
                     entries,
                     annotations: Vec::new(),
                     note: None,
                     ref_target: None,
-                });
+                }));
             },
             &["Smoke Query Results", "tag_000"],
         ),

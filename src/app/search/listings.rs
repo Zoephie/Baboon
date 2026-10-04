@@ -33,14 +33,14 @@ impl Baboon {
         let entries = match self.model.listing_entries() {
             Ok(entries) => entries.to_vec(),
             Err(note) => {
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit,
                     title: listing.title().to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(note),
                     ref_target: None,
-                });
+                }));
                 return;
             }
         };
@@ -52,14 +52,14 @@ impl Baboon {
             .iter()
             .filter(|entry| entry.group_tag.to_be_bytes() == *wanted)
             .count();
-        self.search.query_results = Some(TagQueryResults {
+        self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
             kit,
             title: listing.title().to_owned(),
             entries: Vec::new(),
             annotations: Vec::new(),
             note: Some(format!("Reading {count} tag(s)…")),
             ref_target: None,
-        });
+        }));
         let stamp = self.model.kit_stamp();
         spawn_worker(
             &self.tx,
@@ -92,7 +92,7 @@ impl Baboon {
         if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }
-        self.search.query_results = Some(results);
+        self.dialogs.open(QueryResultsWindow::new(results));
         false
     }
 }

@@ -3,205 +3,222 @@
 
 use super::*;
 
-/// The window listing a tag query's results (find references,
-/// unreferenced tags, listings), while one is open. Clicking an entry
-/// opens it; which rows are expanded is References' own view state.
-pub(in crate::app) fn draw_query_results_window(
-    cx: &Ctx,
-    search: &mut SearchFeature,
-    references: &mut ReferencesFeature,
-) {
-    let Some(results) = search.query_results.take() else {
-        return;
-    };
-    let ctx = cx.egui;
-    let mut open = true;
-    let mut to_open: Option<String> = None;
-    let mut to_reveal: Option<String> = None;
-    let mut to_toggle: Vec<usize> = Vec::new();
-    let mut to_jump: Option<(String, String)> = None;
-    let expanded = &references.ref_jump_expanded;
-    let occurrences = &references.ref_jump_occurrences;
-    egui::Window::new(&results.title)
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("tag_query_results"))
-        .open(&mut open)
-        .default_width(window_width(ctx, 440.0))
-        .show(ctx, |ui| {
-            if let Some(note) = &results.note {
-                ui.label(RichText::new(note).color(subtle_dark()));
-            }
-            if !results.entries.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("{} tag(s)", results.entries.len()))
-                            .color(subtle_dark())
-                            .small(),
-                    );
-                    if ui
-                        .small_button("Copy paths")
-                        .on_hover_text("Copy all result tag paths (one per line)")
-                        .clicked()
-                    {
-                        let text = results
-                            .entries
-                            .iter()
-                            .map(|entry| {
-                                crate::core::format::to_native_path_string(&entry.display_path)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        ui.copy_text(text);
-                    }
-                });
-                ui.separator();
-                // A references popup lets each row expand to its per-occurrence
-                // list; other query kinds render a plain clickable row.
-                let expandable = results.ref_target.is_some();
-                // One line per row, entries and their expanded fields
-                // alike, so only the rows in view are drawn. A query over
-                // a whole source lists thousands of tags.
-                let rows = query_result_rows(results.entries.len(), expandable, |index| {
-                    expanded
-                        .contains(&index)
-                        .then(|| occurrences.get(&index).map(Vec::len))
-                });
-                let row_height = ui.spacing().interact_size.y;
-                egui::ScrollArea::vertical().max_height(460.0).show_rows(
-                    ui,
-                    row_height,
-                    rows.len(),
-                    |ui, range| {
-                        for row in &rows[range] {
-                            #[cfg(test)]
-                            tests::ROWS_BUILT.with(|built| built.set(built.get() + 1));
-                            fixed_height_row(ui, row_height, |ui| match *row {
-                                QueryResultRow::Entry(index) => {
-                                    let entry = &results.entries[index];
-                                    let path = entry.display_path.replace('\\', "/");
-                                    let label = match results.annotations.get(index) {
-                                        Some(annotation) => format!("{annotation}  —  {path}"),
-                                        None => path,
-                                    };
-                                    if expandable {
-                                        let arrow = if expanded.contains(&index) {
-                                            "▼"
-                                        } else {
-                                            "▶"
-                                        };
-                                        if ui
-                                            .add(
-                                                egui::Button::new(RichText::new(arrow).small())
-                                                    .frame(false),
-                                            )
-                                            .on_hover_text(
-                                                "Show every field that references this tag",
-                                            )
-                                            .clicked()
-                                        {
-                                            to_toggle.push(index);
-                                        }
-                                    }
-                                    let row = ui
-                                        .add(
-                                            egui::Label::new(
-                                                RichText::new(&label).color(text_dark()),
-                                            )
-                                            .sense(Sense::click()),
-                                        )
-                                        .on_hover_text(
-                                            "Click to jump to the first reference · \
-                                             right-click to reveal",
-                                        );
-                                    if row.clicked() {
-                                        to_open = Some(entry.key.clone());
-                                    }
-                                    context_menu(&row, |ui| {
-                                        if ui.button("Open").clicked() {
-                                            to_open = Some(entry.key.clone());
-                                            close_menu(ui);
-                                        }
-                                        if ui.button("Reveal in browser").clicked() {
-                                            to_reveal = Some(entry.key.clone());
-                                            close_menu(ui);
-                                        }
-                                    });
-                                }
-                                QueryResultRow::Occurrence(index, position) => {
-                                    let entry = &results.entries[index];
-                                    let occ = &occurrences[&index][position];
-                                    ui.add_space(22.0);
-                                    let jump = icon_button(
-                                        ui,
-                                        ButtonIcon::JumpTo,
-                                        "Jump to this field",
-                                        true,
-                                        text_dark(),
-                                    );
-                                    let label = ui
-                                        .add(
-                                            egui::Label::new(
-                                                RichText::new(format!("↳ {}", occ.label))
-                                                    .color(subtle_dark()),
-                                            )
-                                            .sense(Sense::click()),
-                                        )
-                                        .on_hover_text("Jump to this field");
-                                    if jump.clicked() || label.clicked() {
-                                        to_jump =
-                                            Some((entry.key.clone(), occ.field_path.clone()));
-                                    }
-                                }
-                                QueryResultRow::NoOccurrences(_) => {
-                                    ui.add_space(22.0);
-                                    ui.label(
-                                        RichText::new("no direct field found")
-                                            .italics()
-                                            .color(subtle_dark())
-                                            .small(),
-                                    );
-                                }
-                                QueryResultRow::Loading(_) => {
-                                    ui.add_space(22.0);
-                                    ui.label(
-                                        RichText::new("loading…")
-                                            .italics()
-                                            .color(subtle_dark())
-                                            .small(),
-                                    );
-                                }
-                            });
-                        }
-                    },
-                );
-            }
-        });
-    for index in to_toggle {
-        if references.ref_jump_expanded.remove(&index) {
-            // Collapsed — drop the cache so a re-expand re-reads fresh.
-            references.ref_jump_occurrences.remove(&index);
-        } else {
-            references.ref_jump_expanded.insert(index);
+/// The window listing a tag query's results (find references, unreferenced
+/// tags, listings). Clicking an entry opens it. For references, a row expands
+/// to the fields in it that refer to the target, walked on demand.
+pub(in crate::app) struct QueryResultsWindow {
+    pub(in crate::app) results: TagQueryResults,
+    /// Rows expanded to their occurrences.
+    pub(in crate::app) expanded: HashSet<usize>,
+    /// Each expanded row's occurrences once walked. Present but empty means
+    /// walked and none found; absent means not walked yet.
+    pub(in crate::app) occurrences: HashMap<usize, Vec<RefOccurrence>>,
+    /// Rows whose occurrences a worker is walking. The tag is read off the UI
+    /// thread and never kept as a document: it is not open, so there is no tab
+    /// to keep it for.
+    pub(in crate::app) loading: HashSet<usize>,
+}
+
+impl QueryResultsWindow {
+    pub(in crate::app) fn new(results: TagQueryResults) -> Self {
+        Self {
+            results,
+            expanded: HashSet::new(),
+            occurrences: HashMap::new(),
+            loading: HashSet::new(),
         }
     }
-    let action = match (to_jump, to_open, to_reveal) {
-        (Some((key, field_path)), _, _) => Some(QueryResultAction::Jump { key, field_path }),
-        (None, Some(key), _) => Some(QueryResultAction::Open {
-            key,
-            ref_target: results.ref_target.clone(),
-        }),
-        (None, None, Some(key)) => Some(QueryResultAction::Reveal(key)),
-        (None, None, None) => None,
-    };
-    if let Some(action) = action {
-        cx.send(SearchCommand::QueryResult {
-            kit: results.kit,
-            action,
-        });
-    }
-    // Keep the window's results until it is closed.
-    if open {
-        search.query_results = Some(results);
+}
+
+impl Dialog for QueryResultsWindow {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let results = &self.results;
+        let ctx = cx.egui;
+        let mut open = true;
+        let mut to_open: Option<String> = None;
+        let mut to_reveal: Option<String> = None;
+        let mut to_toggle: Vec<usize> = Vec::new();
+        let mut to_jump: Option<(String, String)> = None;
+        let expanded = &self.expanded;
+        let occurrences = &self.occurrences;
+        egui::Window::new(&results.title)
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("tag_query_results"))
+            .open(&mut open)
+            .default_width(window_width(ctx, 440.0))
+            .show(ctx, |ui| {
+                if let Some(note) = &results.note {
+                    ui.label(RichText::new(note).color(subtle_dark()));
+                }
+                if !results.entries.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("{} tag(s)", results.entries.len()))
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                        if ui
+                            .small_button("Copy paths")
+                            .on_hover_text("Copy all result tag paths (one per line)")
+                            .clicked()
+                        {
+                            let text = results
+                                .entries
+                                .iter()
+                                .map(|entry| {
+                                    crate::core::format::to_native_path_string(&entry.display_path)
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            ui.copy_text(text);
+                        }
+                    });
+                    ui.separator();
+                    // A references popup lets each row expand to its per-occurrence
+                    // list; other query kinds render a plain clickable row.
+                    let expandable = results.ref_target.is_some();
+                    // One line per row, entries and their expanded fields
+                    // alike, so only the rows in view are drawn. A query over
+                    // a whole source lists thousands of tags.
+                    let rows = query_result_rows(results.entries.len(), expandable, |index| {
+                        expanded
+                            .contains(&index)
+                            .then(|| occurrences.get(&index).map(Vec::len))
+                    });
+                    let row_height = ui.spacing().interact_size.y;
+                    egui::ScrollArea::vertical().max_height(460.0).show_rows(
+                        ui,
+                        row_height,
+                        rows.len(),
+                        |ui, range| {
+                            for row in &rows[range] {
+                                #[cfg(test)]
+                                tests::ROWS_BUILT.with(|built| built.set(built.get() + 1));
+                                fixed_height_row(ui, row_height, |ui| match *row {
+                                    QueryResultRow::Entry(index) => {
+                                        let entry = &results.entries[index];
+                                        let path = entry.display_path.replace('\\', "/");
+                                        let label = match results.annotations.get(index) {
+                                            Some(annotation) => format!("{annotation}  —  {path}"),
+                                            None => path,
+                                        };
+                                        if expandable {
+                                            let arrow = if expanded.contains(&index) {
+                                                "▼"
+                                            } else {
+                                                "▶"
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(RichText::new(arrow).small())
+                                                        .frame(false),
+                                                )
+                                                .on_hover_text(
+                                                    "Show every field that references this tag",
+                                                )
+                                                .clicked()
+                                            {
+                                                to_toggle.push(index);
+                                            }
+                                        }
+                                        let row = ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(&label).color(text_dark()),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .on_hover_text(
+                                                "Click to jump to the first reference · \
+                                                 right-click to reveal",
+                                            );
+                                        if row.clicked() {
+                                            to_open = Some(entry.key.clone());
+                                        }
+                                        context_menu(&row, |ui| {
+                                            if ui.button("Open").clicked() {
+                                                to_open = Some(entry.key.clone());
+                                                close_menu(ui);
+                                            }
+                                            if ui.button("Reveal in browser").clicked() {
+                                                to_reveal = Some(entry.key.clone());
+                                                close_menu(ui);
+                                            }
+                                        });
+                                    }
+                                    QueryResultRow::Occurrence(index, position) => {
+                                        let entry = &results.entries[index];
+                                        let occ = &occurrences[&index][position];
+                                        ui.add_space(22.0);
+                                        let jump = icon_button(
+                                            ui,
+                                            ButtonIcon::JumpTo,
+                                            "Jump to this field",
+                                            true,
+                                            text_dark(),
+                                        );
+                                        let label = ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(format!("↳ {}", occ.label))
+                                                        .color(subtle_dark()),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .on_hover_text("Jump to this field");
+                                        if jump.clicked() || label.clicked() {
+                                            to_jump =
+                                                Some((entry.key.clone(), occ.field_path.clone()));
+                                        }
+                                    }
+                                    QueryResultRow::NoOccurrences(_) => {
+                                        ui.add_space(22.0);
+                                        ui.label(
+                                            RichText::new("no direct field found")
+                                                .italics()
+                                                .color(subtle_dark())
+                                                .small(),
+                                        );
+                                    }
+                                    QueryResultRow::Loading(_) => {
+                                        ui.add_space(22.0);
+                                        ui.label(
+                                            RichText::new("loading…")
+                                                .italics()
+                                                .color(subtle_dark())
+                                                .small(),
+                                        );
+                                    }
+                                });
+                            }
+                        },
+                    );
+                }
+            });
+        for index in to_toggle {
+            if self.expanded.remove(&index) {
+                // Collapsed — drop the cache so a re-expand re-reads fresh.
+                self.occurrences.remove(&index);
+            } else {
+                self.expanded.insert(index);
+            }
+        }
+        let action = match (to_jump, to_open, to_reveal) {
+            (Some((key, field_path)), _, _) => Some(QueryResultAction::Jump { key, field_path }),
+            (None, Some(key), _) => Some(QueryResultAction::Open {
+                key,
+                ref_target: results.ref_target.clone(),
+            }),
+            (None, None, Some(key)) => Some(QueryResultAction::Reveal(key)),
+            (None, None, None) => None,
+        };
+        if let Some(action) = action {
+            cx.send(SearchCommand::QueryResult {
+                kit: results.kit,
+                action,
+            });
+        }
+        open
     }
 }
 

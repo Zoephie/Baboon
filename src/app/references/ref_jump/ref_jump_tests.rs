@@ -53,15 +53,19 @@ fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    app.search.query_results = Some(TagQueryResults {
+    app.dialogs.open(QueryResultsWindow::new(TagQueryResults {
         kit: app.model.active_kit_id(),
         title: "References to bitmaps/target".to_owned(),
         entries: vec![entry],
         annotations: Vec::new(),
         note: None,
         ref_target: Some((u32::from_be_bytes(*b"bitm"), "bitmaps/target".to_owned())),
-    });
-    app.references.ref_jump_expanded.insert(0);
+    }));
+    app.dialogs
+        .get_mut::<QueryResultsWindow>()
+        .unwrap()
+        .expanded
+        .insert(0);
     let ctx = egui::Context::default();
 
     // Three frames of the popup. Each one delivers whatever the last one
@@ -96,7 +100,9 @@ fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(loads, 1, "the referrer must be read exactly once");
     assert!(
-        app.references.ref_jump_occurrences.contains_key(&0),
+        app.dialogs
+            .get::<QueryResultsWindow>()
+            .is_some_and(|window| window.occurrences.contains_key(&0)),
         "the row must settle (here with no occurrences: the tag has no body)"
     );
 }

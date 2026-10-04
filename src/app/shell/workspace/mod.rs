@@ -315,7 +315,6 @@ impl Baboon {
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);
-        draw_query_results_window(&cx!(self, ctx), &mut self.search, &mut self.references);
         draw_content_explorer_window(&cx!(self, ctx), &mut self.references);
         draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));

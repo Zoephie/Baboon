@@ -387,7 +387,6 @@ impl Baboon {
             },
             search: SearchFeature {
                 find: FindDialogState::default(),
-                query_results: None,
                 pending_find_jump: None,
                 field_value_searching: false,
             },
@@ -471,9 +470,6 @@ impl Baboon {
             references: ReferencesFeature {
                 pending_ref_jump: None,
                 field_nav: None,
-                ref_jump_expanded: HashSet::new(),
-                ref_jump_occurrences: HashMap::new(),
-                ref_jump_loading: HashSet::new(),
                 content_explorer: None,
                 pending_open: None,
             },

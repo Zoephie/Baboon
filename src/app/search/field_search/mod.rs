@@ -25,14 +25,14 @@ impl Baboon {
                     .is_empty()
                     .then(|| format!("No tag field values contain \"{query}\"."));
                 self.model.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
-                self.search.query_results = Some(TagQueryResults {
+                self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                     kit: stamp.kit,
                     title: format!("Field value '{query}' ({})", entries.len()),
                     entries,
                     annotations,
                     note,
                     ref_target: None,
-                });
+                }));
             }
             Err(error) => self.model.status = format!("Field search failed: {error}"),
         }
@@ -283,14 +283,14 @@ impl Baboon {
                 "Field search for \"{display}\": {} match(es) (indexed)",
                 entries.len()
             );
-            self.search.query_results = Some(TagQueryResults {
+            self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
                 kit: self.model.active_kit_id(),
                 title: format!("Field value '{display}' ({})", entries.len()),
                 entries,
                 annotations,
                 note,
                 ref_target: None,
-            });
+            }));
             return;
         }
 
@@ -385,14 +385,14 @@ impl Baboon {
         let note = entries
             .is_empty()
             .then(|| "No tags with this keyword are in the current source.".to_owned());
-        self.search.query_results = Some(TagQueryResults {
+        self.dialogs.open(QueryResultsWindow::new(TagQueryResults {
             kit: self.model.active_kit_id(),
             title: format!("Tags tagged '{keyword}' ({})", entries.len()),
             entries,
             annotations: Vec::new(),
             note,
             ref_target: None,
-        });
+        }));
     }
 }
 

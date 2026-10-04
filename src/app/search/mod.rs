@@ -16,9 +16,7 @@ pub(in crate::app) use field_index::*;
 pub(in crate::app) mod field_search;
 pub(in crate::app) use field_search::*;
 pub(in crate::app) mod result_windows;
-pub(in crate::app) use result_windows::{
-    FieldValueSearchWindow, QueryResultAction, draw_query_results_window,
-};
+pub(in crate::app) use result_windows::{FieldValueSearchWindow, QueryResultAction, QueryResultsWindow};
 pub(in crate::app) mod listings;
 
 #[cfg(test)]
@@ -29,7 +27,6 @@ mod listing_entries_tests;
 pub(in crate::app) struct SearchFeature {
     /// Modeless find-in-tag dialog and its exact occurrence list.
     pub(in crate::app) find: FindDialogState,
-    pub(in crate::app) query_results: Option<TagQueryResults>,
     pub(in crate::app) field_value_searching: bool,
     /// Find result waiting for its target open tab to finish parsing.
     pub(in crate::app) pending_find_jump: Option<FindOccurrence>,

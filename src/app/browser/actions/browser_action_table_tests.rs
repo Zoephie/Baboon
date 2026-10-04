@@ -139,7 +139,7 @@ fn nothing_happened(app: &Baboon, _: &LooseKit, outcome: &Outcome) -> Result<(),
         app.dialogs.get::<RenameTagState>().is_none()
             && app.dialogs.get::<DeleteConfirm>().is_none()
             && app.dialogs.get::<ExtractTargetPrompt>().is_none()
-            && app.search.query_results.is_none()
+            && app.dialogs.get::<QueryResultsWindow>().is_none()
             && app.references.content_explorer.is_none()
             && app.tag_ops.folder_refactor.is_none()
             && app.dialogs.get::<LooseFolderRenameState>().is_none()
@@ -541,7 +541,7 @@ fn cases() -> Vec<Case> {
                 app.model.kits[0].source.as_mut().unwrap().reverse_dependencies = Some(kit.index());
             },
             check: |app, kit, _| {
-                let results = app.search.query_results.as_ref().ok_or("no results")?;
+                let results = &app.dialogs.get::<QueryResultsWindow>().ok_or("no results")?.results;
                 ensure(results.title == format!("References to {RENDER}"), results.title.clone())?;
                 ensure(
                     results.entries.iter().map(|entry| entry.key.clone()).collect::<Vec<_>>()
