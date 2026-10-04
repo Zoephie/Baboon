@@ -7,9 +7,9 @@
 //! though it worked. These tests are the cheapest place to catch that.
 
 use super::*;
+use crate::app::editor::{AppliedFindFilter, EditorCaches};
 use crate::app::kits::KitView;
 use crate::app::browser::KitBrowser;
-use crate::app::editor::EditorCaches;
 use crate::app::shell::session::RestorePlan;
 
 const OLD: &str = "ublock:pakchunk0:objects/vehicles/warthog";

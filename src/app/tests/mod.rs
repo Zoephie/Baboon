@@ -1,6 +1,30 @@
 use crate::app::documents::saving::new_tag_output_path_from_dialog;
 
 use super::*;
+use crate::core::document::apply::{
+    apply_field_edit, apply_one_block_op, apply_one_h2_shader_param_op,
+    replace_halo2_function_byte_block,
+};
+use crate::core::document::value::{
+    color_float_to_u8, decode_hex, encode_hex, parse_color_channels,
+    parse_rgb_or_argb_color_channels,
+};
+use crate::app::editor::{
+    FunctionDataStorage, FunctionEditPaths, FunctionSnapshot, FunctionView, H2TemplateCache,
+    build_h2ek_shader_editor_model, canonical_field_path, clean_field_name,
+    constant_color_function_hex, constant_function_hex, decode_baboon_palette,
+    decode_halo3_color_preferences, default_color_swatches, encode_baboon_palette,
+    encode_halo3_color_preferences, extract_constant_color, filtered_bitmap_rgba,
+    first_h2_function_edit_summary, first_halo2_byte_block_function_row, format_rgb_hex,
+    h2_constant_color_function_data, h2_constant_scalar_function_data,
+    h2_function_data_range_for_test, h2_function_data_with_range_for_test,
+    h2_shader_template_reference_for_test, h2_tag_function, h2_template_row_edit_kind_for_test,
+    h2_template_row_function_data_path_for_test, h2_template_row_labels_for_test,
+    h2_template_row_value_color_for_test, h2_template_row_value_text_for_test,
+    halo2_function_bytes_from_struct, model_source_dir, parse_rgb_hex, push_function_edit,
+    sanitize_ref_path, shader_function_grid_text, shader_row_edit_path_and_kind,
+    shader_row_value_text_for_test, strip_element_indices, strip_node_indices,
+};
 use crate::app::browser::{collect_bitmap_keys, tag_json_relative_path};
 
 mod classic_h2;
@@ -2299,7 +2323,8 @@ fn the_h2_shader_grid_reads_its_template_once_per_change() {
     std::fs::write(&template_path, b"not a template").unwrap();
 
     let mut tag = h2_classic_shader_tag();
-    crate::app::apply_field_edit(&mut tag, "template", "stem:shaders/test").unwrap();
+    crate::core::document::apply::apply_field_edit(&mut tag, "template", "stem:shaders/test")
+        .unwrap();
     let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
     let source = TagSource::LooseFolder {
         root: root.clone(),

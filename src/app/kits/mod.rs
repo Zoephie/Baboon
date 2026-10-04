@@ -4,6 +4,12 @@
 //! scenarios, and dropping tags on the tools.
 
 use super::*;
+use crate::core::document::value::is_saveable_tag;
+use crate::app::editor::{
+    AppliedFindFilter, ColorPopupWindow, EditDrafts, EditorCaches, FunctionPopupWindow,
+    ToolImportRequest, bitmap_reimport_data_path, combo_box_with_scroll, combo_scroll_next_index,
+    geometry_import_verb, model_source_dir,
+};
 use crate::app::browser::{
     Bitmaps, DraggedTagRef, FilterCache, KitBrowser, KitToolDragState, Models, PaletteTable,
     ThumbnailLibrary, disclosure_triangle_icon, entry_rel_path, is_folder_pane_key,

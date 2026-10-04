@@ -4,6 +4,10 @@
 //! thumbnails.
 
 use super::*;
+use crate::app::editor::{
+    build_bitmap_preview, format_tag_reference_input, geometry_import_verb_for_group_name,
+    truncate_for_cell,
+};
 use crate::app::export::is_scenario_group;
 
 mod filter;

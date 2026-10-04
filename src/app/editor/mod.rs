@@ -302,6 +302,8 @@ pub(in crate::app) mod shader;
 pub(in crate::app) use shader::*;
 pub(in crate::app) mod material;
 pub(in crate::app) use material::*;
+// Explicit: `import` re-exports a different one from `blam_tags::convert`.
+use material::clean_field_key;
 pub(in crate::app) mod function_editor;
 pub(in crate::app) use function_editor::*;
 pub(in crate::app) mod state;

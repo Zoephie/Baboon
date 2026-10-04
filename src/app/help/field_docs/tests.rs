@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::apply::add_block_element;
 
 #[test]
 fn parses_fields_and_explanations_keyed_by_guid() {

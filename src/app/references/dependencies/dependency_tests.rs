@@ -182,7 +182,7 @@ fn a_new_container_tag_has_the_expected_capabilities() {
     let tag = TagFile::new("definitions/haloce_evolved/camera_track.json").unwrap();
 
     assert!(
-        crate::app::is_editable_tag(&entry, &tag),
+        crate::core::document::value::is_editable_tag(&entry, &tag),
         "fields and block controls must be live for a new tag"
     );
     assert!(

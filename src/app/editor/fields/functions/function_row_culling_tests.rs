@@ -7,7 +7,7 @@
 use eframe::egui;
 
 use super::{FUNCTION_PREVIEWS_BUILT, FUNCTION_ROWS_CULLED, draw_foundation_function_row};
-use crate::app::FieldDisplayMeta;
+use crate::app::editor::FieldDisplayMeta;
 use crate::app::editor::fields::extracted_tests::tests::with_test_edit_context;
 use blam_tags::{FunctionType, H2Function, TagFunction};
 

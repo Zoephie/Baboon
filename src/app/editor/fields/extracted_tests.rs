@@ -146,7 +146,7 @@ pub(in crate::app) mod tests {
         };
         let grow = |tag: &mut TagFile, by: usize| {
             for _ in 0..by {
-                crate::app::apply_block_ops(
+                crate::core::document::apply::apply_block_ops(
                     tag,
                     vec![BlockOp {
                         path: target.clone(),
@@ -180,7 +180,7 @@ pub(in crate::app) mod tests {
         };
 
         grow(&mut tag, 8);
-        crate::app::apply_field_edit(&mut tag, "short block index", "2").unwrap();
+        crate::core::document::apply::apply_field_edit(&mut tag, "short block index", "2").unwrap();
         let small = labels_for_one_frame(&tag);
         grow(&mut tag, 32);
         let large = labels_for_one_frame(&tag);
@@ -897,7 +897,7 @@ pub(in crate::app) mod tests {
             "halo4_mcc/camera_track.json",
         ))
         .unwrap();
-        crate::app::add_block_element(&mut tag, "control points").unwrap();
+        crate::core::document::apply::add_block_element(&mut tag, "control points").unwrap();
         let mut focused = false;
 
         with_test_edit_context(|edit| {
@@ -971,7 +971,8 @@ pub(in crate::app) mod tests {
         let pending = type_into_first_value_cell(&light, path, "0.25");
         assert_eq!(pending.len(), 1, "one committed edit for the whole color");
         assert_eq!(pending[0].path, path);
-        crate::app::apply_field_edit(&mut light, path, &pending[0].input).unwrap();
+        crate::core::document::apply::apply_field_edit(&mut light, path, &pending[0].input)
+            .unwrap();
         match light.root().field_path(path).unwrap().value() {
             Some(TagFieldData::RealArgbColor(c)) => {
                 assert_eq!((c.alpha, c.red, c.green, c.blue), (0.25, 0.0, 0.0, 0.0));
@@ -985,7 +986,7 @@ pub(in crate::app) mod tests {
         let path = "override icon color";
         let pending = type_into_first_value_cell(&hud, path, "1");
         assert_eq!(pending.len(), 1);
-        crate::app::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
+        crate::core::document::apply::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
         match hud.root().field_path(path).unwrap().value() {
             Some(TagFieldData::ArgbColor(c)) => assert_eq!(c.0, 0xFF00_0000),
             other => panic!("expected a packed ARGB color, got {other:?}"),

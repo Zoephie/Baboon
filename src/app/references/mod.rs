@@ -2,6 +2,11 @@
 //! jumps, and fixing a tag's dependencies.
 
 use super::*;
+use crate::core::document::value::append_field_path_for;
+use crate::app::editor::{
+    OpenTagRequest, clean_field_name, field_jump_target_id, format_reference_path,
+    is_inherited_parent_name, jump_target_id, parent_block_path, sanitize_ref_path,
+};
 use crate::app::browser::{
     ContentExplorer, FieldNav, PendingRefJump, RefOccurrence, TagQueryResults,
     contains_ignore_ascii_case,

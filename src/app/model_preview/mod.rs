@@ -2,6 +2,12 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use crate::app::editor::{
+    BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
+    clean_field_name, clean_field_name_basic, combo_box_with_scroll, combo_scroll_next_index,
+    halo1_object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
+    truncate_for_cell, viewport_wheel_zoom,
+};
 use crate::app::export::{
     collision_jms_for_game, load_referenced_tag_from_source, model_skeleton, owning_model_skeleton,
     physics_jms_for_game, render_model_skeleton,

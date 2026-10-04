@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::value::append_field_path_for;
 
 fn field_names_only() -> FindLookIn {
     FindLookIn {

@@ -1,6 +1,8 @@
 //! Classic Halo 2 regression tests that exercise real tag fixtures when available.
 
 use super::*;
+use crate::core::document::value::append_field_path_for;
+use crate::core::document::apply::apply_field_edit;
 
 /// Editing a field inside an H2 particle's `Mapping` struct must target
 /// the struct field rather than an earlier custom placeholder with the

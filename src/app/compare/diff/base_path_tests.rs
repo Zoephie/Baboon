@@ -8,7 +8,7 @@ fn a_diff_row_knows_both_sides_paths() {
     let names = TagNameIndex::default();
     let a = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
     let mut b = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
-    crate::app::add_block_element(&mut b, "sound classes").unwrap();
+    crate::core::document::apply::add_block_element(&mut b, "sound classes").unwrap();
     let (rows, _) = diff_tags(&a, &b, &names, 5000);
     assert!(!rows.is_empty());
     // An added element exists only on the edited side.

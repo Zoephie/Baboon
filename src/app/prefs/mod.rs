@@ -3,6 +3,7 @@
 
 use crate::app::kits::detect::add_standard_editing_kit_profiles;
 use super::*;
+use crate::app::editor::default_color_swatches;
 use crate::app::browser::{BrowserMode, BrowserSort};
 
 pub(super) fn prefs_path() -> PathBuf {

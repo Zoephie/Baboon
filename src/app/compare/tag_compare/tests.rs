@@ -344,7 +344,7 @@ fn block_change_icons_only_mark_added_or_removed_elements() {
 fn swap_recomputes_block_changes_in_the_opposite_direction() {
     let a = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
     let mut b = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
-    crate::app::add_block_element(&mut b, "sound classes").unwrap();
+    crate::core::document::apply::add_block_element(&mut b, "sound classes").unwrap();
     let results = comparison_results(&a, &b);
     assert!(
         results

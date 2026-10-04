@@ -82,7 +82,7 @@ use export::ExportFeature;
 pub(in crate::app) mod model_preview;
 use model_preview::*;
 mod editor;
-use editor::*;
+use editor::EditorFeature;
 mod audio;
 use audio::AudioCommand;
 mod runtime_poke;

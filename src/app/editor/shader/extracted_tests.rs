@@ -384,7 +384,7 @@ fn committing_a_structural_reference_rewrites_the_tag() {
         assert_ne!(before, after, "pick a value that is actually a change");
 
         let mut dirty = crate::app::Dirty::default();
-        let applied = crate::app::apply_pending_edits(
+        let applied = crate::core::document::apply::apply_pending_edits(
             &mut tag,
             vec![crate::app::PendingFieldEdit {
                 path: model.definition_edit_path.clone(),
@@ -447,8 +447,10 @@ fn reference_extensions_resolve_from_the_games_own_metadata() {
             "{extension} is not in any game's tag_index"
         );
         // And the parser that the field editor commits through agrees.
-        let parsed = crate::app::parse_tag_reference(&format!("shaders\\example.{extension}"))
-            .unwrap_or_else(|error| panic!("{extension}: {error}"));
+        let parsed = crate::core::document::value::parse_tag_reference(&format!(
+            "shaders\\example.{extension}"
+        ))
+        .unwrap_or_else(|error| panic!("{extension}: {error}"));
         assert_eq!(
             parsed.group_tag_and_name,
             Some((u32::from_be_bytes(*fourcc), "shaders\\example".to_owned()))

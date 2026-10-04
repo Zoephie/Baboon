@@ -3,6 +3,9 @@
 //! inside a Campaign Evolved container.
 
 use super::*;
+use crate::app::editor::{
+    H2TemplateCache, combo_box_with_scroll, combo_scroll_next_index, lost_focus_once,
+};
 use crate::app::browser::{
     ContainerFolderDialog, LooseFolderRenameState, RenameTagState, TagNameOperation,
 };

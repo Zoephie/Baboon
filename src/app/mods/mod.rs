@@ -3,6 +3,10 @@
 //! review, and their windows.
 
 use super::*;
+use crate::app::editor::{
+    EditSinks, FieldEditContext, FieldFilter, FieldFilterAction, draw_foundation_group,
+    draw_struct_fields_inline, strip_node_indices,
+};
 use crate::app::export::ensure_export_directory;
 use crate::app::browser::{
     ModifiedTags, added_text, added_wash, modified_text, removed_text, removed_wash,

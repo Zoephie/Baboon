@@ -3,6 +3,12 @@
 //! around the features.
 
 use super::*;
+use crate::core::document::value::extension_to_group_tag;
+use crate::app::editor::{
+    DeferredFileAction, EditorCommand, EditorFeature, PaneInputs, apply_scroll_speed,
+    begin_wheel_gesture, draw_tag_pane, end_wheel_gesture, lost_focus_once,
+    set_combo_scroll_cycle_enabled, set_zoom_speed, truncate_for_cell, view_text_tab_button,
+};
 use crate::app::export::ContainerDumpReport;
 use crate::app::browser::{
     BITMAP_LIBRARY_KEY, BITMAP_LIBRARY_TITLE, Bitmaps, BrowserAction, BrowserCommand,

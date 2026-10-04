@@ -36,6 +36,12 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::core::document::value::decode_hex;
+use crate::app::editor::{
+    BlockConfirm, ColorPopupWindow, FunctionPopup, FunctionPopupWindow, FunctionView,
+    MaterialColorPopup, TagReferencePickerState, TagReferencePickerWindow, TsvPasteState,
+    constant_function_hex,
+};
 use crate::app::export::{ContainerDumpConfirm, ContainerDumpScope};
 use crate::app::browser::{
     ContainerFolderDialog, ContentExplorer, ExtractKind, ExtractTargetPrompt,

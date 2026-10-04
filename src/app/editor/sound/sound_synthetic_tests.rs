@@ -363,7 +363,7 @@ fn add_element(tag: &mut TagFile, path: &str) {
 }
 
 fn set_field(tag: &mut TagFile, path: &str, input: &str) {
-    crate::app::apply_field_edit(tag, path, input)
+    crate::core::document::apply::apply_field_edit(tag, path, input)
         .unwrap_or_else(|error| panic!("{path} = {input}: {error}"));
 }
 

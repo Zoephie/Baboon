@@ -51,7 +51,7 @@ fn deleting_a_zone_set_reports_only_that_deletion() {
     assert!(before > 4, "need several elements to shift, got {before}");
 
     let mut dirty = Dirty::default();
-    crate::app::apply_block_ops(
+    crate::core::document::apply::apply_block_ops(
         &mut edited,
         vec![BlockOp {
             path: "zone set pvs".to_owned(),
@@ -102,7 +102,7 @@ fn editing_an_element_that_also_shifts_is_still_the_same_element() {
     };
     let names = crate::core::format::TagNameIndex::default();
     let mut dirty = Dirty::default();
-    crate::app::apply_block_ops(
+    crate::core::document::apply::apply_block_ops(
         &mut edited,
         vec![BlockOp {
             path: "zone set pvs".to_owned(),
@@ -112,7 +112,7 @@ fn editing_an_element_that_also_shifts_is_still_the_same_element() {
     );
     // Element 4 is now element 3. Editing inside it is what defeated the
     // alignment.
-    let applied = crate::app::apply_pending_edits(
+    let applied = crate::core::document::apply::apply_pending_edits(
         &mut edited,
         vec![PendingFieldEdit {
             path: "zone set pvs[3]/bsp checksums[0]/bsp checksum".to_owned(),
@@ -151,7 +151,7 @@ fn a_deletion_and_an_addition_change_no_values() {
     };
     let names = crate::core::format::TagNameIndex::default();
     let mut dirty = Dirty::default();
-    crate::app::apply_block_ops(
+    crate::core::document::apply::apply_block_ops(
         &mut edited,
         vec![
             BlockOp {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::apply::{add_block_element, apply_field_edit};
 use std::cell::{Cell, RefCell};
 
 struct MockMemory {

@@ -45,7 +45,8 @@ fn a_saved_tag_updates_its_index_row_and_references() {
         complete_scan: false,
         chosen_kit_layout: None,
     });
-    crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
+    crate::core::document::apply::apply_field_edit(&mut tag, "render model", "mode:objects/crate")
+        .unwrap();
     app.model.kits[0]
         .parsed_tags
         .insert(entry.key.clone(), TagDocument::modified(tag));
@@ -125,7 +126,8 @@ fn a_tag_saved_during_a_reference_build_keeps_its_new_references() {
     read_before_the_save.set_tag_dependencies(entry.key.clone(), Vec::new());
 
     // Then the tag is edited and saved while the build is still running.
-    crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
+    crate::core::document::apply::apply_field_edit(&mut tag, "render model", "mode:objects/crate")
+        .unwrap();
     app.model.kits[0]
         .parsed_tags
         .insert(entry.key.clone(), TagDocument::modified(tag));

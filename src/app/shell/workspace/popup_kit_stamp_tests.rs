@@ -6,6 +6,7 @@
 //! kit's tag with the same key.
 
 use super::*;
+use crate::app::editor::{ColorPopupWindow, MaterialColorPopup};
 
 fn two_kits() -> (Baboon, KitId, KitId) {
     let mut app = Baboon::for_test();

@@ -2,6 +2,11 @@
 //! listings (map ids, sounds by class).
 
 use super::*;
+use crate::app::editor::{
+    clean_field_name, find_full_field_name, format_foundation_scalar_value, foundation_block_title,
+    is_inherited_parent_name, is_previewable_geometry_group_for_game, jump_target_id,
+    lost_focus_once, supports_field_search,
+};
 use crate::app::browser::{PendingRefJump, RefOccurrence, TagQueryResults};
 
 pub(in crate::app) mod find;

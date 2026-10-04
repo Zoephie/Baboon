@@ -121,7 +121,7 @@ fn palette_addition_reaches_the_block_index_dropdown() {
         };
         let before_len = palette_len(&tag).unwrap_or(0);
         let mut dirty = Dirty::default();
-        let status = crate::app::apply_block_ops(
+        let status = crate::core::document::apply::apply_block_ops(
             &mut tag,
             vec![BlockOp {
                 path: "vehicle palette".to_owned(),
@@ -152,7 +152,8 @@ fn palette_addition_reaches_the_block_index_dropdown() {
             path: format!("vehicle palette[{before_len}]/name"),
             input: "objects/vehicles/warthog/warthog.vehicle".to_owned(),
         };
-        let applied = crate::app::apply_pending_edits(&mut tag, vec![edit], &mut dirty);
+        let applied =
+            crate::core::document::apply::apply_pending_edits(&mut tag, vec![edit], &mut dirty);
         let labelled = options(&tag).unwrap_or_default();
         let last = labelled.last().cloned().unwrap_or_default();
         eprintln!("{game}: new label {last:?} ({:?})", applied.status);
@@ -179,7 +180,7 @@ fn collect_block_index_fields(
         return;
     }
     for field in st.fields_all() {
-        let field_path = crate::app::append_field_path_for(path, &field);
+        let field_path = crate::core::document::value::append_field_path_for(path, &field);
         if field.definition().block_index_target().is_some() {
             out.push(path.to_owned());
         }
@@ -263,7 +264,7 @@ fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
                 continue;
             };
             let mut dirty = Dirty::default();
-            let status = crate::app::apply_block_ops(
+            let status = crate::core::document::apply::apply_block_ops(
                 &mut tag,
                 vec![BlockOp {
                     path: target.clone(),
@@ -349,7 +350,7 @@ fn adding_an_element_grows_the_blocks_own_length() {
                 continue;
             };
             let mut dirty = Dirty::default();
-            let status = crate::app::apply_block_ops(
+            let status = crate::core::document::apply::apply_block_ops(
                 &mut tag,
                 vec![BlockOp {
                     path: name.clone(),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::apply::apply_model_variant_ops;
 
 #[test]
 fn searchable_text_separator_only_appears_between_values() {

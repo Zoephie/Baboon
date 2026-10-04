@@ -2,6 +2,7 @@
 //! It owns test-only characterization and does not participate in runtime application behavior.
 
 use super::*;
+use crate::app::editor::combo_box_with_scroll;
 use std::collections::{HashMap, HashSet};
 
 #[test]

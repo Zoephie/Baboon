@@ -4,6 +4,7 @@
 //! container, and the windows that choose what and where.
 
 use super::*;
+use crate::app::editor::clean_field_name;
 use crate::app::browser::{
     ExtractKind, ExtractTargetPrompt, is_bitmap_tag, is_hlsl_include_group, is_hlsl_include_tag,
     is_material_shader_group, native_display_path, tag_display_parent, tag_file_name,

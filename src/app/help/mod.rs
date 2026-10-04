@@ -2,6 +2,7 @@
 //! docs, tag compatibility and map names.
 
 use super::*;
+use crate::app::editor::field_display_meta;
 
 pub(in crate::app) mod docs;
 pub(in crate::app) use docs::*;

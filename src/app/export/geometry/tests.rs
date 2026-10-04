@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::apply::{add_block_element, apply_field_edit};
 
 fn add(tag: &mut TagFile, path: &str) {
     add_block_element(tag, path).unwrap_or_else(|error| panic!("add {path}: {error}"));
