@@ -1289,11 +1289,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_discard",
-            &["chimp.chimp_discard_prompt"],
+            &["dialog:ChimpDiscardPrompt"],
             &["chimp/save/mod.rs"],
             container_kit,
             |h| {
-                h.app.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                h.app.dialogs.open(ChimpDiscardPrompt {
                     kit: active_id(h),
                     packages: vec!["/Game/Smoke/SM_Smoke".to_owned()],
                     pending_action: None,
@@ -1304,7 +1304,7 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_save",
-            &[],
+            &["dialog:ChimpSaveDialog"],
             &["chimp/save/mod.rs"],
             container_kit,
             |h| {
@@ -1315,11 +1315,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_mesh_texture_prompt",
-            &["chimp.chimp_mesh_texture_prompt"],
+            &["dialog:ChimpMeshTexturePrompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt::for_test(
+                h.app.dialogs.open(ChimpMeshTexturePrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/SM_Smoke",
                 ));
@@ -1328,11 +1328,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_texture_export_prompt",
-            &["chimp.chimp_texture_export_prompt"],
+            &["dialog:ChimpTextureExportPrompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt::for_test(
+                h.app.dialogs.open(ChimpTextureExportPrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/T_Smoke",
                 ));
@@ -1341,11 +1341,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "chimp_level_export_prompt",
-            &["chimp.chimp_level_export_prompt"],
+            &["dialog:ChimpLevelExportPrompt"],
             &["chimp/prompts_window.rs"],
             container_kit,
             |h| {
-                h.app.chimp.chimp_level_export_prompt = Some(ChimpLevelExportPrompt::for_test(
+                h.app.dialogs.open(ChimpLevelExportPrompt::for_test(
                     active_id(h),
                     "/Game/Smoke/L_Smoke",
                 ));

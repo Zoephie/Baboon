@@ -313,11 +313,6 @@ impl Baboon {
             &mut self.chimp.chimp_usmap_path_input,
         );
         draw_tool_commands_window(&cx!(self, ctx), &mut self.kit_tools);
-        draw_chimp_discard_window(&cx!(self, ctx), &mut self.chimp);
-        draw_chimp_save_window(&cx!(self, ctx), &mut self.views);
-        draw_chimp_mesh_texture_prompt(&cx!(self, ctx), &mut self.chimp);
-        draw_chimp_texture_export_prompt(&cx!(self, ctx), &mut self.chimp);
-        draw_chimp_level_export_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_poke_window(&cx!(self, ctx), &mut self.poke);

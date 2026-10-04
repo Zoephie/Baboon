@@ -42,6 +42,11 @@ impl<'a> Ctx<'a> {
         self.commands.send(command);
     }
 
+    /// Open `dialog` once this frame's drawing is over.
+    pub(in crate::app) fn open_dialog(&self, dialog: impl Dialog) {
+        self.commands.send(Command::OpenDialog(Box::new(dialog)));
+    }
+
     /// Replace the status line once this frame's drawing is over.
     pub(in crate::app) fn set_status(&self, status: impl Into<String>) {
         self.commands.send(Command::Status(status.into()));
@@ -142,6 +147,8 @@ pub(in crate::app) enum Command {
     Settings(SettingsCommand),
     FirstRun(FirstRunCommand),
     Chimp(ChimpCommand),
+    /// Open a dialog, replacing an open one of its type and instance.
+    OpenDialog(Box<dyn Dialog>),
 }
 
 impl From<HelpCommand> for Command {
@@ -292,6 +299,7 @@ impl Baboon {
             Command::Settings(command) => self.apply_settings_command(command, ctx),
             Command::FirstRun(command) => self.apply_first_run_command(command),
             Command::Chimp(command) => self.apply_chimp_command(command, ctx),
+            Command::OpenDialog(dialog) => self.dialogs.open_boxed(dialog),
         }
     }
 }

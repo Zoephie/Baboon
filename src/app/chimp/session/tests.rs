@@ -599,10 +599,10 @@ fn the_discard_prompt_opens_only_for_modified_packages() {
     let install = SyntheticInstall::new();
     let mut app = install.app_with_open(&[THING]);
     app.open_chimp_discard_prompt(0, Vec::new(), None, None);
-    assert!(app.chimp.chimp_discard_prompt.is_none());
+    assert!(app.dialogs.get::<ChimpDiscardPrompt>().is_none());
     assert_eq!(app.model.status, "Chimp has no modified packages");
     app.open_chimp_discard_prompt(0, vec![THING.to_owned()], None, None);
-    let prompt = app.chimp.chimp_discard_prompt.as_ref().unwrap();
+    let prompt = app.dialogs.get::<ChimpDiscardPrompt>().unwrap();
     assert_eq!(prompt.kit, app.model.kits[0].id);
     assert_eq!(prompt.packages, [THING]);
 }

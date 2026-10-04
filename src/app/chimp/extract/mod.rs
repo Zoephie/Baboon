@@ -578,7 +578,7 @@ impl Baboon {
             .documents
             .get(package)
             .map(|pane| pane.selected_export);
-        self.chimp.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
+        self.dialogs.open(ChimpTextureExportPrompt {
             kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             // DDS and split UDIM: the pair that round-trips into Unreal.
@@ -644,7 +644,7 @@ impl Baboon {
             return;
         }
         let default = SegmentBudget::default();
-        self.chimp.chimp_level_export_prompt = Some(ChimpLevelExportPrompt {
+        self.dialogs.open(ChimpLevelExportPrompt {
             kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             cells,
@@ -803,7 +803,7 @@ impl Baboon {
         }
         // Asked once the destination is known, so the prompt can say exactly
         // where the textures would land.
-        self.chimp.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt {
+        self.dialogs.open(ChimpMeshTexturePrompt {
             kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             format,

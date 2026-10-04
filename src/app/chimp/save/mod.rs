@@ -10,7 +10,9 @@ enum ChimpSaveMode {
     OverwriteSources,
 }
 
-pub(super) struct ChimpSaveDialog {
+pub(in crate::app) struct ChimpSaveDialog {
+    /// The workspace whose modified packages it saves.
+    pub(super) kit: KitId,
     mode: ChimpSaveMode,
     name: String,
     folder: PathBuf,
@@ -42,7 +44,8 @@ impl Baboon {
     /// requires, for tests that draw it.
     #[cfg(test)]
     pub(in crate::app) fn open_chimp_save_dialog_for_test(&mut self, kit_index: usize) {
-        self.views[self.model.kits[kit_index].id].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.dialogs.open(ChimpSaveDialog {
+            kit: self.model.kits[kit_index].id,
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder: PathBuf::from("/no/such/Paks"),
@@ -72,7 +75,8 @@ impl Baboon {
             self.model.status = "Chimp does not have a Paks output folder".to_owned();
             return false;
         };
-        self.views[self.model.kits[kit_index].id].chimp.save_dialog = Some(ChimpSaveDialog {
+        self.dialogs.open(ChimpSaveDialog {
+            kit: self.model.kits[kit_index].id,
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder,
@@ -95,7 +99,7 @@ impl Baboon {
             return;
         };
         if !self.open_chimp_save_dialog_for_close(index, action.clone()) {
-            self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+            self.dialogs.open(ChimpDiscardPrompt {
                 kit,
                 packages,
                 pending_action: Some(action),
@@ -123,7 +127,7 @@ impl Baboon {
                 }
             }
             Err(error) => {
-                self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                self.dialogs.open(ChimpDiscardPrompt {
                     error: Some(error),
                     ..prompt
                 });
@@ -696,259 +700,251 @@ fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> 
         .map_err(|failure| failure.to_string())
 }
 
-pub(in crate::app) fn draw_chimp_discard_window(cx: &Ctx, chimp: &mut ChimpFeature) {
-    let ctx = cx.egui;
-    let Some(prompt) = chimp.chimp_discard_prompt.as_ref() else {
-        return;
-    };
-    let packages = &prompt.packages;
-    let pending_action = prompt.pending_action.clone();
-    let error = prompt.error.clone();
-    let mut open = true;
-    let mut discard = false;
-    let mut save = false;
-    let mut cancel = false;
+impl Dialog for ChimpDiscardPrompt {
+    fn show(&mut self, cx: &Ctx) -> bool {
+        let ctx = cx.egui;
+        let prompt = &*self;
+        let packages = &prompt.packages;
+        let pending_action = prompt.pending_action.clone();
+        let error = prompt.error.clone();
+        let mut open = true;
+        let mut discard = false;
+        let mut save = false;
+        let mut cancel = false;
 
-    egui::Window::new("Discard Chimp changes?")
-        .id(egui::Id::new("chimp_discard_changes"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(window_width(ctx, 520.0))
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label(
-                RichText::new(if pending_action.is_some() {
-                    "The following modified Chimp packages must be saved or discarded before closing."
-                } else {
-                    "Every listed Chimp package will return to its original source data."
-                })
-                .color(text_dark()),
-            );
-            ui.add_space(6.0);
-            egui::ScrollArea::vertical()
-                .max_height(180.0)
-                .show(ui, |ui| {
-                    for package in packages {
-                        ui.label(RichText::new(package).color(text_dark()).monospace());
+        egui::Window::new("Discard Chimp changes?")
+            .id(egui::Id::new("chimp_discard_changes"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(window_width(ctx, 520.0))
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(if pending_action.is_some() {
+                        "The following modified Chimp packages must be saved or discarded before closing."
+                    } else {
+                        "Every listed Chimp package will return to its original source data."
+                    })
+                    .color(text_dark()),
+                );
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        for package in packages {
+                            ui.label(RichText::new(package).color(text_dark()).monospace());
+                        }
+                    });
+                if let Some(error) = error.as_deref() {
+                    ui.add_space(6.0);
+                    ui.colored_label(Color32::from_rgb(180, 48, 40), error);
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "This removes the unsaved recovery copy. Exported mods and source PAK changes already saved are not affected, and this cannot be undone.",
+                    )
+                    .color(Color32::from_rgb(210, 120, 90)),
+                );
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if pending_action.is_some()
+                        && ui.button("Save Chimp Changes…").clicked()
+                    {
+                        save = true;
+                    }
+                    if ui.button("Discard Changes").clicked() {
+                        discard = true;
                     }
                 });
-            if let Some(error) = error.as_deref() {
-                ui.add_space(6.0);
-                ui.colored_label(Color32::from_rgb(180, 48, 40), error);
-            }
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(
-                    "This removes the unsaved recovery copy. Exported mods and source PAK changes already saved are not affected, and this cannot be undone.",
-                )
-                .color(Color32::from_rgb(210, 120, 90)),
-            );
-            ui.add_space(10.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
-                }
-                if pending_action.is_some()
-                    && ui.button("Save Chimp Changes…").clicked()
-                {
-                    save = true;
-                }
-                if ui.button("Discard Changes").clicked() {
-                    discard = true;
-                }
             });
-        });
 
-    if !open || cancel {
-        chimp.chimp_discard_prompt = None;
-    } else if (save && pending_action.is_some()) || discard {
-        let prompt = chimp.chimp_discard_prompt.take().expect("checked above");
-        cx.send(if save {
-            ChimpCommand::SaveBeforeClose(prompt)
-        } else {
-            ChimpCommand::Discard(prompt)
-        });
+        if !open || cancel {
+            return false;
+        }
+        // Left open for the save or discard, which takes it back from the host.
+        if save && pending_action.is_some() {
+            cx.send(ChimpCommand::SaveBeforeClose);
+        } else if discard {
+            cx.send(ChimpCommand::Discard);
+        }
+        true
     }
 }
 
-pub(in crate::app) fn draw_chimp_save_window(cx: &Ctx, views: &mut KitViews) {
-    let ctx = cx.egui;
-    let model = cx.model;
-    let Some(kit_index) = model
-        .kits
-        .iter()
-        .position(|kit| views[kit.id].chimp.save_dialog.is_some())
-    else {
-        return;
-    };
-    let dirty_packages = model.chimp_dirty_packages(kit_index);
-    let source_containers: Vec<PathBuf> = match &model.kits[kit_index].chimp.mount {
-        ChimpMount::Ready(world) => {
-            let mut paths: Vec<_> = dirty_packages
-                .iter()
-                .filter_map(|package| {
-                    let document = model.kits[kit_index].chimp.documents.get(package)?;
-                    world
-                        .containers()
-                        .get(document.provider.container)
-                        .map(|container| container.path.clone())
-                })
-                .collect();
-            paths.sort();
-            paths.dedup();
-            paths
-        }
-        _ => Vec::new(),
-    };
-    let mut close = false;
-    let mut action = None;
-    let expert_mode = model.prefs.expert_mode;
-    let kit = model.kits[kit_index].id;
-    let dialog = views[kit]
-        .chimp
-        .save_dialog
-        .as_mut()
-        .expect("checked above");
-    // Overwriting the installed game's own containers is an expert-mode
-    // route. A dialog left on that mode when expert mode is turned off
-    // would still act on it, so the mode is corrected here rather than only
-    // hidden below.
-    if !expert_mode && dialog.mode == ChimpSaveMode::OverwriteSources {
-        dialog.mode = ChimpSaveMode::ExportMod;
-        dialog.overwrite_acknowledged = false;
-    }
-    egui::Window::new("Save Chimp changes")
-        .id(egui::Id::new("chimp_save_changes"))
-        .collapsible(false)
-        .resizable(true)
-        .default_width(window_width(ctx, 620.0))
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label(format!(
-                "{} modified Unreal package(s) will be saved together.",
-                dirty_packages.len()
-            ));
-            egui::ScrollArea::vertical()
-                .max_height(150.0)
-                .show(ui, |ui| {
-                    for package in &dirty_packages {
-                        ui.label(package);
-                    }
-                });
-            ui.separator();
-            // Without expert mode there is one route, so it is stated
-            // rather than offered as a choice of one.
-            if expert_mode {
-                let mode_before = dialog.mode;
-                ui.radio_value(
-                    &mut dialog.mode,
-                    ChimpSaveMode::ExportMod,
-                    "Export mod (recommended)",
-                );
-                ui.radio_value(
-                    &mut dialog.mode,
-                    ChimpSaveMode::OverwriteSources,
-                    "Overwrite source PAKs",
-                );
-                if dialog.mode != mode_before {
-                    dialog.overwrite_acknowledged = false;
-                }
-            } else {
-                ui.label(
-                    RichText::new(
-                        "Saved as a mod, leaving the installed game untouched. Overwriting \
-                         the game's own PAKs needs expert mode.",
-                    )
-                    .color(subtle_dark())
-                    .small(),
-                );
+impl Dialog for ChimpSaveDialog {
+    fn show(&mut self, cx: &Ctx) -> bool {
+        let ctx = cx.egui;
+        let model = cx.model;
+        let Some(kit_index) = model.kit_index(self.kit) else {
+            return false;
+        };
+        let dirty_packages = model.chimp_dirty_packages(kit_index);
+        let source_containers: Vec<PathBuf> = match &model.kits[kit_index].chimp.mount {
+            ChimpMount::Ready(world) => {
+                let mut paths: Vec<_> = dirty_packages
+                    .iter()
+                    .filter_map(|package| {
+                        let document = model.kits[kit_index].chimp.documents.get(package)?;
+                        world
+                            .containers()
+                            .get(document.provider.container)
+                            .map(|container| container.path.clone())
+                    })
+                    .collect();
+                paths.sort();
+                paths.dedup();
+                paths
             }
-            ui.separator();
-
-            let mut can_save;
-            match dialog.mode {
-                ChimpSaveMode::ExportMod => {
-                    ui.horizontal(|ui| {
-                        ui.label("Mod name");
-                        ui.text_edit_singleline(&mut dialog.name);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Destination");
-                        ui.label(dialog.folder.display().to_string());
-                        if ui.button("Browse…").clicked()
-                            && let Some(folder) = rfd::FileDialog::new()
-                                .set_title("Choose Chimp mod folder")
-                                .set_directory(&dialog.folder)
-                                .pick_folder()
-                        {
-                            dialog.folder = folder;
-                            dialog.overwrite_acknowledged = false;
+            _ => Vec::new(),
+        };
+        let mut close = false;
+        let mut action = None;
+        let expert_mode = model.prefs.expert_mode;
+        let kit = self.kit;
+        let dialog = &mut *self;
+        // Overwriting the installed game's own containers is an expert-mode
+        // route. A dialog left on that mode when expert mode is turned off
+        // would still act on it, so the mode is corrected here rather than only
+        // hidden below.
+        if !expert_mode && dialog.mode == ChimpSaveMode::OverwriteSources {
+            dialog.mode = ChimpSaveMode::ExportMod;
+            dialog.overwrite_acknowledged = false;
+        }
+        egui::Window::new("Save Chimp changes")
+            .id(egui::Id::new("chimp_save_changes"))
+            .collapsible(false)
+            .resizable(true)
+            .default_width(window_width(ctx, 620.0))
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} modified Unreal package(s) will be saved together.",
+                    dirty_packages.len()
+                ));
+                egui::ScrollArea::vertical()
+                    .max_height(150.0)
+                    .show(ui, |ui| {
+                        for package in &dirty_packages {
+                            ui.label(package);
                         }
                     });
-                    let stem = chimp_mod_stem(&dialog.name);
-                    can_save = !sanitize_mod_name(&dialog.name).is_empty();
-                    if can_save {
-                        ui.label(format!("Output: {stem}.utoc / .ucas / .pak"));
-                    } else {
-                        ui.colored_label(
-                            Color32::from_rgb(210, 120, 80),
-                            "Enter a file-safe mod name.",
-                        );
+                ui.separator();
+                // Without expert mode there is one route, so it is stated
+                // rather than offered as a choice of one.
+                if expert_mode {
+                    let mode_before = dialog.mode;
+                    ui.radio_value(
+                        &mut dialog.mode,
+                        ChimpSaveMode::ExportMod,
+                        "Export mod (recommended)",
+                    );
+                    ui.radio_value(
+                        &mut dialog.mode,
+                        ChimpSaveMode::OverwriteSources,
+                        "Overwrite source PAKs",
+                    );
+                    if dialog.mode != mode_before {
+                        dialog.overwrite_acknowledged = false;
                     }
-                    let existing =
-                        chimp_existing_triplet(&dialog.folder.join(format!("{stem}.utoc")));
-                    if !existing.is_empty() {
+                } else {
+                    ui.label(
+                        RichText::new(
+                            "Saved as a mod, leaving the installed game untouched. Overwriting \
+                             the game's own PAKs needs expert mode.",
+                        )
+                        .color(subtle_dark())
+                        .small(),
+                    );
+                }
+                ui.separator();
+
+                let mut can_save;
+                match dialog.mode {
+                    ChimpSaveMode::ExportMod => {
+                        ui.horizontal(|ui| {
+                            ui.label("Mod name");
+                            ui.text_edit_singleline(&mut dialog.name);
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Destination");
+                            ui.label(dialog.folder.display().to_string());
+                            if ui.button("Browse…").clicked()
+                                && let Some(folder) = rfd::FileDialog::new()
+                                    .set_title("Choose Chimp mod folder")
+                                    .set_directory(&dialog.folder)
+                                    .pick_folder()
+                            {
+                                dialog.folder = folder;
+                                dialog.overwrite_acknowledged = false;
+                            }
+                        });
+                        let stem = chimp_mod_stem(&dialog.name);
+                        can_save = !sanitize_mod_name(&dialog.name).is_empty();
+                        if can_save {
+                            ui.label(format!("Output: {stem}.utoc / .ucas / .pak"));
+                        } else {
+                            ui.colored_label(
+                                Color32::from_rgb(210, 120, 80),
+                                "Enter a file-safe mod name.",
+                            );
+                        }
+                        let existing =
+                            chimp_existing_triplet(&dialog.folder.join(format!("{stem}.utoc")));
+                        if !existing.is_empty() {
+                            ui.colored_label(
+                                Color32::from_rgb(210, 120, 80),
+                                format!("This will replace: {}", existing.join(", ")),
+                            );
+                            ui.checkbox(
+                                &mut dialog.overwrite_acknowledged,
+                                "Replace the existing mod container",
+                            );
+                            can_save &= dialog.overwrite_acknowledged;
+                        }
+                    }
+                    ChimpSaveMode::OverwriteSources => {
                         ui.colored_label(
-                            Color32::from_rgb(210, 120, 80),
-                            format!("This will replace: {}", existing.join(", ")),
+                            Color32::from_rgb(190, 72, 56),
+                            "This replaces package indexes in the installed game containers.",
                         );
+                        for path in &source_containers {
+                            ui.label(path.display().to_string());
+                        }
                         ui.checkbox(
                             &mut dialog.overwrite_acknowledged,
-                            "Replace the existing mod container",
+                            "I understand these source containers will be modified",
                         );
-                        can_save &= dialog.overwrite_acknowledged;
+                        can_save = dialog.overwrite_acknowledged && !source_containers.is_empty();
                     }
                 }
-                ChimpSaveMode::OverwriteSources => {
-                    ui.colored_label(
-                        Color32::from_rgb(190, 72, 56),
-                        "This replaces package indexes in the installed game containers.",
-                    );
-                    for path in &source_containers {
-                        ui.label(path.display().to_string());
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        close = true;
                     }
-                    ui.checkbox(
-                        &mut dialog.overwrite_acknowledged,
-                        "I understand these source containers will be modified",
-                    );
-                    can_save = dialog.overwrite_acknowledged && !source_containers.is_empty();
-                }
-            }
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    close = true;
-                }
-                let label = match dialog.mode {
-                    ChimpSaveMode::ExportMod => "Export mod",
-                    ChimpSaveMode::OverwriteSources => "Overwrite source PAKs",
-                };
-                if ui.add_enabled(can_save, egui::Button::new(label)).clicked() {
-                    action = Some(match dialog.mode {
-                        ChimpSaveMode::ExportMod => ChimpSaveAction::Export(
-                            dialog
-                                .folder
-                                .join(format!("{}.utoc", chimp_mod_stem(&dialog.name))),
-                        ),
-                        ChimpSaveMode::OverwriteSources => ChimpSaveAction::Overwrite,
-                    });
-                }
+                    let label = match dialog.mode {
+                        ChimpSaveMode::ExportMod => "Export mod",
+                        ChimpSaveMode::OverwriteSources => "Overwrite source PAKs",
+                    };
+                    if ui.add_enabled(can_save, egui::Button::new(label)).clicked() {
+                        action = Some(match dialog.mode {
+                            ChimpSaveMode::ExportMod => ChimpSaveAction::Export(
+                                dialog
+                                    .folder
+                                    .join(format!("{}.utoc", chimp_mod_stem(&dialog.name))),
+                            ),
+                            ChimpSaveMode::OverwriteSources => ChimpSaveAction::Overwrite,
+                        });
+                    }
+                });
             });
-        });
-    if close || action.is_some() {
         let pending_close_action = dialog.pending_close_action.clone();
-        views[kit].chimp.save_dialog = None;
+        let chosen = action.is_some();
         if let Some(action) = action {
             cx.send(ChimpCommand::Save {
                 kit,
@@ -956,6 +952,7 @@ pub(in crate::app) fn draw_chimp_save_window(cx: &Ctx, views: &mut KitViews) {
                 pending_close_action,
             });
         }
+        !close && !chosen
     }
 }
 
@@ -1007,9 +1004,10 @@ impl Model {
 impl Baboon {
     /// Whether any kit has its Chimp save dialog up.
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
-        self.model
-            .kits
-            .iter()
-            .any(|kit| self.views[kit.id].chimp.save_dialog.is_some())
+        self.model.kits.iter().any(|kit| {
+            self.dialogs
+                .get::<ChimpSaveDialog>()
+                .is_some_and(|dialog| dialog.kit == kit.id)
+        })
     }
 }

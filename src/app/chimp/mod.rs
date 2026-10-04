@@ -96,7 +96,6 @@ impl Baboon {
     }
 }
 pub(in crate::app) mod prompts_window;
-pub(in crate::app) use prompts_window::*;
 
 /// What Chimp's panes and windows ask of the application.
 pub(in crate::app) enum ChimpCommand {
@@ -108,17 +107,19 @@ pub(in crate::app) enum ChimpCommand {
         package: String,
         edit: Option<ChimpEdit>,
     },
-    /// Export a mesh, with the textures `with_textures` asks for.
-    ExportMesh {
-        prompt: ChimpMeshTexturePrompt,
-        with_textures: ChimpTextureScope,
-    },
-    ExportTexture(ChimpTextureExportPrompt),
-    ExportLevel(ChimpLevelExportPrompt),
-    /// The discard prompt's Save: open the save dialog for the close it holds.
-    SaveBeforeClose(ChimpDiscardPrompt),
-    /// The discard prompt's Discard: restore its packages, then run its close.
-    Discard(ChimpDiscardPrompt),
+    /// Export the mesh the open texture prompt is for, with the textures
+    /// `with_textures` asks for.
+    ExportMesh { with_textures: ChimpTextureScope },
+    /// Export the texture the open format prompt is for.
+    ExportTexture,
+    /// Export the level the open level prompt is for.
+    ExportLevel,
+    /// The open discard prompt's Save: open the save dialog for the close it
+    /// holds.
+    SaveBeforeClose,
+    /// The open discard prompt's Discard: restore its packages, then run its
+    /// close.
+    Discard,
     /// The save dialog's choice for a kit's modified packages.
     Save {
         kit: KitId,
@@ -215,16 +216,31 @@ impl Baboon {
                 }
                 refresh_chimp_header_usage(document, pane);
             }
-            ChimpCommand::ExportMesh {
-                prompt,
-                with_textures,
-            } => self.start_chimp_mesh_export(prompt, with_textures, ctx.clone()),
-            ChimpCommand::ExportTexture(prompt) => {
-                self.start_chimp_texture_export(prompt, ctx.clone())
+            ChimpCommand::ExportMesh { with_textures } => {
+                if let Some(prompt) = self.dialogs.close::<ChimpMeshTexturePrompt>() {
+                    self.start_chimp_mesh_export(prompt, with_textures, ctx.clone());
+                }
             }
-            ChimpCommand::ExportLevel(prompt) => self.start_chimp_level_export(prompt, ctx.clone()),
-            ChimpCommand::SaveBeforeClose(prompt) => self.save_chimp_before_close(prompt),
-            ChimpCommand::Discard(prompt) => self.discard_chimp_for_prompt(prompt, ctx),
+            ChimpCommand::ExportTexture => {
+                if let Some(prompt) = self.dialogs.close::<ChimpTextureExportPrompt>() {
+                    self.start_chimp_texture_export(prompt, ctx.clone());
+                }
+            }
+            ChimpCommand::ExportLevel => {
+                if let Some(prompt) = self.dialogs.close::<ChimpLevelExportPrompt>() {
+                    self.start_chimp_level_export(prompt, ctx.clone());
+                }
+            }
+            ChimpCommand::SaveBeforeClose => {
+                if let Some(prompt) = self.dialogs.close::<ChimpDiscardPrompt>() {
+                    self.save_chimp_before_close(prompt);
+                }
+            }
+            ChimpCommand::Discard => {
+                if let Some(prompt) = self.dialogs.close::<ChimpDiscardPrompt>() {
+                    self.discard_chimp_for_prompt(prompt, ctx);
+                }
+            }
             ChimpCommand::Save {
                 kit,
                 action,
@@ -321,20 +337,11 @@ impl Baboon {
     }
 }
 
-/// Chimp's app-wide prompts and jobs: mesh texture, texture export and level
-/// export prompts, the level job, writes in flight, the discard prompt and the
-/// usmap path being typed.
+/// Chimp's app-wide jobs: the level job, writes in flight and the usmap path
+/// being typed. Its prompts are dialogs in the host.
 pub(in crate::app) struct ChimpFeature {
-    /// A Chimp mesh export waiting on the choice to export its textures too.
-    pub(in crate::app) chimp_mesh_texture_prompt: Option<ChimpMeshTexturePrompt>,
-    /// A Chimp texture export waiting on the choice of image format.
-    pub(in crate::app) chimp_texture_export_prompt: Option<ChimpTextureExportPrompt>,
-    pub(in crate::app) chimp_level_export_prompt: Option<ChimpLevelExportPrompt>,
     pub(in crate::app) chimp_level_job: Option<ChimpLevelJob>,
     /// Kits with a Chimp save running, and the close to run once it lands.
     pub(in crate::app) chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
-    /// Pending workspace-wide Chimp discard, optionally continuing a close
-    /// transaction after the packages have been restored.
-    pub(in crate::app) chimp_discard_prompt: Option<ChimpDiscardPrompt>,
     pub(in crate::app) chimp_usmap_path_input: String,
 }

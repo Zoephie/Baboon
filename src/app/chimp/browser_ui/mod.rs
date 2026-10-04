@@ -54,7 +54,7 @@ pub(in crate::app) fn draw_chimp_workspace(
             .on_disabled_hover_text("This workspace has no modified Chimp packages")
             .clicked()
         {
-            chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+            cx.open_dialog(ChimpDiscardPrompt {
                 kit,
                 packages,
                 pending_action: None,

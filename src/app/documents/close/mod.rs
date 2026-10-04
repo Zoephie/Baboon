@@ -110,7 +110,7 @@ impl Baboon {
         // waiting when the app or a workspace closes would be lost.
         self.flush_all_chimp_checkpoints();
         if self.documents.save_changes_prompt.visible
-            || self.chimp.chimp_discard_prompt.is_some()
+            || self.dialogs.get::<ChimpDiscardPrompt>().is_some()
             || self.has_chimp_save_dialog()
         {
             return;
@@ -210,7 +210,7 @@ impl Baboon {
             return;
         }
         if self.documents.save_changes_prompt.visible
-            || self.chimp.chimp_discard_prompt.is_some()
+            || self.dialogs.get::<ChimpDiscardPrompt>().is_some()
             || self.has_chimp_save_dialog()
         {
             return;

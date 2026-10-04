@@ -582,7 +582,7 @@ impl Baboon {
             self.model.status = "Chimp has no modified packages".to_owned();
             return;
         }
-        self.chimp.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+        self.dialogs.open(ChimpDiscardPrompt {
             kit: self.model.kits[kit_index].id,
             packages,
             pending_action,

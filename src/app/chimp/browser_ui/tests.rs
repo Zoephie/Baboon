@@ -257,11 +257,17 @@ fn the_toolbar_discard_prompts_for_modified_packages() {
     let mut frames = Frames::new();
     frames.frame(Vec::new(), &mut draw_workspace(&mut app));
     frames.click_at(button, &mut draw_workspace(&mut app));
-    assert!(app.chimp.chimp_discard_prompt.is_none(), "disabled while clean");
+    assert!(
+        app.dialogs.get::<ChimpDiscardPrompt>().is_none(),
+        "disabled while clean"
+    );
 
     app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
     frames.click_at(button, &mut draw_workspace(&mut app));
-    let prompt = app.chimp.chimp_discard_prompt.as_ref().expect("the prompt opened");
+    let prompt = app
+        .dialogs
+        .get::<ChimpDiscardPrompt>()
+        .expect("the prompt opened");
     assert_eq!(prompt.packages, [THING]);
     assert!(prompt.pending_action.is_none());
 }

@@ -434,12 +434,8 @@ impl Baboon {
                     .as_ref()
                     .map(|path| path.display().to_string())
                     .unwrap_or_default(),
-                chimp_mesh_texture_prompt: None,
-                chimp_texture_export_prompt: None,
-                chimp_level_export_prompt: None,
                 chimp_level_job: None,
                 chimp_writes: HashMap::new(),
-                chimp_discard_prompt: None,
             },
             kit_tools: KitsFeature {
                 editing_kit_validation,

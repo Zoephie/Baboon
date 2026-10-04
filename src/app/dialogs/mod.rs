@@ -39,7 +39,10 @@ impl DialogHost {
     /// Open `dialog`, replacing an open one with the same type and instance
     /// where it stands.
     pub(in crate::app) fn open(&mut self, dialog: impl Dialog) {
-        let dialog: Box<dyn Dialog> = Box::new(dialog);
+        self.open_boxed(Box::new(dialog));
+    }
+
+    pub(in crate::app) fn open_boxed(&mut self, dialog: Box<dyn Dialog>) {
         let key = key_of(&*dialog);
         match self.open.iter_mut().find(|open| key_of(&***open) == key) {
             Some(slot) => *slot = dialog,

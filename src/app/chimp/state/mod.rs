@@ -191,7 +191,6 @@ pub(in crate::app) struct ChimpView {
     pub(super) folder_selection: ChimpFolderSelection,
     pub(super) selected_file: Option<String>,
     pub(super) document_tree: Option<egui_tiles::Tree<String>>,
-    pub(super) save_dialog: Option<ChimpSaveDialog>,
 }
 
 /// One open Unreal package's content: its bytes and decoded header, payloads
@@ -498,6 +497,13 @@ impl Baboon {
         let kit = &mut self.model.kits[kit_index];
         kit.chimp = ChimpState::default();
         self.views[kit.id].chimp = ChimpView::default();
+        if self
+            .dialogs
+            .get::<ChimpSaveDialog>()
+            .is_some_and(|dialog| dialog.kit == kit.id)
+        {
+            self.dialogs.close::<ChimpSaveDialog>();
+        }
     }
 
     /// Close `package`'s document pane in a kit's Chimp layout.
