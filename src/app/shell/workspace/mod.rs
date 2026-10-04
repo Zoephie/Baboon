@@ -311,7 +311,6 @@ impl Baboon {
             &mut self.chimp.chimp_usmap_path_input,
         );
         self.diff_expanded_mod_export_rows();
-        draw_poke_window(&cx!(self, ctx), &mut self.poke);
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);

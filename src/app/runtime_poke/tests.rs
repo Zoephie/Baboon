@@ -924,7 +924,7 @@ fn an_undo_that_panics_keeps_the_record_and_settles() {
 fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
     let mut app = Baboon::for_test();
     let plan = last_poke_for_test(patch_for_test(), vec![1]).plan;
-    app.poke.poke_dialog = Some(PokeDialog {
+    app.dialogs.open(PokeDialog {
         kit: app.model.kits[0].id,
         key: "file:objects/test".to_owned(),
         state: PokeDialogState::Ready(plan),
@@ -932,13 +932,13 @@ fn a_poke_write_that_panics_leaves_the_dialog_with_an_error() {
     let ctx = egui::Context::default();
     crate::app::with_panicking_workers(|| app.confirm_poke(ctx.clone()));
     assert!(matches!(
-        app.poke.poke_dialog.as_ref().map(|dialog| &dialog.state),
+        app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
         Some(PokeDialogState::Writing)
     ));
 
     assert!(crate::app::apply_next_worker_message(&mut app), "the write answered");
     assert!(matches!(
-        app.poke.poke_dialog.as_ref().map(|dialog| &dialog.state),
+        app.dialogs.get::<PokeDialog>().map(|dialog| &dialog.state),
         Some(PokeDialogState::Error(_))
     ));
 }

@@ -193,8 +193,8 @@ pub struct Baboon {
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
-    /// Memory poking: the poke dialog, the record that undoes the last poke,
-    /// and whether a poke or its undo is running.
+    /// Memory poking: the record that undoes the last poke, and whether a
+    /// poke or its undo is running.
     pub(in crate::app) poke: PokeFeature,
     /// Search: the Find dialog, tag query results, the field-value search and a
     /// Find hit waiting to be opened.
@@ -380,7 +380,6 @@ impl Baboon {
             audio: audio::AudioState::default(),
             ce_usmap: None,
             poke: PokeFeature {
-                poke_dialog: None,
                 last_poke: None,
                 poke_direct_running: false,
                 poke_undo_running: false,

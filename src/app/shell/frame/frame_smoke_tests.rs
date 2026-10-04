@@ -1360,11 +1360,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "poke_scanning",
-            &["poke.poke_dialog"],
+            &["dialog:PokeDialog"],
             &["runtime_poke/mod.rs"],
             container_kit,
             |h| {
-                h.app.poke.poke_dialog = Some(PokeDialog {
+                h.app.dialogs.open(PokeDialog {
                     kit: active_id(h),
                     key: ce_key(),
                     state: PokeDialogState::Scanning,
@@ -1374,11 +1374,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "poke_error",
-            &["poke.poke_dialog"],
+            &["dialog:PokeDialog"],
             &["runtime_poke/mod.rs"],
             container_kit,
             |h| {
-                h.app.poke.poke_dialog = Some(PokeDialog {
+                h.app.dialogs.open(PokeDialog {
                     kit: active_id(h),
                     key: ce_key(),
                     state: PokeDialogState::Error("The smoke process is not running".to_owned()),
