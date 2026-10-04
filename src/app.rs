@@ -527,9 +527,10 @@ impl Baboon {
         ctx.set_global_style(foundation_style());
         egui_extras::install_image_loaders(ctx);
         // A drag hovering Sapien's window asks for a copy or not-allowed
-        // cursor (see `track_kit_tool_drop`). egui's own drag-and-drop hook
-        // forces the grabbing hand at the end of every pass, so the request
-        // has to be applied from a hook registered after it, which runs later.
+        // cursor (see `track_kit_tool_drop`). It is applied at the end of the
+        // pass, over whatever cursor a widget under the pointer chose. egui's
+        // drag-and-drop shows its grabbing hand after this hook, and only
+        // when no cursor was chosen, so the request stands.
         ctx.on_end_pass(
             "kit_tool_drop_cursor",
             Arc::new(|ctx| {

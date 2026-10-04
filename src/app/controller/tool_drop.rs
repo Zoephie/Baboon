@@ -4,9 +4,10 @@
 use super::*;
 
 /// egui temp-data key under which a frame leaves the cursor it wants shown
-/// while a drag hovers a kit tool. Read by the end-of-pass hook `Baboon::new`
-/// installs, which runs after egui's own drag-and-drop hook has forced the
-/// grabbing hand, so it has the last word on the cursor.
+/// while a drag hovers a kit tool. Read by the end-of-pass hook
+/// `Baboon::configure_context` installs, which has the last word over the
+/// widgets; egui's drag-and-drop then shows its grabbing hand only when no
+/// cursor was chosen.
 pub(in crate::app) const KIT_TOOL_DROP_CURSOR: &str = "kit_tool_drop_cursor";
 
 /// What a drop on a kit tool does, once every objection is out of the way.
@@ -283,6 +284,31 @@ mod tests {
             0,
         );
         app.plan_kit_tool_drop(&target, &payload(file), &egui::Context::default())
+    }
+
+    /// The cursor a drag over a kit tool asks for is the one shown, over
+    /// egui's grabbing hand for a drag. Without a request the hand shows,
+    /// which is what the request has to win against.
+    #[test]
+    fn a_kit_tool_drop_cursor_outlasts_the_drag_hand() {
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let cursor_after = |requested: Option<egui::CursorIcon>| {
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::DragAndDrop::set_payload(ui.ctx(), "rifle.weapon");
+                if let Some(cursor) = requested {
+                    let id = egui::Id::new(KIT_TOOL_DROP_CURSOR);
+                    ui.ctx().data_mut(|data| data.insert_temp(id, cursor));
+                }
+            });
+            output.platform_output.cursor_icon
+        };
+        assert_eq!(cursor_after(None), egui::CursorIcon::Grabbing);
+        assert_eq!(cursor_after(Some(egui::CursorIcon::Copy)), egui::CursorIcon::Copy);
+        assert_eq!(
+            cursor_after(Some(egui::CursorIcon::NotAllowed)),
+            egui::CursorIcon::NotAllowed
+        );
     }
 
     /// Every objection, in the order a drop meets them, and the plans that
