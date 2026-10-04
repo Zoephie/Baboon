@@ -820,6 +820,44 @@ mod tests {
         plays_a_classic_idle(source, entry, "haloce_mcc", "stand rifle idle");
     }
 
+    /// A Halo CE graph that lists no nodes of its own animates its gbxmodel's,
+    /// as the JMA extractor does. Preview built the skeleton from the graph
+    /// alone, so such a vehicle's animations decoded onto no nodes and the
+    /// preview stayed in its bind pose. `BLAM_TEST_HCEEK` names the kit's
+    /// `tags` folder.
+    #[test]
+    fn a_halo_ce_vehicle_animates_its_gbxmodels_nodes() {
+        let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+        let rel = "vehicles/warthog/warthog.vehicle";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: tags.clone(),
+            game: Some(GameId::HaloCe),
+            definitions_root: crate::test_kits::definitions().to_path_buf(),
+        };
+        let entry = TagEntry {
+            key: file_entry_key(&tags.join(rel)),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*b"vehi"),
+            group_name: Some("vehicle".to_owned()),
+            location: TagEntryLocation::LooseFile(tags.join(rel)),
+        };
+        let list = list_model_animations(&source, &entry).expect("animation list");
+        let index = list
+            .iter()
+            .position(|animation| animation.playable && animation.frame_count > 1)
+            .expect("a playable animation");
+        let decoded = decode_model_animation(&source, &entry, index).expect("decode");
+        assert!(
+            !decoded.skeleton_names.is_empty(),
+            "'{}' decoded onto no nodes",
+            list[index].name
+        );
+    }
+
     /// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
     #[test]
     fn a_halo_2_model_plays_its_idle() {
@@ -1299,10 +1337,12 @@ fn decode_ce_animation(
     let animation = animations
         .get(animation_index)
         .ok_or("The graph no longer lists this animation.")?;
-    let skeleton = Skeleton::from_tag(&antr);
     let gbxmodel = halo1_object_reference(object, "model").and_then(|reference| {
         load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2").ok()
     });
+    // The extractor's skeleton: a graph that lists no nodes of its own
+    // animates its gbxmodel's, when their node list checksums agree.
+    let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
     let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
     let clip = animation.decode();
     let mut pose = match ce_jma_kind(animation) {
