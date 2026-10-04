@@ -27,9 +27,9 @@ pub(in crate::app) enum CompareCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_compare_command(&mut self, command: CompareCommand) {
+    pub(in crate::app) fn apply_compare_command(&mut self, command: CompareCommand, ctx: &egui::Context) {
         match command {
-            CompareCommand::GitReview { kit, action } => self.apply_git_review_action(kit, action),
+            CompareCommand::GitReview { kit, action } => self.apply_git_review_action(kit, action, ctx),
         }
     }
 }

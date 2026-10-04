@@ -156,17 +156,16 @@ pub(in crate::app) enum ExportCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_export_command(&mut self, command: ExportCommand) {
-        let ctx = self.egui_ctx.clone();
+    pub(in crate::app) fn apply_export_command(&mut self, command: ExportCommand, ctx: &egui::Context) {
         match command {
             ExportCommand::StartContainerDump { kit, output, scope } => {
                 if self.focus_navigation_kit(kit) {
-                    self.start_container_dump(kit, output, scope, ctx);
+                    self.start_container_dump(kit, output, scope, ctx.clone());
                 }
             }
             ExportCommand::Extract { kind, key, target } => match kind {
-                ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx),
-                ExtractKind::Animation => self.begin_extract_animation(key, target, ctx),
+                ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx.clone()),
+                ExtractKind::Animation => self.begin_extract_animation(key, target, ctx.clone()),
             },
         }
     }

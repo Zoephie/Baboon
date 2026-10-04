@@ -888,11 +888,10 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
 
 impl Baboon {
     /// Carry out what the Git Review pane of `kit` asked for.
-    pub(in crate::app) fn apply_git_review_action(&mut self, kit: KitId, action: GitReviewAction) {
+    pub(in crate::app) fn apply_git_review_action(&mut self, kit: KitId, action: GitReviewAction, ctx: &egui::Context) {
         let Some(kit_index) = self.model.kit_index(kit) else {
             return;
         };
-        let ctx = self.egui_ctx.clone();
         let repo = self.views[kit].git_review.repo_root.clone();
         match action {
             GitReviewAction::OpenRepositoryFolder => {

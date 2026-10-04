@@ -1347,7 +1347,7 @@ impl Baboon {
     /// pending opens and field navigation, and the sound drains.
     fn process_frame_requests(&mut self, ctx: &egui::Context) {
         self.handle_block_confirm(ctx);
-        self.handle_save_changes_prompt(ctx);
+        draw_save_changes_prompt(&cx!(self, ctx), &mut self.documents);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);

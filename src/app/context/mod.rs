@@ -124,6 +124,7 @@ pub(in crate::app) enum Command {
     Mods(ModsCommand),
     TagOps(TagOpsCommand),
     Import(ImportCommand),
+    Documents(DocumentsCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -174,6 +175,12 @@ impl From<ImportCommand> for Command {
     }
 }
 
+impl From<DocumentsCommand> for Command {
+    fn from(command: DocumentsCommand) -> Self {
+        Command::Documents(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -192,24 +199,25 @@ impl Baboon {
             }
             ctx.request_repaint();
             for command in commands {
-                self.apply_command(command);
+                self.apply_command(command, ctx);
             }
         }
     }
 
-    fn apply_command(&mut self, command: Command) {
+    fn apply_command(&mut self, command: Command, ctx: &egui::Context) {
         match command {
             Command::Status(status) => self.model.status = status,
             Command::OpenFolder { path, label } => self.open_folder_in_explorer(path, &label),
             Command::Help(command) => self.apply_help_command(command),
-            Command::Poke(command) => self.apply_poke_command(command),
-            Command::Compare(command) => self.apply_compare_command(command),
-            Command::Search(command) => self.apply_search_command(command),
-            Command::References(command) => self.apply_references_command(command),
-            Command::Export(command) => self.apply_export_command(command),
-            Command::Mods(command) => self.apply_mods_command(command),
-            Command::TagOps(command) => self.apply_tag_ops_command(command),
-            Command::Import(command) => self.apply_import_command(command),
+            Command::Poke(command) => self.apply_poke_command(command, ctx),
+            Command::Compare(command) => self.apply_compare_command(command, ctx),
+            Command::Search(command) => self.apply_search_command(command, ctx),
+            Command::References(command) => self.apply_references_command(command, ctx),
+            Command::Export(command) => self.apply_export_command(command, ctx),
+            Command::Mods(command) => self.apply_mods_command(command, ctx),
+            Command::TagOps(command) => self.apply_tag_ops_command(command, ctx),
+            Command::Import(command) => self.apply_import_command(command, ctx),
+            Command::Documents(command) => self.apply_documents_command(command, ctx),
         }
     }
 }

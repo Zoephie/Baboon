@@ -3049,14 +3049,14 @@ pub(in crate::app) enum PokeCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_poke_command(&mut self, command: PokeCommand) {
+    pub(in crate::app) fn apply_poke_command(&mut self, command: PokeCommand, ctx: &egui::Context) {
         match command {
             PokeCommand::Confirm { stop_asking } => {
                 if stop_asking && self.model.prefs.confirm_runtime_poke {
                     self.model.prefs.confirm_runtime_poke = false;
                     self.persist_prefs_if_changed();
                 }
-                self.confirm_poke(self.egui_ctx.clone());
+                self.confirm_poke(ctx.clone());
             }
         }
     }

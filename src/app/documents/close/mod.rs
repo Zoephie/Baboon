@@ -285,8 +285,8 @@ impl Baboon {
         self.editor.function_popup = None;
     }
 
-    pub(in crate::app) fn handle_save_changes_prompt(&mut self, ctx: &egui::Context) {
-        let action = render_save_changes_prompt(ctx, &mut self.documents.save_changes_prompt);
+    /// Carry out the save-changes prompt's answer.
+    pub(in crate::app) fn apply_save_changes_prompt_action(&mut self, action: SaveChangesPromptAction, ctx: &egui::Context) {
         match action {
             SaveChangesPromptAction::None => {}
             SaveChangesPromptAction::Cancel => {
@@ -507,6 +507,15 @@ pub(in crate::app) fn discard_button(can_stash: bool, confirmed: bool) -> Discar
             width: 150.0,
             arming: false,
         },
+    }
+}
+
+/// The save-changes prompt, while it is up. Its answer is carried out once
+/// drawing is over.
+pub(in crate::app) fn draw_save_changes_prompt(cx: &Ctx, documents: &mut DocumentsFeature) {
+    let action = render_save_changes_prompt(cx.egui, &mut documents.save_changes_prompt);
+    if !matches!(action, SaveChangesPromptAction::None) {
+        cx.send(DocumentsCommand::SaveChangesPrompt(action));
     }
 }
 

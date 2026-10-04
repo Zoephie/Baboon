@@ -52,8 +52,7 @@ pub(in crate::app) enum SearchCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_search_command(&mut self, command: SearchCommand) {
-        let ctx = self.egui_ctx.clone();
+    pub(in crate::app) fn apply_search_command(&mut self, command: SearchCommand, ctx: &egui::Context) {
         match command {
             SearchCommand::FindChanged => {
                 self.search.find.active = None;
@@ -64,9 +63,9 @@ impl Baboon {
                 }
             }
             SearchCommand::FindStep(delta) => self.step_find(&ctx, delta),
-            SearchCommand::QueryResult { kit, action } => self.apply_query_result_action(kit, action),
-            SearchCommand::RunFieldValueSearch => self.begin_field_value_search(ctx),
-            SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx),
+            SearchCommand::QueryResult { kit, action } => self.apply_query_result_action(kit, action, ctx),
+            SearchCommand::RunFieldValueSearch => self.begin_field_value_search(ctx.clone()),
+            SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx.clone()),
         }
     }
 }

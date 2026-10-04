@@ -82,8 +82,7 @@ pub(in crate::app) enum ImportCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_import_command(&mut self, command: ImportCommand) {
-        let ctx = self.egui_ctx.clone();
+    pub(in crate::app) fn apply_import_command(&mut self, command: ImportCommand, ctx: &egui::Context) {
         match command {
             ImportCommand::ResolveSource => self.resolve_import_source(&ctx),
             ImportCommand::BrowseSourceFile => self.choose_import_source_file(&ctx),
@@ -94,11 +93,11 @@ impl Baboon {
             ImportCommand::AnalyzeTag => self.analyze_import_conversion(),
             ImportCommand::ConfirmTag => self.confirm_import_tag(),
             ImportCommand::Discard => self.apply_import_discard(),
-            ImportCommand::StartCacheImport { only } => self.start_cache_import(ctx, only),
-            ImportCommand::ScanCacheConflicts => self.scan_cache_import_conflicts(ctx),
+            ImportCommand::StartCacheImport { only } => self.start_cache_import(ctx.clone(), only),
+            ImportCommand::ScanCacheConflicts => self.scan_cache_import_conflicts(ctx.clone()),
             ImportCommand::BlamImport { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.begin_blam_import(index, ctx);
+                    self.begin_blam_import(index, ctx.clone());
                 }
             }
         }

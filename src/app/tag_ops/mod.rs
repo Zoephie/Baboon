@@ -87,10 +87,9 @@ pub(in crate::app) enum TagOpsCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_tag_ops_command(&mut self, command: TagOpsCommand) {
-        let ctx = self.egui_ctx.clone();
+    pub(in crate::app) fn apply_tag_ops_command(&mut self, command: TagOpsCommand, ctx: &egui::Context) {
         match command {
-            TagOpsCommand::Delete => self.begin_delete_tag(ctx),
+            TagOpsCommand::Delete => self.begin_delete_tag(ctx.clone()),
             TagOpsCommand::ApplyContainerFolder => {
                 if self.apply_container_folder_dialog() {
                     self.tag_ops.container_folder_dialog = None;
@@ -107,7 +106,7 @@ impl Baboon {
                 kit,
                 key,
                 destination_leaf,
-            } => self.start_container_duplicate(kit, key, destination_leaf, ctx),
+            } => self.start_container_duplicate(kit, key, destination_leaf, ctx.clone()),
         }
     }
 }

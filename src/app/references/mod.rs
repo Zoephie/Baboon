@@ -43,9 +43,9 @@ pub(in crate::app) enum ReferencesCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_references_command(&mut self, command: ReferencesCommand) {
+    pub(in crate::app) fn apply_references_command(&mut self, command: ReferencesCommand, ctx: &egui::Context) {
         match command {
-            ReferencesCommand::Explorer { kit, act } => self.apply_explorer_act(kit, act),
+            ReferencesCommand::Explorer { kit, act } => self.apply_explorer_act(kit, act, ctx),
         }
     }
 }

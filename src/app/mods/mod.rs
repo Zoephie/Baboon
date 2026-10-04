@@ -84,8 +84,7 @@ pub(in crate::app) enum ModsCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_mods_command(&mut self, command: ModsCommand) {
-        let ctx = self.egui_ctx.clone();
+    pub(in crate::app) fn apply_mods_command(&mut self, command: ModsCommand, ctx: &egui::Context) {
         match command {
             ModsCommand::Overwrite {
                 kit,

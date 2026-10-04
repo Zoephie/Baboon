@@ -302,12 +302,11 @@ impl Baboon {
     /// the kit the query ran against, so go back to that kit first; if it has
     /// closed the row is inert rather than opening some unrelated tag that
     /// happens to share the key.
-    pub(in crate::app) fn apply_query_result_action(&mut self, kit: KitId, action: QueryResultAction) {
+    pub(in crate::app) fn apply_query_result_action(&mut self, kit: KitId, action: QueryResultAction, ctx: &egui::Context) {
         if !self.focus_navigation_kit(kit) {
             self.model.status = "That workspace has been closed".to_owned();
             return;
         }
-        let ctx = self.egui_ctx.clone();
         match action {
             QueryResultAction::Jump { key, field_path } => {
                 // The referrer is already loaded (it was walked for its
@@ -327,7 +326,7 @@ impl Baboon {
                         rel_path,
                     });
                 }
-                self.select_entry(key, ctx);
+                self.select_entry(key, ctx.clone());
             }
             QueryResultAction::Reveal(key) => self.reveal_in_browser(&key),
         }

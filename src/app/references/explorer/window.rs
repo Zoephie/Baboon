@@ -167,7 +167,7 @@ impl Baboon {
     /// Carry out what the Content Explorer over `kit` asked for. The graph
     /// belongs to one kit; go back to it before acting, and close the window
     /// if that kit has gone.
-    pub(in crate::app) fn apply_explorer_act(&mut self, kit: KitId, act: ExplorerAct) {
+    pub(in crate::app) fn apply_explorer_act(&mut self, kit: KitId, act: ExplorerAct, ctx: &egui::Context) {
         if !self.focus_navigation_kit(kit) {
             self.references.content_explorer = None;
             self.model.status = "That workspace has been closed".to_owned();
@@ -177,7 +177,7 @@ impl Baboon {
             ExplorerAct::Navigate(entry) => self.content_explorer_navigate(entry),
             ExplorerAct::Back => self.content_explorer_back(),
             ExplorerAct::Forward => self.content_explorer_forward(),
-            ExplorerAct::Open(key) => self.select_entry(key, self.egui_ctx.clone()),
+            ExplorerAct::Open(key) => self.select_entry(key, ctx.clone()),
             ExplorerAct::Reveal(key) => self.reveal_in_browser(&key),
         }
     }
