@@ -1036,7 +1036,15 @@ impl Baboon {
 
     pub(super) fn process_worker_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.rx.try_recv() {
-            let stale = match message {
+            self.apply_worker_message(message, ctx);
+        }
+    }
+
+    /// Apply one worker result. Handlers drop a result whose source is stale
+    /// themselves; what they return about it is not used here.
+    pub(super) fn apply_worker_message(&mut self, message: WorkerMessage, ctx: &egui::Context) {
+        {
+            let _stale = match message {
                 WorkerMessage::TerminalLine(line) => self.handle_terminal_line(line),
                 WorkerMessage::TerminalLogError(error) => self.handle_terminal_log_error(error),
                 WorkerMessage::TerminalDone { run_id } => self.handle_terminal_done(run_id),
@@ -1309,9 +1317,6 @@ impl Baboon {
                     result,
                 } => self.handle_entry_index_saved(stamp, path, result),
             };
-            if stale {
-                continue;
-            }
         }
     }
 
@@ -11215,7 +11220,7 @@ mod listing_entries_tests {
             .rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("the listing worker answers");
-        app.tx.send(message).unwrap();
+        app.apply_worker_message(message, &ctx);
         app.process_worker_messages(&ctx);
 
         assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));

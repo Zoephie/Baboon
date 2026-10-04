@@ -641,14 +641,21 @@ pub(in crate::app) fn with_panicking_workers<T>(f: impl FnOnce() -> T) -> T {
     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
-/// Wait for the next worker message and apply it, as a frame would.
+/// Wait for the next worker message and apply it, then whatever else is
+/// already queued, in arrival order, as a frame would.
+///
+/// It used to put the message it waited for back on the channel and drain the
+/// channel, which applied anything already queued *before* it: a Chimp mount
+/// result could land after its own type index and leave the workspace stuck
+/// "indexing package types".
 #[cfg(test)]
 pub(in crate::app) fn apply_next_worker_message(app: &mut crate::app::Baboon) -> bool {
     let Ok(message) = app.rx.recv_timeout(std::time::Duration::from_secs(10)) else {
         return false;
     };
-    app.tx.send(message).unwrap();
-    app.process_worker_messages(&egui::Context::default());
+    let ctx = egui::Context::default();
+    app.apply_worker_message(message, &ctx);
+    app.process_worker_messages(&ctx);
     true
 }
 
@@ -704,6 +711,18 @@ mod spawn_worker_tests {
         spawn_export(&app.tx, &ctx, || Ok("Extracted objects/rock".to_owned()));
         assert!(apply_next_worker_message(&mut app));
         assert_eq!(app.status, "Extracted objects/rock");
+    }
+
+    /// The test helper applies results in the order they arrived. It used to
+    /// put the message it waited for back on the channel, behind anything
+    /// already queued, so two queued results were applied in reverse.
+    #[test]
+    fn the_test_helper_applies_results_in_arrival_order() {
+        let mut app = crate::app::Baboon::for_test();
+        app.tx.send(WorkerMessage::ExportFinished(Ok("first".to_owned()))).unwrap();
+        app.tx.send(WorkerMessage::ExportFinished(Ok("second".to_owned()))).unwrap();
+        assert!(apply_next_worker_message(&mut app));
+        assert_eq!(app.status, "second", "the later result is applied last");
     }
 
     /// Every export reports through `spawn_export`, not a hand-rolled send

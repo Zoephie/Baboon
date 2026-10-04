@@ -123,7 +123,7 @@ pub(super) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Bab
             app.status
         );
         if let Ok(message) = app.rx.recv_timeout(Duration::from_millis(50)) {
-            app.tx.send(message).unwrap();
+            app.apply_worker_message(message, &ctx);
             app.process_worker_messages(&ctx);
         }
     }
@@ -133,7 +133,7 @@ pub(super) fn pump_until(app: &mut Baboon, what: &str, mut done: impl FnMut(&Bab
 pub(super) fn drain_messages(app: &mut Baboon, quiet: Duration) {
     let ctx = ctx();
     while let Ok(message) = app.rx.recv_timeout(quiet) {
-        app.tx.send(message).unwrap();
+        app.apply_worker_message(message, &ctx);
         app.process_worker_messages(&ctx);
     }
 }
