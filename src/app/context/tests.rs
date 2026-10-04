@@ -20,8 +20,8 @@ fn commands_apply_in_the_order_sent() {
     app.commands.send(HelpCommand::Open(HelpPanelTab::Doc));
     app.commands.send(HelpCommand::Open(HelpPanelTab::MapNames));
     app.apply_commands(&egui);
-    assert!(app.help.about_open);
-    assert!(app.help.help_panel_tab == HelpPanelTab::MapNames);
+    let help = app.dialogs.get::<HelpWindow>().expect("Help opened");
+    assert!(help.tab == HelpPanelTab::MapNames);
 }
 
 /// The queue is drained, so a command runs once however many frames follow.
@@ -31,9 +31,9 @@ fn an_applied_command_does_not_run_again() {
     let egui = egui::Context::default();
     app.commands.send(HelpCommand::Open(HelpPanelTab::Doc));
     app.apply_commands(&egui);
-    app.help.about_open = false;
+    app.dialogs.close::<HelpWindow>();
     app.apply_commands(&egui);
-    assert!(!app.help.about_open);
+    assert!(app.dialogs.get::<HelpWindow>().is_none());
 }
 
 /// Two draws changing different preferences in one frame both land: each

@@ -3,65 +3,79 @@
 
 use super::*;
 
-/// The Help window, while it is open.
-pub(in crate::app) fn draw_help_window(cx: &Ctx, help: &mut HelpFeature) {
-    if !help.about_open {
-        return;
-    }
-    let ctx = cx.egui;
+/// The Help window: what it shows and the choices made in it. The documents
+/// and tutorials are read once per session and shared from [`HelpFeature`].
+pub(in crate::app) struct HelpWindow {
+    pub(in crate::app) tab: HelpPanelTab,
+    docs: Rc<HelpDocsState>,
+    tutorials: Rc<TutorialsState>,
+    tutorials_game: String,
+    tutorials_category: TutorialCategory,
+    script_docs: ScriptDocsUiState,
+    pub(in crate::app) tag_compat: TagCompatUiState,
+    map_names_game_tab: MapNamesGameTab,
+}
 
-    let mut open = help.about_open;
-    egui::Window::new("Baboon Help")
-        .constrain_to(window_work_area(ctx))
-        .id(egui::Id::new("baboon_help"))
-        .collapsible(false)
-        .resizable(true)
-        .constrain(true)
-        .open(&mut open)
-        .default_size(window_size(ctx, Vec2::new(780.0, 560.0), true))
-        .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut help.help_panel_tab, HelpPanelTab::About, "About");
-                ui.selectable_value(&mut help.help_panel_tab, HelpPanelTab::Doc, "Doc");
-                ui.selectable_value(
-                    &mut help.help_panel_tab,
-                    HelpPanelTab::Tutorials,
-                    "Tutorials",
-                );
-                ui.selectable_value(
-                    &mut help.help_panel_tab,
-                    HelpPanelTab::ScriptDoc,
-                    "Script Doc",
-                );
-                ui.selectable_value(
-                    &mut help.help_panel_tab,
-                    HelpPanelTab::TagCompat,
-                    "Tag Compatibility",
-                );
-                ui.selectable_value(
-                    &mut help.help_panel_tab,
-                    HelpPanelTab::MapNames,
-                    "Map Names",
-                );
+impl HelpWindow {
+    /// A Help window on `tab`, over the session's documents.
+    pub(in crate::app) fn new(help: &HelpFeature, tab: HelpPanelTab) -> Self {
+        Self {
+            tab,
+            docs: help.docs.clone(),
+            tutorials: help.tutorials.clone(),
+            tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
+            tutorials_category: TutorialCategory::ThreeD,
+            script_docs: ScriptDocsUiState::default(),
+            tag_compat: TagCompatUiState::default(),
+            map_names_game_tab: MapNamesGameTab::HaloCe,
+        }
+    }
+}
+
+impl Dialog for HelpWindow {
+    fn show(&mut self, cx: &Ctx) -> bool {
+        let ctx = cx.egui;
+        let mut open = true;
+        egui::Window::new("Baboon Help")
+            .constrain_to(window_work_area(ctx))
+            .id(egui::Id::new("baboon_help"))
+            .collapsible(false)
+            .resizable(true)
+            .constrain(true)
+            .open(&mut open)
+            .default_size(window_size(ctx, Vec2::new(780.0, 560.0), true))
+            .min_size(window_size(ctx, Vec2::new(520.0, 360.0), true))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.tab, HelpPanelTab::About, "About");
+                    ui.selectable_value(&mut self.tab, HelpPanelTab::Doc, "Doc");
+                    ui.selectable_value(&mut self.tab, HelpPanelTab::Tutorials, "Tutorials");
+                    ui.selectable_value(&mut self.tab, HelpPanelTab::ScriptDoc, "Script Doc");
+                    ui.selectable_value(
+                        &mut self.tab,
+                        HelpPanelTab::TagCompat,
+                        "Tag Compatibility",
+                    );
+                    ui.selectable_value(&mut self.tab, HelpPanelTab::MapNames, "Map Names");
+                });
+                ui.separator();
+                ui.add_space(8.0);
+                match self.tab {
+                    HelpPanelTab::About => draw_about_tab(ui),
+                    HelpPanelTab::Doc => draw_doc_tab(ui, &self.docs),
+                    HelpPanelTab::Tutorials => draw_tutorials_tab(
+                        ui,
+                        &self.tutorials,
+                        &mut self.tutorials_game,
+                        &mut self.tutorials_category,
+                    ),
+                    HelpPanelTab::ScriptDoc => draw_script_doc_tab(ui, &mut self.script_docs),
+                    HelpPanelTab::TagCompat => draw_tag_compat_tab(cx, ui, &mut self.tag_compat),
+                    HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
+                }
             });
-            ui.separator();
-            ui.add_space(8.0);
-            match help.help_panel_tab {
-                HelpPanelTab::About => draw_about_tab(ui),
-                HelpPanelTab::Doc => draw_doc_tab(ui, &help.help_docs),
-                HelpPanelTab::Tutorials => draw_tutorials_tab(
-                    ui,
-                    &help.tutorials,
-                    &mut help.tutorials_game,
-                    &mut help.tutorials_category,
-                ),
-                HelpPanelTab::ScriptDoc => draw_script_doc_tab(ui, &mut help.script_docs),
-                HelpPanelTab::TagCompat => draw_tag_compat_tab(cx, ui, &mut help.tag_compat),
-                HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut help.map_names_game_tab),
-            }
-        });
-    help.about_open = open;
+        open
+    }
 }
 
 fn draw_script_doc_tab(ui: &mut Ui, docs: &mut ScriptDocsUiState) {
@@ -244,11 +258,19 @@ fn draw_tag_compat_tab(cx: &Ctx, ui: &mut Ui, state: &mut TagCompatUiState) {
 impl Baboon {
     /// Ask where to write the compatibility rows on show, and write them.
     pub(in crate::app) fn export_tag_compat_sheet(&mut self) {
-        let pair = self.help.tag_compat.pairs.get(self.help.tag_compat.pair);
+        let Some(compat) = self
+            .dialogs
+            .get::<HelpWindow>()
+            .map(|help| &help.tag_compat)
+        else {
+            return;
+        };
+        let pair = compat.pairs.get(compat.pair);
         let stem = pair
             .map(|pair| format!("{}-to-{}", pair.source_game, pair.target_game))
             .unwrap_or_else(|| "tag-compat".to_owned());
-        let group = self.help.tag_compat.selected_group.clone().unwrap_or_default();
+        let group = compat.selected_group.clone().unwrap_or_default();
+        let csv = compat.visible_csv();
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export compatibility sheet")
             .add_filter("Comma-separated values", &["csv"])
@@ -257,7 +279,7 @@ impl Baboon {
         else {
             return;
         };
-        self.model.status = match std::fs::write(&path, self.help.tag_compat.visible_csv()) {
+        self.model.status = match std::fs::write(&path, csv) {
             Ok(()) => format!("Wrote {}", path.display()),
             Err(error) => format!("Could not write {}: {error}", path.display()),
         };

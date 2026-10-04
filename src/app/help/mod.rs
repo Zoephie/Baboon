@@ -16,20 +16,15 @@ pub(in crate::app) use tag_compat::*;
 pub(in crate::app) mod map_names;
 pub(in crate::app) use map_names::*;
 pub(in crate::app) mod window;
-pub(in crate::app) use window::draw_help_window;
+pub(in crate::app) use window::HelpWindow;
 
 /// Help: the About and help windows, tutorials, HaloScript and field docs, tag
 /// compatibility and map names.
 pub(in crate::app) struct HelpFeature {
-    pub(in crate::app) about_open: bool,
-    pub(in crate::app) help_panel_tab: HelpPanelTab,
-    pub(in crate::app) help_docs: HelpDocsState,
-    pub(in crate::app) tutorials: TutorialsState,
-    pub(in crate::app) tutorials_game: String,
-    pub(in crate::app) tutorials_category: TutorialCategory,
-    pub(in crate::app) script_docs: ScriptDocsUiState,
-    pub(in crate::app) tag_compat: TagCompatUiState,
-    pub(in crate::app) map_names_game_tab: MapNamesGameTab,
+    /// The documentation and tutorials, read once per session and shared
+    /// with every Help window opened over them.
+    pub(in crate::app) docs: Rc<HelpDocsState>,
+    pub(in crate::app) tutorials: Rc<TutorialsState>,
     /// Parsed-once documentation overlay (help/units + explanations) per group
     /// JSON, keyed by definition file path. Built lazily during render.
     pub(in crate::app) def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
@@ -53,21 +48,27 @@ pub(in crate::app) enum HelpCommand {
 impl Baboon {
     pub(in crate::app) fn apply_help_command(&mut self, command: HelpCommand) {
         match command {
-            HelpCommand::Open(tab) => {
-                self.help.help_panel_tab = tab;
-                self.help.about_open = true;
-            }
+            HelpCommand::Open(tab) => self.help_window().tab = tab,
             HelpCommand::ShowTagCompat {
                 source_game,
                 target_game,
                 group,
             } => {
-                self.help.tag_compat.ensure_loaded(&locate_help_docs_root());
-                self.help.tag_compat.focus(&source_game, &target_game, &group);
-                self.help.help_panel_tab = HelpPanelTab::TagCompat;
-                self.help.about_open = true;
+                let help = self.help_window();
+                help.tag_compat.ensure_loaded(&locate_help_docs_root());
+                help.tag_compat.focus(&source_game, &target_game, &group);
+                help.tab = HelpPanelTab::TagCompat;
             }
             HelpCommand::ExportTagCompatSheet => self.export_tag_compat_sheet(),
         }
+    }
+
+    /// The open Help window, opening it on About if it is not.
+    fn help_window(&mut self) -> &mut HelpWindow {
+        if self.dialogs.get::<HelpWindow>().is_none() {
+            self.dialogs
+                .open(HelpWindow::new(&self.help, HelpPanelTab::About));
+        }
+        self.dialogs.get_mut::<HelpWindow>().expect("just opened")
     }
 }

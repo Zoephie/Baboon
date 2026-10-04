@@ -397,15 +397,8 @@ impl Baboon {
                 field_value_searching: false,
             },
             help: HelpFeature {
-                about_open: false,
-                help_panel_tab: HelpPanelTab::About,
-                help_docs: HelpDocsState::load(),
-                tutorials: TutorialsState::load(&ctx),
-                tutorials_game: GameId::CampaignEvolved.as_str().to_owned(),
-                tutorials_category: TutorialCategory::ThreeD,
-                script_docs: ScriptDocsUiState::default(),
-                tag_compat: TagCompatUiState::default(),
-                map_names_game_tab: MapNamesGameTab::HaloCe,
+                docs: Rc::new(HelpDocsState::load()),
+                tutorials: Rc::new(TutorialsState::load(&ctx)),
                 def_docs_cache: HashMap::new(),
             },
             import: ImportFeature {

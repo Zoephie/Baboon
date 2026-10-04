@@ -501,67 +501,73 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "help_about",
-            &["help.about_open", "help.help_panel_tab"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::About;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::About));
             },
             &["Baboon Help", "blam-tags created by"],
         ),
         case(
             "help_doc",
-            &["help.about_open", "help.help_docs"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::Doc;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::Doc));
             },
             &["Baboon Help", "Supported games"],
         ),
         case(
             "help_tutorials",
-            &["help.about_open", "help.tutorials"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::Tutorials;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::Tutorials));
             },
             &["Baboon Help", "Watch on YouTube"],
         ),
         case(
             "help_script_doc",
-            &["help.about_open", "help.script_docs"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::ScriptDoc;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::ScriptDoc));
             },
             &["Baboon Help", "Network safe"],
         ),
         case(
             "help_tag_compat",
-            &["help.about_open", "help.tag_compat"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::TagCompat;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::TagCompat));
             },
             &["Baboon Help", "Only what is lost"],
         ),
         case(
             "help_map_names",
-            &["help.about_open"],
+            &["dialog:HelpWindow"],
             &["help/window/mod.rs"],
             welcome,
             |h| {
-                h.app.help.about_open = true;
-                h.app.help.help_panel_tab = HelpPanelTab::MapNames;
+                h.app
+                    .dialogs
+                    .open(HelpWindow::new(&h.app.help, HelpPanelTab::MapNames));
             },
             &["Baboon Help", "The Pillar of Autumn"],
         ),
@@ -1643,6 +1649,17 @@ fn product_code(text: &str) -> String {
     out
 }
 
+/// Whether `code` calls `egui::Window::new`, however it is imported, and not
+/// merely a constructor whose name ends in `Window`, like `HelpWindow::new`.
+fn opens_a_window(code: &str) -> bool {
+    code.match_indices("Window::new(").any(|(at, _)| {
+        !code[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
 /// Files under `src/app/` (relative, `/`-separated) whose product code
 /// calls `egui::Window::new`.
 fn window_sources() -> Vec<String> {
@@ -1661,7 +1678,7 @@ fn window_sources() -> Vec<String> {
                     .is_some_and(|name| name == "tests.rs" || name.ends_with("_tests.rs"))
             {
                 let text = std::fs::read_to_string(&path).unwrap();
-                if product_code(&text).contains("Window::new(") {
+                if opens_a_window(&product_code(&text)) {
                     let rel = path.strip_prefix(root).unwrap();
                     out.push(rel.to_string_lossy().replace('\\', "/"));
                 }

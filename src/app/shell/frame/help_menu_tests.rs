@@ -15,14 +15,14 @@ fn idle(h: &mut Harness) {
 fn a_help_menu_item_opens_help_on_its_tab() {
     let mut h = Harness::new();
     idle(&mut h);
-    assert!(!h.app.help.about_open);
+    assert!(h.app.dialogs.get::<HelpWindow>().is_none());
     assert!(!h.painted.iter().any(|text| text == "Baboon Help"));
 
     h.click("Help", 0);
     idle(&mut h);
     h.click("Map Names...", 0);
     idle(&mut h);
-    assert!(h.app.help.about_open);
-    assert!(h.app.help.help_panel_tab == HelpPanelTab::MapNames);
+    let help = h.app.dialogs.get::<HelpWindow>().expect("Help opened");
+    assert!(help.tab == HelpPanelTab::MapNames);
     assert!(h.painted.iter().any(|text| text == "Baboon Help"), "the window draws");
 }

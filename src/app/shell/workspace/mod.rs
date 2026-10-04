@@ -316,7 +316,6 @@ impl Baboon {
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_poke_window(&cx!(self, ctx), &mut self.poke);
-        draw_help_window(&cx!(self, ctx), &mut self.help);
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);

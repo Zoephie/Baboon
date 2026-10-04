@@ -54,12 +54,13 @@ fn the_welcome_links_ask_to_open_their_pages() {
 #[test]
 fn the_help_window_links_ask_to_open_their_pages() {
     let mut h = Harness::new();
-    h.app.help.about_open = true;
-    h.app.help.help_panel_tab = HelpPanelTab::About;
+    h.app
+        .dialogs
+        .open(HelpWindow::new(&h.app.help, HelpPanelTab::About));
     idle(&mut h);
     assert_eq!(urls(&click(&mut h, BABOON_GITHUB_URL, 0)), [BABOON_GITHUB_URL]);
 
-    h.app.help.help_panel_tab = HelpPanelTab::Tutorials;
+    h.app.dialogs.get_mut::<HelpWindow>().unwrap().tab = HelpPanelTab::Tutorials;
     idle(&mut h);
     let opened = click(&mut h, "Watch on YouTube", 0);
     assert_eq!(opened.len(), 1, "{opened:?}");
