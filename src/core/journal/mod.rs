@@ -13,7 +13,9 @@
 //! snapshot, later frames are skipped until a frame with no edits closes the
 //! window.
 
-use super::*;
+use std::sync::Arc;
+
+use blam_tags::TagFile;
 
 /// One serialized tag state plus a human-readable label for the action.
 ///
@@ -22,15 +24,15 @@ use super::*;
 /// Campaign Evolved animation graphs would otherwise be copied wholesale twice
 /// a second.
 #[derive(Clone)]
-pub(super) struct Snapshot {
+pub(crate) struct Snapshot {
     /// Unique to this step for as long as it exists, in memory or in a
     /// recovery file. The recovery project keys its history rows by it, so an
     /// autosave writes only the steps it has not written before: an undo stack
     /// shifts by one on every edit, and when rows were keyed by position every
     /// save rewrote every step — each one a whole serialized tag.
-    pub(super) id: u64,
-    pub(super) bytes: Arc<Vec<u8>>,
-    pub(super) label: String,
+    pub(crate) id: u64,
+    pub(crate) bytes: Arc<Vec<u8>>,
+    pub(crate) label: String,
 }
 
 /// The next snapshot id. Never reused within a process, and raised past every
@@ -39,7 +41,7 @@ pub(super) struct Snapshot {
 static NEXT_SNAPSHOT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Snapshot {
-    pub(super) fn new(bytes: Arc<Vec<u8>>, label: String) -> Self {
+    pub(crate) fn new(bytes: Arc<Vec<u8>>, label: String) -> Self {
         Self {
             id: NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             bytes,
@@ -49,18 +51,18 @@ impl Snapshot {
 
     /// A step read back from a recovery file, keeping the id it was saved
     /// under.
-    pub(super) fn restored(id: u64, bytes: Arc<Vec<u8>>, label: String) -> Self {
+    pub(crate) fn restored(id: u64, bytes: Arc<Vec<u8>>, label: String) -> Self {
         NEXT_SNAPSHOT_ID.fetch_max(id.saturating_add(1), std::sync::atomic::Ordering::Relaxed);
         Self { id, bytes, label }
     }
 }
 
 /// A fresh id for a step read back from a file that stored none.
-pub(super) fn next_snapshot_id() -> u64 {
+pub(crate) fn next_snapshot_id() -> u64 {
     NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(super) struct EditJournal {
+pub(crate) struct EditJournal {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     limit: usize,
@@ -98,7 +100,7 @@ impl EditJournal {
     /// Capture a pre-edit snapshot before applying a batch. No-op while already
     /// coalescing a run, so a continuous drag yields a single undo entry.
     /// Clears the redo stack (a new edit invalidates any redo history).
-    pub(super) fn begin_edit(&mut self, tag: &TagFile, label: &str) {
+    pub(crate) fn begin_edit(&mut self, tag: &TagFile, label: &str) {
         if self.coalescing {
             return;
         }
@@ -111,12 +113,12 @@ impl EditJournal {
 
     /// The stacks as they stand, for the session's recovery project. Oldest
     /// first, matching the in-memory order.
-    pub(super) fn stacks(&self) -> (&[Snapshot], &[Snapshot]) {
+    pub(crate) fn stacks(&self) -> (&[Snapshot], &[Snapshot]) {
         (&self.undo, &self.redo)
     }
 
     /// How many times either stack has changed. See [`EditJournal::revision`].
-    pub(super) fn revision(&self) -> u64 {
+    pub(crate) fn revision(&self) -> u64 {
         self.revision
     }
 
@@ -125,7 +127,7 @@ impl EditJournal {
     /// Replaces rather than merges: a freshly opened document has no history of
     /// its own, and restoring into one that somehow did would interleave two
     /// unrelated edit trails.
-    pub(super) fn restore(&mut self, undo: Vec<Snapshot>, redo: Vec<Snapshot>) {
+    pub(crate) fn restore(&mut self, undo: Vec<Snapshot>, redo: Vec<Snapshot>) {
         self.undo = undo;
         self.redo = redo;
         self.coalescing = false;
@@ -134,21 +136,21 @@ impl EditJournal {
 
     /// Close the current coalescing window (call on a frame with no edits), so
     /// the next edit starts a fresh undo entry.
-    pub(super) fn end_edit_window(&mut self) {
+    pub(crate) fn end_edit_window(&mut self) {
         self.coalescing = false;
     }
 
-    pub(super) fn can_undo(&self) -> bool {
+    pub(crate) fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
-    pub(super) fn can_redo(&self) -> bool {
+    pub(crate) fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
 
     /// Pop the most recent undo snapshot, recording `current` on the redo stack.
     /// Returns the bytes to restore and the action label.
-    pub(super) fn undo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
+    pub(crate) fn undo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.undo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
             push_capped_into(
@@ -164,7 +166,7 @@ impl EditJournal {
     }
 
     /// Pop the most recent redo snapshot, recording `current` on the undo stack.
-    pub(super) fn redo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
+    pub(crate) fn redo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.redo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
             push_capped_into(

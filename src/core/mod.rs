@@ -6,6 +6,7 @@
 pub(crate) mod bundled;
 pub(crate) mod format;
 pub(crate) mod game;
+pub(crate) mod journal;
 pub(crate) mod process;
 pub(crate) mod source;
 pub(crate) mod storage;

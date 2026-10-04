@@ -1,22 +1,19 @@
+use std::sync::Arc;
+
+use blam_tags::TagFile;
+
 use super::*;
 
 fn fresh_model() -> TagFile {
     TagFile::new("definitions/halo2_mcc/model.json").unwrap()
 }
 
+/// One edit that changes the tag's bytes: a new variant element.
 fn add_variant(tag: &mut TagFile) {
-    let mut dirty = Dirty::default();
-    apply_model_variant_ops(
-        tag,
-        vec![ModelVariantOp::Create {
-            name: "test".to_owned(),
-            regions: vec![ModelVariantRegionChoice {
-                region_name: "body".to_owned(),
-                permutation_name: "default".to_owned(),
-            }],
-        }],
-        &mut dirty,
-    );
+    tag.root_mut()
+        .field_mut("variants")
+        .and_then(|mut field| field.as_block_mut().map(|mut block| block.add_element()))
+        .expect("a model has a variants block");
 }
 
 /// A snapshot is a whole serialized tag, and Campaign Evolved ships a
