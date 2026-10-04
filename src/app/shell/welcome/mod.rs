@@ -218,8 +218,10 @@ impl Baboon {
                                                                 )
                                                             });
                                                                 let texture = self
+                                                                    .shell
                                                                     .workspace_banner_texture(
                                                                         ctx,
+                                                                        &self.model.prefs.custom_editing_kit_profiles,
                                                                         profile.game_id(),
                                                                         Some(&profile.id),
                                                                     );
@@ -273,6 +275,7 @@ impl Baboon {
                                                                 shortcut,
                                                             ) => {
                                                                 let texture = self
+                                                                    .shell
                                                                     .game_emblem_texture(
                                                                         ctx,
                                                                         shortcut.game,

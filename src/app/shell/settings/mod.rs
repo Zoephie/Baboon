@@ -1017,7 +1017,12 @@ impl Baboon {
                 .kit_tools.editing_kit_validation
                 .custom_icon_error(&profile.id)
                 .map(str::to_owned);
-            let texture = self.workspace_banner_texture(ui.ctx(), profile.game_id(), Some(&profile.id));
+            let texture = self.shell.workspace_banner_texture(
+                ui.ctx(),
+                &self.model.prefs.custom_editing_kit_profiles,
+                profile.game_id(),
+                Some(&profile.id),
+            );
             let (load, edit, remove) = ui
                 .push_id(&profile.id, |ui| {
                     editing_kit_card_with_read_only(
@@ -1083,7 +1088,7 @@ impl Baboon {
         let mut open = true;
         let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
         let texture =
-            custom_texture.or_else(|| self.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
+            custom_texture.or_else(|| self.shell.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
         let mut actions = EditingKitFormActions::default();
         egui::Window::new(title)
             .constrain_to(window_work_area(ctx))

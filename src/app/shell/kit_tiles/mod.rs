@@ -111,7 +111,12 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                     .as_ref()
                     .map(|profile| profile.id.clone());
                 let banner = game.and_then(|game| {
-                    app.workspace_banner_texture(&self.ctx, Some(game), profile.as_deref())
+                    app.shell.workspace_banner_texture(
+                        &self.ctx,
+                        &app.model.prefs.custom_editing_kit_profiles,
+                        Some(game),
+                        profile.as_deref(),
+                    )
                 });
                 let language = app.audio.language.clone();
                 let kit = app.model.kits[kit_index].id;

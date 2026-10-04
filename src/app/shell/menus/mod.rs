@@ -66,7 +66,12 @@ impl Baboon {
                             )
                         })
                         .unwrap_or_else(|error| format!("{} is unavailable: {error}", profile.name));
-                    let texture = self.workspace_banner_texture(ctx, profile.game_id(), Some(&profile.id));
+                    let texture = self.shell.workspace_banner_texture(
+                        ctx,
+                        &self.model.prefs.custom_editing_kit_profiles,
+                        profile.game_id(),
+                        Some(&profile.id),
+                    );
                     EditingKitRow {
                         name: profile.name.clone(),
                         fallback: "EK",
@@ -79,7 +84,7 @@ impl Baboon {
                     }
                 }
                 EditingKitMenuEntry::BuiltIn(shortcut) => {
-                    let texture = self.game_banner_texture(ctx, Some(shortcut.game)).cloned();
+                    let texture = self.shell.game_banner_texture(ctx, Some(shortcut.game)).cloned();
                     let configured_path = self
                         .model
                         .prefs

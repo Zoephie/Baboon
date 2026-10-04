@@ -67,3 +67,93 @@ pub(in crate::app) struct ShellFeature {
     /// When the per-frame prefs check next runs (egui time).
     pub(in crate::app) prefs_next_check_at: f64,
 }
+
+/// The shell's caches of game and editing-kit artwork, each loaded once.
+impl ShellFeature {
+    pub(in crate::app) fn game_banner_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: Option<GameId>,
+    ) -> Option<&egui::TextureHandle> {
+        if !self.game_banner_textures.contains_key(&game) {
+            let name = game.map_or("unknown", GameId::as_str);
+            let texture = load_png_texture(
+                ctx,
+                &format!("game_banner_{name}"),
+                get_game_banner_bytes(game),
+            )?;
+            self.game_banner_textures.insert(game, texture);
+        }
+        self.game_banner_textures.get(&game)
+    }
+
+    pub(in crate::app) fn game_emblem_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: GameId,
+    ) -> Option<&egui::TextureHandle> {
+        if !self.game_emblem_textures.contains_key(&game) {
+            let bytes = get_game_emblem_bytes(game);
+            let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
+            self.game_emblem_textures.insert(game, texture);
+        }
+        self.game_emblem_textures.get(&game)
+    }
+
+    pub(in crate::app) fn custom_editing_kit_texture(
+        &mut self,
+        ctx: &egui::Context,
+        profile: &CustomEditingKitProfile,
+    ) -> Option<&egui::TextureHandle> {
+        let relative = profile.icon.as_deref()?;
+        if self
+            .custom_editing_kit_texture_failures
+            .contains(&profile.id)
+        {
+            return None;
+        }
+        if !self.custom_editing_kit_textures.contains_key(&profile.id) {
+            let texture = resolve_custom_icon_path(relative)
+                .ok()
+                .and_then(|absolute| fs::read(absolute).ok())
+                .and_then(|bytes| {
+                    load_png_texture(ctx, &format!("custom_editing_kit_{}", profile.id), &bytes)
+                });
+            let Some(texture) = texture else {
+                self.custom_editing_kit_texture_failures
+                    .insert(profile.id.clone());
+                return None;
+            };
+            self.custom_editing_kit_textures
+                .insert(profile.id.clone(), texture);
+        }
+        self.custom_editing_kit_textures.get(&profile.id)
+    }
+
+    /// Resolve the image shown in a loaded workspace's browser header.
+    ///
+    /// A custom profile's selected image takes precedence over the built-in
+    /// engine artwork. Looking the profile up by its stable ID keeps restored
+    /// workspaces connected to later name/icon edits without copying a
+    /// potentially stale icon path into session state.
+    pub(in crate::app) fn workspace_banner_texture(
+        &mut self,
+        ctx: &egui::Context,
+        profiles: &[CustomEditingKitProfile],
+        game: Option<GameId>,
+        profile_id: Option<&str>,
+    ) -> Option<egui::TextureHandle> {
+        let profile = profile_id.and_then(|profile_id| {
+            profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .cloned()
+        });
+        if let Some(profile) = profile
+            && let Some(texture) = self.custom_editing_kit_texture(ctx, &profile).cloned()
+        {
+            return Some(texture);
+        }
+        self.game_banner_texture(ctx, game).cloned()
+    }
+}
