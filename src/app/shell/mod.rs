@@ -5,6 +5,10 @@
 use super::*;
 
 pub(in crate::app) mod updates;
+pub(in crate::app) mod actions;
+pub(in crate::app) use actions::AppAction;
+pub(in crate::app) mod menus;
+pub(in crate::app) use menus::draw_menu_bar;
 pub(in crate::app) mod jobs;
 pub(in crate::app) mod session;
 pub(in crate::app) use session::state::*;

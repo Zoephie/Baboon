@@ -403,15 +403,18 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
-                    first_row = editing_kit_menu_row(ui, "Halo 4", "H4", None, false, true).rect;
+                    first_row =
+                        editing_kit_menu_row_with_read_only(ui, "Halo 4", "H4", None, false, true, false)
+                            .rect;
                     separator = ui.separator().rect;
-                    second_row = editing_kit_menu_row(
+                    second_row = editing_kit_menu_row_with_read_only(
                         ui,
                         "Halo 2 Anniversary Multiplayer",
                         "H2A",
                         None,
                         false,
                         true,
+                        false,
                     )
                     .rect;
                 });

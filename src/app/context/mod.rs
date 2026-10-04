@@ -138,6 +138,7 @@ pub(in crate::app) enum Command {
     Browser(BrowserCommand),
     Kits(KitsCommand),
     Audio(AudioCommand),
+    App(AppAction),
 }
 
 impl From<HelpCommand> for Command {
@@ -218,6 +219,12 @@ impl From<AudioCommand> for Command {
     }
 }
 
+impl From<AppAction> for Command {
+    fn from(action: AppAction) -> Self {
+        Command::App(action)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -260,6 +267,7 @@ impl Baboon {
             Command::Browser(command) => self.apply_browser_command(command, ctx),
             Command::Kits(command) => self.apply_kits_command(command, ctx),
             Command::Audio(command) => self.apply_audio_command(command),
+            Command::App(action) => self.apply_app_action(action, ctx),
         }
     }
 }

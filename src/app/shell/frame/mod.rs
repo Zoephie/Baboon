@@ -264,7 +264,7 @@ pub(in crate::app) fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
 /// A toolbar launcher button: shows the decoded `.ico` icon when available,
 /// otherwise falls back to a single-letter label. Returns the response so the
 /// caller can attach a hover tooltip and read `.clicked()`.
-fn launcher_button(
+pub(in crate::app) fn launcher_button(
     ui: &mut Ui,
     icon: Option<&egui::TextureHandle>,
     fallback: &str,
@@ -393,25 +393,6 @@ fn editing_kit_title_text_with_style(
             );
     }
     job.into()
-}
-
-pub(in crate::app) fn editing_kit_menu_row(
-    ui: &mut Ui,
-    label: &str,
-    fallback: &str,
-    texture: Option<&egui::TextureHandle>,
-    default_project_icon: bool,
-    enabled: bool,
-) -> egui::Response {
-    editing_kit_menu_row_with_read_only(
-        ui,
-        label,
-        fallback,
-        texture,
-        default_project_icon,
-        enabled,
-        false,
-    )
 }
 
 pub(in crate::app) fn editing_kit_menu_row_with_read_only(
@@ -641,7 +622,7 @@ pub(in crate::app) fn sidebar_source_path_label(source: &TagSource) -> String {
     }
 }
 
-fn monitor_commands_for_game(game: Option<GameId>) -> &'static [&'static str] {
+pub(in crate::app) fn monitor_commands_for_game(game: Option<GameId>) -> &'static [&'static str] {
     game
         .map_or(&[], GameFacts::monitor_commands)
 }
@@ -720,150 +701,6 @@ pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Col
         lerp(base.g(), accent.g()),
         lerp(base.b(), accent.b()),
     )
-}
-
-impl Baboon {
-    /// `kit_index` is the workspace whose pane is drawing this. Readiness is
-    /// resolved against that workspace's editing kit rather than the focused
-    /// one, and a launch makes it active first: it saves the tag and starts an
-    /// external editor, neither of which should follow the wrong game.
-
-    pub(in crate::app) fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if launcher_button(ui, self.shell.blender_icon.as_ref(), "B", true)
-                .on_hover_text("Launch Blender")
-                .clicked()
-            {
-                self.launch_blender();
-            }
-
-            let tag_test_ready = self
-                .model.kit_tool_path(self.model.tag_test_executable())
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.shell.tag_test_icon.as_ref(), "T", tag_test_ready)
-                .on_hover_text("Launch tag_test without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_tag_test();
-            }
-
-            let sapien_ready = self
-                .model.kit_tool_path("sapien.exe")
-                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-            if launcher_button(ui, self.shell.sapien_icon.as_ref(), "S", sapien_ready)
-                .on_hover_text("Launch Sapien without an auto-start scenario")
-                .clicked()
-            {
-                self.launch_sapien();
-            }
-
-            // Campaign Evolved holds unsaved edits in a project rather than in
-            // the game's files, so a workspace accumulates stashed
-            // modifications across sessions. This is the way back to the
-            // shipped tags; it is drawn here, outside the workspace tree, so it
-            // always acts on the focused kit.
-            if self.model.current_source_is_campaign_project_capable(self.model.active) {
-                let stashed = self.model.stashed_campaign_tags(self.model.active);
-                let unsaved = self.model.kits[self.model.active]
-                    .parsed_tags
-                    .values()
-                    .filter(|document| document.dirty.is_set())
-                    .count();
-                let anything = !stashed.is_empty() || unsaved > 0;
-                let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
-                let response = ui.add_enabled(anything, egui::Button::image(icon));
-                if response
-                    .on_hover_text(
-                        "Clear this workspace's unsaved modifications, returning every tag to \
-                         the way the game ships it",
-                    )
-                    .on_disabled_hover_text("This workspace has no unsaved modifications")
-                    .clicked()
-                {
-                    self.mods.clear_stash_confirm = Some(ClearStashConfirm {
-                        kit: self.model.active_kit_id(),
-                        stashed,
-                        unsaved,
-                    });
-                }
-            }
-        });
-    }
-
-    pub(in crate::app) fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
-        let game = self.model.source_game();
-        let commands = monitor_commands_for_game(game);
-        let enabled = !commands.is_empty();
-        let ctx = ui.ctx().clone();
-        let menu = ui
-            .add_enabled_ui(enabled, |ui| {
-                right_opening_menu_button(ui, "Monitor", 222.0, |ui| {
-                    style_list_menu(ui);
-                    ui.set_min_width(210.0);
-                    for command in commands {
-                        if ui.button(*command).clicked() {
-                            return Some(*command);
-                        }
-                    }
-                    None
-                })
-            })
-            .inner;
-        if let Some(command) = menu.inner.flatten() {
-            self.submit_terminal_command(format!("tool {command}"), ctx);
-            close_menu(ui);
-        }
-        let response = menu.response;
-        if enabled {
-            response.on_hover_text("Run monitor command");
-        } else {
-            response.on_disabled_hover_text("No monitor commands available for this game");
-        }
-    }
-
-    /// Tools ▸ Assets: the asset libraries, browsed across the whole kit rather
-    /// than one tag at a time.
-    pub(in crate::app) fn draw_assets_tools_menu(&mut self, ui: &mut Ui) {
-        let enabled = self.model.source().is_some();
-        let menu = ui
-            .add_enabled_ui(enabled, |ui| {
-                right_opening_menu_button(ui, "Assets", 222.0, |ui| {
-                    style_list_menu(ui);
-                    ui.set_min_width(210.0);
-                    if ui.button("Bitmap Browser").clicked() {
-                        return Some("bitmap");
-                    }
-                    if ui.button("Model Browser").clicked() {
-                        return Some("model");
-                    }
-                    // Baboon's own import pipelines only cover Halo 3 so far,
-                    // so the entry only appears there.
-                    if self.model.active_kit_is_halo3() && ui.button("Blam!").clicked() {
-                        return Some("blam");
-                    }
-                    None
-                })
-            })
-            .inner;
-        if let Some(asset) = menu.inner.flatten() {
-            match asset {
-                "bitmap" => self.open_bitmap_library(),
-                "model" => self.open_model_library(),
-                "blam" => {
-                    // Re-detect on every open: the data folder may have
-                    // changed since the pane was last shown.
-                    self.views[self.model.kits[self.model.active].id].blam.scanned_path = None;
-                    self.kit_and_view(self.model.active).open_tag_pane(BLAM_KEY);
-                }
-                _ => {}
-            }
-            close_menu(ui);
-        }
-        let response = menu.response;
-        if !enabled {
-            response.on_disabled_hover_text("Load an editing kit to browse its assets");
-        }
-    }
 }
 
 /// Scenario-header launcher using Baboon's bundled application artwork rather
@@ -1100,6 +937,11 @@ pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, 
     });
 }
 
+/// The scenario header's launch buttons. `kit_index` is the workspace whose
+/// pane is drawing this. Readiness is resolved against that workspace's
+/// editing kit rather than the focused one, and a launch makes it active
+/// first: it saves the tag and starts an external editor, neither of which
+/// should follow the wrong game.
 pub(in crate::app) fn draw_scenario_launcher_buttons(
     cx: &Ctx,
     ui: &mut Ui,
