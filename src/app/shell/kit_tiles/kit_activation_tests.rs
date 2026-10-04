@@ -31,7 +31,8 @@ fn a_workspace_activates_on_a_press_not_on_hover() {
         time += 0.1;
         let _ = crate::app::run_ui_test(&ctx, input(time, events), |ui| {
             let ctx = ui.ctx().clone();
-            egui::CentralPanel::default().show(ui, |ui| app.draw_kit_tiles(ui, &ctx));
+            egui::CentralPanel::default().show(ui, |ui| app.draw_workspace_tiles(ui, &ctx));
+            app.apply_commands(&ctx);
         });
     };
     let over_left = egui::pos2(200.0, 300.0);

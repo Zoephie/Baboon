@@ -177,6 +177,12 @@ pub(in crate::app) enum EditorCommand {
     },
     /// Apply what a tag pane collected while it drew.
     PaneDrawn(Box<PaneDrawn>),
+    /// The pane showing `key` in `kit` took focus: it is the tag the file
+    /// actions act on.
+    FocusTab { kit: KitId, key: String },
+    /// Bring `kit`'s open tabs in line with the panes its tile tree holds,
+    /// which a drag, a split or a close can have changed.
+    SyncOpenTabs { kit: KitId },
     /// Run tool bitmaps for the bitmap at `key` in `kit`, then reload it.
     ReimportBitmap { kit: KitId, key: String },
     /// Set the reference field at `field_path` of the tag at `tag_key` in
@@ -193,6 +199,16 @@ impl Baboon {
     pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) {
         match command {
             EditorCommand::PaneDrawn(drawn) => self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::FocusTab { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.kits[index].selected_key = Some(key);
+                }
+            }
+            EditorCommand::SyncOpenTabs { kit } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.kit_and_view(index).sync_open_tabs();
+                }
+            }
             EditorCommand::ReimportBitmap { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.active = index;

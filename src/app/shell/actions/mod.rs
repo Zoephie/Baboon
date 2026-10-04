@@ -35,6 +35,11 @@ pub(in crate::app) enum AppAction {
     Redo,
     /// Return the tag at `key` in `kit` to the way its source has it.
     DiscardChanges { kit: KitId, key: String },
+    /// Show the tag at `key` in `kit`'s browser.
+    RevealInBrowser { kit: KitId, key: String },
+    /// Close tabs or a kit, through the unsaved-changes prompt when anything
+    /// it closes is modified.
+    Close(PendingCloseAction),
     /// Ask before clearing every unsaved modification in `kit`.
     ConfirmClearModifications {
         kit: KitId,
@@ -104,6 +109,13 @@ impl Baboon {
             AppAction::ReviewChanges => self.review_changes(),
             AppAction::Undo => self.undo_current_tag(),
             AppAction::Redo => self.redo_current_tag(),
+            AppAction::RevealInBrowser { kit, key } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.reveal_in_browser(&key);
+                }
+            }
+            AppAction::Close(action) => self.request_close_action(action, ctx),
             AppAction::DiscardChanges { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.discard_tag_changes(index, &key, ctx);

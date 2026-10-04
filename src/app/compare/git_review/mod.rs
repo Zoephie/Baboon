@@ -67,8 +67,6 @@ pub(in crate::app) struct GitReviewState {
     pub(in crate::app) selection: GitReviewSelection,
     pub(in crate::app) selected_path: Option<String>,
     pub(in crate::app) results: Option<TagDiffResults>,
-    /// A double-clicked working tag waiting for the tiled layout to be restored.
-    pub(in crate::app) pending_open: Option<String>,
     pub(in crate::app) filters: TagDiffFilters,
     pub(in crate::app) swapped: bool,
     pub(in crate::app) commit_filter: String,
@@ -554,7 +552,7 @@ impl Baboon {
         false
     }
 
-    pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str) {
+    pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str, ctx: &egui::Context) {
         let Some(repo) = self.views[self.model.kits[kit].id].git_review.repo_root.as_ref() else {
             return;
         };
@@ -590,7 +588,8 @@ impl Baboon {
             }
             self.model.kits[kit].generation = self.model.kits[kit].generation.wrapping_add(1);
         }
-        self.views[self.model.kits[kit].id].git_review.pending_open = Some(key);
+        self.model.active = kit;
+        self.select_entry(key, ctx.clone());
     }
 }
 

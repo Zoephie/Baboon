@@ -918,7 +918,7 @@ impl Baboon {
                 self.run_git_review_job(kit_index, GitReviewJob::SelectFile(path), &ctx);
             }
             GitReviewAction::OpenFile(path) => {
-                self.open_git_review_file(kit_index, &path);
+                self.open_git_review_file(kit_index, &path, &ctx);
             }
         }
     }

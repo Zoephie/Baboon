@@ -43,7 +43,7 @@ impl Baboon {
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(editor_bg()))
             .show(ui, |ui| {
-                self.draw_kit_tiles(ui, ctx);
+                self.draw_workspace_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
         // Every kit, not just the active one: a background kit's sidecar can be

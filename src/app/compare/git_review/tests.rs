@@ -200,10 +200,10 @@ fn opening_a_reviewed_file_finds_the_scanned_entry() {
     app.views[app.model.kits[0].id].git_review.repo_root = Some(root.clone());
     let generation = app.model.kits[0].generation;
 
-    app.open_git_review_file(0, "tags/objects/rifle.weapon");
+    app.open_git_review_file(0, "tags/objects/rifle.weapon", &egui::Context::default());
     let _ = fs::remove_dir_all(&root);
 
-    assert_eq!(app.views[app.model.kits[0].id].git_review.pending_open, Some(entry.key));
+    assert_eq!(app.model.kits[0].selected_key, Some(entry.key));
     assert_eq!(app.model.kits[0].generation, generation, "no entry was added");
     assert_eq!(app.model.kits[0].source.as_ref().unwrap().entries.len(), 1);
 }

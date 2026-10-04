@@ -25,7 +25,9 @@ pub(in crate::app) use settings::{
     SettingsCommand, draw_nested_default_picker, draw_settings_window, draw_update_channel_picker,
 };
 pub(in crate::app) mod kit_tiles;
+pub(in crate::app) use kit_tiles::TileParts;
 pub(in crate::app) mod tag_tiles;
+pub(in crate::app) use tag_tiles::{TileInputs, draw_tag_tiles};
 pub(in crate::app) mod loading;
 pub(in crate::app) use loading::centered_loading_state;
 pub(in crate::app) mod recents;
