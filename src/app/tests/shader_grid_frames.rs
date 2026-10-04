@@ -786,12 +786,21 @@ fn the_render_method_rows_edit_its_own_fields() {
     let mut grid = Grid::new(1);
     grid.idle(2);
 
-    // BUG: the MATERIAL row reads and writes `render_method/global material
-    // type`, which no Halo 3 or Reach shader group has: their material is
-    // the shader root's `material name`. So the row always shows
-    // `default_material` whatever the tag holds, and a typed edit fails to
-    // apply ("field path no longer resolves"). Its edit is not pinned here.
+    // The material is the shader root's `material name`; typing one into the
+    // row writes it there. (The row used to read and write
+    // `render_method/global material type`, which no shader has, so it showed
+    // `default_material` whatever the tag held and an edit failed to apply.)
     assert_eq!(grid.count("MATERIAL"), 1);
+    let material = rightmost_on_row(&grid, "material name", "default_material");
+    grid.click_at(material.center());
+    grid.type_text("hard_metal_thin");
+    assert_eq!(grid.ops.pending.len(), 1);
+    grid.apply();
+    let stored = match grid.doc.tag.root().field("material name").and_then(|field| field.value()) {
+        Some(TagFieldData::StringId(id)) => id.string,
+        other => panic!("material name is {other:?}"),
+    };
+    assert_eq!(stored, "hard_metal_thin");
 
     // A flag toggles its bit in the mask.
     grid.click("use custom setting", 0);
@@ -818,7 +827,7 @@ fn the_render_method_rows_edit_its_own_fields() {
     grid.apply();
     let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
     assert_eq!(render_method.sort_layer.name(), "post-pass");
-    assert_eq!(grid.doc.journal.stacks().0.len(), 3, "undo steps");
+    assert_eq!(grid.doc.journal.stacks().0.len(), 4, "undo steps");
 }
 
 /// "Override Default" on an inherited bitmap creates the parameter with no

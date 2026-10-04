@@ -39,8 +39,7 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
 
     Some(ShaderEditorModel {
         has_material_row: false,
-        global_material_type: String::new(),
-        global_material_edit_path: String::new(),
+        materials: Vec::new(),
         definition_path: String::new(),
         // Halo 2 shows its template through its own row, which already carries
         // an edit; these two belong to the Halo 3-era render_method grid.

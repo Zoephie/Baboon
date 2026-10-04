@@ -13,39 +13,36 @@ pub(in crate::app) fn draw_shader_editor_model(
 ) {
     // MATERIAL section only for material-bearing shader types (Guerilla
     // vtable+0x70 gate). Effect-style shaders have no global material type.
-    if model.has_material_row {
+    if model.has_material_row && !model.materials.is_empty() {
         draw_shader_grid_section_header(ui, "MATERIAL");
-        let mat_edit_path = &model.global_material_edit_path;
-        let material_row = ShaderGridRow {
-            label: "global material type".to_owned(),
-            default_cell: Some(ShaderGridCell {
-                text: "default_material".to_owned(),
-                value_kind: "default",
-                color: None,
-            }),
-            value_cell: ShaderGridCell {
-                text: model.global_material_type.clone(),
-                value_kind: "value",
-                color: None,
-            },
-            fill: material_data_row(),
-            parameter_type: Some("string id".to_owned()),
-            is_overridden: true,
-            function: None,
-            edit: if mat_edit_path.is_empty() {
-                None
-            } else {
-                Some(ShaderRowEdit {
-                    path: mat_edit_path.clone(),
-                    current: model.global_material_type.clone(),
+        for material in &model.materials {
+            let material_row = ShaderGridRow {
+                label: material.label.clone(),
+                default_cell: Some(ShaderGridCell {
+                    text: "default_material".to_owned(),
+                    value_kind: "default",
+                    color: None,
+                }),
+                value_cell: ShaderGridCell {
+                    text: material.value.clone(),
+                    value_kind: "value",
+                    color: None,
+                },
+                fill: material_data_row(),
+                parameter_type: Some("string id".to_owned()),
+                is_overridden: true,
+                function: None,
+                edit: Some(ShaderRowEdit {
+                    path: material.edit_path.clone(),
+                    current: material.value.clone(),
                     kind: ShaderRowEditKind::StringId,
-                })
-            },
-            context_menu: None,
-            create_anim_op: None,
-            constant_function_view: None,
-        };
-        draw_shader_grid_row(ui, &material_row, 0, color_popup, function_popup, edit);
+                }),
+                context_menu: None,
+                create_anim_op: None,
+                constant_function_view: None,
+            };
+            draw_shader_grid_row(ui, &material_row, 0, color_popup, function_popup, edit);
+        }
     }
 
     if !model.definition_path.is_empty() {

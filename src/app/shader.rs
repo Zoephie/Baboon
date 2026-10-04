@@ -231,10 +231,9 @@ pub(super) struct ShaderEditorModel {
     /// True only for the 7 material-bearing shader types (shader/terrain/
     /// custom/halogram/foliage/skin/cortana); gates the MATERIAL section.
     has_material_row: bool,
-    global_material_type: String,
-    /// Absolute tag field path for editing the `global material type`
-    /// string-id. Empty when the field could not be located.
-    global_material_edit_path: String,
+    /// The shader's global material types (the root's `material name`
+    /// fields), one row each.
+    materials: Vec<ShaderMaterialName>,
     definition_path: String,
     /// Absolute tag field paths for the two structural references. Foundation
     /// exposes both for editing under expert mode — its expert gate is a
@@ -352,8 +351,7 @@ pub(super) fn build_shader_editor_model(
         });
     }
 
-    let global_material_type = read_global_material_type(tag);
-    let global_material_edit_path = append_field_path(&edit_prefix, "global material type");
+    let materials = read_shader_material_names(tag);
     // Empty when the field is not there, so the row stays read-only rather than
     // offering an edit that would fail to commit. `render_method_existing_field_path`
     // falls back to its first candidate whether or not it exists, which is the
@@ -422,8 +420,7 @@ pub(super) fn build_shader_editor_model(
 
     Some(ShaderEditorModel {
         has_material_row: shader_type_has_material_row(group_tag),
-        global_material_type,
-        global_material_edit_path,
+        materials,
         definition_path: render_method.definition_path,
         definition_edit_path,
         shader_template_edit_path,

@@ -102,14 +102,42 @@ pub(in crate::app) fn render_method_existing_field_path(
         .unwrap_or_default()
 }
 
-/// Read the `global material type` string-id from the render_method block.
-/// Returns the string name (e.g. `"default_material"`) or a fallback.
-pub(in crate::app) fn read_global_material_type(tag: &TagFile) -> String {
+/// One global material type a shader carries: its label, current value and
+/// the field path that edits it.
+pub(in crate::app) struct ShaderMaterialName {
+    pub(in crate::app) label: String,
+    pub(in crate::app) value: String,
+    pub(in crate::app) edit_path: String,
+}
+
+/// The shader's global material types: the root's `material name` string-id
+/// (`material name 0`…`3` on a terrain shader, one per channel, up to 7 on
+/// Reach's mux shader).
+///
+/// They live on the shader's own root struct, not in its render method. This
+/// used to read `render_method/global material type`, which no Halo 3, ODST,
+/// Reach, Halo 4 or H2A shader has, so the row always showed
+/// `default_material` and an edit failed to resolve.
+pub(in crate::app) fn read_shader_material_names(tag: &TagFile) -> Vec<ShaderMaterialName> {
     let root = tag.root();
-    let rm = root.descend("render_method").unwrap_or(root);
-    rm.read_string_id("global material type")
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "default_material".to_owned())
+    root.fields()
+        .filter(|field| field.clean_name().starts_with("material name"))
+        .filter_map(|field| {
+            let value = match field.value()? {
+                TagFieldData::StringId(id) | TagFieldData::OldStringId(id) => id.string,
+                _ => return None,
+            };
+            Some(ShaderMaterialName {
+                label: field.clean_name().into_owned(),
+                value: if value.is_empty() {
+                    "default_material".to_owned()
+                } else {
+                    value
+                },
+                edit_path: append_field_path_for("", &field),
+            })
+        })
+        .collect()
 }
 
 /// Build the tag field paths for the `animated_index`-th animated
