@@ -1185,3 +1185,76 @@ mod keyword_draft_tests {
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
 }
+
+/// Paint a path with a muted parent and a full-opacity name, preserving the name when space is tight.
+pub(in crate::app) fn paint_path_label(ui: &Ui, display_path: &str, text_rect: egui::Rect) -> bool {
+    let (prefix, name) = display_path
+        .rfind(['/', '\\'])
+        .map_or(("", display_path), |split| display_path.split_at(split + 1));
+    let font = TextStyle::Body.resolve(ui.style());
+    let text_pos = egui::pos2(text_rect.left(), text_rect.center().y);
+    let available = text_rect.width().max(0.0);
+    let name_width = ui
+        .painter()
+        .layout_no_wrap(name.to_owned(), font.clone(), text_dark())
+        .size()
+        .x;
+    let (shown_prefix, shown_name) = if name_width >= available {
+        (
+            String::new(),
+            truncate_path_start_to_width(ui, name, &font, text_dark(), available),
+        )
+    } else {
+        (
+            truncate_path_start_to_width(
+                ui,
+                prefix,
+                &font,
+                text_dark().gamma_multiply(0.5),
+                available - name_width,
+            ),
+            name.to_owned(),
+        )
+    };
+    let truncated = shown_prefix != prefix || shown_name != name;
+    let prefix_width = ui
+        .painter()
+        .layout_no_wrap(
+            shown_prefix.clone(),
+            font.clone(),
+            text_dark().gamma_multiply(0.5),
+        )
+        .size()
+        .x;
+    let painter = ui.painter().with_clip_rect(text_rect);
+    painter.text(
+        text_pos,
+        Align2::LEFT_CENTER,
+        shown_prefix,
+        font.clone(),
+        text_dark().gamma_multiply(0.5),
+    );
+    painter.text(
+        text_pos + egui::vec2(prefix_width, 0.0),
+        Align2::LEFT_CENTER,
+        shown_name,
+        font,
+        text_dark(),
+    );
+    truncated
+}
+
+fn truncate_path_start_to_width(
+    ui: &Ui,
+    text: &str,
+    font: &FontId,
+    color: Color32,
+    max_width: f32,
+) -> String {
+    tag_compare::truncate_start(text, max_width, |candidate| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), color)
+            .size()
+            .x
+    })
+}
