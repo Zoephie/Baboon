@@ -119,3 +119,66 @@ fn a_window_without_a_position_opens_inside_the_work_area() {
     assert!(work_area.contains_rect(rect), "{rect:?} is outside {work_area:?}");
     assert!(rect.top() > work_area.top(), "{rect:?}");
 }
+
+/// How far a drag from `grab` moves a window, with or without a title bar.
+fn window_moved_by_drag(title_bar: bool, grab: Vec2) -> Vec2 {
+    let ctx = egui::Context::default();
+    crate::app::Baboon::configure_context(&ctx);
+    let start = egui::pos2(100.0, 100.0);
+    let frame = |events: Vec<egui::Event>, time: f64| {
+        let mut rect = egui::Rect::NOTHING;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+            let ctx = ui.ctx().clone();
+            rect = egui::Window::new("Dragged")
+                .title_bar(title_bar)
+                .resizable(false)
+                .default_pos(start)
+                .show(&ctx, |ui| {
+                    ui.allocate_space(egui::vec2(300.0, 200.0));
+                })
+                .expect("the window drew")
+                .response
+                .rect;
+        });
+        rect
+    };
+    frame(Vec::new(), 0.0);
+    let before = frame(Vec::new(), 0.1).min;
+    let from = before + grab;
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(vec![egui::Event::PointerMoved(from)], 0.2);
+    frame(vec![button(from, true)], 0.3);
+    for step in 1..=5 {
+        let at = from + egui::vec2(20.0, 10.0) * step as f32;
+        frame(vec![egui::Event::PointerMoved(at)], 0.3 + 0.1 * f64::from(step));
+    }
+    let to = from + egui::vec2(100.0, 50.0);
+    frame(vec![button(to, false)], 1.0);
+    frame(Vec::new(), 1.1).min - before
+}
+
+/// egui 0.36 moves a window only by its title bar. A window without one —
+/// Find, Settings, Compare Tags, the color picker — still moves by a drag
+/// anywhere on it, as every window did in 0.29; one with a title bar moves
+/// by the title bar and no longer by its body.
+#[test]
+fn a_window_without_a_title_bar_moves_by_its_body() {
+    let body = Vec2::new(150.0, 120.0);
+    assert_eq!(window_moved_by_drag(false, body), Vec2::new(100.0, 50.0));
+    assert_eq!(window_moved_by_drag(true, body), Vec2::ZERO);
+    assert_eq!(window_moved_by_drag(true, Vec2::new(150.0, 10.0)), Vec2::new(100.0, 50.0));
+}
