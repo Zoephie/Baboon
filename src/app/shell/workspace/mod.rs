@@ -517,7 +517,7 @@ impl Baboon {
         }
         if ui.button("Browse Keywords...").clicked() {
             close_menu(ui);
-            self.keyword_chooser_open = true;
+            self.browser.keyword_chooser_open = true;
         }
         if ui.button("Find Unreferenced Tags...").clicked() {
             close_menu(ui);

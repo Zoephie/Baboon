@@ -1229,10 +1229,10 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "keyword_chooser",
-            &["keyword_chooser_open"],
+            &["browser.keyword_chooser_open"],
             &["browser/keyword_chooser.rs"],
             memory_kit,
-            |h| h.app.keyword_chooser_open = true,
+            |h| h.app.browser.keyword_chooser_open = true,
             &["Keywords"],
         ),
         case(
@@ -1405,7 +1405,7 @@ const NOT_WINDOWS: &[(&str, &str)] = &[
     ("kit_tools.editing_kit_path_attention", "highlights a row of the Settings window"),
     ("editor.deferred_file_action", "a queued action"),
     ("restored_active_kit", "session restore bookkeeping"),
-    ("reveal_target", "a one-shot browser request"),
+    ("browser.reveal_target", "a one-shot browser request"),
     ("search.field_value_searching", "running flag of the field value search"),
     ("kit_tools.kit_tool_drag", "drag-and-drop tracker"),
     ("ce_usmap", "parsed mappings cache"),

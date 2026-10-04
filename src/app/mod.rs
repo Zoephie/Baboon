@@ -210,8 +210,6 @@ pub struct Baboon {
     /// so the focus can only be honoured once none are outstanding.
     restoring_kits: HashSet<KitId>,
     restored_active_kit: Option<KitId>,
-    keyword_chooser_open: bool,
-    reveal_target: Option<RevealRequest>,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -280,6 +278,8 @@ pub struct Baboon {
     pub(in crate::app) references: ReferencesFeature,
     /// Tag comparison: the open Tag Compare.
     pub(in crate::app) compare: CompareFeature,
+    /// The browser: the keyword chooser and a tag waiting to be revealed.
+    pub(in crate::app) browser: BrowserFeature,
 }
 
 impl Baboon {
@@ -426,8 +426,6 @@ impl Baboon {
             operation_notice: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
-            keyword_chooser_open: false,
-            reveal_target: None,
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
@@ -589,6 +587,10 @@ impl Baboon {
             },
             compare: CompareFeature {
                 tag_diff: None,
+            },
+            browser: BrowserFeature {
+                keyword_chooser_open: false,
+                reveal_target: None,
             },
         }
     }

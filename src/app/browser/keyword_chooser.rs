@@ -5,7 +5,7 @@ use super::*;
 
 impl Baboon {
     pub(in crate::app) fn draw_keyword_chooser_window(&mut self, ctx: &egui::Context) {
-        if !self.keyword_chooser_open {
+        if !self.browser.keyword_chooser_open {
             return;
         }
         let mut open = true;
@@ -46,6 +46,6 @@ impl Baboon {
         if let Some(keyword) = chosen {
             self.show_tags_with_keyword(&keyword);
         }
-        self.keyword_chooser_open = open;
+        self.browser.keyword_chooser_open = open;
     }
 }

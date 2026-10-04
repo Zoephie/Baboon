@@ -552,7 +552,7 @@ impl Baboon {
         self.kits[self.active].filter.clear();
         self.kits[self.active].browser_mode = BrowserMode::Folders;
         self.kits[self.active].selected_key = Some(entry.key.clone());
-        self.reveal_target = Some(RevealRequest {
+        self.browser.reveal_target = Some(RevealRequest {
             kit: self.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),

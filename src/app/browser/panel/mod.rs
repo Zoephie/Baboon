@@ -597,8 +597,8 @@ impl Baboon {
             // Only this kit's browser may consume it: with two browsers on
             // screen, whichever drew first would otherwise swallow a reveal
             // meant for the other and scroll to a tag it does not have.
-            let reveal_owned = match &self.reveal_target {
-                Some(request) if request.kit == kit_id => self.reveal_target.take(),
+            let reveal_owned = match &self.browser.reveal_target {
+                Some(request) if request.kit == kit_id => self.browser.reveal_target.take(),
                 _ => None,
             };
             let reveal = reveal_owned.as_ref().map(|request| Reveal {

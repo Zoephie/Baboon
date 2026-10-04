@@ -676,11 +676,11 @@ impl Baboon {
         forget_tag_in_kit(&mut self.kits[kit_index], key);
         // Navigation state names tags by key, and this key now names nothing.
         if self
-            .reveal_target
+            .browser.reveal_target
             .as_ref()
             .is_some_and(|reveal| reveal.key == key)
         {
-            self.reveal_target = None;
+            self.browser.reveal_target = None;
         }
     }
 }

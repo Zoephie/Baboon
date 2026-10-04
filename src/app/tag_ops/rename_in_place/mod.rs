@@ -771,11 +771,11 @@ impl Baboon {
         rekey_tag_in_kit(&mut self.kits[kit_index], &result.old_key, &new_key);
         self.refresh_favorite_entries_for(kit_index);
         if self
-            .reveal_target
+            .browser.reveal_target
             .as_ref()
             .is_some_and(|target| target.key == result.old_key)
         {
-            self.reveal_target = None;
+            self.browser.reveal_target = None;
         }
 
         self.status = match ledger_error {
