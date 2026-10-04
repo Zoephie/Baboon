@@ -1,3 +1,7 @@
+use blam_tags::TagFile;
+
+use crate::core::bundled::locate_definitions_root;
+use crate::core::document::ops::{ShaderParamInitialField, ShaderParamOp};
 use super::*;
 
 const PARAMETERS: &str = "render_method/parameters";

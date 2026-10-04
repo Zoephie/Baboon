@@ -1,35 +1,48 @@
-//! Field, block, shader, function, and model-variant mutation batches.
-//! It owns tag-editor presentation and deferred edit construction; source loading and application lifecycle coordination belong elsewhere.
+//! Applying a batch of edits to a document: field values, block structure
+//! (with block-index references remapped), function bytes, shader and Halo 2
+//! shader parameters, and model variants. Each batch is one undo step, and a
+//! batch that fails partway leaves the tag as it was.
 
-use super::*;
+use std::collections::HashMap;
 
-pub(in crate::app) struct FieldEditOutcome {
-    pub(in crate::app) path: String,
-    pub(in crate::app) input: String,
-    pub(in crate::app) result: Result<(), String>,
+use blam_tags::{H2Function, TagField, TagFieldData, TagFieldType, TagFile};
+
+use crate::core::document::ops::{
+    BlockOp, BlockOpKind, FunctionDataOp, H2ShaderParamOp, ModelVariantOp,
+    ModelVariantRegionChoice, PendingFieldEdit, ShaderOp, ShaderParamOp,
+};
+use crate::core::document::value::{
+    append_field_path_for, escape_field_path_segment, parse_gui_field_value,
+};
+use crate::core::document::{Dirty, TagDocument};
+
+pub(crate) struct FieldEditOutcome {
+    pub(crate) path: String,
+    pub(crate) input: String,
+    pub(crate) result: Result<(), String>,
 }
 
-pub(in crate::app) struct AppliedFieldEdits {
-    pub(in crate::app) status: Option<String>,
-    pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
+pub(crate) struct AppliedFieldEdits {
+    pub(crate) status: Option<String>,
+    pub(crate) outcomes: Vec<FieldEditOutcome>,
 }
 
 /// Every kind of edit a tag pane collects while it draws. They are applied
 /// together once the draw has finished, behind one undo snapshot.
 #[derive(Default)]
-pub(in crate::app) struct DeferredOps {
-    pub(in crate::app) pending: Vec<PendingFieldEdit>,
-    pub(in crate::app) block_ops: Vec<BlockOp>,
-    pub(in crate::app) shader_ops: Vec<ShaderOp>,
-    pub(in crate::app) shader_param_ops: Vec<ShaderParamOp>,
-    pub(in crate::app) h2_shader_param_ops: Vec<H2ShaderParamOp>,
-    pub(in crate::app) model_variant_ops: Vec<ModelVariantOp>,
+pub(crate) struct DeferredOps {
+    pub(crate) pending: Vec<PendingFieldEdit>,
+    pub(crate) block_ops: Vec<BlockOp>,
+    pub(crate) shader_ops: Vec<ShaderOp>,
+    pub(crate) shader_param_ops: Vec<ShaderParamOp>,
+    pub(crate) h2_shader_param_ops: Vec<H2ShaderParamOp>,
+    pub(crate) model_variant_ops: Vec<ModelVariantOp>,
     /// Halo 2 function byte-block writes from the function editor.
-    pub(in crate::app) function_data_ops: Vec<FunctionDataOp>,
+    pub(crate) function_data_ops: Vec<FunctionDataOp>,
 }
 
 impl DeferredOps {
-    pub(in crate::app) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.pending.is_empty()
             && self.block_ops.is_empty()
             && self.shader_ops.is_empty()
@@ -42,7 +55,7 @@ impl DeferredOps {
 
 /// Whether a batch of edits is its own undo step or joins the one open.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum UndoStep {
+pub(crate) enum UndoStep {
     /// A tag pane's per-frame edits: typing into a field keeps extending one
     /// step, and a frame with no edits closes it.
     Coalesce,
@@ -50,13 +63,13 @@ pub(in crate::app) enum UndoStep {
     Own,
 }
 
-pub(in crate::app) struct AppliedDeferredOps {
+pub(crate) struct AppliedDeferredOps {
     /// The last batch's status line, if any batch set one.
-    pub(in crate::app) status: Option<String>,
+    pub(crate) status: Option<String>,
     /// Per-draft outcomes of the plain field edits.
-    pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
+    pub(crate) outcomes: Vec<FieldEditOutcome>,
     /// A model-variant op ran, so a cached model preview is stale.
-    pub(in crate::app) model_variants_changed: bool,
+    pub(crate) model_variants_changed: bool,
 }
 
 /// Apply one frame's deferred edits to `doc`. Any edit at all opens (or
@@ -65,7 +78,7 @@ pub(in crate::app) struct AppliedDeferredOps {
 /// The undo decision used to list the op kinds by hand, and missed the H2
 /// shader-parameter and function-data ops: the H2 shader grid's main edits
 /// changed the tag with no snapshot to undo to.
-pub(in crate::app) fn apply_deferred_ops(
+pub(crate) fn apply_deferred_ops(
     doc: &mut TagDocument,
     ops: DeferredOps,
     label: &str,
@@ -112,56 +125,8 @@ pub(in crate::app) fn apply_deferred_ops(
     }
 }
 
-impl Baboon {
-    /// Apply edits the UI collected to one open tag: the one entry every
-    /// UI-originated edit goes through, so each gets the same undo step, the
-    /// same read-only refusal, the same draft bookkeeping and the same
-    /// status line.
-    ///
-    /// `None` when nothing was applied: the tag is not open in `kit_index`,
-    /// or the kit is read-only (which says so on the status line when there
-    /// was something to refuse).
-    pub(in crate::app) fn apply_doc_ops(
-        &mut self,
-        kit_index: usize,
-        tag_key: &str,
-        label: &str,
-        ops: DeferredOps,
-        step: UndoStep,
-    ) -> Option<AppliedDeferredOps> {
-        if self.editing_kit_is_read_only(kit_index) {
-            if !ops.is_empty() {
-                self.refuse_read_only_edit(kit_index);
-            }
-            if let Some(doc) = self.kits[kit_index].parsed_tags.get_mut(tag_key) {
-                doc.journal.end_edit_window();
-            }
-            return None;
-        }
-        let kit = &mut self.kits[kit_index];
-        let doc = kit.parsed_tags.get_mut(tag_key)?;
-        let applied = apply_deferred_ops(doc, ops, label);
-        if step == UndoStep::Own {
-            doc.journal.end_edit_window();
-        }
-        // Per-edit outcomes: a draft whose value applied cleanly is marked
-        // clean, while one the parser rejected keeps the text the user typed
-        // instead of snapping back to the old value.
-        kit.edit_buffers
-            .accept_successful_edits(tag_key, &applied.outcomes);
-        if applied.model_variants_changed
-            && let Some(preview) = kit.model_previews.get_mut(tag_key)
-        {
-            preview.invalidate_load();
-        }
-        if let Some(status) = &applied.status {
-            self.status = status.clone();
-        }
-        Some(applied)
-    }
-}
 
-pub(in crate::app) fn apply_pending_edits(
+pub(crate) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
     dirty: &mut Dirty,
@@ -188,7 +153,7 @@ pub(in crate::app) fn apply_pending_edits(
     AppliedFieldEdits { status, outcomes }
 }
 
-pub(in crate::app) fn apply_block_ops(
+pub(crate) fn apply_block_ops(
     tag: &mut TagFile,
     ops: Vec<BlockOp>,
     dirty: &mut Dirty,
@@ -210,7 +175,7 @@ pub(in crate::app) fn apply_block_ops(
     status
 }
 
-pub(in crate::app) fn apply_function_data_ops(
+pub(crate) fn apply_function_data_ops(
     tag: &mut TagFile,
     ops: Vec<FunctionDataOp>,
     dirty: &mut Dirty,
@@ -250,7 +215,7 @@ fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-pub(in crate::app) fn replace_halo2_function_byte_block(
+pub(crate) fn replace_halo2_function_byte_block(
     tag: &mut TagFile,
     block_path: &str,
     data: &[u8],
@@ -332,7 +297,7 @@ fn replace_halo2_wrapped_function_byte_block(
     result
 }
 
-pub(in crate::app) fn apply_h2_shader_param_ops(
+pub(crate) fn apply_h2_shader_param_ops(
     tag: &mut TagFile,
     ops: Vec<H2ShaderParamOp>,
     dirty: &mut Dirty,
@@ -357,7 +322,7 @@ pub(in crate::app) fn apply_h2_shader_param_ops(
     status
 }
 
-pub(in crate::app) fn apply_one_h2_shader_param_op(
+pub(crate) fn apply_one_h2_shader_param_op(
     tag: &mut TagFile,
     op: &H2ShaderParamOp,
 ) -> Result<String, String> {
@@ -587,7 +552,7 @@ fn h2_animation_property_index(
     })
 }
 
-pub(in crate::app) fn apply_one_block_op(
+pub(crate) fn apply_one_block_op(
     tag: &mut TagFile,
     op: &BlockOp,
 ) -> Result<String, String> {
@@ -956,7 +921,7 @@ fn path_is_within_target_element(
 /// the renumbering that follows an element insert, delete or move, so what
 /// the dropdown offers is what renumbering keeps pointing at. `root` is only
 /// needed to climb past the field's own struct.
-pub(in crate::app) fn declared_block_index_target(
+pub(crate) fn declared_block_index_target(
     tag_struct: &blam_tags::TagStruct<'_>,
     root: Option<blam_tags::TagStruct<'_>>,
     struct_path: &str,
@@ -1057,7 +1022,7 @@ fn paste_elements(
     Ok(())
 }
 
-pub(in crate::app) fn apply_field_edit(
+pub(crate) fn apply_field_edit(
     tag: &mut TagFile,
     path: &str,
     input: &str,
@@ -1085,7 +1050,7 @@ fn is_subchunk_backed_field(field_type: TagFieldType) -> bool {
     )
 }
 
-pub(in crate::app) fn apply_shader_ops(
+pub(crate) fn apply_shader_ops(
     tag: &mut TagFile,
     ops: Vec<ShaderOp>,
     dirty: &mut Dirty,
@@ -1105,7 +1070,7 @@ pub(in crate::app) fn apply_shader_ops(
     status
 }
 
-pub(in crate::app) fn apply_shader_param_ops(
+pub(crate) fn apply_shader_param_ops(
     tag: &mut TagFile,
     ops: Vec<ShaderParamOp>,
     dirty: &mut Dirty,
@@ -1125,7 +1090,7 @@ pub(in crate::app) fn apply_shader_param_ops(
     status
 }
 
-pub(in crate::app) fn apply_model_variant_ops(
+pub(crate) fn apply_model_variant_ops(
     tag: &mut TagFile,
     ops: Vec<ModelVariantOp>,
     dirty: &mut Dirty,
@@ -1203,7 +1168,7 @@ fn ensure_block_element_exists(tag: &TagFile, path: &str, index: usize) -> Resul
     }
 }
 
-pub(in crate::app) fn add_block_element(tag: &mut TagFile, path: &str) -> Result<usize, String> {
+pub(crate) fn add_block_element(tag: &mut TagFile, path: &str) -> Result<usize, String> {
     let mut root = tag.root_mut();
     let mut field = root
         .field_path_mut(path)
@@ -1262,7 +1227,7 @@ fn clear_block(tag: &mut TagFile, path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(in crate::app) fn apply_one_shader_param_op(
+pub(crate) fn apply_one_shader_param_op(
     tag: &mut TagFile,
     op: &ShaderParamOp,
 ) -> Result<String, String> {
@@ -1295,7 +1260,7 @@ pub(in crate::app) fn apply_one_shader_param_op(
     })
 }
 
-pub(in crate::app) fn apply_one_shader_op(
+pub(crate) fn apply_one_shader_op(
     tag: &mut TagFile,
     op: &ShaderOp,
 ) -> Result<String, String> {
@@ -1313,8 +1278,32 @@ pub(in crate::app) fn apply_one_shader_op(
     })
 }
 
-#[cfg(test)]
-mod campaign_evolved_field_paths_tests;
+/// The signed index held by any block-index value variant.
+pub(crate) fn block_index_value(value: &TagFieldData) -> Option<i64> {
+    match value {
+        TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => Some(*v as i64),
+        TagFieldData::ShortBlockIndex(v) | TagFieldData::CustomShortBlockIndex(v) => {
+            Some(*v as i64)
+        }
+        TagFieldData::LongBlockIndex(v) | TagFieldData::CustomLongBlockIndex(v) => Some(*v as i64),
+        _ => None,
+    }
+}
+
+/// Resolve a block-index field's target block, returning `(element labels, full
+/// target block path)`. Checks the field's own struct first (sibling target),
+/// then walks up the ancestry from `root` (ancestor target — e.g. weapon's
+/// "primary barrel" → the root "barrels" block). `None` for non-(plain)
+/// block-index fields, custom indices (no target in the definition), or targets
+/// that don't resolve — callers fall back to the numeric editor.
+/// The block a block-index field points into. Only its path and length are
+/// resolved per frame; the element labels, one per target element, are built
+/// by the row when it needs them.
+pub(crate) struct BlockIndexTarget {
+    pub(crate) path: String,
+    pub(crate) len: usize,
+}
+
 
 #[cfg(test)]
 mod rollback_tests;
@@ -1322,5 +1311,3 @@ mod rollback_tests;
 #[cfg(test)]
 mod deferred_ops_tests;
 
-#[cfg(test)]
-mod apply_doc_ops_tests;

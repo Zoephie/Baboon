@@ -81,7 +81,12 @@ mod state;
 use state::*;
 mod kit;
 use kit::*;
-use crate::core::journal::*;
+use crate::core::document::journal::*;
+use crate::core::document::ops::*;
+use crate::core::document::TagDocument;
+#[cfg(test)]
+use crate::core::document::Dirty;
+use crate::core::document::apply::{BlockIndexTarget, block_index_value};
 mod project;
 use project::*;
 mod keywords;

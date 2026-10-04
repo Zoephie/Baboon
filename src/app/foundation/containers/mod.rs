@@ -2630,32 +2630,6 @@ pub(in crate::app) fn draw_foundation_bar(
     });
 }
 
-/// The signed index held by any block-index value variant.
-pub(in crate::app) fn block_index_value(value: &TagFieldData) -> Option<i64> {
-    match value {
-        TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => Some(*v as i64),
-        TagFieldData::ShortBlockIndex(v) | TagFieldData::CustomShortBlockIndex(v) => {
-            Some(*v as i64)
-        }
-        TagFieldData::LongBlockIndex(v) | TagFieldData::CustomLongBlockIndex(v) => Some(*v as i64),
-        _ => None,
-    }
-}
-
-/// Resolve a block-index field's target block, returning `(element labels, full
-/// target block path)`. Checks the field's own struct first (sibling target),
-/// then walks up the ancestry from `root` (ancestor target — e.g. weapon's
-/// "primary barrel" → the root "barrels" block). `None` for non-(plain)
-/// block-index fields, custom indices (no target in the definition), or targets
-/// that don't resolve — callers fall back to the numeric editor.
-/// The block a block-index field points into. Only its path and length are
-/// resolved per frame; the element labels, one per target element, are built
-/// by the row when it needs them.
-pub(in crate::app) struct BlockIndexTarget {
-    pub(in crate::app) path: String,
-    pub(in crate::app) len: usize,
-}
-
 /// The dropdown label of every element of `target`, for a popup that is open.
 pub(in crate::app) fn block_index_target_labels(
     root: Option<TagStruct<'_>>,

@@ -1,3 +1,8 @@
+use blam_tags::TagFile;
+
+use crate::core::bundled::locate_definitions_root;
+use crate::core::document::TagDocument;
+use crate::core::document::ops::{FunctionDataOp, H2ShaderParamOp};
 use super::*;
 
 fn document() -> TagDocument {

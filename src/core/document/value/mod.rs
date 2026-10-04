@@ -1,7 +1,13 @@
-//! Textual field-value parsing, reference parsing, and display metadata.
-//! It owns tag-editor presentation and deferred edit construction; source loading and application lifecycle coordination belong elsewhere.
+//! How typed text becomes a field value (numbers, angles, colours, bounds,
+//! flags, enums, references), how field paths are spelled, and which tags can
+//! be edited and saved.
 
-use super::*;
+use blam_tags::{
+    Endian, StringIdData, TagField, TagFieldData, TagFieldType, TagFile, TagReferenceData,
+    parse_group_tag,
+};
+
+use crate::core::source::{TagEntry, TagEntryLocation};
 
 /// Whether this document's fields and block controls are live.
 ///
@@ -16,7 +22,7 @@ use super::*;
 /// Editability used to be gated on saveability, which made a monolithic tag
 /// build viewable and nothing else — its values could not even be selected and
 /// copied, because a read-only row is painted text rather than a text box.
-pub(in crate::app) fn is_editable_tag(entry: &TagEntry, _tag: &TagFile) -> bool {
+pub(crate) fn is_editable_tag(entry: &TagEntry, _tag: &TagFile) -> bool {
     // Matched rather than defaulted so a new location has to state its answer.
     match entry.location {
         // Loose tags are edited in place; container (Campaign Evolved) tags are
@@ -37,7 +43,7 @@ pub(in crate::app) fn is_editable_tag(entry: &TagEntry, _tag: &TagFile) -> bool 
 /// can. The single source of truth behind every save path's refusal, the
 /// read-only badge on the tag header, and the close prompt's decision not to
 /// treat these edits as unsaved work.
-pub(in crate::app) fn unsaveable_reason(entry: &TagEntry, tag: &TagFile) -> Option<&'static str> {
+pub(crate) fn unsaveable_reason(entry: &TagEntry, tag: &TagFile) -> Option<&'static str> {
     if matches!(entry.location, TagEntryLocation::Monolithic { .. }) {
         return Some(
             "Tags in a monolithic build are read-only — edits stay in this session and are \
@@ -57,11 +63,11 @@ pub(in crate::app) fn unsaveable_reason(entry: &TagEntry, tag: &TagFile) -> Opti
 }
 
 /// Whether edits to this document can be written back anywhere.
-pub(in crate::app) fn is_saveable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
+pub(crate) fn is_saveable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
     unsaveable_reason(entry, tag).is_none()
 }
 
-pub(in crate::app) fn append_field_path(prefix: &str, field_name: &str) -> String {
+pub(crate) fn append_field_path(prefix: &str, field_name: &str) -> String {
     if prefix.is_empty() {
         field_name.to_owned()
     } else {
@@ -75,7 +81,7 @@ pub(in crate::app) fn append_field_path(prefix: &str, field_name: &str) -> Strin
 /// (see `blam_tags::TagField::ordinal`). Use for RESOLVABLE paths (edits,
 /// block ops, function data). Canonical/display paths use the plain-name
 /// form and strip the ordinal via `strip_node_indices`.
-pub(in crate::app) fn append_field_path_for(prefix: &str, field: &TagField<'_>) -> String {
+pub(crate) fn append_field_path_for(prefix: &str, field: &TagField<'_>) -> String {
     // Emit the CLEAN (markup-free) name so field-name markup — `:units`,
     // `[range]`, `#help` — can't collide with the path grammar's own `type:`,
     // `[index]`, and `#ordinal` tokens (the range-hint-as-index bug). The engine
@@ -102,11 +108,11 @@ pub(in crate::app) fn append_field_path_for(prefix: &str, field: &TagField<'_>) 
 /// path no longer resolves" — which in the shader grid meant no bool or int
 /// parameter could be created at all, since they are stored in a field named
 /// `int/bool`.
-pub(in crate::app) fn escape_field_path_segment(field_name: &str) -> String {
+pub(crate) fn escape_field_path_segment(field_name: &str) -> String {
     blam_tags::field_name::clean_field_name(field_name).into_owned()
 }
 
-pub(in crate::app) fn is_text_editable_value(value: &TagFieldData) -> bool {
+pub(crate) fn is_text_editable_value(value: &TagFieldData) -> bool {
     !matches!(
         value,
         TagFieldData::Data(_)
@@ -149,7 +155,7 @@ fn angle_to_radians(typed: f32) -> f32 {
     }
 }
 
-pub(in crate::app) fn parse_gui_field_value(
+pub(crate) fn parse_gui_field_value(
     field: &TagField<'_>,
     input: &str,
 ) -> Result<TagFieldData, String> {
@@ -369,7 +375,7 @@ pub(in crate::app) fn parse_gui_field_value(
 
 /// Decode a contiguous lowercase/uppercase hex string (no separators)
 /// into bytes. Used to ferry function blobs through `PendingFieldEdit`.
-pub(in crate::app) fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
     let s = input.trim();
     if s.len() % 2 != 0 {
         return Err("hex blob must have an even number of digits".to_owned());
@@ -389,7 +395,7 @@ pub(in crate::app) fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Encode bytes as a contiguous lowercase hex string.
-pub(in crate::app) fn encode_hex(bytes: &[u8]) -> String {
+pub(crate) fn encode_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         out.push(char::from_digit((b >> 4) as u32, 16).unwrap());
@@ -398,7 +404,7 @@ pub(in crate::app) fn encode_hex(bytes: &[u8]) -> String {
     out
 }
 
-pub(in crate::app) fn parse_value<T: std::str::FromStr>(
+pub(crate) fn parse_value<T: std::str::FromStr>(
     input: &str,
     expected: &str,
 ) -> Result<T, String> {
@@ -408,7 +414,7 @@ pub(in crate::app) fn parse_value<T: std::str::FromStr>(
 }
 
 /// Parse exactly `N` comma-separated float channels (used for color values).
-pub(in crate::app) fn parse_color_channels<const N: usize>(
+pub(crate) fn parse_color_channels<const N: usize>(
     input: &str,
 ) -> Result<[f32; N], String> {
     let parts: Vec<f32> = input
@@ -421,7 +427,7 @@ pub(in crate::app) fn parse_color_channels<const N: usize>(
         .map_err(|_: Vec<f32>| format!("expected {N} comma-separated color channels"))
 }
 
-pub(in crate::app) fn parse_rgb_or_argb_color_channels(
+pub(crate) fn parse_rgb_or_argb_color_channels(
     input: &str,
 ) -> Result<(f32, f32, f32, f32), String> {
     let parts = input
@@ -437,11 +443,11 @@ pub(in crate::app) fn parse_rgb_or_argb_color_channels(
     }
 }
 
-pub(in crate::app) fn color_float_to_u8(value: f32) -> u8 {
+pub(crate) fn color_float_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-pub(in crate::app) fn parse_float_channels<const N: usize>(
+pub(crate) fn parse_float_channels<const N: usize>(
     input: &str,
     expected: &str,
 ) -> Result<[f32; N], String> {
@@ -464,7 +470,7 @@ pub(in crate::app) fn parse_float_channels<const N: usize>(
         .map_err(|_: Vec<f32>| format!("expected {N} values for {expected}"))
 }
 
-pub(in crate::app) fn parse_float_bounds(
+pub(crate) fn parse_float_bounds(
     input: &str,
     expected: &str,
 ) -> Result<(f32, f32), String> {
@@ -479,7 +485,7 @@ pub(in crate::app) fn parse_float_bounds(
     ))
 }
 
-pub(in crate::app) fn parse_short_bounds(
+pub(crate) fn parse_short_bounds(
     input: &str,
     expected: &str,
 ) -> Result<(i16, i16), String> {
@@ -494,7 +500,7 @@ pub(in crate::app) fn parse_short_bounds(
     ))
 }
 
-pub(in crate::app) fn parse_bounds_parts<'a>(
+pub(crate) fn parse_bounds_parts<'a>(
     input: &'a str,
     expected: &str,
 ) -> Result<(&'a str, &'a str), String> {
@@ -521,7 +527,7 @@ pub(in crate::app) fn parse_bounds_parts<'a>(
     Ok((lower, upper))
 }
 
-pub(in crate::app) fn parse_none_string(input: &str) -> String {
+pub(crate) fn parse_none_string(input: &str) -> String {
     if input.eq_ignore_ascii_case("none") {
         String::new()
     } else {
@@ -529,7 +535,7 @@ pub(in crate::app) fn parse_none_string(input: &str) -> String {
     }
 }
 
-pub(in crate::app) fn parse_block_index(input: &str) -> Result<i32, String> {
+pub(crate) fn parse_block_index(input: &str) -> Result<i32, String> {
     if input.eq_ignore_ascii_case("none") {
         Ok(-1)
     } else {
@@ -537,7 +543,7 @@ pub(in crate::app) fn parse_block_index(input: &str) -> Result<i32, String> {
     }
 }
 
-pub(in crate::app) fn parse_int_mask(input: &str) -> Result<u64, String> {
+pub(crate) fn parse_int_mask(input: &str) -> Result<u64, String> {
     if let Some(hex) = input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
@@ -550,7 +556,7 @@ pub(in crate::app) fn parse_int_mask(input: &str) -> Result<u64, String> {
     }
 }
 
-pub(in crate::app) fn parse_enum_value(field: &TagField<'_>, input: &str) -> Result<i32, String> {
+pub(crate) fn parse_enum_value(field: &TagField<'_>, input: &str) -> Result<i32, String> {
     let names = match field.options() {
         Some(blam_tags::TagOptions::Enum { names, .. }) => Some(names),
         _ => None,
@@ -600,7 +606,7 @@ fn mask_bits(input: &str, bits: u32) -> Result<u64, String> {
     Ok(mask)
 }
 
-pub(in crate::app) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, String> {
+pub(crate) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, String> {
     if input.eq_ignore_ascii_case("none") || input.is_empty() {
         return Ok(TagReferenceData {
             group_tag_and_name: None,
@@ -624,62 +630,8 @@ pub(in crate::app) fn parse_tag_reference(input: &str) -> Result<TagReferenceDat
     })
 }
 
-pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
-    // The engine owns the canonical field-name markup grammar (Foundation's
-    // `TagFieldNameInfo`). We map its decomposition onto Baboon's display meta.
-    // Note the Foundation marker semantics adopted here: `*` = read-only,
-    // `!` = hidden/expert-only (Baboon's `advanced` gate). See
-    // `blam_tags::field_name`.
-    let info = blam_tags::parse_field_name(name);
-    FieldDisplayMeta {
-        label: info.clean_name.into_owned(),
-        unit: info.units.map(str::to_owned),
-        range: info.range.map(str::to_owned),
-        help: info.description.map(str::to_owned),
-        tag_reference_allowed: Vec::new(),
-        read_only: info.read_only,
-        advanced: info.hidden,
-    }
-}
 
-/// Metadata shown after a field's value: the unit (preferred over the type
-/// name), then the `[range]` hint if present.
-pub(in crate::app) fn field_suffix(meta: &FieldDisplayMeta, type_name: &str) -> String {
-    let base = meta
-        .unit
-        .clone()
-        .unwrap_or_else(|| clean_type_name(type_name));
-    match &meta.range {
-        Some(range) => {
-            if base.is_empty() {
-                range.clone()
-            } else {
-                format!("{base} {range}")
-            }
-        }
-        None => base,
-    }
-}
-
-pub(in crate::app) fn draw_field_help(ui: &mut Ui, meta: &FieldDisplayMeta) {
-    // Field documentation is shown on hover over the name label (see
-    // `foundation_label_cell`); this only surfaces the read-only marker.
-    if meta.read_only {
-        ui.label(RichText::new("read-only").color(subtle_dark()).small());
-    }
-}
-
-pub(in crate::app) fn enum_option_label(options: &[&str], selected: i64) -> String {
-    if selected < 0 {
-        return "NONE".to_owned();
-    }
-    options
-        .get(selected as usize)
-        .map(|name| format!("{selected}. {name}"))
-        .unwrap_or_else(|| selected.to_string())
-}
-
-pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
+pub(crate) fn extension_to_group_tag(extension: &str) -> Option<u32> {
     // The games' own `_meta.json` first — it covers every group Baboon can
     // open, and does not have to be kept in step by hand. The table below
     // remains for the cases that run before any definitions are loaded.

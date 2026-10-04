@@ -5,10 +5,13 @@ use super::*;
 
 mod sound;
 pub(super) use sound::*;
-mod mutations;
-pub(super) use mutations::*;
-mod value_parser;
-pub(super) use value_parser::*;
+mod apply_doc;
+#[cfg(test)]
+mod campaign_evolved_field_paths_tests;
+mod field_meta;
+pub(super) use crate::core::document::apply::*;
+pub(super) use crate::core::document::value::*;
+pub(super) use field_meta::*;
 mod bitmap;
 pub(super) use bitmap::*;
 mod model;

@@ -1,3 +1,6 @@
+use blam_tags::{TagField, TagFieldData, TagFieldType, TagFile, TagStruct};
+
+use crate::core::bundled::locate_definitions_root;
 use super::*;
 
 /// `crate` is `bloc` in every game that has it; there is no `crat` group.
