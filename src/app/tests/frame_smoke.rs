@@ -1,6 +1,6 @@
 //! Whole-frame smoke test: every window, dialog, prompt and pane the app can
 //! show, opened one at a time over a populated app and drawn through
-//! [`Baboon::run_frame`] — the body of `eframe::App::update` — for several
+//! [`Baboon::run_frame`] — `eframe::App::logic` then `App::ui` — for several
 //! frames.
 //!
 //! Each case is a `base` state (a kit of some kind, or nothing) and an `open`
@@ -1390,6 +1390,7 @@ fn cases() -> Vec<Case> {
 /// [`every_window_has_a_smoke_case`].
 const NOT_WINDOWS: &[(&str, &str)] = &[
     ("window_state", "native window geometry tracker"),
+    ("native_clock", "the clock of the latest input"),
     ("native_template_cache", "import cache"),
     ("available_update", "data shown in Settings and the status bar"),
     ("last_update_check", "data shown in Settings"),

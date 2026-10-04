@@ -33,7 +33,6 @@ impl Baboon {
                 self.draw_kit_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
-        self.persist_prefs_throttled(ctx.input(|input| input.time));
         // Every kit, not just the active one: a background kit's sidecar can be
         // dirty from edits made before the user switched away.
         let mut keyword_notice = None;
@@ -1403,7 +1402,7 @@ impl Baboon {
     /// Runs after the worker drain so a message set this frame is timed from
     /// this frame. Progress states are rendered from their own fields rather
     /// than from `status`, so expiring it never blanks a running scan.
-    fn expire_status(&mut self, ctx: &egui::Context) {
+    pub(super) fn expire_status(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         if self.status != self.status_shown {
             self.status_shown = self.status.clone();
@@ -1481,11 +1480,12 @@ impl Baboon {
             }
         });
         self.deferred_file_action = Some(action);
+        // It runs at the start of the next frame, which a window with
+        // nothing else to do would otherwise never draw.
+        ctx.request_repaint();
     }
 
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
-        self.process_worker_messages(ctx);
-        self.expire_status(ctx);
         ctx.set_zoom_factor(self.prefs.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
@@ -1501,7 +1501,6 @@ impl Baboon {
         // Opened before any pane draws and settled after the last one, so a
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);
-        self.handle_app_close_request(ctx);
         // A folder move or rename is rewriting tags on disk. Nothing may edit,
         // save or open them until it lands, so no shortcut or dropped file is
         // taken, and no text field keeps the keyboard.

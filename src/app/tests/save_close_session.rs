@@ -266,6 +266,42 @@ fn close_requested_input(time: f64) -> egui::RawInput {
     input
 }
 
+/// Closing the window while it is minimized (from the taskbar, say) runs no
+/// UI pass, only `App::logic`. The close must still be vetoed there, and the
+/// next logic tick must still raise the prompt for the dirty tag.
+#[test]
+fn a_close_while_the_window_is_hidden_is_still_vetoed_and_prompted_for() {
+    let (_kit, mut app, key, _other) = edited("close-hidden");
+    let ctx = egui::Context::default();
+    let _ = crate::app::run_ui_test(&ctx, screen(Vec::new(), 1.0), |_| {});
+    let hidden = |mut input: egui::RawInput| {
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .minimized = Some(true);
+        input
+    };
+
+    let output = ctx.run_logic(&hidden(close_requested_input(2.0)), |ctx| app.run_logic(ctx));
+    let commands = output
+        .viewport_commands
+        .get(&egui::ViewportId::ROOT)
+        .cloned()
+        .unwrap_or_default();
+    assert!(commands.contains(&egui::ViewportCommand::CancelClose), "{commands:?}");
+    assert!(matches!(
+        app.deferred_file_action,
+        Some(DeferredFileAction::Close(PendingCloseAction::CloseApp))
+    ));
+    assert!(!app.save_changes_prompt.visible, "the close waits a frame");
+
+    let _ = ctx.run_logic(&hidden(screen(Vec::new(), 2.1)), |ctx| app.run_logic(ctx));
+    assert!(app.deferred_file_action.is_none());
+    assert!(app.save_changes_prompt.visible, "dirty work is prompted for");
+    assert_eq!(app.save_changes_prompt.dirty_tags[0].tag_id, key);
+}
+
 /// The native close is vetoed, prompted for, and only then re-issued; the
 /// re-issued close is let through once.
 #[test]

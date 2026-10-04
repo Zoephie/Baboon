@@ -1127,8 +1127,16 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
 }
 
 impl eframe::App for Baboon {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.native_clock = raw_input.time;
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.run_logic(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.run_frame(ui);
+        self.draw_root_ui(ui);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1144,15 +1152,40 @@ impl eframe::App for Baboon {
 }
 
 impl Baboon {
-    /// One whole application frame: everything `eframe::App::ui` does.
-    /// Split out because an `eframe::Frame` cannot be built outside eframe,
-    /// and nothing here needs one — so headless tests drive exactly the
-    /// frame the window does.
+    /// One whole application frame while the window shows: what eframe runs,
+    /// `App::logic` and then `App::ui`. For headless tests, which cannot
+    /// build the `eframe::Frame` those take and need not, since nothing here
+    /// uses one — so they drive exactly the frame the window does.
+    #[cfg(test)]
     pub(crate) fn run_frame(&mut self, ui: &mut egui::Ui) {
-        let ctx = &ui.ctx().clone();
-        self.window_state.observe(ctx);
+        self.run_logic(&ui.ctx().clone());
         self.draw_root_ui(ui);
+    }
+
+    /// The part of a frame that needs no UI. eframe runs it before the UI,
+    /// and on its own while the window is minimized or covered, when there is
+    /// no UI pass at all; so background work keeps landing, saves keep being
+    /// written and closing the window still asks first.
+    pub(crate) fn run_logic(&mut self, ctx: &egui::Context) {
+        // While the window is hidden egui's clock stays at the last frame
+        // shown, and every timer below reads it.
+        if let Some(now) = self.native_clock.take() {
+            ctx.input_mut(|input| input.time = input.time.max(now));
+        }
+        self.window_state.observe(ctx);
+        if self.first_run_wizard.is_none() {
+            self.process_worker_messages(ctx);
+            self.expire_status(ctx);
+        }
+        // Raised by the previous frame, whose UI has since committed any edit
+        // that was still focused, so the action sees it.
         self.run_deferred_file_action(ctx);
+        if self.first_run_wizard.is_none() {
+            // Defers the close, so the UI commits a focused edit before the
+            // next frame decides whether there is anything to save.
+            self.handle_app_close_request(ctx);
+            self.persist_prefs_throttled(ctx.input(|input| input.time));
+        }
         // A container write whose workspace closed while it was in flight left
         // a mapping released and an Unreal package mount idle. Nothing else
         // would ever put those back.

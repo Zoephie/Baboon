@@ -893,6 +893,44 @@ mod tests {
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
     }
 
+    /// While the window is minimized eframe runs `App::logic` and no UI pass,
+    /// and egui's clock stays at the last frame shown. A checkpoint that falls
+    /// due then is still written, on the clock eframe stamps on the input.
+    #[test]
+    fn a_checkpoint_falls_due_while_the_window_is_hidden() {
+        let mut app = Baboon::for_test();
+        let mut document = rename_fixture();
+        document.checkpoint_due = Some(5.0);
+        app.kits[0]
+            .chimp
+            .documents
+            .insert("/Game/Test/Thing".to_owned(), document);
+        let ctx = egui::Context::default();
+        let shown = egui::RawInput {
+            time: Some(1.0),
+            ..Default::default()
+        };
+        let _ = crate::app::run_ui_test(&ctx, shown, |_| {});
+        let mut hidden = egui::RawInput {
+            time: Some(6.0),
+            ..Default::default()
+        };
+        hidden
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .minimized = Some(true);
+        let due = |app: &Baboon| app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due;
+
+        // egui alone still reads 1.0, so nothing is due yet.
+        let _ = ctx.run_logic(&hidden, |ctx| app.run_logic(ctx));
+        assert_eq!(due(&app), Some(5.0), "egui's clock does not move while hidden");
+
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut hidden);
+        let _ = ctx.run_logic(&hidden, |ctx| app.run_logic(ctx));
+        assert_eq!(due(&app), None, "checkpointed on eframe's clock");
+    }
+
     /// A remount re-runs recovery while documents are still open. The open
     /// document is newer than its checkpoint, so it must be left alone; only a
     /// package nothing has open is restored.

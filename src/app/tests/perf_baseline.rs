@@ -1,7 +1,7 @@
 //! Frame-time baselines: whole application frames, run headless.
 //!
 //! Every scenario drives [`Baboon::run_frame`] — the body of
-//! `eframe::App::update` — on an egui context configured by
+//! `eframe::App::logic` then `App::ui` — on an egui context configured by
 //! [`Baboon::configure_context`], exactly as the window does, then
 //! tessellates the output as eframe would before handing it to the GPU. What
 //! is timed is therefore the CPU side of a real frame: input, every panel,

@@ -192,6 +192,10 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
 /// intentionally the composition root rather than a domain model.
 pub struct Baboon {
     window_state: crate::window_state::WindowStateTracker,
+    /// The clock eframe stamped on the latest input, kept for
+    /// [`Baboon::run_logic`]: while the window is hidden eframe runs no egui
+    /// pass, so egui's own clock stays at the last frame shown.
+    native_clock: Option<f64>,
     default_names: TagNameIndex,
     /// Cloneable sender given to background jobs; every completion is funneled
     /// back through the receive loop so UI state mutates only on the UI thread.
@@ -571,6 +575,7 @@ impl Baboon {
             .max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
         Self {
             window_state,
+            native_clock: None,
             default_names: names.clone(),
             tx,
             rx,
