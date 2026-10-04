@@ -137,7 +137,9 @@ pub(in crate::app) fn draw_tag_pane(
 
     let supports_field_search = supports_field_search(entry);
 
-    let picker_was_open = editor.tag_reference_picker.is_some();
+    // Filled by the field renderers, which open these by assigning them.
+    let mut tag_reference_picker = None;
+    let mut block_confirm = None;
     let PaneInputs {
         find,
         field_nav,
@@ -286,14 +288,14 @@ pub(in crate::app) fn draw_tag_pane(
         bitmap_hover_entries: source.map(LoadedSourceData::full_entry_set),
         tag_reference_catalog: source
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
-        tag_reference_picker: &mut editor.tag_reference_picker,
+        tag_reference_picker: &mut tag_reference_picker,
         status: Some(&mut status),
         editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
         show_block_sizes: cx.model.prefs.show_block_sizes,
         buffers: &mut view.edit_buffers,
         pending: &mut ops.pending,
         block_ops: &mut ops.block_ops,
-        block_confirm: &mut editor.block_confirm,
+        block_confirm: &mut block_confirm,
         open_request: &mut open_request,
         sound_play_request: crate::app::audio::SoundRequests::new(
             &mut sound_queue,
@@ -425,26 +427,33 @@ pub(in crate::app) fn draw_tag_pane(
     // A color swatch was clicked: open the shared picker. Each popup
     // records the kit it was opened from, so confirming it later edits
     // this document rather than whichever kit is active by then.
-    editor.adopt_opened_popups(
-        kit_id,
-        grid_color_popup.or(color_request),
-        grid_function_popup.or(function_request),
-    );
+    if let Some(popup) = grid_color_popup.or(color_request) {
+        cx.open_dialog(ColorPopupWindow {
+            popup: Some(popup),
+            kit: kit_id,
+        });
+    }
+    if let Some(popup) = grid_function_popup.or(function_request) {
+        cx.open_dialog(FunctionPopupWindow {
+            popup: Some(popup),
+            kit: kit_id,
+        });
+    }
     // A referenced sound was played/extracted from a container source. It
     // is stamped with this kit because resolving it needs that kit's
     // containers, not whichever one happens to be active by the drain.
     if let Some(request) = ce_sound_ref_request {
         editor.pending_ce_sound_ref = Some((kit_id, key.clone(), request));
     }
-    // The reference picker is opened from inside the field renderer rather
-    // than hoisted here, so it is stamped by noticing it appear.
-    if !picker_was_open && editor.tag_reference_picker.is_some() {
-        editor.tag_reference_picker_kit = Some(kit_id);
+    // The reference picker and a block confirmation are opened from inside
+    // the field renderers, which are shared by every pane and know no kit:
+    // they are stamped with this pane's here.
+    if let Some(state) = tag_reference_picker {
+        cx.open_dialog(TagReferencePickerWindow { state, kit: kit_id });
     }
-    // And a block confirmation, raised the same way. Stamping only an
-    // unstamped one leaves a confirmation another pane raised alone.
-    if let Some(confirm) = editor.block_confirm.as_mut() {
-        confirm.kit.get_or_insert(kit_id);
+    if let Some(mut confirm) = block_confirm {
+        confirm.kit = Some(kit_id);
+        cx.open_dialog(confirm);
     }
     // Element(s) were copied: stash them on the clipboard.
     if let Some(clip) = block_clip_request {
@@ -453,7 +462,7 @@ pub(in crate::app) fn draw_tag_pane(
     }
     // "Paste TSV…" was chosen: open the import window.
     if let Some(req) = tsv_paste_request {
-        editor.tsv_paste = Some(TsvPasteState {
+        cx.open_dialog(TsvPasteState {
             kit: kit_id,
             tag_key: key.clone(),
             block_path: req.block_path,

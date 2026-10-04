@@ -300,7 +300,7 @@ impl Baboon {
         // The document is looked up in the active kit below, and two workspaces
         // of the same game share a key space, so a paste answered after a
         // switch could land in the wrong game's tag rather than simply missing.
-        let Some(kit) = self.editor.tsv_paste.as_ref().map(|paste| paste.kit) else {
+        let Some(kit) = self.dialogs.get::<TsvPasteState>().map(|paste| paste.kit) else {
             return;
         };
         if !self.focus_navigation_kit(kit) {
@@ -310,7 +310,7 @@ impl Baboon {
         if self.refuse_read_only_edit(self.model.active) {
             return;
         }
-        let Some(paste) = self.editor.tsv_paste.as_ref() else {
+        let Some(paste) = self.dialogs.get::<TsvPasteState>() else {
             return;
         };
         let tag_key = paste.tag_key.clone();
@@ -390,7 +390,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn set_tsv_paste_status(&mut self, message: &str) {
-        if let Some(paste) = self.editor.tsv_paste.as_mut() {
+        if let Some(paste) = self.dialogs.get_mut::<TsvPasteState>() {
             paste.status = Some(message.to_owned());
         }
     }
@@ -437,13 +437,16 @@ impl Baboon {
     /// first: answered after a switch, it could otherwise delete from the
     /// wrong game's tag.
     pub(in crate::app) fn apply_block_confirm(&mut self) {
-        let confirm_kit = self.editor.block_confirm.as_ref().and_then(|confirm| confirm.kit);
+        let confirm_kit = self
+            .dialogs
+            .get::<BlockConfirm>()
+            .and_then(|confirm| confirm.kit);
         let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
         if routed && self.refuse_read_only_edit(self.model.active) {
-            self.editor.block_confirm = None;
+            self.dialogs.close::<BlockConfirm>();
             return;
         }
-        if let Some(confirm) = self.editor.block_confirm.take()
+        if let Some(confirm) = self.dialogs.close::<BlockConfirm>()
             && routed
         {
             let deletes_model_variant = confirm.path == "variants"
@@ -477,48 +480,48 @@ impl Baboon {
 }
 
 /// The block delete/delete-all confirmation, while one is pending.
-pub(in crate::app) fn draw_block_confirm(cx: &Ctx, editor: &mut EditorFeature) {
-    let Some(confirm) = editor.block_confirm.as_ref() else {
-        return;
-    };
-    let ctx = cx.egui;
-    let message = confirm.message.clone();
-    let confirm_label = confirm.confirm_label.clone();
-    let mut do_apply = false;
-    let mut do_cancel = false;
-    egui::Window::new("Confirm")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label(RichText::new(message).color(text_dark()));
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new(&confirm_label)
-                                .color(Color32::from_rgb(230, 230, 228)),
+impl Dialog for BlockConfirm {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let confirm = &*self;
+        let ctx = cx.egui;
+        let message = confirm.message.clone();
+        let confirm_label = confirm.confirm_label.clone();
+        let mut do_apply = false;
+        let mut do_cancel = false;
+        egui::Window::new("Confirm")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(message).color(text_dark()));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(&confirm_label)
+                                    .color(Color32::from_rgb(230, 230, 228)),
+                            )
+                            .fill(Color32::from_rgb(150, 48, 40))
+                            .min_size(Vec2::new(80.0, 24.0)),
                         )
-                        .fill(Color32::from_rgb(150, 48, 40))
-                        .min_size(Vec2::new(80.0, 24.0)),
-                    )
-                    .clicked()
-                {
-                    do_apply = true;
-                }
-                if ui
-                    .add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 24.0)))
-                    .clicked()
-                {
-                    do_cancel = true;
-                }
+                        .clicked()
+                    {
+                        do_apply = true;
+                    }
+                    if ui
+                        .add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 24.0)))
+                        .clicked()
+                    {
+                        do_cancel = true;
+                    }
+                });
             });
-        });
-    if do_apply {
-        cx.send(EditorCommand::ApplyBlockConfirm);
-    } else if do_cancel {
-        editor.block_confirm = None;
+        // Left open for the apply, which takes it back from the host.
+        if do_apply {
+            cx.send(EditorCommand::ApplyBlockConfirm);
+        }
+        !do_cancel
     }
 }
 

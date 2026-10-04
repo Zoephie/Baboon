@@ -1,41 +1,35 @@
 //! The editor's windows over a tag: the tag reference picker, and the color
-//! and function popups a field opens. They draw from the editor's own state;
-//! what they change in a document is an [`EditorCommand`].
+//! and function popups a field opens. Each is a dialog that remembers the kit
+//! it was opened from; what they change in a document is an [`EditorCommand`].
 
 use super::*;
 
-/// The tag reference picker, while one is open. Its catalog comes from
-/// the kit the picker was opened from, the same kit the pick is applied
-/// to, or it would offer another game's tags.
-pub(in crate::app) fn draw_tag_reference_picker_window(cx: &Ctx, editor: &mut EditorFeature) {
-    if editor.tag_reference_picker.is_none() {
-        return;
-    }
-    let ctx = cx.egui;
-    let expert_mode = cx.model.prefs.expert_mode;
-    // The catalog has to come from the kit the picker was opened from, the
-    // same kit its selection is applied to — otherwise it would offer
-    // another game's tags to pick from.
-    let picker_kit = editor
-        .tag_reference_picker_kit
-        .and_then(|kit| cx.model.resolve_kit(kit))
-        .unwrap_or(cx.model.active);
-    let Some(catalog) = cx.model.kits[picker_kit]
-        .source
-        .as_ref()
-        .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
-    else {
-        editor.tag_reference_picker = None;
-        return;
-    };
+/// The movable tag reference picker over a reference field, and the kit it
+/// was opened from: its catalog comes from that kit, the same kit the pick is
+/// applied to, or it would offer another game's tags.
+pub(in crate::app) struct TagReferencePickerWindow {
+    pub(in crate::app) state: TagReferencePickerState,
+    pub(in crate::app) kit: KitId,
+}
 
-    let mut open = true;
-    let mut picked = None;
-    {
-        let picker = editor
-            .tag_reference_picker
-            .as_mut()
-            .expect("picker presence checked above");
+impl Dialog for TagReferencePickerWindow {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let expert_mode = cx.model.prefs.expert_mode;
+        let Some(picker_kit) = cx.model.resolve_kit(self.kit) else {
+            return false;
+        };
+        let Some(catalog) = cx.model.kits[picker_kit]
+            .source
+            .as_ref()
+            .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
+        else {
+            return false;
+        };
+
+        let mut open = true;
+        let mut picked = None;
+        let picker = &mut self.state;
         egui::Window::new("Select Tag Reference")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new(
@@ -57,107 +51,121 @@ pub(in crate::app) fn draw_tag_reference_picker_window(cx: &Ctx, editor: &mut Ed
                     &mut picker.search,
                 );
             });
-    }
 
-    if let Some(input) = picked {
-        let picker = editor
-            .tag_reference_picker
-            .take()
-            .expect("picker remains open while processing selection");
-        cx.send(EditorCommand::PickTagReference {
-            kit: cx.model.kits[picker_kit].id,
-            tag_key: picker.tag_key,
-            field_path: picker.field_path,
-            input,
-        });
-    } else if !open {
-        editor.tag_reference_picker = None;
+        if let Some(input) = picked {
+            cx.send(EditorCommand::PickTagReference {
+                kit: self.kit,
+                tag_key: self.state.tag_key.clone(),
+                field_path: self.state.field_path.clone(),
+                input,
+            });
+            return false;
+        }
+        open
     }
 }
 
-/// The color picker popup, while one is open. The palette it keeps (custom
-/// swatches and the folder palettes load from) is a preference: the popup
-/// edits copies, and a change goes to the live preferences as a command.
-pub(in crate::app) fn draw_color_popup_window(cx: &Ctx, editor: &mut EditorFeature) {
-    if editor.color_popup.is_none() {
-        editor.color_popup_kit = None;
-        return;
-    }
-    let mut swatches = cx.model.prefs.custom_color_swatches.clone();
-    let mut palette_dir = cx.model.prefs.palette_last_dir.clone();
-    let result = draw_color_popup(cx.egui, &mut editor.color_popup, &mut swatches, &mut palette_dir);
-    if swatches != cx.model.prefs.custom_color_swatches || palette_dir != cx.model.prefs.palette_last_dir {
-        cx.edit_prefs(move |prefs| {
-            prefs.custom_color_swatches = swatches;
-            prefs.palette_last_dir = palette_dir;
-        });
-    }
-    if let Some(result) = result {
-        let (tag_key, label, ops) = match result {
-            ColorPopupResult::FieldEdit { tag_key, edit } => {
-                let ops = DeferredOps {
-                    pending: vec![edit],
-                    ..DeferredOps::default()
-                };
-                (tag_key, "Edit color", ops)
-            }
-            ColorPopupResult::ShaderOp { tag_key, op } => {
-                let ops = DeferredOps {
-                    shader_ops: vec![op],
-                    ..DeferredOps::default()
-                };
-                (tag_key, "Shader edit", ops)
-            }
-            ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                let ops = DeferredOps {
-                    shader_param_ops: vec![op],
-                    ..DeferredOps::default()
-                };
-                (tag_key, "Shader parameter", ops)
-            }
-            ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                let ops = DeferredOps {
-                    h2_shader_param_ops: vec![op],
-                    ..DeferredOps::default()
-                };
-                (tag_key, "Shader parameter", ops)
-            }
-            ColorPopupResult::FunctionDraftColor { target, argb } => {
-                if let Some(popup) = editor.function_popup.as_mut() {
-                    popup.apply_draft_color(target, argb);
+/// The color picker popup over a field, and the kit it was opened from: its
+/// edit is addressed by tag key, which is only unique within a kit. The
+/// palette it keeps (custom swatches and the folder palettes load from) is a
+/// preference: the popup edits copies, and a change goes to the live
+/// preferences as a command.
+pub(in crate::app) struct ColorPopupWindow {
+    pub(in crate::app) popup: Option<MaterialColorPopup>,
+    pub(in crate::app) kit: KitId,
+}
+
+impl Dialog for ColorPopupWindow {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let mut swatches = cx.model.prefs.custom_color_swatches.clone();
+        let mut palette_dir = cx.model.prefs.palette_last_dir.clone();
+        let result = draw_color_popup(cx.egui, &mut self.popup, &mut swatches, &mut palette_dir);
+        if swatches != cx.model.prefs.custom_color_swatches
+            || palette_dir != cx.model.prefs.palette_last_dir
+        {
+            cx.edit_prefs(move |prefs| {
+                prefs.custom_color_swatches = swatches;
+                prefs.palette_last_dir = palette_dir;
+            });
+        }
+        if let Some(result) = result {
+            let (tag_key, label, ops) = match result {
+                ColorPopupResult::FieldEdit { tag_key, edit } => {
+                    let ops = DeferredOps {
+                        pending: vec![edit],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Edit color", ops)
                 }
-                return;
-            }
-        };
-        cx.send(EditorCommand::ApplyPopupOps {
-            opened_from: editor.color_popup_kit,
-            tag_key,
-            label,
-            ops,
-        });
-    }
-    if editor.color_popup.is_none() {
-        editor.color_popup_kit = None;
+                ColorPopupResult::ShaderOp { tag_key, op } => {
+                    let ops = DeferredOps {
+                        shader_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader edit", ops)
+                }
+                ColorPopupResult::ShaderParamOp { tag_key, op } => {
+                    let ops = DeferredOps {
+                        shader_param_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader parameter", ops)
+                }
+                ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
+                    let ops = DeferredOps {
+                        h2_shader_param_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader parameter", ops)
+                }
+                ColorPopupResult::FunctionDraftColor { target, argb } => {
+                    cx.send(EditorCommand::FunctionDraftColor { target, argb });
+                    return self.popup.is_some();
+                }
+            };
+            cx.send(EditorCommand::ApplyPopupOps {
+                opened_from: Some(self.kit),
+                tag_key,
+                label,
+                ops,
+            });
+        }
+        self.popup.is_some()
     }
 }
 
-/// The function editor popup, while one is open.
-pub(in crate::app) fn draw_function_popup_window(cx: &Ctx, editor: &mut EditorFeature) {
-    if let Some(batch) = draw_function_popup(cx.egui, &mut editor.function_popup, &mut editor.color_popup) {
-        let ops = DeferredOps {
-            pending: batch.edits,
-            function_data_ops: batch.data_ops,
-            ..DeferredOps::default()
-        };
-        cx.send(EditorCommand::ApplyPopupOps {
-            opened_from: editor.function_popup_kit,
-            tag_key: batch.tag_key,
-            label: "Edit function",
-            ops,
-        });
-    }
-    if editor.function_popup.is_none() {
-        editor.function_popup_kit = None;
+/// The function editor popup over a field, and the kit it was opened from.
+pub(in crate::app) struct FunctionPopupWindow {
+    pub(in crate::app) popup: Option<FunctionPopup>,
+    pub(in crate::app) kit: KitId,
+}
+
+impl Dialog for FunctionPopupWindow {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        // The function editor opens a color picker for a draft color; the
+        // picker is a dialog of its own, and its choice comes back as
+        // `EditorCommand::FunctionDraftColor`.
+        let mut color = None;
+        if let Some(batch) = draw_function_popup(cx.egui, &mut self.popup, &mut color) {
+            let ops = DeferredOps {
+                pending: batch.edits,
+                function_data_ops: batch.data_ops,
+                ..DeferredOps::default()
+            };
+            cx.send(EditorCommand::ApplyPopupOps {
+                opened_from: Some(self.kit),
+                tag_key: batch.tag_key,
+                label: "Edit function",
+                ops,
+            });
+        }
+        if let Some(popup) = color {
+            cx.open_dialog(ColorPopupWindow {
+                popup: Some(popup),
+                kit: self.kit,
+            });
+        }
+        self.popup.is_some()
     }
 }
 
@@ -174,6 +182,12 @@ pub(in crate::app) enum EditorCommand {
         tag_key: String,
         label: &'static str,
         ops: DeferredOps,
+    },
+    /// The color picker a function popup opened chose `argb` for `target`:
+    /// set it in that popup's draft.
+    FunctionDraftColor {
+        target: FunctionDraftColorTarget,
+        argb: u32,
     },
     /// Apply what a tag pane collected while it drew.
     PaneDrawn(Box<PaneDrawn>),
@@ -233,6 +247,15 @@ impl Baboon {
                 field_path,
                 input,
             } => self.apply_picked_tag_reference(kit, &tag_key, &field_path, input),
+            EditorCommand::FunctionDraftColor { target, argb } => {
+                if let Some(popup) = self
+                    .dialogs
+                    .get_mut::<FunctionPopupWindow>()
+                    .and_then(|window| window.popup.as_mut())
+                {
+                    popup.apply_draft_color(target, argb);
+                }
+            }
         }
     }
 

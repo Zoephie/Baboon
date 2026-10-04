@@ -455,15 +455,7 @@ impl Baboon {
             },
             editor: EditorFeature {
                 deferred_file_action: None,
-                color_popup: None,
-                color_popup_kit: None,
-                function_popup_kit: None,
-                tag_reference_picker_kit: None,
-                function_popup: None,
-                tsv_paste: None,
-                block_confirm: None,
                 pending_ce_sound_ref: None,
-                tag_reference_picker: None,
                 block_clipboard: None,
             },
             references: ReferencesFeature {

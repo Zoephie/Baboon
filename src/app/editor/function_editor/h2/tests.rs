@@ -272,3 +272,42 @@ fn dedicated_picker_updates_h2_logical_color() {
     );
     assert_eq!(&data[4..8], &raw[4..8]);
 }
+
+/// The picker a function popup opens is a dialog of its own; the color it
+/// chooses comes back as a command, and lands in the open popup's draft.
+#[test]
+fn a_picked_draft_color_reaches_the_open_function_popup() {
+    let mut function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
+        .expect("constant function should parse");
+    let blob = function.as_blob_mut().unwrap();
+    blob.set_color_graph_type(ColorGraphType::TwoColor);
+    blob.set_color(3, 0x0044_5566);
+    let popup = FunctionPopup::new(
+        "tag".to_owned(),
+        "function".to_owned(),
+        FunctionView::from_function(function),
+        true,
+    );
+    let mut app = Baboon::for_test();
+    let kit = app.model.kits[0].id;
+    app.dialogs.open(FunctionPopupWindow {
+        popup: Some(popup),
+        kit,
+    });
+
+    app.commands.send(EditorCommand::FunctionDraftColor {
+        target: FunctionDraftColorTarget::Logical(1),
+        argb: 0x00AA_BBCC,
+    });
+    app.apply_commands(&egui::Context::default());
+
+    let window = app
+        .dialogs
+        .get::<FunctionPopupWindow>()
+        .expect("still open");
+    let popup = window.popup.as_ref().expect("still editing");
+    assert_eq!(
+        popup.view.function.as_blob().unwrap().header().colors[3],
+        0x00AA_BBCC
+    );
+}

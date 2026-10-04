@@ -57,8 +57,6 @@ impl Baboon {
         if let Some(notice) = keyword_notice {
             self.model.status = notice;
         }
-        draw_color_popup_window(&cx!(self, ctx), &mut self.editor);
-        draw_function_popup_window(&cx!(self, ctx), &mut self.editor);
         self.process_frame_requests(ctx);
         self.apply_commands(ctx);
     }
@@ -88,7 +86,6 @@ impl Baboon {
     /// Settle what this frame queued after every window has drawn: prompts,
     /// pending opens and field navigation, and the sound drains.
     fn process_frame_requests(&mut self, ctx: &egui::Context) {
-        draw_block_confirm(&cx!(self, ctx), &mut self.editor);
         draw_save_changes_prompt(&cx!(self, ctx), &mut self.documents);
         draw_last_opened_windows_prompt(&cx!(self, ctx), &mut self.shell);
         self.process_pending_open(ctx);
@@ -303,7 +300,6 @@ impl Baboon {
     }
 
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {
-        draw_tag_reference_picker_window(&cx!(self, ctx), &mut self.editor);
         draw_settings_window(
             &cx!(self, ctx),
             &mut self.shell,
@@ -314,7 +310,6 @@ impl Baboon {
         // Walk any expanded rows whose fields are not known yet before the
         // window reads them.
         self.refresh_ref_jump_occurrences(ctx);
-        draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
         self.dialogs.draw(&cx!(self, ctx), &app_reads!(self));
         draw_folder_refactor_lock(ctx, self.tag_ops.folder_refactor.as_ref());
         end_wheel_gesture(ctx);

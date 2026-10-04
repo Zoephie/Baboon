@@ -756,48 +756,56 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tag_reference_picker",
-            &["editor.tag_reference_picker", "editor.tag_reference_picker_kit"],
+            &["dialog:TagReferencePickerWindow"],
             &["editor/dialogs.rs"],
             container_kit,
             |h| {
-                h.app.editor.tag_reference_picker = Some(TagReferencePickerState {
-                    tag_key: ce_key(),
-                    field_path: "model".to_owned(),
-                    allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
-                    current_group: None,
-                    search: String::new(),
+                let kit = active_id(h);
+                h.app.dialogs.open(TagReferencePickerWindow {
+                    state: TagReferencePickerState {
+                        tag_key: ce_key(),
+                        field_path: "model".to_owned(),
+                        allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
+                        current_group: None,
+                        search: String::new(),
+                    },
+                    kit,
                 });
-                h.app.editor.tag_reference_picker_kit = Some(active_id(h));
             },
             &["Select Tag Reference"],
         ),
         case(
             "colour_popup",
-            &["editor.color_popup", "editor.color_popup_kit"],
+            &["dialog:ColorPopupWindow"],
             &["editor/material/color_picker/mod.rs"],
             memory_kit,
             |h| {
-                h.app.editor.color_popup =
-                    Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0));
-                h.app.editor.color_popup_kit = Some(active_id(h));
+                let kit = active_id(h);
+                h.app.dialogs.open(ColorPopupWindow {
+                    popup: Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0)),
+                    kit,
+                });
             },
             &["Color Picker"],
         ),
         case(
             "function_popup",
-            &["editor.function_popup", "editor.function_popup_kit"],
+            &["dialog:FunctionPopupWindow"],
             &["editor/function_editor/mod.rs"],
             memory_kit,
             |h| {
                 let bytes = decode_hex(&constant_function_hex(0.5)).unwrap();
                 let view = FunctionView::from_function(TagFunction::parse(&bytes).unwrap());
-                h.app.editor.function_popup = Some(FunctionPopup::new(
-                    biped_key(),
-                    "Smoke Function".to_owned(),
-                    view,
-                    true,
-                ));
-                h.app.editor.function_popup_kit = Some(active_id(h));
+                let kit = active_id(h);
+                h.app.dialogs.open(FunctionPopupWindow {
+                    popup: Some(FunctionPopup::new(
+                        biped_key(),
+                        "Smoke Function".to_owned(),
+                        view,
+                        true,
+                    )),
+                    kit,
+                });
             },
             &["Smoke Function"],
         ),
@@ -863,14 +871,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "block_confirm",
-            &["editor.block_confirm"],
+            &["dialog:BlockConfirm"],
             &["editor/actions/mod.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.editor.block_confirm = Some(BlockConfirm {
+                h.app.dialogs.open(BlockConfirm {
                     kit: Some(active_id(h)),
                     tag_key: fixture::entry_key(SCENARIO),
                     path: "skies".to_owned(),
@@ -1244,14 +1252,14 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "tsv_paste",
-            &["editor.tsv_paste"],
+            &["dialog:TsvPasteState"],
             &["editor/tsv_paste_window.rs"],
             |h| {
                 scenario_kit(h);
                 open_scenario(h);
             },
             |h| {
-                h.app.editor.tsv_paste = Some(TsvPasteState {
+                h.app.dialogs.open(TsvPasteState {
                     kit: active_id(h),
                     tag_key: fixture::entry_key(SCENARIO),
                     block_path: "skies".to_owned(),
