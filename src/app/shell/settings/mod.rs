@@ -836,8 +836,7 @@ impl Baboon {
         }
         self.saved_prefs = prefs;
         self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-        self.shell.custom_editing_kit_textures.remove(&id);
-        self.shell.custom_editing_kit_texture_failures.remove(&id);
+        self.shell.artwork.forget_custom_editing_kit(&id);
         self.refresh_editing_kit_validation();
 
         if let Some(previous) = previous {
@@ -892,8 +891,7 @@ impl Baboon {
         }
         self.saved_prefs = prefs;
         self.kit_tools.saved_terminal_open_games = self.kit_tools.terminal_open_games.clone();
-        self.shell.custom_editing_kit_textures.remove(&removal.id);
-        self.shell.custom_editing_kit_texture_failures.remove(&removal.id);
+        self.shell.artwork.forget_custom_editing_kit(&removal.id);
         self.refresh_editing_kit_validation();
         for kit in &mut self.model.kits {
             if kit
@@ -1321,7 +1319,7 @@ fn draw_settings_editing_kits_tab(cx: &Ctx, ui: &mut Ui, s: &mut SettingsDraw) {
             .kit_tools.editing_kit_validation
             .custom_icon_error(&profile.id)
             .map(str::to_owned);
-        let texture = s.shell.workspace_banner_texture(
+        let texture = s.shell.artwork.workspace_banner(
             ui.ctx(),
             &cx.model.prefs.custom_editing_kit_profiles,
             profile.game_id(),
@@ -1376,8 +1374,11 @@ fn draw_custom_editing_kit_dialog(ctx: &egui::Context, s: &mut SettingsDraw) {
     };
     let mut open = true;
     let custom_texture = draft_editing_kit_icon_texture(ctx, &draft.icon);
-    let texture =
-        custom_texture.or_else(|| s.shell.game_banner_texture(ctx, GameId::from_id(&draft.game)).cloned());
+    let texture = custom_texture.or_else(|| {
+        s.shell
+            .artwork
+            .game_banner(ctx, GameId::from_id(&draft.game))
+    });
     let mut actions = EditingKitFormActions::default();
     egui::Window::new(title)
         .constrain_to(window_work_area(ctx))

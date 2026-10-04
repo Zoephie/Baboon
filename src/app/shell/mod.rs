@@ -3,6 +3,7 @@
 //! around the features.
 
 use super::*;
+use std::cell::RefCell;
 
 pub(in crate::app) mod updates;
 pub(in crate::app) mod actions;
@@ -63,75 +64,92 @@ pub(in crate::app) struct ShellFeature {
     pub(in crate::app) blender_icon: Option<egui::TextureHandle>,
     pub(in crate::app) sapien_icon: Option<egui::TextureHandle>,
     pub(in crate::app) tag_test_icon: Option<egui::TextureHandle>,
-    pub(in crate::app) game_banner_textures: HashMap<Option<GameId>, egui::TextureHandle>,
-    pub(in crate::app) game_emblem_textures: HashMap<GameId, egui::TextureHandle>,
-    pub(in crate::app) custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
-    pub(in crate::app) custom_editing_kit_texture_failures: HashSet<String>,
+    pub(in crate::app) artwork: ArtworkCache,
     pub(in crate::app) last_pixels_per_point: f32,
     /// When the per-frame prefs check next runs (egui time).
     pub(in crate::app) prefs_next_check_at: f64,
 }
 
-/// The shell's caches of game and editing-kit artwork, each loaded once.
-impl ShellFeature {
-    pub(in crate::app) fn game_banner_texture(
-        &mut self,
+/// Game and editing-kit artwork, each loaded the first time it is drawn.
+///
+/// Filled behind `&self`, so a draw that may only read the shell — a dialog,
+/// through `AppReads` — can still show artwork. A texture handle is a shared
+/// reference, so handing out clones costs nothing.
+#[derive(Default)]
+pub(in crate::app) struct ArtworkCache {
+    game_banners: RefCell<HashMap<Option<GameId>, egui::TextureHandle>>,
+    game_emblems: RefCell<HashMap<GameId, egui::TextureHandle>>,
+    custom_editing_kits: RefCell<HashMap<String, egui::TextureHandle>>,
+    /// Custom editing kits whose icon would not load, so it is not retried
+    /// every frame.
+    custom_editing_kit_failures: RefCell<HashSet<String>>,
+}
+
+impl ArtworkCache {
+    pub(in crate::app) fn game_banner(
+        &self,
         ctx: &egui::Context,
         game: Option<GameId>,
-    ) -> Option<&egui::TextureHandle> {
-        if !self.game_banner_textures.contains_key(&game) {
-            let name = game.map_or("unknown", GameId::as_str);
-            let texture = load_png_texture(
-                ctx,
-                &format!("game_banner_{name}"),
-                get_game_banner_bytes(game),
-            )?;
-            self.game_banner_textures.insert(game, texture);
+    ) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.game_banners.borrow().get(&game) {
+            return Some(texture.clone());
         }
-        self.game_banner_textures.get(&game)
+        let name = game.map_or("unknown", GameId::as_str);
+        let texture = load_png_texture(
+            ctx,
+            &format!("game_banner_{name}"),
+            get_game_banner_bytes(game),
+        )?;
+        self.game_banners.borrow_mut().insert(game, texture.clone());
+        Some(texture)
     }
 
-    pub(in crate::app) fn game_emblem_texture(
-        &mut self,
+    pub(in crate::app) fn game_emblem(
+        &self,
         ctx: &egui::Context,
         game: GameId,
-    ) -> Option<&egui::TextureHandle> {
-        if !self.game_emblem_textures.contains_key(&game) {
-            let bytes = get_game_emblem_bytes(game);
-            let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
-            self.game_emblem_textures.insert(game, texture);
+    ) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.game_emblems.borrow().get(&game) {
+            return Some(texture.clone());
         }
-        self.game_emblem_textures.get(&game)
+        let bytes = get_game_emblem_bytes(game);
+        let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
+        self.game_emblems.borrow_mut().insert(game, texture.clone());
+        Some(texture)
     }
 
-    pub(in crate::app) fn custom_editing_kit_texture(
-        &mut self,
+    pub(in crate::app) fn custom_editing_kit(
+        &self,
         ctx: &egui::Context,
         profile: &CustomEditingKitProfile,
-    ) -> Option<&egui::TextureHandle> {
+    ) -> Option<egui::TextureHandle> {
         let relative = profile.icon.as_deref()?;
         if self
-            .custom_editing_kit_texture_failures
+            .custom_editing_kit_failures
+            .borrow()
             .contains(&profile.id)
         {
             return None;
         }
-        if !self.custom_editing_kit_textures.contains_key(&profile.id) {
-            let texture = resolve_custom_icon_path(relative)
-                .ok()
-                .and_then(|absolute| fs::read(absolute).ok())
-                .and_then(|bytes| {
-                    load_png_texture(ctx, &format!("custom_editing_kit_{}", profile.id), &bytes)
-                });
-            let Some(texture) = texture else {
-                self.custom_editing_kit_texture_failures
-                    .insert(profile.id.clone());
-                return None;
-            };
-            self.custom_editing_kit_textures
-                .insert(profile.id.clone(), texture);
+        if let Some(texture) = self.custom_editing_kits.borrow().get(&profile.id) {
+            return Some(texture.clone());
         }
-        self.custom_editing_kit_textures.get(&profile.id)
+        let texture = resolve_custom_icon_path(relative)
+            .ok()
+            .and_then(|absolute| fs::read(absolute).ok())
+            .and_then(|bytes| {
+                load_png_texture(ctx, &format!("custom_editing_kit_{}", profile.id), &bytes)
+            });
+        let Some(texture) = texture else {
+            self.custom_editing_kit_failures
+                .borrow_mut()
+                .insert(profile.id.clone());
+            return None;
+        };
+        self.custom_editing_kits
+            .borrow_mut()
+            .insert(profile.id.clone(), texture.clone());
+        Some(texture)
     }
 
     /// Resolve the image shown in a loaded workspace's browser header.
@@ -140,24 +158,39 @@ impl ShellFeature {
     /// engine artwork. Looking the profile up by its stable ID keeps restored
     /// workspaces connected to later name/icon edits without copying a
     /// potentially stale icon path into session state.
-    pub(in crate::app) fn workspace_banner_texture(
-        &mut self,
+    pub(in crate::app) fn workspace_banner(
+        &self,
         ctx: &egui::Context,
         profiles: &[CustomEditingKitProfile],
         game: Option<GameId>,
         profile_id: Option<&str>,
     ) -> Option<egui::TextureHandle> {
-        let profile = profile_id.and_then(|profile_id| {
-            profiles
-                .iter()
-                .find(|profile| profile.id == profile_id)
-                .cloned()
-        });
+        let profile = profile_id
+            .and_then(|profile_id| profiles.iter().find(|profile| profile.id == profile_id));
         if let Some(profile) = profile
-            && let Some(texture) = self.custom_editing_kit_texture(ctx, &profile).cloned()
+            && let Some(texture) = self.custom_editing_kit(ctx, profile)
         {
             return Some(texture);
         }
-        self.game_banner_texture(ctx, game).cloned()
+        self.game_banner(ctx, game)
+    }
+
+    /// Drop every texture, to load again at a new scale.
+    pub(in crate::app) fn clear(&self) {
+        self.game_banners.borrow_mut().clear();
+        self.game_emblems.borrow_mut().clear();
+        self.custom_editing_kits.borrow_mut().clear();
+        self.custom_editing_kit_failures.borrow_mut().clear();
+    }
+
+    /// Forget one custom editing kit's icon, edited or removed.
+    pub(in crate::app) fn forget_custom_editing_kit(&self, id: &str) {
+        self.custom_editing_kits.borrow_mut().remove(id);
+        self.custom_editing_kit_failures.borrow_mut().remove(id);
+    }
+
+    /// Try every custom editing kit icon again, as after a path changed.
+    pub(in crate::app) fn retry_custom_editing_kits(&self) {
+        self.custom_editing_kit_failures.borrow_mut().clear();
     }
 }

@@ -494,10 +494,7 @@ impl Baboon {
                     "tag_test_icon",
                     include_root_bytes!("assets/Quick access/tag_test.ico"),
                 ),
-                game_banner_textures: HashMap::new(),
-                game_emblem_textures: HashMap::new(),
-                custom_editing_kit_textures: HashMap::new(),
-                custom_editing_kit_texture_failures: HashSet::new(),
+                artwork: ArtworkCache::default(),
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
             commands: CommandQueue::default(),
@@ -555,10 +552,7 @@ impl Baboon {
             "tag_test_icon",
             include_root_bytes!("assets/Quick access/tag_test.ico"),
         );
-        self.shell.game_banner_textures.clear();
-        self.shell.game_emblem_textures.clear();
-        self.shell.custom_editing_kit_textures.clear();
-        self.shell.custom_editing_kit_texture_failures.clear();
+        self.shell.artwork.clear();
         ctx.request_repaint();
     }
 }

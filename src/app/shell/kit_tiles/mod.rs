@@ -143,7 +143,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                 let game = kit.source.as_ref().and_then(|source| source.game);
                 let profile = kit.profile.as_ref().map(|profile| profile.id.as_str());
                 let banner = game.and_then(|game| {
-                    parts.shell.workspace_banner_texture(
+                    parts.shell.artwork.workspace_banner(
                         cx.egui,
                         &cx.model.prefs.custom_editing_kit_profiles,
                         Some(game),

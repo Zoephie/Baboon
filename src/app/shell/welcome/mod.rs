@@ -217,12 +217,16 @@ pub(in crate::app) fn draw_welcome_screen(
                                                                 profile.name
                                                             )
                                                         });
-                                                            let texture = shell.workspace_banner_texture(
-                                                                    ctx,
-                                                                    &cx.model.prefs.custom_editing_kit_profiles,
-                                                                    profile.game_id(),
-                                                                    Some(&profile.id),
-                                                                );
+                                                            let texture = shell
+                                                                .artwork
+                                                                .workspace_banner(
+                                                                ctx,
+                                                                &cx.model
+                                                                    .prefs
+                                                                    .custom_editing_kit_profiles,
+                                                                profile.game_id(),
+                                                                Some(&profile.id),
+                                                            );
                                                             let image = match texture {
                                                         Some(texture) => egui::Image::new(
                                                             egui::load::SizedTexture::new(
@@ -269,14 +273,10 @@ pub(in crate::app) fn draw_welcome_screen(
                                                             ));
                                                             }
                                                         }
-                                                        EditingKitMenuEntry::BuiltIn(
-                                                            shortcut,
-                                                        ) => {
-                                                            let texture = shell.game_emblem_texture(
-                                                                    ctx,
-                                                                    shortcut.game,
-                                                                )
-                                                                .cloned();
+                                                        EditingKitMenuEntry::BuiltIn(shortcut) => {
+                                                            let texture = shell
+                                                                .artwork
+                                                                .game_emblem(ctx, shortcut.game);
                                                             let path = cx
                                                                 .model.prefs
                                                                 .editing_kit_paths
