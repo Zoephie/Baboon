@@ -91,7 +91,7 @@ impl Baboon {
     fn process_frame_requests(&mut self, ctx: &egui::Context) {
         draw_block_confirm(&cx!(self, ctx), &mut self.editor);
         draw_save_changes_prompt(&cx!(self, ctx), &mut self.documents);
-        self.handle_last_opened_windows_prompt(ctx);
+        draw_last_opened_windows_prompt(&cx!(self, ctx), &mut self.shell);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);
         // A referenced sound on a container source resolves to its own Wwise

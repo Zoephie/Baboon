@@ -342,29 +342,6 @@ impl Baboon {
         Some(current_key)
     }
 
-    pub(in crate::app) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
-        let action = render_last_opened_windows_prompt(ctx, self.shell.last_opened_windows.as_mut());
-        match action {
-            LastOpenedWindowsAction::None => {}
-            LastOpenedWindowsAction::OpenSettings => {
-                self.shell.last_opened_windows = None;
-                self.shell.settings_open = true;
-            }
-            LastOpenedWindowsAction::Cancel { remember } => {
-                if remember {
-                    self.model.prefs.session_restore = SessionRestore::Never;
-                }
-                self.shell.last_opened_windows = None;
-            }
-            LastOpenedWindowsAction::Restore { kits, remember } => {
-                if remember {
-                    self.model.prefs.session_restore = SessionRestore::Always;
-                }
-                self.shell.last_opened_windows = None;
-                self.begin_last_session_restore(kits, ctx.clone());
-            }
-        }
-    }
 }
 
 pub(in crate::app) enum LastOpenedWindowsAction {
@@ -634,4 +611,30 @@ pub(in crate::app) struct RestorePlan {
     /// Loose tag paths requested on the command line, drained after this kit's
     /// editing-kit source finishes loading.
     pub(in crate::app) pending_launch_tags: Option<Vec<PathBuf>>,
+}
+
+/// The prompt asking which of the last session's windows to reopen, while
+/// it is up. Remembering the answer changes the preferences; reopening is
+/// [`AppAction::RestoreSession`].
+pub(in crate::app) fn draw_last_opened_windows_prompt(cx: &Ctx, shell: &mut ShellFeature) {
+    match render_last_opened_windows_prompt(cx.egui, shell.last_opened_windows.as_mut()) {
+        LastOpenedWindowsAction::None => {}
+        LastOpenedWindowsAction::OpenSettings => {
+            shell.last_opened_windows = None;
+            shell.settings_open = true;
+        }
+        LastOpenedWindowsAction::Cancel { remember } => {
+            if remember {
+                cx.edit_prefs(|prefs| prefs.session_restore = SessionRestore::Never);
+            }
+            shell.last_opened_windows = None;
+        }
+        LastOpenedWindowsAction::Restore { kits, remember } => {
+            if remember {
+                cx.edit_prefs(|prefs| prefs.session_restore = SessionRestore::Always);
+            }
+            shell.last_opened_windows = None;
+            cx.send(AppAction::RestoreSession(kits));
+        }
+    }
 }

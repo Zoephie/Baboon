@@ -69,6 +69,8 @@ pub(in crate::app) enum AppAction {
     OpenBitmapLibrary,
     OpenModelLibrary,
     OpenBlamPane,
+    /// Reopen these kits of the last session.
+    RestoreSession(Vec<RestoreKit>),
 }
 
 impl Baboon {
@@ -170,6 +172,7 @@ impl Baboon {
             AppAction::LaunchSapien => self.launch_sapien(),
             AppAction::OpenBitmapLibrary => self.open_bitmap_library(),
             AppAction::OpenModelLibrary => self.open_model_library(),
+            AppAction::RestoreSession(kits) => self.begin_last_session_restore(kits, ctx.clone()),
             AppAction::OpenBlamPane => {
                 // Re-detect on every open: the data folder may have changed
                 // since the pane was last shown.
