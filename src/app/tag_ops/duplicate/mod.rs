@@ -1174,7 +1174,7 @@ impl Baboon {
         if completion == ContainerDuplicateCompletion::Failed {
             if let Err(error) = &result {
                 self.model.status = error.clone();
-                self.shell.operation_notice = Some(OperationNotice {
+                self.dialogs.open(OperationNotice {
                     title: "Duplicate failed".to_owned(),
                     message: error.clone(),
                     failed: true,
@@ -1279,7 +1279,7 @@ impl Baboon {
         // A review left open while this ran is now describing a stash that has
         // one more tag in it than it is showing.
         self.refresh_open_mod_review(kit_index);
-        self.shell.operation_notice = Some(OperationNotice {
+        self.dialogs.open(OperationNotice {
             title: "Tag duplicated".to_owned(),
             message: format!(
                 "{} → {}\n\nWritten into {}.\nThe UTOC and UCAS changed; the sibling PAK did \

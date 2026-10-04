@@ -16,6 +16,7 @@ pub(in crate::app) use session::draw_last_opened_windows_prompt;
 pub(in crate::app) mod frame;
 pub(in crate::app) use frame::{draw_keyword_bar, draw_scenario_launcher_buttons};
 pub(in crate::app) mod workspace;
+pub(in crate::app) use workspace::IndexingNotice;
 pub(in crate::app) mod welcome;
 pub(in crate::app) use welcome::draw_welcome_screen;
 pub(in crate::app) mod first_run;
@@ -32,7 +33,7 @@ pub(in crate::app) mod loading;
 pub(in crate::app) use loading::centered_loading_state;
 pub(in crate::app) mod recents;
 pub(in crate::app) mod operation_notice;
-pub(in crate::app) use operation_notice::{OperationNotice, draw_operation_notice_window};
+pub(in crate::app) use operation_notice::OperationNotice;
 pub(in crate::app) mod worker;
 pub(in crate::app) use worker::*;
 pub(in crate::app) mod launch;
@@ -61,8 +62,6 @@ pub(in crate::app) struct ShellFeature {
     /// so the focus can only be honoured once none are outstanding.
     pub(in crate::app) restoring_kits: HashSet<KitId>,
     pub(in crate::app) restored_active_kit: Option<KitId>,
-    /// Result of the last container write, shown until dismissed.
-    pub(in crate::app) operation_notice: Option<OperationNotice>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     pub(in crate::app) blender_icon: Option<egui::TextureHandle>,
     pub(in crate::app) sapien_icon: Option<egui::TextureHandle>,

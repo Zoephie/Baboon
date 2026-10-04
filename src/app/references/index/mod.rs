@@ -25,7 +25,7 @@ impl Baboon {
                 .index_jobs
                 .references_changed_during_build,
         );
-        self.kit_tools.show_entry_index_wait_notice = false;
+        self.dialogs.close::<IndexingNotice>();
         if self.model.resolve_stamp(stamp).is_none() {
             return true;
         }

@@ -3,56 +3,54 @@
 
 use super::*;
 
-pub(in crate::app) fn draw_operation_notice_window(cx: &Ctx, shell: &mut ShellFeature) {
-    let ctx = cx.egui;
-    let Some(notice) = shell.operation_notice.as_ref() else {
-        return;
-    };
-    let title = notice.title.clone();
-    let mut message = notice.message.clone();
-    let failed = notice.failed;
-    let mut open = true;
-    let mut dismiss = false;
-    egui::Window::new(title)
-        .id(egui::Id::new("operation_notice"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(window_width(ctx, 620.0))
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            if failed {
-                ui.label(
-                    RichText::new("The container was left as it was; nothing was changed.")
-                        .color(text_dark()),
-                );
-                ui.add_space(7.0);
-            }
-            // A read-only multiline edit rather than a label: the message
-            // carries paths and a writer error, and it is only useful if it
-            // can be selected and copied.
-            egui::ScrollArea::vertical()
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut message)
-                            .desired_width(f32::INFINITY)
-                            .font(egui::TextStyle::Monospace)
-                            .interactive(true),
+impl Dialog for OperationNotice {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let ctx = cx.egui;
+        let notice = &*self;
+        let title = notice.title.clone();
+        let mut message = notice.message.clone();
+        let failed = notice.failed;
+        let mut open = true;
+        let mut dismiss = false;
+        egui::Window::new(title)
+            .id(egui::Id::new("operation_notice"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(window_width(ctx, 620.0))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if failed {
+                    ui.label(
+                        RichText::new("The container was left as it was; nothing was changed.")
+                            .color(text_dark()),
                     );
+                    ui.add_space(7.0);
+                }
+                // A read-only multiline edit rather than a label: the message
+                // carries paths and a writer error, and it is only useful if it
+                // can be selected and copied.
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut message)
+                                .desired_width(f32::INFINITY)
+                                .font(egui::TextStyle::Monospace)
+                                .interactive(true),
+                        );
+                    });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Copy").clicked() {
+                        ui.copy_text(message.clone());
+                    }
+                    if ui.button("OK").clicked() {
+                        dismiss = true;
+                    }
                 });
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui.button("Copy").clicked() {
-                    ui.copy_text(message.clone());
-                }
-                if ui.button("OK").clicked() {
-                    dismiss = true;
-                }
             });
-        });
-    if dismiss || !open {
-        shell.operation_notice = None;
+        open && !dismiss
     }
 }
 

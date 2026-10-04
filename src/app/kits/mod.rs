@@ -53,7 +53,6 @@ pub(in crate::app) struct KitsFeature {
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     pub(in crate::app) terminal_open_games: HashSet<String>,
     pub(in crate::app) saved_terminal_open_games: HashSet<String>,
-    pub(in crate::app) show_entry_index_wait_notice: bool,
     /// Pending "import geometry via tool" request from an Import button.
     pub(in crate::app) pending_tool_import: Option<ToolImportRequest>,
 }

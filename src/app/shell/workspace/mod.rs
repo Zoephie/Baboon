@@ -34,7 +34,6 @@ impl Baboon {
             self.tag_ops.folder_refactor.as_ref(),
             self.shell.available_update.as_ref(),
         );
-        draw_entry_index_wait_notice(&cx!(self, ctx), &mut self.kit_tools);
         // Terminal panel — rendered AFTER status so it sits above it.
         let active = self.model.kits[self.model.active].id;
         draw_terminal_panel(&cx!(self, ctx), ui, &mut self.kit_tools, &mut self.views[active]);
@@ -312,7 +311,6 @@ impl Baboon {
             &mut self.kit_tools,
             &mut self.chimp.chimp_usmap_path_input,
         );
-        draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_poke_window(&cx!(self, ctx), &mut self.poke);
         // Walk any expanded rows whose fields are not known yet before the
@@ -629,74 +627,89 @@ pub(in crate::app) fn draw_status_bar(
 }
 
 /// The "please wait" window shown while the active kit is still indexing.
-pub(in crate::app) fn draw_entry_index_wait_notice(cx: &Ctx, kit_tools: &mut KitsFeature) {
-    let ctx = cx.egui;
-    if kit_tools.show_entry_index_wait_notice
-        && (cx.model.kits[cx.model.active].scanning_entries
-            || cx.model.kits[cx.model.active].index_jobs.references_for_entry_index)
-    {
-        let mut open = kit_tools.show_entry_index_wait_notice;
-        let mut hide_notice = false;
-        egui::Window::new("Indexing")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_min_width(360.0);
-                ui.label("Please wait until indexing is completed for best compatibility.");
-                ui.add_space(8.0);
-                if cx.model.kits[cx.model.active].scanning_entries {
-                    let progress = cx.model.kits[cx.model.active].index_jobs.entry_progress.as_ref();
-                    let label = progress
-                        .map(|progress| progress.label.as_str())
-                        .unwrap_or("Indexing tags...");
-                    ui.label(RichText::new(label).strong());
-                    if let Some(progress) = progress {
-                        let fraction = if progress.total == 0 {
-                            0.0
-                        } else {
-                            progress.processed as f32 / progress.total as f32
-                        };
-                        let text = if progress.total == 0 {
-                            "Discovering files...".to_owned()
-                        } else {
-                            format!(
-                                "{} / {} files, {} tags",
-                                progress.processed, progress.total, progress.matched
-                            )
-                        };
-                        draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
-                    }
-                } else if cx.model.kits[cx.model.active].index_jobs.references_for_entry_index {
-                    ui.label(RichText::new("Building reference index...").strong());
-                    if let Some(progress) = cx.model.kits[cx.model.active]
+/// "Please wait" while the active workspace indexes its tags or their
+/// references. Opened when an index job starts and closed when it ends; between
+/// jobs of its own it stays open and draws nothing.
+pub(in crate::app) struct IndexingNotice;
+
+impl Dialog for IndexingNotice {
+    fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
+        let ctx = cx.egui;
+        if cx.model.kits[cx.model.active].scanning_entries
+            || cx.model.kits[cx.model.active]
+                .index_jobs
+                .references_for_entry_index
+        {
+            let mut open = true;
+            let mut hide_notice = false;
+            egui::Window::new("Indexing")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.set_min_width(360.0);
+                    ui.label("Please wait until indexing is completed for best compatibility.");
+                    ui.add_space(8.0);
+                    if cx.model.kits[cx.model.active].scanning_entries {
+                        let progress = cx.model.kits[cx.model.active]
+                            .index_jobs
+                            .entry_progress
+                            .as_ref();
+                        let label = progress
+                            .map(|progress| progress.label.as_str())
+                            .unwrap_or("Indexing tags...");
+                        ui.label(RichText::new(label).strong());
+                        if let Some(progress) = progress {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = if progress.total == 0 {
+                                "Discovering files...".to_owned()
+                            } else {
+                                format!(
+                                    "{} / {} files, {} tags",
+                                    progress.processed, progress.total, progress.matched
+                                )
+                            };
+                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
+                        }
+                    } else if cx.model.kits[cx.model.active]
                         .index_jobs
-                        .reference_progress
-                        .as_ref()
+                        .references_for_entry_index
                     {
-                        let fraction = if progress.total == 0 {
-                            0.0
+                        ui.label(RichText::new("Building reference index...").strong());
+                        if let Some(progress) = cx.model.kits[cx.model.active]
+                            .index_jobs
+                            .reference_progress
+                            .as_ref()
+                        {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = format!("{} / {} tags", progress.processed, progress.total);
+                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
                         } else {
-                            progress.processed as f32 / progress.total as f32
-                        };
-                        let text = format!("{} / {} tags", progress.processed, progress.total);
-                        draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
-                    } else {
-                        draw_index_progress_bar(
-                            ui,
-                            330.0,
-                            None,
-                            "Scanning tag dependencies...",
-                        );
+                            draw_index_progress_bar(
+                                ui,
+                                330.0,
+                                None,
+                                "Scanning tag dependencies...",
+                            );
+                        }
                     }
-                }
-                ui.add_space(8.0);
-                if ui.button("Hide").clicked() {
-                    hide_notice = true;
-                }
-            });
-        kit_tools.show_entry_index_wait_notice = open && !hide_notice;
+                    ui.add_space(8.0);
+                    if ui.button("Hide").clicked() {
+                        hide_notice = true;
+                    }
+                });
+            return open && !hide_notice;
+        }
+        true
     }
 }
 

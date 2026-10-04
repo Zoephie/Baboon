@@ -883,11 +883,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "entry_index_wait_notice",
-            &["kit_tools.show_entry_index_wait_notice"],
+            &["dialog:IndexingNotice"],
             &["shell/workspace/mod.rs"],
             memory_kit,
             |h| {
-                h.app.kit_tools.show_entry_index_wait_notice = true;
+                h.app.dialogs.open(IndexingNotice);
                 h.app.model.kits[h.app.model.active].scanning_entries = true;
             },
             &["Indexing"],
@@ -1265,11 +1265,11 @@ fn cases() -> Vec<Case> {
         ),
         case(
             "operation_notice",
-            &["shell.operation_notice"],
+            &["dialog:OperationNotice"],
             &["shell/operation_notice.rs"],
             welcome,
             |h| {
-                h.app.shell.operation_notice = Some(OperationNotice {
+                h.app.dialogs.open(OperationNotice {
                     title: "Smoke notice".to_owned(),
                     message: "The smoke operation finished.".to_owned(),
                     failed: false,

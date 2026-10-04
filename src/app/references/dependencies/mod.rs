@@ -181,7 +181,7 @@ impl Baboon {
             total: entries.len(),
         });
         if paired_entry_index_build {
-            self.kit_tools.show_entry_index_wait_notice = true;
+            self.dialogs.open(IndexingNotice);
         }
         self.model.status = "Building reference index…".to_owned();
         // A build that panicked used to send nothing and leave the index

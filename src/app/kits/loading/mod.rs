@@ -204,11 +204,11 @@ impl Baboon {
                 if build_reference_index {
                     self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
                 } else {
-                    self.kit_tools.show_entry_index_wait_notice = false;
+                    self.dialogs.close::<IndexingNotice>();
                 }
             }
             Err(e) => {
-                self.kit_tools.show_entry_index_wait_notice = false;
+                self.dialogs.close::<IndexingNotice>();
                 self.model.status = format!("Scan failed: {e}");
             }
         }
@@ -784,7 +784,7 @@ impl Baboon {
             total: 0,
             matched: 0,
         });
-        self.kit_tools.show_entry_index_wait_notice = true;
+        self.dialogs.open(IndexingNotice);
         self.model.status = label;
         let progress_ctx = ctx.clone();
         spawn_worker(

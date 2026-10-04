@@ -442,7 +442,6 @@ impl Baboon {
                     .map(|path| path.display().to_string())
                     .unwrap_or_default(),
                 kit_tool_drag: KitToolDragState::default(),
-                show_entry_index_wait_notice: false,
                 terminal: TerminalState {
                     input: String::new(),
                     lines: Vec::new(),
@@ -499,7 +498,6 @@ impl Baboon {
                 first_run_wizard,
                 settings_open: false,
                 settings_tab: SettingsTab::Startup,
-                operation_notice: None,
                 restoring_kits: HashSet::new(),
                 restored_active_kit: None,
                 prefs_next_check_at: 0.0,
