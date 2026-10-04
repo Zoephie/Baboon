@@ -431,88 +431,94 @@ impl Baboon {
         Some(docs)
     }
 
-    /// Render the block delete/delete-all confirmation modal (if pending) and
-    /// apply the op on confirm.
-    pub(in crate::app) fn handle_block_confirm(&mut self, ctx: &egui::Context) {
-        let Some(confirm) = self.editor.block_confirm.as_ref() else {
-            return;
-        };
-        // The op is applied to the active kit's document, and two workspaces of
-        // the same game share a key space, so a confirmation answered after a
-        // switch could delete from the wrong game's tag.
-        let confirm_kit = confirm.kit;
-        let message = confirm.message.clone();
-        let confirm_label = confirm.confirm_label.clone();
-        let mut do_apply = false;
-        let mut do_cancel = false;
-        egui::Window::new("Confirm")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.label(RichText::new(message).color(text_dark()));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(&confirm_label)
-                                    .color(Color32::from_rgb(230, 230, 228)),
-                            )
-                            .fill(Color32::from_rgb(150, 48, 40))
-                            .min_size(Vec2::new(80.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        do_apply = true;
-                    }
-                    if ui
-                        .add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 24.0)))
-                        .clicked()
-                    {
-                        do_cancel = true;
-                    }
-                });
-            });
-        if do_apply {
-            let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
-            if routed && self.refuse_read_only_edit(self.model.active) {
-                self.editor.block_confirm = None;
-                return;
-            }
-            if let Some(confirm) = self.editor.block_confirm.take()
-                && routed
-            {
-                let deletes_model_variant = confirm.path == "variants"
-                    && matches!(confirm.kind, BlockOpKind::Delete(_))
-                    && self.model.kits[self.model.active]
-                        .parsed_tags
-                        .get(&confirm.tag_key)
-                        .is_some_and(|doc| doc.tag.header.group_tag.to_be_bytes() == *b"hlmt");
-                let ops = DeferredOps {
-                    block_ops: vec![BlockOp {
-                        path: confirm.path,
-                        kind: confirm.kind,
-                    }],
-                    ..DeferredOps::default()
-                };
-                let active = self.model.active;
-                let applied =
-                    self.apply_doc_ops(active, &confirm.tag_key, "Block edit", ops, UndoStep::Own);
-                let refresh_model_preview = deletes_model_variant
-                    && applied.is_some_and(|applied| applied.status.is_some());
-                if refresh_model_preview
-                    && let Some(preview) = self.views[self.model.kits[self.model.active].id]
-                        .caches.model_previews
-                        .get_mut(&confirm.tag_key)
-                {
-                    preview.selected_variant = None;
-                    preview.invalidate_load();
-                }
-            }
-        } else if do_cancel {
+    /// Apply the confirmed block delete or delete-all. The op is applied to
+    /// the active kit's document, and two workspaces of the same game share a
+    /// key space, so it returns to the kit the confirmation was raised in
+    /// first: answered after a switch, it could otherwise delete from the
+    /// wrong game's tag.
+    pub(in crate::app) fn apply_block_confirm(&mut self) {
+        let confirm_kit = self.editor.block_confirm.as_ref().and_then(|confirm| confirm.kit);
+        let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
+        if routed && self.refuse_read_only_edit(self.model.active) {
             self.editor.block_confirm = None;
+            return;
         }
+        if let Some(confirm) = self.editor.block_confirm.take()
+            && routed
+        {
+            let deletes_model_variant = confirm.path == "variants"
+                && matches!(confirm.kind, BlockOpKind::Delete(_))
+                && self.model.kits[self.model.active]
+                    .parsed_tags
+                    .get(&confirm.tag_key)
+                    .is_some_and(|doc| doc.tag.header.group_tag.to_be_bytes() == *b"hlmt");
+            let ops = DeferredOps {
+                block_ops: vec![BlockOp {
+                    path: confirm.path,
+                    kind: confirm.kind,
+                }],
+                ..DeferredOps::default()
+            };
+            let active = self.model.active;
+            let applied =
+                self.apply_doc_ops(active, &confirm.tag_key, "Block edit", ops, UndoStep::Own);
+            let refresh_model_preview = deletes_model_variant
+                && applied.is_some_and(|applied| applied.status.is_some());
+            if refresh_model_preview
+                && let Some(preview) = self.views[self.model.kits[self.model.active].id]
+                    .caches.model_previews
+                    .get_mut(&confirm.tag_key)
+            {
+                preview.selected_variant = None;
+                preview.invalidate_load();
+            }
+        }
+    }
+}
+
+/// The block delete/delete-all confirmation, while one is pending.
+pub(in crate::app) fn draw_block_confirm(cx: &Ctx, editor: &mut EditorFeature) {
+    let Some(confirm) = editor.block_confirm.as_ref() else {
+        return;
+    };
+    let ctx = cx.egui;
+    let message = confirm.message.clone();
+    let confirm_label = confirm.confirm_label.clone();
+    let mut do_apply = false;
+    let mut do_cancel = false;
+    egui::Window::new("Confirm")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.label(RichText::new(message).color(text_dark()));
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new(&confirm_label)
+                                .color(Color32::from_rgb(230, 230, 228)),
+                        )
+                        .fill(Color32::from_rgb(150, 48, 40))
+                        .min_size(Vec2::new(80.0, 24.0)),
+                    )
+                    .clicked()
+                {
+                    do_apply = true;
+                }
+                if ui
+                    .add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 24.0)))
+                    .clicked()
+                {
+                    do_cancel = true;
+                }
+            });
+        });
+    if do_apply {
+        cx.send(EditorCommand::ApplyBlockConfirm);
+    } else if do_cancel {
+        editor.block_confirm = None;
     }
 }
 

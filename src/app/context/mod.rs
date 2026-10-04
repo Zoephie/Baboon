@@ -47,6 +47,13 @@ impl<'a> Ctx<'a> {
         self.commands.send(Command::Status(status.into()));
     }
 
+    /// Change the live preferences with `edit` once this frame's drawing is
+    /// over. A change rather than a whole new set, so two draws changing
+    /// different preferences in one frame both land.
+    pub(in crate::app) fn edit_prefs(&self, edit: impl FnOnce(&mut GuiPrefs) + 'static) {
+        self.commands.send(Command::EditPrefs(Box::new(edit)));
+    }
+
     /// Show `path` in the platform's file manager once this frame's drawing
     /// is over.
     pub(in crate::app) fn open_folder(&self, path: PathBuf, label: &str) {
@@ -115,6 +122,8 @@ pub(in crate::app) enum Command {
     /// Show a folder in the platform's file manager; `label` names it in the
     /// status line if that fails.
     OpenFolder { path: PathBuf, label: String },
+    /// Change the live preferences.
+    EditPrefs(Box<dyn FnOnce(&mut GuiPrefs)>),
     Help(HelpCommand),
     Poke(PokeCommand),
     Compare(CompareCommand),
@@ -125,6 +134,7 @@ pub(in crate::app) enum Command {
     TagOps(TagOpsCommand),
     Import(ImportCommand),
     Documents(DocumentsCommand),
+    Editor(EditorCommand),
 }
 
 impl From<HelpCommand> for Command {
@@ -181,6 +191,12 @@ impl From<DocumentsCommand> for Command {
     }
 }
 
+impl From<EditorCommand> for Command {
+    fn from(command: EditorCommand) -> Self {
+        Command::Editor(command)
+    }
+}
+
 impl From<PokeCommand> for Command {
     fn from(command: PokeCommand) -> Self {
         Command::Poke(command)
@@ -208,6 +224,7 @@ impl Baboon {
         match command {
             Command::Status(status) => self.model.status = status,
             Command::OpenFolder { path, label } => self.open_folder_in_explorer(path, &label),
+            Command::EditPrefs(edit) => edit(&mut self.model.prefs),
             Command::Help(command) => self.apply_help_command(command),
             Command::Poke(command) => self.apply_poke_command(command, ctx),
             Command::Compare(command) => self.apply_compare_command(command, ctx),
@@ -218,6 +235,7 @@ impl Baboon {
             Command::TagOps(command) => self.apply_tag_ops_command(command, ctx),
             Command::Import(command) => self.apply_import_command(command, ctx),
             Command::Documents(command) => self.apply_documents_command(command, ctx),
+            Command::Editor(command) => self.apply_editor_command(command),
         }
     }
 }

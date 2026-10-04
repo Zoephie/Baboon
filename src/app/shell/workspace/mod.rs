@@ -55,8 +55,8 @@ impl Baboon {
         if let Some(notice) = keyword_notice {
             self.model.status = notice;
         }
-        self.draw_and_apply_color_popup(ctx);
-        self.draw_and_apply_function_popup(ctx);
+        draw_color_popup_window(&cx!(self, ctx), &mut self.editor);
+        draw_function_popup_window(&cx!(self, ctx), &mut self.editor);
         self.process_frame_requests(ctx);
         self.apply_commands(ctx);
     }
@@ -1230,81 +1230,6 @@ impl Baboon {
         }
     }
 
-    /// Draw the color picker popup and apply what it returns to the kit it was
-    /// opened from.
-    fn draw_and_apply_color_popup(&mut self, ctx: &egui::Context) {
-        if let Some(result) = draw_color_popup(
-            ctx,
-            &mut self.editor.color_popup,
-            &mut self.model.prefs.custom_color_swatches,
-            &mut self.model.prefs.palette_last_dir,
-        ) {
-            let (tag_key, label, ops) = match result {
-                ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    let ops = DeferredOps {
-                        pending: vec![edit],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Edit color", ops)
-                }
-                ColorPopupResult::ShaderOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        shader_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader edit", ops)
-                }
-                ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        shader_param_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader parameter", ops)
-                }
-                ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    let ops = DeferredOps {
-                        h2_shader_param_ops: vec![op],
-                        ..DeferredOps::default()
-                    };
-                    (tag_key, "Shader parameter", ops)
-                }
-                ColorPopupResult::FunctionDraftColor { target, argb } => {
-                    if let Some(popup) = self.editor.function_popup.as_mut() {
-                        popup.apply_draft_color(target, argb);
-                    }
-                    return;
-                }
-            };
-            // Apply to the kit the picker was opened from.
-            if let Some(kit) = self.popup_target_kit(self.editor.color_popup_kit) {
-                self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
-            }
-        }
-        if self.editor.color_popup.is_none() {
-            self.editor.color_popup_kit = None;
-        }
-    }
-
-    /// Draw the function editor popup and apply what it returns to the kit it
-    /// was opened from.
-    fn draw_and_apply_function_popup(&mut self, ctx: &egui::Context) {
-        if let Some(batch) =
-            draw_function_popup(ctx, &mut self.editor.function_popup, &mut self.editor.color_popup)
-        {
-            let ops = DeferredOps {
-                pending: batch.edits,
-                function_data_ops: batch.data_ops,
-                ..DeferredOps::default()
-            };
-            if let Some(kit) = self.popup_target_kit(self.editor.function_popup_kit) {
-                self.apply_doc_ops(kit, &batch.tag_key, "Edit function", ops, UndoStep::Own);
-            }
-        }
-        if self.editor.function_popup.is_none() {
-            self.editor.function_popup_kit = None;
-        }
-    }
-
     /// Show popups a tag pane opened this frame, recording the kit they were
     /// opened from so confirming one later edits that kit's document rather
     /// than whichever kit is active, or last opened a popup, by then.
@@ -1346,7 +1271,7 @@ impl Baboon {
     /// Settle what this frame queued after every window has drawn: prompts,
     /// pending opens and field navigation, and the sound drains.
     fn process_frame_requests(&mut self, ctx: &egui::Context) {
-        self.handle_block_confirm(ctx);
+        draw_block_confirm(&cx!(self, ctx), &mut self.editor);
         draw_save_changes_prompt(&cx!(self, ctx), &mut self.documents);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
@@ -1562,7 +1487,7 @@ impl Baboon {
     }
 
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {
-        self.draw_tag_reference_picker_window(ctx);
+        draw_tag_reference_picker_window(&cx!(self, ctx), &mut self.editor);
         self.draw_settings_window(ctx);
         self.draw_tool_commands_window(ctx);
         draw_new_tag_window(&cx!(self, ctx), &mut self.tag_ops);
@@ -1599,7 +1524,7 @@ impl Baboon {
         self.draw_keyword_chooser_window(ctx);
         draw_field_value_search_window(&cx!(self, ctx), &mut self.search);
         draw_find_window(&cx!(self, ctx), &mut self.search);
-        self.draw_tsv_paste_window(ctx);
+        draw_tsv_paste_window(&cx!(self, ctx), &mut self.editor);
         draw_rename_tag_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_container_folder_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_loose_folder_rename_window(&cx!(self, ctx), &mut self.tag_ops);

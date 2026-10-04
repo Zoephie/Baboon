@@ -35,3 +35,20 @@ fn an_applied_command_does_not_run_again() {
     app.apply_commands(&egui);
     assert!(!app.help.about_open);
 }
+
+/// Two draws changing different preferences in one frame both land: each
+/// sends a change, not a whole copy of the preferences that would overwrite
+/// the other's.
+#[test]
+fn prefs_edits_from_one_frame_all_land() {
+    let mut app = Baboon::for_test();
+    let egui = egui::Context::default();
+    let expert = app.model.prefs.expert_mode;
+    let sizes = app.model.prefs.show_block_sizes;
+    let cx = cx!(app, &egui);
+    cx.edit_prefs(move |prefs| prefs.expert_mode = !expert);
+    cx.edit_prefs(move |prefs| prefs.show_block_sizes = !sizes);
+    app.apply_commands(&egui);
+    assert_eq!(app.model.prefs.expert_mode, !expert);
+    assert_eq!(app.model.prefs.show_block_sizes, !sizes);
+}

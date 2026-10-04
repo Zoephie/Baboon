@@ -301,6 +301,13 @@ pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
 pub(in crate::app) mod pane;
 pub(in crate::app) mod tsv_paste_window;
+pub(in crate::app) use tsv_paste_window::draw_tsv_paste_window;
+pub(in crate::app) mod dialogs;
+pub(in crate::app) use dialogs::{
+    EditorCommand, draw_color_popup_window, draw_function_popup_window,
+    draw_tag_reference_picker_window,
+};
+pub(in crate::app) use actions::draw_block_confirm;
 
 /// The tag editor's windows and requests: the colour and function popups, the
 /// reference picker, TSV paste, block confirmation and clipboard, a deferred

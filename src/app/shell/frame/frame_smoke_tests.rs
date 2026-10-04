@@ -751,7 +751,7 @@ fn cases() -> Vec<Case> {
         case(
             "tag_reference_picker",
             &["editor.tag_reference_picker", "editor.tag_reference_picker_kit"],
-            &["search/result_windows/mod.rs"],
+            &["editor/dialogs.rs"],
             container_kit,
             |h| {
                 h.app.editor.tag_reference_picker = Some(TagReferencePickerState {
