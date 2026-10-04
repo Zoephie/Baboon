@@ -61,25 +61,21 @@ fn folder_browser_search_hint(folder_name: &str) -> String {
 }
 
 impl Baboon {
-    /// Draw a folder as a first-class docked pane beside ordinary tag panes.
-    pub(in crate::app) fn draw_folder_browser_pane(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-        pane_key: &str,
-    ) -> Option<BrowserAction> {
-        let Some(mut pane) = self.views[self.model.kits[kit_index].id].browser.folder_browsers.remove(pane_key) else {
-            ui.label(RichText::new("This folder is no longer open").color(subtle_dark()));
-            return None;
-        };
-
+    /// Bring a docked folder pane up to date with its kit before it draws:
+    /// the modified and deletable sets its rows mark, and its own tree, which
+    /// for a loose folder loads the folder's tags into the source.
+    pub(in crate::app) fn refresh_folder_browser_pane(&mut self, kit_index: usize, pane_key: &str) {
         self.refresh_modified_tags(kit_index);
         self.refresh_deletable_keys(kit_index);
+        let mut kit_status = None;
+        let kit = &mut self.model.kits[kit_index];
+        let Some(pane) = self.views[kit.id].browser.folder_browsers.get_mut(pane_key) else {
+            return;
+        };
         // A loose pane owns a lazy subtree whose indices address the shared
         // lazy entry vector. Its growth must not rebuild/collapse the pane.
         // Eager sources still use entry count as cache invalidation.
-        let source_len = self.model.kits[kit_index]
+        let source_len = kit
             .source
             .as_ref()
             .map(|source| match source.source {
@@ -87,13 +83,9 @@ impl Baboon {
                 _ => source.full_entry_set().len(),
             })
             .unwrap_or(0);
-        let generation = self.model.kits[kit_index].generation;
-        let bitmap_hover_requests = begin_bitmap_hovers(
-            ui,
-            Arc::clone(&self.views[self.model.kits[kit_index].id].bitmap_browser.thumbnails),
-        );
+        let generation = kit.generation;
         if pane.cached_generation != generation || pane.cached_source_len != source_len {
-            if let Some(source) = self.model.kits[kit_index].source.as_mut() {
+            if let Some(source) = kit.source.as_mut() {
                 if let TagSource::LooseFolder { root, .. } = &source.source {
                     let root = root.clone();
                     let names = source.names.clone();
@@ -106,7 +98,7 @@ impl Baboon {
                         Ok(tree) => pane.tree = tree,
                         Err(error) => {
                             pane.tree = TagTree::default();
-                            self.model.status = format!("Could not load folder tab: {error}");
+                            kit_status = Some(format!("Could not load folder tab: {error}"));
                         }
                     }
                     pane.group_tree = TagTree::default();
@@ -124,678 +116,694 @@ impl Baboon {
             pane.cached_generation = generation;
             pane.cached_source_len = source_len;
         }
-
-        let is_loose = self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
-        let is_container = self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }));
-        let favorite_keys: HashSet<String> = self.model.kits[kit_index].active_favorite_entries
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect();
-        let pane_favorite_folders =
-            std::sync::Arc::new(self.model.kits[kit_index].active_favorite_folders.clone());
-        let selected = self.model.kits[kit_index].selected_key.clone();
-        let modified_tags = std::sync::Arc::clone(&self.views[self.model.kits[kit_index].id].browser.modified_tags);
-        let deletable_keys = std::sync::Arc::clone(&self.views[self.model.kits[kit_index].id].browser.deletable_keys);
-        let game = self.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
-        let sound_language = self.audio.language.clone();
-        let sound_tags_root = self.model.kits[kit_index].source.as_ref().and_then(|source| {
-            if let TagSource::LooseFolder { root, .. } = &source.source {
-                Some(root.clone())
-            } else {
-                None
-            }
-        });
-        let scenario_launch = self.model.kits[kit_index]
-            .source
-            .as_ref()
-            .map(|source| {
-                crate::app::kits::scenario_launch::scenario_launch_availability_with(source, |path| {
-                    is_file_cached(ui.ctx(), path)
-                })
-            })
-            .unwrap_or_default();
-        let mut show_browser_prefixes = self.model.prefs.show_browser_prefixes;
-        let mut folders_before_tags = self.model.prefs.folders_before_tags;
-        let double_click_to_open = self.model.prefs.double_click_to_open_tags;
-        let search_hint = folder_browser_search_hint(&pane.label);
-        let mut action = None;
-        let mut need_scan = false;
-        let mut status_update = None;
-        let scanning = self.model.kits[kit_index].scanning_entries;
-        let source = self.model.kits[kit_index].source.as_mut();
-
-        Frame::NONE
-            .inner_margin(egui::Margin {
-                left: 10,
-                right: 10,
-                top: 8,
-                bottom: 8,
-            })
-            .show(ui, |ui| {
-                set_browser_modified_tags(ui, modified_tags);
-                set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
-                set_browser_deletable_keys(ui, deletable_keys);
-                set_browser_sound_language(ui, game, sound_language.as_deref());
-                set_browser_sound_available_languages(
-                    ui,
-                    game,
-                    sound_tags_root.as_deref(),
-                );
-                set_browser_entries_scanning(ui, scanning);
-                set_browser_loose_source(ui, is_loose);
-                set_browser_game(ui, game);
-                set_browser_scenario_launch(ui, scenario_launch);
-                set_browser_is_folder_pane(ui, true);
-
-                let Some(source) = source else {
-                    ui.label(
-                        RichText::new("This folder source is no longer loaded")
-                            .color(subtle_dark()),
-                    );
-                    return;
-                };
-
-                let header_entries = if is_loose {
-                    &source.entries[..]
-                } else {
-                    source.full_entry_set()
-                };
-                draw_folder_pane_header(
-                    ui,
-                    &mut pane,
-                    header_entries,
-                    is_loose,
-                    is_container,
-                    &mut action,
-                );
-                ui.add_space(14.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                let search_response = if folder_browser_search_stacks(ui.available_width()) {
-                    let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
-                    ui.add_space(4.0);
-                    ui.horizontal_wrapped(|ui| {
-                        draw_folder_browser_controls(
-                            ui,
-                            &mut pane,
-                            &mut show_browser_prefixes,
-                            &mut folders_before_tags,
-                        );
-                    });
-                    search_response
-                } else {
-                    ui.horizontal(|ui| {
-                        draw_folder_browser_controls(
-                            ui,
-                            &mut pane,
-                            &mut show_browser_prefixes,
-                            &mut folders_before_tags,
-                        );
-                        ui.add_space(6.0);
-                        browser_search_field(ui, &mut pane.filter, &search_hint)
-                    })
-                    .inner
-                };
-                if pane.focus_search {
-                    search_response.request_focus();
-                    pane.focus_search = false;
-                }
-                if let Some(warning) = browser::browser_filter_warning(&pane.filter) {
-                    ui.label(
-                        RichText::new(warning)
-                            .small()
-                            .color(Color32::from_rgb(184, 134, 11)),
-                    );
-                }
-                ui.add_space(8.0);
-
-                let filter = pane.filter.trim();
-                let groups_mode = pane.mode == BrowserMode::Groups;
-                let needs_complete_index = is_loose && (groups_mode || !filter.is_empty());
-                if needs_complete_index && source.all_entries.is_empty() {
-                    need_scan = !scanning;
-                    ui.label(
-                        RichText::new(if scanning {
-                            "Indexing tags…"
-                        } else {
-                            "Preparing tag index…"
-                        })
-                        .color(subtle_dark())
-                        .small(),
-                    );
-                } else if is_loose && !groups_mode && filter.is_empty() {
-                    let TagSource::LooseFolder { root, .. } = &source.source else {
-                        unreachable!("is_loose is derived from this source")
-                    };
-                    let root = root.clone();
-                    let names = source.names.clone();
-                    ScrollArea::vertical()
-                        .id_salt(("folder_pane", pane_key))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let tree_action = draw_tree_lazy(
-                                ui,
-                                &mut pane.tree,
-                                &mut source.entries,
-                                // A pane's Groups view is rebuilt from the full
-                                // index each frame; nothing to keep in step.
-                                None,
-                                &root,
-                                &names,
-                                selected.as_deref(),
-                                "",
-                                show_browser_prefixes,
-                                double_click_to_open,
-                                &mut status_update,
-                                None,
-                                pane.sort,
-                                folders_before_tags,
-                                Some(&favorite_keys),
-                            );
-                            if action.is_none() {
-                                action = tree_action;
-                            }
-                        });
-                } else {
-                    let entries = source.full_entry_set();
-                    // Rebuilt when the entries change, not every frame: it walks
-                    // the whole index and allocates per entry. A loose folder's
-                    // full set only grows or is replaced, and either moves the
-                    // generation or the count.
-                    let built_for = (generation, entries.len());
-                    if groups_mode && pane.group_tree_for != Some(built_for) {
-                        pane.group_tree =
-                            crate::core::source::build_group_tree_beneath(entries, &pane.rel_path);
-                        pane.group_tree_for = Some(built_for);
-                    }
-                    let (tree, visible_entries) = if filter.is_empty() {
-                        (
-                            if groups_mode {
-                                &pane.group_tree
-                            } else {
-                                &pane.tree
-                            },
-                            entries,
-                        )
-                    } else {
-                        pane.filter_cache.refresh_beneath(
-                            pane.cached_generation,
-                            filter,
-                            entries,
-                            groups_mode,
-                            &pane.rel_path,
-                        );
-                        (
-                            &pane.filter_cache.tree,
-                            pane.filter_cache.entries.as_slice(),
-                        )
-                    };
-                    ScrollArea::vertical()
-                        .id_salt(("folder_pane", pane_key))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            if visible_entries.is_empty() {
-                                ui.label(RichText::new("No matching tags").color(subtle_dark()));
-                                return;
-                            }
-                            // Already filtered by `filter_cache`: drawn with
-                            // folders open rather than matched a second time.
-                            let tree_action = draw_tree(
-                                ui,
-                                tree,
-                                visible_entries,
-                                selected.as_deref(),
-                                "",
-                                !filter.is_empty(),
-                                show_browser_prefixes,
-                                double_click_to_open,
-                                groups_mode,
-                                None,
-                                pane.sort,
-                                !groups_mode && folders_before_tags,
-                                is_loose.then_some(&favorite_keys),
-                                is_container,
-                            );
-                            if action.is_none() {
-                                action = tree_action;
-                            }
-                        });
-                }
-            });
-
-        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
-
-        self.model.prefs.show_browser_prefixes = show_browser_prefixes;
-        self.model.prefs.folders_before_tags = folders_before_tags;
-
-        action = match action {
-            Some(BrowserAction::OpenFolderBrowser {
-                rel_path,
-                label,
-                open_in_new_tab: false,
-            }) => {
-                navigate_folder_browser(&mut pane, rel_path, label);
-                ui.ctx().request_repaint();
-                None
-            }
-            other => other,
-        };
-        self.views[self.model.kits[kit_index].id]
-            .browser.folder_browsers
-            .insert(pane_key.to_owned(), pane);
-        if let Some(status) = status_update {
+        if let Some(status) = kit_status {
             self.model.status = status;
         }
-        if need_scan {
-            self.model.active = kit_index;
-            self.begin_scan_all_entries(ctx.clone());
-        }
-        action
     }
+}
 
-    /// Draw the tag browser for `kit_index`.
-    ///
-    /// Takes the kit explicitly rather than reading the active one, so a split
-    /// view can render a different kit's browser in each pane.
-    ///
-    /// Every widget id beneath is salted with the kit's id. Without that, two
-    /// browsers in the same frame would share state for anything egui keys by
-    /// label — folder collapse state in particular is keyed on the folder name
-    /// alone, so expanding `objects` in one kit would expand it in the other.
-    pub(in crate::app) fn draw_kit_browser(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
-        let salt = self.model.kits[kit_index].id.0;
-        ui.push_id(salt, |ui| self.draw_kit_browser_inner(ui, ctx, kit_index));
-    }
+/// Draw a folder as a first-class docked pane beside ordinary tag panes. It
+/// is refreshed beforehand by [`Baboon::refresh_folder_browser_pane`].
+pub(in crate::app) fn draw_folder_browser_pane(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    pane_key: &str,
+    view: &mut KitView,
+    sound_language: Option<&str>,
+) {
+    let kit_id = cx.model.kits[kit_index].id;
+    let Some(mut pane) = view.browser.folder_browsers.remove(pane_key) else {
+        ui.label(RichText::new("This folder is no longer open").color(subtle_dark()));
+        return;
+    };
+    let generation = cx.model.kits[kit_index].generation;
+    let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
 
-    fn draw_kit_browser_inner(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        // This kit's own source, not `source()` — that reads the *active* kit,
-        // so in a split every browser drew the focused kit's banner and the
-        // header flickered between games as the cursor moved between panes.
-        let sidebar_header = self.model.kits[kit_index].source.as_ref().map(|source| {
-            (
-                source.game,
-                source.source.origin_label(),
-                sidebar_source_path_label(&source.source),
-                self.model.kits[kit_index]
-                    .profile
-                    .as_ref()
-                    .map(|profile| profile.id.clone()),
-            )
-        });
-        if let Some((Some(game), _origin, path_label, profile_id)) = sidebar_header.as_ref() {
-            draw_game_banner_header(ui, self, *game, path_label, profile_id.as_deref());
+    let is_loose = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
+    let is_container = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }));
+    let favorite_keys: HashSet<String> = cx.model.kits[kit_index].active_favorite_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+    let pane_favorite_folders =
+        std::sync::Arc::new(cx.model.kits[kit_index].active_favorite_folders.clone());
+    let selected = cx.model.kits[kit_index].selected_key.clone();
+    let modified_tags = std::sync::Arc::clone(&view.browser.modified_tags);
+    let deletable_keys = std::sync::Arc::clone(&view.browser.deletable_keys);
+    let game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+    let sound_tags_root = cx.model.kits[kit_index].source.as_ref().and_then(|source| {
+        if let TagSource::LooseFolder { root, .. } = &source.source {
+            Some(root.clone())
         } else {
-            ui.heading(RichText::new("Tags").color(text_dark()));
-            if let Some((_, origin, _, _)) = sidebar_header.as_ref() {
-                ui.small(RichText::new(origin).color(subtle_dark()));
-                ui.add_space(8.0);
-            }
+            None
         }
+    });
+    let scenario_launch = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .map(|source| {
+            crate::app::kits::scenario_launch::scenario_launch_availability_with(source, |path| {
+                is_file_cached(ui.ctx(), path)
+            })
+        })
+        .unwrap_or_default();
+    let mut show_browser_prefixes = cx.model.prefs.show_browser_prefixes;
+    let mut folders_before_tags = cx.model.prefs.folders_before_tags;
+    let double_click_to_open = cx.model.prefs.double_click_to_open_tags;
+    let search_hint = folder_browser_search_hint(&pane.label);
+    let mut action = None;
+    let mut need_scan = false;
+    let mut load_requests = Vec::new();
+    let scanning = cx.model.kits[kit_index].scanning_entries;
+    let source = cx.model.kits[kit_index].source.as_ref();
 
-        let active_favorite_entries = self.model.kits[kit_index].active_favorite_entries.clone();
-        let active_favorite_folders =
-            std::sync::Arc::new(self.model.kits[kit_index].active_favorite_folders.clone());
-        let favorite_keys: HashSet<String> = active_favorite_entries
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect();
-        // Indexed directly rather than through `source_mut()`: the block
-        // below also borrows the kit's browser filter and filter cache and the
-        // status line, and a method call would borrow all of `self`.
-        let kit_id = self.model.kits[kit_index].id;
-        // Refreshed before the tree is drawn, and published into egui memory so
-        // the row and folder painters can reach it without threading it through
-        // every drawing function. The browsers draw one after another, so what
-        // is in memory during this tree's draw is this kit's own set.
-        self.refresh_modified_tags(kit_index);
-        set_browser_modified_tags(
-            ui,
-            std::sync::Arc::clone(&self.views[self.model.kits[kit_index].id].browser.modified_tags),
-        );
-        set_browser_favorite_folders(
-            ui,
-            self.model.kits[kit_index]
-                .source
-                .as_ref()
-                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }))
-                .then_some(active_favorite_folders),
-        );
-        set_browser_game(
-            ui,
-            self.model.kits[kit_index]
-                .source
-                .as_ref()
-                .and_then(|source| source.game),
-        );
-        set_browser_sound_language(
-            ui,
-            self.model.kits[kit_index]
-                .source
-                .as_ref()
-                .and_then(|source| source.game),
-            self.audio.language.as_deref(),
-        );
-        let browser_game = self.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
-        let browser_tags_root = self.model.kits[kit_index].source.as_ref().and_then(|source| {
-            if let TagSource::LooseFolder { root, .. } = &source.source {
-                Some(root.as_path())
+    Frame::NONE
+        .inner_margin(egui::Margin {
+            left: 10,
+            right: 10,
+            top: 8,
+            bottom: 8,
+        })
+        .show(ui, |ui| {
+            set_browser_modified_tags(ui, modified_tags);
+            set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
+            set_browser_deletable_keys(ui, deletable_keys);
+            set_browser_sound_language(ui, game, sound_language);
+            set_browser_sound_available_languages(
+                ui,
+                game,
+                sound_tags_root.as_deref(),
+            );
+            set_browser_entries_scanning(ui, scanning);
+            set_browser_loose_source(ui, is_loose);
+            set_browser_game(ui, game);
+            set_browser_scenario_launch(ui, scenario_launch);
+            set_browser_is_folder_pane(ui, true);
+
+            let Some(source) = source else {
+                ui.label(
+                    RichText::new("This folder source is no longer loaded")
+                        .color(subtle_dark()),
+                );
+                return;
+            };
+
+            let header_entries = if is_loose {
+                &source.entries[..]
             } else {
-                None
+                source.full_entry_set()
+            };
+            draw_folder_pane_header(
+                ui,
+                &mut pane,
+                header_entries,
+                is_loose,
+                is_container,
+                &mut action,
+            );
+            ui.add_space(14.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            let search_response = if folder_browser_search_stacks(ui.available_width()) {
+                let search_response = browser_search_field(ui, &mut pane.filter, &search_hint);
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    draw_folder_browser_controls(
+                        ui,
+                        &mut pane,
+                        &mut show_browser_prefixes,
+                        &mut folders_before_tags,
+                    );
+                });
+                search_response
+            } else {
+                ui.horizontal(|ui| {
+                    draw_folder_browser_controls(
+                        ui,
+                        &mut pane,
+                        &mut show_browser_prefixes,
+                        &mut folders_before_tags,
+                    );
+                    ui.add_space(6.0);
+                    browser_search_field(ui, &mut pane.filter, &search_hint)
+                })
+                .inner
+            };
+            if pane.focus_search {
+                search_response.request_focus();
+                pane.focus_search = false;
             }
-        });
-        set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
-        set_browser_entries_scanning(ui, self.model.kits[kit_index].scanning_entries);
-        set_browser_loose_source(
-            ui,
-            self.model.kits[kit_index]
-                .source
-                .as_ref()
-                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. })),
-        );
-        set_browser_scenario_launch(
-            ui,
-            self.model.kits[kit_index]
-                .source
-                .as_ref()
-                .map(crate::app::kits::scenario_launch::scenario_launch_availability)
-                .unwrap_or_default(),
-        );
-        set_browser_is_folder_pane(ui, false);
-        self.refresh_deletable_keys(kit_index);
-        set_browser_deletable_keys(
-            ui,
-            std::sync::Arc::clone(&self.views[self.model.kits[kit_index].id].browser.deletable_keys),
-        );
-        let bitmap_hover_requests = begin_bitmap_hovers(
-            ui,
-            Arc::clone(&self.views[self.model.kits[kit_index].id].bitmap_browser.thumbnails),
-        );
-        let mut open_git_review = false;
-        let git_review_enabled = self.model.git_review_enabled_for_kit(kit_index);
-        let kit = &mut self.model.kits[kit_index];
-        let view = &mut self.views[kit.id];
-        if let Some(source) = kit.source.as_mut() {
-            ui.add_space(8.0);
-            let scanning = kit.scanning_entries;
-            // Collect deferred scan-trigger here; execute after borrow ends.
-            let mut need_scan = false;
-            let prev_filter_empty = view.browser.filter.is_empty();
-            browser_search_field(ui, &mut view.browser.filter, "search tags");
-            if let Some(warning) = browser::browser_filter_warning(&view.browser.filter) {
+            if let Some(warning) = browser::browser_filter_warning(&pane.filter) {
                 ui.label(
                     RichText::new(warning)
                         .small()
                         .color(Color32::from_rgb(184, 134, 11)),
                 );
             }
-            ui.add_space(6.0);
-            // Wrapped, and with the toolbar visuals hoisted out of the two
-            // scopes that used to group these buttons. A scope is placed as one
-            // unit, so grouped buttons could only wrap in blocks — and the
-            // widest block became the sidebar's minimum width. Individually
-            // wrapping buttons let the panel shrink to a single button.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let groups_clicked = browser_toolbar_controls(
-                    ui,
-                    &mut view.browser.mode,
-                    &mut view.browser.sort,
-                    &mut self.model.prefs.show_browser_prefixes,
-                    &mut self.model.prefs.folders_before_tags,
+            ui.add_space(8.0);
+
+            let filter = pane.filter.trim();
+            let groups_mode = pane.mode == BrowserMode::Groups;
+            let needs_complete_index = is_loose && (groups_mode || !filter.is_empty());
+            if needs_complete_index && source.all_entries.is_empty() {
+                need_scan = !scanning;
+                ui.label(
+                    RichText::new(if scanning {
+                        "Indexing tags…"
+                    } else {
+                        "Preparing tag index…"
+                    })
+                    .color(subtle_dark())
+                    .small(),
                 );
-                if groups_clicked
-                    && matches!(source.source, TagSource::LooseFolder { .. })
-                    && source.all_entries.is_empty()
-                    && !scanning
-                {
-                    need_scan = true;
+            } else if is_loose && !groups_mode && filter.is_empty() {
+                ScrollArea::vertical()
+                    .id_salt(("folder_pane", pane_key))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let tree_action = draw_tree_lazy(
+                            ui,
+                            &pane.tree,
+                            &source.entries,
+                            selected.as_deref(),
+                            "",
+                            show_browser_prefixes,
+                            double_click_to_open,
+                            &mut load_requests,
+                            None,
+                            pane.sort,
+                            folders_before_tags,
+                            Some(&favorite_keys),
+                        );
+                        if action.is_none() {
+                            action = tree_action;
+                        }
+                    });
+            } else {
+                let entries = source.full_entry_set();
+                // Rebuilt when the entries change, not every frame: it walks
+                // the whole index and allocates per entry. A loose folder's
+                // full set only grows or is replaced, and either moves the
+                // generation or the count.
+                let built_for = (generation, entries.len());
+                if groups_mode && pane.group_tree_for != Some(built_for) {
+                    pane.group_tree =
+                        crate::core::source::build_group_tree_beneath(entries, &pane.rel_path);
+                    pane.group_tree_for = Some(built_for);
                 }
-            });
-            if prev_filter_empty
-                && !view.browser.filter.is_empty()
+                let (tree, visible_entries) = if filter.is_empty() {
+                    (
+                        if groups_mode {
+                            &pane.group_tree
+                        } else {
+                            &pane.tree
+                        },
+                        entries,
+                    )
+                } else {
+                    pane.filter_cache.refresh_beneath(
+                        pane.cached_generation,
+                        filter,
+                        entries,
+                        groups_mode,
+                        &pane.rel_path,
+                    );
+                    (
+                        &pane.filter_cache.tree,
+                        pane.filter_cache.entries.as_slice(),
+                    )
+                };
+                ScrollArea::vertical()
+                    .id_salt(("folder_pane", pane_key))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if visible_entries.is_empty() {
+                            ui.label(RichText::new("No matching tags").color(subtle_dark()));
+                            return;
+                        }
+                        // Already filtered by `filter_cache`: drawn with
+                        // folders open rather than matched a second time.
+                        let tree_action = draw_tree(
+                            ui,
+                            tree,
+                            visible_entries,
+                            selected.as_deref(),
+                            "",
+                            !filter.is_empty(),
+                            show_browser_prefixes,
+                            double_click_to_open,
+                            groups_mode,
+                            None,
+                            pane.sort,
+                            !groups_mode && folders_before_tags,
+                            is_loose.then_some(&favorite_keys),
+                            is_container,
+                        );
+                        if action.is_none() {
+                            action = tree_action;
+                        }
+                    });
+            }
+        });
+
+    queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
+    edit_browser_prefs(cx, show_browser_prefixes, folders_before_tags);
+
+    action = match action {
+        Some(BrowserAction::OpenFolderBrowser {
+            rel_path,
+            label,
+            open_in_new_tab: false,
+        }) => {
+            navigate_folder_browser(&mut pane, rel_path, label);
+            ui.ctx().request_repaint();
+            None
+        }
+        other => other,
+    };
+    view.browser.folder_browsers.insert(pane_key.to_owned(), pane);
+    if !load_requests.is_empty() {
+        cx.send(BrowserCommand::LoadFolders {
+            kit: kit_id,
+            tree: LazyTree::Pane(pane_key.to_owned()),
+            paths: load_requests,
+        });
+    }
+    if need_scan {
+        cx.send(BrowserCommand::ScanAllEntries { kit: kit_id });
+    }
+    if let Some(action) = action {
+        cx.send(BrowserCommand::Action { kit: kit_id, action });
+    }
+}
+
+/// Draw the tag browser for `kit_index`.
+///
+/// Takes the kit explicitly rather than reading the active one, so a split
+/// view can render a different kit's browser in each pane.
+///
+/// Every widget id beneath is salted with the kit's id. Without that, two
+/// browsers in the same frame would share state for anything egui keys by
+/// label — folder collapse state in particular is keyed on the folder name
+/// alone, so expanding `objects` in one kit would expand it in the other.
+/// The modified and deletable sets are refreshed beforehand, and the
+/// banner resolved, since both fill caches.
+pub(in crate::app) fn draw_kit_browser(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    view: &mut KitView,
+    browser: &mut BrowserFeature,
+    banner: Option<egui::TextureHandle>,
+    sound_language: Option<&str>,
+) {
+    let salt = cx.model.kits[kit_index].id.0;
+    ui.push_id(salt, |ui| {
+        draw_kit_browser_inner(cx, ui, kit_index, view, browser, banner, sound_language)
+    });
+}
+
+fn draw_kit_browser_inner(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    view: &mut KitView,
+    browser: &mut BrowserFeature,
+    banner: Option<egui::TextureHandle>,
+    sound_language: Option<&str>,
+) {
+    // This kit's own source, not `source()` — that reads the *active* kit,
+    // so in a split every browser drew the focused kit's banner and the
+    // header flickered between games as the cursor moved between panes.
+    let sidebar_header = cx.model.kits[kit_index].source.as_ref().map(|source| {
+        (
+            source.game,
+            source.source.origin_label(),
+            sidebar_source_path_label(&source.source),
+            cx.model.kits[kit_index]
+                .profile
+                .as_ref()
+                .map(|profile| profile.id.clone()),
+        )
+    });
+    if let Some((Some(game), _origin, path_label, profile_id)) = sidebar_header.as_ref() {
+        draw_game_banner_header(ui, cx.model, banner.as_ref(), *game, path_label, profile_id.as_deref());
+    } else {
+        ui.heading(RichText::new("Tags").color(text_dark()));
+        if let Some((_, origin, _, _)) = sidebar_header.as_ref() {
+            ui.small(RichText::new(origin).color(subtle_dark()));
+            ui.add_space(8.0);
+        }
+    }
+
+    let active_favorite_entries = cx.model.kits[kit_index].active_favorite_entries.clone();
+    let active_favorite_folders =
+        std::sync::Arc::new(cx.model.kits[kit_index].active_favorite_folders.clone());
+    let favorite_keys: HashSet<String> = active_favorite_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+    let kit_id = cx.model.kits[kit_index].id;
+    // Published into egui memory so the row and folder painters can reach
+    // it without threading it through every drawing function. The browsers
+    // draw one after another, so what is in memory during this tree's draw
+    // is this kit's own set.
+    set_browser_modified_tags(ui, std::sync::Arc::clone(&view.browser.modified_tags));
+    set_browser_favorite_folders(
+        ui,
+        cx.model.kits[kit_index]
+            .source
+            .as_ref()
+            .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }))
+            .then_some(active_favorite_folders),
+    );
+    set_browser_game(
+        ui,
+        cx.model.kits[kit_index]
+            .source
+            .as_ref()
+            .and_then(|source| source.game),
+    );
+    set_browser_sound_language(
+        ui,
+        cx.model.kits[kit_index]
+            .source
+            .as_ref()
+            .and_then(|source| source.game),
+        sound_language,
+    );
+    let browser_game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
+    let browser_tags_root = cx.model.kits[kit_index].source.as_ref().and_then(|source| {
+        if let TagSource::LooseFolder { root, .. } = &source.source {
+            Some(root.as_path())
+        } else {
+            None
+        }
+    });
+    set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
+    set_browser_entries_scanning(ui, cx.model.kits[kit_index].scanning_entries);
+    set_browser_loose_source(
+        ui,
+        cx.model.kits[kit_index]
+            .source
+            .as_ref()
+            .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. })),
+    );
+    set_browser_scenario_launch(
+        ui,
+        cx.model.kits[kit_index]
+            .source
+            .as_ref()
+            .map(crate::app::kits::scenario_launch::scenario_launch_availability)
+            .unwrap_or_default(),
+    );
+    set_browser_is_folder_pane(ui, false);
+    set_browser_deletable_keys(ui, std::sync::Arc::clone(&view.browser.deletable_keys));
+    let bitmap_hover_requests = begin_bitmap_hovers(ui, Arc::clone(&view.bitmap_browser.thumbnails));
+    let mut open_git_review = false;
+    let git_review_enabled = cx.model.git_review_enabled_for_kit(kit_index);
+    let kit = &cx.model.kits[kit_index];
+    if let Some(source) = kit.source.as_ref() {
+        ui.add_space(8.0);
+        let scanning = kit.scanning_entries;
+        let mut need_scan = false;
+        let mut show_prefixes = cx.model.prefs.show_browser_prefixes;
+        let mut folders_before_tags = cx.model.prefs.folders_before_tags;
+        let prev_filter_empty = view.browser.filter.is_empty();
+        browser_search_field(ui, &mut view.browser.filter, "search tags");
+        if let Some(warning) = browser::browser_filter_warning(&view.browser.filter) {
+            ui.label(
+                RichText::new(warning)
+                    .small()
+                    .color(Color32::from_rgb(184, 134, 11)),
+            );
+        }
+        ui.add_space(6.0);
+        // Wrapped, and with the toolbar visuals hoisted out of the two
+        // scopes that used to group these buttons. A scope is placed as one
+        // unit, so grouped buttons could only wrap in blocks — and the
+        // widest block became the sidebar's minimum width. Individually
+        // wrapping buttons let the panel shrink to a single button.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let groups_clicked = browser_toolbar_controls(
+                ui,
+                &mut view.browser.mode,
+                &mut view.browser.sort,
+                &mut show_prefixes,
+                &mut folders_before_tags,
+            );
+            if groups_clicked
                 && matches!(source.source, TagSource::LooseFolder { .. })
                 && source.all_entries.is_empty()
                 && !scanning
             {
                 need_scan = true;
             }
-            ui.add_space(4.0);
-            let selected = kit.selected_key.clone();
-            let filter = view.browser.filter.trim().to_owned();
-            let mode = view.browser.mode;
-            let show_prefixes = self.model.prefs.show_browser_prefixes;
-            let folders_before_tags = self.model.prefs.folders_before_tags;
-            let double_click_to_open = self.model.prefs.double_click_to_open_tags;
-            let mut status_update = None;
-            // Groups and filtered Folders use all_entries (background
-            // scan) so every tag is visible, not just visited folders.
-            let has_all = !source.all_entries.is_empty();
-            let groups_mode = matches!(mode, BrowserMode::Groups);
-            // Hoisted so the filtered and unfiltered trees cannot disagree about
-            // it: passing `false` here once cost the CE folder menu the moment a
-            // search filter was typed. `draw_tree_node` gates on `!groups_mode`
-            // itself, so this stays correct in Groups mode.
-            let is_container_source =
-                matches!(source.source, TagSource::IoStoreContainerSet { .. });
-            let favorite_context =
-                matches!(source.source, TagSource::LooseFolder { .. }).then_some(&favorite_keys);
-            // One-shot "reveal in tree" request (force-open ancestors +
-            // scroll). Borrowed into the Copy `Reveal` for the draw.
-            //
-            // Only this kit's browser may consume it: with two browsers on
-            // screen, whichever drew first would otherwise swallow a reveal
-            // meant for the other and scroll to a tag it does not have.
-            let reveal_owned = match &self.browser.reveal_target {
-                Some(request) if request.kit == kit_id => self.browser.reveal_target.take(),
-                _ => None,
-            };
-            let reveal = reveal_owned.as_ref().map(|request| Reveal {
-                key: request.key.as_str(),
-                remaining: request.ancestors.as_slice(),
-            });
-            let sort = view.browser.sort;
-            let action = ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let (favorite_action, favorites_visible) = draw_favorites(
-                        ui,
-                        &active_favorite_entries,
-                        // Favorites follow the visible folder browser's lazy
-                        // boundary; a saved/global index must not make an
-                        // unopened favorite look materialized.
-                        &source.entries,
-                        match &source.source {
-                            TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-                            _ => None,
-                        },
-                        selected.as_deref(),
-                        &filter,
-                        show_prefixes,
-                        double_click_to_open,
-                        &favorite_keys,
-                    );
-                    browser_favorites_divider(ui, favorites_visible);
+        });
+        if prev_filter_empty
+            && !view.browser.filter.is_empty()
+            && matches!(source.source, TagSource::LooseFolder { .. })
+            && source.all_entries.is_empty()
+            && !scanning
+        {
+            need_scan = true;
+        }
+        ui.add_space(4.0);
+        let selected = kit.selected_key.clone();
+        let filter = view.browser.filter.trim().to_owned();
+        let mode = view.browser.mode;
+        edit_browser_prefs(cx, show_prefixes, folders_before_tags);
+        let double_click_to_open = cx.model.prefs.double_click_to_open_tags;
+        let mut load_requests = Vec::new();
+        // Groups and filtered Folders use all_entries (background
+        // scan) so every tag is visible, not just visited folders.
+        let has_all = !source.all_entries.is_empty();
+        let groups_mode = matches!(mode, BrowserMode::Groups);
+        // Hoisted so the filtered and unfiltered trees cannot disagree about
+        // it: passing `false` here once cost the CE folder menu the moment a
+        // search filter was typed. `draw_tree_node` gates on `!groups_mode`
+        // itself, so this stays correct in Groups mode.
+        let is_container_source =
+            matches!(source.source, TagSource::IoStoreContainerSet { .. });
+        let favorite_context =
+            matches!(source.source, TagSource::LooseFolder { .. }).then_some(&favorite_keys);
+        // One-shot "reveal in tree" request (force-open ancestors +
+        // scroll). Borrowed into the Copy `Reveal` for the draw.
+        //
+        // Only this kit's browser may consume it: with two browsers on
+        // screen, whichever drew first would otherwise swallow a reveal
+        // meant for the other and scroll to a tag it does not have.
+        let reveal_owned = match &browser.reveal_target {
+            Some(request) if request.kit == kit_id => browser.reveal_target.take(),
+            _ => None,
+        };
+        let reveal = reveal_owned.as_ref().map(|request| Reveal {
+            key: request.key.as_str(),
+            remaining: request.ancestors.as_slice(),
+        });
+        let sort = view.browser.sort;
+        let action = ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let (favorite_action, favorites_visible) = draw_favorites(
+                    ui,
+                    &active_favorite_entries,
+                    // Favorites follow the visible folder browser's lazy
+                    // boundary; a saved/global index must not make an
+                    // unopened favorite look materialized.
+                    &source.entries,
+                    match &source.source {
+                        TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                        _ => None,
+                    },
+                    selected.as_deref(),
+                    &filter,
+                    show_prefixes,
+                    double_click_to_open,
+                    &favorite_keys,
+                );
+                browser_favorites_divider(ui, favorites_visible);
 
-                    if git_review_enabled {
-                        if sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE).clicked() {
-                            open_git_review = true;
-                        }
-                        ui.add_space(4.0);
-                        ui.separator();
-                        ui.add_space(4.0);
+                if git_review_enabled {
+                    if sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE).clicked() {
+                        open_git_review = true;
                     }
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                }
 
-                    let tree_action = if !filter.is_empty() {
-                        // Active search renders a memoized, pruned tree. A loose
-                        // source waits for its complete background index first.
-                        let entries: &[TagEntry] = if has_all {
-                            &source.all_entries
-                        } else {
-                            &source.entries
-                        };
-                        if scanning && !has_all {
-                            ui.label(RichText::new("Indexing tags…").color(subtle_dark()).small());
+                let tree_action = if !filter.is_empty() {
+                    // Active search renders a memoized, pruned tree. A loose
+                    // source waits for its complete background index first.
+                    let entries: &[TagEntry] = if has_all {
+                        &source.all_entries
+                    } else {
+                        &source.entries
+                    };
+                    if scanning && !has_all {
+                        ui.label(RichText::new("Indexing tags…").color(subtle_dark()).small());
+                        None
+                    } else {
+                        view.browser.filter_cache.refresh(
+                            kit.generation,
+                            &filter,
+                            entries,
+                            has_all,
+                            groups_mode,
+                        );
+                        let cache = &view.browser.filter_cache;
+                        if cache.entries.is_empty() {
+                            ui.label(RichText::new("No matching tags").color(subtle_dark()));
                             None
                         } else {
-                            view.browser.filter_cache.refresh(
-                                kit.generation,
-                                &filter,
-                                entries,
-                                has_all,
+                            // Empty filter → tree renders every (already
+                            // pruned) entry with folders collapsed.
+                            draw_tree(
+                                ui,
+                                &cache.tree,
+                                &cache.entries,
+                                selected.as_deref(),
+                                "",
+                                false,
+                                show_prefixes,
+                                double_click_to_open,
                                 groups_mode,
-                            );
-                            let cache = &view.browser.filter_cache;
-                            if cache.entries.is_empty() {
-                                ui.label(RichText::new("No matching tags").color(subtle_dark()));
-                                None
+                                reveal,
+                                sort,
+                                !groups_mode && folders_before_tags,
+                                favorite_context,
+                                is_container_source,
+                            )
+                        }
+                    }
+                } else {
+                    match mode {
+                        BrowserMode::Folders => {
+                            if let TagSource::LooseFolder { .. } = &source.source {
+                                draw_tree_lazy(
+                                    ui,
+                                    &source.tree,
+                                    &source.entries,
+                                    selected.as_deref(),
+                                    &filter,
+                                    show_prefixes,
+                                    double_click_to_open,
+                                    &mut load_requests,
+                                    reveal,
+                                    sort,
+                                    folders_before_tags,
+                                    favorite_context,
+                                )
                             } else {
-                                // Empty filter → tree renders every (already
-                                // pruned) entry with folders collapsed.
                                 draw_tree(
                                     ui,
-                                    &cache.tree,
-                                    &cache.entries,
+                                    &source.tree,
+                                    &source.entries,
                                     selected.as_deref(),
-                                    "",
+                                    &filter,
                                     false,
                                     show_prefixes,
                                     double_click_to_open,
-                                    groups_mode,
+                                    false,
                                     reveal,
                                     sort,
-                                    !groups_mode && folders_before_tags,
-                                    favorite_context,
+                                    folders_before_tags,
+                                    None,
                                     is_container_source,
                                 )
                             }
                         }
-                    } else {
-                        match mode {
-                            BrowserMode::Folders => {
-                                if let TagSource::LooseFolder { root, .. } = &source.source {
-                                    let root = root.clone();
-                                    draw_tree_lazy(
-                                        ui,
-                                        &mut source.tree,
-                                        &mut source.entries,
-                                        source
-                                            .all_entries
-                                            .is_empty()
-                                            .then_some(&mut source.group_tree),
-                                        &root,
-                                        &source.names,
-                                        selected.as_deref(),
-                                        &filter,
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        &mut status_update,
-                                        reveal,
-                                        sort,
-                                        folders_before_tags,
-                                        favorite_context,
-                                    )
+                        BrowserMode::Groups => {
+                            if scanning && !has_all {
+                                ui.label(
+                                    RichText::new("Indexing tags…")
+                                        .color(subtle_dark())
+                                        .small(),
+                                );
+                                None
+                            } else {
+                                let entries = if has_all {
+                                    &source.all_entries[..]
                                 } else {
-                                    draw_tree(
-                                        ui,
-                                        &source.tree,
-                                        &source.entries,
-                                        selected.as_deref(),
-                                        &filter,
-                                        false,
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        false,
-                                        reveal,
-                                        sort,
-                                        folders_before_tags,
-                                        None,
-                                        is_container_source,
-                                    )
-                                }
-                            }
-                            BrowserMode::Groups => {
-                                if scanning && !has_all {
-                                    ui.label(
-                                        RichText::new("Indexing tags…")
-                                            .color(subtle_dark())
-                                            .small(),
-                                    );
-                                    None
-                                } else {
-                                    let entries = if has_all {
-                                        &source.all_entries[..]
-                                    } else {
-                                        &source.entries[..]
-                                    };
-                                    draw_tree(
-                                        ui,
-                                        &source.group_tree,
-                                        entries,
-                                        selected.as_deref(),
-                                        &filter,
-                                        false,
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        true,
-                                        reveal,
-                                        sort,
-                                        false,
-                                        favorite_context,
-                                        false,
-                                    )
-                                }
+                                    &source.entries[..]
+                                };
+                                draw_tree(
+                                    ui,
+                                    &source.group_tree,
+                                    entries,
+                                    selected.as_deref(),
+                                    &filter,
+                                    false,
+                                    show_prefixes,
+                                    double_click_to_open,
+                                    true,
+                                    reveal,
+                                    sort,
+                                    false,
+                                    favorite_context,
+                                    false,
+                                )
                             }
                         }
-                    };
-                    favorite_action.or(tree_action)
-                })
-                .inner;
-            if let Some(status) = status_update {
-                self.model.status = status;
+                    }
+                };
+                favorite_action.or(tree_action)
+            })
+            .inner;
+        if !load_requests.is_empty() {
+            cx.send(BrowserCommand::LoadFolders {
+                kit: kit_id,
+                tree: LazyTree::Source,
+                paths: load_requests,
+            });
+            // A reveal opens one unloaded folder a frame, each loading
+            // before the next can open, so it stays until it gets there.
+            if reveal_owned.is_some() && browser.reveal_target.is_none() {
+                browser.reveal_target = reveal_owned;
             }
-            // Browser actions and the scan below all resolve against the active
-            // kit, and this browser is drawn inside the workspace-tree walk,
-            // where `active` is still whatever it was when the frame began.
-            // Press-activation usually beats the click by a frame, but a press
-            // and its release land in the same frame whenever one runs long --
-            // which is exactly what loading a large tag or indexing does. This
-            // browser's own kit is the right target either way.
-            if action.is_some() || need_scan {
-                self.model.active = kit_index;
-            }
-            if let Some(action) = action {
-                self.handle_browser_action(action, ctx.clone());
-            }
-            // Deferred: begin_scan_all_entries needs &mut self, so
-            // it must be called after the `source` borrow ends.
-            if need_scan {
-                self.begin_scan_all_entries(ctx.clone());
-            }
-        } else {
-            ui.label("Use File to load a tag, folder, or monolithic cache.");
         }
-        if open_git_review {
-            self.model.active = kit_index;
-            self.open_git_review(ctx);
+        // Browser actions and the scan resolve against the active kit, and
+        // this browser draws inside the workspace-tree walk, where `active`
+        // is still whatever it was when the frame began; the commands name
+        // this browser's own kit, which they make active first.
+        if let Some(action) = action {
+            cx.send(BrowserCommand::Action { kit: kit_id, action });
         }
-        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
+        if need_scan {
+            cx.send(BrowserCommand::ScanAllEntries { kit: kit_id });
+        }
+    } else {
+        ui.label("Use File to load a tag, folder, or monolithic cache.");
     }
+    if open_git_review {
+        cx.send(CompareCommand::OpenGitReview { kit: kit_id });
+    }
+    queue_bitmap_hover_thumbnails(cx, kit_index, &mut view.bitmap_browser, &bitmap_hover_requests);
 }
 
 /// Draw the controls shared by the sidebar and docked folder browser. Callers
 /// choose the surrounding layout and may place search beside or above them.
+/// Send the two browser toggles both browsers' toolbars bind to, when the
+/// draw changed them.
+fn edit_browser_prefs(cx: &Ctx, show_prefixes: bool, folders_before_tags: bool) {
+    if show_prefixes != cx.model.prefs.show_browser_prefixes {
+        cx.edit_prefs(move |prefs| prefs.show_browser_prefixes = show_prefixes);
+    }
+    if folders_before_tags != cx.model.prefs.folders_before_tags {
+        cx.edit_prefs(move |prefs| prefs.folders_before_tags = folders_before_tags);
+    }
+}
+
 fn browser_toolbar_controls(
     ui: &mut Ui,
     mode: &mut BrowserMode,

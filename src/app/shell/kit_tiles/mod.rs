@@ -100,7 +100,30 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                 bottom: 6,
             }))
             .show(ui, |ui| {
-                self.app.draw_kit_browser(ui, &self.ctx, kit_index);
+                let app = &mut *self.app;
+                // Each fills a cache, so they are done before the draw.
+                app.refresh_modified_tags(kit_index);
+                app.refresh_deletable_keys(kit_index);
+                let source = app.model.kits[kit_index].source.as_ref();
+                let game = source.and_then(|source| source.game);
+                let profile = app.model.kits[kit_index]
+                    .profile
+                    .as_ref()
+                    .map(|profile| profile.id.clone());
+                let banner = game.and_then(|game| {
+                    app.workspace_banner_texture(&self.ctx, Some(game), profile.as_deref())
+                });
+                let language = app.audio.language.clone();
+                let kit = app.model.kits[kit_index].id;
+                draw_kit_browser(
+                    &cx!(app, &self.ctx),
+                    ui,
+                    kit_index,
+                    &mut app.views[kit],
+                    &mut app.browser,
+                    banner,
+                    language.as_deref(),
+                );
             });
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(editor_bg()))

@@ -266,25 +266,6 @@ impl Baboon {
         self.kit_and_view(kit).open_tag_pane(BITMAP_LIBRARY_KEY);
     }
 
-    pub(in crate::app) fn queue_bitmap_hover_thumbnails(
-        &mut self,
-        kit_index: usize,
-        requests: &Arc<Mutex<Vec<TagEntry>>>,
-        ctx: &egui::Context,
-    ) {
-        let entries = requests
-            .lock()
-            .map(|mut requests| std::mem::take(&mut *requests))
-            .unwrap_or_default();
-        let kit = self.model.kits[kit_index].id;
-        queue_thumbnails::<Bitmaps>(
-            &cx!(self, ctx),
-            kit_index,
-            &mut self.views[kit].bitmap_browser,
-            entries,
-            256,
-        );
-    }
 }
 
 /// Shared contents of the shader-reference hover and any other ordinary egui
@@ -328,3 +309,17 @@ mod tests;
 
 #[cfg(test)]
 mod stale_result_tests;
+
+/// Start the thumbnails the bitmap hovers drawn this frame asked for.
+pub(in crate::app) fn queue_bitmap_hover_thumbnails(
+    cx: &Ctx,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<Bitmaps>,
+    requests: &Arc<Mutex<Vec<TagEntry>>>,
+) {
+    let entries = requests
+        .lock()
+        .map(|mut requests| std::mem::take(&mut *requests))
+        .unwrap_or_default();
+    queue_thumbnails::<Bitmaps>(cx, kit_index, library, entries, 256);
+}

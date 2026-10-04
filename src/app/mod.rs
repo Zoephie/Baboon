@@ -650,7 +650,7 @@ impl Baboon {
     /// engine artwork. Looking the profile up by its stable ID keeps restored
     /// workspaces connected to later name/icon edits without copying a
     /// potentially stale icon path into session state.
-    fn workspace_banner_texture(
+    pub(in crate::app) fn workspace_banner_texture(
         &mut self,
         ctx: &egui::Context,
         game: Option<GameId>,

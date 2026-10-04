@@ -34,21 +34,18 @@ fn expanding_a_lazy_folder_leaves_a_full_index_group_tree_alone() {
         let mut group_tree = crate::core::source::build_group_tree(&full_index);
         assert_eq!(group_tree.children.len(), 1);
         let ctx = egui::Context::default();
+        let mut requests = Vec::new();
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let mut status = None;
                 draw_tree_lazy(
                     ui,
-                    &mut tree,
-                    &mut entries,
-                    hand_over.then_some(&mut group_tree),
-                    &root,
-                    &TagNameIndex::default(),
+                    &tree,
+                    &entries,
                     None,
                     "",
                     false,
                     false,
-                    &mut status,
+                    &mut requests,
                     // Reveal opens the folder, which loads it.
                     Some(Reveal {
                         key: "unused",
@@ -60,6 +57,14 @@ fn expanding_a_lazy_folder_leaves_a_full_index_group_tree_alone() {
                 );
             });
         });
+        load_lazy_folders(
+            &mut tree,
+            &mut entries,
+            hand_over.then_some(&mut group_tree),
+            &root,
+            &TagNameIndex::default(),
+            &requests,
+        );
         assert!(
             tree.children.iter().any(|node| node.entries_loaded),
             "the folder was expanded and loaded"

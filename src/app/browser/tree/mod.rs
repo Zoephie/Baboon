@@ -830,22 +830,19 @@ pub(in crate::app) fn draw_tree(
     clicked
 }
 
+/// Draw a loose folder tree whose folders load as they open. Drawing reads
+/// the tree and changes nothing: an open folder not yet loaded shows as
+/// loading and has its path pushed onto `load_requests`, for
+/// [`load_lazy_folders`] to load once the frame's drawing is over.
 pub(in crate::app) fn draw_tree_lazy(
     ui: &mut Ui,
-    tree: &mut TagTree,
-    entries: &mut Vec<TagEntry>,
-    // The Groups view's tree, to keep in step with lazily loaded folders. Only
-    // when it has nothing better: built from the full tag index, it already
-    // holds every group, and rebuilding it from the handful of lazily loaded
-    // entries would cut it down to the folders the user happened to expand.
-    mut group_tree: Option<&mut TagTree>,
-    root: &Path,
-    names: &TagNameIndex,
+    tree: &TagTree,
+    entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
     show_prefixes: bool,
     double_click_to_open: bool,
-    status_update: &mut Option<String>,
+    load_requests: &mut Vec<PathBuf>,
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
@@ -869,19 +866,16 @@ pub(in crate::app) fn draw_tree_lazy(
         clicked = clicked.or(action);
     }
     for index in ordered_child_indices(&tree.children, sort) {
-        let node = &mut tree.children[index];
+        let node = &tree.children[index];
         let action = draw_tree_node_lazy(
             ui,
             node,
             entries,
-            group_tree.as_deref_mut(),
-            root,
-            names,
             selected,
             filter,
             show_prefixes,
             double_click_to_open,
-            status_update,
+            load_requests,
             reveal,
             sort,
             folders_before_tags,
@@ -1011,20 +1005,13 @@ fn with_folder_block_skipping(
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn draw_tree_node_lazy(
     ui: &mut Ui,
-    node: &mut TagTreeNode,
-    entries: &mut Vec<TagEntry>,
-    // The Groups view's tree, to keep in step with lazily loaded folders. Only
-    // when it has nothing better: built from the full tag index, it already
-    // holds every group, and rebuilding it from the handful of lazily loaded
-    // entries would cut it down to the folders the user happened to expand.
-    group_tree: Option<&mut TagTree>,
-    root: &Path,
-    names: &TagNameIndex,
+    node: &TagTreeNode,
+    entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
     show_prefixes: bool,
     double_click_to_open: bool,
-    status_update: &mut Option<String>,
+    load_requests: &mut Vec<PathBuf>,
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
@@ -1049,14 +1036,11 @@ pub(in crate::app) fn draw_tree_node_lazy(
             ui,
             node,
             entries,
-            group_tree,
-            root,
-            names,
             selected,
             filter,
             show_prefixes,
             double_click_to_open,
-            status_update,
+            load_requests,
             reveal,
             on_path,
             sort,
@@ -1069,17 +1053,13 @@ pub(in crate::app) fn draw_tree_node_lazy(
 #[allow(clippy::too_many_arguments)]
 fn draw_tree_node_lazy_block(
     ui: &mut Ui,
-    node: &mut TagTreeNode,
-    entries: &mut Vec<TagEntry>,
-    // See `draw_tree_node_lazy`.
-    mut group_tree: Option<&mut TagTree>,
-    root: &Path,
-    names: &TagNameIndex,
+    node: &TagTreeNode,
+    entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
     show_prefixes: bool,
     double_click_to_open: bool,
-    status_update: &mut Option<String>,
+    load_requests: &mut Vec<PathBuf>,
     reveal: Option<Reveal>,
     on_path: bool,
     sort: BrowserSort,
@@ -1103,24 +1083,8 @@ fn draw_tree_node_lazy_block(
         on_path,
         |ui| {
             if !node.entries_loaded {
-                match load_folder_node_entries(root, node, entries, names) {
-                    Ok(()) => {
-                        if let Some(group_tree) = group_tree.as_deref_mut() {
-                            *group_tree = crate::core::source::build_group_tree(entries);
-                        }
-                        *status_update = Some(format!(
-                            "Loaded {} tag(s) from {}",
-                            node.entries.len(),
-                            node.label
-                        ));
-                    }
-                    Err(error) => {
-                        *status_update = Some(format!(
-                            "Failed to load folder {}: {error}",
-                            node.rel_path.display()
-                        ));
-                    }
-                }
+                load_requests.push(node.rel_path.clone());
+                ui.label(RichText::new("Loading…").color(subtle_dark()).small());
             }
             let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
             if !folders_before_tags {
@@ -1141,19 +1105,16 @@ fn draw_tree_node_lazy_block(
                 }
             }
             for index in ordered_child_indices(&node.children, sort) {
-                let child = &mut node.children[index];
+                let child = &node.children[index];
                 let action = draw_tree_node_lazy(
                     ui,
                     child,
                     entries,
-                    group_tree.as_deref_mut(),
-                    root,
-                    names,
                     selected,
                     filter,
                     show_prefixes,
                     double_click_to_open,
-                    status_update,
+                    load_requests,
                     inner_reveal,
                     sort,
                     folders_before_tags,
@@ -3376,3 +3337,58 @@ pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> boo
 
 #[cfg(test)]
 mod browser_tree_virtualization_tests;
+
+/// Load the folders at `paths` in a lazy `tree`, adding their tags to
+/// `entries`, and say what the last one did for the status line. With
+/// `group_tree`, the Groups view's tree is kept in step with them: only pass
+/// it when it has nothing better, since one built from the full tag index
+/// already holds every group, and rebuilding it from the handful of lazily
+/// loaded entries would cut it down to the folders the user happened to
+/// expand. A path no longer in the tree, or already loaded, is skipped.
+pub(in crate::app) fn load_lazy_folders(
+    tree: &mut TagTree,
+    entries: &mut Vec<TagEntry>,
+    mut group_tree: Option<&mut TagTree>,
+    root: &Path,
+    names: &TagNameIndex,
+    paths: &[PathBuf],
+) -> Option<String> {
+    let mut status = None;
+    for path in paths {
+        let Some(node) = lazy_node_mut(&mut tree.children, path) else {
+            continue;
+        };
+        if node.entries_loaded {
+            continue;
+        }
+        status = Some(match load_folder_node_entries(root, node, entries, names) {
+            Ok(()) => {
+                if let Some(group_tree) = group_tree.as_deref_mut() {
+                    *group_tree = crate::core::source::build_group_tree(entries);
+                }
+                format!("Loaded {} tag(s) from {}", node.entries.len(), node.label)
+            }
+            Err(error) => {
+                // Marked loaded, and so left empty: an open folder that stays
+                // unloaded is asked for again by every frame that draws it,
+                // and each answer repaints, so a failure would retry forever.
+                node.entries_loaded = true;
+                format!("Failed to load folder {}: {error}", node.rel_path.display())
+            }
+        });
+    }
+    status
+}
+
+/// The node at `path` among `nodes` and their descendants.
+fn lazy_node_mut<'a>(nodes: &'a mut [TagTreeNode], path: &Path) -> Option<&'a mut TagTreeNode> {
+    for node in nodes {
+        if node.rel_path == path {
+            return Some(node);
+        }
+        if path.starts_with(&node.rel_path) {
+            return lazy_node_mut(&mut node.children, path);
+        }
+    }
+    None
+}

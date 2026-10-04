@@ -63,7 +63,13 @@ impl Baboon {
             // the filter produces the normal one-shot restore-defaults pass.
             self.search.find.filter_results = false;
         }
-        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
+        let kit_id = self.model.kits[kit_index].id;
+        queue_bitmap_hover_thumbnails(
+            &cx!(self, ctx),
+            kit_index,
+            &mut self.views[kit_id].bitmap_browser,
+            &bitmap_hover_requests,
+        );
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
         // redraws when new input arrives, so nothing here is guaranteed to be

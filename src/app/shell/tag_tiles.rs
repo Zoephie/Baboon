@@ -37,7 +37,6 @@ struct TagPaneBehavior<'a> {
     expand: Option<(String, bool)>,
     close_all: bool,
     close_all_but: Option<String>,
-    pending_browser_action: Option<BrowserAction>,
 }
 
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
@@ -56,12 +55,18 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            let action = self
-                .app
-                .draw_folder_browser_pane(ui, &self.ctx, self.kit_index, &key);
-            if self.pending_browser_action.is_none() {
-                self.pending_browser_action = action;
-            }
+            self.app.refresh_folder_browser_pane(self.kit_index, &key);
+            let app = &mut *self.app;
+            let kit = app.model.kits[self.kit_index].id;
+            let language = app.audio.language.clone();
+            draw_folder_browser_pane(
+                &cx!(app, &self.ctx),
+                ui,
+                self.kit_index,
+                &key,
+                &mut app.views[kit],
+                language.as_deref(),
+            );
             return egui_tiles::UiResponse::None;
         }
         if key == BITMAP_LIBRARY_KEY {
@@ -609,7 +614,6 @@ impl Baboon {
             expand: None,
             close_all: false,
             close_all_but: None,
-            pending_browser_action: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
@@ -620,7 +624,6 @@ impl Baboon {
         let expand = behavior.expand.take();
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
-        let pending_browser_action = behavior.pending_browser_action.take();
         self.views[self.model.kits[kit_index].id].tag_tree = tree;
 
         // Git Review is another synthetic pane drawn while `tag_tree` is moved
@@ -637,13 +640,6 @@ impl Baboon {
             if !is_folder_pane_key(&key) {
                 self.model.kits[kit_index].selected_key = Some(key);
             }
-        }
-        // Pane contents are drawn while `tag_tree` is temporarily moved out.
-        // Opening from a breadcrumb or folder browser before this point would
-        // add the new tab to the discarded placeholder tree.
-        if let Some(action) = pending_browser_action {
-            self.model.active = kit_index;
-            self.handle_browser_action(action, ctx.clone());
         }
         // Everything below addresses the *active* kit: the close prompt and the
         // save paths under it resolve documents there, and `reveal_in_browser`

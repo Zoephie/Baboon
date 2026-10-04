@@ -309,6 +309,7 @@ pub(in crate::app) fn modified_text() -> Color32 {
 #[cfg(test)]
 mod modified_tags_tests;
 pub(in crate::app) mod panel;
+pub(in crate::app) use panel::{draw_folder_browser_pane, draw_kit_browser};
 pub(in crate::app) mod actions;
 pub(in crate::app) mod bitmap_browser;
 pub(in crate::app) use bitmap_browser::*;
@@ -389,6 +390,15 @@ pub(in crate::app) enum BrowserCommand {
     },
     /// List the active kit's tags carrying a keyword.
     ShowTagsWithKeyword(String),
+    /// Load the folders at `paths` in one of `kit`'s lazy loose-folder trees,
+    /// which a browser drew open before they had loaded.
+    LoadFolders {
+        kit: KitId,
+        tree: LazyTree,
+        paths: Vec<PathBuf>,
+    },
+    /// Index every tag in `kit`'s loose folder, for a view that needs them all.
+    ScanAllEntries { kit: KitId },
     /// What a cell of one of `kit`'s thumbnail libraries asked for.
     LibraryCell {
         kit: KitId,
@@ -412,6 +422,13 @@ impl Baboon {
                 }
             }
             BrowserCommand::ShowTagsWithKeyword(keyword) => self.show_tags_with_keyword(&keyword),
+            BrowserCommand::LoadFolders { kit, tree, paths } => self.load_browser_folders(kit, tree, &paths),
+            BrowserCommand::ScanAllEntries { kit } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.begin_scan_all_entries(ctx.clone());
+                }
+            }
             BrowserCommand::LibraryCell { kit, library, action } => {
                 let Some(index) = self.model.kit_index(kit) else {
                     return;
@@ -440,6 +457,50 @@ impl Baboon {
                     self.model.kits[index].keywords.remove(&key, &keyword);
                 }
             }
+        }
+    }
+}
+
+/// Which of a kit's lazy loose-folder trees a folder belongs to.
+pub(in crate::app) enum LazyTree {
+    /// The sidebar's, the source's own tree.
+    Source,
+    /// A docked folder pane's, by its pane key.
+    Pane(String),
+}
+
+impl Baboon {
+    /// Load folders a browser drew open before they had loaded.
+    fn load_browser_folders(&mut self, kit: KitId, tree: LazyTree, paths: &[PathBuf]) {
+        let Some(index) = self.model.kit_index(kit) else {
+            return;
+        };
+        let kit = &mut self.model.kits[index];
+        let view = &mut self.views[kit.id];
+        let Some(source) = kit.source.as_mut() else {
+            return;
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return;
+        };
+        let root = root.clone();
+        let names = source.names.clone();
+        let status = match tree {
+            LazyTree::Source => {
+                // The Groups view's tree is kept in step only while nothing
+                // better exists: see `load_lazy_folders`.
+                let group_tree = source.all_entries.is_empty().then_some(&mut source.group_tree);
+                load_lazy_folders(&mut source.tree, &mut source.entries, group_tree, &root, &names, paths)
+            }
+            // A pane's Groups view is rebuilt from the full index; nothing to
+            // keep in step.
+            LazyTree::Pane(key) => match view.browser.folder_browsers.get_mut(&key) {
+                Some(pane) => load_lazy_folders(&mut pane.tree, &mut source.entries, None, &root, &names, paths),
+                None => None,
+            },
+        };
+        if let Some(status) = status {
+            self.model.status = status;
         }
     }
 }

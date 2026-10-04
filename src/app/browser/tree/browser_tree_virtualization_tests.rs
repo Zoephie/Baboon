@@ -112,6 +112,7 @@ impl Browser {
         let mut shown_offset = 0.0;
         let (tree, entries, lazy_root) = (&mut self.tree, &mut self.entries, &self.lazy_root);
         let names = crate::core::format::TagNameIndex::default();
+        let mut load_requests = Vec::new();
         let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut area = egui::ScrollArea::vertical();
@@ -119,19 +120,16 @@ impl Browser {
                     area = area.vertical_scroll_offset(offset);
                 }
                 let output = area.show(ui, |ui| {
-                    if let Some(root) = lazy_root {
+                    if lazy_root.is_some() {
                         draw_tree_lazy(
                             ui,
                             tree,
                             entries,
                             None,
-                            root,
-                            &names,
-                            None,
                             filter,
                             false,
                             false,
-                            &mut None,
+                            &mut load_requests,
                             reveal,
                             BrowserSort::Natural,
                             true,
@@ -161,6 +159,11 @@ impl Browser {
                 content_height = output.content_size.y;
             });
         });
+        // What the frame asked to load, loaded once it has drawn, as the
+        // browser's command does.
+        if let Some(root) = lazy_root {
+            super::load_lazy_folders(tree, entries, None, root, &names, &load_requests);
+        }
         TREE_SKIPS_ROWS.with(|skips| skips.set(true));
         let tops = TREE_ROW_TOPS.with(|tops| std::mem::take(&mut *tops.borrow_mut()));
         let row_height = self.ctx.global_style().spacing.interact_size.y;
@@ -436,6 +439,10 @@ fn the_lazy_tree_skips_rows_without_moving_any() {
             browser.click_row(&format!("folder_{folder:02}"));
         }
         browser.time += 1.0;
+        // A folder loads once the frame that drew it open is over, so the
+        // last one clicked fills on the frame after that.
+        browser.scrolled(0.0);
+        browser.scrolled(0.0);
     }
     full.scrolled(END);
     let opened = full.scrolled(END);

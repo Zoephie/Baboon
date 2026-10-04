@@ -533,17 +533,20 @@ pub(in crate::app) fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction:
 /// Fills the sidebar width and allows long source paths to reflow as the pane
 /// narrows. Zero-width break opportunities after path separators keep Windows
 /// paths readable without changing the text the user sees.
+/// `texture` is the banner [`Baboon::workspace_banner_texture`] resolved for
+/// this game and profile; resolving it can load it, so it is done before the
+/// draw.
 pub(in crate::app) fn draw_game_banner_header(
     ui: &mut Ui,
-    app: &mut Baboon,
+    model: &Model,
+    texture: Option<&egui::TextureHandle>,
     game: GameId,
     path_label: &str,
     profile_id: Option<&str>,
 ) {
-    let texture = app.workspace_banner_texture(ui.ctx(), Some(game), profile_id);
     let title = profile_id
         .and_then(|id| {
-            app.model.prefs
+            model.prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == id)
@@ -556,13 +559,13 @@ pub(in crate::app) fn draw_game_banner_header(
                 game_platform_label(game)
             )
         });
-    let read_only = app.model.prefs.custom_editing_kit_profiles.iter().any(|profile| {
+    let read_only = model.prefs.custom_editing_kit_profiles.iter().any(|profile| {
         profile.read_only
             && !profile.is_campaign_evolved()
             && (profile_id == Some(profile.id.as_str())
                 || profile.is_read_only_for(None, Some(Path::new(path_label))))
     });
-    draw_kit_banner_tile(ui, &title, path_label, texture.as_ref(), read_only);
+    draw_kit_banner_tile(ui, &title, path_label, texture, read_only);
 }
 
 /// Used by the kit browser and the live editing-kit form preview.
@@ -667,6 +670,8 @@ mod menu_close_tests;
 mod help_menu_tests;
 #[cfg(test)]
 mod pane_undo_window_tests;
+#[cfg(test)]
+mod lazy_reveal_tests;
 
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {

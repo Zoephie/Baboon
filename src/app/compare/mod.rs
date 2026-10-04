@@ -24,12 +24,20 @@ pub(in crate::app) struct CompareFeature {
 pub(in crate::app) enum CompareCommand {
     /// Carry out what a kit's Git Review pane asked for.
     GitReview { kit: KitId, action: GitReviewAction },
+    /// Open Git Review over `kit`.
+    OpenGitReview { kit: KitId },
 }
 
 impl Baboon {
     pub(in crate::app) fn apply_compare_command(&mut self, command: CompareCommand, ctx: &egui::Context) {
         match command {
             CompareCommand::GitReview { kit, action } => self.apply_git_review_action(kit, action, ctx),
+            CompareCommand::OpenGitReview { kit } => {
+                if let Some(index) = self.model.kit_index(kit) {
+                    self.model.active = index;
+                    self.open_git_review(ctx);
+                }
+            }
         }
     }
 }
