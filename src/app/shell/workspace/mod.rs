@@ -323,9 +323,9 @@ impl Baboon {
         draw_container_duplicate_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
         draw_container_dump_confirm_window(&cx!(self, ctx), &mut self.export);
         draw_delete_confirm_window(&cx!(self, ctx), &mut self.tag_ops);
-        self.draw_chimp_mesh_texture_prompt(ctx);
-        self.draw_chimp_texture_export_prompt(ctx);
-        self.draw_chimp_level_export_prompt(ctx);
+        draw_chimp_mesh_texture_prompt(&cx!(self, ctx), &mut self.chimp);
+        draw_chimp_texture_export_prompt(&cx!(self, ctx), &mut self.chimp);
+        draw_chimp_level_export_prompt(&cx!(self, ctx), &mut self.chimp);
         draw_operation_notice_window(&cx!(self, ctx), &mut self.shell);
         self.diff_expanded_mod_export_rows();
         draw_mod_export_window(&cx!(self, ctx), &mut self.mods);

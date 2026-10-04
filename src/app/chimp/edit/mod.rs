@@ -20,6 +20,13 @@ pub(in crate::app) enum ChimpCommand {
         package: String,
         edit: Option<ChimpEdit>,
     },
+    /// Export a mesh, with the textures `with_textures` asks for.
+    ExportMesh {
+        prompt: ChimpMeshTexturePrompt,
+        with_textures: ChimpTextureScope,
+    },
+    ExportTexture(ChimpTextureExportPrompt),
+    ExportLevel(ChimpLevelExportPrompt),
 }
 
 /// One change a pane asks of its document.
@@ -232,6 +239,12 @@ impl Baboon {
                     None => end_chimp_edit_run(document),
                 }
             }
+            ChimpCommand::ExportMesh {
+                prompt,
+                with_textures,
+            } => self.start_chimp_mesh_export(prompt, with_textures, ctx.clone()),
+            ChimpCommand::ExportTexture(prompt) => self.start_chimp_texture_export(prompt, ctx.clone()),
+            ChimpCommand::ExportLevel(prompt) => self.start_chimp_level_export(prompt, ctx.clone()),
         }
     }
 

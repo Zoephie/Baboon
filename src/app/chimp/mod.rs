@@ -93,6 +93,7 @@ impl Baboon {
     }
 }
 pub(in crate::app) mod prompts_window;
+pub(in crate::app) use prompts_window::*;
 
 /// Chimp's app-wide prompts and jobs: mesh texture, texture export and level
 /// export prompts, the level job, writes in flight, the discard prompt and the
