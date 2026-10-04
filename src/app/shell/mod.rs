@@ -3,6 +3,10 @@
 //! around the features.
 
 use super::*;
+use crate::app::import::{
+    BLAM_KEY, BLAM_TITLE, BlamLogKind, FolderConversionReport, ImportAnalysis, ImportSourceFacts,
+    NativeTemplateCache, OutsideReference, draw_blam_pane,
+};
 use crate::app::references::ReferencesFeature;
 use crate::app::search::{FieldValueSearchWindow, FindOccurrence, SearchFeature};
 use crate::app::compare::{

@@ -1,6 +1,7 @@
 use crate::app::documents::saving::new_tag_output_path_from_dialog;
 
 use super::*;
+use crate::app::editor::material::clean_field_key;
 use crate::core::document::apply::{
     apply_field_edit, apply_one_block_op, apply_one_h2_shader_param_op,
     replace_halo2_function_byte_block,

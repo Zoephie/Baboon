@@ -101,7 +101,7 @@ use search::{FindDialogState, SearchFeature};
 mod references;
 use references::ReferencesFeature;
 pub(in crate::app) mod import;
-use import::*;
+use import::ImportFeature;
 pub(in crate::app) mod mods;
 use mods::*;
 pub(in crate::app) mod tag_ops;

@@ -4,6 +4,7 @@
 //! when it was a bare `thread::spawn`, which sent nothing.
 
 use super::*;
+use crate::app::import::TagImportDialog;
 use crate::app::chimp::ChimpMount;
 
 /// Every loader reserves the kit for the path it is loading; the reservation

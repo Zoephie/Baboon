@@ -36,6 +36,9 @@
 
 use super::perf_baseline_tests::{Harness, fixture};
 use super::*;
+use crate::app::import::{
+    CacheImportDialog, CacheImportTarget, ImportMode, ImportTagDialog, PendingImport, ReplaceChoice,
+};
 use crate::app::search::QueryResultsWindow;
 use crate::app::help::HelpWindow;
 use crate::app::chimp::{ChimpLevelExportPrompt, ChimpMeshTexturePrompt, ChimpTextureExportPrompt};

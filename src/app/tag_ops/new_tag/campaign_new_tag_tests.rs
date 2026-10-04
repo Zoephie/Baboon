@@ -10,6 +10,7 @@
 //! instances by design and stay refused.
 
 use super::*;
+use blam_tags::convert::CAMPAIGN_EVOLVED_GENERATION;
 
 fn definitions() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions")
