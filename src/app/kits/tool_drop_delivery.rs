@@ -648,6 +648,14 @@ mod tests {
         use windows::core::w;
 
         const CHILD_FLAG: &str = "BABOON_DROP_RECEIVER_CHILD";
+
+        /// The receiver test's name as libtest filters it, from this module's
+        /// own path: a name written out by hand went stale when the module
+        /// moved, and the child then ran no test and never answered.
+        fn receiver_test_name() -> String {
+            let module = module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest);
+            format!("{module}::drop_receiver_child")
+        }
         const VISIBLE_FLAG: &str = "BABOON_DROP_RECEIVER_VISIBLE";
         /// Where the visible receiver sits: x, y, width, height on screen.
         const VISIBLE_RECT: (i32, i32, i32, i32) = (100, 100, 300, 200);
@@ -674,7 +682,7 @@ mod tests {
                 .expect("copy the test binary as sapien.exe");
             let child = Command::new(&sapien)
                 .args([
-                    "app::kit_tool_drop::tests::cross_process::drop_receiver_child",
+                    receiver_test_name().as_str(),
                     "--exact",
                     "--nocapture",
                     "--test-threads=1",
@@ -739,7 +747,7 @@ mod tests {
         fn a_posted_drop_reaches_another_process() {
             let child = Command::new(std::env::current_exe().expect("test binary"))
                 .args([
-                    "app::kit_tool_drop::tests::cross_process::drop_receiver_child",
+                    receiver_test_name().as_str(),
                     "--exact",
                     "--nocapture",
                     "--test-threads=1",
