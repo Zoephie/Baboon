@@ -54,6 +54,8 @@ pub(crate) enum BlockOpKind {
     Duplicate(usize),
     Delete(usize),
     DeleteAll,
+    /// Final ordering: each new position identifies its original element.
+    Reorder { order: Vec<usize> },
     /// Insert copied element(s) at the given index.
     Paste {
         at: usize,

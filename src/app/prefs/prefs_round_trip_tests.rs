@@ -3,6 +3,7 @@
 //! mirrored field for a new preference to be forgotten in.
 
 use super::*;
+use crate::app::browser::BrowserAction;
 
 fn app_with(prefs: GuiPrefs) -> Baboon {
     Baboon::assemble(
@@ -23,6 +24,11 @@ fn app_with(prefs: GuiPrefs) -> Baboon {
 fn loaded_prefs_are_written_back_unchanged() {
     let prefs = GuiPrefs {
         browser_mode: BrowserMode::Groups,
+        browser_search_scope: BrowserSearchScope {
+            tags: false,
+            folders: true,
+            keywords: true,
+        },
         show_browser_prefixes: true,
         folders_before_tags: true,
         double_click_to_open_tags: true,
@@ -88,12 +94,47 @@ fn out_of_range_prefs_are_corrected_when_loaded() {
 fn a_changed_pref_is_what_gets_written() {
     let mut app = app_with(GuiPrefs::default());
     app.model.prefs.expert_mode = true;
+    app.model.prefs.browser_search_scope = BrowserSearchScope {
+        tags: false,
+        folders: false,
+        keywords: true,
+    };
     app.views[app.model.kits[0].id].browser.mode = BrowserMode::Groups;
     let written = app.current_prefs();
     assert!(written.expert_mode);
+    assert_eq!(written.browser_search_scope, app.model.prefs.browser_search_scope);
     assert_eq!(
         written.browser_mode,
         BrowserMode::Groups,
         "the focused kit's view"
     );
+}
+
+/// The saved search scope seeds the first workspace, a new one, and a folder
+/// browser opened in it.
+#[test]
+fn saved_search_scope_seeds_startup_and_new_workspaces() {
+    let scope = BrowserSearchScope {
+        tags: true,
+        folders: false,
+        keywords: true,
+    };
+    let mut app = app_with(GuiPrefs {
+        browser_search_scope: scope,
+        ..GuiPrefs::default()
+    });
+    assert_eq!(app.views[app.model.kits[0].id].browser.search_scope, scope);
+    let kit = app.add_kit();
+    assert_eq!(app.views[kit].browser.search_scope, scope);
+    app.model.active = app.model.kit_index(kit).expect("the new kit");
+    app.handle_browser_action(
+        BrowserAction::OpenFolderBrowser {
+            rel_path: PathBuf::from("objects"),
+            label: "objects".into(),
+            open_in_new_tab: true,
+        },
+        egui::Context::default(),
+    );
+    let pane = app.views[kit].browser.folder_browsers.values().next().expect("a folder browser");
+    assert_eq!(pane.search_scope, scope);
 }

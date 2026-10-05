@@ -73,11 +73,92 @@ fn track_height(channels: Option<u16>) -> f32 {
     }
 }
 
+/// Search clips while retaining their grouped natural order and source indices.
+#[allow(clippy::too_many_arguments)]
+fn draw_clip_selector(
+    ui: &mut Ui,
+    id_salt: &str,
+    tag_key: &str,
+    clips: &[PlayerClip],
+    order: &[usize],
+    selected: usize,
+    width: f32,
+) -> Option<usize> {
+    let popup_id = ui.make_persistent_id(("clip_player_combo", id_salt, tag_key));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let title = clips
+        .get(selected)
+        .map(clip_title)
+        .unwrap_or_else(|| "<None>".to_owned());
+    let response = picker_button(
+        ui,
+        popup_id,
+        &title,
+        clips.len(),
+        width,
+        text_dark(),
+        !clips.is_empty(),
+    );
+    let just_opened = response.clicked() && !open;
+    if response.clicked() {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+    }
+    let mut selection = None;
+    // Open while its id is open in memory, as the button above toggles it;
+    // left alone, a popup built from a response is always open.
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            picker_popup_width(ui, &response);
+            let filter_id = popup_id.with("entry_search");
+            let mut filter = ui
+                .data(|data| data.get_temp::<String>(filter_id))
+                .unwrap_or_default();
+            let changed = picker_search_field(ui, &mut filter, "search sounds…", just_opened);
+            ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+            ui.separator();
+            let query = filter.trim().to_lowercase();
+            picker_results(ui, 300.0, changed, |ui| {
+                let mut group: Option<&str> = None;
+                let mut shown = 0;
+                for &index in order {
+                    let clip = &clips[index];
+                    if !query.is_empty() && !clip_title(clip).to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    shown += 1;
+                    if clip.group.as_deref() != group {
+                        group = clip.group.as_deref();
+                        if let Some(heading) = group {
+                            ui.label(RichText::new(heading).strong().color(subtle_dark()));
+                        }
+                    }
+                    let text = match clip.duration {
+                        Some(seconds) => format!("{}    {}", clip.name, format_play_time(seconds)),
+                        None => clip.name.clone(),
+                    };
+                    let row = ui.selectable_label(index == selected, text);
+                    if just_opened && query.is_empty() && index == selected {
+                        row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if row.clicked() {
+                        selection = Some(index);
+                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    }
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No sounds match.").color(subtle_dark()));
+                }
+            });
+        });
+    selection
+}
+
 /// Draw the player over `clips` and return the index of the selected one.
-///
-/// `play` builds the action that plays a clip; it is only called for a clip
-/// being played, since building one can copy the clip's audio. The selection
-/// is kept per tab, by clip id, so it survives the rows being rebuilt.
+/// `play` only builds audio for a clip being played. Selection is stored per tab
+/// by clip id, so it survives the rows being rebuilt.
 pub(super) fn draw_clip_player(
     ui: &mut Ui,
     edit: &mut FieldEditContext<'_>,
@@ -126,28 +207,11 @@ pub(super) fn draw_clip_player(
             choose = Some(order[(rank + order.len() - 1) % order.len()]);
         }
         let width = (ui.available_width() - 90.0).clamp(160.0, 420.0);
-        egui::ComboBox::from_id_salt(("clip_player_combo", id_salt))
-            .width(width)
-            .selected_text(clip_title(clip))
-            .show_ui(ui, |ui| {
-                let mut group: Option<&str> = None;
-                for &index in &order {
-                    let each = &clips[index];
-                    if each.group.as_deref() != group {
-                        group = each.group.as_deref();
-                        if let Some(heading) = group {
-                            ui.label(RichText::new(heading).strong().color(subtle_dark()));
-                        }
-                    }
-                    let text = match each.duration {
-                        Some(seconds) => format!("{}    {}", each.name, format_play_time(seconds)),
-                        None => each.name.clone(),
-                    };
-                    if ui.selectable_label(index == selected, text).clicked() {
-                        choose = Some(index);
-                    }
-                }
-            });
+        if let Some(index) =
+            draw_clip_selector(ui, id_salt, edit.tag_key, clips, &order, selected, width)
+        {
+            choose = Some(index);
+        }
         if ui
             .add_enabled(many, egui::Button::new("\u{25B6}"))
             .on_hover_text("Next")
@@ -1245,6 +1309,89 @@ mod tests {
     use super::*;
     use crate::app::audio::{SoundOwner, SoundRequest, SoundRequests};
     use std::collections::VecDeque;
+
+    #[test]
+    fn sound_picker_search_keeps_groups_counts_and_original_indices() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_global_style(foundation_style());
+        let clips = vec![
+            PlayerClip {
+                id: "a".to_owned(),
+                name: "sound10".to_owned(),
+                group: Some("weapons".to_owned()),
+                duration: None,
+            },
+            PlayerClip {
+                id: "b".to_owned(),
+                name: "sound2".to_owned(),
+                group: Some("vehicles".to_owned()),
+                duration: None,
+            },
+            PlayerClip {
+                id: "c".to_owned(),
+                name: "sound1".to_owned(),
+                group: Some("weapons".to_owned()),
+                duration: None,
+            },
+        ];
+        let order = display_order(&clips);
+        let frame = |events| {
+            let mut result = None;
+            let output = crate::app::run_ui_test(&ctx, 
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        result =
+                            draw_clip_selector(ui, "sound_test", "tag", &clips, &order, 0, 240.0);
+                    });
+                },
+            );
+            (result, output)
+        };
+        let pos = egui::pos2(80.0, 18.0);
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(Vec::new());
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        frame(vec![pointer(pos, false)]);
+        frame(Vec::new());
+        let (_, output) = frame(vec![egui::Event::Text("SOUND2".to_owned())]);
+        let text_shape = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == text => Some(shape),
+                    _ => None,
+                })
+        };
+        assert!(text_shape("vehicles").is_some());
+        assert!(text_shape("weapons").is_none());
+        assert!(
+            text_shape("(3)").is_some(),
+            "show the total, not the filtered count"
+        );
+        let row = text_shape("sound2").expect("case-insensitive sound search");
+        let row_pos = row.pos + row.galley.size() * 0.5;
+        frame(vec![
+            egui::Event::PointerMoved(row_pos),
+            pointer(row_pos, true),
+        ]);
+        let (selection, _) = frame(vec![pointer(row_pos, false)]);
+        assert_eq!(selection, Some(1));
+    }
 
     fn clips_of(duration: Option<f64>) -> Vec<PlayerClip> {
         ["a", "b", "c"]

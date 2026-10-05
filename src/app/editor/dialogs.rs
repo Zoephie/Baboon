@@ -174,6 +174,8 @@ pub(in crate::app) enum EditorCommand {
     ApplyTsvPaste,
     /// Apply the confirmed block delete or delete-all.
     ApplyBlockConfirm,
+    /// Commit the block table's staged changes to its tag.
+    SaveBlockTable,
     /// Apply a popup's edits to the tag at `tag_key` in the kit it was opened
     /// from, or the active kit when it recorded none.
     ApplyPopupOps {
@@ -230,6 +232,7 @@ impl Baboon {
             }
             EditorCommand::ApplyTsvPaste => self.apply_tsv_paste(),
             EditorCommand::ApplyBlockConfirm => self.apply_block_confirm(),
+            EditorCommand::SaveBlockTable => self.save_block_table(ctx),
             EditorCommand::ApplyPopupOps {
                 opened_from,
                 tag_key,

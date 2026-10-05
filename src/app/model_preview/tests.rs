@@ -686,3 +686,63 @@ fn model_geometry_uses_the_model_preview_tab_name() {
         "Collision Model"
     );
 }
+
+/// Clearing the picker's search gives the popup back its full height.
+#[test]
+fn animation_picker_expands_after_clearing_search() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(foundation_fonts());
+    ctx.set_global_style(foundation_style());
+    let animations = (0..40)
+        .map(|index| PreviewAnimationEntry {
+            name: format!("animation {index}"),
+            frame_count: 30,
+            kind: "jma",
+            playable: true,
+        })
+        .collect::<Vec<_>>();
+    let mut playback = PreviewAnimationPlayback::default();
+    let frame = |playback: &mut PreviewAnimationPlayback| {
+        let mut popup_id = None;
+        let _ = crate::app::run_ui_test(&ctx, 
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1000.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let id = ui
+                        .make_persistent_id(("model_animation_popup", "test_animation_picker"));
+                    egui::Popup::open_id(ui.ctx(), id);
+                    popup_id = Some(id);
+                    draw_animation_combo(
+                        ui,
+                        "test_animation_picker",
+                        &animations,
+                        playback,
+                        240.0,
+                    );
+                });
+            },
+        );
+        ctx.memory(|memory| memory.area_rect(popup_id.unwrap()).unwrap().height())
+    };
+    for _ in 0..5 {
+        frame(&mut playback);
+    }
+    let full_height = frame(&mut playback);
+    playback.filter = "animation 39".to_owned();
+    for _ in 0..5 {
+        frame(&mut playback);
+    }
+    let filtered_height = frame(&mut playback);
+    assert!(full_height - filtered_height > 150.0);
+    playback.filter.clear();
+    for _ in 0..5 {
+        frame(&mut playback);
+    }
+    assert!((frame(&mut playback) - full_height).abs() < 1.0);
+}

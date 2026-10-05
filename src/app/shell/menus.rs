@@ -7,7 +7,7 @@ use super::*;
 use super::recents::draw_recent_folders_menu;
 use crate::app::shell::frame::{
     EDITING_KIT_MENU_MIN_WIDTH, EditingKitMenuEntry, editing_kit_menu_row_with_read_only,
-    is_file_cached, launcher_button, monitor_commands_for_game, visible_editing_kit_menu_entries,
+    monitor_commands_for_game, visible_editing_kit_menu_entries,
 };
 
 /// What the menus show that the model does not hold, gathered before they
@@ -25,9 +25,6 @@ pub(in crate::app) struct MenuState {
     /// The menu label and release page of an available update.
     available_update: Option<(String, String)>,
     editing_kits: Vec<EditingKitRow>,
-    blender_icon: Option<egui::TextureHandle>,
-    tag_test_icon: Option<egui::TextureHandle>,
-    sapien_icon: Option<egui::TextureHandle>,
 }
 
 /// One row of the Editing Kits menu, ready to draw.
@@ -118,9 +115,6 @@ impl Baboon {
                 )
             }),
             editing_kits,
-            blender_icon: self.shell.blender_icon.clone(),
-            tag_test_icon: self.shell.tag_test_icon.clone(),
-            sapien_icon: self.shell.sapien_icon.clone(),
         }
     }
 }
@@ -155,7 +149,7 @@ pub(in crate::app) fn draw_menu_bar(cx: &Ctx, ui: &mut egui::Ui, menu: &MenuStat
                 aligned_menu_button(ui, "Editing Kits", |ui| {
                     draw_editing_kits_menu(cx, ui, menu);
                 });
-                draw_tool_launcher_buttons(cx, ui, menu);
+                draw_tool_launcher_buttons(cx, ui);
             });
         });
 }
@@ -812,35 +806,8 @@ fn draw_editing_kits_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     }
 }
 
-fn draw_tool_launcher_buttons(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
+fn draw_tool_launcher_buttons(cx: &Ctx, ui: &mut Ui) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if launcher_button(ui, menu.blender_icon.as_ref(), "B", true)
-            .on_hover_text("Launch Blender")
-            .clicked()
-        {
-            cx.send(AppAction::LaunchBlender);
-        }
-
-        let tag_test_ready = cx
-            .model.kit_tool_path(cx.model.tag_test_executable())
-            .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-        if launcher_button(ui, menu.tag_test_icon.as_ref(), "T", tag_test_ready)
-            .on_hover_text("Launch tag_test without an auto-start scenario")
-            .clicked()
-        {
-            cx.send(AppAction::LaunchTagTest);
-        }
-
-        let sapien_ready = cx
-            .model.kit_tool_path("sapien.exe")
-            .is_some_and(|path| is_file_cached(ui.ctx(), &path));
-        if launcher_button(ui, menu.sapien_icon.as_ref(), "S", sapien_ready)
-            .on_hover_text("Launch Sapien without an auto-start scenario")
-            .clicked()
-        {
-            cx.send(AppAction::LaunchSapien);
-        }
-
         // Campaign Evolved holds unsaved edits in a project rather than in
         // the game's files, so a workspace accumulates stashed
         // modifications across sessions. This is the way back to the

@@ -444,6 +444,96 @@ fn draw_thumbnail_grid<S: ThumbnailSource>(
     }
 }
 
+/// A mixed folder grid using the same cells, caches, workers and commands as
+/// the standalone bitmap and model libraries: a folder pane's Asset Browser.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::app) fn draw_folder_asset_grid(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    pane_key: &str,
+    pane: &FolderBrowserState,
+    entries: &[TagEntry],
+    bitmaps: &mut ThumbnailLibrary<Bitmaps>,
+    models: &mut ThumbnailLibrary<Models>,
+) {
+    let mut visible: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            crate::core::source::entry_is_beneath_folder(entry, &pane.rel_path)
+                && ((pane.asset_bitmaps && Bitmaps::lists(entry))
+                    || (pane.asset_models && Models::lists(entry)))
+        })
+        .collect();
+    match pane.sort {
+        BrowserSort::Natural => {}
+        BrowserSort::Name => visible
+            .sort_by_cached_key(|entry| tag_leaf_name(&entry.display_path).to_ascii_lowercase()),
+        BrowserSort::Type => visible.sort_by_cached_key(|entry| {
+            (
+                format_group_tag(entry.group_tag),
+                tag_leaf_name(&entry.display_path).to_ascii_lowercase(),
+            )
+        }),
+    }
+    if visible.is_empty() {
+        ui.label(RichText::new("No matching assets in this folder").color(subtle_dark()));
+        return;
+    }
+    let mut wanted_bitmaps = Vec::new();
+    let mut wanted_models = Vec::new();
+    let mut action = None;
+    let cell = pane.asset_cell_size.clamp(MIN_CELL, MAX_CELL);
+    let columns = grid_columns(
+        (ui.available_width() - ui.spacing().scroll.allocated_width()).max(cell),
+        cell,
+    );
+    let height = cell + CELL_CAPTION + CELL_GAP;
+    ScrollArea::vertical()
+        .id_salt(("folder_assets", pane_key))
+        .auto_shrink([false, false])
+        .show_rows(ui, height, visible.len().div_ceil(columns), |ui, rows| {
+            ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
+            for row in rows {
+                ui.horizontal(|ui| {
+                    for entry in visible.iter().skip(row * columns).take(columns) {
+                        let cell_action = if Bitmaps::lists(entry) {
+                            let wanted = &mut wanted_bitmaps;
+                            draw_thumbnail_entry(ui, bitmaps, entry, cell, wanted, true)
+                                .map(|action| (Bitmaps::LIBRARY, action))
+                        } else {
+                            let wanted = &mut wanted_models;
+                            draw_thumbnail_entry(ui, models, entry, cell, wanted, true)
+                                .map(|action| (Models::LIBRARY, action))
+                        };
+                        if cell_action.is_some() {
+                            action = cell_action;
+                        }
+                    }
+                });
+                ui.add_space(CELL_GAP);
+            }
+        });
+    let wanted = |keys: Vec<String>| -> Vec<TagEntry> {
+        keys.into_iter()
+            .filter_map(|key| visible.iter().find(|entry| entry.key == key))
+            .map(|entry| (*entry).clone())
+            .collect()
+    };
+    let (wanted_bitmaps, wanted_models) = (wanted(wanted_bitmaps), wanted(wanted_models));
+    // Thumbnails twice the cell's edge, so they stay sharp on high-DPI screens.
+    let edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
+    queue_thumbnails::<Bitmaps>(cx, kit_index, bitmaps, wanted_bitmaps, edge);
+    queue_thumbnails::<Models>(cx, kit_index, models, wanted_models, edge);
+    if let Some((library, action)) = action {
+        cx.send(BrowserCommand::LibraryCell {
+            kit: cx.model.kits[kit_index].id,
+            library,
+            action,
+        });
+    }
+}
+
 /// One grid cell, and whatever the user asked it for.
 fn draw_thumbnail_cell<S: ThumbnailSource>(
     ui: &mut Ui,
@@ -453,7 +543,20 @@ fn draw_thumbnail_cell<S: ThumbnailSource>(
     wanted: &mut Vec<String>,
 ) -> Option<CellAction> {
     let entry_index = *library.matches.get(index)?;
-    let entry = library.entries.get(entry_index)?;
+    let entry = library.entries.get(entry_index)?.clone();
+    draw_thumbnail_entry(ui, library, &entry, cell, wanted, false)
+}
+
+/// One cell for `entry`, from `library`'s caches. `type_badge` marks it with
+/// its group's icon, for a grid that mixes bitmaps and models.
+fn draw_thumbnail_entry<S: ThumbnailSource>(
+    ui: &mut Ui,
+    library: &mut ThumbnailLibrary<S>,
+    entry: &TagEntry,
+    cell: f32,
+    wanted: &mut Vec<String>,
+    type_badge: bool,
+) -> Option<CellAction> {
     let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
 
     let cached = library
@@ -532,6 +635,14 @@ fn draw_thumbnail_cell<S: ThumbnailSource>(
         }
     }
 
+    if type_badge {
+        let badge = egui::Rect::from_min_size(
+            image_rect.right_bottom() - Vec2::splat(22.0),
+            Vec2::splat(20.0),
+        );
+        ui.painter().rect_filled(badge, 2.0, foundation_input());
+        paint_tag_icon_at(ui, Some(entry.group_tag), badge.shrink(2.0));
+    }
     let name = tag_leaf_name(&display_path);
     ui.painter().text(
         egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
@@ -949,5 +1060,151 @@ pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
             move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
             move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
         );
+    }
+}
+
+#[cfg(test)]
+mod folder_asset_browser_tests {
+    use super::*;
+
+    fn folder_pane() -> FolderBrowserState {
+        FolderBrowserState {
+            rel_path: "objects/brute".into(),
+            label: "brute".into(),
+            filter: String::new(),
+            focus_search: false,
+            mode: BrowserMode::Folders,
+            sort: BrowserSort::Name,
+            cached_generation: 0,
+            cached_source_len: 0,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            group_tree_for: None,
+            filter_cache: FilterCache::default(),
+            date_cache: FolderDateCache::default(),
+            table_layout: FolderTableLayout::default(),
+            search_scope: BrowserSearchScope::default(),
+            assets_view: true,
+            asset_bitmaps: true,
+            asset_models: true,
+            asset_cell_size: DEFAULT_CELL,
+        }
+    }
+
+    fn entry(path: &str, group: &[u8; 4]) -> TagEntry {
+        TagEntry {
+            key: path.into(),
+            display_path: path.into(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(path.into()),
+        }
+    }
+
+    /// The Asset Browser grid shows only what is beneath its folder, of the
+    /// types ticked, and queues a thumbnail for each through its own library.
+    #[test]
+    fn mixed_grid_is_folder_scoped_and_type_filters_work() {
+        let entries = vec![
+            entry("objects/brute/grass.bitmap", b"bitm"),
+            entry("objects/brute/nested/brute.render_model", b"mode"),
+            entry("objects/brute/brute.biped", b"bipd"),
+            entry("objects/brute_other/other.bitmap", b"bitm"),
+        ];
+        for (bitmap, model, expected_bitmaps, expected_models) in [
+            (true, true, 1, 1),
+            (true, false, 1, 0),
+            (false, true, 0, 1),
+            (false, false, 0, 0),
+        ] {
+            let mut app = Baboon::for_test();
+            app.install_loaded_source(LoadedSourceData {
+                label: "brute".to_owned(),
+                source: TagSource::LooseFolder {
+                    root: PathBuf::from("<no kit root>"),
+                    game: None,
+                    definitions_root: PathBuf::new(),
+                },
+                names: TagNameIndex::default(),
+                game: None,
+                entries: entries.clone(),
+                tree: TagTree::default(),
+                group_tree: TagTree::default(),
+                all_entries: entries.clone(),
+                reverse_dependencies: None,
+                initial_tag: None,
+                key_hints: Default::default(),
+                complete_scan: true,
+                chosen_kit_layout: None,
+            });
+            let ctx = egui::Context::default();
+            let mut pane = folder_pane();
+            pane.asset_bitmaps = bitmap;
+            pane.asset_models = model;
+            let kit = app.model.kits[0].id;
+            let _ = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(900.0, 500.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let view = &mut app.views[kit];
+                        draw_folder_asset_grid(
+                            &cx!(app, &ctx),
+                            ui,
+                            0,
+                            "test",
+                            &pane,
+                            &entries,
+                            &mut view.bitmap_browser,
+                            &mut view.model_browser,
+                        );
+                    });
+                },
+            );
+            let view = &app.views[kit];
+            let queued: Vec<&String> =
+                view.bitmap_browser.pending.iter().chain(&view.model_browser.pending).collect();
+            assert_eq!(view.bitmap_browser.pending.len(), expected_bitmaps);
+            assert_eq!(view.model_browser.pending.len(), expected_models);
+            assert!(
+                queued.iter().all(|key| key.contains("objects/brute/")),
+                "queued outside the folder: {queued:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn folder_grid_search_uses_the_same_scoped_cache_as_the_tree() {
+        let mut pane = folder_pane();
+        let entries = vec![
+            entry("objects/brute/grass.bitmap", b"bitm"),
+            entry("objects/brute/brute.render_model", b"mode"),
+            entry("objects/elite/grass.bitmap", b"bitm"),
+        ];
+        let keywords =
+            std::collections::BTreeMap::from([(entries[0].key.clone(), vec!["wip".into()])]);
+        pane.search_scope = BrowserSearchScope {
+            tags: false,
+            folders: false,
+            keywords: true,
+        };
+        pane.filter_cache.refresh_scoped(
+            1,
+            "wip",
+            &entries,
+            false,
+            &pane.rel_path,
+            None,
+            pane.search_scope,
+            &keywords,
+        );
+        assert_eq!(pane.filter_cache.entries.len(), 1);
+        assert_eq!(pane.filter_cache.entries[0].key, entries[0].key);
     }
 }

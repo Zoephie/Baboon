@@ -580,7 +580,7 @@ impl Baboon {
                 .collect();
             for key in keys {
                 if is_folder_pane_key(&key) {
-                    self.refresh_folder_browser_pane(kit_index, &key);
+                    self.refresh_folder_browser_pane(kit_index, &key, ctx);
                 } else if key == BITMAP_LIBRARY_KEY {
                     self.refresh_thumbnail_library::<Bitmaps>(kit_index, ctx);
                 } else if key == MODEL_LIBRARY_KEY {

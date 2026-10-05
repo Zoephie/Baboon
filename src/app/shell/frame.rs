@@ -32,6 +32,7 @@ pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
     });
 }
 pub(in crate::app) const PANE_HEADER_ACTION_GAP: f32 = 4.0;
+pub(in crate::app) const PANE_HEADER_BOTTOM_SPACE: f32 = 20.0;
 const PANE_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
 const PANE_HEADER_MIN_LEFT_WIDTH: f32 = 200.0;
 pub(in crate::app) const PANE_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
@@ -40,7 +41,6 @@ const BROWSER_SEARCH_RADIUS: f32 = BROWSER_SEARCH_HEIGHT * 0.5;
 const BROWSER_SEARCH_ICON_SIZE: f32 = 16.0;
 const BROWSER_SEARCH_LEFT_PADDING: f32 = 4.0;
 const BROWSER_SEARCH_ICON_TEXT_GAP: f32 = 8.0;
-const BROWSER_SEARCH_RIGHT_PADDING: f32 = 8.0;
 
 /// Width of the title column when pane actions can remain beside it. Returning
 /// `None` is the shared signal for tag and folder headers to put actions below
@@ -89,9 +89,17 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
         Sense::click(),
     );
 
+    let clear_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.right() - BROWSER_SEARCH_LEFT_PADDING - BROWSER_SEARCH_ICON_SIZE * 0.5,
+            rect.center().y,
+        ),
+        Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
+    );
+
     let edit_rect = egui::Rect::from_min_max(
         egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
-        egui::pos2(rect.right() - BROWSER_SEARCH_RIGHT_PADDING, rect.bottom()),
+        egui::pos2(clear_rect.left() - BROWSER_SEARCH_ICON_TEXT_GAP, rect.bottom()),
     );
     let edit_response = ui.put(
         edit_rect,
@@ -106,9 +114,23 @@ pub(in crate::app) fn browser_search_field(ui: &mut Ui, value: &mut String, hint
     if icon_response.clicked() {
         edit_response.request_focus();
     }
-    let response = background_response
+    let mut response = background_response
         .union(icon_response)
         .union(edit_response.clone());
+    if !value.is_empty() {
+        let clear = search_clear_control_at(
+            ui,
+            clear_rect,
+            edit_response.id.with("clear_search"),
+            BROWSER_SEARCH_ICON_SIZE * 0.5,
+        );
+        if clear.clicked() {
+            value.clear();
+            edit_response.request_focus();
+            response.mark_changed();
+        }
+        response = response.union(clear);
+    }
     ui.painter().rect_stroke(
         rect,
         BROWSER_SEARCH_RADIUS,
@@ -259,34 +281,6 @@ pub(in crate::app) fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
     }
     let delta = ui.input(|input| input.smooth_scroll_delta);
     *scroll_offset -= delta.x + delta.y;
-}
-
-/// A toolbar launcher button: shows the decoded `.ico` icon when available,
-/// otherwise falls back to a single-letter label. Returns the response so the
-/// caller can attach a hover tooltip and read `.clicked()`.
-pub(in crate::app) fn launcher_button(
-    ui: &mut Ui,
-    icon: Option<&egui::TextureHandle>,
-    fallback: &str,
-    enabled: bool,
-) -> egui::Response {
-    match icon {
-        Some(texture) => ui.add_enabled(
-            enabled,
-            egui::Button::image(
-                egui::Image::new(egui::load::SizedTexture::new(
-                    texture.id(),
-                    Vec2::splat(20.0),
-                ))
-                .tint(Color32::WHITE),
-            ),
-        ),
-        None => ui.add_enabled(
-            enabled,
-            egui::Button::new(RichText::new(fallback).color(Color32::WHITE))
-                .min_size(Vec2::splat(22.0)),
-        ),
-    }
 }
 
 fn editing_kit_menu_shortcuts() -> impl Iterator<Item = EditingKitShortcut> {
@@ -1145,6 +1139,60 @@ mod tests {
         assert!(ask(11.5), "after it: asked again, and the new answer used");
         assert_eq!(probes.get(), 2);
     }
+
+#[test]
+fn browser_search_clear_works_in_sidebar_and_folder_widths() {
+    for width in [220.0, 720.0] {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_global_style(foundation_style());
+        let mut filter = "brute".to_owned();
+        let frame = |filter: &mut String, events| {
+            let mut response = None;
+            let _ = crate::app::run_ui_test(&ctx, 
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        ui.scope_builder(
+                            egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                Vec2::new(width, 100.0),
+                            )),
+                            |ui| {
+                                response = Some(browser_search_field(ui, filter, "Search tags"));
+                            },
+                        );
+                    });
+                },
+            );
+            response.unwrap()
+        };
+        let response = frame(&mut filter, Vec::new());
+        let pos = egui::pos2(response.rect.right() - 10.0, response.rect.center().y);
+        let pointer = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut filter,
+            vec![egui::Event::PointerMoved(pos), pointer(true)],
+        );
+        let cleared = frame(&mut filter, vec![pointer(false)]);
+        assert!(filter.is_empty());
+        assert!(cleared.changed(), "clearing must notify the filter cache");
+        assert!(ctx.memory(|memory| memory.focused()).is_some());
+        assert!((cleared.rect.width() - response.rect.width()).abs() < 0.1);
+    }
+}
 }
 
 #[cfg(test)]
@@ -3379,6 +3427,7 @@ mod frame_smoke_tests {
                 |h| {
                     h.app.dialogs.open(LastOpenedWindowsPrompt {
                         kits: vec![LastOpenedWindowsKit {
+                            checked: true,
                             source_kind: LastSessionSourceKind::LooseFolder,
                             source_path: PathBuf::from("/no/such/smoke/tags"),
                             game: Some(fixture::GAME.to_owned()),
@@ -3410,7 +3459,7 @@ mod frame_smoke_tests {
                         dont_ask_again: false,
                     });
                 },
-                &["Last Opened Windows", "smoke.biped"],
+                &["Restore Last Opened Windows", "smoke.biped"],
             ),
             case(
                 "block_confirm",
@@ -3815,6 +3864,35 @@ mod frame_smoke_tests {
                 &["Paste TSV → skies"],
             ),
             case(
+                "block_table",
+                &["dialog:BlockTableState"],
+                &["editor/block_table_window.rs"],
+                |h| {
+                    scenario_kit(h);
+                    open_scenario(h);
+                },
+                |h| {
+                    let kit = &h.app.model.kits[h.app.model.active];
+                    let key = fixture::entry_key(SCENARIO);
+                    let table = crate::app::editor::block_table_for(
+                        kit.id,
+                        &key,
+                        &kit.parsed_tags[&key],
+                        kit.source.as_ref(),
+                        &kit.names,
+                        crate::app::editor::BlockTableRequest {
+                            path: "skies".to_owned(),
+                            label: "skies".to_owned(),
+                            view_scope: "smoke".to_owned(),
+                            selected: 0,
+                        },
+                    )
+                    .expect("the scenario's skies block");
+                    h.app.dialogs.open(table);
+                },
+                &["Block Entry Table - skies"],
+            ),
+            case(
                 "operation_notice",
                 &["dialog:OperationNotice"],
                 &["shell/operation_notice.rs"],
@@ -3979,8 +4057,6 @@ mod frame_smoke_tests {
         ("references.pending_open", "a queued request"),
         ("kit_tools.pending_tool_import", "a queued request"),
         ("shell.blender_icon", "texture"),
-        ("shell.sapien_icon", "texture"),
-        ("shell.tag_test_icon", "texture"),
         ("editor.block_clipboard", "clipboard contents"),
         ("references.pending_ref_jump", "a queued navigation"),
         ("search.pending_find_jump", "a queued navigation"),

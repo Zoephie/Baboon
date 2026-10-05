@@ -478,16 +478,6 @@ impl Baboon {
                     "blender_icon",
                     include_root_bytes!("assets/Quick access/blender.ico"),
                 ),
-                sapien_icon: load_ico_texture(
-                    &ctx,
-                    "sapien_icon",
-                    include_root_bytes!("assets/Quick access/sapien.ico"),
-                ),
-                tag_test_icon: load_ico_texture(
-                    &ctx,
-                    "tag_test_icon",
-                    include_root_bytes!("assets/Quick access/tag_test.ico"),
-                ),
                 artwork: ArtworkCache::default(),
                 last_pixels_per_point: ctx.pixels_per_point(),
             },
@@ -497,7 +487,7 @@ impl Baboon {
             // later one goes through `Baboon::empty_kit`.
             views: KitViews::startup(KitView::new(
                 KitId(0),
-                KitBrowser::new(prefs.browser_mode, prefs.browser_sort),
+                KitBrowser::new(prefs.browser_mode, prefs.browser_sort, prefs.browser_search_scope),
             )),
             model: Model {
                 default_names: names.clone(),
@@ -535,16 +525,6 @@ impl Baboon {
             ctx,
             "blender_icon",
             include_root_bytes!("assets/Quick access/blender.ico"),
-        );
-        self.shell.sapien_icon = load_ico_texture(
-            ctx,
-            "sapien_icon",
-            include_root_bytes!("assets/Quick access/sapien.ico"),
-        );
-        self.shell.tag_test_icon = load_ico_texture(
-            ctx,
-            "tag_test_icon",
-            include_root_bytes!("assets/Quick access/tag_test.ico"),
         );
         self.shell.artwork.clear();
         ctx.request_repaint();

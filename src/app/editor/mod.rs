@@ -323,6 +323,9 @@ pub(in crate::app) use state::*;
 pub(in crate::app) mod pane;
 pub(in crate::app) use pane::{PaneDrawn, PaneInputs, draw_tag_pane};
 pub(in crate::app) mod tsv_paste_window;
+mod block_table;
+mod block_table_window;
+pub(in crate::app) use block_table::block_table_for;
 pub(in crate::app) mod dialogs;
 pub(in crate::app) use dialogs::{
     ColorPopupWindow, EditorCommand, FunctionPopupWindow, TagReferencePickerWindow,

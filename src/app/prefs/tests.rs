@@ -251,3 +251,30 @@ fn favorite_paths_must_be_relative_and_normalized() {
     assert!(clean_favorite_relative_path(PathBuf::from("./brute.model")).is_none());
     assert!(clean_favorite_relative_path(PathBuf::new()).is_none());
 }
+
+#[test]
+fn browser_search_scope_defaults_to_tags_and_round_trips_every_selection() {
+    let tags_only = BrowserSearchScope::default();
+    assert!(tags_only.tags && !tags_only.folders && !tags_only.keywords);
+    assert_eq!(prefs_from_value(&json!({})).browser_search_scope, tags_only);
+    for selection in 1..8 {
+        let scope = BrowserSearchScope {
+            tags: selection & 1 != 0,
+            folders: selection & 2 != 0,
+            keywords: selection & 4 != 0,
+        };
+        let prefs = GuiPrefs {
+            browser_search_scope: scope,
+            ..GuiPrefs::default()
+        };
+        let saved = prefs_to_value(&prefs, &HashSet::new(), false);
+        assert_eq!(prefs_from_value(&saved).browser_search_scope, scope);
+    }
+    assert_eq!(
+        prefs_from_value(&json!({"browser_search_scope": {
+            "tags": false, "folders": false, "keywords": false
+        }}))
+        .browser_search_scope,
+        tags_only
+    );
+}

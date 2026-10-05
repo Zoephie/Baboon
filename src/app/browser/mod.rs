@@ -14,9 +14,11 @@ use crate::app::editor::{
 use crate::app::export::is_scenario_group;
 
 mod filter;
+mod folder_table;
 mod tree;
 
 pub(super) use filter::*;
+pub(super) use folder_table::*;
 pub(super) use tree::*;
 
 /// Which tags in a workspace carry edits that are not written into the game.
@@ -350,6 +352,8 @@ pub(in crate::app) struct KitBrowser {
     pub(in crate::app) sort: BrowserSort,
     pub(in crate::app) filter: String,
     pub(in crate::app) filter_cache: FilterCache,
+    /// What the search box matches: tag names, folder names, keywords.
+    pub(in crate::app) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
     pub(in crate::app) folder_browsers: HashMap<String, FolderBrowserState>,
     /// Which tags the browser should mark as modified, and the signature the
@@ -369,11 +373,31 @@ pub(in crate::app) struct KitBrowser {
 
 impl KitBrowser {
     /// A browser opening in this view, with nothing filtered or cached yet.
-    pub(in crate::app) fn new(mode: BrowserMode, sort: BrowserSort) -> Self {
+    pub(in crate::app) fn new(
+        mode: BrowserMode,
+        sort: BrowserSort,
+        search_scope: BrowserSearchScope,
+    ) -> Self {
         Self {
             mode,
             sort,
+            search_scope,
             ..Self::default()
+        }
+    }
+
+    /// Keep docked folder browsers' pane keys, layout and view preferences
+    /// while the folders they show are renamed or moved from `old` to `new`.
+    pub(in crate::app) fn remap_folder_browser_paths(&mut self, old: &Path, new: &Path) {
+        for pane in self.folder_browsers.values_mut() {
+            if let Ok(suffix) = pane.rel_path.strip_prefix(old) {
+                pane.rel_path = new.join(suffix);
+                pane.label = pane
+                    .rel_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+            }
         }
     }
 }

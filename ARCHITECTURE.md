@@ -148,7 +148,7 @@ tests is `foo.rs`, not a folder:
 
 | Folder | What it is |
 | --- | --- |
-| `browser` | The tag browser: folder and group trees, filters, menus, thumbnail libraries |
+| `browser` | The tag browser: folder and group trees, docked folder panes (column table, asset grid), search, menus, thumbnail libraries |
 | `editor` | The tag pane, the generic field editor, the panels for particular groups, and their popups |
 | `documents` | Opening, saving, undo and redo, and closing with the save-changes prompt |
 | `search` | Find, the field-value index and search, and source listings |

@@ -391,13 +391,21 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     }
                 }
             }
-            if foundation_header_button_clicked(ui, "Clear", editable) {
-                draft.text.clear();
-                draft.changed = true;
-                edit.pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input: "NONE".to_owned(),
-                });
+            let draft_text = draft.text.trim();
+            let can_clear = has_ref
+                || (!draft_text.is_empty() && !draft_text.eq_ignore_ascii_case("none"));
+            if foundation_header_button_clicked(ui, "Clear", editable && can_clear) {
+                draft.set_clean("");
+                // Clicking Clear may blur the text edit and queue its draft
+                // first. Clear supersedes that edit; an already-empty stored
+                // reference needs no mutation when only a draft was discarded.
+                edit.pending.retain(|pending| pending.path != path);
+                if has_ref {
+                    edit.pending.push(PendingFieldEdit {
+                        path: path.to_owned(),
+                        input: "NONE".to_owned(),
+                    });
+                }
             }
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
             draw_field_help(ui, meta);

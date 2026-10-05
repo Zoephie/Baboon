@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::shell::frame::PANE_HEADER_ACTION_GAP;
+use crate::app::shell::frame::PANE_HEADER_BOTTOM_SPACE;
 use crate::app::shell::frame::pane_header_breadcrumbs;
 use crate::app::shell::frame::PANE_HEADER_ICON_TEXT_GAP;
 use crate::app::shell::frame::pane_header_path_parts;
@@ -236,6 +237,7 @@ pub(in crate::app) fn draw_tag_pane(
     let mut grid_function_popup = None;
     let mut block_clip_request = None;
     let mut tsv_paste_request = None;
+    let mut block_table_request = None;
     let mut ce_sound_ref_request = None;
     // What the fields ask of other features, collected here and sent once
     // the pane has drawn.
@@ -322,6 +324,7 @@ pub(in crate::app) fn draw_tag_pane(
         function_request: &mut function_request,
         docs: def_docs.as_deref(),
         tsv_paste_request: &mut tsv_paste_request,
+        block_table_request: &mut block_table_request,
         block_clipboard: editor.block_clipboard.as_ref(),
         block_clip_request: &mut block_clip_request,
         field_filter: field_filter.as_ref(),
@@ -471,6 +474,13 @@ pub(in crate::app) fn draw_tag_pane(
             text: String::new(),
             status: None,
         });
+    }
+    // "Reorganize…" was chosen: open the block table on a copy of the tag.
+    if let Some(request) = block_table_request {
+        match block_table_for(kit_id, &key, doc, source, names, request) {
+            Ok(table) => cx.open_dialog(table),
+            Err(error) => cx.set_status(format!("Could not open block table: {error}")),
+        }
     }
     cx.send(EditorCommand::PaneDrawn(Box::new(PaneDrawn {
         kit: kit_id,
@@ -630,7 +640,7 @@ fn draw_responsive_tag_header(
             |ui| draw_tag_header_common_actions(cx, ui, kit_index, entry),
         );
     }
-    ui.add_space(20.0);
+    ui.add_space(PANE_HEADER_BOTTOM_SPACE);
     ui.separator();
     if let Some((rel_path, label)) = breadcrumb_navigation {
         cx.send(BrowserCommand::Action {

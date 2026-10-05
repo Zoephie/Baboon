@@ -246,6 +246,30 @@ mod tests {
     }
 
     #[test]
+    fn empty_folder_rename_is_rejected_without_moving_the_folder() {
+        let root = crate::test_kits::unique_temp_dir("empty-folder-rename");
+        fs::create_dir_all(root.join("old/nested")).unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let result = run_folder_refactor_job(
+            root.clone(),
+            "old".into(),
+            root.clone(),
+            Some("new".into()),
+            true,
+            "Renaming".into(),
+            TagNameIndex::default(),
+            None,
+            Vec::new(),
+            None,
+            &tx,
+        );
+        assert!(matches!(result, Err(error) if error == "No tags found in that folder"));
+        assert!(root.join("old/nested").is_dir());
+        assert!(!root.join("new").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_new_name_is_accepted_and_trimmed() {
         assert_eq!(
             validate_loose_folder_rename("  shadow", "creep", &siblings(&["creep", "ghost"])),

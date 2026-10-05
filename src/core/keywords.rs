@@ -2,6 +2,7 @@
 //! binaries). Keyed by tag entry key → sorted, unique, lowercased keywords.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 /// One kit's view of its game's keyword sidecar.
 ///
@@ -14,7 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct KeywordStore {
     /// The game's sidecar file; `None` for a source with no game.
     path: Option<std::path::PathBuf>,
-    by_tag: BTreeMap<String, Vec<String>>,
+    /// Shared, so a background search reads a snapshot while edits copy on
+    /// write (see [`Self::snapshot`]).
+    by_tag: Arc<BTreeMap<String, Vec<String>>>,
     /// Tag keys whose keywords this kit changed since it last saved.
     touched: BTreeSet<String>,
     /// A problem with the sidecar the user has not been told about yet.
@@ -30,14 +33,14 @@ impl KeywordStore {
     /// Load the sidecar at `path`; `None` leaves the store empty.
     pub(crate) fn load_at(&mut self, path: Option<std::path::PathBuf>) {
         self.touched.clear();
-        self.by_tag = match path.as_deref().map(read_sidecar) {
+        self.by_tag = Arc::new(match path.as_deref().map(read_sidecar) {
             Some(Ok(by_tag)) => by_tag,
             Some(Err(error)) => {
                 self.notice = Some(error.message());
                 BTreeMap::new()
             }
             None => BTreeMap::new(),
-        };
+        });
         self.path = path;
     }
 
@@ -50,12 +53,20 @@ impl KeywordStore {
         self.by_tag.get(tag_key).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Every tag's keywords, shared: what a search started now reads, unchanged
+    /// by edits made while it runs. The same snapshot until something changes.
+    pub(crate) fn snapshot(&self) -> Arc<BTreeMap<String, Vec<String>>> {
+        Arc::clone(&self.by_tag)
+    }
+
     pub(crate) fn add(&mut self, tag_key: &str, keyword: &str) {
         let keyword = keyword.trim().to_ascii_lowercase();
-        if keyword.is_empty() {
+        if keyword.is_empty() || self.keywords(tag_key).contains(&keyword) {
             return;
         }
-        let list = self.by_tag.entry(tag_key.to_owned()).or_default();
+        let list = Arc::make_mut(&mut self.by_tag)
+            .entry(tag_key.to_owned())
+            .or_default();
         if !list.iter().any(|existing| existing == &keyword) {
             list.push(keyword);
             list.sort();
@@ -64,12 +75,16 @@ impl KeywordStore {
     }
 
     pub(crate) fn remove(&mut self, tag_key: &str, keyword: &str) {
-        if let Some(list) = self.by_tag.get_mut(tag_key) {
+        if !self.keywords(tag_key).iter().any(|existing| existing == keyword) {
+            return;
+        }
+        let by_tag = Arc::make_mut(&mut self.by_tag);
+        if let Some(list) = by_tag.get_mut(tag_key) {
             let before = list.len();
             list.retain(|existing| existing != keyword);
             let changed = list.len() != before;
             if list.is_empty() {
-                self.by_tag.remove(tag_key);
+                by_tag.remove(tag_key);
             }
             if changed {
                 self.touched.insert(tag_key.to_owned());
@@ -80,7 +95,10 @@ impl KeywordStore {
     /// Drop every keyword attached to a tag that no longer exists, so a deleted
     /// tag stops appearing in keyword browsing and its rows leave the sidecar.
     pub(crate) fn forget_tag(&mut self, tag_key: &str) {
-        if self.by_tag.remove(tag_key).is_some() {
+        if !self.by_tag.contains_key(tag_key) {
+            return;
+        }
+        if Arc::make_mut(&mut self.by_tag).remove(tag_key).is_some() {
             self.touched.insert(tag_key.to_owned());
         }
     }
@@ -96,10 +114,14 @@ impl KeywordStore {
         if old_key == new_key {
             return;
         }
-        let Some(moved) = self.by_tag.remove(old_key) else {
+        if !self.by_tag.contains_key(old_key) {
+            return;
+        }
+        let by_tag = Arc::make_mut(&mut self.by_tag);
+        let Some(moved) = by_tag.remove(old_key) else {
             return;
         };
-        let list = self.by_tag.entry(new_key.to_owned()).or_default();
+        let list = by_tag.entry(new_key.to_owned()).or_default();
         for keyword in moved {
             if !list.iter().any(|existing| existing == &keyword) {
                 list.push(keyword);
@@ -193,7 +215,7 @@ impl KeywordStore {
                 }
             }
         }
-        self.by_tag = merged;
+        self.by_tag = Arc::new(merged);
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -278,6 +300,25 @@ mod tests {
     //! It owns test-only characterization and does not participate in runtime application behavior.
 
     use super::*;
+
+    /// A search reads a snapshot: the same one until the store changes, and a
+    /// change leaves a snapshot already taken as it was.
+    #[test]
+    fn snapshots_are_shared_and_edits_do_not_change_an_in_flight_search() {
+        let mut store = KeywordStore::default();
+        store.add("file:a", "hero");
+        let before = store.snapshot();
+        assert!(Arc::ptr_eq(&before, &store.snapshot()));
+        store.add("file:a", "hero");
+        assert!(
+            Arc::ptr_eq(&before, &store.snapshot()),
+            "a no-op edit must not invalidate a search"
+        );
+        store.add("file:a", "wip");
+        assert_eq!(before.get("file:a").unwrap(), &["hero"]);
+        assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
+        assert!(!Arc::ptr_eq(&before, &store.snapshot()));
+    }
 
     #[test]
     fn add_dedupes_and_remove_clears() {

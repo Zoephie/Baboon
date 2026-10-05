@@ -1088,6 +1088,8 @@ mod rekey_tag_tests {
             modified_signature: _,
             // Rebuilt from the generation the moment it moves.
             filter_cache: _,
+            // A view preference, not addressed by a tag key.
+            search_scope: _,
             modified_tags: _,
             deletable_keys: _,
             deletable_keys_generation: _,

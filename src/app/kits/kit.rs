@@ -289,7 +289,11 @@ impl Baboon {
             id,
             KitView::new(
                 id,
-                KitBrowser::new(self.model.prefs.browser_mode, self.model.prefs.browser_sort),
+                KitBrowser::new(
+                    self.model.prefs.browser_mode,
+                    self.model.prefs.browser_sort,
+                    self.model.prefs.browser_search_scope,
+                ),
             ),
         );
         id
@@ -397,7 +401,7 @@ impl Baboon {
         // before the load lands — must not snap it back to the default.
         // The rest of the view starts over with the source.
         let browser = &self.views[id].browser;
-        let browser = KitBrowser::new(browser.mode, browser.sort);
+        let browser = KitBrowser::new(browser.mode, browser.sort, browser.search_scope);
         self.views.insert(id, KitView::new(id, browser));
         // Carried, then moved on, never reset: a job stamped by the source
         // being replaced must not resolve against the new one. Rebuilding

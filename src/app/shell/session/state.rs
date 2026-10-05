@@ -135,6 +135,8 @@ pub(in crate::app) struct LastOpenedFolderEntry {
 
 /// One kit's section of the restore prompt.
 pub(in crate::app) struct LastOpenedWindowsKit {
+    /// Reopen this workspace, independently of its selected panes.
+    pub(in crate::app) checked: bool,
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
@@ -235,6 +237,7 @@ impl LastOpenedWindowsKit {
             })
             .collect::<Vec<_>>();
         Some(Self {
+            checked: source_available,
             source_kind: saved.source_kind,
             source_path: saved.source_path,
             game: saved.game,
@@ -309,12 +312,11 @@ impl LastOpenedWindowsPrompt {
         })
     }
 
-    /// Every saved workspace, paired with the tags checked for it. A source is
-    /// worth reopening even when it has no checked tags or project state: the
-    /// workspace itself is part of the user's last session.
+    /// Selected, available workspaces, paired with their selected panes.
     pub(in crate::app) fn checked_kits(&self) -> Vec<RestoreKit> {
         self.kits
             .iter()
+            .filter(|kit| kit.checked && kit.source_available)
             .map(|kit| {
                 let tags = kit.checked_tags();
                 let chimp_packages = kit.checked_chimp_packages();
@@ -343,6 +345,8 @@ impl LastOpenedWindowsPrompt {
     }
 
     pub(in crate::app) fn has_reopenable_kits(&self) -> bool {
-        !self.kits.is_empty()
+        self.kits
+            .iter()
+            .any(|kit| kit.checked && kit.source_available)
     }
 }

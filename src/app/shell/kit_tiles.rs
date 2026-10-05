@@ -157,6 +157,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
                     &mut parts.views[kit_id],
                     parts.browser,
                     banner,
+                    parts.shell.blender_icon.as_ref(),
                     parts.audio.language.as_deref(),
                 );
             });

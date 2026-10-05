@@ -8,7 +8,7 @@ use crate::app::shell::{
 };
 use crate::app::kits::safe_custom_icon_relative_path;
 use crate::app::editor::default_color_swatches;
-use crate::app::browser::{BrowserMode, BrowserSort};
+use crate::app::browser::{BrowserMode, BrowserSearchScope, BrowserSort};
 
 pub(super) fn prefs_path() -> PathBuf {
     crate::core::storage::data_path("prefs.json")
@@ -97,6 +97,25 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
 /// file does not carry — which is how a file written before a preference
 /// existed keeps working.
 fn prefs_from_value(value: &Value) -> GuiPrefs {
+    let saved_scope = value.get("browser_search_scope");
+    let mut browser_search_scope = BrowserSearchScope {
+        tags: saved_scope
+            .and_then(|v| v.get("tags"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        folders: saved_scope
+            .and_then(|v| v.get("folders"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        keywords: saved_scope
+            .and_then(|v| v.get("keywords"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    };
+    if !browser_search_scope.tags && !browser_search_scope.folders && !browser_search_scope.keywords
+    {
+        browser_search_scope = BrowserSearchScope::default();
+    }
     let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str))
         .unwrap_or_default();
     let browser_sort = browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str))
@@ -104,6 +123,7 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
     GuiPrefs {
         browser_mode,
         browser_sort,
+        browser_search_scope,
         nested_default: nested_default_from_str(
             value.get("nested_default").and_then(Value::as_str),
         )
@@ -727,7 +747,7 @@ fn prefs_to_value(
     collapsed_tool_categories.sort();
     let mut profiles = prefs.custom_editing_kit_profiles.clone();
     add_standard_editing_kit_profiles(&mut profiles, &prefs.editing_kit_paths);
-    json!({
+    let mut value = json!({
         "browser_mode": browser_mode_str(prefs.browser_mode),
         "browser_sort": browser_sort_str(prefs.browser_sort),
         "nested_default": nested_default_str(prefs.nested_default),
@@ -792,7 +812,13 @@ fn prefs_to_value(
         "storage_mode": crate::core::storage::active_mode().map(crate::core::storage::StorageMode::as_str),
         "first_run_complete": first_run_complete,
         "terminal_open_games": games,
-    })
+    });
+    value["browser_search_scope"] = json!({
+        "tags": prefs.browser_search_scope.tags,
+        "folders": prefs.browser_search_scope.folders,
+        "keywords": prefs.browser_search_scope.keywords,
+    });
+    value
 }
 
 /// Replace `path` with `text` so a crash leaves either the old file or the

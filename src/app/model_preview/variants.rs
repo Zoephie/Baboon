@@ -3,6 +3,87 @@
 
 use super::*;
 
+#[cfg(test)]
+mod picker_tests {
+    use super::*;
+
+    #[test]
+    fn variant_picker_filters_and_preserves_none_and_original_indices() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_global_style(foundation_style());
+        let variants = ["minor", "major", "special veteran"]
+            .into_iter()
+            .map(|name| ModelVariantPreview {
+                name: name.to_owned(),
+                regions: HashMap::new(),
+                listed_regions: Default::default(),
+            })
+            .collect::<Vec<_>>();
+        let frame = |events| {
+            let mut result = None;
+            let mut popup_id = None;
+            let output = crate::app::run_ui_test(&ctx, 
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        popup_id = Some(ui.make_persistent_id(("model_preview_variant", "test")));
+                        result = Some(draw_variant_picker(
+                            ui,
+                            "test",
+                            "0. minor",
+                            &variants,
+                            Some(0),
+                        ));
+                    });
+                },
+            );
+            (result.unwrap().0, output, popup_id.unwrap())
+        };
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(Vec::new());
+        let pos = egui::pos2(70.0, 18.0);
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        frame(vec![pointer(pos, false)]);
+        frame(Vec::new());
+        let (_, output, popup_id) = frame(vec![egui::Event::Text("VETERAN".to_owned())]);
+        let row_pos = |output: &egui::FullOutput, text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == text => {
+                        Some(shape.pos + shape.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .expect("picker row")
+        };
+        let pos = row_pos(&output, "2. special veteran");
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        assert_eq!(frame(vec![pointer(pos, false)]).0, Some(Some(2)));
+        ctx.data_mut(|data| data.insert_temp(popup_id.with("entry_search"), String::new()));
+        egui::Popup::open_id(&ctx, popup_id);
+        frame(Vec::new());
+        let (_, output, _) = frame(Vec::new());
+        let pos = row_pos(&output, "<None>");
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        assert_eq!(frame(vec![pointer(pos, false)]).0, Some(None));
+    }
+}
+
 /// Resolve a region's effective permutation for variant `vi`, following the
 /// per-region `parent variant` chain when the variant doesn't set it directly.
 pub(super) fn resolve_variant_region(
@@ -313,6 +394,79 @@ pub(super) fn draw_variant_controls(
     }
 }
 
+/// Search variants without losing the <None> reset or wheel navigation.
+fn draw_variant_picker(
+    ui: &mut Ui,
+    source_key: &str,
+    selected_label: &str,
+    variants: &[ModelVariantPreview],
+    selected: Option<usize>,
+) -> (Option<Option<usize>>, Option<i32>) {
+    let popup_id = ui.make_persistent_id(("model_preview_variant", source_key));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let response = picker_button(
+        ui,
+        popup_id,
+        selected_label,
+        variants.len(),
+        150.0,
+        text_dark(),
+        true,
+    );
+    let just_opened = response.clicked() && !open;
+    if response.clicked() {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+    }
+    let popup_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let mut choice = None;
+    // Open while its id is open in memory, as the button above toggles it;
+    // left alone, a popup built from a response is always open.
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            picker_popup_width(ui, &response);
+            let filter_id = popup_id.with("entry_search");
+            let mut filter = ui
+                .data(|data| data.get_temp::<String>(filter_id))
+                .unwrap_or_default();
+            let changed = picker_search_field(ui, &mut filter, "search variants…", just_opened);
+            ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+            ui.separator();
+            let query = filter.trim().to_lowercase();
+            picker_results(ui, 300.0, changed, |ui| {
+                let mut shown = 0;
+                if query.is_empty() || "<none>".contains(&query) {
+                    shown += 1;
+                    if ui.selectable_label(selected.is_none(), "<None>").clicked() {
+                        choice = Some(None);
+                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    }
+                }
+                for (index, variant) in variants.iter().enumerate() {
+                    let label = format!("{index}. {}", variant.name);
+                    if !query.is_empty() && !label.to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    shown += 1;
+                    let row = ui.selectable_label(selected == Some(index), label);
+                    if just_opened && query.is_empty() && selected == Some(index) {
+                        row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if row.clicked() {
+                        choice = Some(Some(index));
+                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    }
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No variants match.").color(subtle_dark()));
+                }
+            });
+        });
+    (choice, dropdown_wheel_delta(ui, &response, popup_open))
+}
+
 pub(super) fn draw_variant_selector(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -350,31 +504,16 @@ pub(super) fn draw_variant_selector(
                 .unwrap_or_else(|| "<None>".to_owned()),
             None => "(custom)".to_owned(),
         };
-        let (_, wheel_delta) = combo_box_with_scroll(
+        let (choice, wheel_delta) = draw_variant_picker(
             ui,
-            egui::ComboBox::from_id_salt(("model_preview_variant", &data.source_key))
-                .selected_text(selected)
-                .width(150.0),
-            |ui| {
-                if ui
-                    .selectable_label(state.selected_variant.is_none(), "<None>")
-                    .clicked()
-                {
-                    reset_model_preview_selection(state, data, None);
-                }
-                for index in 0..data.variants.len() {
-                    if ui
-                        .selectable_label(
-                            state.selected_variant == Some(index),
-                            format!("{index}. {}", data.variants[index].name),
-                        )
-                        .clicked()
-                    {
-                        reset_model_preview_selection(state, data, Some(index));
-                    }
-                }
-            },
+            &data.source_key,
+            &selected,
+            &data.variants,
+            state.selected_variant,
         );
+        if let Some(choice) = choice {
+            reset_model_preview_selection(state, data, choice);
+        }
         if let Some(delta) = wheel_delta {
             let current = state
                 .selected_variant

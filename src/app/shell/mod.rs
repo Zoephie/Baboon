@@ -34,7 +34,8 @@ use crate::core::document::value::extension_to_group_tag;
 use crate::app::editor::{
     DeferredFileAction, EditorCommand, EditorFeature, PaneInputs, apply_scroll_speed,
     begin_wheel_gesture, draw_tag_pane, end_wheel_gesture, lost_focus_once,
-    set_combo_scroll_cycle_enabled, set_zoom_speed, truncate_for_cell, view_text_tab_button,
+    search_clear_control_at, set_combo_scroll_cycle_enabled, set_zoom_speed, truncate_for_cell,
+    view_text_tab_button,
 };
 use crate::app::export::ContainerDumpReport;
 use crate::app::browser::{
@@ -99,10 +100,9 @@ pub(in crate::app) struct ShellFeature {
     /// so the focus can only be honoured once none are outstanding.
     pub(in crate::app) restoring_kits: HashSet<KitId>,
     pub(in crate::app) restored_active_kit: Option<KitId>,
-    /// Toolbar launcher icons (decoded from embedded .ico at startup).
+    /// Blender's icon for the browser's Shortcuts list (decoded from its
+    /// embedded .ico at startup).
     pub(in crate::app) blender_icon: Option<egui::TextureHandle>,
-    pub(in crate::app) sapien_icon: Option<egui::TextureHandle>,
-    pub(in crate::app) tag_test_icon: Option<egui::TextureHandle>,
     pub(in crate::app) artwork: ArtworkCache,
     pub(in crate::app) last_pixels_per_point: f32,
     /// When the per-frame prefs check next runs (egui time).

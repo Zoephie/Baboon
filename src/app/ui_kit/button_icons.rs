@@ -8,6 +8,7 @@ use super::*;
 pub(in crate::app) enum ButtonIcon {
     Add,
     About,
+    AssetBrowser,
     Browse,
     Cache,
     ChangeAdded,
@@ -62,6 +63,7 @@ pub(in crate::app) enum ButtonIcon {
     Opened,
     Other,
     Pause,
+    Pin,
     Play,
     Remove,
     Refresh,
@@ -73,6 +75,7 @@ pub(in crate::app) enum ButtonIcon {
     Sort,
     Stop,
     Tag,
+    TableView,
     Bitmap,
     View,
     WindowMode,
@@ -84,6 +87,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
         ButtonIcon::Add => include_root_str!("assets/Button Icons/Add.svg"),
         ButtonIcon::About => include_root_str!("assets/Button Icons/About.svg"),
+        ButtonIcon::AssetBrowser => include_root_str!("assets/Button Icons/Asset Browser.svg"),
         ButtonIcon::Browse => include_root_str!("assets/Button Icons/Browse.svg"),
         ButtonIcon::Cache => include_root_str!("assets/Button Icons/Cache.svg"),
         ButtonIcon::ChangeAdded => include_root_str!("assets/Button Icons/change-added.svg"),
@@ -146,6 +150,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Opened => include_root_str!("assets/Button Icons/Opened.svg"),
         ButtonIcon::Other => include_root_str!("assets/Button Icons/Other.svg"),
         ButtonIcon::Pause => include_root_str!("assets/Button Icons/Pause.svg"),
+        ButtonIcon::Pin => include_root_str!("assets/Button Icons/Pin.svg"),
         ButtonIcon::Play => include_root_str!("assets/Button Icons/Play.svg"),
         ButtonIcon::Remove => include_root_str!("assets/Button Icons/Remove.svg"),
         ButtonIcon::Refresh => include_root_str!("assets/Button Icons/Refresh.svg"),
@@ -157,6 +162,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Sort => include_root_str!("assets/Button Icons/Sort.svg"),
         ButtonIcon::Stop => include_root_str!("assets/Button Icons/Stop.svg"),
         ButtonIcon::Tag => include_root_str!("assets/Button Icons/Tag.svg"),
+        ButtonIcon::TableView => include_root_str!("assets/Button Icons/Table View.svg"),
         ButtonIcon::View => include_root_str!("assets/Button Icons/View.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
@@ -214,17 +220,16 @@ pub(in crate::app) fn icon_button(
     enabled: bool,
     color: Color32,
 ) -> egui::Response {
-    let size = ICON_BUTTON_SIZE;
-    let response = ui.add_enabled(enabled, egui::Button::new("").min_size(size));
-    let icon_color = if enabled {
-        icon_color(icon, color)
-    } else {
-        ui.visuals().widgets.noninteractive.fg_stroke.color
-    };
-    let icon_size = BUTTON_ICON_SIZE;
-    let icon_rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(icon_size));
-    paint_button_icon_at(ui, icon, icon_rect, icon_color);
-    response.on_hover_text(tooltip)
+    // Paint in the button's enabled scope so egui fades the whole SVG,
+    // including accent colors embedded in the asset itself.
+    ui.add_enabled_ui(enabled, |ui| {
+        let response = ui.add(egui::Button::new("").min_size(ICON_BUTTON_SIZE));
+        let icon_rect =
+            egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+        paint_button_icon_at(ui, icon, icon_rect, icon_color(icon, color));
+        response.on_hover_text(tooltip)
+    })
+    .inner
 }
 
 /// Repaint a native checkbox with its hovered visuals when an adjacent icon
@@ -730,6 +735,7 @@ mod tests {
         let icons = [
             ButtonIcon::Add,
             ButtonIcon::About,
+            ButtonIcon::AssetBrowser,
             ButtonIcon::Browse,
             ButtonIcon::Cache,
             ButtonIcon::ChannelAlpha,
@@ -789,6 +795,8 @@ mod tests {
             ButtonIcon::Sort,
             ButtonIcon::Stop,
             ButtonIcon::Tag,
+            ButtonIcon::TableView,
+            ButtonIcon::Pin,
             ButtonIcon::View,
             ButtonIcon::WindowMode,
         ];

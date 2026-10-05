@@ -14,8 +14,8 @@ use crate::app::editor::{
     is_inherited_parent_name, jump_target_id, parent_block_path, sanitize_ref_path,
 };
 use crate::app::browser::{
-    ContentExplorer, FieldNav, PendingRefJump, RefOccurrence, TagQueryResults,
-    contains_ignore_ascii_case,
+    ContentExplorer, FieldNav, FilterCache, FolderDateCache, PendingRefJump, RefOccurrence,
+    TagQueryResults, contains_ignore_ascii_case,
 };
 
 pub(in crate::app) mod index;

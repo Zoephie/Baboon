@@ -283,7 +283,14 @@ impl Model {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(in crate::app) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source().and_then(|s| s.game))
+        self.tag_test_executable_for(self.active)
+    }
+
+    /// [`Self::tag_test_executable`] for the kit at `kit_index`.
+    pub(in crate::app) fn tag_test_executable_for(&self, kit_index: usize) -> &'static str {
+        tag_test_executable_for_game(
+            self.kits.get(kit_index).and_then(|kit| kit.source.as_ref()).and_then(|s| s.game),
+        )
     }
 
     pub(in crate::app) fn active_game_is_campaign_evolved(&self) -> bool {

@@ -246,6 +246,7 @@ pub(in crate::app) struct BlockHeaderActions {
     pub(in crate::app) delete: bool,
     pub(in crate::app) delete_all: bool,
     pub(in crate::app) new_selection: Option<usize>,
+    pub(in crate::app) reorganize: bool,
     /// Right-click → "Copy element" on the selected element.
     pub(in crate::app) copy: bool,
     /// Right-click → "Copy entire block".
@@ -268,6 +269,39 @@ pub(in crate::app) struct TsvPasteRequest {
     pub(in crate::app) block_path: String,
     pub(in crate::app) block_label: String,
     pub(in crate::app) element_count: usize,
+}
+
+pub(in crate::app) struct BlockTableRequest {
+    pub(in crate::app) path: String,
+    pub(in crate::app) label: String,
+    pub(in crate::app) view_scope: String,
+    pub(in crate::app) selected: usize,
+}
+
+#[derive(Clone)]
+pub(in crate::app) struct BlockTableRow {
+    pub(in crate::app) id: u64,
+    pub(in crate::app) original_index: Option<usize>,
+    pub(in crate::app) name_field: Option<String>,
+    pub(in crate::app) name: String,
+    pub(in crate::app) stored_name: String,
+}
+
+/// A private tag copy owns all staged data and reference changes. The live
+/// document is untouched until the window's Confirm Changes action succeeds.
+pub(in crate::app) struct BlockTableState {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) tag_key: String,
+    pub(in crate::app) request: BlockTableRequest,
+    pub(in crate::app) stamp: (u64, u64),
+    pub(in crate::app) game: Option<GameId>,
+    pub(in crate::app) definitions_root: Option<PathBuf>,
+    pub(in crate::app) tag: TagFile,
+    pub(in crate::app) baseline_bytes: Vec<u8>,
+    pub(in crate::app) rows: Vec<BlockTableRow>,
+    pub(in crate::app) next_id: u64,
+    pub(in crate::app) status: Option<String>,
+    pub(in crate::app) changed: bool,
 }
 
 /// The open TSV-import window: the user pastes tab-separated rows and applies
@@ -391,6 +425,7 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// Set when the user picks "Paste TSV…" on a block; the caller hoists it
     /// into `self.tsv_paste` to open the import window.
     pub(in crate::app) tsv_paste_request: &'a mut Option<TsvPasteRequest>,
+    pub(in crate::app) block_table_request: &'a mut Option<BlockTableRequest>,
     /// The current block clipboard (read), for gating "Paste" in block menus.
     pub(in crate::app) block_clipboard: Option<&'a BlockClipboard>,
     /// Set when the user clicks "Copy element"; the caller hoists it into
@@ -432,6 +467,7 @@ pub(in crate::app) struct EditSinks {
     color_request: Option<MaterialColorPopup>,
     function_request: Option<FunctionPopup>,
     tsv_paste_request: Option<TsvPasteRequest>,
+    block_table_request: Option<BlockTableRequest>,
     block_clip_request: Option<BlockClipboard>,
     tag_reference_picker: Option<TagReferencePickerState>,
 }
@@ -492,6 +528,7 @@ impl<'a> FieldEditContext<'a> {
             function_request: &mut sinks.function_request,
             docs: None,
             tsv_paste_request: &mut sinks.tsv_paste_request,
+            block_table_request: &mut sinks.block_table_request,
             block_clipboard: None,
             block_clip_request: &mut sinks.block_clip_request,
             field_filter: None,

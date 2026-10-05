@@ -526,69 +526,15 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
         Vec2::splat(BUTTON_ICON_SIZE),
     );
     paint_tag_icon_at(ui, Some(file.group_tag), icon_rect);
-    let (prefix, name) = display_path
-        .rfind(['/', '\\'])
-        .map_or(("", display_path.as_str()), |split| {
-            display_path.split_at(split + 1)
-        });
-    let font = TextStyle::Body.resolve(ui.style());
     let change_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 12.0, rect.center().y),
         Vec2::splat(BUTTON_ICON_SIZE),
     );
-    let text_pos = egui::pos2(rect.left() + 28.0, rect.center().y);
     let text_rect = egui::Rect::from_min_max(
-        egui::pos2(text_pos.x, rect.top()),
+        egui::pos2(rect.left() + 28.0, rect.top()),
         egui::pos2(change_rect.left() - 6.0, rect.bottom()),
     );
-    let available = text_rect.width().max(0.0);
-    let name_width = ui
-        .painter()
-        .layout_no_wrap(name.to_owned(), font.clone(), text_dark())
-        .size()
-        .x;
-    let (shown_prefix, shown_name) = if name_width >= available {
-        (
-            String::new(),
-            truncate_start_to_width(ui, name, &font, text_dark(), available),
-        )
-    } else {
-        (
-            truncate_start_to_width(
-                ui,
-                prefix,
-                &font,
-                text_dark().gamma_multiply(0.5),
-                available - name_width,
-            ),
-            name.to_owned(),
-        )
-    };
-    let truncated = shown_prefix != prefix || shown_name != name;
-    let prefix_width = ui
-        .painter()
-        .layout_no_wrap(
-            shown_prefix.clone(),
-            font.clone(),
-            text_dark().gamma_multiply(0.5),
-        )
-        .size()
-        .x;
-    let painter = ui.painter().with_clip_rect(text_rect);
-    painter.text(
-        text_pos,
-        Align2::LEFT_CENTER,
-        shown_prefix,
-        font.clone(),
-        text_dark().gamma_multiply(0.5),
-    );
-    painter.text(
-        text_pos + egui::vec2(prefix_width, 0.0),
-        Align2::LEFT_CENTER,
-        shown_name,
-        font,
-        text_dark(),
-    );
+    let truncated = super::tag_compare::paint_path_label(ui, &display_path, text_rect);
     paint_button_icon_at(ui, change_icon(&file.status), change_rect, text_dark());
     if truncated {
         response.on_hover_text(display_path)

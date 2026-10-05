@@ -6,9 +6,9 @@ use crate::app::shell::{WorkerMessage, spawn_background, spawn_worker};
 use crate::app::kits::KitStamp;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
-    clean_field_name, clean_field_name_basic, combo_box_with_scroll, combo_scroll_next_index,
+    clean_field_name, clean_field_name_basic, combo_scroll_next_index, dropdown_wheel_delta,
     halo1_object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
-    truncate_for_cell, viewport_wheel_zoom,
+    picker_button, picker_popup_width, picker_results, picker_search_field, viewport_wheel_zoom,
 };
 use crate::app::export::{
     collision_jms_for_game, load_referenced_tag_from_source, model_skeleton, owning_model_skeleton,
@@ -276,85 +276,63 @@ fn draw_animation_combo(
         .unwrap_or("<None>");
     let popup_id = ui.make_persistent_id(("model_animation_popup", entry_key));
     let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
-    let response = ui
-        .scope(|ui| {
-            if open {
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    ui.visuals().widgets.open.weak_bg_fill;
-            }
-            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
-        })
-        .inner;
-    let foreground = if ui.is_enabled() {
-        text_dark()
-    } else {
-        ui.visuals().widgets.noninteractive.fg_stroke.color
-    };
-    ui.painter().text(
-        response.rect.left_center() + Vec2::new(8.0, 0.0),
-        Align2::LEFT_CENTER,
-        truncate_for_cell(selected_text, response.rect.width() - 36.0),
-        FontId::proportional(12.0),
-        foreground,
+    let response = picker_button(
+        ui,
+        popup_id,
+        selected_text,
+        animations.len(),
+        width,
+        text_dark(),
+        !animations.is_empty(),
     );
-    let arrow_rect = egui::Rect::from_center_size(
-        egui::pos2(response.rect.right() - 12.0, response.rect.center().y),
-        Vec2::splat(BUTTON_ICON_SIZE),
-    );
-    paint_button_icon_at(ui, ButtonIcon::Down, arrow_rect, foreground);
     let just_opened = response.clicked() && !open;
     if response.clicked() {
         egui::Popup::toggle_id(ui.ctx(), popup_id);
     }
+    // Open while its id is open in memory, as the button above toggles it;
+    // left alone, a popup built from a response is always open.
     egui::Popup::from_response(&response)
         .id(popup_id)
+        .open_memory(None)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(width.max(240.0));
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut playback.filter)
-                    .hint_text(placeholder_text("search animations…"))
-                    .desired_width(320.0),
-            );
-            if just_opened {
-                search.request_focus();
-            }
+            picker_popup_width(ui, &response);
+            let filter_changed =
+                picker_search_field(ui, &mut playback.filter, "search animations…", just_opened);
             ui.separator();
             let filter = playback.filter.trim().to_ascii_lowercase();
-            egui::ScrollArea::vertical()
-                .max_height(300.0)
-                .show(ui, |ui| {
-                    let mut shown = 0;
-                    for (index, row) in animations.iter().enumerate() {
-                        if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
-                            continue;
-                        }
-                        shown += 1;
-                        let label = if row.playable {
-                            format!("{}  ({} · {} frames)", row.name, row.kind, row.frame_count)
-                        } else {
-                            format!("{}  (no data)", row.name)
-                        };
-                        if ui
-                            .add_enabled(
-                                row.playable,
-                                egui::Button::selectable(playback.selected == Some(index), label),
-                            )
-                            .clicked()
-                        {
-                            playback.selected = Some(index);
-                            playback.pose = None;
-                            playback.time = 0.0;
-                            playback.playing = false;
-                            playback.stopped = false;
-                            playback.error = None;
-                            egui::Popup::close_id(ui.ctx(), popup_id);
-                        }
+            picker_results(ui, 300.0, filter_changed, |ui| {
+                let mut shown = 0;
+                for (index, row) in animations.iter().enumerate() {
+                    if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
+                        continue;
                     }
-                    if shown == 0 {
-                        ui.label(RichText::new("No animations match.").color(subtle_dark()));
+                    shown += 1;
+                    let label = if row.playable {
+                        format!("{}  ({} · {} frames)", row.name, row.kind, row.frame_count)
+                    } else {
+                        format!("{}  (no data)", row.name)
+                    };
+                    if ui
+                        .add_enabled(
+                            row.playable,
+                            egui::Button::selectable(playback.selected == Some(index), label),
+                        )
+                        .clicked()
+                    {
+                        playback.selected = Some(index);
+                        playback.pose = None;
+                        playback.time = 0.0;
+                        playback.playing = false;
+                        playback.stopped = false;
+                        playback.error = None;
+                        egui::Popup::close_id(ui.ctx(), popup_id);
                     }
-                });
+                }
+                if shown == 0 {
+                    ui.label(RichText::new("No animations match.").color(subtle_dark()));
+                }
+            });
         });
 }
 

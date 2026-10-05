@@ -128,6 +128,34 @@ fn kit(path: &str, mode: Option<BrowserMode>) -> LastSessionKit {
 }
 
 #[test]
+fn unchecked_workspaces_are_excluded_without_losing_their_pane_choices() {
+    let root = std::env::temp_dir().display().to_string();
+    let mut prompt = LastOpenedWindowsPrompt::from_session(
+        LastSessionState {
+            kits: vec![kit(&root, None), kit(&root, None)],
+        },
+        &[],
+    )
+    .unwrap();
+    prompt.kits[0].bitmap_library_open = true;
+    prompt.kits[0].checked = false;
+    assert_eq!(prompt.checked_kits().len(), 1);
+    assert!(prompt.kits[0].entries[0].checked);
+    prompt.kits[1].checked = false;
+    assert!(prompt.checked_kits().is_empty());
+    assert!(!prompt.has_reopenable_kits());
+    prompt.kits[0].checked = true;
+    assert_eq!(prompt.checked_kits()[0].tags.len(), 1);
+    assert!(prompt.checked_kits()[0].bitmap_library_open);
+    // A selected workspace can still reopen with all its panes unchecked.
+    prompt.kits[0].entries[0].checked = false;
+    assert_eq!(prompt.checked_kits().len(), 1);
+    assert!(prompt.checked_kits()[0].tags.is_empty());
+    prompt.kits[0].source_available = false;
+    assert!(prompt.checked_kits().is_empty());
+}
+
+#[test]
 fn folder_windows_round_trip_and_can_be_unchecked_for_restore() {
     let source_path = std::env::temp_dir();
     let mut saved = kit(

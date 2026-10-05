@@ -300,6 +300,13 @@ impl Baboon {
                         group_tree: TagTree::default(),
                         group_tree_for: None,
                         filter_cache: FilterCache::default(),
+                        date_cache: FolderDateCache::default(),
+                        table_layout: FolderTableLayout::default(),
+                        search_scope: self.model.prefs.browser_search_scope,
+                        assets_view: false,
+                        asset_bitmaps: true,
+                        asset_models: true,
+                        asset_cell_size: DEFAULT_CELL,
                     });
                 let selected = self.model.kits[self.model.active].selected_key.clone();
                 self.kit_and_view(self.model.active).open_tag_pane(&key);

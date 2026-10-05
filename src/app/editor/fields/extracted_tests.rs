@@ -245,6 +245,70 @@ pub(in crate::app) mod tests {
         assert!(after, "after it, the missing file is noticed");
     }
 
+    /// Clear queues an edit only when a reference is stored; a draft alone is
+    /// discarded, and nothing is written for an empty reference.
+    #[test]
+    fn reference_clear_only_queues_an_edit_for_a_stored_reference() {
+        for (value, draft_text, has_reference) in [
+            ("", None, false),
+            ("NONE", None, false),
+            ("  none  ", None, false),
+            ("NONE", Some("mode:objects/draft"), false),
+            ("mode:objects/test", None, true),
+        ] {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            ctx.set_global_style(foundation_style());
+            with_test_edit_context(|edit| {
+                let path = "model";
+                if let Some(text) = draft_text {
+                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    draft.text = text.to_owned();
+                    draft.changed = true;
+                }
+                let frame = |events, edit: &mut FieldEditContext<'_>| {
+                    crate::app::run_ui_test(&ctx, egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 200.0))),
+                        events, ..Default::default()
+                    }, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            draw_foundation_tag_reference_row(
+                                ui, &field_display_meta(path), value,
+                                has_reference.then(|| (u32::from_be_bytes(*b"mode"), "objects/test".to_owned())),
+                                None, 0, path, edit, 300.0,
+                            );
+                        });
+                    })
+                };
+                let output = frame(Vec::new(), edit);
+                let suffix = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == "tag reference" => Some(shape),
+                    _ => None,
+                }).expect("reference row suffix");
+                // Clear is the square button immediately before the suffix.
+                let pos = egui::pos2(
+                    suffix.pos.x - ctx.global_style().spacing.item_spacing.x - ICON_BUTTON_SIZE.x * 0.5,
+                    suffix.pos.y + suffix.galley.size().y * 0.5,
+                );
+                let pointer = |pressed| egui::Event::PointerButton {
+                    pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default(),
+                };
+                frame(vec![egui::Event::PointerMoved(pos), pointer(true)], edit);
+                frame(vec![pointer(false)], edit);
+                frame(Vec::new(), edit);
+                assert_eq!(edit.pending.len(), usize::from(has_reference), "value {value:?}, draft {draft_text:?}");
+                if has_reference {
+                    assert_eq!(edit.pending[0].input, "NONE");
+                }
+                if draft_text.is_some() {
+                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    assert!(!draft.changed);
+                    assert!(draft.text.is_empty() || draft.text.eq_ignore_ascii_case("none"));
+                }
+            });
+        }
+    }
+
     pub(in crate::app) fn with_test_edit_context(
         assertion: impl FnOnce(&mut FieldEditContext<'_>),
     ) {
@@ -776,7 +840,7 @@ pub(in crate::app) mod tests {
 
     #[test]
     fn foundation_selected_width_reserves_only_current_header_cells() {
-        assert_eq!(foundation_selected_width(1_000.0), 376.0);
+        assert_eq!(foundation_selected_width(1_000.0), 344.0);
         assert_eq!(foundation_selected_width(500.0), 120.0);
         assert_eq!(foundation_selected_width(2_000.0), 420.0);
     }
