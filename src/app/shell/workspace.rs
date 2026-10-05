@@ -59,6 +59,11 @@ impl Baboon {
         if let Some(notice) = keyword_notice {
             self.model.status = notice;
         }
+        // The draws' commands land first: some of them queue the very requests
+        // processed next (the tag pane sends its sound player's plays this way),
+        // and the next frame's draws have to see those requests settled, or
+        // they ask again.
+        self.apply_commands(ctx);
         self.process_frame_requests(ctx);
         self.apply_commands(ctx);
     }
@@ -1154,5 +1159,25 @@ pub(in crate::app) mod tests {
         assert_eq!(popup_kit(&mut app), None);
         // A popup with no recorded kit still applies to the active one.
         assert_eq!(app.popup_target_kit(None), Some(app.model.active));
+    }
+
+    /// What the tag pane asks of the sound player during a frame is taken up
+    /// in that same frame. The pane sends it as a command, and when commands
+    /// were applied after the audio queue had been processed, each draw saw
+    /// the player as it was before its own last requests: it asked again for
+    /// a preview, which, processed after Play, replaced it. Nothing played.
+    #[test]
+    fn a_sound_request_sent_during_a_frame_is_taken_up_that_frame() {
+        use crate::app::audio::{AudioCommand, SoundAction, SoundRequest};
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| app.draw_root_ui(ui));
+
+        app.commands.send(AudioCommand::Queue(std::collections::VecDeque::from([
+            SoundRequest::from(SoundAction::Stop),
+        ])));
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| app.draw_root_ui(ui));
+
+        assert!(app.audio.pending.is_empty(), "the request is still waiting for another frame");
     }
 }
