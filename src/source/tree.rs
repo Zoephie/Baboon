@@ -304,6 +304,9 @@ pub fn load_folder_node_entries(
     entries: &mut Vec<TagEntry>,
     names: &TagNameIndex,
 ) -> Result<()> {
+    // Browser display paths use '/', but file keys must keep the full scan's
+    // spelling. Normalize only the relative part, preserving the saved root.
+    node.rel_path = node.rel_path.components().collect();
     if !node.children_loaded {
         node.children = list_direct_child_nodes(root, &node.rel_path)?;
         node.children_loaded = true;
@@ -581,6 +584,7 @@ pub(crate) fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
 }
 
 fn list_direct_child_nodes(root: &Path, rel_path: &Path) -> Result<Vec<TagTreeNode>> {
+    let rel_path: PathBuf = rel_path.components().collect();
     let folder = root.join(&rel_path);
     let mut children = Vec::new();
     for item in std::fs::read_dir(&folder)
