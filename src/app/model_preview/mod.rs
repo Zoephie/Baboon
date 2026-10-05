@@ -60,8 +60,6 @@ fn model_preview_supports_textures(game: Option<GameId>) -> bool {
     )
 }
 
-#[cfg(test)]
-mod texture_availability_tests;
 
 /// Renderer-facing preview geometry derived from a [`RenderModel`]. Lives in
 /// Baboon (not blam-tags) since it is purely a GUI concern.
@@ -1589,10 +1587,6 @@ fn advance_playback_clock(
     }
 }
 
-#[cfg(test)]
-mod playback_clock_tests;
 
-#[cfg(test)]
-mod texture_note_tests;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;

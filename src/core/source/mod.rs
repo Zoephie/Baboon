@@ -839,11 +839,241 @@ use tree::{
     display_path_with_friendly_extension, display_str_with_friendly_extension, path_to_display,
 };
 
-#[cfg(test)]
-mod container_ref_tests;
+
+
 
 #[cfg(test)]
-mod entry_key_hint_tests;
+mod tests {
+    use super::*;
 
-#[cfg(test)]
-mod kit_layout_tests;
+    /// Campaign Evolved's cook puts a level's generated tags under
+    /// `_Generated_`, but the references baked into the tag data still use the
+    /// pre-cook path — `c10.scenario` points at `levels\halo1\solo\c10\level_a`
+    /// while the payload mounts at `.../c10/_generated_/level_a`. Without the
+    /// fallback, exporting a CE scenario's geometry resolved none of its \\Ps.
+    #[test]
+    fn container_lookup_falls_back_through_generated_folder() {
+        let sbsp = u32::from_be_bytes(*b"sbsp");
+        let mut index = ContainerTagIndex::default();
+        index.insert(
+            container_ref_key(sbsp, "levels/halo1/solo/c10/_generated_/level_a"),
+            3,
+            "Meteorite/Content/Tags/Levels/Halo1/Solo/C10/_Generated_/level_a-scenario_structure_bsp.ubulk"
+                .to_owned(),
+        );
+
+        // The reference as the scenario stores it: backslashes, no `_Generated_`.
+        let (container, rel) = index
+            .lookup(sbsp, "levels\\halo1\\solo\\c10\\level_a")
+            .expect("reference should resolve through the _Generated_ folder");
+        assert_eq!(container, 3);
+        assert!(rel.ends_with("level_a-scenario_structure_bsp.ubulk"));
+
+        // The literal mounted path still resolves.
+        assert!(
+            index
+                .lookup(sbsp, "levels\\halo1\\solo\\c10\\_generated_\\level_a")
+                .is_some()
+        );
+        // Wrong group and unknown paths still miss.
+        assert!(
+            index
+                .lookup(
+                    u32::from_be_bytes(*b"scnr"),
+                    "levels\\halo1\\solo\\c10\\level_a"
+                )
+                .is_none()
+        );
+        assert!(
+            index
+                .lookup(sbsp, "levels\\halo1\\solo\\c99\\nope")
+                .is_none()
+        );
+    }
+
+    /// An exact hit must never be shadowed by a `_Generated_` neighbour.
+    #[test]
+    fn exact_container_match_wins_over_generated_fallback() {
+        let sbsp = u32::from_be_bytes(*b"sbsp");
+        let mut index = ContainerTagIndex::default();
+        index.insert(
+            container_ref_key(sbsp, "levels/x/bsp"),
+            1,
+            "exact.ubulk".to_owned(),
+        );
+        index.insert(
+            container_ref_key(sbsp, "levels/x/_generated_/bsp"),
+            2,
+            "generated.ubulk".to_owned(),
+        );
+        assert_eq!(
+            index.lookup(sbsp, "levels\\x\\bsp"),
+            Some((1, "exact.ubulk"))
+        );
+    }
+
+    fn entry(key: &str) -> TagEntry {
+        TagEntry {
+            key: key.to_owned(),
+            display_path: key.to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        }
+    }
+
+    fn source(entries: Vec<TagEntry>, all_entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: PathBuf::from("a"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        }
+    }
+
+    fn found<'a>(source: &'a LoadedSourceData, key: &str) -> Option<&'a str> {
+        source
+            .entry_for_key(key)
+            .map(|entry| entry.display_path.as_str())
+    }
+
+    /// The lists are mutated in many places behind the hints' back. Whatever
+    /// happens to them, a lookup answers exactly what a scan would.
+    #[test]
+    fn key_lookups_stay_right_as_the_lists_change_under_them() {
+        let mut source = source(vec![entry("a"), entry("b")], vec![entry("c")]);
+        assert_eq!(found(&source, "b"), Some("b"));
+        assert_eq!(found(&source, "c"), Some("c"), "found in the full scan");
+        assert_eq!(found(&source, "b"), Some("b"), "and again from the hint");
+
+        // Inserting ahead of a remembered key moves it: the stale hint is
+        // caught, not trusted.
+        source.entries.insert(0, entry("z"));
+        assert_eq!(found(&source, "b"), Some("b"));
+
+        // The browser's lazy loader appends; a key nobody asked about before
+        // is found by the fallback.
+        source.entries.push(entry("d"));
+        assert_eq!(found(&source, "d"), Some("d"));
+
+        // A removed key is gone, even though its hint pointed at a real slot.
+        source.entries.retain(|entry| entry.key != "b");
+        assert_eq!(found(&source, "b"), None);
+        source.all_entries.clear();
+        assert_eq!(found(&source, "c"), None);
+        assert_eq!(found(&source, "missing"), None);
+    }
+
+    /// A key found once is found again without scanning, which is the point.
+    #[test]
+    fn a_repeated_key_lookup_does_not_scan_again() {
+        let entries: Vec<TagEntry> = (0..1000).map(|index| entry(&format!("k{index}"))).collect();
+        let source = source(entries, Vec::new());
+        assert_eq!(found(&source, "k999"), Some("k999"));
+        let before = KEY_SCANS.with(std::cell::Cell::get);
+        for _ in 0..100 {
+            assert_eq!(found(&source, "k999"), Some("k999"));
+        }
+        assert_eq!(KEY_SCANS.with(std::cell::Cell::get), before);
+    }
+
+    /// Packages layer as tags do: the last-mounted container is read, and
+    /// removing one container's copy leaves the others.
+    #[test]
+    fn a_mods_package_overrides_the_games_until_it_is_deleted() {
+        const PACKAGE: &str = "/game/tags/sound/x-sound";
+        let mut packages = ContainerPackageIndex::default();
+        packages.insert(PACKAGE.to_owned(), 0, "Game/x-sound.uasset".to_owned());
+        packages.insert(PACKAGE.to_owned(), 5, "Mod/x-sound.uasset".to_owned());
+        assert_eq!(
+            packages.lookup("/Game/Tags/Sound/X-Sound"),
+            Some((5, "Mod/x-sound.uasset"))
+        );
+
+        // A rename inside the game's container rewrites its copy, beneath the
+        // mod's.
+        packages.insert(PACKAGE.to_owned(), 0, "Game/renamed.uasset".to_owned());
+        assert_eq!(packages.lookup(PACKAGE), Some((5, "Mod/x-sound.uasset")));
+
+        assert!(packages.remove(PACKAGE, 5), "the mod's copy is deleted");
+        assert_eq!(packages.lookup(PACKAGE), Some((0, "Game/renamed.uasset")));
+        assert!(!packages.remove(PACKAGE, 5));
+        assert!(packages.remove(PACKAGE, 0));
+        assert_eq!(packages.lookup(PACKAGE), None);
+        assert!(packages.is_empty());
+    }
+
+    #[test]
+    fn a_kits_root_and_data_sit_beside_its_tags_folder() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags")).unwrap();
+        assert_eq!(layout.root, PathBuf::from("/ek"));
+        assert_eq!(layout.tags, PathBuf::from("/ek/tags"));
+        assert_eq!(layout.data, PathBuf::from("/ek/data"));
+        assert!(layout.tags_is_root_tags_folder());
+    }
+
+    /// A folder of loose tags with another name still has its parent for a
+    /// root, the same as the terminal and sound extraction always used; the
+    /// tools can't see it, so scenario launching refuses it.
+    #[test]
+    fn a_tags_folder_with_another_name_is_not_the_tools_folder() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags_moda")).unwrap();
+        assert_eq!(layout.root, PathBuf::from("/ek"));
+        assert_eq!(layout.data, PathBuf::from("/ek/data"));
+        assert!(!layout.tags_is_root_tags_folder());
+        assert!(KitLayout::from_tags_folder(Path::new("/")).is_none());
+    }
+
+    #[test]
+    fn non_default_languages_use_the_data_folders_language_sibling() {
+        let layout = KitLayout::from_tags_folder(Path::new("/ek/tags")).unwrap();
+        assert_eq!(layout.data_for_language(None), PathBuf::from("/ek/data"));
+        assert_eq!(
+            layout.data_for_language(Some("french")),
+            PathBuf::from("/ek/data_french")
+        );
+    }
+
+    #[test]
+    fn only_a_loose_folder_has_a_kit_layout() {
+        let loose = TagSource::LooseFolder {
+            root: PathBuf::from("/ek/tags"),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let single = TagSource::SingleFile {
+            path: PathBuf::from("/ek/tags/a.weapon"),
+        };
+        let with = |source| LoadedSourceData {
+            label: String::new(),
+            source,
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        assert_eq!(
+            with(loose).kit_layout().map(|layout| layout.root),
+            Some(PathBuf::from("/ek"))
+        );
+        assert_eq!(with(single).kit_layout(), None);
+    }
+}

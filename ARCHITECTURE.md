@@ -16,7 +16,7 @@ engine. The split is strict:
   - `src/core` — the application's model without any UI: games, tag sources
     and their catalogs, documents and their edit journal, value formatting,
     storage locations, bundled files, helper processes. `core` may not use
-    egui, eframe or anything in `src/app`; `core/layering_tests.rs` fails the
+    egui, eframe or anything in `src/app`; the tests in `core/mod.rs` fail the
     build if it does.
   - `src/app` — the egui application.
   - `src/bin`: the build tools that generate `docs/script_docs.sqlite3` and

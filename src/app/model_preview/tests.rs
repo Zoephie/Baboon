@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::game::GameId;
+use super::model_preview_supports_textures;
 
 fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) {
     let context = egui::Context::default();
@@ -745,4 +747,36 @@ fn animation_picker_expands_after_clearing_search() {
         frame(&mut playback);
     }
     assert!((frame(&mut playback) - full_height).abs() < 1.0);
+}
+
+/// Two panes on the same tag draw the same playback state in one pass; the
+/// clock moves once. Each pane used to move it, so playback ran at 2x.
+#[test]
+fn two_panes_advance_the_clock_once_per_pass() {
+    let mut playback = PreviewAnimationPlayback {
+        playing: true,
+        ..Default::default()
+    };
+    advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+    advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+    assert!((playback.time - 0.1).abs() < 1e-6, "{}", playback.time);
+    advance_playback_clock(&mut playback, 8, 0.1, 10.0, 300.0);
+    assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
+}
+
+#[test]
+fn textured_shading_is_limited_to_supported_editing_kits() {
+    assert!(model_preview_supports_textures(Some(GameId::Halo3)));
+    assert!(model_preview_supports_textures(Some(GameId::HaloReach)));
+    assert!(model_preview_supports_textures(Some(GameId::Halo2)));
+    assert!(model_preview_supports_textures(Some(GameId::HaloCe)));
+    for game in [
+        None,
+        Some(GameId::Halo3Odst),
+        Some(GameId::Halo4),
+        Some(GameId::Halo2Amp),
+        Some(GameId::CampaignEvolved),
+    ] {
+        assert!(!model_preview_supports_textures(game), "{game:?}");
+    }
 }
