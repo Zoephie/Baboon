@@ -752,4 +752,21 @@ mod tests {
         }
         render(&mut done);
     }
+
+    /// A run whose result arrives stale -- its kit's generation moved while it
+    /// ran, which the periodic refresh does on noticing the tags it wrote --
+    /// still ends: the window stops running and can be closed.
+    #[test]
+    fn a_stale_import_result_still_ends_the_run() {
+        let mut app = Baboon::for_test();
+        let mut window = dialog(None);
+        window.running = true;
+        app.dialogs.open(window);
+        let kit = &app.model.kits[0];
+        let stale = KitStamp { kit: kit.id, generation: kit.generation.wrapping_sub(1) };
+        app.handle_cache_import_finished(stale, Err("late".to_owned()), &egui::Context::default());
+        let window = app.dialogs.get::<CacheImportDialog>().expect("still open");
+        assert!(!window.running, "the run is over");
+        assert!(window.progress.is_none());
+    }
 }

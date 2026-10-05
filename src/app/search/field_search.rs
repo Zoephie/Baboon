@@ -45,6 +45,14 @@ impl Baboon {
         stamp: KitStamp,
         blobs: Result<Vec<(String, String)>, String>,
     ) -> bool {
+        // Only one build runs at a time, so a stale one ending means nothing
+        // is building now; still marked building, the index was never built
+        // again.
+        if self.model.resolve_stamp(stamp).is_none()
+            && let Some(kit_index) = self.model.resolve_kit(stamp.kit)
+        {
+            self.model.kits[kit_index].field_index.invalidate();
+        }
         if let Some(kit_index) = self.model.resolve_stamp(stamp) {
             match blobs {
                 Ok(blobs) => self.model.kits[kit_index]

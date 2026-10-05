@@ -154,6 +154,7 @@ impl Baboon {
         let root = root.clone();
         let usmap_path = self.model.prefs.chimp_usmap_path.clone();
         self.model.kits[kit_index].chimp.mount = ChimpMount::Loading;
+        self.model.kits[kit_index].chimp.mount_request = Some(stamp.generation);
         let tx = self.tx.clone();
         // A mount that panicked used to send nothing and stay `Loading`, which
         // refuses every container write for the session. Through
@@ -213,13 +214,26 @@ impl Baboon {
         );
     }
 
+    /// The kit whose mount in flight `stamp` answers. Matched by the mount,
+    /// not by the generation: a tag created while Chimp started bumps that,
+    /// and the dropped world left the workspace "still mounting" -- refusing
+    /// container writes -- for good. A mount with no record is judged by the
+    /// generation, as before.
+    fn chimp_mount_answered(&self, stamp: KitStamp) -> Option<usize> {
+        let index = self.model.resolve_kit(stamp.kit)?;
+        match self.model.kits[index].chimp.mount_request {
+            Some(request) => (request == stamp.generation).then_some(index),
+            None => self.model.resolve_stamp(stamp),
+        }
+    }
+
     pub(in crate::app) fn handle_chimp_mounted(
         &mut self,
         stamp: KitStamp,
         result: Result<Arc<World>, String>,
         ctx: egui::Context,
     ) -> bool {
-        let Some(index) = self.model.resolve_stamp(stamp) else {
+        let Some(index) = self.chimp_mount_answered(stamp) else {
             return true;
         };
         self.views[self.model.kits[index].id].chimp.reset_filter();
@@ -337,7 +351,8 @@ impl Baboon {
         stamp: KitStamp,
         type_index: ChimpTypeIndex,
     ) -> bool {
-        let Some(index) = self.model.resolve_stamp(stamp) else {
+        // Belongs to the mounted world, so it is matched the way the mount is.
+        let Some(index) = self.chimp_mount_answered(stamp) else {
             return true;
         };
         let classified = type_index
@@ -736,6 +751,14 @@ impl Baboon {
         scan: Result<ChimpReferrerScan, String>,
     ) -> bool {
         let Some(index) = self.model.resolve_stamp(stamp) else {
+            // The scan is over; left "scanning", its spinner ran for good and
+            // a new scan was refused.
+            if let Some(index) = self.model.resolve_kit(stamp.kit)
+                && let Some(pane) = self.views[self.model.kits[index].id].chimp.documents.get_mut(&package)
+                && matches!(pane.referrers, ChimpReferrerState::Scanning)
+            {
+                pane.referrers = ChimpReferrerState::Idle;
+            }
             return true;
         };
         let state = match scan {
@@ -757,10 +780,15 @@ impl Baboon {
         package: String,
         result: Result<(ChimpDocument, ChimpDocumentUi), String>,
     ) -> bool {
+        // No longer loading, current or not: left marked, the package could
+        // never be opened again.
+        if let Some(index) = self.model.resolve_kit(stamp.kit) {
+            self.model.kits[index].chimp.loading_packages.remove(&package);
+        }
         let Some(index) = self.model.resolve_stamp(stamp) else {
+            self.model.status = format!("{package} finished loading after the workspace changed; open it again.");
             return true;
         };
-        self.model.kits[index].chimp.loading_packages.remove(&package);
         match result {
             Ok((document, pane)) => {
                 self.insert_chimp_document(index, package.clone(), document, pane);
@@ -1467,6 +1495,50 @@ mod tests {
         };
         assert!(scan.referrers.is_empty());
         assert_eq!(scan.scanned, 1);
+    }
+
+    /// A mount whose answer arrives after a tag edit moved the kit's generation
+    /// is still the mount in flight: its world is taken and indexing finishes.
+    /// Dropped as stale, it left the workspace "still mounting", refusing
+    /// container writes, for the session.
+    #[test]
+    fn a_mount_outlasting_a_generation_bump_still_mounts() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        let ctx = egui::Context::default();
+        app.model.prefs.enable_chimp = true;
+        app.model.kits[0].chimp.mount = ChimpMount::Idle;
+        app.begin_chimp_mount(0, ctx.clone());
+        app.model.kits[0].generation = app.model.kits[0].generation.wrapping_add(1);
+        apply_until(&mut app, |app| {
+            matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
+                && !app.views[app.model.kits[0].id].chimp.type_indexing
+        });
+    }
+
+    /// A package load or referrer scan made stale still ends: the package can
+    /// be opened again and the scan's spinner stops.
+    #[test]
+    fn stale_package_work_still_ends() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let ctx = egui::Context::default();
+        let kit = &app.model.kits[0];
+        let stale = KitStamp { kit: kit.id, generation: kit.generation.wrapping_sub(1) };
+
+        app.model.kits[0].chimp.loading_packages.insert(OTHER.to_owned());
+        app.apply_worker_message(
+            WorkerMessage::ChimpPackageLoaded { stamp: stale, package: OTHER.to_owned(), result: Err("late".to_owned()) },
+            &ctx,
+        );
+        assert!(!app.model.kits[0].chimp.loading_packages.contains(OTHER), "it can be opened again");
+
+        app.chimp_pane_mut(0, THING).referrers = ChimpReferrerState::Scanning;
+        app.apply_worker_message(
+            WorkerMessage::ChimpReferrersScanned { stamp: stale, package: THING.to_owned(), scan: Err("late".to_owned()) },
+            &ctx,
+        );
+        assert!(matches!(app.chimp_pane(0, THING).referrers, ChimpReferrerState::Idle));
     }
 }
 

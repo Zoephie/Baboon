@@ -151,11 +151,23 @@ impl Baboon {
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
+        // A scan refuses to start while another runs, so this is the only one:
+        // it is over whatever became of its source. Cleared only for a current
+        // result, a refresh during the scan left every later scan refused and
+        // everything waiting on one -- Find All, the libraries -- waiting.
+        if let Some(kit_index) = self.model.resolve_kit(stamp.kit) {
+            self.model.kits[kit_index].scanning_entries = false;
+            self.model.kits[kit_index].index_jobs.entry_progress = None;
+            if self.model.resolve_stamp(stamp).is_none() {
+                // Whatever asked for the whole folder still needs it, now as
+                // the folder stands.
+                self.begin_scan_all_entries_in(kit_index, ctx.clone(), "Indexing tags...");
+                return true;
+            }
+        }
         let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
-        self.model.kits[kit_index].scanning_entries = false;
-        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
@@ -224,11 +236,16 @@ impl Baboon {
         label: String,
         result: Result<Vec<TagEntry>, String>,
     ) -> bool {
+        // Over whatever became of its source, as a full scan is.
+        if let Some(kit_index) = self.model.resolve_kit(stamp.kit) {
+            self.model.kits[kit_index].scanning_entries = false;
+            self.model.kits[kit_index].index_jobs.entry_progress = None;
+        }
         let Some(kit_index) = self.model.resolve_stamp(stamp) else {
+            self.model.status =
+                format!("The {label} folder changed while it was loading; load it again.");
             return true;
         };
-        self.model.kits[kit_index].scanning_entries = false;
-        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(entries) => {
                 let count = entries.len();

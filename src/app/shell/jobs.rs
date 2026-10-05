@@ -456,4 +456,76 @@ mod tests {
             Some(PaletteTable::Unreadable)
         ));
     }
+
+    /// A job whose result arrives after its kit's generation moved must also
+    /// settle what it marked: the handlers used to drop the stale result before
+    /// clearing their marker, which then stayed set for the session.
+    fn stale_stamp(app: &Baboon) -> KitStamp {
+        let kit = &app.model.kits[0];
+        KitStamp { kit: kit.id, generation: kit.generation.wrapping_sub(1) }
+    }
+
+    #[test]
+    fn a_stale_blam_import_frees_the_import_button() {
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        let kit = app.model.kits[0].id;
+        app.views[kit].blam.running = true;
+        let stamp = stale_stamp(&app);
+        app.apply_worker_message(
+            WorkerMessage::BlamImportFinished { stamp, outcomes: Vec::new(), created: Vec::new() },
+            &ctx,
+        );
+        assert!(!app.views[kit].blam.running);
+    }
+
+    #[test]
+    fn a_stale_field_index_build_lets_the_index_build_again() {
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        app.model.kits[0].field_index.mark_building();
+        let stamp = stale_stamp(&app);
+        app.apply_worker_message(WorkerMessage::FieldIndexBuilt { stamp, blobs: Ok(Vec::new()) }, &ctx);
+        assert!(!app.model.kits[0].field_index.is_building());
+    }
+
+    #[test]
+    fn a_stale_folder_load_ends_the_scan() {
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        app.model.kits[0].scanning_entries = true;
+        let stamp = stale_stamp(&app);
+        app.apply_worker_message(
+            WorkerMessage::FolderExtractablesLoaded {
+                stamp,
+                rel_path: PathBuf::from("weapons"),
+                label: "weapons".to_owned(),
+                result: Ok(Vec::new()),
+            },
+            &ctx,
+        );
+        assert!(!app.model.kits[0].scanning_entries);
+    }
+
+    /// A full scan made stale -- by Refresh pressed while it ran -- ends, and
+    /// scans the folder again as it stands, since whatever asked for it still
+    /// needs it.
+    #[test]
+    fn a_stale_full_scan_scans_again() {
+        use crate::app::loose_fixture::*;
+        let kit = LooseKit::new("stale-scan", "haloce_mcc");
+        kit.write_classic_ce("weapons/a", "weapon");
+        let mut app = app();
+        kit.install(&mut app);
+        let ctx = ctx();
+        app.model.kits[0].scanning_entries = true;
+        let stamp = stale_stamp(&app);
+        app.apply_worker_message(WorkerMessage::AllEntriesScanned { stamp, result: Ok(Vec::new()) }, &ctx);
+        assert!(app.model.kits[0].scanning_entries, "a new scan started");
+        pump_until(&mut app, "the new scan", |app| !app.model.kits[0].scanning_entries);
+        assert!(
+            app.model.kits[0].source.as_ref().unwrap().all_entries.iter().any(|entry| entry.display_path.contains("a.weapon")),
+            "and found the folder's tags"
+        );
+    }
 }

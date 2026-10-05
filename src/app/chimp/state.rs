@@ -160,6 +160,12 @@ impl ChimpFolderNode {
 #[derive(Default)]
 pub(in crate::app) struct ChimpState {
     pub(in crate::app) mount: ChimpMount,
+    /// The generation the mount in flight (or the one that produced the
+    /// mounted world) was started at. The world depends only on the Paks
+    /// folder, which a tag edit bumping the generation doesn't change; a new
+    /// source rebuilds this state, so a mount from the old one finds no
+    /// match.
+    pub(in crate::app) mount_request: Option<u64>,
     pub(in crate::app) selected_package: Option<String>,
     pub(in crate::app) open_packages: Vec<String>,
     pub(in crate::app) documents: HashMap<String, ChimpDocument>,
