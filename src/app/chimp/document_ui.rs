@@ -1309,4 +1309,37 @@ mod tests {
         assert_eq!(overlay.read(&document.provider.entry_path).unwrap(), bytes);
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    /// An open package that nobody touches does not keep the window drawing.
+    /// The pane and the tile tree send a command every frame; applying one
+    /// that changed nothing used to ask for the next frame, which sent them
+    /// again, for as long as any package was open.
+    #[test]
+    fn an_open_package_left_alone_lets_the_window_sleep() {
+        use crate::app::loose_fixture::repaint_delay_after;
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let draw = |app: &mut Baboon, ui: &mut egui::Ui| {
+            let ctx = ui.ctx().clone();
+            let kit = app.model.kits[0].id;
+            let writing = app.chimp.chimp_writes.contains_key(&kit);
+            egui::CentralPanel::default().show(ui, |ui| {
+                draw_chimp_tiles(ui, &cx!(app, &ctx), &mut app.views[kit].chimp, 0, writing);
+            });
+            app.apply_commands(&ctx);
+        };
+
+        let idle = repaint_delay_after(&mut app, draw, |_| {});
+        assert!(
+            idle > std::time::Duration::from_millis(100),
+            "an idle open package repaints every {idle:?}"
+        );
+
+        // The same measurement sees a frame that did change something.
+        let changed = repaint_delay_after(&mut app, draw, |app| {
+            app.commands
+                .send(crate::app::context::Command::Status("Changed".to_owned()));
+        });
+        assert_eq!(changed, std::time::Duration::ZERO, "a change applied after drawing is drawn");
+    }
 }

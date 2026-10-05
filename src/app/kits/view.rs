@@ -249,8 +249,11 @@ impl<'a> KitMut<'a> {
 
     /// Re-derive `open_tabs` from the tree. Called after anything that can
     /// change the layout: a frame of `tree.ui`, an open, or a close.
-    pub(in crate::app) fn sync_open_tabs(&mut self) {
-        self.kit.open_tabs = self.view.tabs_from_tree();
+    /// Returns whether the open tabs or the selection changed.
+    pub(in crate::app) fn sync_open_tabs(&mut self) -> bool {
+        let open_tabs = self.view.tabs_from_tree();
+        let mut changed = open_tabs != self.kit.open_tabs;
+        self.kit.open_tabs = open_tabs;
         if self
             .kit
             .selected_key
@@ -263,7 +266,9 @@ impl<'a> KitMut<'a> {
                 .iter()
                 .find(|key| !is_folder_pane_key(key))
                 .cloned();
+            changed = true;
         }
+        changed
     }
 
     /// Add `key` as a pane if it is not already laid out, and select it.

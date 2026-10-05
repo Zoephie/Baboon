@@ -211,17 +211,20 @@ pub(in crate::app) enum EditorCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) {
+    /// Apply `command`, returning whether it may have changed what the next
+    /// frame draws. Only the two sent every frame a tag is open can say no.
+    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) -> bool {
         match command {
-            EditorCommand::PaneDrawn(drawn) => self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::PaneDrawn(drawn) => return self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::SyncOpenTabs { kit } => {
+                return self
+                    .model
+                    .kit_index(kit)
+                    .is_some_and(|index| self.kit_and_view(index).sync_open_tabs());
+            }
             EditorCommand::FocusTab { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.kits[index].selected_key = Some(key);
-                }
-            }
-            EditorCommand::SyncOpenTabs { kit } => {
-                if let Some(index) = self.model.kit_index(kit) {
-                    self.kit_and_view(index).sync_open_tabs();
                 }
             }
             EditorCommand::ReimportBitmap { kit, key } => {
@@ -259,6 +262,7 @@ impl Baboon {
                 }
             }
         }
+        true
     }
 
     fn apply_picked_tag_reference(&mut self, kit: KitId, tag_key: &str, field_path: &str, input: String) {

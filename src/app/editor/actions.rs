@@ -208,25 +208,25 @@ impl Baboon {
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         if !state.render_mode.uses_textures() || state.textures_pending {
-            return;
+            return false;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
-            return;
+            return false;
         };
         if data.textures.is_some() || data.preview.materials.is_empty() {
-            return;
+            return false;
         }
         let Some(source) = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.source.clone())
         else {
-            return;
+            return false;
         };
         let materials = data.preview.materials.clone();
         let textures_id = data.textures_id;
@@ -256,6 +256,7 @@ impl Baboon {
                 textures: Vec::new(),
             },
         );
+        true
     }
 
     pub(in crate::app) fn handle_model_textures_resolved(

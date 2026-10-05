@@ -657,11 +657,13 @@ pub(super) fn chimp_export_hash_desyncs(
 /// Count the header's usage for `pane` if it shows the Header view and the
 /// count went stale. Done on the document's side rather than in the draw:
 /// the count walks every export's names, and the engine walks them only
-/// through `&mut`.
-pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument, pane: &mut ChimpDocumentUi) {
+/// through `&mut`. Returns whether it counted.
+pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument, pane: &mut ChimpDocumentUi) -> bool {
     if pane.view == ChimpDocumentView::Header && pane.header_usage.is_none() {
         pane.header_usage = Some(chimp_header_usage(document));
+        return true;
     }
+    false
 }
 
 pub(super) fn chimp_header_usage(document: &mut ChimpDocument) -> ChimpHeaderUsage {

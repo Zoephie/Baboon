@@ -327,9 +327,10 @@ impl ChimpView {
     }
 
     /// Re-derive the open and selected packages from the tile tree, which
-    /// owns the layout.
-    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) {
-        chimp.open_packages = self
+    /// owns the layout. Returns whether the open packages or the selection
+    /// changed.
+    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) -> bool {
+        let open_packages: Vec<String> = self
             .document_tree
             .as_ref()
             .map(|tree| {
@@ -342,13 +343,17 @@ impl ChimpView {
                     .collect()
             })
             .unwrap_or_default();
+        let mut changed = open_packages != chimp.open_packages;
+        chimp.open_packages = open_packages;
         if chimp
             .selected_package
             .as_ref()
             .is_some_and(|package| !chimp.open_packages.contains(package))
         {
             chimp.selected_package = chimp.open_packages.first().cloned();
+            changed = true;
         }
+        changed
     }
 
     fn filter_is_current(&self, query: &str) -> bool {

@@ -5144,4 +5144,35 @@ mod tests {
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
+
+    /// An open tag that nobody touches does not keep the window drawing. The
+    /// pane and the tile tree send a command every frame; applying one that
+    /// changed nothing used to ask for the next frame, which sent them again,
+    /// keeping a core busy for as long as any tag was open.
+    #[test]
+    fn an_open_tag_left_alone_lets_the_window_sleep() {
+        let kit = LooseKit::new("idle-repaint", "haloce_mcc");
+        kit.write_classic_ce("weapons/rifle", "weapon");
+        let mut app = app();
+        kit.install(&mut app);
+        let key = kit.open(&mut app, "weapons/rifle.weapon");
+        assert!(
+            app.views[app.model.kits[0].id].tag_tree.tiles.iter().any(
+                |(_, tile)| matches!(tile, egui_tiles::Tile::Pane(pane) if *pane == key)
+            ),
+            "the tag is laid out as a pane, so its frames send the commands"
+        );
+
+        let idle = repaint_delay_after(&mut app, Baboon::run_frame, |_| {});
+        assert!(
+            idle > Duration::from_millis(100),
+            "an idle open tag repaints every {idle:?}"
+        );
+
+        // The same measurement sees a frame that did change something.
+        let changed = repaint_delay_after(&mut app, Baboon::run_frame, |app| {
+            app.commands.send(crate::app::context::Command::Status("Changed".to_owned()));
+        });
+        assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
+    }
 }

@@ -43,8 +43,11 @@ pub(in crate::app) struct PaneDrawn {
 }
 
 impl Baboon {
-    /// Apply what a tag pane collected while it drew.
-    pub(in crate::app) fn apply_pane_drawn(&mut self, drawn: PaneDrawn, ctx: &egui::Context) {
+    /// Apply what a tag pane collected while it drew, returning whether that
+    /// changed anything the next frame draws. A pane sends this every frame,
+    /// so a frame of looking at the tag must come back false or it draws
+    /// the next one for nothing.
+    pub(in crate::app) fn apply_pane_drawn(&mut self, drawn: PaneDrawn, ctx: &egui::Context) -> bool {
         let PaneDrawn {
             kit,
             key,
@@ -54,8 +57,10 @@ impl Baboon {
             bitmap_hover_requests,
         } = drawn;
         let Some(kit_index) = self.model.kit_index(kit) else {
-            return;
+            return false;
         };
+        // An edit the kit refuses changes the status line, so any op counts.
+        let mut changed = !ops.is_empty();
         // Applying them opens the undo window, or closes it on a frame with
         // none, which is why a pane sends this every frame.
         self.apply_doc_ops(kit_index, &key, "Edit", ops, UndoStep::Coalesce);
@@ -65,6 +70,9 @@ impl Baboon {
             self.search.find.filter_results = false;
         }
         let kit_id = self.model.kits[kit_index].id;
+        changed |= bitmap_hover_requests
+            .lock()
+            .is_ok_and(|requests| !requests.is_empty());
         queue_bitmap_hover_thumbnails(
             &cx!(self, ctx),
             kit_index,
@@ -77,22 +85,23 @@ impl Baboon {
         // visible until something else happens to wake the UI -- an added
         // block element missing from that block's own instance selector, for
         // one.
-        if mutated {
-            ctx.request_repaint();
-        }
+        changed |= mutated;
         if let Some(block_path) = find_filter_block_jump {
             self.navigate_to_field(ctx, &key, &block_path);
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
+            changed = true;
         }
         // Model preview work starts only after the pane has drawn its shell,
         // so switching tabs can reach the screen before a complex geometry
         // parse begins. Follow-up texture/overlay/animation workers use the
-        // same post-draw hook once the base preview lands.
-        self.maybe_request_model_preview(kit_index, &key, ctx);
-        self.maybe_request_model_textures(kit_index, &key, ctx);
-        self.maybe_request_model_overlays(kit_index, &key, ctx);
-        self.maybe_request_model_animations(kit_index, &key, ctx);
-        self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+        // same post-draw hook once the base preview lands. Starting one puts
+        // the preview into a waiting state that has to be drawn.
+        changed |= self.maybe_request_model_preview(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_textures(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_overlays(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_animations(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+        changed
     }
 }
 

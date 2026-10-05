@@ -301,6 +301,29 @@ pub(in crate::app) fn screen(events: Vec<egui::Event>, time: f64) -> egui::RawIn
     }
 }
 
+/// How long egui may wait before the next frame, once `before_frame` has
+/// been applied just ahead of one drawn by `draw`. Frames run on an advancing
+/// clock first, so egui's own start-up repaints and the scrollbars fading in
+/// have settled.
+pub(in crate::app) fn repaint_delay_after(
+    app: &mut Baboon,
+    draw: impl Fn(&mut Baboon, &mut egui::Ui),
+    before_frame: impl FnOnce(&mut Baboon),
+) -> Duration {
+    let ctx = ctx();
+    Baboon::configure_context(&ctx);
+    let frame = |app: &mut Baboon, number: u32| {
+        let input = screen(Vec::new(), f64::from(number) / 60.0);
+        let output = crate::app::run_ui_test(&ctx, input, |ui| draw(app, ui));
+        output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+    };
+    for number in 0..30 {
+        frame(app, number);
+    }
+    before_frame(app);
+    frame(app, 30)
+}
+
 /// Draws the save prompt frame after frame, with an advancing clock.
 pub(in crate::app) struct PromptDriver {
     pub(in crate::app) ctx: egui::Context,

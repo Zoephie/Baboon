@@ -277,22 +277,32 @@ impl From<PokeCommand> for Command {
 impl Baboon {
     /// Apply every command queued this frame, in the order sent. A command
     /// may queue more; those run in the same pass rather than a frame late.
-    /// Drawing has already happened by now, so anything applied repaints.
+    /// Drawing has already happened by now, so a command that changed
+    /// something repaints. Some are sent every frame something is open and
+    /// usually change nothing; repainting for those would draw the next
+    /// frame, which sends them again, for as long as it stays open.
     pub(in crate::app) fn apply_commands(&mut self, ctx: &egui::Context) {
         loop {
             let commands = self.commands.take();
             if commands.is_empty() {
                 return;
             }
-            ctx.request_repaint();
+            let mut changed = false;
             for command in commands {
-                self.apply_command(command, ctx);
+                changed |= self.apply_command(command, ctx);
+            }
+            if changed {
+                ctx.request_repaint();
             }
         }
     }
 
-    fn apply_command(&mut self, command: Command, ctx: &egui::Context) {
+    /// Apply one command, returning whether it may have changed what the
+    /// next frame draws.
+    fn apply_command(&mut self, command: Command, ctx: &egui::Context) -> bool {
         match command {
+            Command::Editor(command) => return self.apply_editor_command(command, ctx),
+            Command::Chimp(command) => return self.apply_chimp_command(command, ctx),
             Command::Status(status) => self.model.status = status,
             Command::OpenFolder { path, label } => self.open_folder_in_explorer(path, &label),
             Command::EditPrefs(edit) => edit(&mut self.model.prefs),
@@ -306,16 +316,15 @@ impl Baboon {
             Command::TagOps(command) => self.apply_tag_ops_command(command, ctx),
             Command::Import(command) => self.apply_import_command(command, ctx),
             Command::Documents(command) => self.apply_documents_command(command, ctx),
-            Command::Editor(command) => self.apply_editor_command(command, ctx),
             Command::Browser(command) => self.apply_browser_command(command, ctx),
             Command::Kits(command) => self.apply_kits_command(command, ctx),
             Command::Audio(command) => self.apply_audio_command(command),
             Command::App(action) => self.apply_app_action(action, ctx),
             Command::Settings(command) => self.apply_settings_command(command, ctx),
             Command::FirstRun(command) => self.apply_first_run_command(command),
-            Command::Chimp(command) => self.apply_chimp_command(command, ctx),
             Command::OpenDialog(dialog) => self.dialogs.open_boxed(dialog),
         }
+        true
     }
 }
 
