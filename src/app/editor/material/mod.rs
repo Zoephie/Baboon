@@ -914,7 +914,7 @@ mod tests {
         let mut draw = |revision: (u64, u64, u64, u64)| {
             let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    crate::app::editor::fields::extracted_tests::tests::with_test_edit_context(
+                    crate::app::editor::fields::with_test_edit_context(
                         |edit| {
                             draw_material_tag(
                                 ui,

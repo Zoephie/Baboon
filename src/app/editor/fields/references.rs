@@ -893,3 +893,606 @@ pub(in crate::app) fn draw_foundation_flags_row(
     }
     ui.add_space(4.0);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn ce_collision_geometry_reference_uses_loaded_game_extension() {
+        let definitions_root = locate_definitions_root();
+        let ce_names = TagNameIndex::load_game(&definitions_root, GameId::HaloCe).unwrap();
+        let h3_names = TagNameIndex::load_game(&definitions_root, GameId::Halo3).unwrap();
+        let coll = parse_group_tag("coll").unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "baboon_ce_collision_reference_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("weapons").join("assault rifle")).unwrap();
+        let rel = "weapons\\assault rifle\\assault rifle";
+        std::fs::write(
+            root.join("weapons")
+                .join("assault rifle")
+                .join("assault rifle.model_collision_geometry"),
+            [],
+        )
+        .unwrap();
+
+        assert!(!reference_target_missing(
+            Some(&ce_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+        assert!(reference_target_missing(
+            Some(&h3_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+        assert!(reference_target_missing(None, Some(&root), coll, rel));
+        std::fs::write(
+            root.join("weapons")
+                .join("assault rifle")
+                .join("assault rifle.collision_model"),
+            [],
+        )
+        .unwrap();
+        assert!(!reference_target_missing(
+            Some(&h3_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A reference row's "missing on disk" check is answered from memory for a
+    /// second, not by a stat every frame, and still notices a file
+    /// that disappears once that interval has passed.
+    #[test]
+    fn reference_rows_recheck_their_target_every_second() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-ref-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let file = root.join("objects/crate.bitmap");
+        std::fs::write(&file, []).unwrap();
+        let bitmap = u32::from_be_bytes(*b"bitm");
+        let ctx = egui::Context::default();
+        let check_at = |time: f64| {
+            let mut missing = None;
+            let _ = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        missing = Some(reference_target_missing_cached(
+                            ui,
+                            None,
+                            Some(&root),
+                            bitmap,
+                            "objects\\crate",
+                        ));
+                    });
+                },
+            );
+            missing.unwrap()
+        };
+
+        assert!(!check_at(10.0));
+        std::fs::remove_file(&file).unwrap();
+        let within = check_at(10.5);
+        let after = check_at(11.5);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            !within,
+            "within the interval the remembered answer stands (no stat)"
+        );
+        assert!(after, "after it, the missing file is noticed");
+    }
+
+    /// Clear queues an edit only when a reference is stored; a draft alone is
+    /// discarded, and nothing is written for an empty reference.
+    #[test]
+    fn reference_clear_only_queues_an_edit_for_a_stored_reference() {
+        for (value, draft_text, has_reference) in [
+            ("", None, false),
+            ("NONE", None, false),
+            ("  none  ", None, false),
+            ("NONE", Some("mode:objects/draft"), false),
+            ("mode:objects/test", None, true),
+        ] {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            ctx.set_global_style(foundation_style());
+            with_test_edit_context(|edit| {
+                let path = "model";
+                if let Some(text) = draft_text {
+                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    draft.text = text.to_owned();
+                    draft.changed = true;
+                }
+                let frame = |events, edit: &mut FieldEditContext<'_>| {
+                    crate::app::run_ui_test(&ctx, egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 200.0))),
+                        events, ..Default::default()
+                    }, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            draw_foundation_tag_reference_row(
+                                ui, &field_display_meta(path), value,
+                                has_reference.then(|| (u32::from_be_bytes(*b"mode"), "objects/test".to_owned())),
+                                None, 0, path, edit, 300.0,
+                            );
+                        });
+                    })
+                };
+                let output = frame(Vec::new(), edit);
+                let suffix = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == "tag reference" => Some(shape),
+                    _ => None,
+                }).expect("reference row suffix");
+                // Clear is the square button immediately before the suffix.
+                let pos = egui::pos2(
+                    suffix.pos.x - ctx.global_style().spacing.item_spacing.x - ICON_BUTTON_SIZE.x * 0.5,
+                    suffix.pos.y + suffix.galley.size().y * 0.5,
+                );
+                let pointer = |pressed| egui::Event::PointerButton {
+                    pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default(),
+                };
+                frame(vec![egui::Event::PointerMoved(pos), pointer(true)], edit);
+                frame(vec![pointer(false)], edit);
+                frame(Vec::new(), edit);
+                assert_eq!(edit.pending.len(), usize::from(has_reference), "value {value:?}, draft {draft_text:?}");
+                if has_reference {
+                    assert_eq!(edit.pending[0].input, "NONE");
+                }
+                if draft_text.is_some() {
+                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    assert!(!draft.changed);
+                    assert!(draft.text.is_empty() || draft.text.eq_ignore_ascii_case("none"));
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn tag_reference_picker_paths_must_be_under_tags_root() {
+        let tags_root = PathBuf::from("tags");
+        let picked = tags_root
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.bitmap");
+
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&picked, &tags_root).unwrap(),
+            r"objects\characters\brute\bitmaps\mask.bitmap"
+        );
+
+        let outside = PathBuf::from("data")
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.tif");
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
+            "Selected file must be inside the tags folder"
+        );
+    }
+
+    #[test]
+    fn bitmap_hover_resolves_a_loaded_entry_from_reference_text() {
+        let bitmap_group = parse_group_tag("bitm").unwrap();
+        let entry = TagEntry {
+            key: "bitmap-key".to_owned(),
+            display_path: "ui/hud/scope.bitmap".to_owned(),
+            group_tag: bitmap_group,
+            group_name: Some("bitmap".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("tags/ui/hud/scope.bitmap")),
+        };
+
+        let resolved = bitmap_reference_hover_entry(
+            Some(std::slice::from_ref(&entry)),
+            None,
+            None,
+            r"ui\hud\scope.bitmap",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.key, entry.key);
+    }
+
+    #[test]
+    fn bitmap_hover_synthesizes_an_unvisited_loose_entry() {
+        let root = PathBuf::from("tags");
+        let resolved =
+            bitmap_reference_hover_entry(None, Some(&root), None, r"ui\hud\scope.bitmap", None)
+                .unwrap();
+
+        assert_eq!(resolved.display_path, "ui/hud/scope.bitmap");
+        assert!(matches!(
+            resolved.location,
+            TagEntryLocation::LooseFile(path) if path == root.join("ui").join("hud").join("scope.bitmap")
+        ));
+    }
+
+    #[test]
+    fn non_bitmap_references_do_not_request_bitmap_hovers() {
+        assert!(
+            bitmap_reference_hover_entry(
+                None,
+                Some(Path::new("tags")),
+                None,
+                r"ui\hud\scope.shader",
+                None,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn tag_reference_group_validator_allows_none_and_matching_group() {
+        let render_model = parse_group_tag("mode").unwrap();
+        let collision_model = parse_group_tag("coll").unwrap();
+        let empty = TagReferenceData {
+            group_tag_and_name: None,
+        };
+        let matching = TagReferenceData {
+            group_tag_and_name: Some((render_model, r"objects\foo\foo".to_owned())),
+        };
+        let mismatched = TagReferenceData {
+            group_tag_and_name: Some((collision_model, r"objects\foo\foo".to_owned())),
+        };
+
+        assert!(tag_reference_group_allowed(&empty, &[render_model]));
+        assert!(tag_reference_group_allowed(&matching, &[render_model]));
+        assert!(!tag_reference_group_allowed(&mismatched, &[render_model]));
+    }
+
+    #[test]
+    fn empty_schema_constrained_reference_keeps_its_required_group() {
+        let structure_design = parse_group_tag("sddt").unwrap();
+        let meta = FieldDisplayMeta {
+            label: "structure design".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: vec![structure_design],
+            read_only: false,
+            advanced: false,
+        };
+
+        assert_eq!(
+            tag_reference_accepted_groups(&meta, &GroupHierarchy::default()),
+            Some(vec![structure_design])
+        );
+    }
+
+    /// The schema decides what a reference takes: an `object` field takes
+    /// every object type, and a field whose schema lists no group takes any,
+    /// as in the tool. The group it points at now has no say: it once
+    /// narrowed a list-less Halo CE shader reference to its current type.
+    #[test]
+    fn the_schema_decides_the_accepted_groups() {
+        let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some(GameId::HaloReach));
+        let object = parse_group_tag("obje").unwrap();
+        let meta = |allowed| FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta(vec![object]), &hierarchy).unwrap();
+        for group in ["scen", "weap"] {
+            assert!(accepted.contains(&parse_group_tag(group).unwrap()), "{group}");
+        }
+        assert_eq!(tag_reference_accepted_groups(&meta(Vec::new()), &hierarchy), None);
+    }
+
+    /// A Halo CE model's shader reference allows `shader`, as tool.exe
+    /// declares it, and so takes every shader type: changing a shader_model
+    /// to a shader_environment needs no clearing first. The definitions
+    /// carried no groups for any Halo CE or Halo 2 reference before.
+    #[test]
+    fn a_halo_ce_model_shader_takes_every_shader_type() {
+        let definitions_root = locate_definitions_root();
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some(GameId::HaloCe));
+        let docs =
+            crate::app::help::field_docs::build_def_docs(&definitions_root, GameId::HaloCe, "gbxmodel");
+        let allowed: Vec<u32> = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Field {
+                    clean_name,
+                    tag_reference_allowed,
+                    ..
+                } if clean_name == "shader" => Some(tag_reference_allowed.clone()),
+                _ => None,
+            })
+            .expect("no shader field in gbxmodel");
+        assert_eq!(allowed, [parse_group_tag("shdr").unwrap()]);
+        let meta = FieldDisplayMeta {
+            label: "shader".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
+        for group in ["shdr", "soso", "senv", "schi", "swat"] {
+            assert!(accepted.contains(&parse_group_tag(group).unwrap()), "{group}");
+        }
+        assert!(!accepted.contains(&parse_group_tag("bitm").unwrap()));
+    }
+
+    /// Issue #46: Reach's multiplayer object type list `object` field allows
+    /// `object`, and must take every object type — a `.weapon` picked in the
+    /// browse dialog, a typed `weap:` reference — while still refusing what
+    /// is not an object.
+    #[test]
+    fn an_object_reference_takes_every_object_type() {
+        let definitions_root = locate_definitions_root();
+        let names = TagNameIndex::load_game(&definitions_root, GameId::HaloReach).unwrap();
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some(GameId::HaloReach));
+        let docs = crate::app::help::field_docs::build_def_docs(
+            &definitions_root,
+            GameId::HaloReach,
+            "multiplayer_object_type_list",
+        );
+        let allowed: Vec<u32> = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Field {
+                    clean_name,
+                    tag_reference_allowed,
+                    ..
+                } if clean_name == "object" => Some(tag_reference_allowed.clone()),
+                _ => None,
+            })
+            .expect("no object field in the multiplayer object type list");
+        assert_eq!(allowed, [parse_group_tag("obje").unwrap()]);
+        let meta = FieldDisplayMeta {
+            label: "object".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
+        for (extension, group) in [
+            ("biped", "bipd"),
+            ("weapon", "weap"),
+            ("scenery", "scen"),
+            ("vehicle", "vehi"),
+        ] {
+            assert_eq!(
+                tag_reference_group_for_extension(extension, Some(&accepted), Some(&names)),
+                Ok(parse_group_tag(group).unwrap()),
+                "{extension}"
+            );
+        }
+        // The browse dialog filters on all of them, under the schema's name.
+        let (filter_name, extensions) =
+            tag_reference_dialog_filter(Some(&accepted), Some(&names)).unwrap();
+        assert_eq!(filter_name, "object");
+        for extension in [
+            "biped",
+            "weapon",
+            "scenery",
+            "vehicle",
+            "equipment",
+            "crate",
+        ] {
+            assert!(
+                extensions.iter().any(|e| e == extension),
+                "the dialog hides .{extension}"
+            );
+        }
+        assert!(!extensions.iter().any(|e| e == "bitmap"));
+        let refused = tag_reference_group_for_extension("bitmap", Some(&accepted), Some(&names));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|message| message.starts_with("Selected tag must be a object (")),
+            "{refused:?}"
+        );
+
+        let mut pending = Vec::new();
+        commit_tag_reference_input(
+            &mut pending,
+            None,
+            "object types[0]/object",
+            "weap:objects\\weapons\\rifle\\assault_rifle\\assault_rifle".to_owned(),
+            Some(&accepted),
+            Some(&names),
+        );
+        assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
+    }
+
+    /// The catalog picker offers what the schema allows, or every group when
+    /// it allows none: the group the reference points at now has no say.
+    #[test]
+    fn catalog_picker_offers_the_schema_groups_or_any() {
+        let animation = parse_group_tag("jmad").unwrap();
+        let biped = parse_group_tag("bipd").unwrap();
+        let vehicle = parse_group_tag("vehi").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+
+        assert!(tag_reference_picker_group_allowed(&[animation], animation, false));
+        assert!(!tag_reference_picker_group_allowed(&[animation], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[biped, vehicle], vehicle, false));
+        assert!(!tag_reference_picker_group_allowed(&[biped, vehicle], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[], animation, false));
+        assert!(tag_reference_picker_group_allowed(&[], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[animation], weapon, true));
+    }
+
+    #[test]
+    fn catalog_picker_searches_names_and_groups_not_parent_folders() {
+        let model = parse_group_tag("mode").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let parent_only = TagEntry {
+            key: "ublock:model".to_owned(),
+            display_path: "objects/characters/elite/garbage/hg_arm.render_model".to_owned(),
+            group_tag: model,
+            group_name: Some("render_model".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/objects/characters/elite/garbage/hg_arm-render_model.ubulk"
+                    .to_owned(),
+            },
+        };
+        let rifle = TagEntry {
+            key: "ublock:weapon".to_owned(),
+            display_path: "objects/weapons/rifle/battle_rifle.weapon".to_owned(),
+            group_tag: weapon,
+            group_name: Some("weapon".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/objects/weapons/rifle/battle_rifle-weapon.ubulk".to_owned(),
+            },
+        };
+
+        assert!(!tag_reference_catalog_entry_matches(&parent_only, "elite"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "rifle"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "weapon"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "WEAP"));
+    }
+
+    #[test]
+    fn catalog_picker_is_exposed_only_for_iostore_sources() {
+        let container_source = LoadedSourceData {
+            label: "Campaign Evolved".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/CampaignEvolved/Content/Paks"),
+                containers: Vec::new(),
+                index: std::sync::Arc::new(crate::core::source::ContainerTagIndex::default()),
+                packages: std::sync::Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: std::sync::Arc::new(crate::core::source::ShippedTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: Some(GameId::CampaignEvolved),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let catalog = tag_reference_catalog_for_source(&container_source, true)
+            .expect("container source should expose a catalog");
+        assert!(catalog.expert_mode);
+
+        let loose_source = LoadedSourceData {
+            label: "H3EK".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("C:/H3EK/tags"),
+                game: Some(GameId::Halo3),
+                definitions_root: PathBuf::from("C:/H3EK/definitions"),
+            },
+            names: TagNameIndex::default(),
+            game: Some(GameId::Halo3),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
+    }
+
+    #[test]
+    fn picker_resolves_structure_design_from_loaded_game_definitions() {
+        let definitions_root = locate_definitions_root();
+        for game in ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc", "halo4_mcc"] {
+            let names = TagNameIndex::load_game(&definitions_root, GameId::from_id(game).unwrap()).unwrap();
+            let structure_design = parse_group_tag("sddt").unwrap();
+            assert_eq!(
+                tag_reference_group_for_extension(
+                    "structure_design",
+                    Some(&[structure_design]),
+                    Some(&names),
+                )
+                .unwrap(),
+                structure_design,
+                "{game}"
+            );
+        }
+    }
+
+    #[test]
+    fn tag_reference_value_icon_prefers_typed_or_committed_group() {
+        let render_model = parse_group_tag("mode").unwrap();
+        let collision_model = parse_group_tag("coll").unwrap();
+        let biped = parse_group_tag("bipd").unwrap();
+        let vehicle = parse_group_tag("vehi").unwrap();
+        let bitmap = parse_group_tag("bitm").unwrap();
+        let target = (collision_model, r"objects\foo\foo".to_owned());
+        let meta = |allowed| FieldDisplayMeta {
+            label: "reference".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+
+        assert_eq!(
+            tag_reference_value_icon_group(
+                &meta(vec![render_model]),
+                Some(&target),
+                r"objects\foo\foo.bitmap"
+            ),
+            Some(bitmap)
+        );
+        assert_eq!(
+            tag_reference_value_icon_group(
+                &meta(vec![render_model]),
+                Some(&target),
+                r"objects\foo\foo"
+            ),
+            Some(collision_model)
+        );
+        assert_eq!(
+            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE"),
+            Some(render_model)
+        );
+        assert_eq!(
+            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE"),
+            None
+        );
+    }
+}

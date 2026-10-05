@@ -3877,3 +3877,192 @@ mod wheel_gesture_tests {
         assert!(!frame(&ctx, true, OVER_BOX, BOX_RECT));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn parent_block_path_and_breadcrumb() {
+        assert_eq!(
+            parent_block_path("regions[0]/permutations").as_deref(),
+            Some("regions")
+        );
+        assert_eq!(parent_block_path("a/b/c").as_deref(), Some("a/b"));
+        assert_eq!(parent_block_path("a/b[3]").as_deref(), Some("a"));
+        assert_eq!(parent_block_path("regions"), None);
+
+        assert_eq!(
+            breadcrumb_for_path("regions[0]/permutations"),
+            "regions › permutations"
+        );
+        assert_eq!(breadcrumb_for_path("variants"), "variants");
+    }
+
+    /// A closed block-index dropdown builds the label it shows, not one per
+    /// element of its target block. Every block-index field on screen used to
+    /// build all of them every frame, so a frame's labels grew with the size
+    /// of every block an index pointed into.
+    #[test]
+    fn closed_block_index_dropdowns_do_not_label_every_target_element() {
+        let mut tag = TagFile::new(crate::app::test_definition_path(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .unwrap();
+        let target = {
+            let root = tag.root();
+            let index = root
+                .fields_all()
+                .find(|field| field.name() == "short block index")
+                .unwrap();
+            block_index_target_options(&root, &index, Some(root), "")
+                .expect("the test tag's block index resolves")
+                .path
+        };
+        let grow = |tag: &mut TagFile, by: usize| {
+            for _ in 0..by {
+                crate::core::document::apply::apply_block_ops(
+                    tag,
+                    vec![BlockOp {
+                        path: target.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut Dirty::default(),
+                );
+            }
+        };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let labels_for_one_frame = |tag: &TagFile| {
+            DROPDOWN_LABELS_BUILT.with(|count| count.set(0));
+            with_test_edit_context(|edit| {
+                let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_fields_with_docs(
+                            ui,
+                            &tag.root(),
+                            &TagNameIndex::default(),
+                            0,
+                            true,
+                            "",
+                            edit,
+                            None,
+                        );
+                    });
+                });
+            });
+            DROPDOWN_LABELS_BUILT.with(std::cell::Cell::get)
+        };
+
+        grow(&mut tag, 8);
+        crate::core::document::apply::apply_field_edit(&mut tag, "short block index", "2").unwrap();
+        let small = labels_for_one_frame(&tag);
+        grow(&mut tag, 32);
+        let large = labels_for_one_frame(&tag);
+
+        assert_eq!(
+            small, large,
+            "a frame built {small} labels over 8 target elements and {large} over 40"
+        );
+    }
+
+    /// A field navigation (reference jump, Find) selects the element holding
+    /// its target in whatever pane draws the block. Panes are scoped `tile{N}`;
+    /// the selection used to be written only under the pre-tiles `docked` /
+    /// `floating` scopes, so no pane ever saw it.
+    #[test]
+    fn field_nav_selects_target_element_in_any_pane_scope() {
+        let ctx = egui::Context::default();
+        let nav = |glow_until: f64| FieldNav {
+            kit: KitId(0),
+            tag_key: "test".to_owned(),
+            field_path: "sounds#2[3]/sound#0".to_owned(),
+            block_indices: vec![("sounds#2".to_owned(), 3)],
+            glow_until,
+        };
+        // The harness's context borrows for a lifetime local to its closure.
+        let first: &'static FieldNav = Box::leak(Box::new(nav(10.0)));
+        let second: &'static FieldNav = Box::leak(Box::new(nav(20.0)));
+        let other_tag: &'static FieldNav = Box::leak(Box::new(FieldNav {
+            tag_key: "other".to_owned(),
+            ..nav(30.0)
+        }));
+        with_test_edit_context(|edit| {
+            edit.view_scope = "tile7";
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 0);
+
+                    edit.field_nav = Some(first);
+                    assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 3);
+                    // Blocks off the target path are left alone.
+                    assert_eq!(block_selected_index(ui, edit, "other#4", 5), 0);
+
+                    // Applied once: paging while the target still glows sticks.
+                    set_block_selected_index(ui, edit, "sounds#2", 1);
+                    assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 1);
+
+                    // A new navigation to the same block selects again.
+                    edit.field_nav = Some(second);
+                    assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 3);
+
+                    // Another tag's navigation does not move this pane.
+                    set_block_selected_index(ui, edit, "sounds#2", 2);
+                    edit.field_nav = Some(other_tag);
+                    assert_eq!(block_selected_index(ui, edit, "sounds#2", 5), 2);
+                });
+            });
+        });
+    }
+
+    #[test]
+    fn screen_flash_explanation_fallback_present() {
+        let text = known_explanation_text("screen flash").unwrap();
+        assert!(text.contains("There are seven screen flash types"));
+        assert!(text.contains("LIGHTEN"));
+
+        assert!(text.contains("DST'"));
+    }
+
+    #[test]
+    fn internal_placeholder_titles_do_not_leak() {
+        assert_eq!(
+            inline_function_label("dirty whore", "rumble/low frequency rumble"),
+            "function"
+        );
+        assert_eq!(
+            visible_container_title("dirty whore", "rumble/low frequency rumble"),
+            "low frequency rumble"
+        );
+        assert!(is_internal_schema_marker_name("HIDE_GROUP_ID"));
+        assert!(is_internal_schema_marker_name("END_HIDE_GROUP_ID"));
+        assert!(is_internal_schema_marker_name("whore function"));
+    }
+
+    #[test]
+    fn format_block_size_label_is_stable_and_human_readable() {
+        assert_eq!(format_block_size_label(2, 36), "2 x 36 B = 72 B");
+        assert_eq!(format_block_size_label(64, 36), "64 x 36 B = 2.2 KiB");
+    }
+
+    #[test]
+    fn combo_scroll_next_index_clamps_and_uses_delta_direction() {
+        assert_eq!(combo_scroll_next_index(1, 3, 1), Some(2));
+        assert_eq!(combo_scroll_next_index(1, 3, 120), Some(2));
+        assert_eq!(combo_scroll_next_index(1, 3, -1), Some(0));
+        assert_eq!(combo_scroll_next_index(1, 3, -120), Some(0));
+        assert_eq!(combo_scroll_next_index(0, 3, -1), None);
+        assert_eq!(combo_scroll_next_index(2, 3, 1), None);
+        assert_eq!(combo_scroll_next_index(0, 0, 1), None);
+    }
+
+    #[test]
+    fn foundation_selected_width_reserves_only_current_header_cells() {
+        assert_eq!(foundation_selected_width(1_000.0), 344.0);
+        assert_eq!(foundation_selected_width(500.0), 120.0);
+        assert_eq!(foundation_selected_width(2_000.0), 420.0);
+    }
+}

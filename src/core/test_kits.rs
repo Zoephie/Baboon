@@ -70,6 +70,11 @@ pub(crate) fn definitions() -> &'static std::path::Path {
     std::path::Path::new(leak(crate::core::bundled::locate_definitions_root()))
 }
 
+/// A file under the bundled definitions, e.g. `"halo2_mcc/model.json"`.
+pub(crate) fn test_definition_path(rel: &str) -> PathBuf {
+    crate::core::bundled::locate_definitions_root().join(rel)
+}
+
 pub(crate) fn leak(path: PathBuf) -> &'static str {
     Box::leak(path.display().to_string().into_boxed_str())
 }

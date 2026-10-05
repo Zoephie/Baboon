@@ -410,3 +410,437 @@ pub(in crate::app) fn format_bytes(bytes: usize) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Read a Halo 2 kit sound, or `None` (with a skip message naming the
+    /// variable) when `BLAM_TEST_H2EK` isn't set.
+    fn h2_kit_sound(rel: &str) -> Option<TagFile> {
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = crate::core::test_kits::h2ek_tags().join(rel);
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: set BLAM_TEST_H2EK to a Halo 2 kit's tags ({})", tag_path.display());
+            return None;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        Some(
+            crate::core::source::read_tag_at_path(&tag_path, Some(GameId::Halo2), Some(defs), group)
+                .expect("read H2 sound tag"),
+        )
+    }
+
+    /// Whole-tag H2 extraction end-to-end (skip-if-absent): build the same rows
+    /// the player builds and run the real `AudioState::run_extract` for one
+    /// language, validating a WAV per permutation at that language's length.
+    #[test]
+    fn h2_extract_writes_one_wav_per_permutation_in_the_chosen_language() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let dir = crate::core::test_kits::unique_temp_dir("h2_extract_german");
+        let source = RowSource {
+            h2: Some(&h2),
+            language: Some("german"),
+            sound_rel: None,
+            multi_pr: false,
+        };
+        let items = build_extract_items(&tag, &rows, source, &dir, false);
+        assert_eq!(items.len(), rows.len(), "every permutation has German");
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "h2".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        for row in &rows {
+            let RowKind::InlineH2 { lpi } = row.kind else {
+                panic!("{} should be an H2 language row", row.name);
+            };
+            let (entry, fallback) = h2.entry_for(lpi, Some("german")).unwrap();
+            assert!(!fallback);
+            let wav = std::fs::read(dir.join(format!("{}.wav", row.name))).expect("wav written");
+            assert_eq!(&wav[0..4], b"RIFF");
+            // 16-bit mono: the data chunk is 2 bytes a frame.
+            let frames = (wav.len() - 44) / 2;
+            let expected = (h2.duration_secs(entry).unwrap() * 48_000.0).round();
+            assert_eq!(frames as f64, expected, "{}: German length", row.name);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each permutation plays its own audio in the chosen language. Rows used to
+    /// take the Nth blob of a flat list of every language of every permutation,
+    /// so `seefoe`'s four rows played permutation `1` in English, Portuguese,
+    /// German and French.
+    #[test]
+    fn h2_rows_play_their_own_permutation_in_the_chosen_language() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        assert_eq!(
+            h2.languages,
+            [
+                "english",
+                "japanese",
+                "german",
+                "french",
+                "spanish",
+                "italian",
+                "korean",
+                "chinese",
+                "portuguese"
+            ]
+        );
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "4", "5"]);
+        for (ordinal, row) in rows.iter().enumerate() {
+            let RowKind::InlineH2 { lpi } = row.kind else {
+                panic!("{} should be an H2 language row", row.name);
+            };
+            assert_eq!(lpi, ordinal, "{} keeps its own entry", row.name);
+            for language in [None, Some("german"), Some("portuguese")] {
+                let (entry, fallback) = h2.entry_for(lpi, language).unwrap();
+                assert!(!fallback);
+                assert_eq!(entry.language, language.unwrap_or("english"));
+            }
+        }
+        // English perm `1` is 0.65 s: 62,400 bytes of 16-bit mono at 48 kHz,
+        // the engine's own duration rule.
+        let (english, _) = h2.entry_for(0, None).unwrap();
+        assert_eq!(h2.duration_secs(english), Some(0.65));
+    }
+
+    /// Render the sound player for `tag` with `language` chosen and the clip
+    /// `selected` (a clip id) picked, returning every piece of text it paints.
+    fn painted_sound_player(
+        tag: &TagFile,
+        language: Option<&str>,
+        selected: Option<&str>,
+    ) -> Vec<String> {
+        let ctx = egui::Context::default();
+        if let Some(id) = selected {
+            ctx.data_mut(|data| {
+                data.insert_temp(clip_selection_id("sound", "test"), id.to_owned())
+            });
+        }
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut sinks = EditSinks::default();
+                        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+                        edit.game = Some(GameId::Halo2);
+                        edit.sound_language = language;
+                        draw_sound_player(ui, tag, &mut edit);
+                    });
+                },
+            );
+            painted = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        painted
+    }
+
+    /// The clip id the player gives a permutation row.
+    fn clip_id(row: &SoundPermRow, language: Option<&str>) -> String {
+        format!(
+            "{}:{}:{}",
+            row.pr_index,
+            row.perm_index,
+            language.unwrap_or("")
+        )
+    }
+
+    /// The player shows what each permutation is — its name and length in the
+    /// chosen language, one at a time as it is picked — instead of the pitch
+    /// range `|default|`, offers the tag's languages, and describes what that
+    /// language plays.
+    #[test]
+    fn h2_sound_player_shows_lengths_languages_and_the_chosen_format() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let has = |painted: &[String], text: &str| painted.iter().any(|shown| shown == text);
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "4", "5"]);
+
+        let english = painted_sound_player(&tag, None, None);
+        for text in [
+            "class: unit_dialog",
+            "1",
+            "0:00.000 / 0:00.650",
+            "\u{1F310} English",
+            "opus \u{00B7} mono \u{00B7} 48 kHz",
+        ] {
+            assert!(has(&english, text), "missing {text:?} in {english:?}");
+        }
+        assert!(has(&english, "\u{2B07} Extract all (English)"));
+        assert!(has(&english, "\u{2B07} All languages"));
+        // The third extract button is the selected permutation's own.
+        assert!(has(&english, "\u{2B07} 1"), "{english:?}");
+        assert!(
+            !english.iter().any(|shown| shown.contains("|default|")),
+            "a lone default pitch range isn't shown: {english:?}"
+        );
+        // Picking each permutation shows it, with its own length.
+        for row in &rows {
+            let painted = painted_sound_player(&tag, None, Some(&clip_id(row, None)));
+            let (entry, _) = h2.entry_for(lpi_of(row), None).unwrap();
+            let length = format!(
+                "0:00.000 / {}",
+                format_play_time(h2.duration_secs(entry).unwrap())
+            );
+            assert!(
+                has(&painted, &row.name),
+                "{} not shown: {painted:?}",
+                row.name
+            );
+            assert!(
+                has(&painted, &length),
+                "{} lacks {length:?}: {painted:?}",
+                row.name
+            );
+        }
+
+        let portuguese = painted_sound_player(&tag, Some("portuguese"), None);
+        assert!(
+            has(&portuguese, "xbox adpcm \u{00B7} mono \u{00B7} 22.05 kHz"),
+            "{portuguese:?}"
+        );
+        assert!(has(&portuguese, "(rate inferred)"));
+        assert!(has(&portuguese, "\u{2B07} Extract all (Portuguese)"));
+
+        // Another game's language this tag never had: say so, play English.
+        let mexican = painted_sound_player(&tag, Some("mexican"), None);
+        assert!(
+            has(
+                &mexican,
+                "Mexican isn't in this tag \u{2014} playing English."
+            ),
+            "{mexican:?}"
+        );
+        assert!(has(&mexican, "\u{1F310} English"));
+    }
+
+    fn lpi_of(row: &SoundPermRow) -> usize {
+        match row.kind {
+            RowKind::InlineH2 { lpi } => lpi,
+            _ => panic!("{} is not a Halo 2 language row", row.name),
+        }
+    }
+
+    /// A permutation missing the chosen language says so and plays English,
+    /// but a bulk extract leaves it out rather than filing English audio
+    /// under `data_japanese`.
+    #[test]
+    fn h2_permutation_missing_the_language_falls_back_and_is_not_extracted() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_loose/16_taunt/tnt_elt.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        assert_eq!(rows.len(), 3);
+        // Shown for the permutation that lacks it, when that one is picked.
+        let notes: Vec<bool> = rows
+            .iter()
+            .map(|row| {
+                painted_sound_player(
+                    &tag,
+                    Some("japanese"),
+                    Some(&clip_id(row, Some("japanese"))),
+                )
+                .iter()
+                .any(|shown| shown == "no Japanese \u{00B7} plays English")
+            })
+            .collect();
+        assert_eq!(notes.iter().filter(|note| **note).count(), 1, "{notes:?}");
+
+        let source = RowSource {
+            h2: Some(&h2),
+            language: Some("japanese"),
+            sound_rel: None,
+            multi_pr: false,
+        };
+        let base = std::path::Path::new("data_japanese");
+        assert_eq!(build_extract_items(&tag, &rows, source, base, false).len(), 2);
+    }
+
+    /// Portuguese is legacy Xbox ADPCM under an Opus tag. It used to go to the
+    /// Opus decoder ("no opus packets decoded"); it decodes as ADPCM at the
+    /// rate its mouth data implies, not the tag's 48 kHz.
+    #[test]
+    fn h2_legacy_language_decodes_with_its_own_codec_and_inferred_rate() {
+        use super::audio::InlineCodec;
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let (entry, _) = h2.entry_for(0, Some("portuguese")).unwrap();
+        assert!(matches!(entry.codec, InlineCodec::XboxAdpcm));
+        assert_eq!(h2.rate_of(entry), (22_050, H2RateSource::Inferred));
+        let (english, _) = h2.entry_for(0, None).unwrap();
+        assert_eq!(h2.rate_of(english), (48_000, H2RateSource::Tag));
+
+        let (bytes, offsets) = h2.samples(&tag, entry).unwrap();
+        let (codec, channels, rate) = h2.decode_params(entry);
+        let pcm = super::audio::decode_inline_chunked(codec, &bytes, &offsets, channels, rate)
+            .expect("portuguese decodes");
+        assert_eq!(pcm.sample_rate, 22_050);
+        let seconds = pcm.frame_count() as f64 / 22_050.0;
+        assert!((seconds - h2.duration_secs(entry).unwrap()).abs() < 1e-9);
+    }
+
+    /// A permutation's `language permutation info` index isn't its position:
+    /// in `marine_jump` the first permutation's audio is entry 6.
+    #[test]
+    fn h2_permutation_uses_its_stored_index_not_its_position() {
+        let Some(tag) = h2_kit_sound("sound/characters/marines/marine_jump.sound") else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        assert!(matches!(rows[0].kind, RowKind::InlineH2 { lpi: 6 }));
+        assert!(matches!(rows[1].kind, RowKind::InlineH2 { lpi: 0 }));
+    }
+
+    /// Halo 2's older layout keeps samples on the permutation, like CE, but names
+    /// the codec `compression`. Read through CE's `format`, its Xbox ADPCM was
+    /// decoded as PCM noise.
+    #[test]
+    fn h2_older_layout_reads_compression_not_ce_format() {
+        use super::audio::InlineCodec;
+        let Some(tag) = h2_kit_sound("sound/characters/footsteps/grunt/dirt/jump_up.sound") else {
+            return;
+        };
+        assert!(H2Sound::read(&tag).is_none(), "no language entries in this layout");
+        let rows = sound_permutation_rows(&tag, None);
+        assert_eq!(rows.len(), 6);
+        for row in &rows {
+            assert!(
+                matches!(
+                    row.kind,
+                    RowKind::InlinePermutation {
+                        codec: InlineCodec::XboxAdpcm,
+                        channels: 1,
+                        sample_rate: 44_100,
+                    }
+                ),
+                "{}",
+                row.name
+            );
+        }
+    }
+
+    /// Every Halo 2 sound's every language entry decodes, to exactly the length
+    /// the engine computes from the tag (`sound_definitions.cpp`: count × ½ ×
+    /// encoding factor ÷ rate). This is the gate on the whole model: the entry
+    /// choice, the per-entry codec, the inferred legacy rate, and the Opus
+    /// decoder's negated last packet all have to be right for the lengths to
+    /// agree. Long: run with `--ignored` in release.
+    #[test]
+    #[ignore]
+    fn h2_every_language_entry_decodes_to_the_engine_length() {
+        let root = crate::core::test_kits::h2ek_tags();
+        if !root.exists() {
+            eprintln!("skip: set BLAM_TEST_H2EK");
+            return;
+        }
+        let mut files = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "sound") {
+                    files.push(path);
+                }
+            }
+        }
+        let total = files.len();
+        let (mut tags_with_entries, mut entries, mut unknown_length) = (0usize, 0usize, 0usize);
+        let mut failures = Vec::new();
+        for path in &files {
+            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().into_owned();
+            let tag = h2_kit_sound(&rel).unwrap();
+            let Some(h2) = H2Sound::read(&tag) else {
+                continue;
+            };
+            tags_with_entries += 1;
+            let rows = sound_permutation_rows(&tag, Some(&h2));
+            for row in &rows {
+                let RowKind::InlineH2 { lpi } = row.kind else {
+                    continue;
+                };
+                for entry in h2.entries(lpi) {
+                    entries += 1;
+                    let (bytes, offsets) = h2.samples(&tag, entry).unwrap();
+                    let (codec, channels, rate) = h2.decode_params(entry);
+                    let decoded = match super::audio::decode_inline_chunked(
+                        codec, &bytes, &offsets, channels, rate,
+                    ) {
+                        Ok(pcm) => pcm.frame_count() as f64,
+                        Err(error) => {
+                            failures.push(format!("{rel} {} {}: {error}", row.name, entry.language));
+                            continue;
+                        }
+                    };
+                    let Some(expected) = h2.duration_secs(entry).map(|s| s * f64::from(rate)) else {
+                        unknown_length += 1;
+                        continue;
+                    };
+                    if (decoded - expected).abs() > 0.5 {
+                        failures.push(format!(
+                            "{rel} {} {}: decoded {decoded} frames, engine says {expected}",
+                            row.name, entry.language
+                        ));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "{total} sound tags, {tags_with_entries} with language entries, {entries} entries \
+             decoded, {unknown_length} without a stored length, {} failures",
+            failures.len()
+        );
+        for failure in failures.iter().take(40) {
+            eprintln!("  {failure}");
+        }
+        assert!(failures.is_empty());
+    }
+}

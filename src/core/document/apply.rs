@@ -1629,3 +1629,524 @@ mod deferred_ops_tests {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::value::{append_field_path, is_editable_tag, is_saveable_tag};
+    use crate::core::format::TagNameIndex;
+    use crate::core::game::GameId;
+    use crate::core::test_kits::test_definition_path;
+    use blam_tags::{Endian, TagStruct};
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn block_index_value_reads_all_variants() {
+        use blam_tags::TagFieldData::*;
+        assert_eq!(block_index_value(&CharBlockIndex(-1)), Some(-1));
+        assert_eq!(block_index_value(&ShortBlockIndex(5)), Some(5));
+        assert_eq!(block_index_value(&LongBlockIndex(42)), Some(42));
+        assert_eq!(block_index_value(&CustomShortBlockIndex(3)), Some(3));
+        // Non-block-index values don't read as a block index.
+        assert_eq!(block_index_value(&LongInteger(7)), None);
+    }
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Regression (skip-if-absent): clearing a classic Halo CE tag_reference to
+    /// NONE — or saving a freshly-created reference — must reset the inline
+    /// group + path-length words. When the reference's sub-chunk payload is
+    /// emptied (`TagReferenceData::to_bytes(None)` yields no bytes), the classic
+    /// encoder used to leave the stale on-disk path length in place while
+    /// writing no trailing path, so re-decoding hit "unexpected EOF reading
+    /// tag_reference path: need N bytes, have M" and `write_atomic` failed
+    /// verification — corrupting Save As / new-tag saves. This drives the exact
+    /// Baboon load→edit→save path (read_tag_at_path → apply_field_edit →
+    /// write_atomic) that the field reported.
+    #[test]
+    #[ignore]
+    fn ce_shader_model_clear_reference_saves() {
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
+            "haloce_mcc",
+            "characters/crewman/shaders/crewman_body.shader_model",
+        ));
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"soso");
+        let out = std::env::temp_dir().join("baboon_ce_clear_ref.shader_model");
+        let load = || {
+            crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
+                .expect("read CE shader_model tag")
+        };
+
+        // Save As of the unmodified tag round-trips.
+        load()
+            .write_atomic(&out)
+            .expect("Save As of unmodified tag");
+
+        // Setting a reference to a new path round-trips (the pre-existing path).
+        let mut edited = load();
+
+        apply_field_edit(
+            &mut edited,
+            "base map",
+            "weapons\\smg\\bitmaps\\smg.bitmap",
+        )
+        .expect("set base map");
+        edited.write_atomic(&out).expect("save after set");
+
+        // Clearing a long-path reference to NONE round-trips (the regression).
+        let mut cleared = load();
+        apply_field_edit(&mut cleared, "base map", "none").expect("clear base map");
+        cleared
+            .write_atomic(&out)
+            .expect("save after clear-to-none must verify");
+
+        // The cleared reference reads back as a null reference — an empty path,
+        // the same shape a genuine stock null (e.g. the detail map) decodes to,
+        // which Baboon renders as NONE.
+        let reread = crate::core::source::read_tag_at_path(&out, Some(GameId::HaloCe), Some(defs), group)
+            .expect("reread cleared tag");
+        let root = reread.root();
+        let base = root
+            .field_path("base map")
+            .and_then(|f| f.value())
+            .expect("base map field present");
+        match base {
+            TagFieldData::TagReference(r) => {
+                let path = r.group_tag_and_name.as_ref().map(|(_, p)| p.as_str());
+                assert!(
+                    path.is_none_or(str::is_empty),
+                    "cleared ref should have no path, got {path:?}"
+                );
+            }
+            other => panic!("expected tag reference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn euler_angle_edit_round_trips_through_tag_serialization() {
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let mut tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let mut dirty = Dirty::default();
+
+        let status = apply_pending_edits(
+            &mut tag,
+            vec![PendingFieldEdit {
+                path: "real euler angles 3d".to_owned(),
+                input: "-0.65, 0, 1.25".to_owned(),
+            }],
+            &mut dirty,
+        );
+
+        assert_eq!(
+            status.status.as_deref(),
+            Some("Edited real euler angles 3d")
+        );
+        assert_eq!(status.outcomes.len(), 1);
+        assert_eq!(status.outcomes[0].path, "real euler angles 3d");
+        assert_eq!(status.outcomes[0].input, "-0.65, 0, 1.25");
+        assert!(status.outcomes[0].result.is_ok());
+        assert!(dirty.is_set());
+        let bytes = tag.write_to_bytes().unwrap();
+        let reopened = TagFile::read_from_bytes(&bytes).unwrap();
+        let value = reopened
+            .root()
+            .field("real euler angles 3d")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealEulerAngles3d(value) = value else {
+            panic!("expected real euler angles 3d");
+        };
+        // The typed degrees survive as the radians they mean.
+        assert!((value.yaw + 0.65f32.to_radians()).abs() < 0.0001);
+        assert!(value.pitch.abs() < 0.0001);
+        assert!((value.roll - 1.25f32.to_radians()).abs() < 0.0001);
+    }
+
+    #[test]
+    fn model_variant_ops_create_update_and_drop_regions() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/model.json")).unwrap();
+        let mut dirty = Dirty::default();
+
+        let status = apply_model_variant_ops(
+            &mut tag,
+            vec![ModelVariantOp::Create {
+                name: "test".to_owned(),
+                regions: vec![ModelVariantRegionChoice {
+                    region_name: "body".to_owned(),
+                    permutation_name: "default".to_owned(),
+                }],
+            }],
+            &mut dirty,
+        );
+        assert_eq!(status.as_deref(), Some("Created model variant 'test'"));
+        assert!(dirty.is_set());
+        assert_variant(&tag, 0, "test", "body", "default");
+
+        let status = apply_model_variant_ops(
+            &mut tag,
+            vec![ModelVariantOp::Update {
+                variant_index: 0,
+                regions: vec![ModelVariantRegionChoice {
+                    region_name: "head".to_owned(),
+                    permutation_name: "damaged".to_owned(),
+                }],
+            }],
+            &mut dirty,
+        );
+        assert_eq!(status.as_deref(), Some("Updated model variant 0"));
+        assert_variant(&tag, 0, "test", "head", "damaged");
+    }
+
+    #[test]
+    fn h2_render_model_marker_translation_and_rotation_are_editable() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/render_model.json")).unwrap();
+        tag.container = test_halo2_render_model_container();
+        {
+            let mut root = tag.root_mut();
+
+            let mut field = root.field_path_mut("marker groups").unwrap();
+            let mut marker_groups = field.as_block_mut().unwrap();
+            marker_groups.add_element();
+        }
+        {
+            let mut root = tag.root_mut();
+            let mut field = root.field_path_mut("marker groups[0]/markers").unwrap();
+            let mut markers = field.as_block_mut().unwrap();
+            markers.add_element();
+        }
+
+        let mut dirty = Dirty::default();
+        let status = apply_pending_edits(
+            &mut tag,
+            vec![
+                PendingFieldEdit {
+                    path: "marker groups[0]/markers[0]/translation".to_owned(),
+                    input: "-0.27, 0, 0.73".to_owned(),
+                },
+                PendingFieldEdit {
+                    path: "marker groups[0]/markers[0]/rotation".to_owned(),
+                    input: "-0.38, 0, -0.92, 0".to_owned(),
+                },
+            ],
+            &mut dirty,
+        );
+
+        assert_eq!(
+            status.status.as_deref(),
+            Some("Edited marker groups[0]/markers[0]/rotation")
+        );
+        assert!(status.outcomes.iter().all(|outcome| outcome.result.is_ok()));
+        assert!(dirty.is_set());
+        let root = tag.root();
+        let translation = root
+            .field_path("marker groups[0]/markers[0]/translation")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealPoint3d(translation) = translation else {
+            panic!("translation should be a real point 3d");
+        };
+        assert!((translation.x + 0.27).abs() < 0.0001);
+        assert!((translation.y - 0.0).abs() < 0.0001);
+        assert!((translation.z - 0.73).abs() < 0.0001);
+
+        let rotation = root
+            .field_path("marker groups[0]/markers[0]/rotation")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealQuaternion(rotation) = rotation else {
+            panic!("rotation should be a real quaternion");
+        };
+        assert!((rotation.i + 0.38).abs() < 0.0001);
+        assert!((rotation.j - 0.0).abs() < 0.0001);
+        assert!((rotation.k + 0.92).abs() < 0.0001);
+        assert!((rotation.w - 0.0).abs() < 0.0001);
+        assert_h2_render_model_write_atomic_verifies(&tag);
+    }
+
+    fn test_halo2_render_model_container() -> blam_tags::file::TagContainer {
+        let mut header = vec![0; 64];
+        header[36..40].copy_from_slice(b"edom");
+        header[56..58].copy_from_slice(&0u16.to_le_bytes());
+        header[60..64].copy_from_slice(b"!MLB");
+        blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header,
+        }
+    }
+
+    fn assert_h2_render_model_write_atomic_verifies(tag: &TagFile) {
+        let mut path = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!(
+            "baboon_h2_render_model_marker_{}_{}.render_model",
+            std::process::id(),
+            stamp
+        ));
+        let _ = std::fs::remove_file(&path);
+        tag.write_atomic(&path).unwrap_or_else(|error| {
+            panic!(
+                "write_atomic verification failed for {}: {error}",
+                path.display()
+            )
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn assert_variant(
+        tag: &TagFile,
+        variant_index: usize,
+        variant_name: &str,
+        region_name: &str,
+        permutation_name: &str,
+    ) {
+        let variants = tag
+            .root()
+            .field("variants")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let variant = variants.element(variant_index).unwrap();
+        assert_eq!(
+            variant.read_string_id("name").as_deref(),
+            Some(variant_name)
+        );
+        let regions = variant
+            .field("regions")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(regions.len(), 1);
+        let region = regions.element(0).unwrap();
+        assert_eq!(
+            region.read_string_id("region name").as_deref(),
+            Some(region_name)
+        );
+        let permutations = region
+            .field("permutations")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(permutations.len(), 1);
+        let permutation = permutations.element(0).unwrap();
+        assert_eq!(
+            permutation.read_string_id("permutation name").as_deref(),
+            Some(permutation_name)
+        );
+    }
+
+    /// A little-endian tag holds an edit little-endian — the anchor for the
+    /// big-endian claim below, and the reason that claim needs real data:
+    /// element bytes are stored in the source wire order, so an edit's byte
+    /// order is a property of the tag it was read from, not of the editor.
+    #[test]
+    fn an_edit_is_stored_in_the_tags_own_byte_order() {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        add_block_element(&mut tag, "control points").unwrap();
+        apply_field_edit(&mut tag, "control points[0]/position", "1.5, 2.5, 3.5").unwrap();
+
+        let bytes = tag.write_to_bytes().unwrap();
+        let mut wanted = Vec::new();
+        for value in [1.5f32, 2.5, 3.5] {
+            wanted.extend_from_slice(&value.to_le_bytes());
+        }
+        assert!(
+            bytes.windows(wanted.len()).any(|window| window == wanted),
+            "a little-endian tag must hold the edit little-endian"
+        );
+    }
+
+    /// Skip-if-absent, and the only place the big-endian edit path can actually
+    /// be exercised: a tag's element bytes carry the byte order they were read
+    /// in, and nothing here can manufacture those — flipping `TagFile::endian`
+    /// on a tag built from a schema changes the file's wire marker and not one
+    /// byte of its block data, so a synthetic "big-endian" tag would agree with
+    /// a broken encoder.
+    ///
+    /// Sweeps the whole build (or `BABOON_MONOLITHIC_TAGS` tags of it) and
+    /// reports a ledger: every tag counted before anything is filtered, and
+    /// every skip named, so a run that reached almost nothing cannot read as a
+    /// clean pass.
+    ///
+    /// Run against a real Halo 4 development build:
+    ///   BABOON_MONOLITHIC="/path/to/tag_cache/blob_index.dat" \
+    ///     cargo test a_monolithic_tag_edit -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a monolithic tag build; set BABOON_MONOLITHIC"]
+    fn a_monolithic_tag_edit_is_stored_big_endian() {
+        let Ok(blob_index) = std::env::var("BABOON_MONOLITHIC") else {
+            eprintln!("skip: BABOON_MONOLITHIC not set");
+            return;
+        };
+        let blob_index = std::path::PathBuf::from(blob_index);
+        if !blob_index.exists() {
+            eprintln!("skip: no monolithic build at {}", blob_index.display());
+            return;
+        }
+        let limit = std::env::var("BABOON_MONOLITHIC_TAGS")
+            .ok()
+            .and_then(|count| count.parse::<usize>().ok())
+            .unwrap_or(usize::MAX);
+        let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
+        let loaded = crate::core::source::load_monolithic_blob_index(blob_index, &names)
+            .expect("open the monolithic build");
+
+        let total = loaded.entries.len().min(limit);
+        let (mut unreadable, mut no_real_field, mut edited) = (0usize, 0usize, 0usize);
+        let mut read_panics = Vec::new();
+        let mut failures = Vec::new();
+        // Reading a tag can panic inside the engine's geometry decoder on this
+        // build. That is not what this test is about, so it is caught, counted,
+        // and named rather than allowed to end the sweep at the first one.
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        // Distinctive enough that finding its 4 bytes in a tag is not a
+        // coincidence, and asymmetric under byte-swap.
+        let value = 1234.5677f32;
+        let big = value.to_be_bytes();
+        let little = value.to_le_bytes();
+
+        for entry in loaded.entries.iter().take(limit) {
+            let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::core::source::read_entry(&loaded.source, entry)
+            }));
+            let mut tag = match read {
+                Ok(Ok(tag)) => tag,
+                // Counted and named, not silently passed over: a build Baboon
+                // cannot parse is a different result from one it edits cleanly.
+                Ok(Err(_)) => {
+                    unreadable += 1;
+                    continue;
+                }
+                Err(_) => {
+                    read_panics.push(entry.display_path.clone());
+                    continue;
+                }
+            };
+            assert_eq!(tag.endian, Endian::Be, "a monolithic build is big-endian");
+            assert!(
+                is_editable_tag(entry, &tag),
+                "every tag in the build must be editable"
+            );
+            assert!(
+                !is_saveable_tag(entry, &tag),
+                "and none of them saveable: {}",
+                entry.display_path
+            );
+            let Some(path) = first_real_field_path(tag.root(), 0, "") else {
+                no_real_field += 1;
+                continue;
+            };
+
+            if let Err(error) = apply_field_edit(&mut tag, &path, &value.to_string()) {
+                failures.push(format!(
+                    "{} / {path}: edit failed: {error}",
+                    entry.display_path
+                ));
+                continue;
+            }
+            let read_back = tag.root().field_path(&path).and_then(|field| field.value());
+            if !matches!(read_back, Some(TagFieldData::Real(back)) if (back - value).abs() < 0.001)
+            {
+                failures.push(format!(
+                    "{} / {path}: read back as {read_back:?}, not the value typed",
+                    entry.display_path
+                ));
+                continue;
+            }
+
+            let bytes = tag.write_to_bytes().unwrap();
+            if !bytes.windows(4).any(|window| window == big) {
+                failures.push(format!(
+                    "{} / {path}: the edit did not land big-endian",
+                    entry.display_path
+                ));
+                continue;
+            }
+            if bytes.windows(4).any(|window| window == little) {
+                failures.push(format!(
+                    "{} / {path}: the value also appears little-endian",
+                    entry.display_path
+                ));
+                continue;
+            }
+            edited += 1;
+        }
+
+        std::panic::set_hook(previous_hook);
+        eprintln!(
+            "{total} tag(s) in the build: {edited} edited big-endian, {no_real_field} with no \
+             real field to type into, {unreadable} unreadable, {} panicked on read, {} failed",
+            read_panics.len(),
+            failures.len()
+        );
+        // Caught so one bad tag cannot end the sweep, but still a failure: the
+        // whole build read clean once `half_to_f32` stopped overflowing on
+        // subnormal halves, and a tag that panics on read is a tag whose tab
+        // sits on "Loading…" forever.
+        assert!(
+            read_panics.is_empty(),
+            "{} tag(s) panicked while being read: {}",
+            read_panics.len(),
+            read_panics
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        assert!(
+            failures.is_empty(),
+            "{} failure(s):\n{}",
+            failures.len(),
+            failures
+                .iter()
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert!(edited > 0, "no tag in the build had a real field to edit");
+    }
+
+    /// Path of the first plain `real` field in `tag_struct`, searching nested
+    /// structs and the first element of each block.
+    fn first_real_field_path(
+        tag_struct: TagStruct<'_>,
+        depth: usize,
+        prefix: &str,
+    ) -> Option<String> {
+        if depth > 3 {
+            return None;
+        }
+        for field in tag_struct.fields() {
+            let path = append_field_path(prefix, field.name());
+            if matches!(field.value(), Some(TagFieldData::Real(_))) {
+                return Some(path);
+            }
+            if let Some(nested) = field.as_struct() {
+                if let Some(found) = first_real_field_path(nested, depth + 1, &path) {
+                    return Some(found);
+                }
+            } else if let Some(block) = field.as_block() {
+                if let Some(element) = block.element(0) {
+                    let element_path = format!("{path}[0]");
+                    if let Some(found) = first_real_field_path(element, depth + 1, &element_path) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+        None
+    }
+}

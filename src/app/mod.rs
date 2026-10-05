@@ -155,9 +155,7 @@ pub(crate) fn copied_text(output: &egui::PlatformOutput) -> String {
 }
 
 #[cfg(test)]
-pub(super) fn test_definition_path(rel: &str) -> PathBuf {
-    locate_definitions_root().join(rel)
-}
+pub(super) use crate::core::test_kits::test_definition_path;
 
 /// Long-lived application state shared by Baboon's immediate-mode UI.
 ///

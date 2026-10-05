@@ -489,4 +489,40 @@ mod tests {
             format!("objects{separator}weapons{separator}rifle.weapon")
         );
     }
+
+    // Shader model, editing, and thumbnail unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// The extension a tag reference is typed with has to resolve to a group tag,
+    /// and that used to come from a hand-written table in the value parser — which
+    /// had no `render_method_definition`, so committing a shader's definition was
+    /// refused as an unknown group and the row changed nothing. The mapping now
+    /// comes from the games' own `_meta.json`, so anything Baboon can open is
+    /// something it can parse a reference to.
+    #[test]
+    fn reference_extensions_resolve_from_the_games_own_metadata() {
+        let names =
+            crate::core::format::TagNameIndex::load_from_definitions(&crate::core::bundled::locate_definitions_root());
+        names.publish_as_process_group_names();
+        for (extension, fourcc) in [
+            ("render_method_definition", b"rmdf"),
+            ("render_method_template", b"rmt2"),
+            ("shader_template", b"stem"),
+        ] {
+            assert_eq!(
+                crate::core::format::process_group_tag_for(extension),
+                Some(u32::from_be_bytes(*fourcc)),
+                "{extension} is not in any game's tag_index"
+            );
+            // And the parser that the field editor commits through agrees.
+            let parsed = crate::core::document::value::parse_tag_reference(&format!(
+                "shaders\\example.{extension}"
+            ))
+            .unwrap_or_else(|error| panic!("{extension}: {error}"));
+            assert_eq!(
+                parsed.group_tag_and_name,
+                Some((u32::from_be_bytes(*fourcc), "shaders\\example".to_owned()))
+            );
+        }
+    }
 }

@@ -710,3 +710,57 @@ pub(in crate::app) struct FieldDisplayMeta {
     pub(in crate::app) read_only: bool,
     pub(in crate::app) advanced: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Expand/collapse-all is a direct instruction about the whole tag, so it
+    /// has to win over the rules that otherwise decide a container's open
+    /// state — the search filter's, and a reference jump forcing its target's
+    /// ancestors open. Every container type resolves through here, so this is
+    /// the one place that ordering is decided.
+    #[test]
+    fn expand_all_overrides_the_other_open_rules() {
+        with_test_edit_context(|edit| {
+            // Nothing asked for: the caller's own default stands.
+            assert_eq!(edit.resolve_open("some/block", true), None);
+
+            edit.expand_all = Some(true);
+            assert_eq!(edit.resolve_open("some/block", false), Some(true));
+
+            edit.expand_all = Some(false);
+            assert_eq!(edit.resolve_open("some/block", true), Some(false));
+        });
+    }
+
+    /// The preference adjusts each container's *default* rather than forcing
+    /// its state, so a group the user has since opened or closed keeps their
+    /// choice — egui only consults a default when it has nothing stored.
+    #[test]
+    fn nested_default_overrides_only_the_schema_default() {
+        with_test_edit_context(|edit| {
+            edit.nested_default = NestedDefault::Schema;
+            assert!(edit.default_open(true));
+            assert!(!edit.default_open(false));
+
+            edit.nested_default = NestedDefault::Collapsed;
+            assert!(
+                !edit.default_open(true),
+                "collapsed must close a section the schema opens"
+            );
+
+            edit.nested_default = NestedDefault::Expanded;
+            assert!(
+                edit.default_open(false),
+                "expanded must open a section the schema closes"
+            );
+
+            // And it stays a default: nothing here forces an open state.
+            assert_eq!(edit.resolve_open("some/block", true), None);
+        });
+    }
+}

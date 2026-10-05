@@ -1712,3 +1712,50 @@ mod sampler_mode_tests {
         assert_eq!(inputs, ["4"], "the x override starts at the default's index");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Shader model, editing, and thumbnail unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// A shader bool or int parameter is stored in a field literally named
+    /// `int/bool`, and the path grammar has no escapes: a segment is the field's
+    /// *clean* name, in which that slash is a backslash. Inventing an escape left
+    /// the slash separating, so the segment became `int\` + `bool` and every write
+    /// failed with "field path no longer resolves" — which is what made
+    /// `no_dynamic_lights`, `use_material_texture` and `order3_area_specular`
+    /// impossible to enable.
+    #[test]
+    fn a_slash_in_a_field_name_becomes_a_backslash_not_an_escape() {
+        assert_eq!(escape_field_path_segment("int/bool"), "int\\bool");
+        assert_eq!(
+            shader_param_field_path("render_method", Some(3), "int/bool").as_deref(),
+            Some("render_method/parameters[3]/int\\bool")
+        );
+        // Ordinary names are untouched, and markup is cleaned exactly as the
+        // engine's own addressing does.
+        assert_eq!(
+            escape_field_path_segment("parameter type"),
+            "parameter type"
+        );
+        assert_eq!(
+            escape_field_path_segment("parameter name^"),
+            "parameter name"
+        );
+        // Whatever the engine says a clean name is, this has to agree with it.
+        for raw in [
+            "int/bool",
+            "aiming/looking",
+            "max nodes/vertex",
+            "Densities (g/mL)",
+        ] {
+            assert_eq!(
+                escape_field_path_segment(raw),
+                blam_tags::field_name::clean_field_name(raw).into_owned(),
+                "{raw} disagreed with the engine's clean name"
+            );
+        }
+    }
+}

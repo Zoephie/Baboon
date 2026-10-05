@@ -2656,3 +2656,1031 @@ mod sound_players_tests;
 
 #[cfg(test)]
 mod sound_synthetic_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// The extract-layout default-range detector matches the tool's `|default|`
+    /// rule plus our synthesized placeholder for unnamed ranges.
+    #[test]
+    fn default_pitch_range_detection() {
+        assert!(is_default_pitch_range(""));
+        assert!(is_default_pitch_range("|default|"));
+        assert!(is_default_pitch_range("default"));
+        assert!(is_default_pitch_range("pitch range 0"));
+        assert!(is_default_pitch_range("pitch range 12"));
+        assert!(!is_default_pitch_range("close"));
+        assert!(!is_default_pitch_range("pitch range x"));
+    }
+
+    #[test]
+    fn fmod_language_picker_lists_the_catalog_and_disables_missing_banks() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-fmod-language-picker-{}",
+            std::process::id()
+        ));
+        let tags = root.join("tags");
+        let banks = root.join("fmod/pc");
+        std::fs::create_dir_all(&tags).unwrap();
+        std::fs::create_dir_all(&banks).unwrap();
+        std::fs::write(banks.join("english.fsb"), []).unwrap();
+        std::fs::write(banks.join("french.fsb"), []).unwrap();
+
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+        edit.game = Some(GameId::Halo3);
+        edit.tags_root = Some(&tags);
+        let choices = language_choices(&edit, None);
+
+        assert_eq!(choices.len(), FMOD_LANGUAGES.len());
+        assert_eq!(choices.iter().filter(|choice| choice.available).count(), 2);
+        assert!(choices.iter().all(|choice| choice.label != "default"));
+        let japanese = choices
+            .iter()
+            .find(|choice| choice.label == "Japanese")
+            .unwrap();
+        assert!(!japanese.available);
+        assert!(japanese
+            .unavailable_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("japanese.fsb")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Campaign Evolved extraction end-to-end (skip-if-absent): resolve a
+    /// sound tag's Wwise media exactly as the player does, run it through
+    /// `AudioState::run_extract`, and validate the WAV that lands on disk.
+    ///
+    /// Run with:
+    ///   CE_PAKS=/path/to/Meteorite/Content/Paks cargo test ce_extract -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn ce_extract_writes_a_valid_wav() {
+        use crate::app::audio::AudioState;
+        use crate::app::export::sound_extract::{ExtractItem, ExtractRequest, ExtractSource};
+        use crate::core::source::ce_audio::{CeSoundMedia, resolve_sound_binding};
+        use crate::core::source::{ContainerPackageIndex, MountedContainer, container_package_name};
+        use blam_tags::iostore::{IoStoreArchive, usmap::Usmap};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        let Ok(root) = std::env::var("CE_PAKS") else {
+            eprintln!("skip: CE_PAKS not set");
+            return;
+        };
+        let root = PathBuf::from(root);
+        if !root.exists() {
+            eprintln!("skip: no Campaign Evolved paks at {}", root.display());
+            return;
+        }
+
+        let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
+            .expect("read paks dir")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            })
+            .filter(|p| {
+                !p.file_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            })
+            .collect();
+        utocs.sort();
+
+        let mut containers = Vec::new();
+        let mut packages = ContainerPackageIndex::default();
+        for utoc in utocs {
+            let Ok(archive) = IoStoreArchive::open(&utoc) else {
+                continue;
+            };
+            let idx = containers.len();
+            for e in archive.entries() {
+                if let Some(pkg) = container_package_name(&e.path) {
+                    packages.insert(pkg, idx, e.path.clone());
+                }
+            }
+            containers.push(MountedContainer {
+                utoc_path: utoc.clone(),
+                chunk_label: utoc.file_stem().unwrap().to_string_lossy().into_owned(),
+                // Nothing on this path layers shipped against modded — it mounts
+                // everything to resolve one lookup.
+                is_mod: false,
+                archive: Arc::new(archive),
+            });
+        }
+
+        let usmap = Usmap::meteorite().expect("bundled usmap");
+        let binding = resolve_sound_binding(
+            &containers,
+            &packages,
+            &usmap,
+            "/Game/Tags/sound/scripted/vo_scr_m02halo/m02_00040_cortana-sound",
+            None,
+        );
+        assert!(!binding.is_empty(), "no media resolved");
+
+        let shown = binding.language_to_show(None);
+        let media: Vec<CeSoundMedia> = binding
+            .media_for_language(&shown)
+            .into_iter()
+            .cloned()
+            .collect();
+        assert!(!media.is_empty());
+
+        let dir = std::env::temp_dir().join(format!("baboon_ce_extract_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let items: Vec<ExtractItem> = media
+            .iter()
+            .map(|m| ExtractItem {
+                out_path: dir.join(format!("{}.wav", sanitize_component(&m.display_name()))),
+                source: ExtractSource::CeMedia {
+                    paks_root: root.clone(),
+                    media: Box::new(m.clone()),
+                },
+            })
+            .collect();
+        let expected: Vec<PathBuf> = items.iter().map(|i| i.out_path.clone()).collect();
+
+        let mut audio = AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce extract test".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+
+        for path in &expected {
+            let bytes = std::fs::read(path)
+                .unwrap_or_else(|e| panic!("{} not written: {e}", path.display()));
+            assert!(bytes.len() > 44, "{} is header-only", path.display());
+            assert_eq!(&bytes[0..4], b"RIFF", "{} is not a RIFF", path.display());
+            assert_eq!(&bytes[8..12], b"WAVE", "{} is not a WAVE", path.display());
+            // Real audio, not a buffer of zeroes.
+            let loud = bytes[44..]
+                .chunks_exact(2)
+                .any(|s| i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64);
+            assert!(loud, "{} decoded to silence", path.display());
+            println!("wrote {} ({} bytes)", path.display(), bytes.len());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// End-to-end validation of the sound-player glue against real H3 files
+    /// (skip-if-absent): extract permutation names exactly as `draw_sound_player`
+    /// does, then resolve each against the FMOD banks and decode — the same path
+    /// `AudioState::process` takes on a Play click.
+    #[test]
+    #[ignore]
+    fn sound_player_permutations_resolve_and_decode() {
+        use blam_tags::audio::{SoundBanks, decode_subsound};
+        // Overridable so the same check runs against any game's tags + banks.
+        let root = std::env::var("SND_TAGS_ROOT")
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo3_mcc", "").to_owned());
+        let rel = std::env::var("SND_TAG")
+            .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
+        let tags_root = std::path::Path::new(&root);
+        let tag_path = tags_root.join(&rel);
+        if !tag_path.exists() {
+            eprintln!("skip: no H3 tags at {}", tag_path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
+        let root = tag.root();
+        let pitch_ranges = find_block_field(&root, "pitch range").expect("pitch ranges block");
+        let mut names = Vec::new();
+        for pr_index in 0..pitch_ranges.len() {
+            let pitch_range = pitch_ranges.element(pr_index).unwrap();
+            let permutations =
+                find_block_field(&pitch_range, "permutation").expect("permutations block");
+            for perm_index in 0..permutations.len() {
+                let perm = permutations.element(perm_index).unwrap();
+                if let Some(name) = find_full_field_name(&perm, "name")
+                    .and_then(|full| perm.read_string_id(full))
+                    .filter(|n| !n.is_empty())
+                {
+                    names.push(name);
+                }
+            }
+        }
+        assert!(!names.is_empty(), "extracted no permutation names");
+
+        let banks = SoundBanks::open_pc(tags_root).expect("open FMOD banks");
+        let mut resolved = 0usize;
+        for name in &names {
+            if let Some((bank_index, sub_index)) = banks.resolve(name) {
+                let bank = banks.bank(bank_index);
+                let sub = &bank.subsounds[sub_index];
+                let data = bank.read_subsound_data(sub_index).unwrap();
+                let pcm =
+                    decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash).unwrap();
+                assert!(pcm.frame_count() > 0, "'{name}' decoded to nothing");
+                resolved += 1;
+            }
+        }
+        eprintln!(
+            "permutations: {} extracted, {} resolved+decoded",
+            names.len(),
+            resolved
+        );
+        assert!(resolved > 0, "no permutation names resolved in the bank");
+    }
+
+    /// End-to-end validation of the Halo 4 Wwise glue (skip-if-absent): read a
+    /// real `.sound` tag, extract its event name exactly as `draw_sound_player`
+    /// does, then resolve+decode it against the game's `.pck` banks — the same
+    /// path `AudioState::process` takes on a PlayEvent click.
+    #[test]
+    #[ignore]
+    fn h4_event_resolves_and_decodes() {
+        use blam_tags::audio::WwiseBanks;
+        let root = std::env::var("H4_TAGS_ROOT")
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo4_mcc", "").to_owned());
+        let rel = std::env::var("H4_SND_TAG")
+            .unwrap_or_else(|_| "sound/ui/m30_a_60_sfx.sound".to_owned());
+        let tags_root = std::path::Path::new(&root);
+
+        let tag_path = tags_root.join(&rel);
+        if !tag_path.exists() {
+            eprintln!("skip: no H4 tags at {}", tag_path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&tag_path).expect("read H4 sound tag");
+        let events = h4_event_names(&tag);
+        assert!(!events.is_empty(), "no event names on the H4 sound tag");
+        eprintln!("events: {events:?}");
+
+        let banks = WwiseBanks::open_pc(tags_root).expect("open Wwise banks");
+        let mut resolved = 0usize;
+        for (_label, name) in &events {
+            let pcm = banks.resolve(name).expect("resolve event");
+            assert!(pcm.frame_count() > 0, "'{name}' decoded to nothing");
+            eprintln!(
+                "  {name} -> {}ch {}Hz {} frames",
+                pcm.channels,
+                pcm.sample_rate,
+                pcm.frame_count()
+            );
+            resolved += 1;
+        }
+        assert!(resolved > 0);
+    }
+
+    /// Coverage audit (skip-if-absent): walk *every* `.sound` tag under a game's
+    /// tags tree, compute each permutation's `fmod bank subsound id hash` exactly
+    /// as the sound player does, and check it resolves in the FMOD banks. Reports
+    /// id-coverage and, for id-misses, whether the legacy name lookup would have
+    /// found *anything* — so a miss is attributed to a genuinely absent subsound
+    /// vs. a hash/reconstruction gap. Run with:
+    ///   SND_TAGS_ROOT=/path/to/haloreach_mcc/tags \
+    ///     cargo test fmod_id_resolves_every_permutation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fmod_id_resolves_every_permutation() {
+        use blam_tags::audio::{SoundBanks, fmod_bank_subsound_id_hash, fmod_pitch_range_folder};
+
+        let root = std::env::var("SND_TAGS_ROOT")
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("haloreach_mcc", "").to_owned());
+        let tags_root = std::path::Path::new(&root);
+        if !tags_root.exists() {
+            eprintln!("skip: no tags at {}", tags_root.display());
+            return;
+        }
+        let language = std::env::var("SND_LANGUAGE").ok();
+        let banks = SoundBanks::open_pc_language(tags_root, language.as_deref())
+            .expect("open FMOD banks");
+
+        // Recursively collect every .sound tag.
+        let mut sound_tags = Vec::new();
+        let mut stack = vec![tags_root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|e| e == "sound") {
+                    sound_tags.push(p);
+                }
+            }
+        }
+        eprintln!(
+            "scanning {} .sound tags under {} for {:?}",
+            sound_tags.len(), root, language
+        );
+
+        let (mut perms, mut by_id, mut by_name, mut id_miss_name_hit, mut absent, mut no_pr) =
+            (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+        let mut hash_gaps: Vec<String> = Vec::new();
+
+        for tag_path in &sound_tags {
+            let Ok(tag) = blam_tags::TagFile::read(tag_path) else {
+                continue;
+            };
+            let tag_root = tag.root();
+            let Some(pitch_ranges) = find_block_field(&tag_root, "pitch range") else {
+                no_pr += 1;
+                continue;
+            };
+            // Tag rel path (backslash, no extension) — the hash input's tag part.
+            let rel = tag_path
+                .strip_prefix(tags_root)
+                .unwrap_or(tag_path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace('/', "\\");
+            let multi_pr = pitch_ranges.len() > 1;
+            for pr_index in 0..pitch_ranges.len() {
+                let Some(pr) = pitch_ranges.element(pr_index) else {
+                    continue;
+                };
+                let pr_name = find_full_field_name(&pr, "name")
+                    .and_then(|full| pr.read_string_id(full))
+                    .unwrap_or_default();
+                let folder = fmod_pitch_range_folder(&pr_name, multi_pr);
+                let Some(permutations) = find_block_field(&pr, "permutation") else {
+                    continue;
+                };
+                for perm_index in 0..permutations.len() {
+                    let Some(perm) = permutations.element(perm_index) else {
+                        continue;
+                    };
+                    let Some(name) = find_full_field_name(&perm, "name")
+                        .and_then(|full| perm.read_string_id(full))
+                        .filter(|n| !n.is_empty())
+                    else {
+                        continue;
+                    };
+                    perms += 1;
+                    let id = fmod_bank_subsound_id_hash(&rel, folder, &name);
+                    let id_hit = banks.resolve_by_id(id).is_some();
+                    let name_hit = banks.resolve(&name).is_some();
+                    if id_hit {
+                        by_id += 1;
+                    }
+                    if name_hit {
+                        by_name += 1;
+                    }
+                    if !id_hit {
+                        if name_hit {
+                            id_miss_name_hit += 1;
+                            if hash_gaps.len() < 30 {
+                                hash_gaps
+                                    .push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
+                            }
+                        } else {
+                            absent += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        eprintln!("permutations: {perms}");
+        eprintln!(
+            "  resolved by id  : {by_id} ({:.2}%)",
+            100.0 * by_id as f64 / perms.max(1) as f64
+        );
+        eprintln!("  resolved by name: {by_name} (legacy, ambiguous)");
+        eprintln!("  id-miss, name-hit (potential hash gap): {id_miss_name_hit}");
+        eprintln!("  id-miss, name-miss (subsound absent from bank): {absent}");
+        eprintln!("  tags without a pitch-range block (Wwise/classic): {no_pr}");
+        if !hash_gaps.is_empty() {
+            eprintln!("  sample hash gaps:");
+            for g in &hash_gaps {
+                eprintln!("    {g}");
+            }
+        }
+    }
+
+    /// Classic Halo CE inline audio (skip-if-absent): read the classic `.sound`
+    /// tag, extract the permutation's inline `samples` exactly as the player
+    /// does, and decode the Ogg Vorbis — the path `AudioState` takes for a
+    /// `PlayInline` action.
+    #[test]
+    #[ignore]
+    fn ce_inline_permutation_extracts_and_decodes() {
+        use blam_tags::audio::decode_ogg_vorbis;
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
+            .expect("read CE sound tag");
+        let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
+        assert!(
+            bytes.starts_with(b"OggS"),
+            "CE samples should be an Ogg stream"
+        );
+        let pcm = decode_ogg_vorbis(&bytes).expect("decode CE ogg");
+        eprintln!(
+            "CE inline: {} bytes -> {} frames {}ch {}Hz",
+            bytes.len(),
+            pcm.frame_count(),
+            pcm.channels,
+            pcm.sample_rate
+        );
+        assert!(pcm.frame_count() > 0);
+    }
+
+    /// Classic Halo CE Xbox-ADPCM weapon sound (skip-if-absent). CE `.sound`
+    /// tags aren't always Ogg — weapon/effect sounds are frequently
+    /// `format = xbox adpcm`, which has no `OggS` header. Regression for the
+    /// `ogg header: NoCapturePatternFound` failure: the codec must come from the
+    /// tag's `format` field, and the row must decode via the ADPCM path.
+    #[test]
+    #[ignore]
+    fn ce_inline_xbox_adpcm_extracts_and_decodes() {
+        use super::audio::InlineCodec;
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sfx/weapons/sniper rifle/fire.sound",
+        ));
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
+            .expect("read CE sound tag");
+
+        // The tag reports Xbox-ADPCM, mono, 22050 Hz — and carries no Ogg stream.
+        let root = tag.root();
+        let perm = find_block_field(&root, "pitch range")
+            .and_then(|ranges| ranges.element(0))
+            .and_then(|range| find_block_field(&range, "permutation"))
+            .and_then(|perms| perms.element(0))
+            .expect("first permutation");
+        let (codec, channels, sample_rate) = permutation_inline_params(&root, &perm);
+        assert!(
+            matches!(codec, InlineCodec::XboxAdpcm),
+            "sniper fire.sound is xbox adpcm, got {codec:?}"
+        );
+        assert_eq!((channels, sample_rate), (1, 22_050));
+
+        // The player's row must inherit that codec (not assume Ogg).
+        let rows = sound_permutation_rows(&tag, None);
+        assert!(matches!(
+            rows.first().map(|r| &r.kind),
+            Some(RowKind::InlinePermutation {
+                codec: InlineCodec::XboxAdpcm,
+                ..
+            })
+        ));
+
+        let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
+        assert!(!bytes.starts_with(b"OggS"), "adpcm stream, not Ogg");
+        let pcm = super::audio::decode_inline(codec, &bytes, channels, sample_rate)
+            .expect("decode CE xbox adpcm");
+        eprintln!(
+            "CE xbox-adpcm: {} bytes -> {} frames {}ch {}Hz",
+            bytes.len(),
+            pcm.frame_count(),
+            pcm.channels,
+            pcm.sample_rate
+        );
+        assert!(pcm.frame_count() > 0);
+    }
+
+    /// End-to-end extraction (skip-if-absent): read a real CE `.sound`, build
+    /// the same rows the player builds, and run the actual
+    /// `AudioState::run_extract` for both WAV (decoded) and raw `.ogg`
+    /// (passthrough), validating each output.
+    #[test]
+    #[ignore]
+    fn ce_extract_writes_wav_and_raw_ogg() {
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
+            .expect("read CE sound tag");
+        let rows = sound_permutation_rows(&tag, None);
+        assert!(!rows.is_empty(), "CE tag should have permutations");
+
+        // Decoded WAV.
+        let wav_dir = std::env::temp_dir().join("baboon_ce_extract_wav");
+        let _ = std::fs::remove_dir_all(&wav_dir);
+
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &wav_dir, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        let wav = std::fs::read(wav_dir.join(format!("{}.wav", sanitize_component(&rows[0].name))))
+            .expect("wav written");
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert!(wav.len() > 44, "wav should carry samples");
+
+        // Raw .ogg passthrough should be byte-identical to the inline samples.
+        let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
+        let _ = std::fs::remove_dir_all(&ogg_dir);
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &ogg_dir, true);
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
+            .expect("ogg written");
+        assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
+        let inline =
+            inline_permutation_samples(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
+        assert_eq!(ogg, inline, "raw passthrough must be verbatim tag bytes");
+
+        let _ = std::fs::remove_dir_all(&wav_dir);
+
+        let _ = std::fs::remove_dir_all(&ogg_dir);
+    }
+
+    /// Whole-tag H3/Reach bank extraction end-to-end (skip-if-absent): run the
+    /// real `run_extract` Bank path (resolve subsound → decode → WAV) for every
+    /// permutation. `SND_TAGS_ROOT`/`SND_TAG` override for Reach/ODST.
+    #[test]
+    #[ignore]
+    fn bank_extract_writes_wav() {
+        let root = std::env::var("SND_TAGS_ROOT")
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo3_mcc", "").to_owned());
+        let rel = std::env::var("SND_TAG")
+            .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
+        let tags_root = std::path::Path::new(&root);
+        let tag_path = tags_root.join(&rel);
+        if !tag_path.exists() {
+            eprintln!("skip: no bank tags at {}", tag_path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
+        assert!(!rows.is_empty());
+        let dir = std::env::temp_dir().join("baboon_bank_extract");
+        let _ = std::fs::remove_dir_all(&dir);
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &dir, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root.to_path_buf()),
+                label: "bank".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        let mut found = 0usize;
+        for entry in walkdir(&dir) {
+            let bytes = std::fs::read(&entry).unwrap();
+            assert_eq!(&bytes[0..4], b"RIFF");
+            found += 1;
+        }
+        assert!(found > 0, "wrote no bank WAVs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Per-language bank plumbing (skip-if-absent): the FMOD languages are
+    /// discovered from the `.fsb` names, and opening a specific language + the
+    /// shared sfx bank still resolves an SFX permutation (language bank first,
+    /// sfx fallback). Proves `open_pc_language` doesn't break default resolution.
+    #[test]
+    #[ignore]
+    fn fmod_language_selection_resolves() {
+        use blam_tags::audio::SoundBanks;
+        let tags_root = std::path::Path::new(crate::core::test_kits::tag_path("halo3_mcc", ""));
+        if !tags_root.join("../fmod/pc/sfx.fsb").exists() {
+            eprintln!("skip: no H3 fmod banks");
+            return;
+        }
+        let langs = SoundBanks::available_languages(tags_root);
+
+        eprintln!("H3 languages: {langs:?}");
+        assert!(
+            langs.iter().any(|l| l == "french"),
+            "expected localized .fsb languages, got {langs:?}"
+        );
+        assert!(!langs.iter().any(|l| l == "sfx"), "sfx must be excluded");
+        // Open a specific language + sfx; an SFX permutation still resolves.
+        let banks =
+            SoundBanks::open_pc_language(tags_root, Some("french")).expect("open french+sfx");
+        let tag = blam_tags::TagFile::read(
+            &tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound"),
+        )
+        .expect("read sfx sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
+        let resolved = rows
+            .iter()
+            .filter(|r| banks.resolve(&r.name).is_some())
+            .count();
+        assert!(resolved > 0, "no permutations resolved in french+sfx banks");
+    }
+
+    /// Exercise the same row classification, ID construction, queued action,
+    /// bank resolution, and async decode used by the sound-player button.
+    #[test]
+    #[ignore]
+    fn h3_sound_player_action_reaches_playback() {
+        let tags_root = crate::core::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
+        assert!(!rows.is_empty(), "sound tag has no permutations");
+        assert!(
+            rows.iter().all(|row| matches!(row.kind, RowKind::Bank)),
+            "H3 permutations must be bank-backed"
+        );
+        let rel = sound_tag_rel(&path, &tags_root).expect("tag-relative path");
+        let source = RowSource {
+            h2: None,
+            language: None,
+            sound_rel: Some(&rel),
+            multi_pr: rows_span_multiple_pitch_ranges(&rows),
+        };
+        let play = row_play_action(&tag, &rows[0], source, Some(&tags_root))
+            .expect("play action for H3 row");
+        let super::audio::SoundAction::Play { id, key, .. } = &play else {
+            panic!("H3 row did not create an FMOD play action");
+        };
+        let banks = blam_tags::audio::SoundBanks::open_pc(&tags_root).expect("open H3 banks");
+        let (bank_index, sub_index) = id
+            .and_then(|id| banks.resolve_by_id(id))
+            .or_else(|| banks.resolve(key))
+            .expect("resolve H3 player row");
+        let bank = banks.bank(bank_index);
+        let sub = &bank.subsounds[sub_index];
+        let data = bank.read_subsound_data(sub_index).expect("read H3 subsound");
+        let pcm = blam_tags::audio::decode_subsound(
+            &data,
+            sub.channels,
+            sub.frequency,
+            sub.setup_hash,
+        )
+        .expect("decode H3 player row");
+        let peak = pcm
+            .samples
+            .iter()
+            .map(|sample| sample.unsigned_abs())
+            .max()
+            .unwrap_or(0);
+        assert!(peak > 64, "resolved H3 player row decoded to silence");
+        let duration = pcm.duration_secs();
+        let mut audio = super::audio::AudioState::default();
+        audio.pending.push_back(play.into());
+        audio.process(None, &egui::Context::default());
+        audio.wait_for_audio_jobs();
+        assert!(
+            audio.status.as_deref().is_some_and(|status| status.starts_with('\u{25B6}')),
+            "normal player path did not reach playback: {:?}",
+            audio.status
+        );
+        // Keep the ignored manual/integration test's output stream alive long
+        // enough for the device to render the queued voice.
+        std::thread::sleep(std::time::Duration::from_secs_f32(
+            duration.clamp(0.25, 10.0) + 0.5,
+        ));
+    }
+
+    #[test]
+    #[ignore]
+    fn h3_extraction_writes_non_silent_pcm() {
+        let tags_root = crate::core::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::Halo3));
+        let sound_rel = sound_tag_rel(&path, &tags_root).unwrap();
+        let out = std::env::temp_dir().join(format!(
+            "baboon-h3-extract-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&out);
+        let source = RowSource {
+            h2: None,
+            language: None,
+            sound_rel: Some(&sound_rel),
+            multi_pr: rows_span_multiple_pitch_ranges(&rows),
+        };
+        let items = build_extract_items(&tag, &rows, source, &out, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root),
+                label: "H3 non-silent regression".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        for wav in walkdir(&out) {
+            let bytes = std::fs::read(&wav).unwrap();
+            assert!(bytes.len() > 44, "empty WAV: {}", wav.display());
+            assert!(
+                bytes[44..].chunks_exact(2).any(|sample| sample != [0, 0]),
+                "silent WAV: {} ({:?})",
+                wav.display(),
+                audio.status
+            );
+        }
+        let _ = std::fs::remove_dir_all(out);
+    }
+
+    #[test]
+    #[ignore]
+    fn h3_all_language_extraction_reads_the_explicit_english_bank() {
+        use crate::app::export::sound_extract::ExtractSource;
+
+        let tags_root = crate::core::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let shared_banks = blam_tags::audio::SoundBanks::open_pc_language(
+            &tags_root,
+            Some("__baboon_shared_bank_only__"),
+        )
+        .expect("open shared H3 FMOD bank");
+        let layout = KitLayout::from_tags_folder(&tags_root).expect("kit layout");
+        let mut items = browser_sound_extract_items(
+            &tag,
+            &path,
+            &layout,
+            Some(GameId::Halo3),
+            None,
+            true,
+            Some(&shared_banks),
+        );
+        assert!(items.iter().any(|item| matches!(
+            &item.source,
+            ExtractSource::Bank { language: Some(language), .. }
+                if language.eq_ignore_ascii_case("english")
+        )));
+        assert!(!items.iter().any(|item| matches!(
+            item.source,
+            ExtractSource::Bank { language: None, .. }
+        )));
+        let mut item_languages = items
+            .iter()
+            .filter_map(|item| match &item.source {
+                ExtractSource::Bank { language, .. } => language.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        item_languages.sort();
+        item_languages.dedup();
+        assert_eq!(
+            item_languages,
+            blam_tags::audio::SoundBanks::available_languages(&tags_root),
+            "all-languages extraction must follow installed .fsb files"
+        );
+
+        let sfx_path = tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound");
+        let sfx_tag = TagFile::read(&sfx_path).expect("read shared H3 sound tag");
+        let sfx_items = browser_sound_extract_items(
+            &sfx_tag,
+            &sfx_path,
+            &layout,
+            Some(GameId::Halo3),
+            Some("french"),
+            true,
+            Some(&shared_banks),
+        );
+        assert!(!sfx_items.is_empty());
+        assert!(sfx_items.iter().all(|item| matches!(
+            item.source,
+            ExtractSource::Bank { language: None, .. }
+        )));
+        assert!(sfx_items.iter().all(|item| item.out_path.starts_with(
+            tags_root.parent().unwrap().join("data")
+        )));
+
+        let out = std::env::temp_dir().join(format!(
+            "baboon-h3-all-languages-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&out);
+        for (index, item) in items.iter_mut().enumerate() {
+            item.out_path = out.join(format!("{index}.wav"));
+        }
+        let total = items.len();
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root),
+                label: "H3 all-languages regression".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        assert_eq!(walkdir(&out).len(), total, "{:?}", audio.status);
+        assert!(
+            audio.status.as_deref().is_some_and(|status| status
+                .starts_with(&format!("extracted {total}/{total}"))),
+            "{:?}",
+            audio.status
+        );
+        let _ = std::fs::remove_dir_all(out);
+    }
+
+    /// Recursively collect files under `dir` (small test helper).
+    fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(walkdir(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sound_classes_summary_reads_modern_and_classic_layouts() {
+        // Modern (Reach): scalar distances nested under "distance parameters".
+        let mut tag = TagFile::new("definitions/haloreach_mcc/sound_classes.json").unwrap();
+        add_block_element(&mut tag, "sound classes").unwrap();
+        let classes = tag
+            .root()
+            .field("sound classes")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let element = classes.element(0).unwrap();
+        assert!(
+            element.descend("distance parameters").is_some(),
+            "Reach nests distances under `distance parameters`"
+        );
+        assert_ne!(
+            sound_class_distance_row(&element).near,
+            "—",
+            "Reach `minimum distance` field name should resolve"
+        );
+
+        // Classic (H3): `distance bounds` real_bounds directly on the entry.
+        let mut tag = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
+        add_block_element(&mut tag, "sound classes").unwrap();
+        let classes = tag
+            .root()
+            .field("sound classes")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let element = classes.element(0).unwrap();
+        assert!(
+            element.descend("distance parameters").is_none(),
+            "H3 has no `distance parameters` struct"
+        );
+
+        assert!(
+            element.field("distance bounds").is_some(),
+            "H3 keeps `distance bounds` directly on the entry"
+        );
+        assert_ne!(sound_class_distance_row(&element).near, "—");
+    }
+
+    #[test]
+    fn material_effects_summary_walks_effects_and_materials_cross_game() {
+        // CE: effect → `materials` block with `effect` + `sound` tag references.
+        let mut tag = TagFile::new("definitions/haloce_mcc/material_effects.json").unwrap();
+        add_block_element(&mut tag, "effects").unwrap();
+        add_block_element(&mut tag, "effects[0]/materials").unwrap();
+        let materials = tag
+            .root()
+            .field_path("effects[0]/materials")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let material = materials.element(0).unwrap();
+        assert!(find_full_field_name(&material, "effect").is_some());
+        assert!(find_full_field_name(&material, "sound").is_some());
+
+        // Modern (H3): effect → `sounds` block; materials use a `tag (effect or
+        // sound)` reference and a `material name` string_id.
+        let mut tag = TagFile::new("definitions/halo3_mcc/material_effects.json").unwrap();
+        add_block_element(&mut tag, "effects").unwrap();
+        let effects = tag
+            .root()
+            .field("effects")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let effect = effects.element(0).unwrap();
+        let labels: Vec<String> = block_fields(&effect)
+            .into_iter()
+            .map(|(label, _)| label.to_ascii_lowercase())
+            .collect();
+        assert!(
+            labels.iter().any(|label| label.contains("sound")),
+            "modern effect has a `sounds` material sub-block"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("old")),
+            "modern effect still declares the deprecated `old materials` block"
+        );
+        add_block_element(&mut tag, "effects[0]/sounds").unwrap();
+        let sounds = tag
+            .root()
+            .field_path("effects[0]/sounds")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let material = sounds.element(0).unwrap();
+        assert!(
+            material
+                .field_names()
+                .any(|name| name.contains("tag (effect or sound)")),
+            "modern material carries a `tag (effect or sound)` reference"
+        );
+        assert!(
+            find_field_name_containing(&material, "material name").is_some(),
+            "modern material carries a `material name` field"
+        );
+    }
+
+    #[test]
+    fn dialogue_summary_detects_direct_vs_nested_and_classic() {
+        // Classic CE: no vocalizations block (flat per-context fields).
+        let tag = TagFile::new("definitions/haloce_mcc/dialogue.json").unwrap();
+        assert!(
+            find_block_field(&tag.root(), "vocali").is_none(),
+            "CE has no vocalizations block"
+        );
+
+        // H3/ODST: `sound` reference directly on the vocalization.
+        let mut tag = TagFile::new("definitions/halo3_mcc/dialogue.json").unwrap();
+        add_block_element(&mut tag, "vocalizations").unwrap();
+        let vocals = tag
+            .root()
+            .field("vocalizations")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let vocal = vocals.element(0).unwrap();
+        assert!(
+            find_full_field_name(&vocal, "sound").is_some(),
+            "H3 keeps `sound` directly on the vocalization"
+        );
+        assert!(
+            find_block_field(&vocal, "stimul").is_none(),
+            "H3 has no stimuli sub-block"
+        );
+
+        // Reach/H4/H2A: `sound` nested under a per-vocalization `stimuli` block.
+        let mut tag = TagFile::new("definitions/haloreach_mcc/dialogue.json").unwrap();
+        add_block_element(&mut tag, "vocalizations").unwrap();
+        let vocals = tag
+            .root()
+            .field("vocalizations")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let vocal = vocals.element(0).unwrap();
+        assert!(
+            find_block_field(&vocal, "stimul").is_some(),
+            "Reach nests sounds under a `stimuli` block"
+        );
+        assert!(
+            find_full_field_name(&vocal, "sound").is_none(),
+            "Reach vocalization has no direct `sound` field"
+        );
+    }
+}

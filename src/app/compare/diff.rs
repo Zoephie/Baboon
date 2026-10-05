@@ -1005,3 +1005,53 @@ mod deletion_repro_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::document::apply::add_block_element;
+    use crate::app::compare::diff_tags;
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn diff_detects_value_and_block_count_changes() {
+        let names = TagNameIndex::default();
+        let a = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
+        let mut b = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
+        // Two freshly-created identical tags must report no differences.
+        let (diffs, truncated) = diff_tags(&a, &b, &names, 5000);
+        assert!(diffs.is_empty(), "identical tags should have no diffs");
+        assert!(!truncated);
+        // Adding a block element to one shows up as an element-count difference.
+        add_block_element(&mut b, "sound classes").unwrap();
+        let (diffs, _) = diff_tags(&a, &b, &names, 5000);
+        assert!(
+            diffs.iter().any(|d| d.path.contains("sound classes")),
+            "block element-count difference should be reported"
+        );
+        // An added element is reported as added, and with its contents: a bare
+        // "one more element" says nothing about what is being shipped.
+        assert!(
+            diffs.iter().any(|d| d.b.starts_with("added")),
+            "the new element should be marked as added: {diffs:?}"
+        );
+        assert!(
+            diffs
+                .iter()
+                .filter(|d| d.path.starts_with("sound classes[0]/"))
+                .count()
+                > 0,
+            "the added element's own fields should be listed: {diffs:?}"
+        );
+        // Nothing in the added element belongs to the old tag.
+        assert!(
+            diffs
+                .iter()
+                .filter(|d| d.path.starts_with("sound classes[0]"))
+                .all(|d| d.a.is_empty()),
+            "an added element has no previous value: {diffs:?}"
+        );
+    }
+}

@@ -458,3 +458,189 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
 
 /// Red used to flag tag references whose target file is missing on disk.
 pub(in crate::app) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 92);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Both editable and read-only values must accept focus for selection/copy.
+    /// Drive real pointer input through component rows, not just the cell helper.
+    #[test]
+    fn editable_and_read_only_value_rows_can_be_clicked_into() {
+        assert!(
+            click_across_value_row(true),
+            "an editable value row must take a caret, or its text cannot be selected or copied"
+        );
+        assert!(
+            click_across_value_row(false),
+            "a read-only row must accept focus so its value can be selected and copied"
+        );
+    }
+
+    /// Render one `real_vector_3d` row (the `Point 0 / x y z` shape from the
+    /// report) and click along it until something takes keyboard focus.
+    /// Returns whether anything ever did.
+    fn click_across_value_row(editable: bool) -> bool {
+        let ctx = egui::Context::default();
+        let mut tag = TagFile::new(crate::app::test_definition_path(
+            "halo4_mcc/camera_track.json",
+        ))
+        .unwrap();
+        crate::core::document::apply::add_block_element(&mut tag, "control points").unwrap();
+        let mut focused = false;
+
+        with_test_edit_context(|edit| {
+            edit.editable = editable;
+            // Sweep the row rather than trusting a hand-computed cell position:
+            // the widths are layout details, and a click that lands on the label
+            // by accident would report "not editable" for the wrong reason.
+            for step in 0..90 {
+                let pointer = egui::Pos2::new(step as f32 * 10.0, 12.0);
+                let click = |pressed| egui::Event::PointerButton {
+                    pos: pointer,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(900.0, 200.0),
+                    )),
+                    events: vec![
+                        egui::Event::PointerMoved(pointer),
+                        click(true),
+                        click(false),
+                    ],
+                    ..Default::default()
+                };
+                let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let field = tag
+                            .root()
+                            .field_path("control points[0]/position")
+                            .expect("the control point's position field");
+                        let value = field.value().expect("position has a value");
+                        let meta = field_display_meta(field.name());
+                        draw_foundation_value_row(
+                            ui,
+                            field,
+                            &meta,
+                            field.type_name(),
+                            &value,
+                            &TagNameIndex::default(),
+                            0,
+                            "control points[0]/position",
+                            edit,
+                            None,
+                            300.0,
+                        );
+                    });
+                });
+                if ctx.memory(|memory| memory.focused()).is_some() {
+                    focused = true;
+                    break;
+                }
+            }
+        });
+
+        focused
+    }
+
+    /// Typing a channel value into a color row edits the color. The cells used
+    /// to be read-only text, so the swatch's picker was the only way in, and
+    /// setting exact RGB numbers was impossible (reported by a Halo CE modder).
+    /// Drives real pointer and keyboard input through the whole value row, then
+    /// applies whatever edit it queued the way the editor does.
+    #[test]
+    fn color_channels_are_typed_into_directly() {
+        // Float ARGB: the first cell is alpha.
+        let mut light = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
+        let path = "color lower bound";
+        let pending = type_into_first_value_cell(&light, path, "0.25");
+        assert_eq!(pending.len(), 1, "one committed edit for the whole color");
+        assert_eq!(pending[0].path, path);
+        crate::core::document::apply::apply_field_edit(&mut light, path, &pending[0].input)
+            .unwrap();
+        match light.root().field_path(path).unwrap().value() {
+            Some(TagFieldData::RealArgbColor(c)) => {
+                assert_eq!((c.alpha, c.red, c.green, c.blue), (0.25, 0.0, 0.0, 0.0));
+            }
+            other => panic!("expected a real ARGB color, got {other:?}"),
+        }
+
+        // Packed ARGB: edited in the same 0-1 channels the row shows, stored as bytes.
+        let mut hud =
+            TagFile::new(crate::app::test_definition_path("haloce_mcc/grenade_hud_interface.json")).unwrap();
+        let path = "override icon color";
+        let pending = type_into_first_value_cell(&hud, path, "1");
+        assert_eq!(pending.len(), 1);
+        crate::core::document::apply::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
+        match hud.root().field_path(path).unwrap().value() {
+            Some(TagFieldData::ArgbColor(c)) => assert_eq!(c.0, 0xFF00_0000),
+            other => panic!("expected a packed ARGB color, got {other:?}"),
+        }
+    }
+
+    /// Click along a value row until a cell takes focus, replace its text with
+    /// `text`, press Enter, and return the edits the row queued.
+    fn type_into_first_value_cell(tag: &TagFile, path: &str, text: &str) -> Vec<PendingFieldEdit> {
+        let ctx = egui::Context::default();
+        let mut pending = Vec::new();
+        with_test_edit_context(|edit| {
+            let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
+                    events,
+                    ..Default::default()
+                };
+                let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let field = tag.root().field_path(path).expect("color field");
+                        let value = field.value().expect("color value");
+                        let meta = field_display_meta(field.name());
+                        draw_foundation_value_row(
+                            ui, field, &meta, field.type_name(), &value,
+                            &TagNameIndex::default(), 0, path, edit, None, 300.0,
+                        );
+                    });
+                });
+            };
+            let key = |key, modifiers| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            };
+            for step in 0..90 {
+                let pointer = egui::Pos2::new(step as f32 * 10.0, 12.0);
+                let click = |pressed| egui::Event::PointerButton {
+                    pos: pointer,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                };
+                frame(vec![egui::Event::PointerMoved(pointer), click(true), click(false)], edit);
+                if ctx.memory(|memory| memory.focused()).is_some() {
+                    break;
+                }
+            }
+            assert!(ctx.memory(|memory| memory.focused()).is_some(), "no cell in the row took focus");
+            frame(
+                vec![
+                    key(egui::Key::A, egui::Modifiers::COMMAND),
+                    egui::Event::Text(text.to_owned()),
+                ],
+                edit,
+            );
+            assert!(edit.pending.is_empty(), "typing alone must not commit");
+            frame(vec![key(egui::Key::Enter, egui::Modifiers::NONE)], edit);
+            pending = std::mem::take(edit.pending);
+        });
+        pending
+    }
+}

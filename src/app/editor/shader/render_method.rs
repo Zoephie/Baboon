@@ -263,3 +263,311 @@ pub(in crate::app) fn push_shader_context_action(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Shader model, editing, and thumbnail unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// End to end against the shipped H3 tags: create a bool parameter the way the
+    /// grid's "Override Default" does, and read back what landed.
+    #[test]
+    fn enabling_a_bool_shader_parameter_writes_it() {
+        let path = std::path::Path::new(crate::core::test_kits::tag_path(
+            "halo3_mcc",
+            "objects/characters/brute/shaders/armor_lights.shader",
+        ));
+        if !path.exists() {
+            eprintln!("skipping: no H3 editing kit");
+            return;
+        }
+        let bytes = std::fs::read(path).expect("read shader");
+        let mut tag = blam_tags::TagFile::read_from_bytes(&bytes).expect("parse shader");
+        let prefix = render_method_edit_prefix(&tag);
+        let block = append_field_path(&prefix, "parameters");
+
+        for name in [
+            "no_dynamic_lights",
+            "use_material_texture",
+            "order3_area_specular",
+        ] {
+            let op = ShaderParamOp {
+                parameters_block_path: block.clone(),
+                parameter_name: name.to_owned(),
+                initial_fields: vec![
+                    ShaderParamInitialField {
+                        field: "parameter type".to_owned(),
+                        // `bool` in the parameter-type enum.
+                        input: "4".to_owned(),
+                    },
+                    ShaderParamInitialField {
+                        field: "int/bool".to_owned(),
+                        input: "1".to_owned(),
+                    },
+                ],
+                animated_parameters: Vec::new(),
+            };
+            let message = apply_one_shader_param_op(&mut tag, &op)
+                .unwrap_or_else(|error| panic!("enabling {name} failed: {error}"));
+            eprintln!("{message}");
+        }
+
+        // The values have to survive a save, not just the in-memory write.
+        let saved = tag.write_to_bytes().expect("serialize");
+        let reopened = blam_tags::TagFile::read_from_bytes(&saved).expect("reparse");
+        let root = reopened.root();
+        let parameters = root
+            .field_path(&block)
+            .and_then(|field| field.as_block())
+            .expect("parameters block");
+        let mut enabled = Vec::new();
+        for index in 0..parameters.len() {
+            let Some(element) = parameters.element(index) else {
+                continue;
+            };
+            let name = element
+                .field("parameter name")
+                .and_then(|field| field.value())
+                .and_then(|value| match value {
+                    blam_tags::TagFieldData::StringId(s)
+                    | blam_tags::TagFieldData::OldStringId(s) => Some(s.string.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let value = element
+                .field_path("int\\bool")
+                .and_then(|field| field.value())
+                .and_then(|value| match value {
+                    blam_tags::TagFieldData::LongInteger(v) => Some(v),
+                    _ => None,
+                });
+            if value == Some(1) {
+                enabled.push(name);
+            }
+        }
+        for expected in [
+            "no_dynamic_lights",
+            "use_material_texture",
+            "order3_area_specular",
+        ] {
+            assert!(
+                enabled.iter().any(|name| name == expected),
+                "{expected} is not enabled in the saved tag; enabled: {enabled:?}"
+            );
+        }
+    }
+
+    /// The two structural references — `definition` and `shader template` — were
+    /// drawn as painted text with editing switched off, so a shader's render
+    /// method definition could be read but never changed, unlike Foundation's
+    /// expert mode. Guards the part that is easy to get wrong: the tag field paths
+    /// the editor commits through. `definition` sits on the render_method block,
+    /// but the template reference hangs off `postprocess[0]`, not the root.
+    ///
+    /// Ignored by default — it needs a loose Halo 3 tag tree.
+    ///
+    /// Run with:
+    ///   H3_TAGS=~/Halo/halo3_mcc/tags \
+    ///     cargo test structural_shader_references -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a loose Halo 3 tag tree; set H3_TAGS"]
+    fn structural_shader_references_resolve_to_editable_reference_fields() {
+        let Ok(root) = std::env::var("H3_TAGS") else {
+            eprintln!("skipping: set H3_TAGS to a loose Halo 3 tags directory");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let source = crate::core::source::TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+
+        // Any shader that resolves its render-method chain will do; walk until one
+        // builds a grid, so this does not hinge on one hand-picked tag.
+        let mut rmdf_cache = std::collections::HashMap::new();
+        let mut rmop_cache = std::collections::HashMap::new();
+        let mut checked = 0usize;
+        for entry in walkdir_shaders(&root).into_iter().take(400) {
+            let Ok(tag) = blam_tags::TagFile::read(&entry) else {
+                continue;
+            };
+            let Some(model) = super::build_shader_editor_model(
+                &tag,
+                u32::from_be_bytes(*b"rmsh"),
+                Some(&source),
+                &mut rmdf_cache,
+                &mut rmop_cache,
+            ) else {
+                continue;
+            };
+
+            assert!(
+                !model.definition_edit_path.is_empty(),
+                "{}: no edit path for `definition`",
+                entry.display()
+            );
+            let field = tag
+                .root()
+                .field_path(&model.definition_edit_path)
+                .unwrap_or_else(|| panic!("{}: definition path does not resolve", entry.display()));
+            let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+                panic!("{}: `definition` is not a tag reference", entry.display());
+            };
+            assert_eq!(
+                reference.group_tag_and_name.map(|(_, name)| name),
+                Some(model.definition_path.clone()),
+                "{}: the edit path addresses a different reference than the row shows",
+                entry.display()
+            );
+
+            // The template only exists once a postprocess block does.
+            if let Some(template) = model.shader_template_path.as_deref() {
+                assert!(
+                    !model.shader_template_edit_path.is_empty(),
+                    "{}: no edit path for `shader template`",
+                    entry.display()
+                );
+                let field = tag
+                    .root()
+                    .field_path(&model.shader_template_edit_path)
+                    .unwrap_or_else(|| {
+                        panic!("{}: shader template path does not resolve", entry.display())
+                    });
+                let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+                    panic!(
+                        "{}: `shader template` is not a tag reference",
+                        entry.display()
+                    );
+                };
+                assert_eq!(
+                    reference.group_tag_and_name.map(|(_, name)| name),
+                    Some(template.to_owned()),
+                    "{}: template edit path addresses a different reference",
+                    entry.display()
+                );
+            }
+            checked += 1;
+            if checked >= 5 {
+                break;
+            }
+        }
+        assert!(
+            checked > 0,
+            "no shader in this tag tree built a grid to check"
+        );
+        println!("checked {checked} shader(s)");
+    }
+
+    fn walkdir_shaders(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in rd.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "shader") {
+                    out.push(path);
+                    if out.len() > 400 {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The row being drawn is only half of "editable" — the commit has to land.
+    /// This drives the same path the widget pushes (`apply_pending_edits` at the
+    /// resolved edit path) and checks the reference actually changes on the tag.
+    ///
+    /// Ignored by default — it needs a loose Halo 3 tag tree.
+    ///
+    /// Run with:
+    ///   H3_TAGS=~/Halo/halo3_mcc/tags \
+    ///     cargo test committing_a_structural_reference -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a loose Halo 3 tag tree; set H3_TAGS"]
+    fn committing_a_structural_reference_rewrites_the_tag() {
+        let Ok(root) = std::env::var("H3_TAGS") else {
+            eprintln!("skipping: set H3_TAGS to a loose Halo 3 tags directory");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let source = crate::core::source::TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let mut rmdf_cache = std::collections::HashMap::new();
+        let mut rmop_cache = std::collections::HashMap::new();
+
+        for entry in walkdir_shaders(&root).into_iter().take(400) {
+            let Ok(mut tag) = blam_tags::TagFile::read(&entry) else {
+                continue;
+            };
+            let Some(model) = super::build_shader_editor_model(
+                &tag,
+                u32::from_be_bytes(*b"rmsh"),
+                Some(&source),
+                &mut rmdf_cache,
+                &mut rmop_cache,
+            ) else {
+                continue;
+            };
+            if model.definition_edit_path.is_empty() {
+                continue;
+            }
+
+            let before = model.definition_path.clone();
+            let after = "shaders\\custom_definition";
+            assert_ne!(before, after, "pick a value that is actually a change");
+
+            let mut dirty = crate::app::Dirty::default();
+            let applied = crate::core::document::apply::apply_pending_edits(
+                &mut tag,
+                vec![crate::app::PendingFieldEdit {
+                    path: model.definition_edit_path.clone(),
+                    input: format!("{after}.render_method_definition"),
+                }],
+                &mut dirty,
+            );
+            assert!(
+                applied
+                    .outcomes
+                    .iter()
+                    .all(|outcome| outcome.result.is_ok()),
+                "{}: commit failed: {:?}",
+                entry.display(),
+                applied.status
+            );
+            assert!(dirty.is_set(), "a committed edit marks the document dirty");
+
+            let field = tag
+                .root()
+                .field_path(&model.definition_edit_path)
+                .expect("definition still resolves");
+            let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+                panic!("definition stopped being a tag reference");
+            };
+            assert_eq!(
+                reference
+                    .group_tag_and_name
+                    .map(|(_, name)| name)
+                    .as_deref(),
+                Some(after),
+                "{}: the reference did not take the committed value",
+                entry.display()
+            );
+            println!("{}: {before:?} -> {after:?}", entry.display());
+            return;
+        }
+        panic!("no shader in this tag tree built a grid to commit against");
+    }
+}

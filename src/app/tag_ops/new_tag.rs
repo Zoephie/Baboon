@@ -1330,3 +1330,31 @@ impl Model {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn new_tags_strip_doc_strings_and_explanations_on_write() {
+        // The engine strips explanation fields + cleans field names when building
+        // a layout from JSON, so a freshly-created tag's embedded blay matches
+        // shipped tags — no `#help`/`:units` text, no explanation bodies.
+        let tag = TagFile::new("definitions/haloreach_mcc/sound_classes.json").unwrap();
+        let bytes = tag.write_to_bytes().unwrap();
+        let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+        assert!(
+            !contains(b"attenuating"),
+            "must not embed explanation/help text"
+        );
+        assert!(
+            !contains(b"world units"),
+            "must not embed `:units` annotations"
+        );
+        // And it must still round-trip cleanly.
+        TagFile::read_from_bytes(&bytes).expect("stripped tag must parse");
+    }
+}

@@ -816,3 +816,151 @@ mod narrowing_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::document::apply::add_block_element;
+    use crate::core::source::NewContainerTemplate;
+    use crate::core::test_kits::test_definition_path;
+    use blam_tags::Endian;
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let euler2d = root.field("real euler angles 2d").unwrap();
+        let euler3d = root.field("real euler angles 3d").unwrap();
+
+        // Typed in degrees, stored in radians — the editor's angle contract.
+        let TagFieldData::RealEulerAngles2d(value) =
+            parse_gui_field_value(&euler2d, "0.25, -0.5").unwrap()
+        else {
+            panic!("expected real euler angles 2d");
+        };
+        assert!((value.yaw - 0.25f32.to_radians()).abs() < 0.0001);
+        assert!((value.pitch + 0.5f32.to_radians()).abs() < 0.0001);
+
+        let TagFieldData::RealEulerAngles3d(value) =
+            parse_gui_field_value(&euler3d, "-0.65 0 1.25").unwrap()
+        else {
+            panic!("expected real euler angles 3d");
+        };
+        assert!((value.yaw + 0.65f32.to_radians()).abs() < 0.0001);
+        assert!(value.pitch.abs() < 0.0001);
+        assert!((value.roll - 1.25f32.to_radians()).abs() < 0.0001);
+
+        for invalid in ["1, 2", "1, 2, 3, 4", "yaw, pitch, roll"] {
+            assert!(
+                parse_gui_field_value(&euler3d, invalid).is_err(),
+                "{invalid:?} should be rejected"
+            );
+        }
+    }
+
+    /// A brand-new Campaign Evolved tag must be editable the moment it is
+    /// created. `is_editable_tag` drives `FieldEditContext::editable`, which
+    /// gates every value widget and every block grow/shrink button, so a
+    /// `NewContainer` entry missing from the match rendered the whole tag
+    /// read-only until it was exported as a mod and remounted.
+    #[test]
+    fn a_new_container_tag_is_editable() {
+        let tag = TagFile::new("definitions/haloce_evolved/camera_track.json").unwrap();
+        let entry = TagEntry {
+            key: "newtag:/Game/Tags/test/example-camera_track".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: tag.header.group_tag,
+            group_name: Some("camera_track".into()),
+            location: TagEntryLocation::NewContainer {
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/other-camera_track.uasset".into(),
+                },
+                package: "/Game/Tags/test/example-camera_track".into(),
+                group_tag: tag.header.group_tag,
+            },
+        };
+
+        assert!(
+            is_editable_tag(&entry, &tag),
+            "a newly created container tag must be editable"
+        );
+
+        // And the block op the UI defers actually appends to the fresh tag.
+        let mut tag = tag;
+        let index = add_block_element(&mut tag, "control points").unwrap();
+        assert_eq!(index, 0);
+        assert_eq!(
+            tag.root()
+                .field_path("control points")
+                .and_then(|field| field.as_block())
+                .map(|block| block.len()),
+            Some(1)
+        );
+    }
+
+    fn camera_track_entry(location: TagEntryLocation) -> TagEntry {
+        TagEntry {
+            key: "cache:trak:test\\example".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: u32::from_be_bytes(*b"trak"),
+            group_name: Some("camera_track".into()),
+            location,
+        }
+    }
+
+    /// A tag carrying the wire marker a Xbox 360 / monolithic build parses as.
+    /// Only the file-level marker — the one the save gate reads — is flipped;
+    /// the block data underneath is still whatever the schema built, which is
+    /// why the byte-order behaviour is checked against a real build instead.
+    fn camera_track_with_wire_endian(endian: Endian) -> TagFile {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        tag.endian = endian;
+        tag
+    }
+
+    /// A monolithic build's tags are fully editable and never saveable, and the
+    /// two answers come from different questions.
+    ///
+    /// They used to come from one: editability was gated on saveability, so a
+    /// tag build rendered as painted text — its values could not be typed into,
+    /// and (the actual complaint) could not be selected and copied either.
+    #[test]
+    fn a_monolithic_tag_is_editable_but_never_saveable() {
+        let tag = camera_track_with_wire_endian(Endian::Be);
+        let monolithic = camera_track_entry(TagEntryLocation::Monolithic {
+            name: "test\\example".into(),
+            group_tag: tag.header.group_tag,
+        });
+
+        assert!(
+            is_editable_tag(&monolithic, &tag),
+            "a monolithic build's fields and block controls must be live"
+        );
+        assert!(!is_saveable_tag(&monolithic, &tag));
+        assert!(
+            unsaveable_reason(&monolithic, &tag)
+                .is_some_and(|reason| reason.contains("monolithic")),
+            "the refusal has to name the build, not the byte order"
+        );
+
+        // The same tag out of a loose folder is refused for the other reason —
+        // the MCC writer emits a little-endian header, so there is no
+        // round-trip for these bytes wherever they came from.
+        let loose_be =
+            camera_track_entry(TagEntryLocation::LooseFile("example.camera_track".into()));
+        assert!(is_editable_tag(&loose_be, &tag));
+        assert!(
+            unsaveable_reason(&loose_be, &tag).is_some_and(|reason| reason.contains("big-endian"))
+        );
+
+        // And the gate can still say yes: an ordinary little-endian loose tag
+        // saves exactly as it did before.
+        let le = camera_track_with_wire_endian(Endian::Le);
+        assert!(is_saveable_tag(&loose_be, &le));
+    }
+}

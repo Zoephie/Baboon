@@ -437,8 +437,6 @@ pub(in crate::app) fn build_shader_editor_model(
     })
 }
 
-#[cfg(test)]
-mod extracted_tests;
 
 
 #[cfg(test)]

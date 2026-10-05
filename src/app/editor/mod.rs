@@ -306,8 +306,6 @@ fn draw_tag_fields_scroll(
 
 const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
 
-#[cfg(test)]
-mod extracted_tests;
 pub(in crate::app) mod fields;
 pub(in crate::app) use fields::*;
 pub(in crate::app) mod shader;

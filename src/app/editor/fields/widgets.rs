@@ -1084,3 +1084,361 @@ pub(in crate::app) fn search_clear_control_at(
         .line_segment([icon_rect.right_top(), icon_rect.left_bottom()], stroke);
     clear
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Foundation unit tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Named components, and each one shown in degrees: euler angles are stored
+    /// in radians, and the editor edits degrees like every other Halo tool.
+    #[test]
+    fn euler_angles_use_editable_named_components() {
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
+            blam_tags::math::RealEulerAngles2d {
+                yaw: 45f32.to_radians(),
+                pitch: (-90f32).to_radians(),
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "45".to_owned()),
+                ("pitch".to_owned(), "-90".to_owned()),
+            ]
+        );
+
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles3d(
+            blam_tags::math::RealEulerAngles3d {
+                yaw: (-0.65f32).to_radians(),
+                pitch: 0.0,
+                roll: 1.25f32.to_radians(),
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "-0.65".to_owned()),
+                ("pitch".to_owned(), "0".to_owned()),
+                ("roll".to_owned(), "1.25".to_owned()),
+            ]
+        );
+    }
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// Angle-typed fields hold radians and are edited in degrees, as Guerilla
+    /// presents them and as their own `:degrees` field names say.
+    ///
+    /// The numbers are the ones from the report that found this: an ODST weapon
+    /// whose `minimum error` read `0.01` in Guerilla and `0` in Baboon, and which
+    /// after typing `0.15` into Baboon read `8.59437` in Guerilla — a factor of
+    /// 180/π, applied to every angle field in every game.
+    #[test]
+    fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        // Typing 0.15 means 0.15 degrees, not 0.15 radians.
+        let angle = root.field("angle").unwrap();
+        let TagFieldData::Angle(stored) = parse_gui_field_value(&angle, "0.15").unwrap() else {
+            panic!("expected an angle");
+        };
+        assert!(
+            (stored - 0.15f32.to_radians()).abs() < 1e-7,
+            "0.15 degrees stored as {stored} radians"
+        );
+
+        // And the reverse, against Guerilla's own reading of the same tag: the
+        // 0.15 radians Baboon used to write shows as 8.59437 degrees.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.15)),
+            "8.59437"
+        );
+        // The value the reporter saw as `0` — 0.01 degrees is 0.000175 radians,
+        // which the old two-decimal display rounded away entirely.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.01f32.to_radians())),
+            "0.01"
+        );
+
+        // Bounds are two angles, and get the same treatment.
+        let bounds = root.field("angle bounds").unwrap();
+        let TagFieldData::AngleBounds(stored) =
+            parse_gui_field_value(&bounds, "0.05..0.5").unwrap()
+        else {
+            panic!("expected angle bounds");
+        };
+        assert!((stored.lower - 0.05f32.to_radians()).abs() < 1e-7);
+        assert!((stored.upper - 0.5f32.to_radians()).abs() < 1e-7);
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("14.3239".to_owned(), "114.592".to_owned())),
+            "the other two values Guerilla showed for the same tag"
+        );
+    }
+
+    /// With degrees turned off, an angle is shown and typed as the radians it
+    /// actually holds — no conversion in either direction.
+    ///
+    /// The failure this guards against is a half-flipped switch: a display that
+    /// still converted while the parser did not would divide every angle the
+    /// user retyped by 57.3, silently, which is the exact bug that made degrees
+    /// unconditional in the first place.
+    #[test]
+    fn angles_are_shown_and_typed_as_radians_when_degrees_are_off() {
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
+        let _units = crate::core::format::AngleUnitGuard::set(false);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        // 0.15 typed now means 0.15 radians, stored verbatim.
+        let angle = root.field("angle").unwrap();
+        let TagFieldData::Angle(stored) = parse_gui_field_value(&angle, "0.15").unwrap() else {
+            panic!("expected an angle");
+        };
+        assert_eq!(stored, 0.15, "radians mode must store what was typed");
+
+        // The same value the degrees test reads as 8.59437.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.15)),
+            "0.15"
+        );
+
+        let bounds = root.field("angle bounds").unwrap();
+        let TagFieldData::AngleBounds(stored) = parse_gui_field_value(&bounds, "0.25..2").unwrap()
+        else {
+            panic!("expected angle bounds");
+        };
+        assert_eq!((stored.lower, stored.upper), (0.25, 2.0));
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("0.25".to_owned(), "2".to_owned())),
+        );
+    }
+
+    /// Radians are not rounded to the six significant digits degrees get: there
+    /// is no conversion to be inexact, so the shortest round-tripping decimal is
+    /// both exact and already a fixed point. Rounding here would lose precision
+    /// with nothing to buy it.
+    #[test]
+    fn radians_round_trip_exactly_rather_than_to_six_digits() {
+        use crate::app::editor::fields::format_foundation_scalar_value;
+        let _units = crate::core::format::AngleUnitGuard::set(false);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let angle = tag.root().field("angle").unwrap();
+        let names = TagNameIndex::default();
+
+        // A value with more than six significant digits, which degrees mode
+        // would round: 0.34906584 is 20 degrees.
+        let mut value = 0.34906584f32;
+        for step in 0..8 {
+            let shown = format_foundation_scalar_value(&names, &TagFieldData::Angle(value));
+            let TagFieldData::Angle(reparsed) = parse_gui_field_value(&angle, &shown).unwrap()
+            else {
+                panic!("expected an angle");
+            };
+            assert_eq!(
+                reparsed, value,
+                "step {step} changed {value} to {reparsed} via {shown:?}"
+            );
+            value = reparsed;
+        }
+    }
+
+    /// Euler angles are angles, so they follow the unit too — in both the
+    /// editable and the read-only renderer, which used to disagree.
+    #[test]
+    fn euler_angles_follow_the_unit_in_both_renderers() {
+        use crate::app::editor::fields::{foundation_editable_component_parts, foundation_value_parts};
+        let euler = TagFieldData::RealEulerAngles3d(blam_tags::math::RealEulerAngles3d {
+            yaw: std::f32::consts::FRAC_PI_2,
+            pitch: 0.0,
+            roll: 0.0,
+        });
+
+        {
+            let _units = crate::core::format::AngleUnitGuard::set(true);
+            let editable = foundation_editable_component_parts(&euler).unwrap();
+            let read_only = foundation_value_parts(&euler).unwrap();
+            assert_eq!(editable[0].1, "90", "half pi is 90 degrees");
+            assert_eq!(
+                read_only, editable,
+                "a read-only euler field used to show radians while an editable one showed degrees"
+            );
+        }
+
+        let _units = crate::core::format::AngleUnitGuard::set(false);
+        let editable = foundation_editable_component_parts(&euler).unwrap();
+        let read_only = foundation_value_parts(&euler).unwrap();
+        assert!(editable[0].1.starts_with("1.57"), "{editable:?}");
+        assert_eq!(read_only, editable);
+    }
+
+    /// Editing an angle repeatedly must not walk it: degrees are shown to six
+    /// significant digits, so the display has to be a fixed point of
+    /// parse-then-format even though rad↔deg is not exact.
+    #[test]
+    fn angle_display_survives_repeated_edits() {
+        use crate::app::editor::fields::format_foundation_scalar_value;
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let field = tag.root().field("angle").unwrap();
+        let names = TagNameIndex::default();
+
+        for typed in [
+            "0.01", "0.15", "20", "45", "70", "360", "1440", "-90", "8.59437",
+        ] {
+            let TagFieldData::Angle(stored) = parse_gui_field_value(&field, typed).unwrap() else {
+                panic!("expected an angle");
+            };
+            let shown = format_foundation_scalar_value(&names, &TagFieldData::Angle(stored));
+            assert_eq!(shown, typed, "{typed} degrees came back as {shown}");
+
+            // And again, from what was shown — the fixed point that matters when a
+            // field is opened, committed, reopened and committed again.
+            let TagFieldData::Angle(second) = parse_gui_field_value(&field, &shown).unwrap() else {
+                panic!("expected an angle");
+            };
+            assert_eq!(
+                format_foundation_scalar_value(&names, &TagFieldData::Angle(second)),
+                typed,
+                "{typed} drifted on the second edit"
+            );
+        }
+    }
+
+    /// Only angle-typed fields convert. A `real` labelled `:degrees` — the ODST
+    /// weapon's `distribution angle` is one — is already in whatever unit its name
+    /// claims, which is why it was the one field in that group both tools agreed
+    /// on.
+    #[test]
+    fn plain_reals_are_left_alone() {
+        use crate::app::editor::fields::{format_foundation_scalar_value, foundation_bounds_values};
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        let real = root.field("real").unwrap();
+        let TagFieldData::Real(stored) = parse_gui_field_value(&real, "0.15").unwrap() else {
+            panic!("expected a real");
+        };
+        assert_eq!(stored, 0.15);
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Real(0.15)),
+            "0.15"
+        );
+
+        let bounds = root.field("real bounds").unwrap();
+        let TagFieldData::RealBounds(stored) = parse_gui_field_value(&bounds, "0.05..0.5").unwrap()
+        else {
+            panic!("expected real bounds");
+        };
+        assert_eq!((stored.lower, stored.upper), (0.05, 0.5));
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::RealBounds(blam_tags::math::RealBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("0.25".to_owned(), "2".to_owned()))
+        );
+    }
+
+    /// The editable text is what a commit writes back, so it cannot be a rounded
+    /// version of the value. Two decimals meant every real under 0.01 displayed as
+    /// `0` and became `0` the moment the field was touched.
+    #[test]
+    fn small_reals_are_not_displayed_as_zero() {
+        use crate::app::editor::fields::fmt_real;
+        for value in [0.001f32, 0.0001, 0.75, 1e-7, 0.123456, -0.005] {
+            let shown = fmt_real(value);
+            let parsed: f32 = shown.parse().expect("editable text parses back");
+            assert_eq!(parsed, value, "{value} displayed as {shown}");
+        }
+        assert_eq!(fmt_real(0.0), "0");
+        assert_eq!(fmt_real(-0.0), "0");
+        assert_eq!(fmt_real(70.0), "70");
+    }
+
+    #[test]
+    fn supported_scenario_schemas_define_object_rotation_as_euler_angles() {
+        fn has_object_rotation(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Object(object) => {
+                    (object.get("name").and_then(serde_json::Value::as_str) == Some("rotation")
+                        && object.get("type").and_then(serde_json::Value::as_str)
+                            == Some("real_euler_angles_3d"))
+                        || object.values().any(has_object_rotation)
+                }
+                serde_json::Value::Array(values) => values.iter().any(has_object_rotation),
+                _ => false,
+            }
+        }
+
+        for game in [
+            "haloce_mcc",
+            "halo2_mcc",
+            "halo2amp_mcc",
+            "halo3_mcc",
+            "halo3odst_mcc",
+            "haloreach_mcc",
+            "halo4_mcc",
+            "haloce_evolved",
+        ] {
+            let path = test_definition_path(&format!("{game}/scenario.json"));
+            let value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(
+                has_object_rotation(&value),
+                "{} has no real_euler_angles_3d object rotation",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn block_to_tsv_exports_header_and_one_row_per_element() {
+        let mut tag = TagFile::new("definitions/halo2_mcc/model.json").unwrap();
+        let mut dirty = Dirty::default();
+        for name in ["alpha", "beta"] {
+            apply_model_variant_ops(
+                &mut tag,
+                vec![ModelVariantOp::Create {
+                    name: name.to_owned(),
+                    regions: Vec::new(),
+                }],
+                &mut dirty,
+            );
+        }
+        let variants = tag
+            .root()
+            .field("variants")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let tsv = super::block_to_tsv(&variants, &TagNameIndex::default());
+
+        let lines: Vec<&str> = tsv.lines().collect();
+        assert_eq!(lines.len(), 3, "header + 2 element rows");
+        assert!(
+            lines[0].split('\t').any(|col| col == "name"),
+            "header should include the `name` column"
+        );
+        assert!(tsv.contains("alpha") && tsv.contains("beta"));
+    }
+}
