@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::shell::actions::pressed_shortcuts;
+use crate::app::editor::DraftFlush;
 use crate::app::shell::frame::terminal_line_is_strong;
 use crate::app::shell::frame::terminal_line_color;
 use crate::app::kits::terminal::open_terminal_log;
@@ -66,6 +67,13 @@ impl Baboon {
         self.apply_commands(ctx);
         self.process_frame_requests(ctx);
         self.apply_commands(ctx);
+        // A field typed into and then not drawn on this pass -- its section
+        // collapsed, its pane switched to another sub-tab or block element,
+        // its tab closed or hidden -- never sees its box lose focus, so it
+        // commits here instead of keeping the edit to itself.
+        if self.commit_drafts(DraftFlush::NotDrawnOn(ctx.cumulative_pass_nr())) {
+            ctx.request_repaint();
+        }
     }
 
     /// The kit a confirmed popup applies to: the one it was opened from, or
@@ -173,6 +181,13 @@ impl Baboon {
     }
 
     pub(in crate::app) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
+        // A save, poke or close reads the tags as they stand, so every field
+        // still holding a typed change commits first. Usually the pass that
+        // queued the action already committed it; but a window that is
+        // minimized runs no UI pass at all, and the close is decided here.
+        if self.editor.deferred_file_action.is_some() {
+            self.commit_drafts(DraftFlush::All);
+        }
         match self.editor.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
                 if self.model.prefs.enable_chimp
@@ -260,7 +275,19 @@ impl Baboon {
             });
             return;
         }
-        for action in pressed_shortcuts(ctx) {
+        let shortcuts = pressed_shortcuts(ctx);
+        // Save, close and poke act on the tags as they stand. Giving up the
+        // focused field now, before any pane draws, lets it see the loss and
+        // commit on this pass; given up when the action is applied, after
+        // the draw, the field committed a frame after the save had run.
+        if shortcuts.iter().any(|action| matches!(action, AppAction::Defer(_))) {
+            ctx.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
+        }
+        for action in shortcuts {
             self.commands.send(action);
         }
         self.refresh_find(ctx);

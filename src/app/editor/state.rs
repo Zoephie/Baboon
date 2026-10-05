@@ -28,6 +28,62 @@ pub(in crate::app) struct EditDraft {
     pub(in crate::app) text: String,
     baseline: String,
     pub(in crate::app) changed: bool,
+    /// The pass the draft's row was last drawn on.
+    drawn_pass: u64,
+    /// How to commit it without its row, set while it holds a change.
+    commit: Option<DraftCommit>,
+}
+
+/// How a changed draft becomes edits when it has to be committed without its
+/// row: a save, a close, or a pass that no longer draws it (a collapsed
+/// section, another sub-tab, another block element).
+///
+/// A row commits through its text box losing focus, and that is only seen by
+/// drawing the box. Saving and closing run before the next draw, and a box
+/// that stops being drawn never sees its loss, so each lost the edit. The row
+/// leaves this behind instead, built from the same code its own commit runs.
+#[derive(Clone)]
+pub(in crate::app) struct DraftCommit {
+    tag_key: String,
+    /// Every draft the commit reads, the row's own included; committing one
+    /// commits them all.
+    members: Rc<[String]>,
+    build: Rc<DraftCommitBuild>,
+}
+
+/// Builds a [`DraftCommit`]'s edits from the drafts as they stand.
+type DraftCommitBuild = dyn Fn(&EditDrafts) -> Result<DeferredOps, String>;
+
+impl std::fmt::Debug for DraftCommit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DraftCommit")
+            .field("tag_key", &self.tag_key)
+            .field("members", &self.members)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DraftCommit {
+    /// A commit that reads the drafts `members`, in order.
+    pub(in crate::app) fn new(
+        tag_key: &str,
+        members: Vec<String>,
+        build: impl Fn(&[&str]) -> Result<DeferredOps, String> + 'static,
+    ) -> Self {
+        let members: Rc<[String]> = members.into();
+        let read = members.clone();
+        Self {
+            tag_key: tag_key.to_owned(),
+            members,
+            build: Rc::new(move |drafts: &EditDrafts| {
+                let texts = read
+                    .iter()
+                    .map(|key| drafts.entries.get(key).map_or("", |draft| draft.text.as_str()))
+                    .collect::<Vec<_>>();
+                build(&texts)
+            }),
+        }
+    }
 }
 
 impl EditDraft {
@@ -37,6 +93,8 @@ impl EditDraft {
             baseline: text.clone(),
             text,
             changed: false,
+            drawn_pass: 0,
+            commit: None,
         }
     }
 
@@ -46,6 +104,7 @@ impl EditDraft {
                 self.text = value.to_owned();
                 self.baseline = value.to_owned();
                 self.changed = false;
+                self.commit = None;
             }
         } else if self.baseline != value {
             self.text = value.to_owned();
@@ -57,32 +116,88 @@ impl EditDraft {
         self.changed |= response.changed();
     }
 
-    pub(in crate::app) fn should_commit(&self, ui: &egui::Ui, response: &egui::Response) -> bool {
-        self.changed
-            && (lost_focus_once(&response)
-                || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))))
+    /// Whether the draft's change commits now: its box lost focus, or Enter
+    /// was pressed in it. A committed draft holds no change any more, so the
+    /// box shows the tag's value from then on, as the tag displays it (`1.10`
+    /// becomes `1.1`), and an undo shows through it.
+    ///
+    /// Escape gives up focus too, but throws the change away: the box goes
+    /// back to the tag's value and nothing commits.
+    pub(in crate::app) fn should_commit(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
+        if !self.changed {
+            return false;
+        }
+        let lost_focus = lost_focus_once(response);
+        if lost_focus && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.text = self.baseline.clone();
+            self.mark_committed();
+            return false;
+        }
+        let commit = lost_focus
+            || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+        if commit {
+            self.mark_committed();
+        }
+        commit
+    }
+
+    /// Record that the draft's change has gone to the tag (or was thrown
+    /// away), so nothing commits it again.
+    pub(in crate::app) fn mark_committed(&mut self) {
+        self.changed = false;
+        self.commit = None;
+    }
+
+    /// Leave behind how to commit this draft's change without its row. Only
+    /// a draft holding a change keeps one.
+    pub(in crate::app) fn keep_commit(&mut self, commit: impl FnOnce() -> DraftCommit) {
+        if self.changed {
+            self.commit = Some(commit());
+        }
     }
 
     pub(in crate::app) fn set_clean(&mut self, value: impl Into<String>) {
         let value = value.into();
         self.text = value.clone();
         self.baseline = value;
-        self.changed = false;
+        self.mark_committed();
     }
+}
+
+/// Which changed drafts [`EditDrafts::take_uncommitted`] commits.
+#[derive(Clone, Copy)]
+pub(in crate::app) enum DraftFlush {
+    /// Every one: a save or a close is about to read the tags.
+    All,
+    /// Those whose row was not drawn on this pass, so it will not see its
+    /// box lose focus.
+    NotDrawnOn(u64),
 }
 
 #[derive(Default)]
 pub(in crate::app) struct EditDrafts {
     entries: HashMap<String, EditDraft>,
+    /// The pass rows are being drawn on, stamped on each draft they touch.
+    pass: u64,
 }
 
 impl EditDrafts {
-    pub(in crate::app) fn draft_mut(&mut self, key: String, value: &str) -> &mut EditDraft {
-        let draft = self
-            .entries
-            .entry(key)
-            .or_insert_with(|| EditDraft::new(value));
+    /// Start stamping drafts with `pass`, egui's pass number. Called before
+    /// any row draws.
+    pub(in crate::app) fn begin_pass(&mut self, pass: u64) {
+        self.pass = pass;
+    }
+
+    pub(in crate::app) fn draft_mut(&mut self, key: &str, value: &str) -> &mut EditDraft {
+        let pass = self.pass;
+        // Looked up before inserting, so a row drawn every frame doesn't
+        // allocate its key every frame.
+        if !self.entries.contains_key(key) {
+            self.entries.insert(key.to_owned(), EditDraft::new(value));
+        }
+        let draft = self.entries.get_mut(key).expect("inserted above");
         draft.synchronize(value);
+        draft.drawn_pass = pass;
         draft
     }
 
@@ -92,6 +207,7 @@ impl EditDrafts {
             .remove(key)
             .unwrap_or_else(|| EditDraft::new(value));
         draft.synchronize(value);
+        draft.drawn_pass = self.pass;
         draft
     }
 
@@ -101,6 +217,39 @@ impl EditDrafts {
 
     pub(in crate::app) fn insert_clean(&mut self, key: String, value: String) {
         self.entries.insert(key, EditDraft::new(value));
+    }
+
+    /// The edits of every changed draft `which` names, by tag, as their rows
+    /// would have committed them; each is then marked committed. A draft
+    /// whose row left no way to commit it is left alone.
+    pub(in crate::app) fn take_uncommitted(
+        &mut self,
+        which: DraftFlush,
+    ) -> Vec<(String, Result<DeferredOps, String>)> {
+        let mut commits: Vec<DraftCommit> = Vec::new();
+        for draft in self.entries.values() {
+            let Some(commit) = &draft.commit else {
+                continue;
+            };
+            let due = draft.changed
+                && match which {
+                    DraftFlush::All => true,
+                    DraftFlush::NotDrawnOn(pass) => draft.drawn_pass != pass,
+                };
+            if due && !commits.iter().any(|seen| Rc::ptr_eq(&seen.members, &commit.members)) {
+                commits.push(commit.clone());
+            }
+        }
+        let mut out = Vec::with_capacity(commits.len());
+        for commit in commits {
+            out.push((commit.tag_key.clone(), (commit.build)(self)));
+            for key in commit.members.iter() {
+                if let Some(draft) = self.entries.get_mut(key) {
+                    draft.mark_committed();
+                }
+            }
+        }
+        out
     }
 
     /// Drop every draft belonging to one tag. Drafts are keyed `tag|path`, so
@@ -538,6 +687,29 @@ impl<'a> FieldEditContext<'a> {
 }
 
 impl FieldEditContext<'_> {
+    /// Queue `ops`, as a row's own commit does: the same ops a
+    /// [`DraftCommit`] builds when the row cannot commit itself.
+    pub(in crate::app) fn push_ops(&mut self, ops: DeferredOps) {
+        let DeferredOps {
+            pending,
+            block_ops,
+            shader_ops,
+            shader_param_ops,
+            h2_shader_param_ops,
+            model_variant_ops,
+            function_data_ops,
+        } = ops;
+        // Function-data writes come only from the function popup, never from
+        // a text row.
+        debug_assert!(function_data_ops.is_empty());
+        self.pending.extend(pending);
+        self.block_ops.extend(block_ops);
+        self.shader_ops.extend(shader_ops);
+        self.shader_param_ops.extend(shader_param_ops);
+        self.h2_shader_param_ops.extend(h2_shader_param_ops);
+        self.model_variant_ops.extend(model_variant_ops);
+    }
+
     pub(in crate::app) fn widget_id(
         &self,
         salt: impl std::hash::Hash + std::fmt::Debug,

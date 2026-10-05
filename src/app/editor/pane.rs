@@ -278,6 +278,9 @@ pub(in crate::app) fn draw_tag_pane(
         _ => None,
     });
     let kit_layout = source.and_then(LoadedSourceData::kit_layout);
+    // Drafts the rows below touch are stamped as drawn this pass; the sweep
+    // after the UI commits the changed ones that weren't.
+    view.edit_buffers.begin_pass(ui.ctx().cumulative_pass_nr());
     let mut edit_context = FieldEditContext {
         view_scope: scope,
         tag_key: &key,

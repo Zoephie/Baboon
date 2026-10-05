@@ -228,7 +228,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
-    let draft = edit.buffers.draft_mut(buffer_key, value);
+    let draft = edit.buffers.draft_mut(&buffer_key, value);
 
     let droppable = edit.editable && !meta.read_only;
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
@@ -266,6 +266,12 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         edit.names,
                     );
                 }
+                draft.keep_commit(|| {
+                    let (path, accepted) = (path.to_owned(), accepted.clone());
+                    DraftCommit::new(edit.tag_key, vec![buffer_key.clone()], move |texts| {
+                        tag_reference_input_ops(&path, texts[0], accepted.as_deref(), None)
+                    })
+                });
                 response
             } else if !has_ref {
                 foundation_tag_reference_input_cell_colored(
@@ -495,40 +501,43 @@ fn accepted_groups_label(accepted: &[u32], names: Option<&TagNameIndex>) -> Stri
 
 pub(super) fn commit_tag_reference_input(
     pending: &mut Vec<PendingFieldEdit>,
-    mut status: Option<&mut String>,
+    status: Option<&mut String>,
     path: &str,
     input: String,
     accepted: Option<&[u32]>,
     names: Option<&TagNameIndex>,
 ) {
-    if let Some(accepted) = accepted {
-        match parse_tag_reference(&input) {
-            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {
-                pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input,
-                });
-            }
-            Ok(_) => {
-                if let Some(status) = status.as_deref_mut() {
-                    *status = format!(
-                        "Reference must be a {} tag",
-                        accepted_groups_label(accepted, names)
-                    );
-                }
-            }
-            Err(error) => {
-                if let Some(status) = status.as_deref_mut() {
-                    *status = format!("Invalid tag reference: {error}");
-                }
+    match tag_reference_input_ops(path, &input, accepted, names) {
+        Ok(ops) => pending.extend(ops.pending),
+        Err(error) => {
+            if let Some(status) = status {
+                *status = error;
             }
         }
-    } else {
-        pending.push(PendingFieldEdit {
-            path: path.to_owned(),
-            input,
-        });
     }
+}
+
+/// The edit setting the reference at `path` to `input`, or why it is
+/// refused: a group the field doesn't take, or text that isn't a reference.
+pub(super) fn tag_reference_input_ops(
+    path: &str,
+    input: &str,
+    accepted: Option<&[u32]>,
+    names: Option<&TagNameIndex>,
+) -> Result<DeferredOps, String> {
+    if let Some(accepted) = accepted {
+        match parse_tag_reference(input) {
+            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {}
+            Ok(_) => {
+                return Err(format!(
+                    "Reference must be a {} tag",
+                    accepted_groups_label(accepted, names)
+                ));
+            }
+            Err(error) => return Err(format!("Invalid tag reference: {error}")),
+        }
+    }
+    Ok(field_edit_ops(path, input))
 }
 
 pub(super) fn tag_reference_value_icon_group(
@@ -1024,7 +1033,7 @@ mod tests {
             with_test_edit_context(|edit| {
                 let path = "model";
                 if let Some(text) = draft_text {
-                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    let draft = edit.buffers.draft_mut(&format!("{}|{path}", edit.tag_key), value);
                     draft.text = text.to_owned();
                     draft.changed = true;
                 }
@@ -1063,7 +1072,7 @@ mod tests {
                     assert_eq!(edit.pending[0].input, "NONE");
                 }
                 if draft_text.is_some() {
-                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    let draft = edit.buffers.draft_mut(&format!("{}|{path}", edit.tag_key), value);
                     assert!(!draft.changed);
                     assert!(draft.text.is_empty() || draft.text.eq_ignore_ascii_case("none"));
                 }

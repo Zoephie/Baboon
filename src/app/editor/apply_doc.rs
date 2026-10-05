@@ -13,6 +13,25 @@ impl Baboon {
     /// `None` when nothing was applied: the tag is not open in `kit_index`,
     /// or the kit is read-only (which says so on the status line when there
     /// was something to refuse).
+    /// Commit the changed drafts `which` names, in every kit, as their rows
+    /// would have. Returns whether any did.
+    pub(in crate::app) fn commit_drafts(&mut self, which: DraftFlush) -> bool {
+        let mut committed = false;
+        for kit_index in 0..self.model.kits.len() {
+            let kit = self.model.kits[kit_index].id;
+            for (tag_key, ops) in self.views[kit].edit_buffers.take_uncommitted(which) {
+                committed = true;
+                match ops {
+                    Ok(ops) => {
+                        self.apply_doc_ops(kit_index, &tag_key, "Edit", ops, UndoStep::Coalesce);
+                    }
+                    Err(error) => self.model.status = error,
+                }
+            }
+        }
+        committed
+    }
+
     pub(in crate::app) fn apply_doc_ops(
         &mut self,
         kit_index: usize,
@@ -161,7 +180,7 @@ mod tests {
         let shown = value(&app);
         let draft = app.views[app.model.kits[0].id]
             .edit_buffers
-            .draft_mut(draft_key.clone(), &shown);
+            .draft_mut(&draft_key, &shown);
         draft.text = "07".to_owned();
         draft.changed = true;
 

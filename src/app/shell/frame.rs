@@ -5175,4 +5175,236 @@ mod tests {
         });
         assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
     }
+
+    /// A Halo CE kit with two weapons open, "b" the tab shown, settled.
+    struct TypedEdit {
+        h: Harness,
+        kit: LooseKit,
+        key: String,
+    }
+
+    /// Where a field row's text box sits: right of its label.
+    fn field_box(h: &Harness, label: &str) -> egui::Pos2 {
+        let rect = h
+            .painted_rects
+            .iter()
+            .find(|(text, _)| text == label)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{label:?} is not painted"));
+        egui::pos2(rect.left() + 310.0, rect.center().y)
+    }
+
+    fn painted_at(h: &Harness, label: &str) -> egui::Pos2 {
+        h.painted_rects
+            .iter()
+            .find(|(text, _)| text == label)
+            .map(|(_, rect)| rect.center())
+            .unwrap_or_else(|| panic!("{label:?} is not painted"))
+    }
+
+    /// Slide onto `target` over three frames, then press and release there.
+    fn click_point(h: &mut Harness, target: egui::Pos2) {
+        let from = target - egui::vec2(30.0, 30.0);
+        for step in 1..=3 {
+            h.frame(vec![egui::Event::PointerMoved(from + (target - from) * step as f32 / 3.0)]);
+        }
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+    }
+
+    fn press_key(h: &mut Harness, key: egui::Key, modifiers: egui::Modifiers) {
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers }]);
+        }
+    }
+
+    fn settle(h: &mut Harness, frames: usize) {
+        for _ in 0..frames {
+            h.frame(Vec::new());
+        }
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers { ctrl: true, command: true, ..egui::Modifiers::NONE };
+    const RADIUS: &str = "item/object/bounding radius#2";
+
+    impl TypedEdit {
+        /// Type `5` into "bounding radius" and leave the box focused.
+        fn new(name: &str) -> Self {
+            let kit = LooseKit::new(name, "haloce_mcc");
+            kit.write_classic_ce("weapons/a", "weapon");
+            kit.write_classic_ce("weapons/b", "weapon");
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            kit.open(&mut h.app, "weapons/a.weapon");
+            let key = kit.open(&mut h.app, "weapons/b.weapon");
+            settle(&mut h, 8);
+            let at = field_box(&h, "bounding radius");
+            click_point(&mut h, at);
+            settle(&mut h, 1);
+            h.frame(vec![egui::Event::Text("5".to_owned())]);
+            settle(&mut h, 1);
+            let edit = Self { h, kit, key };
+            assert_eq!(edit.radius(), Some(0.0), "typing alone commits nothing");
+            edit
+        }
+
+        fn doc(&self) -> Option<&crate::core::document::TagDocument> {
+            self.h.app.model.kits[0].parsed_tags.get(&self.key)
+        }
+
+        fn radius(&self) -> Option<f32> {
+            real_of(&self.doc()?.tag, RADIUS)
+        }
+
+        fn dirty(&self) -> bool {
+            self.doc().is_some_and(|doc| doc.dirty.is_set())
+        }
+
+        /// The radius the file on disk holds.
+        fn saved_radius(&self) -> Option<f32> {
+            let bytes = std::fs::read(self.kit.root.join("weapons/b.weapon")).unwrap();
+            let tag = crate::core::source::read_tag_from_bytes(
+                &bytes,
+                GameId::from_id("haloce_mcc"),
+                Some(&locate_definitions_root()),
+                group_tag("haloce_mcc", "weapon"),
+            )
+            .unwrap();
+            real_of(&tag, RADIUS)
+        }
+    }
+
+    /// Ctrl+S while still typing saves what was typed. The shortcut used to
+    /// give up the field's focus only after the panes had drawn, and the save
+    /// ran before the next draw, so the file got the old value and the edit
+    /// landed a frame later, leaving the tag modified.
+    #[test]
+    fn ctrl_s_while_typing_saves_the_typed_value() {
+        let mut edit = TypedEdit::new("edit-ctrl-s");
+        press_key(&mut edit.h, egui::Key::S, CTRL);
+        settle(&mut edit.h, 4);
+        assert_eq!(edit.saved_radius(), Some(5.0), "the file holds the typed value");
+        assert!(!edit.dirty(), "and the tag is saved");
+    }
+
+    /// Ctrl+W while still typing asks to save the typed value rather than
+    /// closing the tab and dropping it.
+    #[test]
+    fn ctrl_w_while_typing_asks_to_save_the_typed_value() {
+        let mut edit = TypedEdit::new("edit-ctrl-w");
+        press_key(&mut edit.h, egui::Key::W, CTRL);
+        settle(&mut edit.h, 4);
+        assert!(edit.h.app.dialogs.get::<SaveChangesPrompt>().is_some(), "the close asks first");
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// Collapsing the section of a field being typed into commits it. The
+    /// box stops being drawn on that click, so it never saw itself lose focus,
+    /// and kept the typed text to itself while the tag stayed unchanged.
+    #[test]
+    fn collapsing_the_section_of_a_typed_field_commits_it() {
+        let mut edit = TypedEdit::new("edit-collapse");
+        let header = painted_at(&edit.h, "OBJECT_BLOCK_STRUCT");
+        click_point(&mut edit.h, header);
+        settle(&mut edit.h, 3);
+        assert!(!edit.h.painted.iter().any(|text| text == "bounding radius"), "the section is collapsed");
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// The same for switching the pane to its Model Preview sub-tab.
+    #[test]
+    fn switching_sub_tab_commits_a_typed_field() {
+        let mut edit = TypedEdit::new("edit-sub-tab");
+        let tab = painted_at(&edit.h, "Model Preview");
+        click_point(&mut edit.h, tab);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// Closing the window while it is minimized asks about a field still
+    /// being typed in. eframe runs no UI pass for a minimized window, so the
+    /// field never committed, the tags looked saved, and the app quit.
+    #[test]
+    fn closing_while_minimized_asks_about_a_typed_field() {
+        let mut edit = TypedEdit::new("edit-minimized");
+        let mut commands = Vec::new();
+        for (frame, close) in [true, false, false].into_iter().enumerate() {
+            let mut input = screen(Vec::new(), 500.0 + frame as f64 / 60.0);
+            let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            viewport.minimized = Some(true);
+            if close {
+                viewport.events.push(egui::ViewportEvent::Close);
+            }
+            let app = &mut edit.h.app;
+            let output = edit.h.ctx.run_logic(&input, |ctx| app.run_logic(ctx));
+            if let Some(sent) = output.viewport_commands.get(&egui::ViewportId::ROOT) {
+                commands.extend(sent.iter().cloned());
+            }
+        }
+        assert!(!commands.contains(&egui::ViewportCommand::Close), "the app quit: {commands:?}");
+        assert!(edit.h.app.dialogs.get::<SaveChangesPrompt>().is_some(), "it asks first");
+        assert_eq!(edit.radius(), Some(5.0));
+    }
+
+    /// Escape in a field puts the tag's value back and commits nothing.
+    #[test]
+    fn escape_restores_the_original_value() {
+        let mut edit = TypedEdit::new("edit-escape");
+        press_key(&mut edit.h, egui::Key::Escape, egui::Modifiers::NONE);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(0.0));
+        assert!(!edit.dirty());
+        let row = painted_at(&edit.h, "bounding radius");
+        assert!(
+            !edit.h.painted_rects.iter().any(|(text, rect)| text == "05" && (rect.center().y - row.y).abs() < 6.0),
+            "the box shows the tag's value again"
+        );
+        // Enter still commits.
+        let at = field_box(&edit.h, "bounding radius");
+        click_point(&mut edit.h, at);
+        edit.h.frame(vec![egui::Event::Text("7".to_owned())]);
+        press_key(&mut edit.h, egui::Key::Enter, egui::Modifiers::NONE);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(7.0), "the box held 0 again, so it reads 07");
+    }
+
+    /// An undo shows through a multi-part row after its edit committed. The
+    /// row's boxes kept the typed text (`05`, shown back as `5`), so the undo
+    /// was hidden and clicking in and out of the box applied it again.
+    #[test]
+    fn an_undo_shows_through_a_committed_component_row() {
+        let mut edit = TypedEdit::new("edit-components");
+        press_key(&mut edit.h, egui::Key::Escape, egui::Modifiers::NONE);
+        settle(&mut edit.h, 2);
+        // The first component's box, just right of where a one-box row's
+        // box starts.
+        let x_box = field_box(&edit.h, "bounding offset") + egui::vec2(10.0, 0.0);
+        click_point(&mut edit.h, x_box);
+        edit.h.frame(vec![egui::Event::Text("5".to_owned())]);
+        press_key(&mut edit.h, egui::Key::Enter, egui::Modifiers::NONE);
+        settle(&mut edit.h, 2);
+        let offset = |edit: &TypedEdit| {
+            edit.doc().and_then(|doc| doc.tag.root().field_path("item/object/bounding offset#2")?.value()).map(|value| format!("{value:?}"))
+        };
+        let edited = offset(&edit);
+        assert!(edit.dirty(), "the component edit committed: {edited:?}");
+        press_key(&mut edit.h, egui::Key::Z, CTRL);
+        settle(&mut edit.h, 2);
+        let undone = offset(&edit);
+        assert_ne!(undone, edited, "the undo reverted it");
+        // In and out of the box without typing re-applies nothing.
+        click_point(&mut edit.h, x_box);
+        click_point(&mut edit.h, egui::pos2(1400.0, 900.0));
+        settle(&mut edit.h, 2);
+        assert_eq!(offset(&edit), undone, "the undo stays undone");
+    }
 }

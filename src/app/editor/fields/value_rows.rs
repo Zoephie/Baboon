@@ -246,6 +246,37 @@ pub(in crate::app) fn draw_foundation_multi_value_row(
     });
 }
 
+/// The edit a row setting `path` from `input` commits.
+pub(in crate::app) fn field_edit_ops(path: &str, input: &str) -> DeferredOps {
+    DeferredOps {
+        pending: vec![PendingFieldEdit {
+            path: path.to_owned(),
+            input: input.trim().to_owned(),
+        }],
+        ..DeferredOps::default()
+    }
+}
+
+/// How a row that sets `path` from its one box, `buffer_key`, commits without
+/// being drawn.
+pub(in crate::app) fn single_field_commit(tag_key: &str, buffer_key: &str, path: &str) -> DraftCommit {
+    let path = path.to_owned();
+    DraftCommit::new(tag_key, vec![buffer_key.to_owned()], move |texts| {
+        Ok(field_edit_ops(&path, texts[0]))
+    })
+}
+
+/// A bounds value from its two boxes, as the field's parser reads it.
+fn bounds_input(lower: &str, upper: &str) -> String {
+    format!("{}..{}", lower.trim(), upper.trim())
+}
+
+/// A multi-component value from its boxes, in the order the field's parser
+/// reads them.
+fn components_input(texts: &[&str]) -> String {
+    texts.iter().map(|text| text.trim()).collect::<Vec<_>>().join(", ")
+}
+
 pub(in crate::app) fn draw_foundation_bounds_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
@@ -275,13 +306,24 @@ pub(in crate::app) fn draw_foundation_bounds_row(
             let upper_response = foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
             lower.note_response(&lower_response);
             upper.note_response(&upper_response);
-            let commit = lower.should_commit(ui, &lower_response)
-                || upper.should_commit(ui, &upper_response);
-            if commit {
-                edit.pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input: format!("{}..{}", lower.text.trim(), upper.text.trim()),
-                });
+            // Both asked, so a commit in one box is seen even when the other
+            // commits too; the edit carries both.
+            let lower_commit = lower.should_commit(ui, &lower_response);
+            let upper_commit = upper.should_commit(ui, &upper_response);
+            if lower_commit || upper_commit {
+                edit.push_ops(field_edit_ops(path, &bounds_input(&lower.text, &upper.text)));
+                lower.mark_committed();
+                upper.mark_committed();
+            }
+            if lower.changed || upper.changed {
+                let path = path.to_owned();
+                let commit = DraftCommit::new(
+                    edit.tag_key,
+                    vec![lower_key.clone(), upper_key.clone()],
+                    move |texts| Ok(field_edit_ops(&path, &bounds_input(texts[0], texts[1]))),
+                );
+                lower.keep_commit(|| commit.clone());
+                upper.keep_commit(|| commit);
             }
         } else {
             foundation_input_cell(ui, lower_value, 92.0);
@@ -358,20 +400,29 @@ fn draw_foundation_component_cells(
         }
     }
     if editable {
-        let changed = drafts.iter().any(|(_, draft)| draft.changed);
-        let committed = responses
-            .iter()
-            .zip(drafts.iter())
-            .any(|(response, (_, draft))| draft.should_commit(ui, response));
-        if committed && changed {
-            edit.pending.push(PendingFieldEdit {
-                path: path.to_owned(),
-                input: drafts
-                    .iter()
-                    .map(|(_, draft)| draft.text.trim())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
+        // Every box asked, not just until one says yes, so each sees its own
+        // focus loss; the edit carries all of them.
+        let mut committed = false;
+        for (response, (_, draft)) in responses.iter().zip(drafts.iter_mut()) {
+            committed |= draft.should_commit(ui, response);
+        }
+        if committed {
+            let texts = drafts.iter().map(|(_, draft)| draft.text.as_str()).collect::<Vec<_>>();
+            edit.push_ops(field_edit_ops(path, &components_input(&texts)));
+            for (_, draft) in &mut drafts {
+                draft.mark_committed();
+            }
+        }
+        if drafts.iter().any(|(_, draft)| draft.changed) {
+            let path = path.to_owned();
+            let commit = DraftCommit::new(
+                edit.tag_key,
+                drafts.iter().map(|(key, _)| key.clone()).collect(),
+                move |texts| Ok(field_edit_ops(&path, &components_input(texts))),
+            );
+            for (_, draft) in &mut drafts {
+                draft.keep_commit(|| commit.clone());
+            }
         }
     }
 
@@ -434,7 +485,7 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
             .clamp(180.0, 920.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("text", &buffer_key));
-    let draft = edit.buffers.draft_mut(buffer_key, value);
+    let draft = edit.buffers.draft_mut(&buffer_key, value);
 
     ui.horizontal(|ui| {
         ui.add_space(indent);
@@ -444,11 +495,9 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
         let response = foundation_text_edit_cell(ui, &mut draft.text, width, id);
         draft.note_response(&response);
         if draft.should_commit(ui, &response) {
-            edit.pending.push(PendingFieldEdit {
-                path: path.to_owned(),
-                input: draft.text.trim().to_owned(),
-            });
+            edit.pending.extend(field_edit_ops(path, &draft.text).pending);
         }
+        draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
