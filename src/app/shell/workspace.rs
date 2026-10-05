@@ -1106,7 +1106,8 @@ pub(in crate::app) mod tests {
                 physical_key: None,
                 pressed: true,
                 repeat: false,
-                modifiers: egui::Modifiers::CTRL,
+                // As Windows reports Ctrl: `command` set with it.
+                modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
             }]),
             |_| {
                 app.prepare_root_frame(&ctx);

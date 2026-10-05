@@ -5,6 +5,7 @@
 
 use super::*;
 use super::recents::draw_recent_folders_menu;
+use super::actions::shortcut_text;
 use crate::app::shell::frame::{
     EDITING_KIT_MENU_MIN_WIDTH, EditingKitMenuEntry, editing_kit_menu_row_with_read_only,
     monitor_commands_for_game, visible_editing_kit_menu_entries,
@@ -269,11 +270,12 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         cx.send(AppAction::Recent(action));
     }
     ui.separator();
+    let save_shortcut = shortcut_text(ui.ctx(), egui::Modifiers::COMMAND, egui::Key::S);
     let save_label =
         if cx.model.prefs.enable_chimp && menu.chimp_surface {
-            "Save Chimp Changes...    Ctrl+S"
+            format!("Save Chimp Changes...    {save_shortcut}")
         } else {
-            "Save Current Tag    Ctrl+S"
+            format!("Save Current Tag    {save_shortcut}")
         };
     if icon_text_button(
         ui,
@@ -301,7 +303,10 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
         if ui
             .add_enabled(
                 cx.model.can_poke_current_tag(),
-                egui::Button::new("Poke Current Tag...    Ctrl+P"),
+                egui::Button::new(format!(
+                    "Poke Current Tag...    {}",
+                    shortcut_text(ui.ctx(), egui::Modifiers::COMMAND, egui::Key::P)
+                )),
             )
             .on_hover_text(
                 "Apply supported changes to this already-loaded tag in the verified Campaign Evolved process",
@@ -379,7 +384,10 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     if ui
         .add_enabled(
             cx.model.kits[cx.model.active].selected_key.is_some(),
-            egui::Button::new("Close Current Tag    Ctrl+W"),
+            egui::Button::new(format!(
+                "Close Current Tag    {}",
+                shortcut_text(ui.ctx(), egui::Modifiers::COMMAND, egui::Key::W)
+            )),
         )
         .clicked()
     {
@@ -414,7 +422,13 @@ fn draw_file_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
 fn draw_edit_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     style_list_menu(ui);
     if ui
-        .add_enabled(menu.can_undo, egui::Button::new("Undo    Ctrl+Z"))
+        .add_enabled(
+            menu.can_undo,
+            egui::Button::new(format!(
+                "Undo    {}",
+                shortcut_text(ui.ctx(), egui::Modifiers::COMMAND, egui::Key::Z)
+            )),
+        )
         .clicked()
     {
         close_menu(ui);
@@ -423,7 +437,14 @@ fn draw_edit_menu(cx: &Ctx, ui: &mut Ui, menu: &MenuState) {
     if ui
         .add_enabled(
             menu.can_redo,
-            egui::Button::new("Redo    Ctrl+Shift+Z"),
+            egui::Button::new(format!(
+                "Redo    {}",
+                shortcut_text(
+                    ui.ctx(),
+                    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+                    egui::Key::Z,
+                )
+            )),
         )
         .clicked()
     {
