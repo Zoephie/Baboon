@@ -94,6 +94,8 @@ fn render_method_caches(
                         BitmapComparisonFunction::Never,
                     ),
                     default_address_mode: Enum::from_variant(BitmapAddressMode::Wrap),
+                    default_filter_mode_index: 0,
+                    default_address_mode_index: 0,
                     anisotropy_amount: 0,
                     default_color: blam_tags::math::ArgbColor(0xff80_4020),
                     default_bitmap_scale: 1.0,
@@ -102,7 +104,11 @@ fn render_method_caches(
                 .collect();
             rmop.insert(
                 format!("rmop:{option_path}"),
-                Some(Arc::new(RenderMethodOption { parameters })),
+                Some(Arc::new(RenderMethodOption {
+                    parameters,
+                    filter_mode_names: Vec::new(),
+                    address_mode_names: Vec::new(),
+                })),
             );
         }
         definition_categories.push(RenderMethodDefinitionCategory {
@@ -886,9 +892,13 @@ fn a_bitmap_parameter_is_overridden_and_expands() {
         edits,
         [
             ("render_method/parameters[0]/bitmap flags", "1"),
-            ("render_method/parameters[0]/bitmap filter mode", "trilinear"),
+            ("render_method/parameters[0]/bitmap filter mode", "0"),
         ]
     );
-    grid.apply();
+    // The mode field is a short: the default goes in as its index.
+    let applied = grid.apply();
+    for outcome in &applied.outcomes {
+        assert_eq!(outcome.result, Ok(()));
+    }
     assert_eq!(grid.count("p0_0_filter_mode"), 1, "{:?}", grid.texts());
 }

@@ -1986,6 +1986,8 @@ mod perf_baseline_tests {
                                 BitmapComparisonFunction::Never,
                             ),
                             default_address_mode: Enum::from_variant(BitmapAddressMode::Wrap),
+                            default_filter_mode_index: 0,
+                            default_address_mode_index: 0,
                             anisotropy_amount: 0,
                             default_color: blam_tags::math::ArgbColor(0xff80_4020),
                             default_bitmap_scale: 1.0,
@@ -1996,6 +1998,8 @@ mod perf_baseline_tests {
                         format!("rmop:{option_path}"),
                         Some(Arc::new(RenderMethodOption {
                             parameters: option_parameters,
+                            filter_mode_names: Vec::new(),
+                            address_mode_names: Vec::new(),
                         })),
                     );
                 }

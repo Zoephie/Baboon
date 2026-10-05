@@ -21,6 +21,7 @@ pub(in crate::app) fn shader_rows_from_option(
         let instance = instance_index.map(|i| &render_method.parameters[i]);
         push_shader_parameter_rows(
             &mut rows,
+            option,
             parameter,
             instance,
             edit_prefix,
@@ -33,6 +34,7 @@ pub(in crate::app) fn shader_rows_from_option(
 
 pub(in crate::app) fn push_shader_parameter_rows(
     rows: &mut Vec<ShaderGridRow>,
+    option: &RenderMethodOption,
     parameter: &RenderMethodOptionParameter,
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
@@ -52,6 +54,7 @@ pub(in crate::app) fn push_shader_parameter_rows(
                 param_index,
             ));
             rows.extend(shader_bitmap_expansion_rows(
+                option,
                 parameter,
                 instance,
                 edit_prefix,
@@ -386,11 +389,14 @@ pub(in crate::app) fn shader_bitmap_row(
             if current_flags & sampler.flag_bit != 0 {
                 continue;
             }
+            // The field is a plain short: it takes the mode's index. Its name
+            // ("trilinear") does not parse as one.
             let initial_value = if sampler.flag_bit == BITMAP_FLAG_FILTER {
-                parameter.default_filter_mode.name()
+                parameter.default_filter_mode_index
             } else {
-                parameter.default_address_mode.name()
-            };
+                parameter.default_address_mode_index
+            }
+            .to_string();
             if let Some(pidx) = param_index {
                 let flag_path =
                     append_field_path(edit_prefix, &format!("parameters[{pidx}]/bitmap flags"));
@@ -407,7 +413,7 @@ pub(in crate::app) fn shader_bitmap_row(
                         },
                         PendingFieldEdit {
                             path: field_path,
-                            input: initial_value.to_owned(),
+                            input: initial_value.clone(),
                         },
                     ]),
                 });
@@ -429,7 +435,7 @@ pub(in crate::app) fn shader_bitmap_row(
                             },
                             ShaderParamInitialField {
                                 field: sampler.field.to_owned(),
-                                input: initial_value.to_string(),
+                                input: initial_value.clone(),
                             },
                         ],
                         animated_parameters: Vec::new(),
@@ -529,6 +535,7 @@ pub(in crate::app) fn shader_bitmap_row(
 }
 
 pub(in crate::app) fn shader_bitmap_expansion_rows(
+    option: &RenderMethodOption,
     parameter: &RenderMethodOptionParameter,
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
@@ -536,15 +543,20 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
 ) -> Vec<ShaderGridRow> {
     let mut rows = Vec::new();
     let name = &parameter.parameter_name;
-    let filter_opts = bitmap_filter_option_labels();
-    let addr_opts = bitmap_address_option_labels();
+    // The option's own game's names: the lists differ by game, and a Reach
+    // shader's filter 9 is a texture-array mode, not Halo 3's comparison one.
+    let own_or = |names: &[String], fallback: fn() -> Vec<String>| {
+        if names.is_empty() { fallback() } else { names.to_vec() }
+    };
+    let filter_opts = own_or(&option.filter_mode_names, bitmap_filter_option_labels);
+    let addr_opts = own_or(&option.address_mode_names, bitmap_address_option_labels);
 
     if let Some(instance) = instance {
         let flags = instance.bitmap_flags;
         if flags & BITMAP_FLAG_FILTER != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_filter_mode"),
-                option_index_for_name(&filter_opts, parameter.default_filter_mode.name()) as i16,
+                parameter.default_filter_mode_index,
                 instance.bitmap_filter_mode as i16,
                 filter_opts,
                 edit_prefix,
@@ -555,7 +567,7 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode"),
-                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
+                parameter.default_address_mode_index,
                 instance.bitmap_address_mode as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -566,7 +578,7 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS_X != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_x"),
-                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
+                parameter.default_address_mode_index,
                 instance.bitmap_address_mode_x as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -577,7 +589,7 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS_Y != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_y"),
-                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
+                parameter.default_address_mode_index,
                 instance.bitmap_address_mode_y as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -1630,4 +1642,73 @@ pub(in crate::app) fn function_points_summary(points: &[(f32, f32); 4]) -> Strin
         .map(|(x, y)| format!("({}, {})", format_shader_float(*x), format_shader_float(*y)))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod sampler_mode_tests {
+    use super::*;
+    use crate::core::document::apply::{add_block_element, apply_field_edit};
+
+    fn set(tag: &mut TagFile, path: &str, value: &str) {
+        apply_field_edit(tag, path, value).unwrap_or_else(|error| panic!("{path}: {error}"));
+    }
+
+    /// A Reach shader's sampler modes are named from Reach's own lists, which
+    /// differ from Halo 3's: filter 9 is `texture array quadanisotropic (2)`
+    /// (Halo 3's comparison bilinear) and address 4 is `mirroronce` (Halo 3
+    /// has no fifth). An override starts at the option's default as the
+    /// index the short field holds, where it used to be handed the default's
+    /// name.
+    #[test]
+    fn reach_sampler_modes_are_named_from_reach_lists() {
+        let defs = crate::test_kits::definitions();
+        let mut rmop = TagFile::new(defs.join("haloreach_mcc/render_method_option.json")).unwrap();
+        add_block_element(&mut rmop, "parameters").unwrap();
+        set(&mut rmop, "parameters[0]/parameter name", "base_map");
+        set(&mut rmop, "parameters[0]/parameter type", "bitmap");
+        set(&mut rmop, "parameters[0]/default filter mode", "texture array quadlinear");
+        set(&mut rmop, "parameters[0]/default address mode", "mirroronce");
+        let option = RenderMethodOption::from_tag(&rmop).unwrap();
+
+        let mut shader = TagFile::new(defs.join("haloreach_mcc/shader.json")).unwrap();
+        let prefix = render_method_edit_prefix(&shader);
+        let parameters = append_field_path(&prefix, "parameters");
+        add_block_element(&mut shader, &parameters).unwrap();
+        for (field, value) in [
+            ("parameter name", "base_map"),
+            ("parameter type", "bitmap"),
+            ("bitmap flags", "3"),
+            ("bitmap filter mode", "9"),
+            ("bitmap address mode", "4"),
+        ] {
+            set(&mut shader, &format!("{parameters}[0]/{field}"), value);
+        }
+        let render_method = RenderMethod::from_tag(&shader).unwrap();
+
+        let rows = shader_rows_from_option(&shader, &render_method, &option, &prefix);
+        let row = |label: &str| {
+            rows.iter()
+                .find(|row| row.label == label)
+                .unwrap_or_else(|| panic!("no {label} row"))
+        };
+        let filter = row("base_map_filter_mode");
+        assert_eq!(filter.value_cell.text, "texture array quadanisotropic (2)");
+        assert_eq!(filter.default_cell.as_ref().unwrap().text, "texture array quadlinear");
+        let wrap = row("base_map_wrap_mode");
+        assert_eq!(wrap.value_cell.text, "mirroronce");
+
+        let inputs: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| row.context_menu.as_ref())
+            .flat_map(|menu| &menu.items)
+            .filter_map(|item| match &item.action {
+                ShaderContextAction::FieldEdits(edits) => edits
+                    .iter()
+                    .find(|edit| edit.path.ends_with("bitmap address mode x"))
+                    .map(|edit| edit.input.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(inputs, ["4"], "the x override starts at the default's index");
+    }
 }
