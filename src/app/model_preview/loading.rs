@@ -2163,9 +2163,24 @@ pub(super) struct RawVariant {
 }
 
 #[cfg(test)]
-mod ce_repro_tests {
+mod tests {
     use super::*;
+    use blam_tags::TagFile;
+    use crate::app::editor::{
+        is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
+    };
+    use crate::app::model_preview::RenderModelPreview;
+    use crate::app::model_preview::loading::build_particle_model_preview;
+    use crate::app::model_preview::state::ModelTagPanelTab;
+    use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
+    use crate::core::format::TagNameIndex;
+    use crate::core::game::GameId;
+    use crate::core::source::{TagEntry, TagEntryLocation, TagSource, TagTree};
+    use crate::core::tag_key::file_entry_key;
+    use eframe::egui;
+    use std::path::Path;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
     fn test_jms_vertex(uv: [f32; 2]) -> blam_tags::jms::JmsVertex {
         blam_tags::jms::JmsVertex {
@@ -2409,40 +2424,25 @@ mod ce_repro_tests {
             );
         }
     }
-}
 
-#[cfg(test)]
-mod particle_model_preview_tests {
-    //! `particle_model` tags get a working Model Preview tab.
-    //!
-    //! blam-tags owns the decode (splitting the merged triangle strip at the
-    //! `m_gpu_data/m_variants` boundaries, decompressing through the
-    //! compression bounds) and is tested there. What this asserts is
-    //! Baboon's half:
-    //!
-    //! - the tab pair and viewport actually appear for `pmdf` / `PRTM`,
-    //! - **without** widening [`is_model_group`], whose other job is deciding
-    //!   whether a `tag_reference` is an object's model link — a `particle`
-    //!   tag's `Model` → `pmdf` field would be misread as one,
-    //! - each JMI object becomes its own preview region, so the region list
-    //!   doubles as an object toggle,
-    //! - the geometry the viewport uploads is right way round — batches
-    //!   index inside the vertex buffer and face normals agree with the
-    //!   stored vertex normals.
-    //!
-    //! Skips silently when the corresponding tag set is absent.
-
-    use std::path::PathBuf;
-    use crate::core::tag_key::file_entry_key;
-    use crate::core::game::GameId;
-
-    use blam_tags::TagFile;
-
-    use crate::app::editor::{
-        is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
-    };
-    use crate::app::model_preview::RenderModelPreview;
-    use crate::app::model_preview::loading::build_particle_model_preview;
+    // `particle_model` tags get a working Model Preview tab.
+    //
+    // blam-tags owns the decode (splitting the merged triangle strip at the
+    // `m_gpu_data/m_variants` boundaries, decompressing through the
+    // compression bounds) and is tested there. What this asserts is
+    // Baboon's half:
+    //
+    // - the tab pair and viewport actually appear for `pmdf` / `PRTM`,
+    // - **without** widening [`is_model_group`], whose other job is deciding
+    //   whether a `tag_reference` is an object's model link — a `particle`
+    //   tag's `Model` → `pmdf` field would be misread as one,
+    // - each JMI object becomes its own preview region, so the region list
+    //   doubles as an object toggle,
+    // - the geometry the viewport uploads is right way round — batches
+    //   index inside the vertex buffer and face normals agree with the
+    //   stored vertex normals.
+    //
+    // Skips silently when the corresponding tag set is absent.
 
     /// Root of an extracted MCC tag set, via `BLAM_TEST_<KIT>_TAGS` or the
     /// conventional local layout.
@@ -2460,7 +2460,7 @@ mod particle_model_preview_tests {
         p.is_dir().then_some(p)
     }
 
-    fn names() -> crate::core::format::TagNameIndex {
+    fn bundled_names() -> crate::core::format::TagNameIndex {
         let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         crate::core::format::TagNameIndex::load_from_definitions(&defs)
     }
@@ -2526,7 +2526,7 @@ mod particle_model_preview_tests {
     /// `particle`'s `Model` field as an object's model link.
     #[test]
     fn particle_model_is_previewable_without_becoming_a_model() {
-        let names = names();
+        let names = bundled_names();
         for group in [b"pmdf", b"PRTM"] {
             let tag = u32::from_be_bytes(*group);
             let label = String::from_utf8_lossy(group).into_owned();
@@ -2551,7 +2551,7 @@ mod particle_model_preview_tests {
     /// draws the tag itself, so the viewport belongs inside the tag too.
     #[test]
     fn render_model_is_previewable() {
-        let names = names();
+        let names = bundled_names();
         let tag = u32::from_be_bytes(*b"mode");
         assert!(
             is_previewable_geometry_group(tag, &names),
@@ -2561,7 +2561,7 @@ mod particle_model_preview_tests {
 
     #[test]
     fn object_family_preview_is_halo_ce_only() {
-        let names = names();
+        let names = bundled_names();
         for group in [b"bipd", b"vehi", b"weap", b"eqip", b"scen"] {
             let tag = u32::from_be_bytes(*group);
             assert!(is_previewable_geometry_group_for_game(
@@ -2713,7 +2713,7 @@ mod particle_model_preview_tests {
             return;
         }
         let tag = read(&path, "haloreach_mcc");
-        let names = names();
+        let names = bundled_names();
         let entry = crate::core::source::TagEntry {
             key: file_entry_key(&path),
             display_path: "fx/particles/models/debris/falling_leaves/falling_leaves.particle_model"
@@ -2769,7 +2769,7 @@ mod particle_model_preview_tests {
             return;
         }
         let tag = read(&path, "halo3_mcc");
-        let names = names();
+        let names = bundled_names();
         assert!(
             is_previewable_geometry_group(tag.header.group_tag, &names),
             "`mode` must open the Model Preview tab",
@@ -2809,7 +2809,7 @@ mod particle_model_preview_tests {
             ("haloreach", "haloreach_mcc"),
             ("halo4", "halo4_mcc"),
         ];
-        let names = names();
+        let names = bundled_names();
         let mut checked = 0usize;
         let mut objects = 0usize;
         let mut failures: Vec<String> = Vec::new();
@@ -2871,33 +2871,18 @@ mod particle_model_preview_tests {
         );
         eprintln!("[particle_model preview] {checked} tags, {objects} objects");
     }
-}
 
-#[cfg(test)]
-mod model_preview_worker_tests {
-    //! The model preview parses on a worker, not the UI thread.
-    //!
-    //! What the app derives, frame by frame: the post-draw hook starts a worker
-    //! and leaves the state without data (the loading shells), the worker's
-    //! message installs the result, and a result for a request the state no
-    //! longer wants is dropped instead of installed. Both a modern (Halo 3) and a
-    //! classic (Halo 2) tag must load, from disk and from an edited document's
-    //! bytes: a classic tag's bytes carry no layout, so re-parsing them the
-    //! modern way fails where reading them the kit's way does not.
-    //!
-    //! Needs `BLAM_TEST_H3EK` / `BLAM_TEST_H2EK`; skips a kit that is not set.
-
-    use std::path::Path;
-    use crate::core::tag_key::file_entry_key;
-    use crate::core::game::GameId;
-    use std::time::{Duration, Instant};
-
-    use eframe::egui;
-
-    use crate::app::model_preview::state::ModelTagPanelTab;
-    use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
-    use crate::core::format::TagNameIndex;
-    use crate::core::source::{TagEntry, TagEntryLocation, TagSource, TagTree};
+    // The model preview parses on a worker, not the UI thread.
+    //
+    // What the app derives, frame by frame: the post-draw hook starts a worker
+    // and leaves the state without data (the loading shells), the worker's
+    // message installs the result, and a result for a request the state no
+    // longer wants is dropped instead of installed. Both a modern (Halo 3) and a
+    // classic (Halo 2) tag must load, from disk and from an edited document's
+    // bytes: a classic tag's bytes carry no layout, so re-parsing them the
+    // modern way fails where reading them the kit's way does not.
+    //
+    // Needs `BLAM_TEST_H3EK` / `BLAM_TEST_H2EK`; skips a kit that is not set.
 
     struct Fixture {
         app: Baboon,
@@ -3129,24 +3114,14 @@ mod model_preview_worker_tests {
         );
         fixture.frames_until_loaded();
     }
-}
 
-#[cfg(test)]
-mod synthetic_loading_tests {
-    //! `load_model_preview` over synthetic tags: which group goes down which
-    //! path, what each produces, and what each refuses with.
-    //!
-    //! Characterization, with no kit. The geometry is a Halo CE gbxmodel built
-    //! from the definitions — the one render format whose vertices and triangles
-    //! are plain tag blocks — and the references between tags resolve against a
-    //! loose folder written to a temporary directory.
-
-    use super::*;
-    use crate::app::{Baboon, LoadedSourceData, ModelPreviewState, TagDocument};
-    use crate::app::model_preview::state::ModelTagPanelTab;
-    use crate::core::source::TagTree;
-    use std::path::PathBuf;
-    use std::time::{Duration, Instant};
+    // `load_model_preview` over synthetic tags: which group goes down which
+    // path, what each produces, and what each refuses with.
+    //
+    // Characterization, with no kit. The geometry is a Halo CE gbxmodel built
+    // from the definitions — the one render format whose vertices and triangles
+    // are plain tag blocks — and the references between tags resolve against a
+    // loose folder written to a temporary directory.
 
     fn new_tag_for(game: &str, group: &str) -> TagFile {
         TagFile::new(

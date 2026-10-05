@@ -58,10 +58,6 @@ impl Baboon {
         self.model.status = status;
     }
 
-
-
-
-
     pub(in crate::app) fn show_unreferenced_tags(&mut self) {
         match self.model.unreferenced_entries() {
             Some(entries) => {
@@ -610,17 +606,57 @@ pub(in crate::app) fn reference_path_from_rel_file(
     reference_path_without_group_extension(&rel_file.to_string_lossy(), group_tag, names)
 }
 
+impl Model {
+    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
+    /// broken references against.
+    ///
+    /// This used to rescan the whole folder on the UI thread on every use,
+    /// even with the completed scan already in memory, then replace
+    /// `all_entries` without moving the kit generation and rewrite the whole
+    /// index. The completed scan is kept current by single-tag upserts and the
+    /// periodic refresh, so it is used as it is; before it exists, this says
+    /// so rather than blocking on a scan of its own.
+    pub(in crate::app) fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
+        let source = self.kits[self.active]
+            .source
+            .as_ref()
+            .ok_or_else(|| "no tag source is loaded".to_owned())?;
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+            return Err("load a loose editing-kit tags folder first".to_owned());
+        }
+        if source.all_entries.is_empty() {
+            return Err(
+                "the tag index is still being built; try again once indexing finishes".to_owned(),
+            );
+        }
+        Ok(source.all_entries.clone())
+    }
+
+    /// Explain why a reference lookup found no index, tailored to whether one is
+    /// currently building (auto after the full scan, or via Tools → Build
+    /// Reference Index).
+    pub(in crate::app) fn reference_index_unavailable_note(&self) -> String {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
+            "Reference index is building — try again in a moment.".to_owned()
+        } else {
+            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
+        }
+    }
+}
+
 #[cfg(test)]
-mod dependency_tests {
+mod tests {
     use super::*;
     use crate::app::kits::loading::loaded_source_status;
+    use crate::app::tag_ops::new_tag::new_container_package;
+    use crate::app::tag_ops::new_tag::new_container_template_for;
+    use crate::app::tag_ops::new_tag::normalize_container_tag_rel;
     use crate::app::tag_ops::refactor::affected_move_rewrite_entries;
+    use crate::app::tag_ops::refactor::build_folder_reference_rewrites;
     use crate::app::tag_ops::refactor::bytes_contain_any_ascii_case_insensitive;
     use crate::app::tag_ops::refactor::rewrite_reference_needles;
-    use crate::app::tag_ops::refactor::build_folder_reference_rewrites;
-    use crate::app::tag_ops::new_tag::normalize_container_tag_rel;
-    use crate::app::tag_ops::new_tag::new_container_template_for;
-    use crate::app::tag_ops::new_tag::new_container_package;
 
     fn entry(display_path: &str, group_tag: u32) -> TagEntry {
         TagEntry {
@@ -1023,11 +1059,6 @@ mod dependency_tests {
         assert!(affected_keys.contains(&new_shader.key));
         assert!(affected_keys.contains(&outside_model.key));
     }
-}
-
-#[cfg(test)]
-mod dependency_database_tests {
-    use super::*;
 
     fn loose(root: &Path, all_entries: Vec<TagEntry>) -> LoadedSourceData {
         LoadedSourceData {
@@ -1093,11 +1124,6 @@ mod dependency_database_tests {
             "no scan yet: say so rather than scan on the UI thread"
         );
     }
-}
-
-#[cfg(test)]
-mod refresh_reference_tests {
-    use super::*;
 
     /// A refresh patches the reference index with what changed. It used to
     /// drop it, so "References to" said the index was unavailable until a
@@ -1158,11 +1184,6 @@ mod refresh_reference_tests {
         referrers.sort();
         assert_eq!(referrers, ["file:kept", "file:new"]);
     }
-}
-
-#[cfg(test)]
-mod container_dependency_tests {
-    use super::*;
 
     static CE_PAKS: std::sync::LazyLock<&'static str> =
         std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
@@ -1299,45 +1320,5 @@ mod container_dependency_tests {
             "most tags came back unreferenced ({unreferenced}); reference paths are \
              probably not matching entry paths"
         );
-    }
-}
-
-impl Model {
-    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
-    /// broken references against.
-    ///
-    /// This used to rescan the whole folder on the UI thread on every use,
-    /// even with the completed scan already in memory, then replace
-    /// `all_entries` without moving the kit generation and rewrite the whole
-    /// index. The completed scan is kept current by single-tag upserts and the
-    /// periodic refresh, so it is used as it is; before it exists, this says
-    /// so rather than blocking on a scan of its own.
-    pub(in crate::app) fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
-        let source = self.kits[self.active]
-            .source
-            .as_ref()
-            .ok_or_else(|| "no tag source is loaded".to_owned())?;
-        if !matches!(source.source, TagSource::LooseFolder { .. }) {
-            return Err("load a loose editing-kit tags folder first".to_owned());
-        }
-        if source.all_entries.is_empty() {
-            return Err(
-                "the tag index is still being built; try again once indexing finishes".to_owned(),
-            );
-        }
-        Ok(source.all_entries.clone())
-    }
-
-    /// Explain why a reference lookup found no index, tailored to whether one is
-    /// currently building (auto after the full scan, or via Tools → Build
-    /// Reference Index).
-    pub(in crate::app) fn reference_index_unavailable_note(&self) -> String {
-        if self.kits[self.active].index_jobs.building_references
-            || self.kits[self.active].scanning_entries
-        {
-            "Reference index is building — try again in a moment.".to_owned()
-        } else {
-            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
-        }
     }
 }

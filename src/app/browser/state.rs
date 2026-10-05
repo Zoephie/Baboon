@@ -788,7 +788,7 @@ fn run_browser_search(
 }
 
 #[cfg(test)]
-mod async_browser_search_tests {
+mod tests {
     use super::*;
 
     #[test]

@@ -329,7 +329,7 @@ pub(in crate::app) fn ref_occurrences_in(tag: &TagFile, group_tag: u32, target: 
 }
 
 #[cfg(test)]
-mod ref_jump_tests {
+mod tests {
     //! The "References to X" popup's per-row occurrence walk.
 
     use super::*;

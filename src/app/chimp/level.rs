@@ -527,11 +527,6 @@ mod tests {
         assert_eq!(skips.inherited_mesh, 3);
         assert_eq!(skips.total(), 7);
     }
-}
-
-#[cfg(test)]
-mod scaling_probe_tests {
-    use super::*;
 
     /// Split one cell's cost into the steps that make it up.
     ///
@@ -703,11 +698,6 @@ mod scaling_probe_tests {
             );
         }
     }
-}
-
-#[cfg(test)]
-mod real_data_tests {
-    use super::*;
 
     /// Read part of a real Campaign Evolved level and check what comes out is a
     /// coherent world rather than a plausible-looking pile of numbers.

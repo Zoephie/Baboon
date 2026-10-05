@@ -1018,7 +1018,7 @@ pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) ->
 }
 
 #[cfg(test)]
-mod compat_keys_tests {
+mod tests {
     //! The saved spelling of every entry key and index root key, checked against
     //! fixed strings and the synthetic samples in `testdata/compat`.
     //!

@@ -230,36 +230,6 @@ fn truncate_field_value(value: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod field_search_kit_tests {
-    use super::*;
-
-    /// Results belong to the kit the search ran in. They were tagged with the
-    /// kit focused when they arrived, so switching workspace mid-search gave
-    /// rows whose keys resolve nowhere.
-    #[test]
-    fn field_search_results_belong_to_the_kit_that_ran_the_search() {
-        let mut app = Baboon::for_test();
-        let searched = app.model.kits[0].id;
-        let stamp = KitStamp {
-            kit: searched,
-            generation: app.model.kits[0].generation,
-        };
-        let other = KitId(searched.0 + 1);
-        app.push_kit(Kit::empty(other, TagNameIndex::default()));
-        app.model.active = 1;
-
-        app.handle_field_value_search_finished(stamp, "grass".to_owned(), Ok(Vec::new()));
-
-        let results = app
-            .dialogs
-            .close::<QueryResultsWindow>()
-            .expect("results")
-            .results;
-        assert_eq!(results.kit, searched);
-    }
-}
-
 impl Baboon {
     /// Run a field-value search for the current query. If the in-memory index is
     /// ready it answers instantly from cache; otherwise it kicks off a live
@@ -365,8 +335,6 @@ impl Baboon {
         self.begin_build_field_index(ctx);
     }
 
-
-
     /// Build the in-memory searchable-text index in the background (idempotent —
     /// skips if already ready for this generation or already building).
     /// Starts source-scoped indexing or search work without blocking the UI thread.
@@ -426,10 +394,51 @@ impl Baboon {
     }
 }
 
+impl Model {
+    /// Whether a group matches a (lowercased) group filter — by four-CC or by a
+    /// substring of the group's name/extension (e.g. "weap" or "weapon").
+    pub(in crate::app) fn group_label_matches(&self, group_tag: u32, filter_lower: &str) -> bool {
+        if format_group_tag(group_tag).to_ascii_lowercase() == filter_lower {
+            return true;
+        }
+        self.names()
+            .name_for(group_tag)
+            .or_else(|| group_tag_to_extension(group_tag))
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains(filter_lower)
+    }
+}
+
 #[cfg(test)]
-mod field_search_tests {
+mod tests {
     use super::*;
     use crate::core::document::apply::apply_model_variant_ops;
+
+    /// Results belong to the kit the search ran in. They were tagged with the
+    /// kit focused when they arrived, so switching workspace mid-search gave
+    /// rows whose keys resolve nowhere.
+    #[test]
+    fn field_search_results_belong_to_the_kit_that_ran_the_search() {
+        let mut app = Baboon::for_test();
+        let searched = app.model.kits[0].id;
+        let stamp = KitStamp {
+            kit: searched,
+            generation: app.model.kits[0].generation,
+        };
+        let other = KitId(searched.0 + 1);
+        app.push_kit(Kit::empty(other, TagNameIndex::default()));
+        app.model.active = 1;
+
+        app.handle_field_value_search_finished(stamp, "grass".to_owned(), Ok(Vec::new()));
+
+        let results = app
+            .dialogs
+            .close::<QueryResultsWindow>()
+            .expect("results")
+            .results;
+        assert_eq!(results.kit, searched);
+    }
 
     #[test]
     fn searchable_text_separator_only_appears_between_values() {
@@ -511,21 +520,5 @@ mod field_search_tests {
             first_field_value_match(&tag.root(), "zzz-not-present", "").is_none(),
             "absent text should not match"
         );
-    }
-}
-
-impl Model {
-    /// Whether a group matches a (lowercased) group filter — by four-CC or by a
-    /// substring of the group's name/extension (e.g. "weap" or "weapon").
-    pub(in crate::app) fn group_label_matches(&self, group_tag: u32, filter_lower: &str) -> bool {
-        if format_group_tag(group_tag).to_ascii_lowercase() == filter_lower {
-            return true;
-        }
-        self.names()
-            .name_for(group_tag)
-            .or_else(|| group_tag_to_extension(group_tag))
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .contains(filter_lower)
     }
 }

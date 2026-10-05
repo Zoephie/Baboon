@@ -1706,20 +1706,20 @@ pub(super) fn bsp_display_name(reference: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! The derived-preview builders' non-drawing halves: JMS/ASS scenes into
-    //! preview geometry, physics primitives into meshes, and the merge/rename
-    //! plumbing the hlmt overlays and the scenario composite stand on.
-    //!
-    //! Everything here is pure geometry — no tag files, no GL — because that is
-    //! the half that can be wrong quietly: a missed ÷100 draws a BSP a hundred
-    //! times too big, a bad winding turns a hull inside out, and both look like
-    //! "the preview is broken" with no error anywhere.
-
     use super::*;
     use blam_tags::math::RealRgbColor;
     use blam_tags::{
         AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
     };
+
+    // The derived-preview builders' non-drawing halves: JMS/ASS scenes into
+    // preview geometry, physics primitives into meshes, and the merge/rename
+    // plumbing the hlmt overlays and the scenario composite stand on.
+    //
+    // Everything here is pure geometry — no tag files, no GL — because that is
+    // the half that can be wrong quietly: a missed ÷100 draws a BSP a hundred
+    // times too big, a bad winding turns a hull inside out, and both look like
+    // "the preview is broken" with no error anywhere.
 
     #[test]
     fn overlay_colors_match_their_tag_icons() {
@@ -2459,16 +2459,11 @@ mod tests {
         );
         eprintln!("built {built} derived previews from the real kit");
     }
-}
 
-#[cfg(test)]
-mod bsp_texture_probe_tests {
-    //! The textured BSP contract against a real kit: the native H3 decode must
-    //! keep UVs, tangent frames, and the materials block's shader paths — the
-    //! three things the ASS text path lost, and the three things diffuse, normal
-    //! mapping, and alpha-test each depend on.
-
-    use super::*;
+    // The textured BSP contract against a real kit: the native H3 decode must
+    // keep UVs, tangent frames, and the materials block's shader paths — the
+    // three things the ASS text path lost, and the three things diffuse, normal
+    // mapping, and alpha-test each depend on.
 
     /// Point `BABOON_MODEL_KIT` at an H3-family kit's `tags` folder to run this
     /// against real BSPs; absent, it self-skips like the other fixture tests.
@@ -2584,11 +2579,6 @@ mod bsp_texture_probe_tests {
             tags_root.display()
         );
     }
-}
-
-#[cfg(test)]
-mod overlay_texture_tests {
-    use super::*;
 
     /// Collision and physics overlays land while the model's textures are
     /// still resolving. The merge appends flat-coloured materials after the

@@ -630,7 +630,6 @@ pub(crate) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, Strin
     })
 }
 
-
 pub(crate) fn extension_to_group_tag(extension: &str) -> Option<u32> {
     // The games' own `_meta.json` first — it covers every group Baboon can
     // open, and does not have to be kept in step by hand. The table below
@@ -705,11 +704,15 @@ fn fallback_extension_to_group_tag(extension: &str) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod narrowing_tests {
-    use blam_tags::{TagField, TagFieldData, TagFieldType, TagFile, TagStruct};
-
-    use crate::core::bundled::locate_definitions_root;
+mod tests {
     use super::*;
+    use blam_tags::Endian;
+    use blam_tags::{TagField, TagFieldData, TagFieldType, TagFile, TagStruct};
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::apply::add_block_element;
+    use crate::core::document::apply::apply_field_edit;
+    use crate::core::source::NewContainerTemplate;
+    use crate::core::test_kits::test_definition_path;
 
     /// `crate` is `bloc` in every game that has it; there is no `crat` group.
     #[test]
@@ -815,16 +818,6 @@ mod narrowing_tests {
             assert!(parse_gui_field_value(field, "0").is_ok());
         });
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::document::apply::apply_field_edit;
-    use crate::core::document::apply::add_block_element;
-    use crate::core::source::NewContainerTemplate;
-    use crate::core::test_kits::test_definition_path;
-    use blam_tags::Endian;
 
     // Editor unit and fixture tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 pub(in crate::app) const PANE_HEADER_ICON_SIZE: f32 = 32.0;
 pub(in crate::app) const PANE_HEADER_SECTION_GAP: f32 = 20.0;
 pub(in crate::app) const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
@@ -621,14 +620,384 @@ pub(in crate::app) fn monitor_commands_for_game(game: Option<GameId>) -> &'stati
         .map_or(&[], GameFacts::monitor_commands)
 }
 
+/// A clickable tag entry row in the Content Explorer. Returns true on click.
+pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
+    ui.add(
+        egui::Label::new(RichText::new(entry.display_path.replace('\\', "/")).color(text_dark()))
+            .sense(Sense::click()),
+    )
+    .on_hover_text("Click to navigate here")
+    .clicked()
+}
+
+/// `probe`'s answer, re-asked at most once a second.
+///
+/// For file-system questions the UI asks every frame — is a tool there, does
+/// an output exist. Each is a stat, and on a slow or network drive a stat per
+/// frame is a stall per frame. A file created or deleted outside Baboon shows
+/// up within the second. Keyed by `key` in egui's memory.
+pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: impl std::hash::Hash + std::fmt::Debug,
+    probe: impl FnOnce() -> T,
+) -> T {
+    const RECHECK_SECONDS: f64 = 1.0;
+    let key = egui::Id::new(("recheck_cached", key));
+    let now = ctx.input(|input| input.time);
+    if let Some((value, checked_at)) = ctx.data(|data| data.get_temp::<(T, f64)>(key))
+        && (0.0..RECHECK_SECONDS).contains(&(now - checked_at))
+    {
+        return value;
+    }
+    let value = probe();
+    ctx.data_mut(|data| data.insert_temp(key, (value.clone(), now)));
+    value
+}
+
+/// Whether `path` is a file, re-checked at most once a second.
+pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path) -> bool {
+    recheck_cached(ctx, ("is_file", path), || path.is_file())
+}
+
+/// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
+pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
+    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    Color32::from_rgb(
+        lerp(base.r(), accent.r()),
+        lerp(base.g(), accent.g()),
+        lerp(base.b(), accent.b()),
+    )
+}
+
+/// Scenario-header launcher using Baboon's bundled application artwork rather
+/// than the executable icon discovered for the global tools toolbar.
+fn scenario_launcher_button(
+    ui: &mut Ui,
+    image_uri: &'static str,
+    image_bytes: &'static [u8],
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
+    let image = egui::Image::from_bytes(image_uri, image_bytes)
+        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
+    ui.add_enabled(
+        enabled,
+        egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+    )
+}
+
+fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
+    const TEXT_PADDING: f32 = 8.0;
+    const REMOVE_WIDTH: f32 = 20.0;
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
+    let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
+    let background = editor_bg();
+    let target = if is_dark_mode() {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    let blend =
+        |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
+    let fill = Color32::from_rgb(
+        blend(background.r(), target.r()),
+        blend(background.g(), target.g()),
+        blend(background.b(), target.b()),
+    );
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8), fill);
+    let text_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
+        egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
+    );
+    let text_pos = egui::Align2::LEFT_CENTER
+        .align_size_within_rect(galley.size(), text_rect)
+        .min;
+    ui.painter().galley(text_pos, galley, text_dark());
+
+    let remove_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.right() - REMOVE_WIDTH, rect.top()),
+        rect.right_bottom(),
+    );
+    let remove = ui
+        .interact(
+            remove_rect,
+            ui.make_persistent_id(("keyword_remove", tag_key, keyword)),
+            Sense::click(),
+        )
+        .on_hover_text("Remove keyword");
+    let stroke = ui.style().interact(&remove).fg_stroke;
+    let cross = egui::Rect::from_center_size(remove_rect.center(), Vec2::splat(7.0));
+    ui.painter()
+        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
+    ui.painter()
+        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    remove.clicked()
+}
+
+impl eframe::App for Baboon {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.native_clock = raw_input.time;
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.run_logic(ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw_root_ui(ui);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // A quit that never asks the window to close (macOS Cmd+Q) skips the
+        // close request, which is where waiting checkpoints are otherwise flushed.
+        self.flush_all_chimp_checkpoints();
+        // The per-frame prefs write is throttled; whatever changed in the last
+        // second would otherwise be lost.
+        self.persist_prefs_if_changed();
+        self.window_state.persist_now();
+        self.persist_session_on_exit();
+    }
+}
+
+impl Baboon {
+    /// One whole application frame while the window shows: what eframe runs,
+    /// `App::logic` and then `App::ui`. For headless tests, which cannot
+    /// build the `eframe::Frame` those take and need not, since nothing here
+    /// uses one — so they drive exactly the frame the window does.
+    #[cfg(test)]
+    pub(crate) fn run_frame(&mut self, ui: &mut egui::Ui) {
+        self.run_logic(&ui.ctx().clone());
+        self.draw_root_ui(ui);
+    }
+
+    /// The part of a frame that needs no UI. eframe runs it before the UI,
+    /// and on its own while the window is minimized or covered, when there is
+    /// no UI pass at all; so background work keeps landing, saves keep being
+    /// written and closing the window still asks first.
+    pub(crate) fn run_logic(&mut self, ctx: &egui::Context) {
+        // While the window is hidden egui's clock stays at the last frame
+        // shown, and every timer below reads it.
+        if let Some(now) = self.native_clock.take() {
+            ctx.input_mut(|input| input.time = input.time.max(now));
+        }
+        self.window_state.observe(ctx);
+        if self.dialogs.get::<FirstRunWizardState>().is_none() {
+            self.process_worker_messages(ctx);
+            self.expire_status(ctx);
+        }
+        // Raised by the previous frame, whose UI has since committed any edit
+        // that was still focused, so the action sees it.
+        self.run_deferred_file_action(ctx);
+        if self.dialogs.get::<FirstRunWizardState>().is_none() {
+            // Defers the close, so the UI commits a focused edit before the
+            // next frame decides whether there is anything to save.
+            self.handle_app_close_request(ctx);
+            self.persist_prefs_throttled(ctx.input(|input| input.time));
+        }
+        // A container write whose workspace closed while it was in flight left
+        // a mapping released and an Unreal package mount idle. Nothing else
+        // would ever put those back.
+        self.sweep_container_write_leases(ctx);
+        self.maybe_autosave_campaign_projects(ctx);
+        // Every kit, not only one whose Chimp workspace is on screen: a
+        // checkpoint waiting on a workspace the user switched away from would
+        // otherwise wait until they came back.
+        for kit_index in 0..self.model.kits.len() {
+            self.run_due_chimp_checkpoints(kit_index, ctx);
+        }
+    }
+}
+
+/// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
+/// Keywords live in an external sidecar, not the tag binary. Adding and
+/// removing are commands; the draft being typed is this pane's own.
+pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, tag_key: &str) {
+    let kit = cx.model.kits[kit_index].id;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(RichText::new("Keywords:").color(subtle_dark()));
+        let existing = cx.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
+        let mut remove: Option<String> = None;
+        for keyword in &existing {
+            if keyword_pill(ui, tag_key, keyword) {
+                remove = Some(keyword.clone());
+            }
+        }
+        if let Some(keyword) = remove {
+            cx.send(BrowserCommand::RemoveKeyword {
+                kit,
+                key: tag_key.to_owned(),
+                keyword,
+            });
+        }
+        // The draft is this pane's own. It used to be one field on the app,
+        // so text typed into one pane's box showed in every other pane.
+        let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
+        let mut draft = ui
+            .data_mut(|data| data.get_temp::<String>(draft_id))
+            .unwrap_or_default();
+        let keyword_field = Frame::NONE
+            .fill(foundation_input())
+            .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
+            .inner_margin(egui::Margin::same(2))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.spacing_mut().interact_size.y = 20.0;
+                ui.set_height(20.0);
+                ui.horizontal(|ui| {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut draft)
+                            .hint_text(placeholder_text("add keyword"))
+                            .desired_width(120.0)
+                            .frame(egui::Frame::NONE),
+                    );
+                    let add_response = ui
+                        .scope(|ui| {
+                            ui.spacing_mut().interact_size = Vec2::splat(20.0);
+                            ui.add(
+                                egui::Button::new("")
+                                    .min_size(Vec2::splat(20.0))
+                                    .corner_radius(egui::CornerRadius::same(10)),
+                            )
+                        })
+                        .inner;
+                    let add_icon_rect = egui::Rect::from_center_size(
+                        add_response.rect.center(),
+                        Vec2::splat(BUTTON_ICON_SIZE),
+                    );
+                    paint_button_icon_at(ui, ButtonIcon::Add, add_icon_rect, text_dark());
+                    let add_clicked = add_response.on_hover_text("Add keyword").clicked();
+                    (resp, add_clicked)
+                })
+                .inner
+            });
+        let (resp, add_clicked) = keyword_field.inner;
+        ui.painter().rect_stroke(
+            keyword_field.response.rect,
+            egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8),
+            pane_header_input_stroke(
+                ui,
+                keyword_field.response.hovered() || resp.hovered(),
+                resp.has_focus(),
+            ),
+            egui::StrokeKind::Middle,
+        );
+        let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (add_clicked || submitted) && !draft.trim().is_empty() {
+            cx.send(BrowserCommand::AddKeyword {
+                kit,
+                key: tag_key.to_owned(),
+                keyword: draft.clone(),
+            });
+            draft.clear();
+        }
+        ui.data_mut(|data| data.insert_temp(draft_id, draft));
+    });
+}
+
+/// The scenario header's launch buttons. `kit_index` is the workspace whose
+/// pane is drawing this. Readiness is resolved against that workspace's
+/// editing kit rather than the focused one, and a launch makes it active
+/// first: it saves the tag and starts an external editor, neither of which
+/// should follow the wrong game.
+pub(in crate::app) fn draw_scenario_launcher_buttons(
+    cx: &Ctx,
+    ui: &mut Ui,
+    kit_index: usize,
+    entry: &TagEntry,
+) {
+    let kit = cx.model.kits[kit_index].id;
+    if entry.group_tag != u32::from_be_bytes(*b"scnr") {
+        return;
+    }
+    let key = entry.key.clone();
+    // Halo Combat Evolved's Sapien cannot be handed a scenario, and
+    // Campaign Evolved has no Sapien at all. Neither is a button worth
+    // greying out — a control that can never work reads as something the
+    // user has misconfigured.
+    let offers_sapien = cx.model.kit_offers_scenario_sapien(kit_index);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let tag_test_ready = cx.model.can_launch_scenario_in_tag_test(kit_index, entry);
+        if scenario_launcher_button(
+            ui,
+            "bytes://baboon_app_icons/tag-test.png",
+            include_root_bytes!("assets/App Icons/Tag Test.png"),
+            "TagTest",
+            tag_test_ready,
+        )
+        .on_hover_text("Save if needed, then launch this scenario in tag_test")
+        .clicked()
+        {
+            cx.send(KitsCommand::LaunchScenario {
+                kit,
+                key: key.clone(),
+                tool: ScenarioTool::TagTest,
+            });
+        }
+        if offers_sapien {
+            let sapien_ready = cx.model.can_launch_scenario_in_sapien(kit_index, entry);
+            if scenario_launcher_button(
+                ui,
+                "bytes://baboon_app_icons/sapien.png",
+                include_root_bytes!("assets/App Icons/Sapien.png"),
+                "Sapien",
+                sapien_ready,
+            )
+            .on_hover_text("Save if needed, then launch this scenario in Sapien")
+            .clicked()
+            {
+                cx.send(KitsCommand::LaunchScenario {
+                    kit,
+                    key: key.clone(),
+                    tool: ScenarioTool::Sapien,
+                });
+            }
+        }
+        ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    //! Unit tests for top-level UI helpers.
-    //! It owns test-only characterization and does not participate in runtime application behavior.
-
     use super::*;
+    use crate::app::browser::{
+        ContainerFolderDialog, ContentExplorer, ExtractKind, ExtractTargetPrompt,
+        LooseFolderRenameState, RenameTagState, TagNameOperation,
+    };
+    use crate::app::chimp::{ChimpLevelExportPrompt, ChimpMeshTexturePrompt, ChimpTextureExportPrompt};
+    use crate::app::documents::{ChimpDiscardPrompt, DirtyTagEntry, SaveChangesPrompt};
     use crate::app::editor::combo_box_with_scroll;
+    use crate::app::editor::{
+        BlockConfirm, ColorPopupWindow, FunctionPopup, FunctionPopupWindow, FunctionView,
+        MaterialColorPopup, TagReferencePickerState, TagReferencePickerWindow, TsvPasteState,
+        constant_function_hex,
+    };
+    use crate::app::export::{ContainerDumpConfirm, ContainerDumpScope};
+    use crate::app::help::HelpWindow;
+    use crate::app::import::{
+        CacheImportDialog, CacheImportTarget, ImportMode, ImportTagDialog, PendingImport, ReplaceChoice,
+    };
+    use crate::app::loose_fixture::*;
+    use crate::app::mods::{
+        CampaignProjectSnapshot, ExportedMod, ModExportChange, ModExportDialog, ModExportRow,
+        OverwriteConfirm,
+    };
+    use crate::app::runtime_poke::{PokeDialog, PokeDialogState};
+    use crate::app::search::QueryResultsWindow;
+    use crate::app::tag_ops::{ContainerDuplicateConfirm, DeleteConfirm, DeleteKind};
+    use crate::core::document::value::decode_hex;
+    use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
     use std::collections::{HashMap, HashSet};
+    use std::time::{Duration, Instant};
+
+    // Unit tests for top-level UI helpers.
+    // It owns test-only characterization and does not participate in runtime application behavior.
 
     #[test]
     fn editing_kit_read_only_titles_use_a_muted_suffix_without_changing_the_name() {
@@ -1140,8 +1509,8 @@ mod tests {
         assert_eq!(probes.get(), 2);
     }
 
-#[test]
-fn browser_search_clear_works_in_sidebar_and_folder_widths() {
+    #[test]
+    fn browser_search_clear_works_in_sidebar_and_folder_widths() {
     for width in [220.0, 720.0] {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
@@ -1192,18 +1561,13 @@ fn browser_search_clear_works_in_sidebar_and_folder_widths() {
         assert!(ctx.memory(|memory| memory.focused()).is_some());
         assert!((cleared.rect.width() - response.rect.width()).abs() < 0.1);
     }
-}
-}
+    }
 
-#[cfg(test)]
-mod ui_scale_slider_tests {
-    //! The welcome screen's UI scale slider, driven with real pointer input.
-    //!
-    //! The slider sets the zoom factor of the window it is drawn in. Applying the
-    //! value while the drag was live rescaled the slider under the pointer, so the
-    //! handle slid away from the cursor and the scale could not be aimed at all.
-
-    use super::*;
+    // The welcome screen's UI scale slider, driven with real pointer input.
+    //
+    // The slider sets the zoom factor of the window it is drawn in. Applying the
+    // value while the drag was live rescaled the slider under the pointer, so the
+    // handle slid away from the cursor and the scale could not be aimed at all.
 
     /// One frame with `events` delivered to it, standing in for the wizard: the
     /// slider edits `pending`, and the rule decides when that reaches `live`.
@@ -1337,16 +1701,13 @@ mod ui_scale_slider_tests {
         assert_ne!(pending, DEFAULT_UI_SCALE, "the click moved the slider");
         assert_eq!(live, pending, "and the window followed it");
     }
-}
 
-#[cfg(test)]
-mod shader_option_read_tests {
-    //! Reading the shipped H3 shader option tags.
-    //!
-    //! `source extern` resolves by the option name embedded in the tag, and the
-    //! engine panics on a name it has no variant for — deliberately, so a decode gap
-    //! surfaces. That made three of the H3 kit's own option tags unreadable, and in a
-    //! GUI an unreadable option tag is a dead process rather than a message.
+    // Reading the shipped H3 shader option tags.
+    //
+    // `source extern` resolves by the option name embedded in the tag, and the
+    // engine panics on a name it has no variant for — deliberately, so a decode gap
+    // surfaces. That made three of the H3 kit's own option tags unreadable, and in a
+    // GUI an unreadable option tag is a dead process rather than a message.
 
     static H3_SHADERS: std::sync::LazyLock<&'static str> =
         std::sync::LazyLock::new(|| crate::core::test_kits::tag_path("halo3_mcc", "shaders"));
@@ -1416,65 +1777,59 @@ mod shader_option_read_tests {
             "the tags this test exists for are missing from the kit: found {covered:?}"
         );
     }
-}
 
-#[cfg(test)]
-mod perf_baseline_tests {
-    //! Frame-time baselines: whole application frames, run headless.
-    //!
-    //! Every scenario drives [`Baboon::run_frame`] — the body of
-    //! `eframe::App::logic` then `App::ui` — on an egui context configured by
-    //! [`Baboon::configure_context`], exactly as the window does, then
-    //! tessellates the output as eframe would before handing it to the GPU. What
-    //! is timed is therefore the CPU side of a real frame: input, every panel,
-    //! the worker drain, the prefs throttle, autosave checks, and tessellation.
-    //! The GPU upload and draw are not (there is no GPU here).
-    //!
-    //! All data is synthetic: tags are built from this repository's own
-    //! `definitions/` schemas, never read from a kit, so this runs anywhere.
-    //!
-    //! Run (release is the number that matters; debug only proves it works):
-    //!
-    //! ```text
-    //! cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
-    //! ```
-    //!
-    //! Comparing against a baseline: run once on the commit to compare against
-    //! and once on the change, on the same machine, quiet, with the same
-    //! `BABOON_PERF_PPP`, appending to one CSV under two labels:
-    //!
-    //! ```text
-    //! BABOON_PERF_LABEL=before BABOON_PERF_CSV=perf.csv cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
-    //! BABOON_PERF_LABEL=after  BABOON_PERF_CSV=perf.csv cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
-    //! ```
-    //!
-    //! then compare rows by `scenario`: `median_ms` and `p95_ms` for time, and
-    //! the counter columns (rows laid out, labels built, ...) for work, which
-    //! do not depend on the machine and should match exactly unless the change
-    //! meant to alter them. A run on a loaded machine is noise; differences of
-    //! a few percent in time are noise anyway. A failed scenario check (the
-    //! state did not show what the scenario claims) fails the test; the
-    //! numbers of the scenarios that passed are still printed.
-    //!
-    //! Environment:
-    //! - `BABOON_PERF_WARMUP`  warm-up frames per scenario (default 20)
-    //! - `BABOON_PERF_FRAMES`  measured frames per scenario (default 120)
-    //! - `BABOON_PERF_ONLY`    comma-separated substrings; run only scenarios
-    //!   whose name contains one of them
-    //! - `BABOON_PERF_PPP`     pixels per point (default 1.0; 2.0 for Retina)
-    //! - `BABOON_PERF_CSV`     append one CSV row per scenario to this file
-    //! - `BABOON_PERF_LABEL`   the CSV's label column, e.g. `before` / `after`
-    //!
-    //! Surviving a restructure: scenarios only describe *what is on screen*
-    //! through the [`fixture`] module below, which is the one place that knows
-    //! how app state is laid out (kits, documents, the terminal, caches). When
-    //! that layout changes, only `fixture` needs porting; scenario definitions,
-    //! measurement and reporting stay as they are, so before/after numbers stay
-    //! comparable. The layout counters are `#[cfg(test)]` thread-locals the app
-    //! already keeps; [`Counters`] is the one place that reads them.
-
-    use super::*;
-    use std::time::{Duration, Instant};
+    // Frame-time baselines: whole application frames, run headless.
+    //
+    // Every scenario drives [`Baboon::run_frame`] — the body of
+    // `eframe::App::logic` then `App::ui` — on an egui context configured by
+    // [`Baboon::configure_context`], exactly as the window does, then
+    // tessellates the output as eframe would before handing it to the GPU. What
+    // is timed is therefore the CPU side of a real frame: input, every panel,
+    // the worker drain, the prefs throttle, autosave checks, and tessellation.
+    // The GPU upload and draw are not (there is no GPU here).
+    //
+    // All data is synthetic: tags are built from this repository's own
+    // `definitions/` schemas, never read from a kit, so this runs anywhere.
+    //
+    // Run (release is the number that matters; debug only proves it works):
+    //
+    // ```text
+    // cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
+    // ```
+    //
+    // Comparing against a baseline: run once on the commit to compare against
+    // and once on the change, on the same machine, quiet, with the same
+    // `BABOON_PERF_PPP`, appending to one CSV under two labels:
+    //
+    // ```text
+    // BABOON_PERF_LABEL=before BABOON_PERF_CSV=perf.csv cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
+    // BABOON_PERF_LABEL=after  BABOON_PERF_CSV=perf.csv cargo test --release perf_baseline -- --ignored --nocapture --test-threads=1
+    // ```
+    //
+    // then compare rows by `scenario`: `median_ms` and `p95_ms` for time, and
+    // the counter columns (rows laid out, labels built, ...) for work, which
+    // do not depend on the machine and should match exactly unless the change
+    // meant to alter them. A run on a loaded machine is noise; differences of
+    // a few percent in time are noise anyway. A failed scenario check (the
+    // state did not show what the scenario claims) fails the test; the
+    // numbers of the scenarios that passed are still printed.
+    //
+    // Environment:
+    // - `BABOON_PERF_WARMUP`  warm-up frames per scenario (default 20)
+    // - `BABOON_PERF_FRAMES`  measured frames per scenario (default 120)
+    // - `BABOON_PERF_ONLY`    comma-separated substrings; run only scenarios
+    //   whose name contains one of them
+    // - `BABOON_PERF_PPP`     pixels per point (default 1.0; 2.0 for Retina)
+    // - `BABOON_PERF_CSV`     append one CSV row per scenario to this file
+    // - `BABOON_PERF_LABEL`   the CSV's label column, e.g. `before` / `after`
+    //
+    // Surviving a restructure: scenarios only describe *what is on screen*
+    // through the [`fixture`] module below, which is the one place that knows
+    // how app state is laid out (kits, documents, the terminal, caches). When
+    // that layout changes, only `fixture` needs porting; scenario definitions,
+    // measurement and reporting stay as they are, so before/after numbers stay
+    // comparable. The layout counters are `#[cfg(test)]` thread-locals the app
+    // already keeps; [`Counters`] is the one place that reads them.
 
     const SCREEN: egui::Vec2 = egui::vec2(1600.0, 1000.0);
     /// Inside the kit's browser side panel (330 points wide by default).
@@ -1509,7 +1864,7 @@ mod perf_baseline_tests {
             crate::app::browser::TREE_ROWS_LAID_OUT.with(|c| c.set(0));
             crate::app::editor::fields::FUNCTION_PREVIEWS_BUILT.with(|c| c.set(0));
             crate::app::editor::fields::DROPDOWN_LABELS_BUILT.with(|c| c.set(0));
-            crate::app::shell::workspace::terminal_output_tests::LINES_BUILT.with(|c| c.set(0));
+            crate::app::shell::workspace::tests::LINES_BUILT.with(|c| c.set(0));
             crate::app::editor::material::SHADER_MODELS_BUILT.with(|c| c.set(0));
         }
 
@@ -1520,7 +1875,7 @@ mod perf_baseline_tests {
                     .with(std::cell::Cell::get),
                 dropdown_labels: crate::app::editor::fields::DROPDOWN_LABELS_BUILT
                     .with(std::cell::Cell::get),
-                terminal_lines: crate::app::shell::workspace::terminal_output_tests::LINES_BUILT
+                terminal_lines: crate::app::shell::workspace::tests::LINES_BUILT
                     .with(std::cell::Cell::get),
                 shader_models: crate::app::editor::material::SHADER_MODELS_BUILT.with(std::cell::Cell::get),
             }
@@ -2562,73 +2917,42 @@ mod perf_baseline_tests {
         }
         assert!(failures.is_empty(), "scenarios failed: {failures:#?}");
     }
-}
 
-#[cfg(test)]
-mod frame_smoke_tests {
-    //! Whole-frame smoke test: every window, dialog, prompt and pane the app can
-    //! show, opened one at a time over a populated app and drawn through
-    //! [`Baboon::run_frame`] — `eframe::App::logic` then `App::ui` — for several
-    //! frames.
-    //!
-    //! Each case is a `base` state (a kit of some kind, or nothing) and an `open`
-    //! step that puts one window or pane on top of it. The case runs [`FRAMES`]
-    //! frames and requires every one of its `expect` strings in the last frame's
-    //! painted text; a panic anywhere in the frame fails it too. A window paints
-    //! nothing on its first frame, and one that never drew would leave its title
-    //! and labels unpainted, so a window that silently stayed shut fails rather
-    //! than passing on an empty screen.
-    //!
-    //! The expectations are themselves checked: each case also runs its `base`
-    //! alone, and at least one `expect` string must be missing there. An
-    //! expectation the base already paints (a menu label, a browser row) would
-    //! pass whether or not the window drew, so it is rejected.
-    //!
-    //! The cases are split across [`SHARDS`] tests, which run in parallel; each
-    //! runs all of its cases and reports every failure together. Run them with
-    //! `cargo test frame_smoke`. `BABOON_SMOKE_ONLY=name,name` runs only cases
-    //! whose name contains one of them; `BABOON_SMOKE_DUMP=1` (with
-    //! `--nocapture`) prints every case's painted text.
-    //!
-    //! All data is synthetic: tags are built from this repository's
-    //! `definitions/` schemas, and the loose kits are temporary folders of those
-    //! tags. Nothing is read from a real kit or game.
-    //!
-    //! Adding a window is one row in [`cases`]. [`every_window_has_a_smoke_case`]
-    //! is what notices a window without one: it reads the `Baboon` struct out of
-    //! `src/app/mod.rs` and every `egui::Window::new` site out of `src/app/`, and
-    //! requires each field shaped like window state and each file that opens a
-    //! window to be named by some case, or listed in [`NOT_WINDOWS`] with the
-    //! reason. A new `Option<…Dialog>` field, or a new file with a window in it,
-    //! fails that test until it has a row here.
-
-    use super::perf_baseline_tests::{Harness, fixture};
-    use super::*;
-    use crate::app::documents::{ChimpDiscardPrompt, DirtyTagEntry, SaveChangesPrompt};
-    use crate::app::tag_ops::{ContainerDuplicateConfirm, DeleteConfirm, DeleteKind};
-    use crate::app::mods::{
-        CampaignProjectSnapshot, ExportedMod, ModExportChange, ModExportDialog, ModExportRow,
-        OverwriteConfirm,
-    };
-    use crate::app::import::{
-        CacheImportDialog, CacheImportTarget, ImportMode, ImportTagDialog, PendingImport, ReplaceChoice,
-    };
-    use crate::app::search::QueryResultsWindow;
-    use crate::app::help::HelpWindow;
-    use crate::app::chimp::{ChimpLevelExportPrompt, ChimpMeshTexturePrompt, ChimpTextureExportPrompt};
-    use crate::app::runtime_poke::{PokeDialog, PokeDialogState};
-    use crate::core::document::value::decode_hex;
-    use crate::app::editor::{
-        BlockConfirm, ColorPopupWindow, FunctionPopup, FunctionPopupWindow, FunctionView,
-        MaterialColorPopup, TagReferencePickerState, TagReferencePickerWindow, TsvPasteState,
-        constant_function_hex,
-    };
-    use crate::app::export::{ContainerDumpConfirm, ContainerDumpScope};
-    use crate::app::browser::{
-        ContainerFolderDialog, ContentExplorer, ExtractKind, ExtractTargetPrompt,
-        LooseFolderRenameState, RenameTagState, TagNameOperation,
-    };
-    use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource};
+    // Whole-frame smoke test: every window, dialog, prompt and pane the app can
+    // show, opened one at a time over a populated app and drawn through
+    // [`Baboon::run_frame`] — `eframe::App::logic` then `App::ui` — for several
+    // frames.
+    //
+    // Each case is a `base` state (a kit of some kind, or nothing) and an `open`
+    // step that puts one window or pane on top of it. The case runs [`FRAMES`]
+    // frames and requires every one of its `expect` strings in the last frame's
+    // painted text; a panic anywhere in the frame fails it too. A window paints
+    // nothing on its first frame, and one that never drew would leave its title
+    // and labels unpainted, so a window that silently stayed shut fails rather
+    // than passing on an empty screen.
+    //
+    // The expectations are themselves checked: each case also runs its `base`
+    // alone, and at least one `expect` string must be missing there. An
+    // expectation the base already paints (a menu label, a browser row) would
+    // pass whether or not the window drew, so it is rejected.
+    //
+    // The cases are split across [`SHARDS`] tests, which run in parallel; each
+    // runs all of its cases and reports every failure together. Run them with
+    // `cargo test frame_smoke`. `BABOON_SMOKE_ONLY=name,name` runs only cases
+    // whose name contains one of them; `BABOON_SMOKE_DUMP=1` (with
+    // `--nocapture`) prints every case's painted text.
+    //
+    // All data is synthetic: tags are built from this repository's
+    // `definitions/` schemas, and the loose kits are temporary folders of those
+    // tags. Nothing is read from a real kit or game.
+    //
+    // Adding a window is one row in [`cases`]. [`every_window_has_a_smoke_case`]
+    // is what notices a window without one: it reads the `Baboon` struct out of
+    // `src/app/mod.rs` and every `egui::Window::new` site out of `src/app/`, and
+    // requires each field shaped like window state and each file that opens a
+    // window to be named by some case, or listed in [`NOT_WINDOWS`] with the
+    // reason. A new `Option<…Dialog>` field, or a new file with a window in it,
+    // fails that test until it has a row here.
 
     /// Frames each case runs after its setup. A window's first frame only
     /// measures it; the second is the first that paints; the rest let anything
@@ -4362,17 +4686,10 @@ mod frame_smoke_tests {
         assert!(problems.iter().any(|p| p.contains("shell/frame/dialogs/smoke.rs")), "{problems:?}");
         assert_eq!(problems.len(), 3, "{problems:?}");
     }
-}
 
-#[cfg(test)]
-mod external_links_tests {
-    //! Every way out of the app to a web page asks the platform to open it.
-    //! egui only reports the request; eframe opens it only with its `links`
-    //! feature, which egui 0.29's eframe turned on by itself and 0.36's does not.
-
-    use super::perf_baseline_tests::Harness;
-    use super::*;
-    use crate::app::help::HelpWindow;
+    // Every way out of the app to a web page asks the platform to open it.
+    // egui only reports the request; eframe opens it only with its `links`
+    // feature, which egui 0.29's eframe turned on by itself and 0.36's does not.
 
     /// Click `text`'s `nth` painting and return every URL that asked to open.
     fn click(h: &mut Harness, text: &str, nth: usize) -> Vec<egui::OpenUrl> {
@@ -4454,22 +4771,10 @@ mod external_links_tests {
         assert!(click(&mut h, "Help", 0).is_empty(), "opening the menu opens nothing");
         assert_eq!(urls(&click(&mut h, "Update available: v9.9.9...", 0)), [release]);
     }
-}
 
-#[cfg(test)]
-mod menu_close_tests {
-    //! Menus close when an item closes them, or on a click outside — not on every
-    //! click inside, which is egui 0.36's default and would shut the View menu
-    //! each time one of its checkboxes was ticked.
-
-    use super::perf_baseline_tests::Harness;
-    use super::*;
-
-    fn idle(h: &mut Harness) {
-        for _ in 0..4 {
-            h.frame(Vec::new());
-        }
-    }
+    // Menus close when an item closes them, or on a click outside — not on every
+    // click inside, which is egui 0.36's default and would shut the View menu
+    // each time one of its checkboxes was ticked.
 
     /// Whether the View menu is showing, told by one of its items.
     fn view_menu_open(h: &Harness) -> bool {
@@ -4544,22 +4849,10 @@ mod menu_close_tests {
         assert_eq!(openness_after(close_menu), 1.0);
         assert_eq!(openness_after(|ui| ui.close()), 0.0, "egui's close collapses it");
     }
-}
-#[cfg(test)]
-mod help_menu_tests {
-    //! The Help menu opens Help on the tab it names. The menu sends a command and
-    //! the window draws from Help's own state, so this crosses the whole path: a
-    //! click, the queue, the frame applying it, and the next frame's window.
 
-    use super::perf_baseline_tests::Harness;
-    use super::*;
-    use crate::app::help::HelpWindow;
-
-    fn idle(h: &mut Harness) {
-        for _ in 0..4 {
-            h.frame(Vec::new());
-        }
-    }
+    // The Help menu opens Help on the tab it names. The menu sends a command and
+    // the window draws from Help's own state, so this crosses the whole path: a
+    // click, the queue, the frame applying it, and the next frame's window.
 
     #[test]
     fn a_help_menu_item_opens_help_on_its_tab() {
@@ -4576,16 +4869,11 @@ mod help_menu_tests {
         assert!(help.tab == HelpPanelTab::MapNames);
         assert!(h.painted.iter().any(|text| text == "Baboon Help"), "the window draws");
     }
-}
-#[cfg(test)]
-mod pane_undo_window_tests {
-    //! An open tag's pane hands its edits on every frame, an empty set included,
-    //! because applying none is what ends the undo step that typing coalesces
-    //! into. Were the empty frames skipped, every edit after the first would fold
-    //! into one step that undo could only take back whole.
 
-    use super::perf_baseline_tests::Harness;
-    use super::perf_baseline_tests::fixture;
+    // An open tag's pane hands its edits on every frame, an empty set included,
+    // because applying none is what ends the undo step that typing coalesces
+    // into. Were the empty frames skipped, every edit after the first would fold
+    // into one step that undo could only take back whole.
 
     fn steps(h: &mut Harness, key: &str) -> usize {
         let kit = h.app.model.active;
@@ -4637,16 +4925,11 @@ mod pane_undo_window_tests {
         doc.journal.begin_edit(&doc.tag, "second");
         assert_eq!(steps(&mut h, &key), 1);
     }
-}
-#[cfg(test)]
-mod lazy_reveal_tests {
-    //! Revealing a tag inside folders the loose browser has not loaded yet. Each
-    //! folder loads once the frame that drew it open is over, so a reveal can only
-    //! open the next folder down a frame later; it has to stay armed until it
-    //! reaches its tag rather than be spent on the first frame.
 
-    use super::perf_baseline_tests::Harness;
-    use crate::app::loose_fixture::*;
+    // Revealing a tag inside folders the loose browser has not loaded yet. Each
+    // folder loads once the frame that drew it open is over, so a reveal can only
+    // open the next folder down a frame later; it has to stay armed until it
+    // reaches its tag rather than be spent on the first frame.
 
     #[test]
     fn a_reveal_through_unloaded_folders_reaches_its_tag() {
@@ -4683,15 +4966,10 @@ mod lazy_reveal_tests {
         );
         assert!(h.app.browser.reveal_target.is_none(), "and the reveal is spent");
     }
-}
-#[cfg(test)]
-mod settings_draft_tests {
-    //! Settings edits a draft of the preferences and sends it once drawn. A tick
-    //! has to reach the live preferences that way, and only the setting ticked
-    //! may change.
 
-    use super::perf_baseline_tests::Harness;
-    use super::*;
+    // Settings edits a draft of the preferences and sends it once drawn. A tick
+    // has to reach the live preferences that way, and only the setting ticked
+    // may change.
 
     #[test]
     fn a_settings_checkbox_changes_the_live_preference() {
@@ -4726,15 +5004,10 @@ mod settings_draft_tests {
             .expect("reopened");
         assert_eq!(draft.error.as_deref(), Some("Enter an editing kit name"));
     }
-}
-#[cfg(test)]
-mod tab_menu_tests {
-    //! A kit's tag tabs: pressing in a pane focuses its tag, a middle-click closes
-    //! a tab, and the tab menu's closes reach the right tabs. Each goes through a
-    //! command sent while the tiles draw, so these drive whole frames.
 
-    use super::perf_baseline_tests::{Harness, fixture};
-    use super::*;
+    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click closes
+    // a tab, and the tab menu's closes reach the right tabs. Each goes through a
+    // command sent while the tiles draw, so these drive whole frames.
 
     const PATHS: [&str; 3] = [
         "folder_00/sub_00/tag_000.biped",
@@ -4752,12 +5025,6 @@ mod tab_menu_tests {
             .collect();
         idle(&mut h);
         (h, keys)
-    }
-
-    fn idle(h: &mut Harness) {
-        for _ in 0..4 {
-            h.frame(Vec::new());
-        }
     }
 
     /// Slide onto the first painting of `text` and press and release `button`
@@ -4825,204 +5092,6 @@ mod tab_menu_tests {
         idle(&mut h);
         assert_eq!(open_tabs(&h), [keys[1].clone()]);
     }
-}
-
-/// A clickable tag entry row in the Content Explorer. Returns true on click.
-pub(in crate::app) fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
-    ui.add(
-        egui::Label::new(RichText::new(entry.display_path.replace('\\', "/")).color(text_dark()))
-            .sense(Sense::click()),
-    )
-    .on_hover_text("Click to navigate here")
-    .clicked()
-}
-
-/// `probe`'s answer, re-asked at most once a second.
-///
-/// For file-system questions the UI asks every frame — is a tool there, does
-/// an output exist. Each is a stat, and on a slow or network drive a stat per
-/// frame is a stall per frame. A file created or deleted outside Baboon shows
-/// up within the second. Keyed by `key` in egui's memory.
-pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
-    ctx: &egui::Context,
-    key: impl std::hash::Hash + std::fmt::Debug,
-    probe: impl FnOnce() -> T,
-) -> T {
-    const RECHECK_SECONDS: f64 = 1.0;
-    let key = egui::Id::new(("recheck_cached", key));
-    let now = ctx.input(|input| input.time);
-    if let Some((value, checked_at)) = ctx.data(|data| data.get_temp::<(T, f64)>(key))
-        && (0.0..RECHECK_SECONDS).contains(&(now - checked_at))
-    {
-        return value;
-    }
-    let value = probe();
-    ctx.data_mut(|data| data.insert_temp(key, (value.clone(), now)));
-    value
-}
-
-/// Whether `path` is a file, re-checked at most once a second.
-pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path) -> bool {
-    recheck_cached(ctx, ("is_file", path), || path.is_file())
-}
-
-/// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
-pub(in crate::app) fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
-    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-    Color32::from_rgb(
-        lerp(base.r(), accent.r()),
-        lerp(base.g(), accent.g()),
-        lerp(base.b(), accent.b()),
-    )
-}
-
-/// Scenario-header launcher using Baboon's bundled application artwork rather
-/// than the executable icon discovered for the global tools toolbar.
-fn scenario_launcher_button(
-    ui: &mut Ui,
-    image_uri: &'static str,
-    image_bytes: &'static [u8],
-    label: &str,
-    enabled: bool,
-) -> egui::Response {
-    let image = egui::Image::from_bytes(image_uri, image_bytes)
-        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
-    ui.add_enabled(
-        enabled,
-        egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
-    )
-}
-
-fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
-    const TEXT_PADDING: f32 = 8.0;
-    const REMOVE_WIDTH: f32 = 20.0;
-    let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
-    let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
-    let background = editor_bg();
-    let target = if is_dark_mode() {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    };
-    let blend =
-        |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
-    let fill = Color32::from_rgb(
-        blend(background.r(), target.r()),
-        blend(background.g(), target.g()),
-        blend(background.b(), target.b()),
-    );
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8), fill);
-    let text_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
-    );
-    let text_pos = egui::Align2::LEFT_CENTER
-        .align_size_within_rect(galley.size(), text_rect)
-        .min;
-    ui.painter().galley(text_pos, galley, text_dark());
-
-    let remove_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.right() - REMOVE_WIDTH, rect.top()),
-        rect.right_bottom(),
-    );
-    let remove = ui
-        .interact(
-            remove_rect,
-            ui.make_persistent_id(("keyword_remove", tag_key, keyword)),
-            Sense::click(),
-        )
-        .on_hover_text("Remove keyword");
-    let stroke = ui.style().interact(&remove).fg_stroke;
-    let cross = egui::Rect::from_center_size(remove_rect.center(), Vec2::splat(7.0));
-    ui.painter()
-        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
-    remove.clicked()
-}
-
-impl eframe::App for Baboon {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.native_clock = raw_input.time;
-    }
-
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.run_logic(ctx);
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.draw_root_ui(ui);
-    }
-
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // A quit that never asks the window to close (macOS Cmd+Q) skips the
-        // close request, which is where waiting checkpoints are otherwise flushed.
-        self.flush_all_chimp_checkpoints();
-        // The per-frame prefs write is throttled; whatever changed in the last
-        // second would otherwise be lost.
-        self.persist_prefs_if_changed();
-        self.window_state.persist_now();
-        self.persist_session_on_exit();
-    }
-}
-
-impl Baboon {
-    /// One whole application frame while the window shows: what eframe runs,
-    /// `App::logic` and then `App::ui`. For headless tests, which cannot
-    /// build the `eframe::Frame` those take and need not, since nothing here
-    /// uses one — so they drive exactly the frame the window does.
-    #[cfg(test)]
-    pub(crate) fn run_frame(&mut self, ui: &mut egui::Ui) {
-        self.run_logic(&ui.ctx().clone());
-        self.draw_root_ui(ui);
-    }
-
-    /// The part of a frame that needs no UI. eframe runs it before the UI,
-    /// and on its own while the window is minimized or covered, when there is
-    /// no UI pass at all; so background work keeps landing, saves keep being
-    /// written and closing the window still asks first.
-    pub(crate) fn run_logic(&mut self, ctx: &egui::Context) {
-        // While the window is hidden egui's clock stays at the last frame
-        // shown, and every timer below reads it.
-        if let Some(now) = self.native_clock.take() {
-            ctx.input_mut(|input| input.time = input.time.max(now));
-        }
-        self.window_state.observe(ctx);
-        if self.dialogs.get::<FirstRunWizardState>().is_none() {
-            self.process_worker_messages(ctx);
-            self.expire_status(ctx);
-        }
-        // Raised by the previous frame, whose UI has since committed any edit
-        // that was still focused, so the action sees it.
-        self.run_deferred_file_action(ctx);
-        if self.dialogs.get::<FirstRunWizardState>().is_none() {
-            // Defers the close, so the UI commits a focused edit before the
-            // next frame decides whether there is anything to save.
-            self.handle_app_close_request(ctx);
-            self.persist_prefs_throttled(ctx.input(|input| input.time));
-        }
-        // A container write whose workspace closed while it was in flight left
-        // a mapping released and an Unreal package mount idle. Nothing else
-        // would ever put those back.
-        self.sweep_container_write_leases(ctx);
-        self.maybe_autosave_campaign_projects(ctx);
-        // Every kit, not only one whose Chimp workspace is on screen: a
-        // checkpoint waiting on a workspace the user switched away from would
-        // otherwise wait until they came back.
-        for kit_index in 0..self.model.kits.len() {
-            self.run_due_chimp_checkpoints(kit_index, ctx);
-        }
-    }
-}
-
-#[cfg(test)]
-mod keyword_draft_tests {
-    use super::*;
 
     /// Two panes showing the same tag keep their own keyword drafts. The draft
     /// used to be one field on the app, shared by every pane in every kit.
@@ -5059,154 +5128,4 @@ mod keyword_draft_tests {
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
-}
-
-/// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
-/// Keywords live in an external sidecar, not the tag binary. Adding and
-/// removing are commands; the draft being typed is this pane's own.
-pub(in crate::app) fn draw_keyword_bar(cx: &Ctx, ui: &mut Ui, kit_index: usize, tag_key: &str) {
-    let kit = cx.model.kits[kit_index].id;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(RichText::new("Keywords:").color(subtle_dark()));
-        let existing = cx.model.kits[kit_index].keywords.keywords(tag_key).to_vec();
-        let mut remove: Option<String> = None;
-        for keyword in &existing {
-            if keyword_pill(ui, tag_key, keyword) {
-                remove = Some(keyword.clone());
-            }
-        }
-        if let Some(keyword) = remove {
-            cx.send(BrowserCommand::RemoveKeyword {
-                kit,
-                key: tag_key.to_owned(),
-                keyword,
-            });
-        }
-        // The draft is this pane's own. It used to be one field on the app,
-        // so text typed into one pane's box showed in every other pane.
-        let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
-        let mut draft = ui
-            .data_mut(|data| data.get_temp::<String>(draft_id))
-            .unwrap_or_default();
-        let keyword_field = Frame::NONE
-            .fill(foundation_input())
-            .corner_radius(egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8))
-            .inner_margin(egui::Margin::same(2))
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.spacing_mut().interact_size.y = 20.0;
-                ui.set_height(20.0);
-                ui.horizontal(|ui| {
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut draft)
-                            .hint_text(placeholder_text("add keyword"))
-                            .desired_width(120.0)
-                            .frame(egui::Frame::NONE),
-                    );
-                    let add_response = ui
-                        .scope(|ui| {
-                            ui.spacing_mut().interact_size = Vec2::splat(20.0);
-                            ui.add(
-                                egui::Button::new("")
-                                    .min_size(Vec2::splat(20.0))
-                                    .corner_radius(egui::CornerRadius::same(10)),
-                            )
-                        })
-                        .inner;
-                    let add_icon_rect = egui::Rect::from_center_size(
-                        add_response.rect.center(),
-                        Vec2::splat(BUTTON_ICON_SIZE),
-                    );
-                    paint_button_icon_at(ui, ButtonIcon::Add, add_icon_rect, text_dark());
-                    let add_clicked = add_response.on_hover_text("Add keyword").clicked();
-                    (resp, add_clicked)
-                })
-                .inner
-            });
-        let (resp, add_clicked) = keyword_field.inner;
-        ui.painter().rect_stroke(
-            keyword_field.response.rect,
-            egui::CornerRadius::same((BUTTON_HEIGHT / 2.0) as u8),
-            pane_header_input_stroke(
-                ui,
-                keyword_field.response.hovered() || resp.hovered(),
-                resp.has_focus(),
-            ),
-            egui::StrokeKind::Middle,
-        );
-        let submitted = lost_focus_once(&resp) && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (add_clicked || submitted) && !draft.trim().is_empty() {
-            cx.send(BrowserCommand::AddKeyword {
-                kit,
-                key: tag_key.to_owned(),
-                keyword: draft.clone(),
-            });
-            draft.clear();
-        }
-        ui.data_mut(|data| data.insert_temp(draft_id, draft));
-    });
-}
-
-/// The scenario header's launch buttons. `kit_index` is the workspace whose
-/// pane is drawing this. Readiness is resolved against that workspace's
-/// editing kit rather than the focused one, and a launch makes it active
-/// first: it saves the tag and starts an external editor, neither of which
-/// should follow the wrong game.
-pub(in crate::app) fn draw_scenario_launcher_buttons(
-    cx: &Ctx,
-    ui: &mut Ui,
-    kit_index: usize,
-    entry: &TagEntry,
-) {
-    let kit = cx.model.kits[kit_index].id;
-    if entry.group_tag != u32::from_be_bytes(*b"scnr") {
-        return;
-    }
-    let key = entry.key.clone();
-    // Halo Combat Evolved's Sapien cannot be handed a scenario, and
-    // Campaign Evolved has no Sapien at all. Neither is a button worth
-    // greying out — a control that can never work reads as something the
-    // user has misconfigured.
-    let offers_sapien = cx.model.kit_offers_scenario_sapien(kit_index);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let tag_test_ready = cx.model.can_launch_scenario_in_tag_test(kit_index, entry);
-        if scenario_launcher_button(
-            ui,
-            "bytes://baboon_app_icons/tag-test.png",
-            include_root_bytes!("assets/App Icons/Tag Test.png"),
-            "TagTest",
-            tag_test_ready,
-        )
-        .on_hover_text("Save if needed, then launch this scenario in tag_test")
-        .clicked()
-        {
-            cx.send(KitsCommand::LaunchScenario {
-                kit,
-                key: key.clone(),
-                tool: ScenarioTool::TagTest,
-            });
-        }
-        if offers_sapien {
-            let sapien_ready = cx.model.can_launch_scenario_in_sapien(kit_index, entry);
-            if scenario_launcher_button(
-                ui,
-                "bytes://baboon_app_icons/sapien.png",
-                include_root_bytes!("assets/App Icons/Sapien.png"),
-                "Sapien",
-                sapien_ready,
-            )
-            .on_hover_text("Save if needed, then launch this scenario in Sapien")
-            .clicked()
-            {
-                cx.send(KitsCommand::LaunchScenario {
-                    kit,
-                    key: key.clone(),
-                    tool: ScenarioTool::Sapien,
-                });
-            }
-        }
-        ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
-    });
 }

@@ -570,7 +570,7 @@ pub(in crate::app) fn tsv_paste_summary(
 }
 
 #[cfg(test)]
-mod tsv_paste_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -590,11 +590,6 @@ mod tsv_paste_tests {
             ]
         );
     }
-}
-
-#[cfg(test)]
-mod tsv_paste_summary_tests {
-    use super::*;
 
     fn outcome(path: &str, input: &str, result: Result<(), String>) -> FieldEditOutcome {
         FieldEditOutcome {

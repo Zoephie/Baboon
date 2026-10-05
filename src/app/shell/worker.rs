@@ -715,7 +715,7 @@ pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
 }
 
 #[cfg(test)]
-mod spawn_worker_tests {
+mod tests {
     use super::*;
     use std::time::Duration;
 

@@ -795,22 +795,22 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod rekey_tag_tests {
-    //! Moving a tag's identity without losing anything filed under it.
-    //!
-    //! `TagEntry::key` is what documents, tabs, previews, undo history and the
-    //! keyword sidecar are all addressed by, so a rename has to carry every one of
-    //! them. A map that gets missed does not crash — it strands that state under a
-    //! key nothing resolves any more, and from the outside the rename looks as
-    //! though it worked. These tests are the cheapest place to catch that.
-
+mod tests {
     use super::*;
-    use crate::app::shell::session::LastSessionTag;
+    use crate::app::browser::KitBrowser;
+    use crate::app::editor::{AppliedFindFilter, EditorCaches};
     use crate::app::kits::{KitView, tag_tree_id};
     use crate::app::mods::TagHistory;
-    use crate::app::editor::{AppliedFindFilter, EditorCaches};
-    use crate::app::browser::KitBrowser;
+    use crate::app::shell::session::LastSessionTag;
     use crate::app::shell::session::RestorePlan;
+
+    // Moving a tag's identity without losing anything filed under it.
+    //
+    // `TagEntry::key` is what documents, tabs, previews, undo history and the
+    // keyword sidecar are all addressed by, so a rename has to carry every one of
+    // them. A map that gets missed does not crash — it strands that state under a
+    // key nothing resolves any more, and from the outside the rename looks as
+    // though it worked. These tests are the cheapest place to catch that.
 
     const OLD: &str = "ublock:pakchunk0:objects/vehicles/warthog";
     const NEW: &str = "ublock:pakchunk0:objects/vehicles/scorpion";
@@ -1111,21 +1111,16 @@ mod rekey_tag_tests {
             h2_templates: _,
         } = EditorCaches::default();
     }
-}
 
-#[cfg(test)]
-mod rename_eligibility_tests {
-    //! Who may rename a tag inside the pak that holds it.
-    //!
-    //! Only tags Baboon authored, and the reason is a measurement rather than a
-    //! policy: a container redirect does not forward references. Renaming the
-    //! assault rifle removes it from the game, and renaming it with a redirect
-    //! verified present in the container removes it just the same. So a rename
-    //! relocates a tag only when nothing points at it — which for a tag Baboon
-    //! created is true by construction, because it did not exist when the game was
-    //! built.
-
-    use super::*;
+    // Who may rename a tag inside the pak that holds it.
+    //
+    // Only tags Baboon authored, and the reason is a measurement rather than a
+    // policy: a container redirect does not forward references. Renaming the
+    // assault rifle removes it from the game, and renaming it with a redirect
+    // verified present in the container removes it just the same. So a rename
+    // relocates a tag only when nothing points at it — which for a tag Baboon
+    // created is true by construction, because it did not exist when the game was
+    // built.
 
     const UTOC: &str = "C:/Game/Paks/pakchunk240-Windows.utoc";
     const REL: &str = "Meteorite/Content/Tags/objects/copy-biped.ubulk";
@@ -1259,18 +1254,13 @@ mod rename_eligibility_tests {
             4096
         );
     }
-}
 
-#[cfg(test)]
-mod container_rename_state_tests {
-    //! Moving a renamed tag through the mounted source without reloading it.
-    //!
-    //! Three indices, an entry list, two trees and a reference graph all describe
-    //! where a container tag lives. A reload would rebuild all of them, and is what
-    //! the code deliberately avoids — so each one has to be moved by hand, and the
-    //! order of two of those moves matters.
-
-    use super::*;
+    // Moving a renamed tag through the mounted source without reloading it.
+    //
+    // Three indices, an entry list, two trees and a reference graph all describe
+    // where a container tag lives. A reload would rebuild all of them, and is what
+    // the code deliberately avoids — so each one has to be moved by hand, and the
+    // order of two of those moves matters.
 
     const GROUP: u32 = 0x6269_7064; // 'bipd'
     const OLD_UBULK: &str = "Meteorite/Content/Tags/objects/vehicles/warthog-vehicle.ubulk";

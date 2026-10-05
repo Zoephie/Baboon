@@ -509,7 +509,7 @@ pub(in crate::app) fn container_save_route(expert_mode: bool, confirm: bool) -> 
 }
 
 #[cfg(test)]
-mod in_place_overwrite_tests {
+mod tests {
     use super::*;
     use crate::app::mods::in_place::InPlaceOverwrite;
     use crate::app::mods::in_place::InPlaceOverwriteJob;

@@ -379,8 +379,6 @@ impl Baboon {
         });
     }
 
-
-
     /// Apply the confirmed deletion. Loose tags are moved on the spot; container
     /// tags go to a worker, because rewriting a pak's TOC is not a UI-thread job.
     pub(in crate::app) fn begin_delete_tag(&mut self, ctx: egui::Context) {
@@ -735,6 +733,15 @@ fn run_container_delete(
     })
 }
 
+impl Model {
+    pub(in crate::app) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
+        match &self.source()?.source {
+            TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1020,11 +1027,6 @@ mod tests {
         assert!(loose_trash_destination(None, "../../escape.weapon", 1).is_err());
         assert!(loose_trash_destination(None, "", 1).is_err());
     }
-}
-
-#[cfg(test)]
-mod delete_lease_tests {
-    use super::*;
 
     /// A container delete holds the write lease while it runs and gives it back
     /// when it finishes, failed or not, so the container can be written again.
@@ -1051,14 +1053,5 @@ mod delete_lease_tests {
             .ok()
             .expect("free again once it finished");
         app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
-    }
-}
-
-impl Model {
-    pub(in crate::app) fn mounted_containers(&self) -> Option<Vec<crate::core::source::MountedContainer>> {
-        match &self.source()?.source {
-            TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
-            _ => None,
-        }
     }
 }

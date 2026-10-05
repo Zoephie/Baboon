@@ -373,7 +373,7 @@ impl ModelRenderMode {
 }
 
 #[cfg(test)]
-mod model_render_mode_tests {
+mod tests {
     use super::*;
 
     #[test]

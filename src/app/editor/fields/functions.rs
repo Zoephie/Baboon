@@ -284,9 +284,67 @@ pub(in crate::app) fn foundation_function_edit_paths(
     }
 }
 
+/// First-pass editable function types — others stay read-only (graph +
+/// controls disabled) but still round-trip on save.
+pub(in crate::app) fn draw_foundation_enum_row(
+    ui: &mut Ui,
+    meta: &FieldDisplayMeta,
+    options: &[&str],
+    current: Option<i64>,
+    depth: usize,
+    path: &str,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let mut selected = current.unwrap_or(-1);
+    ui.horizontal(|ui| {
+        ui.add_space(depth as f32 * 12.0);
+        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+        ui.add_enabled_ui(edit.editable && !meta.read_only, |ui| {
+            let selected_label = enum_option_label(options, selected);
+            let selected_text = highlighted_widget_text(
+                ui,
+                &selected_label,
+                TextStyle::Button,
+                text_dark(),
+                FindTargetKind::Value,
+            )
+            .unwrap_or_else(|| selected_label.clone().into());
+            let (_, wheel_delta) = combo_box_with_scroll(
+                ui,
+                egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
+                    .width(240.0)
+                    .selected_text(selected_text),
+                |ui| {
+                    for (index, option) in options.iter().enumerate() {
+                        ui.selectable_value(&mut selected, index as i64, *option);
+                    }
+                },
+            );
+            if let Some(delta) = wheel_delta
+                && let Some(next) =
+                    combo_scroll_next_i64(selected, 0, options.len() as i64 - 1, delta)
+            {
+                selected = next;
+            }
+        });
+        if Some(selected) != current && selected >= 0 {
+            edit.pending.push(PendingFieldEdit {
+                path: path.to_owned(),
+                input: selected.to_string(),
+            });
+        }
+        draw_field_help(ui, meta);
+    });
+}
+
 #[cfg(test)]
-mod function_editor_routing_tests {
+mod tests {
     use super::*;
+    use blam_tags::{FunctionType, H2Function, TagFunction};
+    use crate::app::editor::FieldDisplayMeta;
+    use crate::app::editor::fields::with_test_edit_context;
+    use eframe::egui;
+    use super::{FUNCTION_PREVIEWS_BUILT, FUNCTION_ROWS_CULLED, draw_foundation_function_row};
 
     fn constant_view() -> FunctionView {
         let bytes = decode_hex(&constant_function_hex(0.0)).expect("constant function bytes");
@@ -586,75 +644,12 @@ mod function_editor_routing_tests {
         assert_eq!(&written[..4], &before[..4], "header untouched");
         assert_eq!(&written[12..], &before[12..], "graph data untouched");
     }
-}
 
-/// First-pass editable function types — others stay read-only (graph +
-/// controls disabled) but still round-trip on save.
-pub(in crate::app) fn draw_foundation_enum_row(
-    ui: &mut Ui,
-    meta: &FieldDisplayMeta,
-    options: &[&str],
-    current: Option<i64>,
-    depth: usize,
-    path: &str,
-    edit: &mut FieldEditContext<'_>,
-) {
-    let mut selected = current.unwrap_or(-1);
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        ui.add_enabled_ui(edit.editable && !meta.read_only, |ui| {
-            let selected_label = enum_option_label(options, selected);
-            let selected_text = highlighted_widget_text(
-                ui,
-                &selected_label,
-                TextStyle::Button,
-                text_dark(),
-                FindTargetKind::Value,
-            )
-            .unwrap_or_else(|| selected_label.clone().into());
-            let (_, wheel_delta) = combo_box_with_scroll(
-                ui,
-                egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
-                    .width(240.0)
-                    .selected_text(selected_text),
-                |ui| {
-                    for (index, option) in options.iter().enumerate() {
-                        ui.selectable_value(&mut selected, index as i64, *option);
-                    }
-                },
-            );
-            if let Some(delta) = wheel_delta
-                && let Some(next) =
-                    combo_scroll_next_i64(selected, 0, options.len() as i64 - 1, delta)
-            {
-                selected = next;
-            }
-        });
-        if Some(selected) != current && selected >= 0 {
-            edit.pending.push(PendingFieldEdit {
-                path: path.to_owned(),
-                input: selected.to_string(),
-            });
-        }
-        draw_field_help(ui, meta);
-    });
-}
-
-#[cfg(test)]
-mod function_row_culling_tests {
-    //! Function rows off screen are reserved, not built.
-    //!
-    //! Every function row carries a full read-only function editor as its
-    //! preview. The tests draw a column of them in a scroll area and compare what
-    //! the viewport shows with culling on against the same frames with it off.
-
-    use eframe::egui;
-
-    use super::{FUNCTION_PREVIEWS_BUILT, FUNCTION_ROWS_CULLED, draw_foundation_function_row};
-    use crate::app::editor::FieldDisplayMeta;
-    use crate::app::editor::fields::with_test_edit_context;
-    use blam_tags::{FunctionType, H2Function, TagFunction};
+    // Function rows off screen are reserved, not built.
+    //
+    // Every function row carries a full read-only function editor as its
+    // preview. The tests draw a column of them in a scroll area and compare what
+    // the viewport shows with culling on against the same frames with it off.
 
     fn function(kind: FunctionType) -> TagFunction {
         TagFunction::H2(H2Function::new(kind))

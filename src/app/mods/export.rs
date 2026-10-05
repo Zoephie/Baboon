@@ -17,14 +17,6 @@ impl Baboon {
         self.open_mod_review(false);
     }
 
-
-
-
-
-
-
-
-
     /// Write the reviewed mod. `included` are the identities the user kept.
     pub(in crate::app) fn write_reviewed_mod(
         &mut self,
@@ -435,14 +427,87 @@ pub(in crate::app) fn ensure_priority_suffix(path: PathBuf) -> PathBuf {
     path.with_file_name(format!("{stem}_P.{extension}"))
 }
 
+impl Model {
+    /// The container a tag would be written into, and whether it is a mod.
+    pub(in crate::app) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let TagEntryLocation::Container { container, .. } =
+            &self.entry_for_key_in(kit, key)?.location
+        else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .map(|container| (container.chunk_label.clone(), container.is_mod))
+    }
+
+    /// Every mod this workspace has mounted, by container label.
+    pub(in crate::app) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        containers
+            .iter()
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// The mounted containers an export to `output` would replace, by label.
+    ///
+    /// A mod installed under `Paks` is mounted like any other container, and
+    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
+    /// mapping first — Windows refuses to truncate a file with a mapped section
+    /// open — so this is what the review dialog says out loud and what the export
+    /// releases before it writes.
+    pub(in crate::app) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        crate::core::source::mounted_containers_at(&source.source, output)
+            .into_iter()
+            .filter_map(|index| containers.get(index))
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// The mounted mod currently serving this tag, if the mount resolved it to
+    /// one rather than to the game's own pack.
+    pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let entry = self.campaign_entry_for_identity(kit, identity)?;
+        let TagEntryLocation::Container { container, .. } = &entry.location else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+    }
+}
+
 #[cfg(test)]
-mod mod_output_tests {
+mod tests {
     use super::*;
-    use crate::app::mods::review::classify_overlay;
     use crate::app::mods::export::default_mod_export_folder;
+    use crate::app::mods::export::mod_output_path;
     use crate::app::mods::in_place::ContainerSaveRoute;
     use crate::app::mods::in_place::container_save_route;
-    use crate::app::mods::export::mod_output_path;
+    use crate::app::mods::review::classify_overlay;
+    use crate::app::mods::review::wrapper_origin_for;
+    use std::path::PathBuf;
 
     #[test]
     fn a_mod_is_written_into_a_folder_of_its_own_under_mods() {
@@ -575,21 +640,15 @@ mod mod_output_tests {
             ModExportChange::Modified
         );
     }
-}
 
-#[cfg(test)]
-mod mod_override_tests {
-    //! Separating the game's own packs from mods installed into the same tree.
-    //!
-    //! Baboon mounts the pak folder recursively, exactly as the game does, so a mod
-    //! in `Paks/~mods` -- or loose in `Paks` -- is mounted and wins every collision.
-    //! That is correct for reading, and it silently redefined "as the game ships it"
-    //! to mean "as this install currently loads it": every comparison against a
-    //! modded tag came back empty, including a mod compared against an earlier export
-    //! of itself.
-
-    use super::*;
-    use crate::app::mods::review::wrapper_origin_for;
+    // Separating the game's own packs from mods installed into the same tree.
+    //
+    // Baboon mounts the pak folder recursively, exactly as the game does, so a mod
+    // in `Paks/~mods` -- or loose in `Paks` -- is mounted and wins every collision.
+    // That is correct for reading, and it silently redefined "as the game ships it"
+    // to mean "as this install currently loads it": every comparison against a
+    // modded tag came back empty, including a mod compared against an earlier export
+    // of itself.
 
     static PAKS: std::sync::LazyLock<&'static str> =
         std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
@@ -1233,13 +1292,6 @@ mod mod_override_tests {
             );
         }
     }
-}
-
-#[cfg(test)]
-mod priority_suffix_tests {
-    use std::path::PathBuf;
-
-    use super::*;
 
     #[test]
     fn a_mod_always_gets_the_priority_suffix() {
@@ -1264,76 +1316,5 @@ mod priority_suffix_tests {
             ensure_priority_suffix(PathBuf::from("/mods/thing_2_P.utoc")),
             PathBuf::from("/mods/thing_2_P.utoc")
         );
-    }
-}
-
-impl Model {
-    /// The container a tag would be written into, and whether it is a mod.
-    pub(in crate::app) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return None;
-        };
-        let TagEntryLocation::Container { container, .. } =
-            &self.entry_for_key_in(kit, key)?.location
-        else {
-            return None;
-        };
-        containers
-            .get(*container)
-            .map(|container| (container.chunk_label.clone(), container.is_mod))
-    }
-
-    /// Every mod this workspace has mounted, by container label.
-    pub(in crate::app) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Vec::new();
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Vec::new();
-        };
-        containers
-            .iter()
-            .filter(|container| container.is_mod)
-            .map(|container| container.chunk_label.clone())
-            .collect()
-    }
-
-    /// The mounted containers an export to `output` would replace, by label.
-    ///
-    /// A mod installed under `Paks` is mounted like any other container, and
-    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
-    /// mapping first — Windows refuses to truncate a file with a mapped section
-    /// open — so this is what the review dialog says out loud and what the export
-    /// releases before it writes.
-    pub(in crate::app) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Vec::new();
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Vec::new();
-        };
-        crate::core::source::mounted_containers_at(&source.source, output)
-            .into_iter()
-            .filter_map(|index| containers.get(index))
-            .map(|container| container.chunk_label.clone())
-            .collect()
-    }
-
-    /// The mounted mod currently serving this tag, if the mount resolved it to
-    /// one rather than to the game's own pack.
-    pub(in crate::app) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return None;
-        };
-        let entry = self.campaign_entry_for_identity(kit, identity)?;
-        let TagEntryLocation::Container { container, .. } = &entry.location else {
-            return None;
-        };
-        containers
-            .get(*container)
-            .filter(|container| container.is_mod)
-            .map(|container| container.chunk_label.clone())
     }
 }

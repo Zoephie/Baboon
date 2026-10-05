@@ -1418,8 +1418,9 @@ fn run_container_duplicate(
 }
 
 #[cfg(test)]
-mod provenance_tests {
+mod tests {
     use super::*;
+    use crate::app::kits::{KitMut, KitView};
     use crate::core::source::ContainerPackageIndex;
 
     /// A stand-in for the mount's directory indexes: one `Vec` of paths per
@@ -1615,12 +1616,6 @@ mod provenance_tests {
             assert!(text.contains(expected), "missing {expected} in:\n{text}");
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::kits::{KitMut, KitView};
 
     fn temp_fixture(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

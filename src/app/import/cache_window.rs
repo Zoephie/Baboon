@@ -593,7 +593,7 @@ impl Dialog for CacheImportDialog {
 }
 
 #[cfg(test)]
-mod cache_import_window_tests {
+mod tests {
     use super::*;
 
     fn dialog(report: Option<FolderConversionReport>) -> CacheImportDialog {

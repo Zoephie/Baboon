@@ -292,7 +292,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod worker_panic_tests {
+mod tests {
     //! A background job that panics must still settle what the UI marked as in
     //! flight. Each test makes the job panic before it does any work (see
     //! `with_panicking_workers`) and checks the state it would have left stuck

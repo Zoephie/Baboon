@@ -136,7 +136,6 @@ impl EditDrafts {
     }
 }
 
-
 /// A copied block element, held on the app so it can be pasted into a block of
 /// the same shape in another open tag. `group_tag` + `block_path` gate which
 /// blocks accept the paste (same group, same block); the library re-validates
@@ -235,7 +234,6 @@ pub(in crate::app) struct ToolImportRequest {
     /// Source directory argument, e.g. `objects\characters\masterchief`.
     pub(in crate::app) source_dir: String,
 }
-
 
 /// What the user clicked in a block header this frame.
 #[derive(Default)]
@@ -626,33 +624,6 @@ impl FieldEditContext<'_> {
     }
 }
 
-#[cfg(test)]
-mod edit_draft_tests {
-    use super::*;
-
-    #[test]
-    fn changed_draft_is_not_replaced_by_stale_model_value() {
-        let mut draft = EditDraft::new("10");
-        draft.text = "25".to_owned();
-        draft.changed = true;
-        draft.synchronize("10");
-        assert_eq!(draft.text, "25");
-        assert!(draft.changed);
-    }
-
-    #[test]
-    fn successful_commit_becomes_the_new_clean_baseline() {
-        let mut draft = EditDraft::new("10");
-        draft.text = "25".to_owned();
-        draft.changed = true;
-        draft.synchronize("25");
-        assert_eq!(draft.text, "25");
-        assert!(!draft.changed);
-        draft.synchronize("30");
-        assert_eq!(draft.text, "30");
-    }
-}
-
 /// Whether `ancestor` is `target` itself or an ancestor of it, compared
 /// segment-wise so `"custom references"` is an ancestor of
 /// `"custom references/sounds"` but not of `"custom references extra"`. Both
@@ -714,6 +685,28 @@ pub(in crate::app) struct FieldDisplayMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_draft_is_not_replaced_by_stale_model_value() {
+        let mut draft = EditDraft::new("10");
+        draft.text = "25".to_owned();
+        draft.changed = true;
+        draft.synchronize("10");
+        assert_eq!(draft.text, "25");
+        assert!(draft.changed);
+    }
+
+    #[test]
+    fn successful_commit_becomes_the_new_clean_baseline() {
+        let mut draft = EditDraft::new("10");
+        draft.text = "25".to_owned();
+        draft.changed = true;
+        draft.synchronize("25");
+        assert_eq!(draft.text, "25");
+        assert!(!draft.changed);
+        draft.synchronize("30");
+        assert_eq!(draft.text, "30");
+    }
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

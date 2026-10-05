@@ -151,7 +151,7 @@ impl Baboon {
     /// is depth without information.
     fn build_diff_tree(sections: Vec<DiffSection>) -> DiffNode {
         #[cfg(test)]
-        diff_view_tests::TREES_BUILT.with(|built| built.set(built.get() + 1));
+        tests::TREES_BUILT.with(|built| built.set(built.get() + 1));
         let mut root = DiffNode::default();
         for section in sections {
             let (container, _) = Self::split_element_index(&section.element);
@@ -1102,7 +1102,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod mod_export_tests {
+mod tests {
     use super::*;
     use std::path::PathBuf;
 
@@ -1296,11 +1296,6 @@ mod mod_export_tests {
         assert_eq!(dialog("thing_P").stem(), "thing_P");
         assert_eq!(dialog("thing_p").stem(), "thing_p");
     }
-}
-
-#[cfg(test)]
-mod diff_view_tests {
-    use super::*;
 
     thread_local! {
         pub(super) static TREES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };

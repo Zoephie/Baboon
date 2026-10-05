@@ -882,7 +882,7 @@ pub(in crate::app) fn container_dump_entries<'a>(
 }
 
 #[cfg(test)]
-mod container_folder_extract_tests {
+mod tests {
     //! Right-click → Extract tags to folder, on a Campaign Evolved container.
     //!
     //! The narrow-scope twin of File → Extract All Tags to Folder. It shares that

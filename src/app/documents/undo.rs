@@ -121,7 +121,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod chimp_surface_undo_tests {
+mod tests {
     //! Undo and redo on the Chimp surface.
     //!
     //! Ctrl+Z, Ctrl+Y and the Edit menu act on the selected tag. On the Chimp

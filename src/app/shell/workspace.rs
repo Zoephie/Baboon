@@ -63,9 +63,6 @@ impl Baboon {
         self.apply_commands(ctx);
     }
 
-
-
-
     /// The kit a confirmed popup applies to: the one it was opened from, or
     /// none if that kit has closed since, so the edit is dropped rather than
     /// landing in another kit's tag that happens to share its key. A popup
@@ -376,7 +373,7 @@ pub(in crate::app) fn draw_terminal_output(
                     ui.skip_ahead_auto_ids(first);
                     for line in &lines[first..last.max(first)] {
                         #[cfg(test)]
-                        terminal_output_tests::LINES_BUILT.with(|built| built.set(built.get() + 1));
+                        tests::LINES_BUILT.with(|built| built.set(built.get() + 1));
                         ui.add(egui::Label::new(terminal_line_text(line)).wrap());
                     }
                 });
@@ -389,296 +386,6 @@ pub(in crate::app) fn draw_terminal_output(
                 ui.scroll_to_rect(bottom, Some(egui::Align::BOTTOM));
             }
         });
-}
-
-#[cfg(test)]
-pub(in crate::app) mod terminal_output_tests {
-    use super::*;
-
-    thread_local! {
-        /// Output lines laid out. egui skips painting offscreen labels by
-        /// itself, so the painted text alone cannot show that the pane lays
-        /// out only what is in view.
-        pub(in crate::app) static LINES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
-    fn lines(count: usize) -> Vec<TerminalLineEntry> {
-        (0..count)
-            .map(|index| {
-                TerminalLineEntry::new(format!(
-                    "{index}: tool.exe: importing C:\\Halo\\tags\\objects\\weapons\\rifle_{index}\\\
-                     render\\rifle_{index}.render_model from data\\objects\\weapons ... done"
-                ))
-            })
-            .collect()
-    }
-
-    fn frame(
-        ctx: &egui::Context,
-        lines: &[TerminalLineEntry],
-        bottom: bool,
-    ) -> std::time::Duration {
-        let started = std::time::Instant::now();
-        let _ = crate::app::run_ui_test(
-            &ctx,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 300.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    draw_terminal_output(ui, lines, bottom);
-                });
-            },
-        );
-        started.elapsed()
-    }
-
-    /// The text of every line painted in a frame.
-    fn painted(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> Vec<String> {
-        LINES_BUILT.with(|built| built.set(0));
-        let output = crate::app::run_ui_test(
-            &ctx,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 300.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    draw_terminal_output(ui, lines, bottom);
-                });
-            },
-        );
-        output
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Only the lines in view are drawn, and they are the right ones: the
-    /// top of the output when opened, the end of it after scrolling there.
-    #[test]
-    fn the_terminal_draws_the_lines_in_view() {
-        let lines = lines(20_000);
-        let starts =
-            |painted: &[String], prefix: &str| painted.iter().any(|text| text.starts_with(prefix));
-
-        let top = painted(&egui::Context::default(), &lines, false);
-        assert!(starts(&top, "0: ") && !starts(&top, "19999: "));
-        let built = LINES_BUILT.with(std::cell::Cell::get);
-        assert!(built < 100, "laid out {built} of 20,000 lines");
-
-        let ctx = egui::Context::default();
-        // Scrolling animates over frames; land in one.
-        ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
-        painted(&ctx, &lines, true);
-        let bottom = (0..3).map(|_| painted(&ctx, &lines, false)).last().unwrap();
-        assert!(starts(&bottom, "19999: "), "the last line is in view");
-        assert!(!starts(&bottom, "0: "));
-        let built = LINES_BUILT.with(std::cell::Cell::get);
-        assert!(built < 100, "laid out {built} of 20,000 lines");
-    }
-
-    /// Frame time with a full terminal. Run with `--release --ignored
-    /// --nocapture`.
-    #[test]
-    #[ignore]
-    fn bench_terminal_frame() {
-        let lines = lines(20_000);
-        let ctx = egui::Context::default();
-        for index in 0..6 {
-            eprintln!("frame {index}: {:?}", frame(&ctx, &lines, index == 0));
-        }
-    }
-}
-
-#[cfg(test)]
-mod folder_refactor_lock_tests {
-    //! While a folder move or rename rewrites tags on disk, nothing under the lock
-    //! takes a click and no shortcut runs. Each check has an unlocked control that
-    //! must disagree, so a lock that blocked nothing would fail here.
-
-    use super::*;
-
-    fn app(locked: bool) -> Baboon {
-        let mut app = Baboon::assemble(
-            &egui::Context::default(),
-            crate::app::shell::window_state::WindowStateTracker::for_test(),
-            GuiPrefs::default(),
-            HashSet::new(),
-            None,
-            TagNameIndex::default(),
-            None,
-        );
-        if locked {
-            app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
-                label: "Renaming creep to shadow".to_owned(),
-                phase: "Moving files".to_owned(),
-                progress: Some(0.5),
-            });
-        }
-        app
-    }
-
-    fn input(events: Vec<egui::Event>) -> egui::RawInput {
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            events,
-            ..Default::default()
-        }
-    }
-
-    /// Click a button drawn beneath the lock layer; whether it saw the click.
-    fn button_sees_click(locked: bool) -> bool {
-        let mut app = app(locked);
-        let ctx = egui::Context::default();
-        let rect = std::cell::Cell::new(egui::Rect::NOTHING);
-        let clicked = std::cell::Cell::new(false);
-        let frame = |events: Vec<egui::Event>, app: &mut Baboon| {
-            let _ = crate::app::run_ui_test(&ctx, input(events), |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    let response = ui.button("Save");
-                    rect.set(response.rect);
-                    clicked.set(clicked.get() | response.clicked());
-                });
-                draw_folder_refactor_lock(&ctx, app.tag_ops.folder_refactor.as_ref());
-            });
-        };
-        frame(Vec::new(), &mut app);
-        let pos = rect.get().center();
-        let press = |pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
-        frame(vec![egui::Event::PointerMoved(pos)], &mut app);
-        frame(vec![press(true)], &mut app);
-        frame(vec![press(false)], &mut app);
-        frame(Vec::new(), &mut app);
-        clicked.get()
-    }
-
-    #[test]
-    fn the_lock_swallows_clicks_meant_for_the_app_beneath() {
-        assert!(
-            button_sees_click(false),
-            "control: the click lands unlocked"
-        );
-        assert!(!button_sees_click(true), "the lock must take the click");
-    }
-
-    /// Press Ctrl+S; whether a save was queued.
-    fn ctrl_s_queues_save(locked: bool) -> bool {
-        let mut app = app(locked);
-        let ctx = egui::Context::default();
-        let _ = crate::app::run_ui_test(
-            &ctx,
-            input(vec![egui::Event::Key {
-                key: egui::Key::S,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::CTRL,
-            }]),
-            |_| {
-                app.prepare_root_frame(&ctx);
-                // A shortcut's action is applied with the frame's commands.
-                app.apply_commands(&ctx);
-            },
-        );
-        app.editor.deferred_file_action.is_some()
-    }
-
-    #[test]
-    fn shortcuts_do_not_run_while_locked() {
-        assert!(
-            ctrl_s_queues_save(false),
-            "control: Ctrl+S queues a save unlocked"
-        );
-        assert!(
-            !ctrl_s_queues_save(true),
-            "Ctrl+S must not run under the lock"
-        );
-    }
-}
-
-#[cfg(test)]
-mod popup_kit_stamp_tests {
-    //! A confirmed colour or function popup edits the kit it was opened from.
-    //!
-    //! The shader and material grids used to write the shared popup directly,
-    //! with no record of their kit, so the stamp left by whichever popup was
-    //! opened before decided where the edit went: dropped, or applied to another
-    //! kit's tag with the same key.
-
-    use super::*;
-    use crate::app::editor::{ColorPopupWindow, MaterialColorPopup};
-
-    fn two_kits() -> (Baboon, KitId, KitId) {
-        let mut app = Baboon::for_test();
-        let a = app.model.kits[0].id;
-        let b = KitId(a.0 + 1);
-        app.push_kit(Kit::empty(b, TagNameIndex::default()));
-        (app, a, b)
-    }
-
-    /// A colour popup opened from `kit`, as a tag pane opens one.
-    fn open_popup(app: &mut Baboon, kit: KitId) {
-        app.dialogs.open(ColorPopupWindow {
-            popup: Some(MaterialColorPopup::new("color", 1.0, 0.5, 0.25, 1.0)),
-            kit,
-        });
-    }
-
-    /// The kit the open colour popup applies to.
-    fn popup_kit(app: &mut Baboon) -> Option<usize> {
-        let opened_from = app
-            .dialogs
-            .get::<ColorPopupWindow>()
-            .map(|window| window.kit);
-        app.popup_target_kit(opened_from)
-    }
-
-    #[test]
-    fn a_grid_popup_opened_after_another_kits_popup_edits_its_own_kit() {
-        let (mut app, a, b) = two_kits();
-        // A normal swatch in B opens the picker; it is stamped with B.
-        open_popup(&mut app, b);
-        assert_eq!(popup_kit(&mut app), Some(1));
-
-        // Then the shader grid in A opens one, B still active.
-        app.model.active = 1;
-        open_popup(&mut app, a);
-        assert_eq!(
-            popup_kit(&mut app),
-            Some(0),
-            "the edit lands in A, where the popup was opened"
-        );
-    }
-
-    #[test]
-    fn a_popup_from_a_closed_kit_is_dropped_not_redirected() {
-        let (mut app, _, b) = two_kits();
-        open_popup(&mut app, b);
-        app.model.kits.pop();
-        assert_eq!(popup_kit(&mut app), None);
-        // A popup with no recorded kit still applies to the active one.
-        assert_eq!(app.popup_target_kit(None), Some(app.model.active));
-    }
 }
 
 /// The status bar: the status line, index and job progress, the update
@@ -1168,4 +875,284 @@ pub(in crate::app) fn draw_folder_refactor_lock(ctx: &egui::Context, folder_refa
             });
         });
     ctx.request_repaint_after(PROGRESS_REPAINT);
+}
+
+#[cfg(test)]
+pub(in crate::app) mod tests {
+    use super::*;
+    use crate::app::editor::{ColorPopupWindow, MaterialColorPopup};
+
+    thread_local! {
+        /// Output lines laid out. egui skips painting offscreen labels by
+        /// itself, so the painted text alone cannot show that the pane lays
+        /// out only what is in view.
+        pub(in crate::app) static LINES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn lines(count: usize) -> Vec<TerminalLineEntry> {
+        (0..count)
+            .map(|index| {
+                TerminalLineEntry::new(format!(
+                    "{index}: tool.exe: importing C:\\Halo\\tags\\objects\\weapons\\rifle_{index}\\\
+                     render\\rifle_{index}.render_model from data\\objects\\weapons ... done"
+                ))
+            })
+            .collect()
+    }
+
+    fn frame(
+        ctx: &egui::Context,
+        lines: &[TerminalLineEntry],
+        bottom: bool,
+    ) -> std::time::Duration {
+        let started = std::time::Instant::now();
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_terminal_output(ui, lines, bottom);
+                });
+            },
+        );
+        started.elapsed()
+    }
+
+    /// The text of every line painted in a frame.
+    fn painted(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> Vec<String> {
+        LINES_BUILT.with(|built| built.set(0));
+        let output = crate::app::run_ui_test(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_terminal_output(ui, lines, bottom);
+                });
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Only the lines in view are drawn, and they are the right ones: the
+    /// top of the output when opened, the end of it after scrolling there.
+    #[test]
+    fn the_terminal_draws_the_lines_in_view() {
+        let lines = lines(20_000);
+        let starts =
+            |painted: &[String], prefix: &str| painted.iter().any(|text| text.starts_with(prefix));
+
+        let top = painted(&egui::Context::default(), &lines, false);
+        assert!(starts(&top, "0: ") && !starts(&top, "19999: "));
+        let built = LINES_BUILT.with(std::cell::Cell::get);
+        assert!(built < 100, "laid out {built} of 20,000 lines");
+
+        let ctx = egui::Context::default();
+        // Scrolling animates over frames; land in one.
+        ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        painted(&ctx, &lines, true);
+        let bottom = (0..3).map(|_| painted(&ctx, &lines, false)).last().unwrap();
+        assert!(starts(&bottom, "19999: "), "the last line is in view");
+        assert!(!starts(&bottom, "0: "));
+        let built = LINES_BUILT.with(std::cell::Cell::get);
+        assert!(built < 100, "laid out {built} of 20,000 lines");
+    }
+
+    /// Frame time with a full terminal. Run with `--release --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench_terminal_frame() {
+        let lines = lines(20_000);
+        let ctx = egui::Context::default();
+        for index in 0..6 {
+            eprintln!("frame {index}: {:?}", frame(&ctx, &lines, index == 0));
+        }
+    }
+
+    // While a folder move or rename rewrites tags on disk, nothing under the lock
+    // takes a click and no shortcut runs. Each check has an unlocked control that
+    // must disagree, so a lock that blocked nothing would fail here.
+
+    fn app(locked: bool) -> Baboon {
+        let mut app = Baboon::assemble(
+            &egui::Context::default(),
+            crate::app::shell::window_state::WindowStateTracker::for_test(),
+            GuiPrefs::default(),
+            HashSet::new(),
+            None,
+            TagNameIndex::default(),
+            None,
+        );
+        if locked {
+            app.tag_ops.folder_refactor = Some(FolderRefactorUiState {
+                label: "Renaming creep to shadow".to_owned(),
+                phase: "Moving files".to_owned(),
+                progress: Some(0.5),
+            });
+        }
+        app
+    }
+
+    fn input(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        }
+    }
+
+    /// Click a button drawn beneath the lock layer; whether it saw the click.
+    fn button_sees_click(locked: bool) -> bool {
+        let mut app = app(locked);
+        let ctx = egui::Context::default();
+        let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let clicked = std::cell::Cell::new(false);
+        let frame = |events: Vec<egui::Event>, app: &mut Baboon| {
+            let _ = crate::app::run_ui_test(&ctx, input(events), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let response = ui.button("Save");
+                    rect.set(response.rect);
+                    clicked.set(clicked.get() | response.clicked());
+                });
+                draw_folder_refactor_lock(&ctx, app.tag_ops.folder_refactor.as_ref());
+            });
+        };
+        frame(Vec::new(), &mut app);
+        let pos = rect.get().center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(pos)], &mut app);
+        frame(vec![press(true)], &mut app);
+        frame(vec![press(false)], &mut app);
+        frame(Vec::new(), &mut app);
+        clicked.get()
+    }
+
+    #[test]
+    fn the_lock_swallows_clicks_meant_for_the_app_beneath() {
+        assert!(
+            button_sees_click(false),
+            "control: the click lands unlocked"
+        );
+        assert!(!button_sees_click(true), "the lock must take the click");
+    }
+
+    /// Press Ctrl+S; whether a save was queued.
+    fn ctrl_s_queues_save(locked: bool) -> bool {
+        let mut app = app(locked);
+        let ctx = egui::Context::default();
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            input(vec![egui::Event::Key {
+                key: egui::Key::S,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }]),
+            |_| {
+                app.prepare_root_frame(&ctx);
+                // A shortcut's action is applied with the frame's commands.
+                app.apply_commands(&ctx);
+            },
+        );
+        app.editor.deferred_file_action.is_some()
+    }
+
+    #[test]
+    fn shortcuts_do_not_run_while_locked() {
+        assert!(
+            ctrl_s_queues_save(false),
+            "control: Ctrl+S queues a save unlocked"
+        );
+        assert!(
+            !ctrl_s_queues_save(true),
+            "Ctrl+S must not run under the lock"
+        );
+    }
+
+    // A confirmed colour or function popup edits the kit it was opened from.
+    //
+    // The shader and material grids used to write the shared popup directly,
+    // with no record of their kit, so the stamp left by whichever popup was
+    // opened before decided where the edit went: dropped, or applied to another
+    // kit's tag with the same key.
+
+    fn two_kits() -> (Baboon, KitId, KitId) {
+        let mut app = Baboon::for_test();
+        let a = app.model.kits[0].id;
+        let b = KitId(a.0 + 1);
+        app.push_kit(Kit::empty(b, TagNameIndex::default()));
+        (app, a, b)
+    }
+
+    /// A colour popup opened from `kit`, as a tag pane opens one.
+    fn open_popup(app: &mut Baboon, kit: KitId) {
+        app.dialogs.open(ColorPopupWindow {
+            popup: Some(MaterialColorPopup::new("color", 1.0, 0.5, 0.25, 1.0)),
+            kit,
+        });
+    }
+
+    /// The kit the open colour popup applies to.
+    fn popup_kit(app: &mut Baboon) -> Option<usize> {
+        let opened_from = app
+            .dialogs
+            .get::<ColorPopupWindow>()
+            .map(|window| window.kit);
+        app.popup_target_kit(opened_from)
+    }
+
+    #[test]
+    fn a_grid_popup_opened_after_another_kits_popup_edits_its_own_kit() {
+        let (mut app, a, b) = two_kits();
+        // A normal swatch in B opens the picker; it is stamped with B.
+        open_popup(&mut app, b);
+        assert_eq!(popup_kit(&mut app), Some(1));
+
+        // Then the shader grid in A opens one, B still active.
+        app.model.active = 1;
+        open_popup(&mut app, a);
+        assert_eq!(
+            popup_kit(&mut app),
+            Some(0),
+            "the edit lands in A, where the popup was opened"
+        );
+    }
+
+    #[test]
+    fn a_popup_from_a_closed_kit_is_dropped_not_redirected() {
+        let (mut app, _, b) = two_kits();
+        open_popup(&mut app, b);
+        app.model.kits.pop();
+        assert_eq!(popup_kit(&mut app), None);
+        // A popup with no recorded kit still applies to the active one.
+        assert_eq!(app.popup_target_kit(None), Some(app.model.active));
+    }
 }

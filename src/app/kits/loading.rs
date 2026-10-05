@@ -316,186 +316,6 @@ fn campaign_evolved_surface_on_load() -> KitSurface {
     KitSurface::Tags
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A refresh that saw a definition or option change, appear or go asks
-    /// the shader grid to re-read them; one that saw only other tags does not.
-    #[test]
-    fn a_refresh_notices_render_method_changes() {
-        let entry = |group: &[u8; 4], key: &str| TagEntry {
-            key: key.to_owned(),
-            display_path: key.to_owned(),
-            group_tag: u32::from_be_bytes(*group),
-            group_name: None,
-            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
-        };
-        let refresh = |touched: Vec<TagEntry>, removed: Vec<&str>| EntryIndexRefresh {
-            entries: Vec::new(),
-            changed: true,
-            added: 0,
-            updated: 0,
-            removed: 0,
-            touched,
-            removed_keys: removed.into_iter().map(str::to_owned).collect(),
-            touched_dependencies: Vec::new(),
-            errors: Vec::new(),
-        };
-        assert!(!refresh_touches_render_methods(&refresh(
-            vec![entry(b"hlmt", "file:a.model")],
-            vec!["file:b.weapon"],
-        )));
-        assert!(refresh_touches_render_methods(&refresh(
-            vec![entry(b"rmdf", "file:shaders/shader.render_method_definition")],
-            Vec::new(),
-        )));
-        assert!(refresh_touches_render_methods(&refresh(
-            Vec::new(),
-            vec!["file:shaders/bump.render_method_option"],
-        )));
-    }
-
-    #[test]
-    fn campaign_evolved_projects_open_on_tags() {
-        assert_eq!(campaign_evolved_surface_on_load(), KitSurface::Tags);
-    }
-
-    fn loose_kit_at(tags: &Path) -> Baboon {
-        loose_kit_with(tags, "halo3_mcc", None)
-    }
-
-    fn loose_kit_with(tags: &Path, game: &str, chosen: Option<KitLayout>) -> Baboon {
-        let mut app = Baboon::for_test();
-        app.install_loaded_source(LoadedSourceData {
-            label: "test".to_owned(),
-            source: TagSource::LooseFolder {
-                root: tags.to_path_buf(),
-                game: GameId::from_id(game),
-                definitions_root: PathBuf::new(),
-            },
-            names: TagNameIndex::default(),
-            game: GameId::from_id(game),
-            entries: Vec::new(),
-            tree: TagTree::default(),
-            group_tree: TagTree::default(),
-            all_entries: Vec::new(),
-            reverse_dependencies: None,
-            initial_tag: None,
-            key_hints: Default::default(),
-            complete_scan: false,
-            chosen_kit_layout: chosen,
-        });
-        app.apply_loaded_source_identity(GameId::from_id(game));
-        app
-    }
-
-    /// A kit whose profile chose its folders uses exactly those: its data
-    /// folder is the chosen one, not the root's `data`, and its Halo CE tools
-    /// are told where both are.
-    #[test]
-    fn a_kit_with_chosen_folders_uses_them_everywhere() {
-        let ek = PathBuf::from("/ek/HCEEK");
-        let chosen = KitLayout {
-            root: ek.clone(),
-            tags: ek.join("tags_moda"),
-            data: ek.join("data_moda"),
-        };
-        let app = loose_kit_with(&chosen.tags, "haloce_mcc", Some(chosen.clone()));
-        assert_eq!(app.model.kit_layout_for(0), Some(chosen.clone()));
-        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data_moda")));
-        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
-        assert_eq!(
-            app.model.active_kit_tool_folder_options(),
-            vec![
-                ("-tags_dir", ek.join("tags_moda")),
-                ("-data_dir", ek.join("data_moda")),
-            ]
-        );
-        // The same folders opened as a Halo 3 kit get no options: its tools
-        // can't take them.
-        let halo3 = loose_kit_with(&chosen.tags.clone(), "halo3_mcc", Some(chosen));
-        assert!(halo3.model.active_kit_tool_folder_options().is_empty());
-    }
-
-    /// Opening a profile's chosen tags folder as a folder opens the profile,
-    /// so its data folder and tool options come with it.
-    #[test]
-    fn a_chosen_tags_folder_belongs_to_its_profile() {
-        let outer = crate::core::test_kits::unique_temp_dir("chosen-tags-profile");
-        let root = outer.join("H2EK");
-        for folder in ["tags", "data", "tags_moda", "data_moda"] {
-            std::fs::create_dir_all(root.join(folder)).unwrap();
-        }
-        let mut app = Baboon::for_test();
-        let profile = |id: &str, tags: Option<&str>| CustomEditingKitProfile {
-            read_only: false,
-            git_tracked: false,
-            id: id.to_owned(),
-            name: id.to_owned(),
-            game: "halo2_mcc".to_owned(),
-            root: root.clone(),
-            icon: None,
-            tags_folder: tags.map(PathBuf::from),
-            data_folder: tags.map(|_| PathBuf::from("data_moda")),
-        };
-        app.model.prefs.custom_editing_kit_profiles =
-            vec![profile("stock", None), profile("moda", Some("tags_moda"))];
-        app.refresh_editing_kit_validation();
-        let moda = app.profile_using_chosen_tags_folder(&root.join("tags_moda"));
-        let stock = app.profile_using_chosen_tags_folder(&root.join("tags"));
-        let _ = std::fs::remove_dir_all(&outer);
-        assert_eq!(moda.map(|profile| profile.id).as_deref(), Some("moda"));
-        // The stock kit opens as a folder, as it always has.
-        assert_eq!(stock, None);
-    }
-
-    /// Every way the app asks where a loaded kit's root and data folder are
-    /// answers from the one layout, so they cannot drift apart again.
-    #[test]
-    fn a_loaded_kits_folders_all_come_from_its_layout() {
-        let ek = PathBuf::from("/ek/H3EK");
-        let app = loose_kit_at(&ek.join("tags"));
-        assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
-        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
-        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
-        assert_eq!(app.model.kit_tool_path("sapien.exe"), Some(ek.join("sapien.exe")));
-    }
-
-    /// A loose folder with another name used to be its own kit root for tool
-    /// launches and Open Data Folder, while the terminal and sound extraction
-    /// used its parent. Now all of them use the parent.
-    #[test]
-    fn a_folder_not_named_tags_has_its_parent_for_a_root_everywhere() {
-        let app = loose_kit_at(Path::new("/ek/H3EK/tags_moda"));
-        let ek = PathBuf::from("/ek/H3EK");
-        assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
-        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
-        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek));
-    }
-
-    /// The read-only check now starts from the tags folder, which is under the
-    /// kit root, so a read-only profile still covers the kit it names.
-    #[test]
-    fn a_read_only_profile_still_covers_its_kit() {
-        let mut app = loose_kit_at(Path::new("/ek/H3EK/tags"));
-        app.model.prefs.custom_editing_kit_profiles = vec![CustomEditingKitProfile {
-            read_only: true,
-            git_tracked: false,
-            id: "00000000-0000-4000-8000-000000000001".to_owned(),
-            name: "H3EK".to_owned(),
-            game: "halo3_mcc".to_owned(),
-            root: PathBuf::from("/ek/H3EK"),
-            icon: None,
-            tags_folder: None,
-            data_folder: None,
-        }];
-        assert!(app.model.editing_kit_is_read_only(0));
-        app.model.prefs.custom_editing_kit_profiles[0].root = PathBuf::from("/ek/other");
-        assert!(!app.model.editing_kit_is_read_only(0));
-    }
-}
-
 pub(in crate::app) fn loaded_source_status(source: &LoadedSourceData) -> String {
     match &source.source {
         TagSource::LooseFolder { .. } if source.all_entries.is_empty() => {
@@ -533,153 +353,6 @@ pub(in crate::app) fn loaded_source_status(source: &LoadedSourceData) -> String 
             source.entries.len(),
             source.label
         ),
-    }
-}
-
-#[cfg(test)]
-mod scan_generation_tests {
-    use super::*;
-
-    /// A finished scan replaces the lists folder panes index into, so it has
-    /// to move the generation the panes rebuild on.
-    #[test]
-    fn a_finished_scan_moves_the_kit_generation() {
-        let root = std::env::temp_dir().join(format!(
-            "baboon-scan-generation-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let mut app = Baboon::for_test();
-        app.install_loaded_source(LoadedSourceData {
-            label: "test".to_owned(),
-            source: TagSource::LooseFolder {
-                root: root.clone(),
-                game: None,
-                definitions_root: PathBuf::new(),
-            },
-            names: TagNameIndex::default(),
-            game: None,
-            entries: Vec::new(),
-            tree: TagTree::default(),
-            group_tree: TagTree::default(),
-            all_entries: Vec::new(),
-            reverse_dependencies: None,
-            initial_tag: None,
-            key_hints: Default::default(),
-            complete_scan: false,
-            chosen_kit_layout: None,
-        });
-        let before = app.model.kits[0].generation;
-        let stamp = app.model.kit_stamp();
-        // Not empty: an empty scan leaves the reference build thinking the
-        // scan is unfinished, and it starts another scan, which bumps the
-        // generation on its own and would hide a missing bump here.
-        let scanned = vec![TagEntry {
-            key: "file:objects/a.model".to_owned(),
-            display_path: "objects/a.model".to_owned(),
-            group_tag: u32::from_be_bytes(*b"hlmt"),
-            group_name: None,
-            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
-        }];
-
-        app.handle_all_entries_scanned(stamp, Ok(scanned), &egui::Context::default());
-        assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
-
-        std::fs::remove_dir_all(&root).unwrap();
-        assert_ne!(app.model.kits[0].generation, before);
-    }
-
-    /// Loading a source into one kit leaves another kit's index work alone.
-    /// The flags were app-wide, so any kit finishing a load cleared another
-    /// kit's running reference build (and its progress bar), which let a
-    /// second build start over it.
-    #[test]
-    fn loading_one_kit_leaves_another_kits_index_build_running() {
-        let mut app = Baboon::for_test();
-        app.model.kits[0].index_jobs.building_references = true;
-        let second = KitId(app.model.kits[0].id.0 + 1);
-        app.push_kit(Kit::empty(second, TagNameIndex::default()));
-
-        app.handle_source_loaded(
-            second,
-            Ok(LoadedSourceData {
-                label: "second".to_owned(),
-                source: TagSource::SingleFile {
-                    path: PathBuf::from("second.model"),
-                },
-                names: TagNameIndex::default(),
-                game: None,
-                entries: Vec::new(),
-                tree: TagTree::default(),
-                group_tree: TagTree::default(),
-                all_entries: Vec::new(),
-                reverse_dependencies: None,
-                initial_tag: None,
-                key_hints: Default::default(),
-                complete_scan: false,
-                chosen_kit_layout: None,
-            }),
-            None,
-            &egui::Context::default(),
-        );
-
-        assert!(app.model.kits[0].index_jobs.building_references);
-    }
-
-    /// An empty tags folder scans to nothing, and that is a finished scan.
-    /// The reference build used to read the empty list as "not scanned yet"
-    /// and start another scan, which landed empty and started another.
-    #[test]
-    fn an_empty_folder_is_scanned_once() {
-        let root = std::env::temp_dir().join(format!(
-            "baboon-empty-scan-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let mut app = Baboon::for_test();
-        app.install_loaded_source(LoadedSourceData {
-            label: "test".to_owned(),
-            source: TagSource::LooseFolder {
-                root: root.clone(),
-                game: None,
-                definitions_root: PathBuf::new(),
-            },
-            names: TagNameIndex::default(),
-            game: None,
-            entries: Vec::new(),
-            tree: TagTree::default(),
-            group_tree: TagTree::default(),
-            all_entries: Vec::new(),
-            reverse_dependencies: None,
-            initial_tag: None,
-            key_hints: Default::default(),
-            complete_scan: false,
-            chosen_kit_layout: None,
-        });
-        let stamp = app.model.kit_stamp();
-
-        app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
-
-        std::fs::remove_dir_all(&root).unwrap();
-        assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
-        let index = app.model.kits[0]
-            .source
-            .as_ref()
-            .unwrap()
-            .reverse_dependencies
-            .as_ref();
-        assert!(
-            index.is_some(),
-            "an empty folder has an empty reference graph"
-        );
     }
 }
 
@@ -867,8 +540,6 @@ impl Baboon {
         self.begin_load_iostore_container_path(path, ctx);
     }
 
-
-
     /// Mounts a single IoStore container (`.utoc`) off the UI thread; completion
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
     pub(in crate::app) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
@@ -1046,8 +717,6 @@ impl Baboon {
         self.select_entry(key, ctx);
         Ok(true)
     }
-
-
 
     /// Trigger a background full recursive scan of a LooseFolder source so
     /// that Groups mode and search work without needing to expand every tree
@@ -1531,48 +1200,6 @@ pub(in crate::app) fn persist_entry_index_changes(
     refresh
 }
 
-#[cfg(test)]
-mod folder_extractable_tree_tests {
-    use super::*;
-    use crate::app::kits::loading::replace_loaded_tree_scope;
-
-    fn sound(path: &str) -> TagEntry {
-        TagEntry {
-            key: path.to_owned(),
-            display_path: format!("{path}.sound"),
-            group_tag: u32::from_be_bytes(*b"snd!"),
-            group_name: Some("sound".to_owned()),
-            location: TagEntryLocation::LooseFile(PathBuf::from(format!(
-                "C:/kit/tags/{path}.sound"
-            ))),
-        }
-    }
-
-    #[test]
-    fn loading_an_extraction_scope_materializes_its_nested_tags() {
-        let entries = vec![sound("sound/a"), sound("sound/sub/b")];
-        let mut tree = TagTree {
-            children: vec![TagTreeNode {
-                label: "sound".to_owned(),
-                rel_path: PathBuf::from("sound"),
-                children_loaded: true,
-                entries_loaded: true,
-                ..Default::default()
-            }],
-            entries: Vec::new(),
-        };
-
-        replace_loaded_tree_scope(&mut tree, Path::new(""), Path::new("sound"), &entries);
-
-        let sound_node = &tree.children[0];
-        assert!(sound_node.children_loaded && sound_node.entries_loaded);
-        assert_eq!(
-            crate::app::browser::collect_sound_keys(sound_node, &entries),
-            vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
-        );
-    }
-}
-
 impl Model {
     /// The `Paks` directory of the Campaign Evolved install this session is
     /// working with — an already-mounted container set's own root, else the
@@ -1610,5 +1237,364 @@ impl Model {
                     None
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::kits::loading::replace_loaded_tree_scope;
+
+    /// A refresh that saw a definition or option change, appear or go asks
+    /// the shader grid to re-read them; one that saw only other tags does not.
+    #[test]
+    fn a_refresh_notices_render_method_changes() {
+        let entry = |group: &[u8; 4], key: &str| TagEntry {
+            key: key.to_owned(),
+            display_path: key.to_owned(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        };
+        let refresh = |touched: Vec<TagEntry>, removed: Vec<&str>| EntryIndexRefresh {
+            entries: Vec::new(),
+            changed: true,
+            added: 0,
+            updated: 0,
+            removed: 0,
+            touched,
+            removed_keys: removed.into_iter().map(str::to_owned).collect(),
+            touched_dependencies: Vec::new(),
+            errors: Vec::new(),
+        };
+        assert!(!refresh_touches_render_methods(&refresh(
+            vec![entry(b"hlmt", "file:a.model")],
+            vec!["file:b.weapon"],
+        )));
+        assert!(refresh_touches_render_methods(&refresh(
+            vec![entry(b"rmdf", "file:shaders/shader.render_method_definition")],
+            Vec::new(),
+        )));
+        assert!(refresh_touches_render_methods(&refresh(
+            Vec::new(),
+            vec!["file:shaders/bump.render_method_option"],
+        )));
+    }
+
+    #[test]
+    fn campaign_evolved_projects_open_on_tags() {
+        assert_eq!(campaign_evolved_surface_on_load(), KitSurface::Tags);
+    }
+
+    fn loose_kit_at(tags: &Path) -> Baboon {
+        loose_kit_with(tags, "halo3_mcc", None)
+    }
+
+    fn loose_kit_with(tags: &Path, game: &str, chosen: Option<KitLayout>) -> Baboon {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: tags.to_path_buf(),
+                game: GameId::from_id(game),
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: GameId::from_id(game),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: chosen,
+        });
+        app.apply_loaded_source_identity(GameId::from_id(game));
+        app
+    }
+
+    /// A kit whose profile chose its folders uses exactly those: its data
+    /// folder is the chosen one, not the root's `data`, and its Halo CE tools
+    /// are told where both are.
+    #[test]
+    fn a_kit_with_chosen_folders_uses_them_everywhere() {
+        let ek = PathBuf::from("/ek/HCEEK");
+        let chosen = KitLayout {
+            root: ek.clone(),
+            tags: ek.join("tags_moda"),
+            data: ek.join("data_moda"),
+        };
+        let app = loose_kit_with(&chosen.tags, "haloce_mcc", Some(chosen.clone()));
+        assert_eq!(app.model.kit_layout_for(0), Some(chosen.clone()));
+        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data_moda")));
+        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
+        assert_eq!(
+            app.model.active_kit_tool_folder_options(),
+            vec![
+                ("-tags_dir", ek.join("tags_moda")),
+                ("-data_dir", ek.join("data_moda")),
+            ]
+        );
+        // The same folders opened as a Halo 3 kit get no options: its tools
+        // can't take them.
+        let halo3 = loose_kit_with(&chosen.tags.clone(), "halo3_mcc", Some(chosen));
+        assert!(halo3.model.active_kit_tool_folder_options().is_empty());
+    }
+
+    /// Opening a profile's chosen tags folder as a folder opens the profile,
+    /// so its data folder and tool options come with it.
+    #[test]
+    fn a_chosen_tags_folder_belongs_to_its_profile() {
+        let outer = crate::core::test_kits::unique_temp_dir("chosen-tags-profile");
+        let root = outer.join("H2EK");
+        for folder in ["tags", "data", "tags_moda", "data_moda"] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        let mut app = Baboon::for_test();
+        let profile = |id: &str, tags: Option<&str>| CustomEditingKitProfile {
+            read_only: false,
+            git_tracked: false,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            game: "halo2_mcc".to_owned(),
+            root: root.clone(),
+            icon: None,
+            tags_folder: tags.map(PathBuf::from),
+            data_folder: tags.map(|_| PathBuf::from("data_moda")),
+        };
+        app.model.prefs.custom_editing_kit_profiles =
+            vec![profile("stock", None), profile("moda", Some("tags_moda"))];
+        app.refresh_editing_kit_validation();
+        let moda = app.profile_using_chosen_tags_folder(&root.join("tags_moda"));
+        let stock = app.profile_using_chosen_tags_folder(&root.join("tags"));
+        let _ = std::fs::remove_dir_all(&outer);
+        assert_eq!(moda.map(|profile| profile.id).as_deref(), Some("moda"));
+        // The stock kit opens as a folder, as it always has.
+        assert_eq!(stock, None);
+    }
+
+    /// Every way the app asks where a loaded kit's root and data folder are
+    /// answers from the one layout, so they cannot drift apart again.
+    #[test]
+    fn a_loaded_kits_folders_all_come_from_its_layout() {
+        let ek = PathBuf::from("/ek/H3EK");
+        let app = loose_kit_at(&ek.join("tags"));
+        assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
+        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
+        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek.clone()));
+        assert_eq!(app.model.kit_tool_path("sapien.exe"), Some(ek.join("sapien.exe")));
+    }
+
+    /// A loose folder with another name used to be its own kit root for tool
+    /// launches and Open Data Folder, while the terminal and sound extraction
+    /// used its parent. Now all of them use the parent.
+    #[test]
+    fn a_folder_not_named_tags_has_its_parent_for_a_root_everywhere() {
+        let app = loose_kit_at(Path::new("/ek/H3EK/tags_moda"));
+        let ek = PathBuf::from("/ek/H3EK");
+        assert_eq!(app.model.editing_kit_root(), Some(ek.clone()));
+        assert_eq!(app.model.loaded_data_root(), Some(ek.join("data")));
+        assert_eq!(app.views[app.model.kits[0].id].terminal.work_dir, Some(ek));
+    }
+
+    /// The read-only check now starts from the tags folder, which is under the
+    /// kit root, so a read-only profile still covers the kit it names.
+    #[test]
+    fn a_read_only_profile_still_covers_its_kit() {
+        let mut app = loose_kit_at(Path::new("/ek/H3EK/tags"));
+        app.model.prefs.custom_editing_kit_profiles = vec![CustomEditingKitProfile {
+            read_only: true,
+            git_tracked: false,
+            id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            name: "H3EK".to_owned(),
+            game: "halo3_mcc".to_owned(),
+            root: PathBuf::from("/ek/H3EK"),
+            icon: None,
+            tags_folder: None,
+            data_folder: None,
+        }];
+        assert!(app.model.editing_kit_is_read_only(0));
+        app.model.prefs.custom_editing_kit_profiles[0].root = PathBuf::from("/ek/other");
+        assert!(!app.model.editing_kit_is_read_only(0));
+    }
+
+    /// A finished scan replaces the lists folder panes index into, so it has
+    /// to move the generation the panes rebuild on.
+    #[test]
+    fn a_finished_scan_moves_the_kit_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-scan-generation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let before = app.model.kits[0].generation;
+        let stamp = app.model.kit_stamp();
+        // Not empty: an empty scan leaves the reference build thinking the
+        // scan is unfinished, and it starts another scan, which bumps the
+        // generation on its own and would hide a missing bump here.
+        let scanned = vec![TagEntry {
+            key: "file:objects/a.model".to_owned(),
+            display_path: "objects/a.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
+        }];
+
+        app.handle_all_entries_scanned(stamp, Ok(scanned), &egui::Context::default());
+        assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_ne!(app.model.kits[0].generation, before);
+    }
+
+    /// Loading a source into one kit leaves another kit's index work alone.
+    /// The flags were app-wide, so any kit finishing a load cleared another
+    /// kit's running reference build (and its progress bar), which let a
+    /// second build start over it.
+    #[test]
+    fn loading_one_kit_leaves_another_kits_index_build_running() {
+        let mut app = Baboon::for_test();
+        app.model.kits[0].index_jobs.building_references = true;
+        let second = KitId(app.model.kits[0].id.0 + 1);
+        app.push_kit(Kit::empty(second, TagNameIndex::default()));
+
+        app.handle_source_loaded(
+            second,
+            Ok(LoadedSourceData {
+                label: "second".to_owned(),
+                source: TagSource::SingleFile {
+                    path: PathBuf::from("second.model"),
+                },
+                names: TagNameIndex::default(),
+                game: None,
+                entries: Vec::new(),
+                tree: TagTree::default(),
+                group_tree: TagTree::default(),
+                all_entries: Vec::new(),
+                reverse_dependencies: None,
+                initial_tag: None,
+                key_hints: Default::default(),
+                complete_scan: false,
+                chosen_kit_layout: None,
+            }),
+            None,
+            &egui::Context::default(),
+        );
+
+        assert!(app.model.kits[0].index_jobs.building_references);
+    }
+
+    /// An empty tags folder scans to nothing, and that is a finished scan.
+    /// The reference build used to read the empty list as "not scanned yet"
+    /// and start another scan, which landed empty and started another.
+    #[test]
+    fn an_empty_folder_is_scanned_once() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-empty-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let stamp = app.model.kit_stamp();
+
+        app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!app.model.kits[0].scanning_entries, "no second scan was started");
+        let index = app.model.kits[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .reverse_dependencies
+            .as_ref();
+        assert!(
+            index.is_some(),
+            "an empty folder has an empty reference graph"
+        );
+    }
+
+    fn sound(path: &str) -> TagEntry {
+        TagEntry {
+            key: path.to_owned(),
+            display_path: format!("{path}.sound"),
+            group_tag: u32::from_be_bytes(*b"snd!"),
+            group_name: Some("sound".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from(format!(
+                "C:/kit/tags/{path}.sound"
+            ))),
+        }
+    }
+
+    #[test]
+    fn loading_an_extraction_scope_materializes_its_nested_tags() {
+        let entries = vec![sound("sound/a"), sound("sound/sub/b")];
+        let mut tree = TagTree {
+            children: vec![TagTreeNode {
+                label: "sound".to_owned(),
+                rel_path: PathBuf::from("sound"),
+                children_loaded: true,
+                entries_loaded: true,
+                ..Default::default()
+            }],
+            entries: Vec::new(),
+        };
+
+        replace_loaded_tree_scope(&mut tree, Path::new(""), Path::new("sound"), &entries);
+
+        let sound_node = &tree.children[0];
+        assert!(sound_node.children_loaded && sound_node.entries_loaded);
+        assert_eq!(
+            crate::app::browser::collect_sound_keys(sound_node, &entries),
+            vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
+        );
     }
 }

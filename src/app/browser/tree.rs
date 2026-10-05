@@ -1999,149 +1999,6 @@ fn loose_folder_import_menu_item(ui: &mut Ui, rel_path: &Path) -> Option<Browser
     None
 }
 
-#[cfg(test)]
-mod folder_primary_action_tests {
-    use super::*;
-
-    #[test]
-    fn favorite_precedes_import_and_extract_without_duplicate_dividers() {
-        for open_in_new_tab in [false, true] {
-            let ctx = egui::Context::default();
-            let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    style_tag_context_menu(ui);
-                    loose_folder_primary_menu_items(
-                        ui,
-                        Path::new("objects/brute"),
-                        "brute",
-                        Some(false),
-                        open_in_new_tab,
-                        |ui| {
-                            context_menu_button(ui, "Extract >");
-                            None
-                        },
-                    );
-                    context_menu_button(ui, "Copy Folder Path");
-                });
-            });
-            let labels: Vec<_> = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) => Some((text.galley.job.text.as_str(), text.pos.y)),
-                    _ => None,
-                })
-                .collect();
-            let y = |label| labels.iter().find(|(text, _)| *text == label).unwrap().1;
-            assert!(y("Add to Favorites") < y("Import tags here..."));
-            assert!(y("Import tags here...") < y("Extract >"));
-            let separators: Vec<_> = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y => {
-                        Some(points[0].y)
-                    }
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(separators.len(), 3, "one divider between each section");
-            assert!(
-                separators
-                    .iter()
-                    .any(|s| *s > y("Add to Favorites") && *s < y("Import tags here..."))
-            );
-            assert!(
-                !separators
-                    .iter()
-                    .any(|s| *s > y("Import tags here...") && *s < y("Extract >"))
-            );
-        }
-    }
-
-    #[test]
-    fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
-        for header in [false, true] {
-            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
-                let ctx = egui::Context::default();
-                let row_width = std::cell::Cell::new(0.0);
-                let frame = |events| {
-                    let mut action = None;
-                    let output = crate::app::run_ui_test(&ctx, 
-                        egui::RawInput {
-                            events,
-                            ..Default::default()
-                        },
-                        |ui| {
-                            egui::CentralPanel::default().show(ui, |ui| {
-                                style_tag_context_menu(ui);
-                                ui.set_width(CONTEXT_MENU_WIDTH);
-                                row_width.set(ui.available_width());
-                                action = if header {
-                                    loose_folder_transfer_menu_items(
-                                        ui,
-                                        Path::new("objects/brute"),
-                                        "brute",
-                                    )
-                                } else {
-                                    loose_folder_primary_menu_items(
-                                        ui,
-                                        Path::new("objects/brute"),
-                                        "brute",
-                                        Some(false),
-                                        true,
-                                        |_| None,
-                                    )
-                                };
-                            });
-                        },
-                    );
-                    (output, action)
-                };
-                let (output, _) = frame(Vec::new());
-                let buttons: Vec<_> = output
-                    .shapes
-                    .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect)
-                            if rect.rect.height() > 40.0 && rect.rect.height() < 70.0 =>
-                        {
-                            Some(rect.rect)
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                assert_eq!(buttons.len(), 3);
-                for button in &buttons {
-                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
-                    assert_eq!(button.top(), buttons[0].top());
-                }
-                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
-                let pos = buttons[index].center();
-                frame(vec![egui::Event::PointerMoved(pos)]);
-                let event = |pressed| egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                };
-                frame(vec![event(true)]);
-                let (_, action) = frame(vec![event(false)]);
-                assert!(
-                    match (label, action) {
-                        ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
-                        | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
-                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
-                            rel_path == Path::new("objects/brute"),
-                        _ => false,
-                    },
-                    "{label} did not dispatch (header={header})"
-                );
-            }
-        }
-    }
-}
-
 /// Colour for a folder row: marked when anything beneath it carries edits that
 /// are not written into the game, so the workspace can be scanned top-down for
 /// where the modifications actually are.
@@ -2476,130 +2333,6 @@ fn show_full_width_browser_row<R>(
         ui.painter().set(background, shape);
     }
     (response, inner)
-}
-
-#[cfg(test)]
-mod group_header_tests {
-    use super::*;
-
-    #[test]
-    fn group_tree_label_splits_friendly_name_and_fourcc() {
-        assert_eq!(group_tree_label_parts("control cntl"), ("control", "cntl"));
-        assert_eq!(group_tree_label_parts("bloc"), ("", "bloc"));
-    }
-
-    #[test]
-    fn folder_header_hover_target_spans_the_available_row() {
-        let ctx = egui::Context::default();
-        let mut expected = egui::Rect::NOTHING;
-        let mut actual = egui::Rect::NOTHING;
-        let _ = crate::app::run_ui_test(
-            &ctx,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    Vec2::new(360.0, 100.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    expected = ui.available_rect_before_wrap();
-                    actual = show_folder_tree_header(
-                        ui,
-                        "characters",
-                        "characters",
-                        text_dark(),
-                        false,
-                        false,
-                        |_| {},
-                    )
-                    .rect;
-                });
-            },
-        );
-
-        assert_eq!(actual.left(), expected.left());
-        assert_eq!(actual.right(), expected.right());
-    }
-
-    #[test]
-    fn favorites_header_hover_target_spans_the_available_row() {
-        let ctx = egui::Context::default();
-        let mut expected = egui::Rect::NOTHING;
-        let mut actual = egui::Rect::NOTHING;
-        let _ = crate::app::run_ui_test(
-            &ctx,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    Vec2::new(360.0, 100.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    expected = ui.available_rect_before_wrap();
-                    actual = show_favorites_section(ui, |_| {}).rect;
-                });
-            },
-        );
-
-        assert_eq!(actual.left(), expected.left());
-        assert_eq!(actual.right(), expected.right());
-    }
-
-    #[test]
-    fn nested_folder_headers_keep_their_own_guides_enabled() {
-        let ctx = egui::Context::default();
-        let mut nested_guide_enabled = false;
-        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                begin_folder_chevron_collection(ui);
-                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, |ui| {
-                    nested_guide_enabled = ui.visuals().indent_has_left_vline;
-                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, |_| {});
-                });
-            });
-        });
-
-        assert!(nested_guide_enabled);
-    }
-
-    #[test]
-    fn folder_guide_is_split_instead_of_painted_over() {
-        let shapes = guide_segments_around_cutouts(
-            10.0,
-            0.0,
-            40.0,
-            &[egui::Rect::from_min_max(
-                egui::pos2(5.0, 14.0),
-                egui::pos2(15.0, 26.0),
-            )],
-            Stroke::new(1.0_f32, Color32::WHITE),
-        );
-
-        assert_eq!(shapes.len(), 2);
-    }
-
-    #[test]
-    fn nested_chevron_center_matches_parent_icon_guide() {
-        let ctx = egui::Context::default();
-        let mut delta = f32::INFINITY;
-        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                let parent_icon_center = ui.spacing().indent
-                    + ui.spacing().item_spacing.x
-                    + BROWSER_TREE_ICON_SIZE * 0.5;
-                let nested_chevron_center = ui.spacing().indent
-                    + ui.spacing().indent * 0.5
-                    + browser_chevron_center_offset(ui);
-                delta = nested_chevron_center - (parent_icon_center + BROWSER_GUIDE_ICON_OFFSET);
-            });
-        });
-
-        assert!(delta.abs() < f32::EPSILON);
-    }
 }
 
 pub(in crate::app) fn collect_tag_keys(node: &TagTreeNode, entries: &[TagEntry]) -> Vec<String> {
@@ -3443,10 +3176,536 @@ pub(in crate::app) fn supports_delete_menu(
     }
 }
 
+pub(in crate::app) fn folder_chevron_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
+    let slot = browser_chevron_slot(ui, response);
+    let center = slot.center();
+    if let Some(cutouts) = folder_chevron_cutouts(ui)
+        && let Ok(mut cutouts) = cutouts.lock()
+    {
+        cutouts.push(slot);
+    }
+    let half = 3.5;
+    let stroke = Stroke::new(1.5_f32, ui.visuals().text_color());
+    let points = if openness > 0.5 {
+        [
+            egui::pos2(center.x - half, center.y - half * 0.5),
+            egui::pos2(center.x, center.y + half * 0.5),
+            egui::pos2(center.x + half, center.y - half * 0.5),
+        ]
+    } else {
+        [
+            egui::pos2(center.x - half * 0.5, center.y - half),
+            egui::pos2(center.x + half * 0.5, center.y),
+            egui::pos2(center.x - half * 0.5, center.y + half),
+        ]
+    };
+    ui.painter().add(egui::Shape::line(points.to_vec(), stroke));
+}
+
+pub(in crate::app) fn disclosure_triangle_icon(
+    ui: &mut Ui,
+    open: bool,
+    center: egui::Pos2,
+    color: Color32,
+) {
+    let size = 7.0;
+    let points = if open {
+        vec![
+            egui::pos2(center.x - size, center.y - size * 0.4),
+            egui::pos2(center.x + size, center.y - size * 0.4),
+            egui::pos2(center.x, center.y + size * 0.7),
+        ]
+    } else {
+        vec![
+            egui::pos2(center.x - size * 0.4, center.y - size),
+            egui::pos2(center.x - size * 0.4, center.y + size),
+            egui::pos2(center.x + size * 0.7, center.y),
+        ]
+    };
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
+pub(in crate::app) fn tag_tab_label(entry: &TagEntry) -> String {
+    entry
+        .display_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&entry.display_path)
+        .to_owned()
+}
+
+pub(in crate::app) fn tag_file_name(entry: &TagEntry) -> String {
+    entry
+        .display_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("tag")
+        .to_owned()
+}
+
+pub(in crate::app) fn tag_file_stem(entry: &TagEntry) -> String {
+    Path::new(&tag_file_name(entry))
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("tag")
+        .to_owned()
+}
+
+pub(in crate::app) fn tag_display_parent(entry: &TagEntry) -> PathBuf {
+    Path::new(&entry.display_path)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
+    let mut path = PathBuf::from(&entry.display_path);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("tag");
+    path.set_file_name(format!("{file_name}.json"));
+    path
+}
+
+/// What "Extract bitmap source" does, where its menu items offer it.
+const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
+     .tif that tool bitmaps can import again. Existing files are left alone.";
+
+pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"bitm")
+}
+
+pub(in crate::app) fn is_bitmap_tag(entry: &TagEntry) -> bool {
+    is_bitmap_group(entry.group_tag)
+        || entry.group_name.as_deref() == Some("bitmap")
+        || entry.display_path.to_ascii_lowercase().ends_with(".bitmap")
+}
+
+/// The groups that *are* render geometry: `mode` (H2+ render_model, and H1's
+/// legacy `model`, which previews through the same dispatch) and `mod2`
+/// (H1 gbxmodel). Deliberately not `hlmt` — a model tag has no geometry of its
+/// own, only a reference to one of these.
+pub(in crate::app) fn is_render_model_group(group_tag: u32) -> bool {
+    matches!(&group_tag.to_be_bytes(), b"mode" | b"mod2")
+}
+
+pub(in crate::app) fn is_render_model_tag(entry: &TagEntry) -> bool {
+    is_render_model_group(entry.group_tag)
+        || matches!(
+            entry.group_name.as_deref(),
+            Some("render_model") | Some("gbxmodel")
+        )
+        || {
+            let path = entry.display_path.to_ascii_lowercase();
+            path.ends_with(".render_model") || path.ends_with(".gbxmodel")
+        }
+}
+
+pub(in crate::app) fn is_material_shader_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"mats")
+}
+
+pub(in crate::app) fn is_material_shader_browser_tag(entry: &TagEntry) -> bool {
+    is_material_shader_group(entry.group_tag)
+        || entry.group_name.as_deref() == Some("material_shader")
+        || entry
+            .display_path
+            .to_ascii_lowercase()
+            .ends_with(".material_shader")
+}
+
+pub(in crate::app) fn is_hlsl_include_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"hlsl")
+}
+
+pub(in crate::app) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
+    is_hlsl_include_group(entry.group_tag)
+        || entry.group_name.as_deref() == Some("hlsl_include")
+        || entry
+            .display_path
+            .to_ascii_lowercase()
+            .ends_with(".hlsl_include")
+}
+
+pub(in crate::app) fn supports_animation_extraction(group_tag: u32) -> bool {
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"jmad" | b"hlmt" | b"antr" | b"mode"
+    )
+}
+
+pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
+    supports_tag_geometry_extraction(group_tag)
+        || supports_bsp_geometry_extraction(group_tag)
+        || supports_scenario_geometry_extraction(group_tag)
+        || supports_particle_geometry_extraction(group_tag)
+        || supports_animation_extraction(group_tag)
+        || supports_tag_import_info_extraction(group_tag)
+        || is_bitmap_group(group_tag)
+        || crate::app::editor::is_sound_group(group_tag)
+        || is_material_shader_group(group_tag)
+        || is_hlsl_include_group(group_tag)
+}
+
+pub(in crate::app) fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
+    )
+}
+
+/// A single structure BSP exports to one ASS. Kept apart from
+/// [`supports_tag_geometry_extraction`] because the menu wording differs
+/// — a BSP is level geometry, not a model — and because the two land in
+/// different arms of `extract_geometry_for_entry`.
+pub(in crate::app) fn supports_bsp_geometry_extraction(group_tag: u32) -> bool {
+    group_tag.to_be_bytes().as_slice() == b"sbsp"
+}
+
+/// A scenario exports every BSP it references, one file each.
+pub(in crate::app) fn supports_scenario_geometry_extraction(group_tag: u32) -> bool {
+    group_tag.to_be_bytes().as_slice() == b"scnr"
+}
+
+/// A particle_model exports to a `.jmi` manifest plus one JMS per object
+/// it was imported from — not a single file — so it gets its own wording
+/// rather than joining [`supports_tag_geometry_extraction`].
+pub(in crate::app) fn supports_particle_geometry_extraction(group_tag: u32) -> bool {
+    blam_tags::is_particle_model_group(group_tag)
+}
+
+pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
+    )
+}
+
+/// Load the folders at `paths` in a lazy `tree`, adding their tags to
+/// `entries`, and say what the last one did for the status line. With
+/// `group_tree`, the Groups view's tree is kept in step with them: only pass
+/// it when it has nothing better, since one built from the full tag index
+/// already holds every group, and rebuilding it from the handful of lazily
+/// loaded entries would cut it down to the folders the user happened to
+/// expand. A path no longer in the tree, or already loaded, is skipped.
+pub(in crate::app) fn load_lazy_folders(
+    tree: &mut TagTree,
+    entries: &mut Vec<TagEntry>,
+    mut group_tree: Option<&mut TagTree>,
+    root: &Path,
+    names: &TagNameIndex,
+    paths: &[PathBuf],
+) -> Option<String> {
+    let mut status = None;
+    for path in paths {
+        let Some(node) = lazy_node_mut(&mut tree.children, path) else {
+            continue;
+        };
+        if node.entries_loaded {
+            continue;
+        }
+        status = Some(match load_folder_node_entries(root, node, entries, names) {
+            Ok(()) => {
+                if let Some(group_tree) = group_tree.as_deref_mut() {
+                    *group_tree = crate::core::source::build_group_tree(entries);
+                }
+                format!("Loaded {} tag(s) from {}", node.entries.len(), node.label)
+            }
+            Err(error) => {
+                // Marked loaded, and so left empty: an open folder that stays
+                // unloaded is asked for again by every frame that draws it,
+                // and each answer repaints, so a failure would retry forever.
+                node.entries_loaded = true;
+                format!("Failed to load folder {}: {error}", node.rel_path.display())
+            }
+        });
+    }
+    status
+}
+
+/// The node at `path` among `nodes` and their descendants.
+fn lazy_node_mut<'a>(nodes: &'a mut [TagTreeNode], path: &Path) -> Option<&'a mut TagTreeNode> {
+    for node in nodes {
+        if node.rel_path == path {
+            return Some(node);
+        }
+        if path.starts_with(&node.rel_path) {
+            return lazy_node_mut(&mut node.children, path);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::browser::BrowserSort;
     use crate::app::browser::{collect_bitmap_keys, tag_json_relative_path};
+    use crate::core::source::{TagEntry, TagEntryLocation, TagTree};
+    use eframe::egui;
+    use std::time::Instant;
+    use super::{
+        Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
+    };
+
+    #[test]
+    fn favorite_precedes_import_and_extract_without_duplicate_dividers() {
+        for open_in_new_tab in [false, true] {
+            let ctx = egui::Context::default();
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    style_tag_context_menu(ui);
+                    loose_folder_primary_menu_items(
+                        ui,
+                        Path::new("objects/brute"),
+                        "brute",
+                        Some(false),
+                        open_in_new_tab,
+                        |ui| {
+                            context_menu_button(ui, "Extract >");
+                            None
+                        },
+                    );
+                    context_menu_button(ui, "Copy Folder Path");
+                });
+            });
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some((text.galley.job.text.as_str(), text.pos.y)),
+                    _ => None,
+                })
+                .collect();
+            let y = |label| labels.iter().find(|(text, _)| *text == label).unwrap().1;
+            assert!(y("Add to Favorites") < y("Import tags here..."));
+            assert!(y("Import tags here...") < y("Extract >"));
+            let separators: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, .. } if points[0].y == points[1].y => {
+                        Some(points[0].y)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(separators.len(), 3, "one divider between each section");
+            assert!(
+                separators
+                    .iter()
+                    .any(|s| *s > y("Add to Favorites") && *s < y("Import tags here..."))
+            );
+            assert!(
+                !separators
+                    .iter()
+                    .any(|s| *s > y("Import tags here...") && *s < y("Extract >"))
+            );
+        }
+    }
+
+    #[test]
+    fn folder_primary_buttons_fill_the_row_and_dispatch_from_both_menus() {
+        for header in [false, true] {
+            for (index, label) in ["Rename", "Move", "Copy To"].into_iter().enumerate() {
+                let ctx = egui::Context::default();
+                let row_width = std::cell::Cell::new(0.0);
+                let frame = |events| {
+                    let mut action = None;
+                    let output = crate::app::run_ui_test(&ctx, 
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                style_tag_context_menu(ui);
+                                ui.set_width(CONTEXT_MENU_WIDTH);
+                                row_width.set(ui.available_width());
+                                action = if header {
+                                    loose_folder_transfer_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                    )
+                                } else {
+                                    loose_folder_primary_menu_items(
+                                        ui,
+                                        Path::new("objects/brute"),
+                                        "brute",
+                                        Some(false),
+                                        true,
+                                        |_| None,
+                                    )
+                                };
+                            });
+                        },
+                    );
+                    (output, action)
+                };
+                let (output, _) = frame(Vec::new());
+                let buttons: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.height() > 40.0 && rect.rect.height() < 70.0 =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(buttons.len(), 3);
+                for button in &buttons {
+                    assert!((button.width() - (row_width.get() - 8.0) / 3.0).abs() < 1.0);
+                    assert_eq!(button.top(), buttons[0].top());
+                }
+                assert!((buttons[2].right() - buttons[0].left() - row_width.get()).abs() < 1.0);
+                let pos = buttons[index].center();
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                let event = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(vec![event(true)]);
+                let (_, action) = frame(vec![event(false)]);
+                assert!(
+                    match (label, action) {
+                        ("Rename", Some(BrowserAction::RenameLooseFolder { rel_path, .. }))
+                        | ("Move", Some(BrowserAction::MoveLooseFolder { rel_path, .. }))
+                        | ("Copy To", Some(BrowserAction::CopyLooseFolder { rel_path, .. })) =>
+                            rel_path == Path::new("objects/brute"),
+                        _ => false,
+                    },
+                    "{label} did not dispatch (header={header})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn group_tree_label_splits_friendly_name_and_fourcc() {
+        assert_eq!(group_tree_label_parts("control cntl"), ("control", "cntl"));
+        assert_eq!(group_tree_label_parts("bloc"), ("", "bloc"));
+    }
+
+    #[test]
+    fn folder_header_hover_target_spans_the_available_row() {
+        let ctx = egui::Context::default();
+        let mut expected = egui::Rect::NOTHING;
+        let mut actual = egui::Rect::NOTHING;
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    expected = ui.available_rect_before_wrap();
+                    actual = show_folder_tree_header(
+                        ui,
+                        "characters",
+                        "characters",
+                        text_dark(),
+                        false,
+                        false,
+                        |_| {},
+                    )
+                    .rect;
+                });
+            },
+        );
+
+        assert_eq!(actual.left(), expected.left());
+        assert_eq!(actual.right(), expected.right());
+    }
+
+    #[test]
+    fn favorites_header_hover_target_spans_the_available_row() {
+        let ctx = egui::Context::default();
+        let mut expected = egui::Rect::NOTHING;
+        let mut actual = egui::Rect::NOTHING;
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    expected = ui.available_rect_before_wrap();
+                    actual = show_favorites_section(ui, |_| {}).rect;
+                });
+            },
+        );
+
+        assert_eq!(actual.left(), expected.left());
+        assert_eq!(actual.right(), expected.right());
+    }
+
+    #[test]
+    fn nested_folder_headers_keep_their_own_guides_enabled() {
+        let ctx = egui::Context::default();
+        let mut nested_guide_enabled = false;
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                begin_folder_chevron_collection(ui);
+                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, |ui| {
+                    nested_guide_enabled = ui.visuals().indent_has_left_vline;
+                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, |_| {});
+                });
+            });
+        });
+
+        assert!(nested_guide_enabled);
+    }
+
+    #[test]
+    fn folder_guide_is_split_instead_of_painted_over() {
+        let shapes = guide_segments_around_cutouts(
+            10.0,
+            0.0,
+            40.0,
+            &[egui::Rect::from_min_max(
+                egui::pos2(5.0, 14.0),
+                egui::pos2(15.0, 26.0),
+            )],
+            Stroke::new(1.0_f32, Color32::WHITE),
+        );
+
+        assert_eq!(shapes.len(), 2);
+    }
+
+    #[test]
+    fn nested_chevron_center_matches_parent_icon_guide() {
+        let ctx = egui::Context::default();
+        let mut delta = f32::INFINITY;
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let parent_icon_center = ui.spacing().indent
+                    + ui.spacing().item_spacing.x
+                    + BROWSER_TREE_ICON_SIZE * 0.5;
+                let nested_chevron_center = ui.spacing().indent
+                    + ui.spacing().indent * 0.5
+                    + browser_chevron_center_offset(ui);
+                delta = nested_chevron_center - (parent_icon_center + BROWSER_GUIDE_ICON_OFFSET);
+            });
+        });
+
+        assert!(delta.abs() < f32::EPSILON);
+    }
 
     /// Expanding a folder lazily loads its tags and, when handed the Groups
     /// view's tree, rebuilds it from the lazily loaded entries. Handed the tree
@@ -4428,234 +4687,14 @@ mod tests {
             PathBuf::from("objects/test/spartans.model.json")
         );
     }
-}
 
-pub(in crate::app) fn folder_chevron_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
-    let slot = browser_chevron_slot(ui, response);
-    let center = slot.center();
-    if let Some(cutouts) = folder_chevron_cutouts(ui)
-        && let Ok(mut cutouts) = cutouts.lock()
-    {
-        cutouts.push(slot);
-    }
-    let half = 3.5;
-    let stroke = Stroke::new(1.5_f32, ui.visuals().text_color());
-    let points = if openness > 0.5 {
-        [
-            egui::pos2(center.x - half, center.y - half * 0.5),
-            egui::pos2(center.x, center.y + half * 0.5),
-            egui::pos2(center.x + half, center.y - half * 0.5),
-        ]
-    } else {
-        [
-            egui::pos2(center.x - half * 0.5, center.y - half),
-            egui::pos2(center.x + half * 0.5, center.y),
-            egui::pos2(center.x - half * 0.5, center.y + half),
-        ]
-    };
-    ui.painter().add(egui::Shape::line(points.to_vec(), stroke));
-}
-
-pub(in crate::app) fn disclosure_triangle_icon(
-    ui: &mut Ui,
-    open: bool,
-    center: egui::Pos2,
-    color: Color32,
-) {
-    let size = 7.0;
-    let points = if open {
-        vec![
-            egui::pos2(center.x - size, center.y - size * 0.4),
-            egui::pos2(center.x + size, center.y - size * 0.4),
-            egui::pos2(center.x, center.y + size * 0.7),
-        ]
-    } else {
-        vec![
-            egui::pos2(center.x - size * 0.4, center.y - size),
-            egui::pos2(center.x - size * 0.4, center.y + size),
-            egui::pos2(center.x + size * 0.7, center.y),
-        ]
-    };
-    ui.painter()
-        .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
-}
-
-pub(in crate::app) fn tag_tab_label(entry: &TagEntry) -> String {
-    entry
-        .display_path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(&entry.display_path)
-        .to_owned()
-}
-
-pub(in crate::app) fn tag_file_name(entry: &TagEntry) -> String {
-    entry
-        .display_path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("tag")
-        .to_owned()
-}
-
-pub(in crate::app) fn tag_file_stem(entry: &TagEntry) -> String {
-    Path::new(&tag_file_name(entry))
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("tag")
-        .to_owned()
-}
-
-pub(in crate::app) fn tag_display_parent(entry: &TagEntry) -> PathBuf {
-    Path::new(&entry.display_path)
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default()
-}
-
-pub(in crate::app) fn tag_json_relative_path(entry: &TagEntry) -> PathBuf {
-    let mut path = PathBuf::from(&entry.display_path);
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("tag");
-    path.set_file_name(format!("{file_name}.json"));
-    path
-}
-
-/// What "Extract bitmap source" does, where its menu items offer it.
-const BITMAP_SOURCE_HOVER: &str = "Write the source image the bitmap was imported from as a \
-     .tif that tool bitmaps can import again. Existing files are left alone.";
-
-pub(in crate::app) fn is_bitmap_group(group_tag: u32) -> bool {
-    group_tag == u32::from_be_bytes(*b"bitm")
-}
-
-pub(in crate::app) fn is_bitmap_tag(entry: &TagEntry) -> bool {
-    is_bitmap_group(entry.group_tag)
-        || entry.group_name.as_deref() == Some("bitmap")
-        || entry.display_path.to_ascii_lowercase().ends_with(".bitmap")
-}
-
-/// The groups that *are* render geometry: `mode` (H2+ render_model, and H1's
-/// legacy `model`, which previews through the same dispatch) and `mod2`
-/// (H1 gbxmodel). Deliberately not `hlmt` — a model tag has no geometry of its
-/// own, only a reference to one of these.
-pub(in crate::app) fn is_render_model_group(group_tag: u32) -> bool {
-    matches!(&group_tag.to_be_bytes(), b"mode" | b"mod2")
-}
-
-pub(in crate::app) fn is_render_model_tag(entry: &TagEntry) -> bool {
-    is_render_model_group(entry.group_tag)
-        || matches!(
-            entry.group_name.as_deref(),
-            Some("render_model") | Some("gbxmodel")
-        )
-        || {
-            let path = entry.display_path.to_ascii_lowercase();
-            path.ends_with(".render_model") || path.ends_with(".gbxmodel")
-        }
-}
-
-pub(in crate::app) fn is_material_shader_group(group_tag: u32) -> bool {
-    group_tag == u32::from_be_bytes(*b"mats")
-}
-
-pub(in crate::app) fn is_material_shader_browser_tag(entry: &TagEntry) -> bool {
-    is_material_shader_group(entry.group_tag)
-        || entry.group_name.as_deref() == Some("material_shader")
-        || entry
-            .display_path
-            .to_ascii_lowercase()
-            .ends_with(".material_shader")
-}
-
-pub(in crate::app) fn is_hlsl_include_group(group_tag: u32) -> bool {
-    group_tag == u32::from_be_bytes(*b"hlsl")
-}
-
-pub(in crate::app) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
-    is_hlsl_include_group(entry.group_tag)
-        || entry.group_name.as_deref() == Some("hlsl_include")
-        || entry
-            .display_path
-            .to_ascii_lowercase()
-            .ends_with(".hlsl_include")
-}
-
-pub(in crate::app) fn supports_animation_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"jmad" | b"hlmt" | b"antr" | b"mode"
-    )
-}
-
-pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
-    supports_tag_geometry_extraction(group_tag)
-        || supports_bsp_geometry_extraction(group_tag)
-        || supports_scenario_geometry_extraction(group_tag)
-        || supports_particle_geometry_extraction(group_tag)
-        || supports_animation_extraction(group_tag)
-        || supports_tag_import_info_extraction(group_tag)
-        || is_bitmap_group(group_tag)
-        || crate::app::editor::is_sound_group(group_tag)
-        || is_material_shader_group(group_tag)
-        || is_hlsl_include_group(group_tag)
-}
-
-pub(in crate::app) fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
-    )
-}
-
-/// A single structure BSP exports to one ASS. Kept apart from
-/// [`supports_tag_geometry_extraction`] because the menu wording differs
-/// — a BSP is level geometry, not a model — and because the two land in
-/// different arms of `extract_geometry_for_entry`.
-pub(in crate::app) fn supports_bsp_geometry_extraction(group_tag: u32) -> bool {
-    group_tag.to_be_bytes().as_slice() == b"sbsp"
-}
-
-/// A scenario exports every BSP it references, one file each.
-pub(in crate::app) fn supports_scenario_geometry_extraction(group_tag: u32) -> bool {
-    group_tag.to_be_bytes().as_slice() == b"scnr"
-}
-
-/// A particle_model exports to a `.jmi` manifest plus one JMS per object
-/// it was imported from — not a single file — so it gets its own wording
-/// rather than joining [`supports_tag_geometry_extraction`].
-pub(in crate::app) fn supports_particle_geometry_extraction(group_tag: u32) -> bool {
-    blam_tags::is_particle_model_group(group_tag)
-}
-
-pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
-    )
-}
-
-#[cfg(test)]
-mod browser_tree_virtualization_tests {
-    //! The browser tree lays out only the rows it can show.
-    //!
-    //! Tag rows below or above the clip rect are reserved as one block of space,
-    //! and a folder that was wholly off screen is reserved at the height it had
-    //! when last drawn. Neither may move a row: every test here compares what the
-    //! viewport shows against the same frames drawn with skipping turned off,
-    //! which lays out every row as the tree always did.
-
-    use std::time::Instant;
-
-    use eframe::egui;
-
-    use super::{
-        Reveal, TREE_ROW_TOPS, TREE_ROWS_LAID_OUT, TREE_SKIPS_ROWS, draw_tree, draw_tree_lazy,
-    };
-    use crate::app::browser::BrowserSort;
-    use crate::core::source::{TagEntry, TagEntryLocation, TagTree};
+    // The browser tree lays out only the rows it can show.
+    //
+    // Tag rows below or above the clip rect are reserved as one block of space,
+    // and a folder that was wholly off screen is reserved at the height it had
+    // when last drawn. Neither may move a row: every test here compares what the
+    // viewport shows against the same frames drawn with skipping turned off,
+    // which lays out every row as the tree always did.
 
     /// 40 top folders × 10 subfolders × 150 tags: 60,000 tags, 440 folders.
     fn synthetic_entries() -> Vec<TagEntry> {
@@ -5135,59 +5174,4 @@ mod browser_tree_virtualization_tests {
             }
         }
     }
-}
-
-/// Load the folders at `paths` in a lazy `tree`, adding their tags to
-/// `entries`, and say what the last one did for the status line. With
-/// `group_tree`, the Groups view's tree is kept in step with them: only pass
-/// it when it has nothing better, since one built from the full tag index
-/// already holds every group, and rebuilding it from the handful of lazily
-/// loaded entries would cut it down to the folders the user happened to
-/// expand. A path no longer in the tree, or already loaded, is skipped.
-pub(in crate::app) fn load_lazy_folders(
-    tree: &mut TagTree,
-    entries: &mut Vec<TagEntry>,
-    mut group_tree: Option<&mut TagTree>,
-    root: &Path,
-    names: &TagNameIndex,
-    paths: &[PathBuf],
-) -> Option<String> {
-    let mut status = None;
-    for path in paths {
-        let Some(node) = lazy_node_mut(&mut tree.children, path) else {
-            continue;
-        };
-        if node.entries_loaded {
-            continue;
-        }
-        status = Some(match load_folder_node_entries(root, node, entries, names) {
-            Ok(()) => {
-                if let Some(group_tree) = group_tree.as_deref_mut() {
-                    *group_tree = crate::core::source::build_group_tree(entries);
-                }
-                format!("Loaded {} tag(s) from {}", node.entries.len(), node.label)
-            }
-            Err(error) => {
-                // Marked loaded, and so left empty: an open folder that stays
-                // unloaded is asked for again by every frame that draws it,
-                // and each answer repaints, so a failure would retry forever.
-                node.entries_loaded = true;
-                format!("Failed to load folder {}: {error}", node.rel_path.display())
-            }
-        });
-    }
-    status
-}
-
-/// The node at `path` among `nodes` and their descendants.
-fn lazy_node_mut<'a>(nodes: &'a mut [TagTreeNode], path: &Path) -> Option<&'a mut TagTreeNode> {
-    for node in nodes {
-        if node.rel_path == path {
-            return Some(node);
-        }
-        if path.starts_with(&node.rel_path) {
-            return lazy_node_mut(&mut node.children, path);
-        }
-    }
-    None
 }

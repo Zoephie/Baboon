@@ -91,7 +91,6 @@ pub(in crate::app) struct Kit {
     /// First-class custom profile associated with this workspace, if any.
     pub(in crate::app) profile: Option<EditingKitProfileIdentity>,
 
-
     /// Folders the user made in a container source that no tag has landed in
     /// yet, as `/`-separated `display_path`-cased paths.
     ///
@@ -215,26 +214,15 @@ impl Kit {
 
 impl Baboon {
 
-
-
-
     #[allow(dead_code)]
     pub(in crate::app) fn kit_mut(&mut self, id: KitId) -> Option<&mut Kit> {
         self.model.kits.iter_mut().find(|kit| kit.id == id)
     }
 
-
-
     #[allow(dead_code)]
     pub(in crate::app) fn active_kit_mut(&mut self) -> &mut Kit {
         &mut self.model.kits[self.model.active]
     }
-
-
-
-
-
-
 
     /// Focus the kit a piece of navigation state belongs to, before acting on
     /// it. Navigation names tags by key, and a key only means something within
@@ -261,15 +249,9 @@ impl Baboon {
         }
     }
 
-
-
-
-
     pub(in crate::app) fn source_mut(&mut self) -> Option<&mut LoadedSourceData> {
         self.model.kits[self.model.active].source.as_mut()
     }
-
-
 
     /// Allocate the next never-reused kit id.
     #[allow(dead_code)]
@@ -336,10 +318,6 @@ impl Baboon {
         }
         self.model.active = active_after_removal(self.model.active, index, self.model.kits.len());
     }
-
-
-
-
 
     /// Route an open request for `path` to a kit.
     ///
@@ -504,17 +482,129 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
     shifted.min(new_len.saturating_sub(1))
 }
 
+/// egui id for a kit's tag layout tree. Distinct per kit so two trees rendered
+/// in the same frame keep separate drag state.
+pub(in crate::app) fn tag_tree_id(id: KitId) -> egui::Id {
+    egui::Id::new(("kit_tag_tree", id.0))
+}
+
+impl Kit {
+    /// This kit's browser entry for `key`, wherever it is listed: the visible
+    /// entries, the full set a filtered browser hides, or a favorite pulled in
+    /// from elsewhere.
+    pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
+        let source = self.source.as_ref()?;
+        source.entry_for_key(key).or_else(|| {
+            self.active_favorite_entries
+                .iter()
+                .find(|entry| entry.key == key)
+        })
+    }
+}
+
+/// A kit's background tag-index and reference-index jobs.
+#[derive(Default)]
+pub(in crate::app) struct IndexJobs {
+    /// Checking the cached loose-folder index for file changes.
+    pub(in crate::app) refreshing: bool,
+    /// When the next periodic refresh is due, in egui time.
+    pub(in crate::app) next_refresh_at: f64,
+    /// A reference-index build is running.
+    pub(in crate::app) building_references: bool,
+    /// That build was started by a tag-index build, which reports them as one.
+    pub(in crate::app) references_for_entry_index: bool,
+    pub(in crate::app) reference_progress: Option<ReferenceIndexProgressState>,
+    pub(in crate::app) entry_progress: Option<EntryIndexProgressState>,
+    /// Tags whose references changed (a save, a refresh, a new or deleted tag)
+    /// while a reference-index build was running, with what they are now;
+    /// `None` for a tag that is gone. The build read those tags before the
+    /// change, so its result is patched with these before it replaces the
+    /// index, rather than reverting them. See [`Kit::set_tag_references`].
+    pub(in crate::app) references_changed_during_build: HashMap<String, Option<Vec<DependencyRef>>>,
+}
+
+impl Model {
+    /// Look a kit up by its stable id. Unused while `kits` holds a single
+    /// workspace; these are the entry points the kit strip, per-kit worker
+    /// routing, and the layout trees resolve through once more than one kit
+    /// can be resident.
+    #[allow(dead_code)]
+    pub(in crate::app) fn kit_index(&self, id: KitId) -> Option<usize> {
+        self.kits.iter().position(|kit| kit.id == id)
+    }
+
+    #[allow(dead_code)]
+    pub(in crate::app) fn kit(&self, id: KitId) -> Option<&Kit> {
+        self.kits.iter().find(|kit| kit.id == id)
+    }
+
+    /// The active kit. Infallible: `kits` is never empty and `active` is
+    /// always a valid index into it.
+    #[allow(dead_code)]
+    pub(in crate::app) fn active_kit(&self) -> &Kit {
+        &self.kits[self.active]
+    }
+
+    pub(in crate::app) fn active_kit_id(&self) -> KitId {
+        self.kits[self.active].id
+    }
+
+    /// Stamp identifying the active kit and its current revision, to be
+    /// attached to a background job so its result can be routed back.
+    pub(in crate::app) fn kit_stamp(&self) -> KitStamp {
+        let kit = &self.kits[self.active];
+        KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        }
+    }
+
+    /// Resolve a stamp to the kit index it still refers to, or `None` if the
+    /// kit has closed or its source was replaced while the job was running.
+    /// Ids are never reused, so a closed kit cannot alias a live one.
+    pub(in crate::app) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
+        let index = self.kit_index(stamp.kit)?;
+        (self.kits[index].generation == stamp.generation).then_some(index)
+    }
+
+    /// Resolve a kit id to its index, ignoring generation. For results that
+    /// stay valid across a source reload, such as a parsed document.
+    pub(in crate::app) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
+        self.kit_index(kit)
+    }
+
+    /// The active kit's source, or `None` for an empty workspace.
+    pub(in crate::app) fn source(&self) -> Option<&LoadedSourceData> {
+        self.kits[self.active].source.as_ref()
+    }
+
+    pub(in crate::app) fn names(&self) -> &TagNameIndex {
+        &self.kits[self.active].names
+    }
+
+    /// Whether any kit holds unsaved edits.
+    pub(in crate::app) fn any_kit_dirty(&self) -> bool {
+        self.kits.iter().any(kit_has_dirty_documents)
+    }
+
+    /// Index of the first kit holding unsaved edits.
+    pub(in crate::app) fn first_dirty_kit(&self) -> Option<usize> {
+        self.kits.iter().position(kit_has_dirty_documents)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::EditingKitProfileIdentity;
-    use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
+    use super::*;
+    use blam_tags::TagFile;
     use crate::app::kits::{KitMut, KitView};
     use crate::app::test_definition_path;
     use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
-    use blam_tags::TagFile;
     use std::collections::HashMap;
     use std::path::Path;
     use std::path::PathBuf;
+    use super::EditingKitProfileIdentity;
+    use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
 
     fn kit_holding(location: TagEntryLocation, endian: blam_tags::Endian) -> Kit {
         let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
@@ -684,53 +774,6 @@ mod tests {
             Path::new("campaign-evolved")
         ));
     }
-}
-
-/// egui id for a kit's tag layout tree. Distinct per kit so two trees rendered
-/// in the same frame keep separate drag state.
-pub(in crate::app) fn tag_tree_id(id: KitId) -> egui::Id {
-    egui::Id::new(("kit_tag_tree", id.0))
-}
-
-impl Kit {
-    /// This kit's browser entry for `key`, wherever it is listed: the visible
-    /// entries, the full set a filtered browser hides, or a favorite pulled in
-    /// from elsewhere.
-    pub(in crate::app) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
-        let source = self.source.as_ref()?;
-        source.entry_for_key(key).or_else(|| {
-            self.active_favorite_entries
-                .iter()
-                .find(|entry| entry.key == key)
-        })
-    }
-}
-
-/// A kit's background tag-index and reference-index jobs.
-#[derive(Default)]
-pub(in crate::app) struct IndexJobs {
-    /// Checking the cached loose-folder index for file changes.
-    pub(in crate::app) refreshing: bool,
-    /// When the next periodic refresh is due, in egui time.
-    pub(in crate::app) next_refresh_at: f64,
-    /// A reference-index build is running.
-    pub(in crate::app) building_references: bool,
-    /// That build was started by a tag-index build, which reports them as one.
-    pub(in crate::app) references_for_entry_index: bool,
-    pub(in crate::app) reference_progress: Option<ReferenceIndexProgressState>,
-    pub(in crate::app) entry_progress: Option<EntryIndexProgressState>,
-    /// Tags whose references changed (a save, a refresh, a new or deleted tag)
-    /// while a reference-index build was running, with what they are now;
-    /// `None` for a tag that is gone. The build read those tags before the
-    /// change, so its result is patched with these before it replaces the
-    /// index, rather than reverting them. See [`Kit::set_tag_references`].
-    pub(in crate::app) references_changed_during_build: HashMap<String, Option<Vec<DependencyRef>>>,
-}
-
-#[cfg(test)]
-mod document_cleanup_tests {
-    use super::*;
-    use crate::app::kits::{KitMut, KitView};
 
     /// Two sources loaded one after another into the same kit must not share a
     /// generation, or a job stamped against the first resolves against the
@@ -800,75 +843,5 @@ mod document_cleanup_tests {
         assert!(view.caches.model_previews.is_empty());
         assert!(view.caches.bitmap_previews.is_empty());
         assert!(kit.loading_tags.is_empty());
-    }
-}
-
-impl Model {
-    /// Look a kit up by its stable id. Unused while `kits` holds a single
-    /// workspace; these are the entry points the kit strip, per-kit worker
-    /// routing, and the layout trees resolve through once more than one kit
-    /// can be resident.
-    #[allow(dead_code)]
-    pub(in crate::app) fn kit_index(&self, id: KitId) -> Option<usize> {
-        self.kits.iter().position(|kit| kit.id == id)
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::app) fn kit(&self, id: KitId) -> Option<&Kit> {
-        self.kits.iter().find(|kit| kit.id == id)
-    }
-
-    /// The active kit. Infallible: `kits` is never empty and `active` is
-    /// always a valid index into it.
-    #[allow(dead_code)]
-    pub(in crate::app) fn active_kit(&self) -> &Kit {
-        &self.kits[self.active]
-    }
-
-    pub(in crate::app) fn active_kit_id(&self) -> KitId {
-        self.kits[self.active].id
-    }
-
-    /// Stamp identifying the active kit and its current revision, to be
-    /// attached to a background job so its result can be routed back.
-    pub(in crate::app) fn kit_stamp(&self) -> KitStamp {
-        let kit = &self.kits[self.active];
-        KitStamp {
-            kit: kit.id,
-            generation: kit.generation,
-        }
-    }
-
-    /// Resolve a stamp to the kit index it still refers to, or `None` if the
-    /// kit has closed or its source was replaced while the job was running.
-    /// Ids are never reused, so a closed kit cannot alias a live one.
-    pub(in crate::app) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
-        let index = self.kit_index(stamp.kit)?;
-        (self.kits[index].generation == stamp.generation).then_some(index)
-    }
-
-    /// Resolve a kit id to its index, ignoring generation. For results that
-    /// stay valid across a source reload, such as a parsed document.
-    pub(in crate::app) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
-        self.kit_index(kit)
-    }
-
-    /// The active kit's source, or `None` for an empty workspace.
-    pub(in crate::app) fn source(&self) -> Option<&LoadedSourceData> {
-        self.kits[self.active].source.as_ref()
-    }
-
-    pub(in crate::app) fn names(&self) -> &TagNameIndex {
-        &self.kits[self.active].names
-    }
-
-    /// Whether any kit holds unsaved edits.
-    pub(in crate::app) fn any_kit_dirty(&self) -> bool {
-        self.kits.iter().any(kit_has_dirty_documents)
-    }
-
-    /// Index of the first kit holding unsaved edits.
-    pub(in crate::app) fn first_dirty_kit(&self) -> Option<usize> {
-        self.kits.iter().position(kit_has_dirty_documents)
     }
 }

@@ -1456,7 +1456,7 @@ pub(in crate::app) fn moved_key_map(
 }
 
 #[cfg(test)]
-mod loose_refactor_jobs_tests {
+mod tests {
     //! Characterization of the loose-kit refactors -- tag rename and move,
     //! folder rename, move and copy, duplicate, delete -- run to completion on a
     //! temporary tree whose tags reference each other.

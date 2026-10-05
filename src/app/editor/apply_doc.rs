@@ -55,7 +55,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod apply_doc_ops_tests {
+mod tests {
     use super::*;
 
     const KEY: &str = "file:test.render_model";

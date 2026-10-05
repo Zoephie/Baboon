@@ -304,19 +304,33 @@ pub(in crate::app) fn tag_leaf_name(display_path: &str) -> String {
         .to_owned()
 }
 
+/// Start the thumbnails the bitmap hovers drawn this frame asked for.
+pub(in crate::app) fn queue_bitmap_hover_thumbnails(
+    cx: &Ctx,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<Bitmaps>,
+    requests: &Arc<Mutex<Vec<TagEntry>>>,
+) {
+    let entries = requests
+        .lock()
+        .map(|mut requests| std::mem::take(&mut *requests))
+        .unwrap_or_default();
+    queue_thumbnails::<Bitmaps>(cx, kit_index, library, entries, 256);
+}
+
 #[cfg(test)]
 mod tests {
-    //! The Bitmap Library's non-drawing halves: which tags it lists, which mip it
-    //! decodes, and what its cache throws away.
-    //!
-    //! The grid itself needs a GPU context to say anything useful, so what is
-    //! covered here is the logic that decides how much work the grid does — the
-    //! part that turns a kit with twenty thousand bitmaps into something that
-    //! scrolls, and the part that would quietly leak GPU memory if it stopped
-    //! evicting.
-
     use super::*;
     use crate::app::kits::{KitMut, tag_tree_id};
+
+    // The Bitmap Library's non-drawing halves: which tags it lists, which mip it
+    // decodes, and what its cache throws away.
+    //
+    // The grid itself needs a GPU context to say anything useful, so what is
+    // covered here is the logic that decides how much work the grid does — the
+    // part that turns a kit with twenty thousand bitmaps into something that
+    // scrolls, and the part that would quietly leak GPU memory if it stopped
+    // evicting.
 
     fn entry(display_path: &str, group: &[u8; 4], group_name: Option<&str>) -> TagEntry {
         TagEntry {
@@ -781,11 +795,6 @@ mod tests {
             assert!(!BITMAP_LIBRARY_KEY.starts_with(prefix));
         }
     }
-}
-
-#[cfg(test)]
-mod stale_result_tests {
-    use super::*;
 
     /// A thumbnail that lands after a generation bump is dropped, but its key
     /// must leave `pending`: it used to stay, and four such keys stopped every
@@ -893,18 +902,4 @@ mod stale_result_tests {
 
         assert!(!app.views[app.model.kits[0].id].caches.model_previews["file:a.model"].textures_pending);
     }
-}
-
-/// Start the thumbnails the bitmap hovers drawn this frame asked for.
-pub(in crate::app) fn queue_bitmap_hover_thumbnails(
-    cx: &Ctx,
-    kit_index: usize,
-    library: &mut ThumbnailLibrary<Bitmaps>,
-    requests: &Arc<Mutex<Vec<TagEntry>>>,
-) {
-    let entries = requests
-        .lock()
-        .map(|mut requests| std::mem::take(&mut *requests))
-        .unwrap_or_default();
-    queue_thumbnails::<Bitmaps>(cx, kit_index, library, entries, 256);
 }

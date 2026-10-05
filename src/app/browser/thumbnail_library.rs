@@ -768,7 +768,6 @@ impl Baboon {
         }
     }
 
-
     pub(in crate::app) fn handle_thumbnail_ready<S: ThumbnailSource>(
         &mut self,
         stamp: KitStamp,
@@ -809,12 +808,66 @@ impl Baboon {
     }
 }
 
+/// Start thumbnail jobs for `entries` that have none, up to the in-flight
+/// bound.
+pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
+    cx: &Ctx,
+    kit_index: usize,
+    library: &mut ThumbnailLibrary<S>,
+    entries: Vec<TagEntry>,
+    max_edge: u32,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    let Some(source) = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .map(|source| source.source.clone())
+    else {
+        return;
+    };
+    let stamp = KitStamp {
+        kit: cx.model.kits[kit_index].id,
+        generation: cx.model.kits[kit_index].generation,
+    };
+
+    for entry in entries {
+        let key = entry.key.clone();
+        let cached = library
+            .thumbnails
+            .lock()
+            .is_ok_and(|thumbnails| thumbnails.contains(&key));
+        if cached {
+            continue;
+        }
+        if library.pending.len() >= MAX_DECODES_IN_FLIGHT {
+            break;
+        }
+        if !library.pending.insert(key.clone()) {
+            continue;
+        }
+
+        // Through `spawn_worker` because tags have panicked the bitmap
+        // decoders and the geometry parser before: a thread that panics
+        // never sends, so `pending` would keep its key and one of the four
+        // slots would be gone for good. Four such tags stopped the library
+        // and every hover preview.
+        let source = source.clone();
+        let panic_key = key.clone();
+        cx.spawn(
+            move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
+            move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    //! One grid, two libraries: each lists only its own kind of tag, searches
-    //! within it, and queues thumbnail jobs only for what it shows.
-
     use super::*;
+
+    // One grid, two libraries: each lists only its own kind of tag, searches
+    // within it, and queues thumbnail jobs only for what it shows.
 
     fn entry(display_path: &str, group: &[u8; 4]) -> TagEntry {
         TagEntry {
@@ -1007,65 +1060,6 @@ mod tests {
             "failed thumbnails still repaint every {failed:?}"
         );
     }
-}
-
-/// Start thumbnail jobs for `entries` that have none, up to the in-flight
-/// bound.
-pub(in crate::app) fn queue_thumbnails<S: ThumbnailSource>(
-    cx: &Ctx,
-    kit_index: usize,
-    library: &mut ThumbnailLibrary<S>,
-    entries: Vec<TagEntry>,
-    max_edge: u32,
-) {
-    if entries.is_empty() {
-        return;
-    }
-    let Some(source) = cx.model.kits[kit_index]
-        .source
-        .as_ref()
-        .map(|source| source.source.clone())
-    else {
-        return;
-    };
-    let stamp = KitStamp {
-        kit: cx.model.kits[kit_index].id,
-        generation: cx.model.kits[kit_index].generation,
-    };
-
-    for entry in entries {
-        let key = entry.key.clone();
-        let cached = library
-            .thumbnails
-            .lock()
-            .is_ok_and(|thumbnails| thumbnails.contains(&key));
-        if cached {
-            continue;
-        }
-        if library.pending.len() >= MAX_DECODES_IN_FLIGHT {
-            break;
-        }
-        if !library.pending.insert(key.clone()) {
-            continue;
-        }
-
-        // Through `spawn_worker` because tags have panicked the bitmap
-        // decoders and the geometry parser before: a thread that panics
-        // never sends, so `pending` would keep its key and one of the four
-        // slots would be gone for good. Four such tags stopped the library
-        // and every hover preview.
-        let source = source.clone();
-        let panic_key = key.clone();
-        cx.spawn(
-            move || S::message(stamp, key, S::render(&source, &entry, max_edge)),
-            move |_| S::message(stamp, panic_key, Err(S::CRASHED.to_owned())),
-        );
-    }
-}
-
-#[cfg(test)]
-mod folder_asset_browser_tests {
-    use super::*;
 
     fn folder_pane() -> FolderBrowserState {
         FolderBrowserState {
@@ -1091,7 +1085,7 @@ mod folder_asset_browser_tests {
         }
     }
 
-    fn entry(path: &str, group: &[u8; 4]) -> TagEntry {
+    fn loose_entry(path: &str, group: &[u8; 4]) -> TagEntry {
         TagEntry {
             key: path.into(),
             display_path: path.into(),
@@ -1106,10 +1100,10 @@ mod folder_asset_browser_tests {
     #[test]
     fn mixed_grid_is_folder_scoped_and_type_filters_work() {
         let entries = vec![
-            entry("objects/brute/grass.bitmap", b"bitm"),
-            entry("objects/brute/nested/brute.render_model", b"mode"),
-            entry("objects/brute/brute.biped", b"bipd"),
-            entry("objects/brute_other/other.bitmap", b"bitm"),
+            loose_entry("objects/brute/grass.bitmap", b"bitm"),
+            loose_entry("objects/brute/nested/brute.render_model", b"mode"),
+            loose_entry("objects/brute/brute.biped", b"bipd"),
+            loose_entry("objects/brute_other/other.bitmap", b"bitm"),
         ];
         for (bitmap, model, expected_bitmaps, expected_models) in [
             (true, true, 1, 1),
@@ -1183,9 +1177,9 @@ mod folder_asset_browser_tests {
     fn folder_grid_search_uses_the_same_scoped_cache_as_the_tree() {
         let mut pane = folder_pane();
         let entries = vec![
-            entry("objects/brute/grass.bitmap", b"bitm"),
-            entry("objects/brute/brute.render_model", b"mode"),
-            entry("objects/elite/grass.bitmap", b"bitm"),
+            loose_entry("objects/brute/grass.bitmap", b"bitm"),
+            loose_entry("objects/brute/brute.render_model", b"mode"),
+            loose_entry("objects/elite/grass.bitmap", b"bitm"),
         ];
         let keywords =
             std::collections::BTreeMap::from([(entries[0].key.clone(), vec!["wip".into()])]);

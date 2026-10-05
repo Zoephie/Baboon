@@ -316,7 +316,7 @@ fn draw_icon_window_header_impl(
 }
 
 #[cfg(test)]
-mod key_scope_tests {
+mod tests {
     use super::*;
 
     fn occurrence(field_path: &str) -> FindOccurrence {

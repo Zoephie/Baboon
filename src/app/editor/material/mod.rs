@@ -816,10 +816,11 @@ pub(in crate::app) fn material_value_kind(value: &TagFieldData) -> &'static str 
     }
 }
 
-
 #[cfg(test)]
-mod shader_routing_tests {
+mod tests {
     use super::*;
+    use crate::app::editor::material::clean_field_key;
+    use crate::app::editor::{H2TemplateCache, canonical_field_path, clean_field_name, format_rgb_hex, parse_rgb_hex, strip_node_indices};
 
     fn entry(fourcc: &[u8; 4], group_name: &str) -> TagEntry {
         TagEntry {
@@ -859,13 +860,6 @@ mod shader_routing_tests {
             assert!(supports_field_search(&entry), "{name}");
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::editor::material::clean_field_key;
-    use crate::app::editor::{H2TemplateCache, canonical_field_path, clean_field_name, format_rgb_hex, parse_rgb_hex, strip_node_indices};
 
     /// The shader grid's model is built once for a revision of the document,
     /// not on every frame, and again when the document changes.

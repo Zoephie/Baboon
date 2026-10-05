@@ -1170,7 +1170,15 @@ pub(in crate::app) fn extract_scenario_geometry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blam_tags::JmsFile;
+    use blam_tags::game::Game;
+    use crate::app::browser::supports_tag_extract_menu;
+    use crate::app::export::{extract_animations_for_entry, extract_geometry_for_entry};
     use crate::core::document::apply::{add_block_element, apply_field_edit};
+    use crate::core::game::GameId;
+    use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
+    use crate::core::tag_key::file_entry_key;
+    use std::path::{Path, PathBuf};
 
     /// A Halo CE or Halo 2 structure BSP extracts in its own game's form. The
     /// single-BSP export read every BSP with the Halo 3 reader, so it failed on
@@ -1691,29 +1699,17 @@ mod tests {
             assert!(len > 0, "{} is empty", e.path().display());
         }
     }
-}
 
-#[cfg(test)]
-mod extract_targets_tests {
-    //! Extract Geometry / Extract Animations for another game's tools.
-    //!
-    //! Each test extracts a shipped tag through the entry point the target
-    //! window calls and reads back what was written: the version each tool
-    //! accepts, and — across the Halo CE boundary — every triangle still there,
-    //! in one file per permutation for Halo CE or permutation-and-region material
-    //! lines for the later tools. Kit-gated: set `BLAM_TEST_HCEEK` /
-    //! `BLAM_TEST_H2EK` to the kits' `tags` folders.
+    // Extract Geometry / Extract Animations for another game's tools.
+    //
+    // Each test extracts a shipped tag through the entry point the target
+    // window calls and reads back what was written: the version each tool
+    // accepts, and — across the Halo CE boundary — every triangle still there,
+    // in one file per permutation for Halo CE or permutation-and-region material
+    // lines for the later tools. Kit-gated: set `BLAM_TEST_HCEEK` /
+    // `BLAM_TEST_H2EK` to the kits' `tags` folders.
 
-    use std::path::{Path, PathBuf};
-    use crate::core::tag_key::file_entry_key;
-    use crate::core::game::GameId;
-
-    use blam_tags::JmsFile;
-    use blam_tags::game::Game;
-
-    use crate::app::export::{extract_animations_for_entry, extract_geometry_for_entry};
-    use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
-
+    /// The tag `rel` under a kit root, or `None` (saying why) when it is absent.
     fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
         if root.join(rel).is_file() {
             Some(root)
@@ -1996,53 +1992,25 @@ mod extract_targets_tests {
             }
         }
     }
-}
-#[cfg(test)]
-mod particle_model_extract_menu_tests {
-    //! Right-click → Extract → particle geometry actually extracts.
-    //!
-    //! This wiring has two halves that are edited in different files and can
-    //! drift apart silently: the browser's `supports_*` gate decides whether
-    //! the menu item is drawn, and `extract_geometry_for_entry`'s match arm
-    //! decides whether the action does anything. Either one alone looks
-    //! finished — a gate with no arm shows a menu entry that errors, an arm
-    //! with no gate is unreachable.
-    //!
-    //! The gate half lives with the other groups in
-    //! `browser::filter`'s `tag_extract_menu_covers_every_group_with_an_asset_extractor`.
-    //! What is asserted here is the action half, each test opening by
-    //! re-checking its own gate so the pair stays visible in one place.
-    //!
-    //! Skips, saying so, when the tag set is absent: set `BLAM_TEST_HREK` and
-    //! `BLAM_TEST_H2EK` (see `crate::test_kits`).
 
-    use std::path::{Path, PathBuf};
-    use crate::core::tag_key::file_entry_key;
-    use crate::core::game::GameId;
+    // Right-click → Extract → particle geometry actually extracts.
+    //
+    // This wiring has two halves that are edited in different files and can
+    // drift apart silently: the browser's `supports_*` gate decides whether
+    // the menu item is drawn, and `extract_geometry_for_entry`'s match arm
+    // decides whether the action does anything. Either one alone looks
+    // finished — a gate with no arm shows a menu entry that errors, an arm
+    // with no gate is unreachable.
+    //
+    // The gate half lives with the other groups in
+    // `browser::filter`'s `tag_extract_menu_covers_every_group_with_an_asset_extractor`.
+    // What is asserted here is the action half, each test opening by
+    // re-checking its own gate so the pair stays visible in one place.
+    //
+    // Skips, saying so, when the tag set is absent: set `BLAM_TEST_HREK` and
+    // `BLAM_TEST_H2EK` (see `crate::core::test_kits`).
 
-    use crate::app::browser::supports_tag_extract_menu;
-    use crate::app::export::extract_geometry_for_entry;
-    use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
-
-    /// The tag `rel` under a kit root, or `None` (saying why) when it is absent.
-    fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
-        if root.join(rel).is_file() {
-            Some(root)
-        } else {
-            eprintln!("skipping: {rel} not present under {}", root.display());
-            None
-        }
-    }
-
-    fn loose_source(root: &Path, game: &str) -> TagSource {
-        TagSource::LooseFolder {
-            root: root.to_path_buf(),
-            game: GameId::from_id(game),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        }
-    }
-
-    fn entry_for(root: &Path, rel: &str, group: &[u8; 4]) -> TagEntry {
+    fn particle_model_entry(root: &Path, rel: &str, group: &[u8; 4]) -> TagEntry {
         let path = root.join(rel);
         TagEntry {
             key: file_entry_key(&path),
@@ -2071,7 +2039,7 @@ mod particle_model_extract_menu_tests {
 
         let summary = extract_geometry_for_entry(
             &loose_source(&root, "haloreach_mcc"),
-            &entry_for(&root, rel, b"pmdf"),
+            &particle_model_entry(&root, rel, b"pmdf"),
             &out,
             blam_tags::game::Game::Halo3,
         )
@@ -2139,7 +2107,7 @@ mod particle_model_extract_menu_tests {
 
         let summary = extract_geometry_for_entry(
             &loose_source(&root, "halo2_mcc"),
-            &entry_for(&root, rel, b"PRTM"),
+            &particle_model_entry(&root, rel, b"PRTM"),
             &out,
             blam_tags::game::Game::Halo2,
         )

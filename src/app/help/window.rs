@@ -913,7 +913,7 @@ fn doc_load_error(ui: &mut Ui, message: &str) {
 }
 
 #[cfg(test)]
-mod tutorial_ui_tests {
+mod tests {
     use super::*;
 
     #[test]

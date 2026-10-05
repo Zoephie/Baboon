@@ -4,7 +4,7 @@
 use super::*;
 
 #[cfg(test)]
-mod picker_tests {
+mod tests {
     use super::*;
 
     #[test]

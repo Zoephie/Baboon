@@ -125,7 +125,6 @@ pub(crate) fn apply_deferred_ops(
     }
 }
 
-
 pub(crate) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
@@ -1033,182 +1032,6 @@ fn path_without_field_ordinals(path: &str) -> String {
     out
 }
 
-#[cfg(test)]
-mod block_index_remap_tests {
-    use blam_tags::TagFile;
-
-    use crate::core::document::ops::{BlockOp, BlockOpKind};
-    use super::*;
-
-    fn test_tag() -> TagFile {
-        TagFile::new(crate::core::test_kits::definitions().join(
-            "haloreach_mcc/test_tag.json",
-        ))
-        .expect("load test-tag definition")
-    }
-
-    fn add_basic_elements(tag: &mut TagFile, count: usize) {
-        for _ in 0..count {
-            apply_one_block_op(
-                tag,
-                &BlockOp {
-                    path: "basic block".to_owned(),
-                    kind: BlockOpKind::Add,
-                },
-            )
-            .expect("add basic block element");
-        }
-    }
-
-    fn set_test_indices(tag: &mut TagFile, char_index: i64, short_index: i64, long_index: i64) {
-        apply_field_edit(tag, "char block index", &char_index.to_string()).unwrap();
-        apply_field_edit(tag, "short block index", &short_index.to_string()).unwrap();
-        apply_field_edit(tag, "long block index", &long_index.to_string()).unwrap();
-    }
-
-    fn test_indices(tag: &TagFile) -> [i128; 3] {
-        let root = tag.root();
-        [
-            root.read_int_any("char block index").unwrap(),
-            root.read_int_any("short block index").unwrap(),
-            root.read_int_any("long block index").unwrap(),
-        ]
-    }
-
-    #[test]
-    fn insert_and_delete_preserve_declared_block_index_targets() {
-        let mut tag = test_tag();
-        add_basic_elements(&mut tag, 3);
-        set_test_indices(&mut tag, 0, 1, 2);
-
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "basic block".to_owned(),
-                kind: BlockOpKind::Insert(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(test_indices(&tag), [0, 2, 3]);
-
-        // Removing the newly inserted element restores every old position.
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "basic block".to_owned(),
-                kind: BlockOpKind::Delete(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(test_indices(&tag), [0, 1, 2]);
-
-        // A reference to the removed entry becomes <none>; later references
-        // move down while earlier references remain unchanged.
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "basic block".to_owned(),
-                kind: BlockOpKind::Delete(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(test_indices(&tag), [0, -1, 1]);
-    }
-
-    #[test]
-    fn duplicate_shifts_only_entries_after_the_copy_source() {
-        let mut tag = test_tag();
-        add_basic_elements(&mut tag, 3);
-        set_test_indices(&mut tag, 0, 1, 2);
-
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "basic block".to_owned(),
-                kind: BlockOpKind::Duplicate(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(test_indices(&tag), [0, 1, 3]);
-    }
-
-    #[test]
-    fn reordering_repairs_external_indices_of_every_integer_width() {
-        let mut tag = test_tag();
-        add_basic_elements(&mut tag, 3);
-        set_test_indices(&mut tag, 0, 1, 2);
-
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "basic block".to_owned(),
-                kind: BlockOpKind::Reorder { order: vec![1, 2, 0] },
-            },
-        ).unwrap();
-        assert_eq!(test_indices(&tag), [2, 0, 1]);
-    }
-
-    #[test]
-    fn nested_declared_reference_resolves_its_ancestor_target() {
-        let mut tag =
-            TagFile::new(crate::core::test_kits::definitions().join("halo2_mcc/model.json")).unwrap();
-        add_elements_at(&mut tag, "variants", 3);
-        add_elements_at(&mut tag, "variants[0]/regions", 1);
-        apply_field_edit(&mut tag, "variants[0]/regions[0]/parent variant", "2").unwrap();
-
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "variants".to_owned(),
-                kind: BlockOpKind::Insert(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            tag.root()
-                .descend("variants[0]/regions[0]")
-                .and_then(|region| region.read_int_any("parent variant")),
-            Some(3)
-        );
-    }
-
-    #[test]
-    fn classic_parent_node_reference_is_remapped() {
-        let mut tag =
-            TagFile::new(crate::core::test_kits::definitions().join("haloce_mcc/model.json")).unwrap();
-        add_elements_at(&mut tag, "nodes", 3);
-        apply_field_edit(&mut tag, "nodes[0]/parent node index", "2").unwrap();
-
-        apply_one_block_op(
-            &mut tag,
-            &BlockOp {
-                path: "nodes".to_owned(),
-                kind: BlockOpKind::Insert(1),
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            tag.root()
-                .descend("nodes[0]")
-                .and_then(|node| node.read_int_any("parent node index")),
-            Some(3)
-        );
-    }
-
-    fn add_elements_at(tag: &mut TagFile, path: &str, count: usize) {
-        for _ in 0..count {
-            apply_one_block_op(
-                tag,
-                &BlockOp {
-                    path: path.to_owned(),
-                    kind: BlockOpKind::Add,
-                },
-            )
-            .unwrap();
-        }
-    }
-}
-
 /// Insert `elements` consecutively starting at `at`, preserving their order.
 fn paste_elements(
     block: &mut blam_tags::TagBlockMut<'_>,
@@ -1505,14 +1328,189 @@ pub(crate) struct BlockIndexTarget {
     pub(crate) len: usize,
 }
 
-
 #[cfg(test)]
-mod rollback_tests {
-    use blam_tags::TagFile;
-
-    use crate::core::bundled::locate_definitions_root;
-    use crate::core::document::ops::{ShaderParamInitialField, ShaderParamOp};
+mod tests {
     use super::*;
+    use blam_tags::TagFile;
+    use blam_tags::{Endian, TagStruct};
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::TagDocument;
+    use crate::core::document::apply::apply_field_edit;
+    use crate::core::document::ops::{BlockOp, BlockOpKind};
+    use crate::core::document::ops::{FunctionDataOp, H2ShaderParamOp};
+    use crate::core::document::ops::{ShaderParamInitialField, ShaderParamOp};
+    use crate::core::document::value::{append_field_path, is_editable_tag, is_saveable_tag};
+    use crate::core::format::TagNameIndex;
+    use crate::core::game::GameId;
+    use crate::core::test_kits::test_definition_path;
+
+    fn test_tag() -> TagFile {
+        TagFile::new(crate::core::test_kits::definitions().join(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .expect("load test-tag definition")
+    }
+
+    fn add_basic_elements(tag: &mut TagFile, count: usize) {
+        for _ in 0..count {
+            apply_one_block_op(
+                tag,
+                &BlockOp {
+                    path: "basic block".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .expect("add basic block element");
+        }
+    }
+
+    fn set_test_indices(tag: &mut TagFile, char_index: i64, short_index: i64, long_index: i64) {
+        apply_field_edit(tag, "char block index", &char_index.to_string()).unwrap();
+        apply_field_edit(tag, "short block index", &short_index.to_string()).unwrap();
+        apply_field_edit(tag, "long block index", &long_index.to_string()).unwrap();
+    }
+
+    fn test_indices(tag: &TagFile) -> [i128; 3] {
+        let root = tag.root();
+        [
+            root.read_int_any("char block index").unwrap(),
+            root.read_int_any("short block index").unwrap(),
+            root.read_int_any("long block index").unwrap(),
+        ]
+    }
+
+    #[test]
+    fn insert_and_delete_preserve_declared_block_index_targets() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 2, 3]);
+
+        // Removing the newly inserted element restores every old position.
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Delete(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 1, 2]);
+
+        // A reference to the removed entry becomes <none>; later references
+        // move down while earlier references remain unchanged.
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Delete(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, -1, 1]);
+    }
+
+    #[test]
+    fn duplicate_shifts_only_entries_after_the_copy_source() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Duplicate(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 1, 3]);
+    }
+
+    #[test]
+    fn reordering_repairs_external_indices_of_every_integer_width() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Reorder { order: vec![1, 2, 0] },
+            },
+        ).unwrap();
+        assert_eq!(test_indices(&tag), [2, 0, 1]);
+    }
+
+    #[test]
+    fn nested_declared_reference_resolves_its_ancestor_target() {
+        let mut tag =
+            TagFile::new(crate::core::test_kits::definitions().join("halo2_mcc/model.json")).unwrap();
+        add_elements_at(&mut tag, "variants", 3);
+        add_elements_at(&mut tag, "variants[0]/regions", 1);
+        apply_field_edit(&mut tag, "variants[0]/regions[0]/parent variant", "2").unwrap();
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "variants".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tag.root()
+                .descend("variants[0]/regions[0]")
+                .and_then(|region| region.read_int_any("parent variant")),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn classic_parent_node_reference_is_remapped() {
+        let mut tag =
+            TagFile::new(crate::core::test_kits::definitions().join("haloce_mcc/model.json")).unwrap();
+        add_elements_at(&mut tag, "nodes", 3);
+        apply_field_edit(&mut tag, "nodes[0]/parent node index", "2").unwrap();
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "nodes".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tag.root()
+                .descend("nodes[0]")
+                .and_then(|node| node.read_int_any("parent node index")),
+            Some(3)
+        );
+    }
+
+    fn add_elements_at(tag: &mut TagFile, path: &str, count: usize) {
+        for _ in 0..count {
+            apply_one_block_op(
+                tag,
+                &BlockOp {
+                    path: path.to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+        }
+    }
 
     const PARAMETERS: &str = "render_method/parameters";
 
@@ -1565,16 +1563,6 @@ mod rollback_tests {
         .unwrap();
         assert_eq!(parameter_count(&tag), before + 1);
     }
-}
-
-#[cfg(test)]
-mod deferred_ops_tests {
-    use blam_tags::TagFile;
-
-    use crate::core::bundled::locate_definitions_root;
-    use crate::core::document::TagDocument;
-    use crate::core::document::ops::{FunctionDataOp, H2ShaderParamOp};
-    use super::*;
 
     fn document() -> TagDocument {
         let schema = locate_definitions_root().join("halo3_mcc/render_model.json");
@@ -1627,18 +1615,6 @@ mod deferred_ops_tests {
         apply_deferred_ops(&mut untouched, DeferredOps::default(), "Edit");
         assert!(!untouched.journal.can_undo(), "a frame with no ops");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::document::apply::apply_field_edit;
-    use crate::core::bundled::locate_definitions_root;
-    use crate::core::document::value::{append_field_path, is_editable_tag, is_saveable_tag};
-    use crate::core::format::TagNameIndex;
-    use crate::core::game::GameId;
-    use crate::core::test_kits::test_definition_path;
-    use blam_tags::{Endian, TagStruct};
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

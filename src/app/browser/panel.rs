@@ -1454,7 +1454,7 @@ fn draw_folder_header_launcher(
 }
 
 #[cfg(test)]
-mod responsive_folder_toolbar_tests {
+mod tests {
     use super::*;
     use crate::app::shell::frame::sidebar_wrappable_path_label;
 

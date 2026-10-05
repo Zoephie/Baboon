@@ -83,7 +83,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod tag_load_failure_tests {
+mod tests {
     use super::*;
 
     /// A tag that fails to load says so. The terminal line was copied from the

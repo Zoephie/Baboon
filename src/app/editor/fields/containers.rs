@@ -2312,316 +2312,6 @@ fn searchable_block_selector_with_none(
     (response, selection, popup_open)
 }
 
-#[cfg(test)]
-mod searchable_block_selector_tests {
-    use super::*;
-
-    #[test]
-    fn picker_popup_matches_button_width_with_long_entries_and_reference_none() {
-        for width in [150.0, 300.0, 700.0] {
-            let ctx = egui::Context::default();
-            ctx.set_fonts(foundation_fonts());
-            ctx.set_global_style(foundation_style());
-            let popup_id = egui::Id::new("reference_picker_width");
-            let mut button_rect = egui::Rect::NOTHING;
-            egui::Popup::open_id(&ctx, popup_id);
-            for query in ["", "missing", ""] {
-                ctx.data_mut(|data| {
-                    data.insert_temp(popup_id.with("entry_search"), query.to_owned())
-                });
-                for _ in 0..5 {
-                    let _ = crate::app::run_ui_test(&ctx, 
-                        egui::RawInput {
-                            screen_rect: Some(egui::Rect::from_min_size(
-                                egui::Pos2::ZERO,
-                                Vec2::new(1000.0, 800.0),
-                            )),
-                            ..Default::default()
-                        },
-                        |ui| {
-                            egui::CentralPanel::default().show(ui, |ui| {
-                                button_rect = searchable_block_selector_with_none(
-                                    ui,
-                                    popup_id,
-                                    "<none>",
-                                    usize::MAX,
-                                    2,
-                                    width,
-                                    &|index| {
-                                        format!(
-                                            "{index}. {}",
-                                            "very long block entry name ".repeat(8)
-                                        )
-                                    },
-                                    Some("<none>"),
-                                )
-                                .0
-                                .rect;
-                            });
-                        },
-                    );
-                }
-                let popup_rect = ctx.memory(|memory| memory.area_rect(popup_id).unwrap());
-                assert!(
-                    (popup_rect.width() - button_rect.width()).abs() < 1.0,
-                    "button {button_rect:?}, popup {popup_rect:?}, query {query}"
-                );
-            }
-            // Unassigning remains available even when the referenced block is empty.
-            let mut choice = None;
-            let frame = |events, choice: &mut Option<usize>| {
-                crate::app::run_ui_test(&ctx, 
-                    egui::RawInput {
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        egui::CentralPanel::default().show(ui, |ui| {
-                            *choice = searchable_block_selector_with_none(
-                                ui,
-                                popup_id,
-                                "<none>",
-                                usize::MAX,
-                                0,
-                                width,
-                                &|_| unreachable!("empty blocks have no entry labels"),
-                                Some("<none>"),
-                            )
-                            .1;
-                        });
-                    },
-                )
-            };
-            let output = frame(Vec::new(), &mut choice);
-            let pos = output
-                .shapes
-                .iter()
-                .find_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(shape)
-                        if shape.galley.text() == "<none>"
-                            && shape.pos.y > button_rect.bottom() =>
-                    {
-                        Some(shape.pos + shape.galley.size() * 0.5)
-                    }
-                    _ => None,
-                })
-                .expect("unassigned row");
-            let pointer = |pressed| egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
-            frame(
-                vec![egui::Event::PointerMoved(pos), pointer(true)],
-                &mut choice,
-            );
-            frame(vec![pointer(false)], &mut choice);
-            assert_eq!(choice, Some(usize::MAX));
-        }
-    }
-
-    #[test]
-    fn clearing_search_restores_the_full_popup_height() {
-        let ctx = egui::Context::default();
-        ctx.set_fonts(foundation_fonts());
-        ctx.set_global_style(foundation_style());
-        let popup_id = egui::Id::new("test_block_search_resize");
-        let frame = |events| {
-            let mut response = None;
-            let _ = crate::app::run_ui_test(&ctx, 
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(1000.0, 800.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        response = Some(searchable_block_selector(
-                            ui,
-                            popup_id,
-                            "0. entry 0",
-                            0,
-                            40,
-                            240.0,
-                            &|index| format!("{index}. entry {index}"),
-                        ));
-                    });
-                },
-            );
-            response.unwrap().0
-        };
-        let pointer = |pos, pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        let pos = frame(Vec::new()).rect.center();
-        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
-        frame(vec![pointer(pos, false)]);
-        for _ in 0..5 {
-            frame(Vec::new());
-        }
-        let height = || ctx.memory(|memory| memory.area_rect(popup_id).unwrap().height());
-        let full_height = height();
-        frame(vec![egui::Event::Text("entry 39".to_owned())]);
-        for _ in 0..5 {
-            frame(Vec::new());
-        }
-        let filtered_height = height();
-        assert!(
-            full_height - filtered_height > 200.0,
-            "filtering should hug its single result"
-        );
-        let search_id = ctx
-            .memory(|memory| memory.focused())
-            .expect("search has focus");
-        let search = ctx.read_response(search_id).unwrap();
-        let clear_response = ctx
-            .read_response(search_id.with("clear_search"))
-            .expect("clear control exists");
-        assert!(
-            (clear_response.rect.right() - search.rect.right()).abs() < 0.1,
-            "clear control must reach the search field's outer right edge"
-        );
-        let clear_pos = clear_response.rect.center();
-        frame(vec![
-            egui::Event::PointerMoved(clear_pos),
-            pointer(clear_pos, true),
-        ]);
-        frame(vec![pointer(clear_pos, false)]);
-        for _ in 0..5 {
-            frame(Vec::new());
-        }
-        assert_eq!(
-            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
-                .as_deref(),
-            Some(""),
-            "search {:?}; clear {:?}",
-            search.rect,
-            ctx.read_response(search_id.with("clear_search"))
-        );
-        assert!(
-            egui::Popup::is_id_open(&ctx, popup_id),
-            "clearing keeps the picker open"
-        );
-        assert!(
-            (height() - full_height).abs() < 1.0,
-            "the cleared popup must recover its original height"
-        );
-    }
-
-    #[test]
-    fn typing_filters_without_closing_and_selects_the_original_entry_index() {
-        let ctx = egui::Context::default();
-        ctx.set_fonts(foundation_fonts());
-        ctx.set_global_style(foundation_style());
-        let popup_id = egui::Id::new("test_block_search");
-        let labels_built = std::cell::Cell::new(0);
-        let labels = ["0. minor", "1. major", "2. minor veteran"];
-        let frame = |events| {
-            let mut result = None;
-            let output = crate::app::run_ui_test(&ctx, 
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(1000.0, 800.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        result = Some(searchable_block_selector(
-                            ui,
-                            popup_id,
-                            labels[0],
-                            0,
-                            labels.len(),
-                            240.0,
-                            &|index| {
-                                labels_built.set(labels_built.get() + 1);
-                                labels[index].to_owned()
-                            },
-                        ));
-                    });
-                },
-            );
-            (result.unwrap(), output)
-        };
-        let ((response, _, _), _) = frame(Vec::new());
-        assert_eq!(
-            labels_built.get(),
-            0,
-            "closed pickers must build no list labels"
-        );
-        let button_pos = response.rect.center();
-        let pointer = |pos, pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(vec![
-            egui::Event::PointerMoved(button_pos),
-            pointer(button_pos, true),
-        ]);
-        frame(vec![pointer(button_pos, false)]);
-        frame(Vec::new());
-        let ((_, _, open), output) = frame(vec![egui::Event::Text("VETERAN".to_owned())]);
-        assert!(open, "typing must keep the popup open");
-        assert_eq!(
-            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
-                .as_deref(),
-            Some("VETERAN")
-        );
-        let text_rect = |text: &str| {
-            output
-                .shapes
-                .iter()
-                .find_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(shape) if shape.galley.text() == text => {
-                        Some(egui::Rect::from_min_size(shape.pos, shape.galley.size()))
-                    }
-                    _ => None,
-                })
-        };
-        assert!(
-            text_rect(labels[1]).is_none(),
-            "nonmatching entries must be hidden"
-        );
-        assert!(
-            text_rect("(3)").is_some(),
-            "the count is the block total, not the number of matches"
-        );
-        let row_pos = text_rect(labels[2])
-            .expect("case-insensitive search match")
-            .center();
-        frame(vec![
-            egui::Event::PointerMoved(row_pos),
-            pointer(row_pos, true),
-        ]);
-        let ((_, selection, _), _) = frame(vec![pointer(row_pos, false)]);
-        assert_eq!(
-            selection,
-            Some(2),
-            "filtered results must preserve the source index"
-        );
-        assert!(!egui::Popup::is_id_open(&ctx, popup_id));
-        ctx.data_mut(|data| {
-            data.insert_temp(popup_id.with("entry_search"), "no such entry".to_owned())
-        });
-        egui::Popup::open_id(&ctx, popup_id);
-        let (_, output) = frame(Vec::new());
-        assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape,
-            egui::Shape::Text(shape) if shape.galley.text() == "No entries match.")));
-    }
-}
-
 pub(in crate::app) fn combo_box_with_scroll<R>(
     ui: &mut Ui,
     combo: egui::ComboBox,
@@ -3188,8 +2878,315 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 }
 
 #[cfg(test)]
-mod palette_repro_tests {
+mod tests {
     use super::*;
+    use crate::core::source::{load_iostore_container_set, read_entry};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn picker_popup_matches_button_width_with_long_entries_and_reference_none() {
+        for width in [150.0, 300.0, 700.0] {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            ctx.set_global_style(foundation_style());
+            let popup_id = egui::Id::new("reference_picker_width");
+            let mut button_rect = egui::Rect::NOTHING;
+            egui::Popup::open_id(&ctx, popup_id);
+            for query in ["", "missing", ""] {
+                ctx.data_mut(|data| {
+                    data.insert_temp(popup_id.with("entry_search"), query.to_owned())
+                });
+                for _ in 0..5 {
+                    let _ = crate::app::run_ui_test(&ctx, 
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                Vec2::new(1000.0, 800.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                button_rect = searchable_block_selector_with_none(
+                                    ui,
+                                    popup_id,
+                                    "<none>",
+                                    usize::MAX,
+                                    2,
+                                    width,
+                                    &|index| {
+                                        format!(
+                                            "{index}. {}",
+                                            "very long block entry name ".repeat(8)
+                                        )
+                                    },
+                                    Some("<none>"),
+                                )
+                                .0
+                                .rect;
+                            });
+                        },
+                    );
+                }
+                let popup_rect = ctx.memory(|memory| memory.area_rect(popup_id).unwrap());
+                assert!(
+                    (popup_rect.width() - button_rect.width()).abs() < 1.0,
+                    "button {button_rect:?}, popup {popup_rect:?}, query {query}"
+                );
+            }
+            // Unassigning remains available even when the referenced block is empty.
+            let mut choice = None;
+            let frame = |events, choice: &mut Option<usize>| {
+                crate::app::run_ui_test(&ctx, 
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            *choice = searchable_block_selector_with_none(
+                                ui,
+                                popup_id,
+                                "<none>",
+                                usize::MAX,
+                                0,
+                                width,
+                                &|_| unreachable!("empty blocks have no entry labels"),
+                                Some("<none>"),
+                            )
+                            .1;
+                        });
+                    },
+                )
+            };
+            let output = frame(Vec::new(), &mut choice);
+            let pos = output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape)
+                        if shape.galley.text() == "<none>"
+                            && shape.pos.y > button_rect.bottom() =>
+                    {
+                        Some(shape.pos + shape.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .expect("unassigned row");
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(
+                vec![egui::Event::PointerMoved(pos), pointer(true)],
+                &mut choice,
+            );
+            frame(vec![pointer(false)], &mut choice);
+            assert_eq!(choice, Some(usize::MAX));
+        }
+    }
+
+    #[test]
+    fn clearing_search_restores_the_full_popup_height() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_global_style(foundation_style());
+        let popup_id = egui::Id::new("test_block_search_resize");
+        let frame = |events| {
+            let mut response = None;
+            let _ = crate::app::run_ui_test(&ctx, 
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        response = Some(searchable_block_selector(
+                            ui,
+                            popup_id,
+                            "0. entry 0",
+                            0,
+                            40,
+                            240.0,
+                            &|index| format!("{index}. entry {index}"),
+                        ));
+                    });
+                },
+            );
+            response.unwrap().0
+        };
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let pos = frame(Vec::new()).rect.center();
+        frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
+        frame(vec![pointer(pos, false)]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        let height = || ctx.memory(|memory| memory.area_rect(popup_id).unwrap().height());
+        let full_height = height();
+        frame(vec![egui::Event::Text("entry 39".to_owned())]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        let filtered_height = height();
+        assert!(
+            full_height - filtered_height > 200.0,
+            "filtering should hug its single result"
+        );
+        let search_id = ctx
+            .memory(|memory| memory.focused())
+            .expect("search has focus");
+        let search = ctx.read_response(search_id).unwrap();
+        let clear_response = ctx
+            .read_response(search_id.with("clear_search"))
+            .expect("clear control exists");
+        assert!(
+            (clear_response.rect.right() - search.rect.right()).abs() < 0.1,
+            "clear control must reach the search field's outer right edge"
+        );
+        let clear_pos = clear_response.rect.center();
+        frame(vec![
+            egui::Event::PointerMoved(clear_pos),
+            pointer(clear_pos, true),
+        ]);
+        frame(vec![pointer(clear_pos, false)]);
+        for _ in 0..5 {
+            frame(Vec::new());
+        }
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
+                .as_deref(),
+            Some(""),
+            "search {:?}; clear {:?}",
+            search.rect,
+            ctx.read_response(search_id.with("clear_search"))
+        );
+        assert!(
+            egui::Popup::is_id_open(&ctx, popup_id),
+            "clearing keeps the picker open"
+        );
+        assert!(
+            (height() - full_height).abs() < 1.0,
+            "the cleared popup must recover its original height"
+        );
+    }
+
+    #[test]
+    fn typing_filters_without_closing_and_selects_the_original_entry_index() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        ctx.set_global_style(foundation_style());
+        let popup_id = egui::Id::new("test_block_search");
+        let labels_built = std::cell::Cell::new(0);
+        let labels = ["0. minor", "1. major", "2. minor veteran"];
+        let frame = |events| {
+            let mut result = None;
+            let output = crate::app::run_ui_test(&ctx, 
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        result = Some(searchable_block_selector(
+                            ui,
+                            popup_id,
+                            labels[0],
+                            0,
+                            labels.len(),
+                            240.0,
+                            &|index| {
+                                labels_built.set(labels_built.get() + 1);
+                                labels[index].to_owned()
+                            },
+                        ));
+                    });
+                },
+            );
+            (result.unwrap(), output)
+        };
+        let ((response, _, _), _) = frame(Vec::new());
+        assert_eq!(
+            labels_built.get(),
+            0,
+            "closed pickers must build no list labels"
+        );
+        let button_pos = response.rect.center();
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(vec![
+            egui::Event::PointerMoved(button_pos),
+            pointer(button_pos, true),
+        ]);
+        frame(vec![pointer(button_pos, false)]);
+        frame(Vec::new());
+        let ((_, _, open), output) = frame(vec![egui::Event::Text("VETERAN".to_owned())]);
+        assert!(open, "typing must keep the popup open");
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<String>(popup_id.with("entry_search")))
+                .as_deref(),
+            Some("VETERAN")
+        );
+        let text_rect = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == text => {
+                        Some(egui::Rect::from_min_size(shape.pos, shape.galley.size()))
+                    }
+                    _ => None,
+                })
+        };
+        assert!(
+            text_rect(labels[1]).is_none(),
+            "nonmatching entries must be hidden"
+        );
+        assert!(
+            text_rect("(3)").is_some(),
+            "the count is the block total, not the number of matches"
+        );
+        let row_pos = text_rect(labels[2])
+            .expect("case-insensitive search match")
+            .center();
+        frame(vec![
+            egui::Event::PointerMoved(row_pos),
+            pointer(row_pos, true),
+        ]);
+        let ((_, selection, _), _) = frame(vec![pointer(row_pos, false)]);
+        assert_eq!(
+            selection,
+            Some(2),
+            "filtered results must preserve the source index"
+        );
+        assert!(!egui::Popup::is_id_open(&ctx, popup_id));
+        ctx.data_mut(|data| {
+            data.insert_temp(popup_id.with("entry_search"), "no such entry".to_owned())
+        });
+        egui::Popup::open_id(&ctx, popup_id);
+        let (_, output) = frame(Vec::new());
+        assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape,
+            egui::Shape::Text(shape) if shape.galley.text() == "No entries match.")));
+    }
 
     #[test]
     fn block_jump_matches_exact_paths_and_opens_ancestors() {
@@ -3578,11 +3575,6 @@ mod palette_repro_tests {
             failures.len()
         );
     }
-}
-
-#[cfg(test)]
-mod scroll_speed_tests {
-    use super::*;
 
     /// One frame with one trackpad-sized scroll (small enough that egui
     /// applies it unsmoothed), returning `(smooth, raw)` as panes see them.
@@ -3654,11 +3646,6 @@ mod scroll_speed_tests {
         assert!((base + 40.0).abs() < 0.01, "one line is 40 points: {base}");
         assert!((travelled(3.0) - base * 3.0).abs() < 0.01);
     }
-}
-
-#[cfg(test)]
-mod viewport_wheel_tests {
-    use super::*;
 
     const VIEWPORT: egui::Rect = egui::Rect {
         min: egui::Pos2::new(0.0, 150.0),
@@ -3769,15 +3756,10 @@ mod viewport_wheel_tests {
         set_zoom_speed(&ctx, 2.5);
         assert_eq!(frame(&ctx, true, OVER_VIEWPORT).0, Some(-10.0));
     }
-}
-
-#[cfg(test)]
-mod wheel_gesture_tests {
-    use super::*;
 
     /// One frame: optionally a wheel event, and a dropdown at `rect` asking
     /// whether it may cycle. Returns whether it was allowed to.
-    fn frame(ctx: &egui::Context, wheel: bool, pointer: egui::Pos2, rect: egui::Rect) -> bool {
+    fn dropdown_frame(ctx: &egui::Context, wheel: bool, pointer: egui::Pos2, rect: egui::Rect) -> bool {
         let mut events = vec![egui::Event::PointerMoved(pointer)];
         if wheel {
             events.push(egui::Event::MouseWheel {
@@ -3810,7 +3792,7 @@ mod wheel_gesture_tests {
         claimed
     }
 
-    fn ctx() -> egui::Context {
+    fn cycling_ctx() -> egui::Context {
         let ctx = egui::Context::default();
         set_combo_scroll_cycle_enabled(&ctx, true);
         ctx
@@ -3828,13 +3810,13 @@ mod wheel_gesture_tests {
     /// panel scrolling and must stay panel scrolling.
     #[test]
     fn a_dropdown_scrolled_past_mid_gesture_does_not_change() {
-        let ctx = ctx();
+        let ctx = cycling_ctx();
         // The gesture begins away from any dropdown.
-        assert!(!frame(&ctx, true, ABOVE_BOX, BOX_RECT));
+        assert!(!dropdown_frame(&ctx, true, ABOVE_BOX, BOX_RECT));
         // Now the cursor slides over one while the wheel is still turning.
         for _ in 0..5 {
             assert!(
-                !frame(&ctx, true, OVER_BOX, BOX_RECT),
+                !dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT),
                 "a dropdown claimed a wheel gesture that began as panel scrolling"
             );
         }
@@ -3843,28 +3825,28 @@ mod wheel_gesture_tests {
     /// Deliberate use still works: point at a dropdown, then scroll.
     #[test]
     fn a_dropdown_pointed_at_first_still_cycles() {
-        let ctx = ctx();
+        let ctx = cycling_ctx();
         assert!(
-            frame(&ctx, true, OVER_BOX, BOX_RECT),
+            dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT),
             "a gesture starting on a dropdown should be the dropdown's"
         );
         // ...and keeps it for the rest of the gesture.
-        assert!(frame(&ctx, true, OVER_BOX, BOX_RECT));
+        assert!(dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT));
     }
 
     /// After the wheel goes quiet the next turn is a fresh gesture, so stopping
     /// and pointing at a dropdown works without moving the mouse away first.
     #[test]
     fn a_pause_starts_a_new_gesture() {
-        let ctx = ctx();
-        assert!(!frame(&ctx, true, ABOVE_BOX, BOX_RECT));
-        assert!(!frame(&ctx, true, OVER_BOX, BOX_RECT));
+        let ctx = cycling_ctx();
+        assert!(!dropdown_frame(&ctx, true, ABOVE_BOX, BOX_RECT));
+        assert!(!dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT));
         // Frames with no wheel event: the gesture goes stale.
         for _ in 0..40 {
-            frame(&ctx, false, OVER_BOX, BOX_RECT);
+            dropdown_frame(&ctx, false, OVER_BOX, BOX_RECT);
         }
         assert!(
-            frame(&ctx, true, OVER_BOX, BOX_RECT),
+            dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT),
             "a new gesture over a dropdown should be claimable"
         );
     }
@@ -3874,15 +3856,8 @@ mod wheel_gesture_tests {
     fn the_preference_disables_it_entirely() {
         let ctx = egui::Context::default();
         set_combo_scroll_cycle_enabled(&ctx, false);
-        assert!(!frame(&ctx, true, OVER_BOX, BOX_RECT));
+        assert!(!dropdown_frame(&ctx, true, OVER_BOX, BOX_RECT));
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::source::{load_iostore_container_set, read_entry};
-    use std::path::{Path, PathBuf};
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

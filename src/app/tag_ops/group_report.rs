@@ -107,7 +107,7 @@ pub(in crate::app) fn shipped_counts_by_group(source: &LoadedSourceData) -> Hash
 }
 
 #[cfg(test)]
-mod group_report_tests {
+mod tests {
     //! Whether a Campaign Evolved group can be authored, and what the answer rests
     //! on.
     //!

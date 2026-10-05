@@ -230,7 +230,6 @@ impl Baboon {
         self.kit_and_view(kit).open_tag_pane(MODEL_LIBRARY_KEY);
     }
 
-
 }
 
 /// The Model Library's [`ThumbnailSource`].
@@ -305,20 +304,35 @@ fn is_gbxmodel(entry: &TagEntry) -> bool {
     entry.group_tag == u32::from_be_bytes(*b"mod2")
 }
 
+impl Model {
+    /// Resolve a double-clicked render model to the tag its cell should open:
+    /// the owning `.model` when the kit has one, otherwise the tag itself.
+    pub(in crate::app) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
+        let Some(source) = self.kits[kit_index].source.as_ref() else {
+            return key.to_owned();
+        };
+        let entries = source.full_entry_set();
+        let Some(clicked) = entries.iter().find(|entry| entry.key == key) else {
+            return key.to_owned();
+        };
+        owning_model_key(entries, clicked).unwrap_or_else(|| key.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    //! The Model Library's non-drawing halves: which tags it lists, which tag a
-    //! double-click resolves to, and what its rasterizer draws.
-    //!
-    //! The grid, its arithmetic and its cache are `thumbnail_library`'s, shared
-    //! with the Bitmap Library and covered with it. What is
-    //! covered here is what this library adds: the render-model predicate, the
-    //! render_model → `.model` owner resolution, and the CPU rasterizer that must
-    //! never panic on the geometry a shipped tag can hold.
-
     use super::*;
-    use crate::app::kits::{KitMut, tag_tree_id};
     use crate::app::import::BLAM_KEY;
+    use crate::app::kits::{KitMut, tag_tree_id};
+
+    // The Model Library's non-drawing halves: which tags it lists, which tag a
+    // double-click resolves to, and what its rasterizer draws.
+    //
+    // The grid, its arithmetic and its cache are `thumbnail_library`'s, shared
+    // with the Bitmap Library and covered with it. What is
+    // covered here is what this library adds: the render-model predicate, the
+    // render_model → `.model` owner resolution, and the CPU rasterizer that must
+    // never panic on the geometry a shipped tag can hold.
 
     fn entry(display_path: &str, group: &[u8; 4], group_name: Option<&str>) -> TagEntry {
         TagEntry {
@@ -626,11 +640,6 @@ mod tests {
             models.len()
         );
     }
-}
-
-#[cfg(test)]
-mod library_scan_tests {
-    use super::*;
 
     /// A library asks for its own kit's scan, not the focused kit's.
     #[test]
@@ -674,20 +683,5 @@ mod library_scan_tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert!(app.model.kits[1].scanning_entries, "the library's kit is scanned");
         assert!(!app.model.kits[0].scanning_entries, "the focused kit is not");
-    }
-}
-
-impl Model {
-    /// Resolve a double-clicked render model to the tag its cell should open:
-    /// the owning `.model` when the kit has one, otherwise the tag itself.
-    pub(in crate::app) fn resolve_model_browser_open(&self, kit_index: usize, key: &str) -> String {
-        let Some(source) = self.kits[kit_index].source.as_ref() else {
-            return key.to_owned();
-        };
-        let entries = source.full_entry_set();
-        let Some(clicked) = entries.iter().find(|entry| entry.key == key) else {
-            return key.to_owned();
-        };
-        owning_model_key(entries, clicked).unwrap_or_else(|| key.to_owned())
     }
 }

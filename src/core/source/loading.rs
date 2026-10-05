@@ -181,7 +181,6 @@ pub fn load_monolithic_blob_index(
     })
 }
 
-
 /// Mounts every IoStore container in a `Paks` directory as one merged read-only
 /// source of Reach tags (Halo: Campaign Evolved). Shared tags live in
 /// `pakchunk0`; each level chunk carries that mission's scenario + BSPs, so all
@@ -1114,9 +1113,26 @@ fn read_non_classic_tag(path: &Path) -> Result<TagFile> {
     TagFile::read(path).map_err(Into::into)
 }
 
+/// Validates a selected `blob_index.dat` and returns its cache directory.
+pub fn normalize_blob_index_path(path: &Path) -> Result<PathBuf> {
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if !file_name.eq_ignore_ascii_case("blob_index.dat") {
+        anyhow::bail!("expected blob_index.dat, got {}", path.display());
+    }
+    path.parent()
+        .map(Path::to_path_buf)
+        .with_context(|| format!("{} has no parent directory", path.display()))
+}
+
 #[cfg(test)]
-mod container_tests {
+mod tests {
     use super::*;
+    use blam_tags::TagFieldData;
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::apply::apply_field_edit;
 
     /// Containers mount in Unreal's order, the same one Chimp uses, so the two
     /// agree on which mod's copy of a tag wins. Ordered by chunk number and
@@ -1306,25 +1322,6 @@ mod container_tests {
             "expected an hlmt carrying both animation and skeleton model refs"
         );
     }
-}
-
-/// Validates a selected `blob_index.dat` and returns its cache directory.
-pub fn normalize_blob_index_path(path: &Path) -> Result<PathBuf> {
-    let file_name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
-    if !file_name.eq_ignore_ascii_case("blob_index.dat") {
-        anyhow::bail!("expected blob_index.dat, got {}", path.display());
-    }
-    path.parent()
-        .map(Path::to_path_buf)
-        .with_context(|| format!("{} has no parent directory", path.display()))
-}
-
-#[cfg(test)]
-mod paks_dir_tests {
-    use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
         crate::core::test_kits::unique_temp_path(&format!("paks-{name}"))
@@ -1534,14 +1531,6 @@ mod paks_dir_tests {
         assert_eq!(find_paks_dir(&root), None);
         let _ = std::fs::remove_dir_all(&root);
     }
-}
-
-#[cfg(test)]
-mod mod_export_tests {
-    use super::*;
-
-    static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
     /// End-to-end check of what Export Mod actually writes, short of the game
     /// loading it: take a real container tag, change a byte, write an override
@@ -1941,11 +1930,6 @@ mod mod_export_tests {
         }
         eprintln!("re-saved {rel_path} into its own exported mod");
     }
-}
-
-#[cfg(test)]
-mod classic_layout_tests {
-    use super::*;
 
     /// A fresh classic tag of `definition`, as the bytes it saves to.
     fn classic_bytes(definition: &str, engine: blam_tags::classic::ClassicEngine) -> Vec<u8> {
@@ -1987,14 +1971,6 @@ mod classic_layout_tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::bundled::locate_definitions_root;
-    use crate::core::document::apply::apply_field_edit;
-    use blam_tags::TagFieldData;
 
     /// Undo and redo snapshot a document as `write_to_bytes` and restore it
     /// through `read_tag_from_bytes`. A classic (Halo CE / Halo 2) document

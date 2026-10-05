@@ -1645,9 +1645,11 @@ pub(in crate::app) fn function_points_summary(points: &[(f32, f32); 4]) -> Strin
 }
 
 #[cfg(test)]
-mod sampler_mode_tests {
+mod tests {
     use super::*;
+    use crate::app::editor::{constant_color_function_hex, extract_constant_color, shader_function_grid_text};
     use crate::core::document::apply::{add_block_element, apply_field_edit};
+    use crate::core::document::value::decode_hex;
 
     fn set(tag: &mut TagFile, path: &str, value: &str) {
         apply_field_edit(tag, path, value).unwrap_or_else(|error| panic!("{path}: {error}"));
@@ -1711,13 +1713,6 @@ mod sampler_mode_tests {
             .collect();
         assert_eq!(inputs, ["4"], "the x override starts at the default's index");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::editor::{constant_color_function_hex, extract_constant_color, shader_function_grid_text};
-    use crate::core::document::value::decode_hex;
 
     // Shader model, editing, and thumbnail unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

@@ -431,7 +431,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod kit_activation_tests {
+mod tests {
     //! Which workspace is active decides where Ctrl+S, the save prompt and open
     //! pickers land, so it changes on a press inside a workspace and never because
     //! the cursor passed over one. Two workspaces side by side, driven headless.

@@ -600,7 +600,10 @@ fn dump_struct(
 }
 
 #[cfg(test)]
-mod alignment_tests {
+mod tests {
+    use super::*;
+    use crate::app::compare::diff_tags;
+    use crate::core::document::apply::add_block_element;
     use super::align_by_identity;
 
     /// Fixed-field keys that match nothing, so a test exercises content
@@ -780,10 +783,6 @@ mod alignment_tests {
         let pairs = align_by_identity(&ids(&["a", "b"]), &[]).expect("aligns");
         assert_eq!(pairs, vec![(Some(0), None), (Some(1), None)]);
     }
-}
-#[cfg(test)]
-mod base_path_tests {
-    use super::*;
 
     /// Deleting an element shifts every index below it, so the same field lives
     /// at two different paths. A side-by-side view has to know both, or it
@@ -803,10 +802,6 @@ mod base_path_tests {
             "an added element has no path in the shipped tag: {rows:?}"
         );
     }
-}
-#[cfg(test)]
-mod deletion_repro_tests {
-    use super::*;
 
     static PAKS: std::sync::LazyLock<&'static str> =
         std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
@@ -1004,13 +999,6 @@ mod deletion_repro_tests {
             "the deleted element should be reported"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::document::apply::add_block_element;
-    use crate::app::compare::diff_tags;
 
     // Editor unit and fixture tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

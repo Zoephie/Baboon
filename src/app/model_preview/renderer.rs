@@ -1712,7 +1712,7 @@ fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 }
 
 #[cfg(test)]
-mod gpu_renderer_tests {
+mod tests {
     use super::*;
     use blam_tags::math::{RealPoint2d, RealPoint3d, RealVector3d};
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};

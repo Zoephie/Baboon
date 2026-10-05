@@ -2257,7 +2257,7 @@ pub(in crate::app) fn normalize_shader_template_browse_path(
 }
 
 #[cfg(test)]
-mod reference_cell_tests {
+mod tests {
     use super::*;
     use crate::app::browser::draw_entry;
     use crate::app::editor::fields::with_test_edit_context;
@@ -2380,12 +2380,6 @@ mod reference_cell_tests {
         assert!(drop_onto(structural(), &bitmap, true).is_empty());
         assert!(drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, false).is_empty());
     }
-}
-
-#[cfg(test)]
-mod h2_template_switch_tests {
-    use super::*;
-    use crate::app::editor::fields::with_test_edit_context;
 
     /// Switching an H2 shader's template queues the new template's parameter
     /// names, so parameters it lacks are pruned. This read the template off a
@@ -2419,11 +2413,6 @@ mod h2_template_switch_tests {
             assert!(!names.is_empty());
         });
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     // Shader model, editing, and thumbnail unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

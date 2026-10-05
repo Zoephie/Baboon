@@ -351,8 +351,9 @@ pub(in crate::app) fn dependency_target_exists(tags_root: &Path, rel_path: &str,
 }
 
 #[cfg(test)]
-mod incomplete_index_tests {
+mod tests {
     use super::*;
+    use crate::app::browser::{BrowserAction, BrowserSearchScope, folder_pane_key};
 
     /// A build that lost tags to a crashed reader says so, rather than
     /// reporting a complete index.
@@ -382,12 +383,6 @@ mod incomplete_index_tests {
 
         assert!(app.model.status.contains("without 3 tag"), "{}", app.model.status);
     }
-}
-
-#[cfg(test)]
-mod reference_path_tests {
-
-    use super::*;
 
     #[test]
     fn ancestor_block_indices_splits_indexed_path() {
@@ -454,12 +449,6 @@ mod reference_path_tests {
             normalize_ref("sound\\materials\\hard\\human_weap_melee"),
         );
     }
-}
-
-#[cfg(test)]
-mod folder_browser_integration_tests {
-    use super::*;
-    use crate::app::browser::{BrowserAction, BrowserSearchScope, folder_pane_key};
 
     /// A folder renamed while docked browsers show it, or folders inside
     /// it: the panes follow with their view choices, the tags' keywords move

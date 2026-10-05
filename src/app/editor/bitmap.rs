@@ -608,67 +608,6 @@ fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
     }
 }
 
-#[cfg(test)]
-mod bitmap_channel_control_tests {
-    use super::*;
-
-    #[test]
-    fn soloing_a_channel_enables_it_and_disables_the_rest() {
-        let mut preview = BitmapPreviewState::default();
-        apply_bitmap_channel_action(
-            &mut preview,
-            ButtonIcon::ChannelBlue,
-            BitmapChannelAction::Solo,
-        );
-
-        assert!(!preview.show_red);
-        assert!(!preview.show_green);
-        assert!(preview.show_blue);
-        assert!(!preview.show_alpha);
-    }
-
-    #[test]
-    fn excluding_a_channel_disables_it_and_enables_the_rest() {
-        let mut preview = BitmapPreviewState::default();
-        preview.show_red = false;
-        preview.show_green = false;
-        preview.show_blue = false;
-        preview.show_alpha = false;
-        apply_bitmap_channel_action(
-            &mut preview,
-            ButtonIcon::ChannelGreen,
-            BitmapChannelAction::Exclude,
-        );
-
-        assert!(preview.show_red);
-        assert!(!preview.show_green);
-        assert!(preview.show_blue);
-        assert!(preview.show_alpha);
-    }
-
-    #[test]
-    fn active_channel_fills_are_explicitly_forty_percent() {
-        assert_eq!(
-            bitmap_channel_active_colors(ButtonIcon::ChannelRed)
-                .0
-                .to_array(),
-            [102, 0, 0, 102]
-        );
-        assert_eq!(
-            bitmap_channel_active_colors(ButtonIcon::ChannelGreen)
-                .0
-                .to_array(),
-            [0, 102, 0, 102]
-        );
-        assert_eq!(
-            bitmap_channel_active_colors(ButtonIcon::ChannelBlue)
-                .0
-                .to_array(),
-            [0, 0, 102, 102]
-        );
-    }
-}
-
 fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
     let label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
     const ZOOM_SETTINGS_WIDTH: f32 = 240.0;
@@ -1004,30 +943,110 @@ pub(in crate::app) fn decode_bitmap_level(level: BitmapLevel) -> anyhow::Result<
     })
 }
 
-#[cfg(test)]
-mod bump_preview_tests {
-    //! The bitmap preview shows a bump map as a normal map, not as noise.
-    //!
-    //! `tool.exe` bakes bump/zbump sources into tangent-space normals stored as
-    //! `dxn` (BC5) with signed channels on PC. Reading them unsigned rotates
-    //! every texel by half the range, and until the engine reconstructed Z the
-    //! blue channel was a flat 128 — so the panel drew colour noise on a dead
-    //! plane and *Extract Bitmap* wrote the same thing to TIFF.
-    //!
-    //! The decode itself is the engine's, and `blam-tags` covers it directly.
-    //! What this asserts is Baboon's half: that `build_bitmap_preview` resolves
-    //! the format through `BitmapImage::format` (which is what distinguishes the
-    //! two `dxn` encodings) rather than re-deriving it from the schema name, and
-    //! that the mip-chain walk hands the decoder the bytes it expects.
-    //!
-    //! Skips silently when no H3 editing kit is present.
+pub(in crate::app) fn filtered_bitmap_rgba(
+    data: &BitmapPreviewData,
+    preview: &BitmapPreviewState,
+) -> Vec<u8> {
+    let alpha_only =
+        !preview.show_red && !preview.show_green && !preview.show_blue && preview.show_alpha;
+    let mut out = data.rgba.clone();
+    for pixel in out.chunks_exact_mut(4) {
+        let [r, g, b, a] = [pixel[0], pixel[1], pixel[2], pixel[3]];
+        if alpha_only {
+            pixel[0] = a;
+            pixel[1] = a;
+            pixel[2] = a;
+            pixel[3] = 255;
+        } else {
+            pixel[0] = if preview.show_red { r } else { 0 };
+            pixel[1] = if preview.show_green { g } else { 0 };
+            pixel[2] = if preview.show_blue { b } else { 0 };
 
+            pixel[3] = if preview.show_alpha { a } else { 255 };
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blam_tags::TagFile;
+    use crate::app::editor::bitmap::build_bitmap_preview;
+    use eframe::egui;
     use std::path::PathBuf;
 
-    use blam_tags::TagFile;
-    use eframe::egui;
+    #[test]
+    fn soloing_a_channel_enables_it_and_disables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelBlue,
+            BitmapChannelAction::Solo,
+        );
 
-    use crate::app::editor::bitmap::build_bitmap_preview;
+        assert!(!preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(!preview.show_alpha);
+    }
+
+    #[test]
+    fn excluding_a_channel_disables_it_and_enables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        preview.show_red = false;
+        preview.show_green = false;
+        preview.show_blue = false;
+        preview.show_alpha = false;
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelGreen,
+            BitmapChannelAction::Exclude,
+        );
+
+        assert!(preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(preview.show_alpha);
+    }
+
+    #[test]
+    fn active_channel_fills_are_explicitly_forty_percent() {
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelRed)
+                .0
+                .to_array(),
+            [102, 0, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelGreen)
+                .0
+                .to_array(),
+            [0, 102, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelBlue)
+                .0
+                .to_array(),
+            [0, 0, 102, 102]
+        );
+    }
+
+    // The bitmap preview shows a bump map as a normal map, not as noise.
+    //
+    // `tool.exe` bakes bump/zbump sources into tangent-space normals stored as
+    // `dxn` (BC5) with signed channels on PC. Reading them unsigned rotates
+    // every texel by half the range, and until the engine reconstructed Z the
+    // blue channel was a flat 128 — so the panel drew colour noise on a dead
+    // plane and *Extract Bitmap* wrote the same thing to TIFF.
+    //
+    // The decode itself is the engine's, and `blam-tags` covers it directly.
+    // What this asserts is Baboon's half: that `build_bitmap_preview` resolves
+    // the format through `BitmapImage::format` (which is what distinguishes the
+    // two `dxn` encodings) rather than re-deriving it from the schema name, and
+    // that the mip-chain walk hands the decoder the bytes it expects.
+    //
+    // Skips silently when no H3 editing kit is present.
 
     /// A tag whose whole point is that it is a bump map, in a folder every
     /// H3EK install ships.
@@ -1152,36 +1171,6 @@ mod bump_preview_tests {
             "the worker decoded different pixels"
         );
     }
-}
-
-pub(in crate::app) fn filtered_bitmap_rgba(
-    data: &BitmapPreviewData,
-    preview: &BitmapPreviewState,
-) -> Vec<u8> {
-    let alpha_only =
-        !preview.show_red && !preview.show_green && !preview.show_blue && preview.show_alpha;
-    let mut out = data.rgba.clone();
-    for pixel in out.chunks_exact_mut(4) {
-        let [r, g, b, a] = [pixel[0], pixel[1], pixel[2], pixel[3]];
-        if alpha_only {
-            pixel[0] = a;
-            pixel[1] = a;
-            pixel[2] = a;
-            pixel[3] = 255;
-        } else {
-            pixel[0] = if preview.show_red { r } else { 0 };
-            pixel[1] = if preview.show_green { g } else { 0 };
-            pixel[2] = if preview.show_blue { b } else { 0 };
-
-            pixel[3] = if preview.show_alpha { a } else { 255 };
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     // Editor unit and fixture tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

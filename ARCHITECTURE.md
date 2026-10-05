@@ -111,8 +111,8 @@ trait Dialog: Any {
 - A draw opens a dialog with `cx.open_dialog(…)`; a handler with
   `dialogs.open(…)`. Opening one of the same type and instance replaces it.
 
-The smoke test (`frame_smoke_tests` in `shell/frame.rs`) draws every window over a
-populated app and fails for any `impl Dialog` without a case.
+The smoke test in `shell/frame.rs` draws every window over a populated app
+and fails for any `impl Dialog` without a case.
 
 ## Documents and undo
 
@@ -177,17 +177,22 @@ core's document and keyword types, which every feature sees.
 
 ## Tests
 
-Tests sit beside the code they test: inline at the bottom of the module's
-file as `mod tests { … }` or a topic-named `mod …_tests { … }`, or as
-`tests.rs` or `…_tests.rs` files when the module is a folder with other
-children. Most build what they need synthetically from the bundled
-definitions. Tests that need a real editing kit read its location from the
-environment through `src/core/test_kits.rs` (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`, `BLAM_TEST_H3EK`,
-`BLAM_TEST_HREK`) and skip, by name, when it is not set; Campaign Evolved ones
-read `CE_PAKS` and are `#[ignore]`d otherwise. No tag files are checked in.
+Tests sit beside the code they test, in the module whose code they exercise:
+one `#[cfg(test)] mod tests { … }` at the bottom of the file, or a `tests.rs`
+beside `mod.rs` when the module is a folder with other children. A test that
+needs no UI belongs in `core`. Fixtures several modules share are
+`#[cfg(test)]` items beside what they set up, such as
+`editor::fields::with_test_edit_context`, or live in `src/core/test_kits.rs`.
 
-Whole-frame tests drive `Baboon::run_frame` headlessly through the harness in
-`perf_baseline_tests` in `shell/frame.rs`.
+Most tests build what they need synthetically from the bundled definitions.
+Tests that need a real editing kit read its location from the environment
+through `src/core/test_kits.rs` (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`,
+`BLAM_TEST_H3EK`, `BLAM_TEST_HREK`) and skip, by name, when it is not set;
+Campaign Evolved ones read `BLAM_TEST_CE` through `test_kits`, or `CE_PAKS`
+directly, and are `#[ignore]`d otherwise. No tag files are checked in.
+
+Whole-frame tests drive `Baboon::run_frame` headlessly through the `Harness`
+in `shell/frame.rs`'s tests.
 
 ## Adding things
 

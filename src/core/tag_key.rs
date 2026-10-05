@@ -2,7 +2,8 @@
 //! sessions, keyword sidecars, favourites and the index database.
 //!
 //! A key's spelling is a file format, so every kind is built here and nowhere
-//! else, and read back here too; `compat_keys_tests` pins every spelling.
+//! else, and read back here too; the tests in `core::source::index` pin every
+//! spelling.
 
 use std::path::Path;
 

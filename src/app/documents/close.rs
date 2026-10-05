@@ -94,8 +94,6 @@ impl Baboon {
         true
     }
 
-
-
     pub(in crate::app) fn close_tab(&mut self, key: &str) {
         // `close_tag_pane` re-derives the open set and moves the selection off
         // a removed tag, so there is nothing to fix up afterwards.
@@ -215,16 +213,6 @@ impl Baboon {
         }
         self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
     }
-
-
-
-
-
-
-
-
-
-
 
     pub(in crate::app) fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
@@ -652,12 +640,104 @@ pub(in crate::app) fn close_prompt_save_route(location: Option<&TagEntryLocation
     }
 }
 
-#[cfg(test)]
-mod save_changes_prompt_tests {
-    //! The close prompt's discard button, which used to be one click from deleting
-    //! a workspace's stashed edits.
+impl Model {
+    /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
+    /// in this kit's project from an earlier session.
+    pub(in crate::app) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
+        self.kits[kit]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set())
+            || self.tag_has_stashed_overlay(kit, key)
+    }
 
+    pub(in crate::app) fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
+        self.close_action_tag_keys(action)
+            .into_iter()
+            .filter_map(|key| {
+                let doc = self.kits[self.active].parsed_tags.get(&key)?;
+                if !doc.dirty.is_set() {
+                    return None;
+                }
+                // Edits to a tag that has no writer (a monolithic build, a
+                // big-endian tag) are session-scratch by construction. Listing
+                // them here would offer a Save that always fails, and — for
+                // CloseApp, which re-checks for dirty work after the prompt —
+                // a close that never terminates.
+                if !document_edits_are_saveable(&self.kits[self.active], &key, doc) {
+                    return None;
+                }
+                Some(DirtyTagEntry {
+                    path: self.tag_path_label(&key),
+                    tag_id: key,
+                    checked: true,
+                })
+            })
+            .collect()
+    }
+
+    pub(in crate::app) fn dirty_chimp_for_close_action(&self, action: &PendingCloseAction) -> Vec<String> {
+        if close_action_includes_chimp(action) {
+            self.chimp_dirty_packages(self.active)
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
+        match action {
+            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
+                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            }
+            PendingCloseAction::CloseTab(key) => vec![key.clone()],
+            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
+                self.kits[self.active]
+                    .open_tabs
+                    .iter()
+                    .filter(|key| *key != kept_key),
+            ),
+            // `request_close_action` has already made this kit active, so the
+            // active-kit lookups above address the right documents.
+            PendingCloseAction::CloseKit(_) => {
+                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
+            }
+        }
+    }
+
+    pub(in crate::app) fn tag_path_label(&self, key: &str) -> String {
+        let Some(entry) = self.entry_for_key(key) else {
+            return key.to_owned();
+        };
+        match &entry.location {
+            TagEntryLocation::LooseFile(path) => path.display().to_string(),
+            TagEntryLocation::Monolithic { .. }
+            | TagEntryLocation::Container { .. }
+            | TagEntryLocation::NewContainer { .. } => entry.display_path.clone(),
+        }
+    }
+
+    /// Whether the loaded document for `key` still has unsaved edits. Save
+    /// paths that report through `status` (container writes) use this to tell
+    /// success from failure.
+    pub(in crate::app) fn tag_is_dirty(&self, key: &str) -> bool {
+        self.kits[self.active]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty.is_set())
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
+    use crate::app::browser::{BrowserAction, BrowserMode, BrowserSort};
+    use crate::app::loose_fixture::*;
+    use crate::app::shell::FolderRefactorUiState;
+    use crate::app::shell::session::LastSessionSourceKind;
+    use std::path::PathBuf;
+
+    // The close prompt's discard button, which used to be one click from deleting
+    // a workspace's stashed edits.
 
     /// No single click may delete a stash. The button that did was labelled "Don't
     /// Save" on a quit dialog, and because Export Mod leaves its tags dirty, that is
@@ -690,28 +770,19 @@ mod save_changes_prompt_tests {
         // Even a stale confirmation flag cannot turn this into two clicks.
         assert_eq!(discard_button(false, true).label, "Don't Save");
     }
-}
 
-#[cfg(test)]
-mod save_close_session_tests {
-    //! Characterization of the save, close, discard, undo and session-restore
-    //! flows on synthetic loose tags.
-    //!
-    //! These pin what the app does today, so moving the code that does it can be
-    //! shown to have changed nothing. Each flow runs through the entry point the
-    //! UI calls -- the close prompt is clicked, not short-circuited -- and each
-    //! assertion reads back state: files on disk, documents, tabs, the prompt.
-    //!
-    //! A Campaign Evolved source would route the prompt's Save into the pak
-    //! (`overwrite_current_tag_in_place` / `save_new_container_tag`), which needs a
-    //! mounted install; those branches are not reached here. The stash half of the
-    //! prompt is covered in `campaign_project_round_trip_tests.rs`.
-
-    use crate::app::loose_fixture::*;
-    use super::*;
-    use crate::app::shell::FolderRefactorUiState;
-    use crate::app::shell::session::LastSessionSourceKind;
-    use crate::app::browser::{BrowserAction, BrowserMode, BrowserSort};
+    // Characterization of the save, close, discard, undo and session-restore
+    // flows on synthetic loose tags.
+    //
+    // These pin what the app does today, so moving the code that does it can be
+    // shown to have changed nothing. Each flow runs through the entry point the
+    // UI calls -- the close prompt is clicked, not short-circuited -- and each
+    // assertion reads back state: files on disk, documents, tabs, the prompt.
+    //
+    // A Campaign Evolved source would route the prompt's Save into the pak
+    // (`overwrite_current_tag_in_place` / `save_new_container_tag`), which needs a
+    // mounted install; those branches are not reached here. The stash half of the
+    // prompt is covered in `campaign_project_round_trip_tests.rs`.
 
     const MODEL: &str = "objects/props/crate.model";
     const OTHER: &str = "objects/props/barrel.model";
@@ -1425,12 +1496,6 @@ mod save_close_session_tests {
         Baboon::for_test().persist_session_on_exit();
         assert!(load_last_session().is_none());
     }
-}
-
-#[cfg(test)]
-mod close_tests {
-    use std::path::PathBuf;
-
 
     #[test]
     fn only_workspace_close_actions_wait_for_chimp_documents() {
@@ -1484,92 +1549,5 @@ mod close_tests {
             ClosePromptSave::File
         );
         assert_eq!(close_prompt_save_route(None), ClosePromptSave::File);
-    }
-}
-
-impl Model {
-    /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
-    /// in this kit's project from an earlier session.
-    pub(in crate::app) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
-        self.kits[kit]
-            .parsed_tags
-            .get(key)
-            .is_some_and(|document| document.dirty.is_set())
-            || self.tag_has_stashed_overlay(kit, key)
-    }
-
-    pub(in crate::app) fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
-        self.close_action_tag_keys(action)
-            .into_iter()
-            .filter_map(|key| {
-                let doc = self.kits[self.active].parsed_tags.get(&key)?;
-                if !doc.dirty.is_set() {
-                    return None;
-                }
-                // Edits to a tag that has no writer (a monolithic build, a
-                // big-endian tag) are session-scratch by construction. Listing
-                // them here would offer a Save that always fails, and — for
-                // CloseApp, which re-checks for dirty work after the prompt —
-                // a close that never terminates.
-                if !document_edits_are_saveable(&self.kits[self.active], &key, doc) {
-                    return None;
-                }
-                Some(DirtyTagEntry {
-                    path: self.tag_path_label(&key),
-                    tag_id: key,
-                    checked: true,
-                })
-            })
-            .collect()
-    }
-
-    pub(in crate::app) fn dirty_chimp_for_close_action(&self, action: &PendingCloseAction) -> Vec<String> {
-        if close_action_includes_chimp(action) {
-            self.chimp_dirty_packages(self.active)
-        } else {
-            Vec::new()
-        }
-    }
-
-    pub(in crate::app) fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
-        match action {
-            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
-            }
-            PendingCloseAction::CloseTab(key) => vec![key.clone()],
-            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
-                self.kits[self.active]
-                    .open_tabs
-                    .iter()
-                    .filter(|key| *key != kept_key),
-            ),
-            // `request_close_action` has already made this kit active, so the
-            // active-kit lookups above address the right documents.
-            PendingCloseAction::CloseKit(_) => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
-            }
-        }
-    }
-
-    pub(in crate::app) fn tag_path_label(&self, key: &str) -> String {
-        let Some(entry) = self.entry_for_key(key) else {
-            return key.to_owned();
-        };
-        match &entry.location {
-            TagEntryLocation::LooseFile(path) => path.display().to_string(),
-            TagEntryLocation::Monolithic { .. }
-            | TagEntryLocation::Container { .. }
-            | TagEntryLocation::NewContainer { .. } => entry.display_path.clone(),
-        }
-    }
-
-    /// Whether the loaded document for `key` still has unsaved edits. Save
-    /// paths that report through `status` (container writes) use this to tell
-    /// success from failure.
-    pub(in crate::app) fn tag_is_dirty(&self, key: &str) -> bool {
-        self.kits[self.active]
-            .parsed_tags
-            .get(key)
-            .is_some_and(|document| document.dirty.is_set())
     }
 }

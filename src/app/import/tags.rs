@@ -464,7 +464,6 @@ pub(in crate::app) fn import_sources_for(target_game: &str) -> Vec<&'static str>
 
 impl Baboon {
 
-
     fn refuse_read_only_tag_import(&mut self) -> bool {
         let index = self
             .dialogs
@@ -1299,16 +1298,30 @@ fn detect_import_game(
     }
 }
 
-#[cfg(test)]
-mod import_timing_tests {
-    //! Where the wall-clock of one conversion actually goes.
-    //!
-    //! Diagnostic, not a gate: run with `--ignored --nocapture` against real kits.
-    //! Every number here is measured on this machine's installed kits, so it is a
-    //! profile rather than an assertion.
+impl Model {
+    /// Whether Import Tags can act on the active kit. Loose kits only: a
+    /// monolithic cache is read-only, and a Campaign Evolved container has its
+    /// own import path because a tag there is a package, not a file.
+    pub(in crate::app) fn can_import_tags(&self) -> bool {
+        if self.editing_kit_is_read_only(self.active) {
+            return false;
+        }
+        self.source().is_some_and(|source| {
+            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
+        })
+    }
+}
 
-    use crate::app::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
     use std::time::Instant;
+
+    // Where the wall-clock of one conversion actually goes.
+    //
+    // Diagnostic, not a gate: run with `--ignored --nocapture` against real kits.
+    // Every number here is measured on this machine's installed kits, so it is a
+    // profile rather than an assertion.
 
     fn kit(name: &str) -> Option<PathBuf> {
         let path = PathBuf::from("D:/SteamLibrary/steamapps/common")
@@ -1542,11 +1555,6 @@ mod import_timing_tests {
             );
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn a_pasted_windows_path_loses_its_quotes() {
@@ -2086,19 +2094,5 @@ mod tests {
         assert!(
             detect_import_game(Path::new("D:/Kits/X/tags/foo.weapon"), &roots, None,).is_none()
         );
-    }
-}
-
-impl Model {
-    /// Whether Import Tags can act on the active kit. Loose kits only: a
-    /// monolithic cache is read-only, and a Campaign Evolved container has its
-    /// own import path because a tag there is a package, not a file.
-    pub(in crate::app) fn can_import_tags(&self) -> bool {
-        if self.editing_kit_is_read_only(self.active) {
-            return false;
-        }
-        self.source().is_some_and(|source| {
-            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
-        })
     }
 }

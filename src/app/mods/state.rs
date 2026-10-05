@@ -197,7 +197,7 @@ pub(in crate::app) struct ExportedMod {
 }
 
 #[cfg(test)]
-mod mod_export_tests {
+mod tests {
     use super::*;
 
     fn dialog(name: &str, folder: &str) -> ModExportDialog {

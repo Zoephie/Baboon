@@ -45,9 +45,6 @@ impl Baboon {
         self.dialogs.open(dialog);
     }
 
-
-
-
     /// Create the tag the New Tag dialog describes. The dialog is taken out of
     /// the host while it is, and put back — carrying the reason — when the
     /// tag cannot be made.
@@ -350,10 +347,6 @@ impl Baboon {
             "Renamed {old_display} → {new_rel}.{extension} (unsaved)"
         ))
     }
-
-
-
-
 
     /// Register an in-memory (unsaved) container tag: insert it into the browser
     /// entries, rebuild the folder + group trees so it shows up, open it in a
@@ -664,21 +657,166 @@ pub(in crate::app) fn register_created_tag_in_source(
     source.upsert_entry(entry, pending_folders);
 }
 
-#[cfg(test)]
-mod campaign_new_tag_tests {
-    //! Creating a Campaign Evolved tag in a group the game ships no instance of.
-    //!
-    //! The dialog offers all 141 groups the definitions define, but the game ships a
-    //! tag for only 101 of them. Creation used to require an existing same-group
-    //! `.uasset` to donate the UE5 package structure, so the other 40 -- among them
-    //! `cinematic_scene`, the reported case -- could not be created at all. The
-    //! wrapper is now *derived* from the group's own rules when no same-group tag
-    //! ships, which covers 36 of those 40. The last four are `object`, `unit`,
-    //! `item` and `device`: Halo's abstract base groups, which have no standalone
-    //! instances by design and stay refused.
+impl NewTagDialog {
+    /// Reload the groups for the selected game, and what the selected one
+    /// allows.
+    pub(in crate::app) fn refresh_groups(&mut self, model: &Model) {
+        self.load_groups();
+        self.refresh_authorability(model);
+    }
 
+    /// Load the groups the selected game's schemas define, keeping the
+    /// selection in range and clearing what depended on the old list.
+    fn load_groups(&mut self) {
+        match load_new_tag_groups(&self.game) {
+            Ok(groups) if groups.is_empty() => {
+                self.groups = groups;
+                self.selected_group = 0;
+                self.error = Some(format!(
+                    "No tag schemas found for {}",
+                    self.game
+                ));
+            }
+            Ok(groups) => {
+                self.groups = groups;
+                self.selected_group = self
+                    .selected_group
+                    .min(self.groups.len() - 1);
+                self.rel_path.clear();
+                self.output_path = None;
+                self.error = None;
+            }
+            Err(error) => {
+                self.groups.clear();
+                self.selected_group = 0;
+                self.rel_path.clear();
+                self.output_path = None;
+                self.error = Some(error);
+            }
+        }
+    }
+
+    /// Answer "can I make one of these?" for the group the New Tag dialog has
+    /// selected, and cache it.
+    ///
+    /// Called when the group or the game changes, which is the only time the
+    /// answer can move — it parses the whole mapping table, so it must not run
+    /// per frame.
+    pub(in crate::app) fn refresh_authorability(&mut self, model: &Model) {
+        self.authorability = None;
+        // Only Campaign Evolved has native classes standing behind its groups.
+        // Everywhere else a new tag is a file, and there is nothing to refuse.
+        if self.game != GameId::CampaignEvolved.as_str() {
+            return;
+        }
+        let Some(group) = self
+            .groups
+            .get(self.selected_group)
+        else {
+            return;
+        };
+        let Ok(usmap) = blam_tags::iostore::object::usmap::Usmap::meteorite() else {
+            return;
+        };
+        let shipped = model
+            .source()
+            .map(shipped_counts_by_group)
+            .and_then(|counts| counts.get(&group.group_tag).copied())
+            .unwrap_or(0);
+        let verdict = group_authorability(&group.name, shipped, &usmap);
+        self.authorability = Some((verdict.authorable(), verdict.summary()));
+    }
+
+    /// Ask where to write the new tag, under the loaded tags folder.
+    pub(in crate::app) fn choose_output_path(&mut self, model: &Model) {
+        let Some(root) = model.loaded_tags_root() else {
+            self.error =
+                Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
+            return;
+        };
+        let Some(group) = self
+            .groups
+            .get(self.selected_group)
+            .cloned()
+        else {
+            self.error = Some("Choose a tag group".to_owned());
+            return;
+        };
+
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(format!("Create New {}", group.name))
+            .set_directory(&root)
+            .set_file_name(format!("new_tag.{}", group.extension))
+            .add_filter(
+                format!("{} tag", group.extension),
+                &[group.extension.as_str()],
+            );
+        if let Some(output) = self.output_path.as_ref()
+            && let Some(parent) = output.parent()
+        {
+            dialog = dialog.set_directory(parent);
+        }
+        let Some(picked) = dialog.save_file() else {
+            return;
+        };
+        match new_tag_output_path_from_dialog(&root, &picked, &group.extension) {
+            Ok((output, rel_path)) => {
+                self.output_path = Some(output);
+                self.rel_path = rel_path;
+                self.error = None;
+            }
+            Err(error) => {
+                self.output_path = None;
+                self.rel_path.clear();
+                self.error = Some(error);
+            }
+        }
+    }
+}
+
+impl Model {
+    /// Find an existing container tag of `group_tag` and return its owning
+    /// container index plus its `.uasset` container path — the package template
+    /// for a new tag of the same group.
+    pub(in crate::app) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
+        self.find_container_template_in(self.active, group_tag)
+    }
+
+    /// A specific kit's template. Project recovery names its kit: the container
+    /// a stashed new tag is modelled on has to come from the source that tag
+    /// belongs to, not from whichever kit happens to be focused.
+    ///
+    /// Returning `None` is an ordinary answer, not a failure: it means the game
+    /// ships no tag of this group, and the caller derives the wrapper instead.
+    /// See [`pick_container_template`] for why no other group can stand in.
+    pub(in crate::app) fn find_container_template_in(
+        &self,
+        kit: usize,
+        group_tag: u32,
+    ) -> Option<(usize, String)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        pick_container_template(
+            source.entries.iter().chain(source.all_entries.iter()),
+            group_tag,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
     use blam_tags::convert::CAMPAIGN_EVOLVED_GENERATION;
+
+    // Creating a Campaign Evolved tag in a group the game ships no instance of.
+    //
+    // The dialog offers all 141 groups the definitions define, but the game ships a
+    // tag for only 101 of them. Creation used to require an existing same-group
+    // `.uasset` to donate the UE5 package structure, so the other 40 -- among them
+    // `cinematic_scene`, the reported case -- could not be created at all. The
+    // wrapper is now *derived* from the group's own rules when no same-group tag
+    // ships, which covers 36 of those 40. The last four are `object`, `unit`,
+    // `item` and `device`: Halo's abstract base groups, which have no standalone
+    // instances by design and stay refused.
 
     fn definitions() -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions")
@@ -1018,12 +1156,6 @@ mod campaign_new_tag_tests {
             "an unsaved tag has no .uasset to donate"
         );
     }
-}
-
-#[cfg(test)]
-mod container_path_tests {
-
-    use super::*;
 
     /// A mod without `_P` mounts at the same priority as the game's own
     /// containers and loses, so it builds correctly and does nothing. Renaming
@@ -1070,14 +1202,10 @@ mod container_path_tests {
         assert_eq!(normalize_container_tag_rel(""), "");
         assert_eq!(normalize_container_tag_rel("///"), "");
     }
-}
-#[cfg(test)]
-mod dialog_tests {
-    //! The New Tag dialog through its Create: the create takes the dialog back
-    //! from the host, and returns it — with the reason — only when no tag was
-    //! made.
 
-    use super::*;
+    // The New Tag dialog through its Create: the create takes the dialog back
+    // from the host, and returns it — with the reason — only when no tag was
+    // made.
 
     /// A loose Halo 3 editing kit in a fresh temporary folder, holding nothing.
     fn loose_app() -> (Baboon, PathBuf) {
@@ -1184,156 +1312,6 @@ mod dialog_tests {
             assert_eq!(tag.classic_engine(), Some(engine), "{game:?}");
         }
     }
-}
-
-impl NewTagDialog {
-    /// Reload the groups for the selected game, and what the selected one
-    /// allows.
-    pub(in crate::app) fn refresh_groups(&mut self, model: &Model) {
-        self.load_groups();
-        self.refresh_authorability(model);
-    }
-
-    /// Load the groups the selected game's schemas define, keeping the
-    /// selection in range and clearing what depended on the old list.
-    fn load_groups(&mut self) {
-        match load_new_tag_groups(&self.game) {
-            Ok(groups) if groups.is_empty() => {
-                self.groups = groups;
-                self.selected_group = 0;
-                self.error = Some(format!(
-                    "No tag schemas found for {}",
-                    self.game
-                ));
-            }
-            Ok(groups) => {
-                self.groups = groups;
-                self.selected_group = self
-                    .selected_group
-                    .min(self.groups.len() - 1);
-                self.rel_path.clear();
-                self.output_path = None;
-                self.error = None;
-            }
-            Err(error) => {
-                self.groups.clear();
-                self.selected_group = 0;
-                self.rel_path.clear();
-                self.output_path = None;
-                self.error = Some(error);
-            }
-        }
-    }
-
-    /// Answer "can I make one of these?" for the group the New Tag dialog has
-    /// selected, and cache it.
-    ///
-    /// Called when the group or the game changes, which is the only time the
-    /// answer can move — it parses the whole mapping table, so it must not run
-    /// per frame.
-    pub(in crate::app) fn refresh_authorability(&mut self, model: &Model) {
-        self.authorability = None;
-        // Only Campaign Evolved has native classes standing behind its groups.
-        // Everywhere else a new tag is a file, and there is nothing to refuse.
-        if self.game != GameId::CampaignEvolved.as_str() {
-            return;
-        }
-        let Some(group) = self
-            .groups
-            .get(self.selected_group)
-        else {
-            return;
-        };
-        let Ok(usmap) = blam_tags::iostore::object::usmap::Usmap::meteorite() else {
-            return;
-        };
-        let shipped = model
-            .source()
-            .map(shipped_counts_by_group)
-            .and_then(|counts| counts.get(&group.group_tag).copied())
-            .unwrap_or(0);
-        let verdict = group_authorability(&group.name, shipped, &usmap);
-        self.authorability = Some((verdict.authorable(), verdict.summary()));
-    }
-
-    /// Ask where to write the new tag, under the loaded tags folder.
-    pub(in crate::app) fn choose_output_path(&mut self, model: &Model) {
-        let Some(root) = model.loaded_tags_root() else {
-            self.error =
-                Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
-            return;
-        };
-        let Some(group) = self
-            .groups
-            .get(self.selected_group)
-            .cloned()
-        else {
-            self.error = Some("Choose a tag group".to_owned());
-            return;
-        };
-
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(format!("Create New {}", group.name))
-            .set_directory(&root)
-            .set_file_name(format!("new_tag.{}", group.extension))
-            .add_filter(
-                format!("{} tag", group.extension),
-                &[group.extension.as_str()],
-            );
-        if let Some(output) = self.output_path.as_ref()
-            && let Some(parent) = output.parent()
-        {
-            dialog = dialog.set_directory(parent);
-        }
-        let Some(picked) = dialog.save_file() else {
-            return;
-        };
-        match new_tag_output_path_from_dialog(&root, &picked, &group.extension) {
-            Ok((output, rel_path)) => {
-                self.output_path = Some(output);
-                self.rel_path = rel_path;
-                self.error = None;
-            }
-            Err(error) => {
-                self.output_path = None;
-                self.rel_path.clear();
-                self.error = Some(error);
-            }
-        }
-    }
-}
-
-impl Model {
-    /// Find an existing container tag of `group_tag` and return its owning
-    /// container index plus its `.uasset` container path — the package template
-    /// for a new tag of the same group.
-    pub(in crate::app) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
-        self.find_container_template_in(self.active, group_tag)
-    }
-
-    /// A specific kit's template. Project recovery names its kit: the container
-    /// a stashed new tag is modelled on has to come from the source that tag
-    /// belongs to, not from whichever kit happens to be focused.
-    ///
-    /// Returning `None` is an ordinary answer, not a failure: it means the game
-    /// ships no tag of this group, and the caller derives the wrapper instead.
-    /// See [`pick_container_template`] for why no other group can stand in.
-    pub(in crate::app) fn find_container_template_in(
-        &self,
-        kit: usize,
-        group_tag: u32,
-    ) -> Option<(usize, String)> {
-        let source = self.kits.get(kit)?.source.as_ref()?;
-        pick_container_template(
-            source.entries.iter().chain(source.all_entries.iter()),
-            group_tag,
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     // Editor unit and fixture tests.
     // It owns test-only characterization and does not participate in runtime application behavior.

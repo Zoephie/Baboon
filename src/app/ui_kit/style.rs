@@ -117,26 +117,6 @@ fn selection_stroke_for(dark_mode: bool) -> Color32 {
     }
 }
 
-#[cfg(test)]
-mod neutral_button_tests {
-    use super::*;
-
-    #[test]
-    fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
-        assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
-        assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
-        assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
-        assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
-    }
-
-    #[test]
-    fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
-        assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
-        assert_eq!(selection_fill_for(false), Color32::from_rgb(75, 125, 155));
-        assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
-    }
-}
-
 /// Consistent styling for empty text-input prompts without changing egui's
 /// general weak-text color, which is also used by unrelated disabled UI.
 pub(in crate::app) fn placeholder_text(text: impl Into<String>) -> RichText {
@@ -800,12 +780,29 @@ pub(in crate::app) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
 /// reads as current state long after it stopped being true.
 pub(in crate::app) const STATUS_LINGER_SECS: f64 = 5.0;
 
+pub(in crate::app) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;
+
 #[cfg(test)]
 mod tests {
-    //! Unit tests for shared visual-style helpers.
-    //! It owns test-only characterization and does not participate in runtime application behavior.
-
     use super::*;
+
+    #[test]
+    fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
+        assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
+        assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
+        assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
+        assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
+    }
+
+    #[test]
+    fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
+        assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
+        assert_eq!(selection_fill_for(false), Color32::from_rgb(75, 125, 155));
+        assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
+    }
+
+    // Unit tests for shared visual-style helpers.
+    // It owns test-only characterization and does not participate in runtime application behavior.
 
     #[test]
     fn material_text_for_bg_chooses_contrasting_foreground() {
@@ -1010,4 +1007,3 @@ mod tests {
         assert!(matches!(visuals.handle_shape, egui::style::HandleShape::Circle));
     }
 }
-pub(in crate::app) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;

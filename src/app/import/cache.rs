@@ -665,7 +665,7 @@ impl Baboon {
 }
 
 #[cfg(test)]
-mod outside_tree_tests {
+mod tests {
     use super::*;
 
     fn reference(path: &str) -> OutsideReference {

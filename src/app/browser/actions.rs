@@ -7,7 +7,6 @@ use crate::core::tag_key::same_entry_key;
 
 impl Baboon {
 
-
     /// Rebuild `kit`'s resolved favorite entries from the saved paths for its
     /// tags root. Kit-scoped because a finished background refactor refreshes
     /// the workspace it belonged to, which need not be the focused one.
@@ -494,8 +493,6 @@ impl Baboon {
         self.open_folder_in_explorer(path, "data");
     }
 
-
-
     /// Show a browser folder in File Explorer.
     ///
     /// `rel_path` is the browser's own path for the node, which for a loose kit
@@ -664,30 +661,45 @@ pub(in crate::app) fn remap_favorite_paths(
     }
 }
 
-#[cfg(test)]
-mod browser_action_table_tests {
-    //! Every `BrowserAction` dispatched through `handle_browser_action` on a
-    //! synthetic loose Halo 3 kit, one case per variant, each asserting the state
-    //! its arm leaves behind.
-    //!
-    //! Many arms end in a native file or folder dialog, which a test cannot
-    //! answer. For those the case pins everything before the dialog: the guard
-    //! that refuses, with its message, or -- where the guard returns silently --
-    //! that nothing at all changed. What runs after a dialog is covered by the
-    //! tests of the jobs themselves.
-    //!
-    //! `variant_index` matches every variant without a wildcard, so adding one
-    //! fails to compile here until it is given an index, and the table test then
-    //! fails until it is given a case.
+impl Model {
+    pub(in crate::app) fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
+        self.prefs
+            .editing_kit_favorites
+            .iter()
+            .position(|kit| same_recent_path(&kit.tags_root, root))
+    }
 
-    use crate::app::loose_fixture::*;
+    pub(in crate::app) fn loaded_data_root(&self) -> Option<PathBuf> {
+        Some(self.kit_layout_for(self.active)?.data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
+    use crate::app::import::{CacheImportDialog, TagImportDialog};
+    use crate::app::loose_fixture::*;
+    use crate::app::search::QueryResultsWindow;
     use crate::app::shell::FolderRefactorUiState;
     use crate::app::tag_ops::{DeleteConfirm, DeleteKind, NewTagDialog};
-    use crate::app::import::{CacheImportDialog, TagImportDialog};
-    use crate::app::search::QueryResultsWindow;
     use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
+    use super::remap_favorite_folders;
+
+    // Every `BrowserAction` dispatched through `handle_browser_action` on a
+    // synthetic loose Halo 3 kit, one case per variant, each asserting the state
+    // its arm leaves behind.
+    //
+    // Many arms end in a native file or folder dialog, which a test cannot
+    // answer. For those the case pins everything before the dialog: the guard
+    // that refuses, with its message, or -- where the guard returns silently --
+    // that nothing at all changed. What runs after a dialog is covered by the
+    // tests of the jobs themselves.
+    //
+    // `variant_index` matches every variant without a wildcard, so adding one
+    // fails to compile here until it is given an index, and the table test then
+    // fails until it is given a case.
 
     const MODEL: &str = "objects/props/crate.model";
     const RENDER: &str = "objects/props/crate.render_model";
@@ -1483,11 +1495,6 @@ mod browser_action_table_tests {
         assert!(app.model.prefs.editing_kit_favorites.is_empty());
         assert!(app.model.kits[0].active_favorite_entries.is_empty());
     }
-}
-
-#[cfg(test)]
-mod browser_refresh_tests {
-    use super::*;
 
     #[test]
     fn browser_refresh_discards_lazy_entries_and_relists_folders() {
@@ -1518,12 +1525,6 @@ mod browser_refresh_tests {
         assert!(tree.children.iter().all(|node| !node.entries_loaded));
         let _ = std::fs::remove_dir_all(root);
     }
-}
-
-#[cfg(test)]
-mod favorite_folder_tests {
-    use super::remap_favorite_folders;
-    use std::path::{Path, PathBuf};
 
     #[test]
     fn favorite_folders_at_or_under_a_moved_folder_follow_it() {
@@ -1544,11 +1545,6 @@ mod favorite_folder_tests {
             ]
         );
     }
-}
-
-#[cfg(test)]
-mod folder_opener_tests {
-    use super::*;
 
     /// Open Folder did nothing but say "only available on Windows" on macOS
     /// and Linux. Every platform now launches its file manager on the folder.
@@ -1586,13 +1582,6 @@ mod folder_opener_tests {
         assert!(!launched);
         assert!(app.model.status.contains("not found"), "{}", app.model.status);
     }
-}
-
-#[cfg(test)]
-mod explorer_path_tests {
-    use std::path::{Path, PathBuf};
-
-    use super::*;
 
     #[test]
     fn explorer_select_arguments_keep_switch_separate_from_path_with_spaces() {
@@ -1640,18 +1629,5 @@ mod explorer_path_tests {
 
         assert_eq!(favorites[0], new_relative);
         assert_eq!(favorites[1], PathBuf::from("sound/brute.sound"));
-    }
-}
-
-impl Model {
-    pub(in crate::app) fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
-        self.prefs
-            .editing_kit_favorites
-            .iter()
-            .position(|kit| same_recent_path(&kit.tags_root, root))
-    }
-
-    pub(in crate::app) fn loaded_data_root(&self) -> Option<PathBuf> {
-        Some(self.kit_layout_for(self.active)?.data)
     }
 }
