@@ -4,7 +4,7 @@
 use super::*;
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(in crate::app) enum ButtonIcon {
     Add,
     About,
@@ -178,9 +178,9 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 }
 
 pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
-    let svg = colorized_icon_svg(icon, color);
+    let svg = colorized_icon_bytes(icon, color);
     let uri = button_icon_uri(ui.ctx(), icon, color, rect.width());
-    egui::Image::from_bytes(uri, svg.into_bytes())
+    egui::Image::from_bytes(uri, svg)
         .fit_to_exact_size(rect.size())
         .tint(Color32::WHITE)
         .paint_at(ui, rect);
@@ -193,9 +193,9 @@ pub(in crate::app) fn button_icon_image(
     size: f32,
 ) -> egui::Image<'static> {
     let color = icon_color(icon, color);
-    let svg = colorized_icon_svg(icon, color);
+    let svg = colorized_icon_bytes(icon, color);
     let uri = button_icon_uri(ui.ctx(), icon, color, size);
-    egui::Image::from_bytes(uri, svg.into_bytes())
+    egui::Image::from_bytes(uri, svg)
         .fit_to_exact_size(Vec2::splat(size))
         .tint(Color32::WHITE)
 }
@@ -281,6 +281,25 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
         ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => material_delete_text(),
         _ => fallback,
     }
+}
+
+/// [`colorized_icon_svg`], made once per icon and color. Icons are painted
+/// every frame and egui drops the bytes it is handed once it has the texture,
+/// so rebuilding the SVG each time (five passes over its text) was all waste:
+/// a sixth of a frame with one weapon tag open.
+fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
+    thread_local! {
+        static COLORIZED: std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    let bytes = COLORIZED.with(|colorized| {
+        colorized
+            .borrow_mut()
+            .entry((icon, color))
+            .or_insert_with(|| colorized_icon_svg(icon, color).into_bytes().into())
+            .clone()
+    });
+    egui::load::Bytes::Shared(bytes)
 }
 
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
@@ -810,6 +829,25 @@ mod tests {
         let svg = colorized_icon_svg(ButtonIcon::Open, Color32::from_rgb(1, 2, 3));
         assert!(svg.contains("#010203"));
         assert!(!svg.contains("currentColor"));
+    }
+
+    /// Painting an icon again hands egui the bytes made the first time, not
+    /// a fresh recoloring: icons are painted on every frame.
+    #[test]
+    fn a_colorized_icon_is_made_once_per_color() {
+        let shared = |color| match colorized_icon_bytes(ButtonIcon::Open, color) {
+            egui::load::Bytes::Shared(bytes) => bytes,
+            egui::load::Bytes::Static(_) => panic!("a recolored icon is not static"),
+        };
+        let first = shared(Color32::from_rgb(1, 2, 3));
+        assert_eq!(
+            &*first,
+            colorized_icon_svg(ButtonIcon::Open, Color32::from_rgb(1, 2, 3)).as_bytes()
+        );
+        assert!(Arc::ptr_eq(&first, &shared(Color32::from_rgb(1, 2, 3))));
+        let other = shared(Color32::from_rgb(4, 5, 6));
+        assert!(!Arc::ptr_eq(&first, &other));
+        assert!(std::str::from_utf8(&other).unwrap().contains("#040506"));
     }
 
     #[test]
