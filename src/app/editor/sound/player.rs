@@ -85,7 +85,7 @@ fn draw_clip_selector(
     width: f32,
 ) -> Option<usize> {
     let popup_id = ui.make_persistent_id(("clip_player_combo", id_salt, tag_key));
-    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let title = clips
         .get(selected)
         .map(clip_title)
@@ -101,15 +101,16 @@ fn draw_clip_selector(
     );
     let just_opened = response.clicked() && !open;
     if response.clicked() {
-        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
     }
     let mut selection = None;
-    egui::popup::popup_below_widget(
-        ui,
-        popup_id,
-        &response,
-        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
-        |ui| {
+    // Open while its id is open in memory, as the button above toggles it;
+    // left alone, a popup built from a response is always open.
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
             picker_popup_width(ui, &response);
             let filter_id = popup_id.with("entry_search");
             let mut filter = ui
@@ -144,15 +145,14 @@ fn draw_clip_selector(
                     }
                     if row.clicked() {
                         selection = Some(index);
-                        ui.memory_mut(|memory| memory.close_popup());
+                        egui::Popup::close_id(ui.ctx(), popup_id);
                     }
                 }
                 if shown == 0 {
                     ui.label(RichText::new("No sounds match.").color(subtle_dark()));
                 }
             });
-        },
-    );
+        });
     selection
 }
 
@@ -171,7 +171,7 @@ pub(super) fn draw_clip_player(
     // Whether a text field had the keyboard as the frame began. Asked after
     // the transport row is drawn, the answer misses an Enter that confirmed a
     // typed volume or speed: the box gives the keyboard up while handling it.
-    let keyboard_busy = ui.ctx().wants_keyboard_input();
+    let keyboard_busy = ui.ctx().egui_wants_keyboard_input();
     let selection_id = clip_selection_id(id_salt, edit.tag_key);
     let stored = ui.data(|data| data.get_temp::<String>(selection_id));
     // Listed, stepped through and defaulted in display order: groups as the
@@ -359,7 +359,7 @@ pub(super) fn draw_clip_player(
 
     // Space plays or pauses and Enter stops, in the focused tab, when no text
     // field has the keyboard.
-    if edit.sound_has_focus && !keyboard_busy && !ui.ctx().wants_keyboard_input() {
+    if edit.sound_has_focus && !keyboard_busy && !ui.ctx().egui_wants_keyboard_input() {
         let (space, enter) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Space),
@@ -612,6 +612,7 @@ fn draw_timeline(
         3.0,
         foundation_input(),
         egui::Stroke::new(1.0, foundation_input_edge()),
+        egui::StrokeKind::Middle,
     );
 
     // The part of the clip shown: all of it until zoomed. While playing it
@@ -753,7 +754,7 @@ fn draw_timeline(
     let set_region = |edit: &mut FieldEditContext<'_>, region: Option<(f64, f64)>| {
         match region {
             Some((start, end)) => {
-                ui.data_mut(|data| data.insert_temp(region_id, (clip_id.clone(), start, end)))
+                ui.data_mut(|data| data.insert_temp(region_id, (clip_id.clone(), start, end)));
             }
             None => ui.data_mut(|data| data.remove::<(String, f64, f64)>(region_id)),
         }
@@ -841,7 +842,7 @@ fn draw_timeline(
     // Escape clears the region, in the focused tab.
     if region.is_some()
         && edit.sound_has_focus
-        && !ui.ctx().wants_keyboard_input()
+        && !ui.ctx().egui_wants_keyboard_input()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         set_region(edit, None);
@@ -1246,6 +1247,7 @@ fn draw_overview(
         2.0,
         foundation_blue().gamma_multiply(0.2),
         egui::Stroke::new(1.0, foundation_blue()),
+        egui::StrokeKind::Middle,
     );
     let response =
         response.on_hover_text("The whole sound: drag the box to scroll, click to centre");
@@ -1312,7 +1314,7 @@ mod tests {
     fn sound_picker_search_keeps_groups_counts_and_original_indices() {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         let clips = vec![
             PlayerClip {
                 id: "a".to_owned(),
@@ -1336,7 +1338,7 @@ mod tests {
         let order = display_order(&clips);
         let frame = |events| {
             let mut result = None;
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(&ctx, 
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -1345,8 +1347,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         result =
                             draw_clip_selector(ui, "sound_test", "tag", &clips, &order, 0, 240.0);
                     });
@@ -1405,7 +1407,7 @@ mod tests {
 
     fn owner() -> SoundOwner {
         SoundOwner {
-            kit: crate::app::kit::KitId(1),
+            kit: crate::app::kits::kit::KitId(1),
             key: "test".to_owned(),
         }
     }
@@ -1473,7 +1475,8 @@ mod tests {
             let focused = self.focused;
             let queued = &mut self.queued;
             let timeline = &mut self.timeline;
-            let output = self.ctx.run(
+            let output = crate::app::run_ui_test(
+                &self.ctx,
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -1483,8 +1486,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
                         edit.sound_play_request = SoundRequests::new(queued, Some(owner()));
                         edit.sound_playback = playback.clone();
@@ -2026,16 +2029,43 @@ mod tests {
     }
 
     /// A glyph the fonts lack draws as an empty box; ⤨ did.
+    ///
+    /// This compares what each glyph draws with what a character no font has
+    /// draws, rather than asking `Fonts::has_glyphs`: egui 0.36 answers that
+    /// by checking that the face owning the character is not the face of the
+    /// replacement box, so every glyph of the emoji font that also supplies
+    /// the box (◀ ▶ 🔀 🌐 🔊 among them) is reported missing though it draws.
     #[test]
     fn every_player_glyph_is_in_the_app_s_fonts() {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::app::foundation_fonts());
-        let _ = ctx.run(Default::default(), |_| {});
+        let _ = crate::app::run_ui_test(&ctx, Default::default(), |_| {});
+        // Where in the font atlas each glyph of `text` comes from.
+        let drawn = |text: &str| -> Vec<([u16; 2], [u16; 2])> {
+            let galley = ctx.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    text.to_owned(),
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                )
+            });
+            galley
+                .rows
+                .iter()
+                .flat_map(|row| row.glyphs.iter())
+                .map(|glyph| (glyph.uv_rect.min, glyph.uv_rect.max))
+                .collect()
+        };
+        // U+0378 and U+0379 are unassigned, so no font has them: both draw
+        // the replacement box, and the check below must call them missing.
+        let replacement = drawn("\u{378}");
+        assert_eq!(replacement.len(), 1);
+        assert_eq!(drawn("\u{379}"), replacement);
+        let is_missing = |glyph: &str| drawn(glyph).iter().any(|uv| *uv == replacement[0]);
+        assert!(is_missing("\u{379}"), "the check sees a missing glyph");
         let missing: Vec<&str> = PLAYER_GLYPHS
             .into_iter()
-            .filter(|glyph| {
-                !ctx.fonts(|fonts| fonts.has_glyphs(&egui::FontId::proportional(14.0), glyph))
-            })
+            .filter(|glyph| is_missing(glyph))
             .collect();
         assert!(missing.is_empty(), "no glyph for {missing:?}");
     }
@@ -2190,6 +2220,7 @@ mod tests {
 
     fn wheel(delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel {
+            phase: egui::TouchPhase::Move,
             unit: egui::MouseWheelUnit::Point,
             delta,
             modifiers,
@@ -2652,5 +2683,278 @@ mod tests {
         assert!(!speeds.is_empty(), "the drag set no speed");
         assert!(speeds.iter().all(|speed| *speed <= 5.0), "{speeds:?}");
         assert_eq!(speeds.last(), Some(&5.0));
+    }
+
+    // The reference players — a looping sound's components, a dialogue tag's
+    // vocalizations — play through the clip player: one selection, one
+    // playhead, and plays stamped with the clip they are for.
+    //
+    // Kit-gated: set `BLAM_TEST_H3EK` to the Halo 3 kit's `tags` folder.
+
+    /// The plays among queued requests. The language selector also commits
+    /// the language it shows (`SetLanguage`) whenever it is drawn, and an idle
+    /// player asks for its waveform preview; neither is what these tests are
+    /// about.
+    fn plays(queued: &VecDeque<SoundRequest>) -> Vec<&SoundRequest> {
+        queued
+            .iter()
+            .filter(|request| {
+                !request.preview
+                    && !matches!(
+                        request.action,
+                        crate::app::audio::SoundAction::SetLanguage(_)
+                    )
+            })
+            .collect()
+    }
+
+    fn h3_tag(rel: &str) -> Option<(std::path::PathBuf, TagFile)> {
+        let root = crate::core::test_kits::h3ek_tags();
+        let path = root.join(rel);
+        if !path.is_file() {
+            eprintln!("skipping: {rel} not present under {}", root.display());
+            return None;
+        }
+        Some((root, TagFile::read(&path).expect("read H3 tag")))
+    }
+
+    /// Draw `draw` for a few frames, clicking each of `clicks` (the `nth` painted
+    /// text starting with `text`, top to bottom) in turn; what it painted and
+    /// what it queued.
+    fn run(
+        root: &std::path::Path,
+        clicks: &[(&str, usize)],
+        draw: &dyn Fn(&mut Ui, &mut FieldEditContext<'_>),
+    ) -> (Vec<String>, VecDeque<SoundRequest>, egui::Context) {
+        let ctx = egui::Context::default();
+        let mut queued = VecDeque::new();
+        let frame = |events: Vec<egui::Event>, queued: &mut VecDeque<SoundRequest>| {
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut sinks = EditSinks::default();
+                        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+                        edit.game = Some(GameId::Halo3);
+                        edit.tags_root = Some(root);
+                        edit.sound_play_request = SoundRequests::new(
+                            queued,
+                            Some(SoundOwner {
+                                kit: crate::app::kits::kit::KitId(1),
+                                key: "test".to_owned(),
+                            }),
+                        );
+                        draw(ui, &mut edit);
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some((
+                        text.galley.text().to_owned(),
+                        text.galley.rect.translate(text.pos.to_vec2()),
+                    )),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        frame(Vec::new(), &mut queued);
+        let mut texts = frame(Vec::new(), &mut queued);
+        for &(text, nth) in clicks {
+            let mut found: Vec<egui::Rect> = texts
+                .iter()
+                .filter(|(shown, _)| shown.starts_with(text))
+                .map(|(_, rect)| *rect)
+                .collect();
+            found.sort_by(|a, b| {
+                a.top()
+                    .total_cmp(&b.top())
+                    .then(a.left().total_cmp(&b.left()))
+            });
+            let pos = found
+                .get(nth)
+                .unwrap_or_else(|| panic!("no {nth}th {text:?}"))
+                .center();
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                vec![egui::Event::PointerMoved(pos), button(true)],
+                &mut queued,
+            );
+            frame(vec![button(false)], &mut queued);
+            texts = frame(Vec::new(), &mut queued);
+        }
+        (
+            texts.into_iter().map(|(text, _)| text).collect(),
+            queued,
+            ctx,
+        )
+    }
+
+    /// A looping sound lists its component sounds under their tracks, and Play
+    /// plays the selected one — its first permutation, from the FMOD banks —
+    /// stamped with its clip.
+    #[test]
+    fn a_looping_sound_plays_its_components_through_the_clip_player() {
+        let rel = "sound/game_sfx/ui/main_menu_music/main_menu_music.sound_looping";
+        let Some((root, tag)) = h3_tag(rel) else {
+            return;
+        };
+        let draw =
+            |ui: &mut Ui, edit: &mut FieldEditContext<'_>| draw_sound_looping_player(ui, &tag, edit);
+        let (painted, queued, _) = run(&root, &[], &draw);
+        assert!(
+            painted
+                .iter()
+                .any(|text| text == "delta_menu \u{25B8} in \u{00B7} in"),
+            "the first component is not selected under its track: {painted:?}"
+        );
+        assert!(plays(&queued).is_empty(), "drawing alone played something");
+
+        // "▶" is Next on the clip row, then Play on the transport.
+        let (_, queued, _) = run(&root, &[("\u{25B6}", 1)], &draw);
+        let request = *plays(&queued).first().expect("Play queued nothing");
+        assert!(
+            request
+                .clip
+                .as_deref()
+                .is_some_and(|clip| clip.starts_with("ref:0:")),
+            "{:?}",
+            request.clip
+        );
+        assert!(
+            matches!(request.action, crate::app::audio::SoundAction::Play { .. }),
+            "an H3 component plays from the banks"
+        );
+    }
+
+    /// The dialogue overview's ▶ selects that sound in the player and plays it,
+    /// under the same clip the player's dropdown has for it.
+    #[test]
+    fn a_dialogue_row_plays_through_the_player() {
+        let Some((root, tag)) = h3_tag("sound/dialog/combat/arbiter.dialogue") else {
+            return;
+        };
+        let draw = |ui: &mut Ui, edit: &mut FieldEditContext<'_>| draw_dialogue_summary(ui, &tag, edit);
+        // Open the table, then: ▶ number 0 is Next and 1 is Play; 2 is the
+        // first row's.
+        let (painted, queued, ctx) = run(&root, &[("Vocalizations (", 0), ("\u{25B6}", 2)], &draw);
+        assert!(
+            painted
+                .iter()
+                .any(|text| text.starts_with("Vocalizations (")),
+            "the player is not shown above a closed table: {painted:?}"
+        );
+        let request = *plays(&queued).first().expect("the row's ▶ queued nothing");
+        let clip = request.clip.clone().expect("the row's play names no clip");
+        assert!(clip.starts_with("ref:0:0:"), "{clip}");
+        let selected = ctx.data(|data| data.get_temp::<String>(clip_selection_id("dialogue", "test")));
+        assert_eq!(
+            selected.as_deref(),
+            Some(clip.as_str()),
+            "the player did not select the row's sound"
+        );
+    }
+
+    /// On a Campaign Evolved mount a referenced sound resolves after the frame, so
+    /// its play is a reference request — and it carries the clip along.
+    #[test]
+    fn a_campaign_evolved_reference_carries_its_clip() {
+        let path = "sound\\dialog\\x\\line";
+        let play = referenced_clip_play(
+            u32::from_be_bytes(*b"snd!"),
+            path,
+            None,
+            None,
+            None,
+            None,
+            true,
+        );
+        assert!(matches!(play, Some(ClipPlay::CeRef(_))));
+
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+        let clips = [referenced_clip(
+            "ref:0:x".to_owned(),
+            None,
+            "line".to_owned(),
+        )];
+        play_clip_now(
+            &egui::Context::default(),
+            &mut edit,
+            "dialogue",
+            &clips,
+            0,
+            &mut |_| {
+                referenced_clip_play(
+                    u32::from_be_bytes(*b"snd!"),
+                    path,
+                    None,
+                    None,
+                    None,
+                    None,
+                    true,
+                )
+            },
+        );
+        let request = edit
+            .ce_sound_ref_request
+            .as_ref()
+            .expect("no reference request");
+        assert_eq!(request.clip.as_deref(), Some("ref:0:x"));
+        assert_eq!(request.reference, path);
+        assert!(!request.extract);
+    }
+
+    /// Opening a looping sound previews its selected component: the request the
+    /// player makes resolves through the real FMOD banks to a decoded waveform,
+    /// with nothing played.
+    #[test]
+    fn opening_a_sound_previews_its_waveform_from_the_banks() {
+        let rel = "sound/game_sfx/ui/main_menu_music/main_menu_music.sound_looping";
+        let Some((root, tag)) = h3_tag(rel) else {
+            return;
+        };
+        let draw =
+            |ui: &mut Ui, edit: &mut FieldEditContext<'_>| draw_sound_looping_player(ui, &tag, edit);
+        let (_, queued, _) = run(&root, &[], &draw);
+        let mut audio = crate::app::audio::AudioState::default();
+        let previews: Vec<SoundRequest> = queued
+            .into_iter()
+            .filter(|request| request.preview)
+            .collect();
+        assert!(!previews.is_empty(), "opening the player previewed nothing");
+        let owner = previews[0].owner.clone().unwrap();
+        audio.pending.extend(previews);
+        let ctx = egui::Context::default();
+        while !audio.pending.is_empty() {
+            audio.process(Some(&root), &ctx);
+        }
+        audio.wait_for_audio_jobs();
+        match &audio.preview_for(&owner).expect("no preview").state {
+            crate::app::audio::PreviewState::Ready(waveform) => {
+                assert!(waveform.frames() > 1000, "{} frames", waveform.frames());
+            }
+            crate::app::audio::PreviewState::Failed(reason) => panic!("preview failed: {reason}"),
+            crate::app::audio::PreviewState::Pending => panic!("preview never landed"),
+        }
+        assert!(
+            audio.playback(Some(&owner)).is_none(),
+            "previewing played the sound"
+        );
     }
 }

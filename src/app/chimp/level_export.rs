@@ -942,8 +942,10 @@ pub(in crate::app) fn scene_to_usd(
 
 #[cfg(test)]
 mod tests {
-    use super::super::level::{IDENTITY, compose};
     use super::*;
+    use crate::app::chimp::level::MeshPlacement;
+    use super::super::level::read_cell_into;
+    use super::super::level::{IDENTITY, compose};
 
     #[test]
     fn a_prim_name_is_an_identifier() {
@@ -1013,12 +1015,6 @@ mod tests {
         let usd = instance_text(0, "SM_Rock", &IDENTITY);
         assert!(usd.contains("( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )"));
     }
-}
-
-#[cfg(test)]
-mod real_data_tests {
-    use super::super::level::read_cell_into;
-    use super::*;
 
     /// Export a slice of a real level and check geometry is shared rather than
     /// repeated. Skips unless `BABOON_PROBE_PAKS` points at an install.
@@ -1132,12 +1128,6 @@ mod real_data_tests {
         // The sidecar the geometry passed through must not be left behind.
         assert!(!path.with_extension("prototypes.tmp").exists());
     }
-}
-
-#[cfg(test)]
-mod segmented_tests {
-    use super::super::level::read_cell_into;
-    use super::*;
 
     /// Read a slice of a real level, split it small, and check the pieces are a
     /// level rather than a pile of files.
@@ -1229,12 +1219,6 @@ mod segmented_tests {
         assert!(readme.contains("Keep the library file beside the"));
         let _ = std::fs::remove_dir_all(&directory);
     }
-}
-
-#[cfg(test)]
-mod census {
-    use super::super::level::read_cell_into;
-    use super::*;
 
     /// Bytes one vertex costs in a binary sidecar: position, normal and UV as
     /// the `f32`s they already are.
@@ -1435,12 +1419,6 @@ mod census {
         }
         scene.meshes
     }
-}
-
-#[cfg(test)]
-mod sample_export {
-    use super::super::level::read_cell_into;
-    use super::*;
 
     /// Write as much of C10 as fits in a triangle budget, to find out how much
     /// geometry an importer will actually take.
@@ -1744,12 +1722,6 @@ mod sample_export {
             report.dropped_placements
         );
     }
-}
-
-#[cfg(test)]
-mod level_pass_tests {
-    use super::*;
-    use crate::app::chimp::level::MeshPlacement;
 
     /// Both level exports decode each mesh once, drop the placements of the
     /// meshes that did not decode, and segment the rest.

@@ -67,9 +67,9 @@ impl BlockTableState {
             .tag
             .write_to_bytes()
             .map_err(|error| error.to_string())?;
-        let mut candidate = crate::source::read_tag_from_bytes(
+        let mut candidate = crate::core::source::read_tag_from_bytes(
             &bytes,
-            self.game.as_deref(),
+            self.game,
             self.definitions_root.as_deref(),
             self.tag.group().tag,
         )
@@ -176,86 +176,72 @@ impl BlockTableState {
     }
 }
 
-impl Baboon {
-    pub(in crate::app) fn open_block_table(
-        &mut self,
-        kit_index: usize,
-        key: &str,
-        request: BlockTableRequest,
-    ) {
-        let result = (|| {
-            let kit = &self.kits[kit_index];
-            let doc = kit.parsed_tags.get(key).ok_or("Tag is no longer open")?;
-            let baseline_bytes = doc
-                .tag
-                .write_to_bytes()
-                .map_err(|error| error.to_string())?;
-            let game = kit.source.as_ref().and_then(|source| source.game.clone());
-            let definitions_root = kit.source.as_ref().and_then(|source| match &source.source {
-                TagSource::LooseFolder {
-                    definitions_root, ..
-                } => Some(definitions_root.clone()),
-                _ => None,
-            });
-            let tag = crate::source::read_tag_from_bytes(
-                &baseline_bytes,
-                game.as_deref(),
-                definitions_root.as_deref(),
-                doc.tag.group().tag,
-            )
-            .map_err(|error| error.to_string())?;
-            let count = tag
-                .root()
-                .field_path(&request.path)
-                .and_then(|field| field.as_block())
-                .ok_or("Field is not a block")?
-                .len();
-            let rows = (0..count)
-                .map(|index| {
-                    table_row(
-                        &tag,
-                        &request.path,
-                        index,
-                        index as u64,
-                        Some(index),
-                        &kit.names,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok::<_, String>(BlockTableState {
-                kit: kit.id,
-                tag_key: key.to_owned(),
-                request,
-                stamp: doc.content_stamp(),
-                game,
-                definitions_root,
-                tag,
-                baseline_bytes,
-                rows,
-                next_id: count as u64,
-                status: None,
-                changed: false,
-            })
-        })();
-        match result {
-            Ok(table) => self.block_table = Some(table),
-            Err(error) => self.status = format!("Could not open block table: {error}"),
-        }
-    }
+/// The block table for the block at `request.path` in `doc`: a private copy of
+/// the tag that every staged change edits, and the rows it lists.
+pub(in crate::app) fn block_table_for(
+    kit: KitId,
+    key: &str,
+    doc: &TagDocument,
+    source: Option<&LoadedSourceData>,
+    names: &TagNameIndex,
+    request: BlockTableRequest,
+) -> Result<BlockTableState, String> {
+    let baseline_bytes = doc.tag.write_to_bytes().map_err(|error| error.to_string())?;
+    let game = source.and_then(|source| source.game);
+    let definitions_root = source.and_then(|source| match &source.source {
+        TagSource::LooseFolder {
+            definitions_root, ..
+        } => Some(definitions_root.clone()),
+        _ => None,
+    });
+    let tag = crate::core::source::read_tag_from_bytes(
+        &baseline_bytes,
+        game,
+        definitions_root.as_deref(),
+        doc.tag.group().tag,
+    )
+    .map_err(|error| error.to_string())?;
+    let count = tag
+        .root()
+        .field_path(&request.path)
+        .and_then(|field| field.as_block())
+        .ok_or("Field is not a block")?
+        .len();
+    let rows = (0..count)
+        .map(|index| table_row(&tag, &request.path, index, index as u64, Some(index), names))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(BlockTableState {
+        kit,
+        tag_key: key.to_owned(),
+        request,
+        stamp: doc.content_stamp(),
+        game,
+        definitions_root,
+        tag,
+        baseline_bytes,
+        rows,
+        next_id: count as u64,
+        status: None,
+        changed: false,
+    })
+}
 
+impl Baboon {
+    /// Commit the open block table's staged changes to its document, as one
+    /// undo step. A refusal leaves the table open with the reason.
     pub(in crate::app) fn save_block_table(&mut self, ctx: &egui::Context) {
-        let Some(mut table) = self.block_table.take() else {
+        let Some(mut table) = self.dialogs.close::<BlockTableState>() else {
             return;
         };
         let result = (|| {
             let kit_index = self
+                .model
                 .kit_index(table.kit)
                 .ok_or("The editing kit is closed")?;
-            if self.editing_kit_is_read_only(kit_index) {
+            if self.model.editing_kit_is_read_only(kit_index) {
                 return Err("This editing kit is read-only".to_owned());
             }
-            let kit = &mut self.kits[kit_index];
-            let doc = kit
+            let doc = self.model.kits[kit_index]
                 .parsed_tags
                 .get_mut(&table.tag_key)
                 .ok_or("Tag is no longer open")?;
@@ -263,7 +249,7 @@ impl Baboon {
                 return Ok(());
             }
             // Indexed drafts cannot survive moving entries to different paths.
-            kit.edit_buffers.forget_tag(&table.tag_key);
+            self.views[table.kit].edit_buffers.forget_tag(&table.tag_key);
             let selected = table
                 .rows
                 .iter()
@@ -281,13 +267,13 @@ impl Baboon {
                 )
             });
             self.invalidate_tag_caches_in(kit_index, &table.tag_key);
-            self.status = format!("Reorganized {} (unsaved)", table.request.label);
+            self.model.status = format!("Reorganized {} (unsaved)", table.request.label);
             ctx.request_repaint();
             Ok(())
         })();
         if let Err(error) = result {
             table.status = Some(error);
-            self.block_table = Some(table);
+            self.dialogs.open(table);
         }
     }
 }
@@ -372,7 +358,7 @@ mod tests {
     fn staged(tag: &TagFile) -> BlockTableState {
         let baseline_bytes = tag.write_to_bytes().unwrap();
         let game = matches!(tag.container, blam_tags::file::TagContainer::Classic { .. })
-            .then(|| "halo2_mcc".to_owned());
+            .then_some(GameId::Halo2);
         let definitions_root = game.as_ref().map(|_| {
             crate::app::test_definition_path("halo2_mcc/model.json")
                 .parent()
@@ -381,9 +367,9 @@ mod tests {
                 .unwrap()
                 .to_path_buf()
         });
-        let tag = crate::source::read_tag_from_bytes(
+        let tag = crate::core::source::read_tag_from_bytes(
             &baseline_bytes,
-            game.as_deref(),
+            game,
             definitions_root.as_deref(),
             tag.group().tag,
         )
@@ -650,9 +636,9 @@ mod tests {
             .parent()
             .unwrap()
             .to_path_buf();
-        let mut live = crate::source::read_tag_from_bytes(
+        let mut live = crate::core::source::read_tag_from_bytes(
             &header,
-            Some("halo2_mcc"),
+            Some(GameId::Halo2),
             Some(&definitions_root),
             layout_tag.group().tag,
         )
@@ -687,9 +673,9 @@ mod tests {
             .unwrap();
         table.rows[0].name = "renamed_classic".to_owned();
         let candidate = table.candidate().unwrap();
-        let saved = crate::source::read_tag_from_bytes(
+        let saved = crate::core::source::read_tag_from_bytes(
             &candidate.write_to_bytes().unwrap(),
-            table.game.as_deref(),
+            table.game,
             table.definitions_root.as_deref(),
             candidate.group().tag,
         )

@@ -33,655 +33,649 @@ impl ChimpPackageActions {
     }
 }
 
-impl Baboon {
-    pub(in crate::app) fn draw_chimp_workspace(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
-        chimp_workspace_toolbar(ui, |ui| {
-            let packages = self.chimp_dirty_packages(kit_index);
-            let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
-            let response = ui.add_enabled(!packages.is_empty(), egui::Button::image(icon));
-            if response
-                .on_hover_text(
-                    "Discard every modified Chimp package in this workspace and restore the original source data",
-                )
-                .on_disabled_hover_text("This workspace has no modified Chimp packages")
-                .clicked()
-            {
-                self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
-                    kit: self.kits[kit_index].id,
-                    packages,
-                    pending_action: None,
-                    error: None,
-                });
+/// Draw a kit's Chimp surface: its toolbar, the package browser, and the
+/// open packages or the mount's status.
+pub(in crate::app) fn draw_chimp_workspace(
+    ui: &mut Ui,
+    cx: &Ctx,
+    chimp: &mut ChimpFeature,
+    view: &mut ChimpView,
+    kit_index: usize,
+) {
+    let kit = cx.model.kits[kit_index].id;
+    chimp_workspace_toolbar(ui, |ui| {
+        let packages = cx.model.chimp_dirty_packages(kit_index);
+        let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
+        let response = ui.add_enabled(!packages.is_empty(), egui::Button::image(icon));
+        if response
+            .on_hover_text(
+                "Discard every modified Chimp package in this workspace and restore the original source data",
+            )
+            .on_disabled_hover_text("This workspace has no modified Chimp packages")
+            .clicked()
+        {
+            cx.open_dialog(ChimpDiscardPrompt {
+                kit,
+                packages,
+                pending_action: None,
+                error: None,
+            });
+        }
+    });
+    draw_chimp_level_progress(ui, chimp, kit);
+    ui.add_space(4.0);
+    let ready = matches!(cx.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
+    egui::Panel::left(egui::Id::new(("chimp_package_browser", kit.0)))
+        .resizable(true)
+        .default_size(360.0)
+        .frame(
+            Frame::NONE
+                .fill(left_panel())
+                .inner_margin(egui::Margin::same(8)),
+        )
+        .show(ui, |ui| {
+            draw_chimp_browser(ui, cx, view, kit_index);
+        });
+    egui::CentralPanel::default()
+        .frame(
+            Frame::NONE
+                .fill(editor_bg())
+                .inner_margin(egui::Margin::same(10)),
+        )
+        .show(ui, |ui| {
+            let writing = chimp.chimp_writes.contains_key(&kit);
+            if ready {
+                match view.browser {
+                    ChimpBrowser::Folders => match view.folder_selection {
+                        ChimpFolderSelection::Package => {
+                            draw_chimp_tiles(ui, cx, view, kit_index, writing)
+                        }
+                        ChimpFolderSelection::File => draw_chimp_file(ui, cx, view, kit_index),
+                    },
+                    ChimpBrowser::Groups => draw_chimp_tiles(ui, cx, view, kit_index, writing),
+                    ChimpBrowser::Packages => draw_chimp_tiles(ui, cx, view, kit_index, writing),
+                    ChimpBrowser::Archives => {
+                        crate::app::shell::frame::centered_empty_state(
+                            ui,
+                            "Select an archive to browse its folder hierarchy.",
+                        );
+                    }
+                    ChimpBrowser::Files => draw_chimp_file(ui, cx, view, kit_index),
+                }
+            } else {
+                draw_chimp_mount_status(ui, cx, kit_index);
             }
         });
-        self.draw_chimp_level_progress(ui, kit_index);
-        ui.add_space(4.0);
-        let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
-        egui::SidePanel::left(egui::Id::new((
-            "chimp_package_browser",
-            self.kits[kit_index].id.0,
-        )))
-        .resizable(true)
-        .default_width(360.0)
-        .frame(
-            Frame::none()
-                .fill(left_panel())
-                .inner_margin(egui::Margin::same(8.0)),
-        )
-        .show_inside(ui, |ui| {
-            self.draw_chimp_browser(ui, ctx, kit_index);
-        });
-        egui::CentralPanel::default()
-            .frame(
-                Frame::none()
-                    .fill(editor_bg())
-                    .inner_margin(egui::Margin::same(10.0)),
-            )
-            .show_inside(ui, |ui| {
-                if ready {
-                    match self.kits[kit_index].chimp.browser {
-                        ChimpBrowser::Folders => {
-                            match self.kits[kit_index].chimp.folder_selection {
-                                ChimpFolderSelection::Package => {
-                                    self.draw_chimp_tiles(ui, ctx, kit_index)
-                                }
-                                ChimpFolderSelection::File => self.draw_chimp_file(ui, kit_index),
-                            }
-                        }
-                        ChimpBrowser::Groups => self.draw_chimp_tiles(ui, ctx, kit_index),
-                        ChimpBrowser::Packages => self.draw_chimp_tiles(ui, ctx, kit_index),
-                        ChimpBrowser::Archives => {
-                            crate::app::ui::centered_empty_state(
-                                ui,
-                                "Select an archive to browse its folder hierarchy.",
-                            );
-                        }
-                        ChimpBrowser::Files => self.draw_chimp_file(ui, kit_index),
+}
+
+/// A bar for the export running in this workspace, if one is.
+///
+/// A level export is minutes of work, and without this the window simply
+/// sits there — the one thing a user cannot tell from a frozen-looking
+/// screen is the difference between working and stuck.
+fn draw_chimp_level_progress(ui: &mut Ui, chimp: &ChimpFeature, kit: KitId) {
+    let Some(job) = chimp.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
+        return;
+    };
+    let phase = job.phase;
+    let (done, total) = (job.done, job.total);
+    let fraction = job.fraction();
+    let remaining = job.remaining();
+    let name = job.name.clone();
+
+    ui.add_space(4.0);
+    egui::Frame::NONE
+        .fill(row_type())
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("Exporting {name}"))
+                        .color(text_dark())
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Only ever an estimate, and said as one.
+                    if let Some(remaining) = remaining {
+                        ui.label(
+                            RichText::new(format!("{} left", format_remaining(remaining)))
+                                .color(subtle_dark())
+                                .small(),
+                        );
                     }
-                } else {
-                    self.draw_chimp_mount_status(ui, kit_index);
-                }
+                });
             });
+            ui.add_space(3.0);
+            ui.add(
+                egui::ProgressBar::new(fraction).desired_height(10.0).text(
+                    RichText::new(format!(
+                        "{} ({}/3) — {done}/{total}",
+                        phase.label(),
+                        phase.step()
+                    ))
+                    .small(),
+                ),
+            );
+        });
+    ui.add_space(2.0);
+}
+
+fn draw_chimp_mount_status(ui: &mut Ui, cx: &Ctx, kit_index: usize) {
+    let kit = cx.model.kits[kit_index].id;
+    if matches!(cx.model.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+        crate::app::shell::loading::centered_loading_state(
+            ui,
+            "Please wait — Chimp is starting up…",
+            "Discovering containers and indexing Unreal packages.",
+        );
+        return;
     }
+    ui.vertical_centered(|ui| {
+        ui.add_space(48.0);
+        ui.heading("Chimp");
+        ui.add_space(8.0);
+        match &cx.model.kits[kit_index].chimp.mount {
+            ChimpMount::Idle => {
+                ui.label("The Unreal package index has not been started.");
+                if ui.button("Start Chimp").clicked() {
+                    cx.send(ChimpCommand::Mount { kit });
+                }
+            }
+            ChimpMount::Loading => {}
+            ChimpMount::Failed(error) => {
+                ui.colored_label(Color32::from_rgb(210, 80, 80), error);
+                if ui.button("Retry").clicked() {
+                    cx.send(ChimpCommand::Mount { kit });
+                }
+            }
+            ChimpMount::Ready(_) => {}
+        }
+    });
+}
 
-    /// A bar for the export running in this workspace, if one is.
-    ///
-    /// A level export is minutes of work, and without this the window simply
-    /// sits there — the one thing a user cannot tell from a frozen-looking
-    /// screen is the difference between working and stuck.
-    fn draw_chimp_level_progress(&mut self, ui: &mut Ui, kit_index: usize) {
-        let kit = self.kits[kit_index].id;
-        let Some(job) = self.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
-            return;
-        };
-        let phase = job.phase;
-        let (done, total) = (job.done, job.total);
-        let fraction = job.fraction();
-        let remaining = job.remaining();
-        let name = job.name.clone();
+fn draw_chimp_browser(ui: &mut Ui, cx: &Ctx, view: &mut ChimpView, kit_index: usize) {
+    let kit = cx.model.kits[kit_index].id;
+    if matches!(cx.model.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+        // Allocate the whole browser body so an otherwise empty loading
+        // state cannot collapse the resizable side panel around its icon.
+        let available = ui.available_size();
+        let (container, _) = ui.allocate_exact_size(available, Sense::hover());
+        let spinner_size = 128.0_f32.min(container.width()).min(container.height());
+        let top_padding = 48.0_f32.min((container.height() - spinner_size).max(0.0));
+        let spinner_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                container.center().x - spinner_size * 0.5,
+                container.top() + top_padding,
+            ),
+            Vec2::splat(spinner_size),
+        );
+        crate::app::shell::loading::paint_loading_rings_sized(ui, spinner_rect, spinner_size);
+        return;
+    }
+    ui.horizontal(|ui| {
+        for (browser, label) in ChimpBrowser::TABS {
+            ui.selectable_value(&mut view.browser, browser, label);
+        }
+    });
+    ui.add_space(4.0);
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut view.filter)
+            .hint_text(placeholder_text("Search package or container…"))
+            .desired_width(f32::INFINITY),
+    );
+    if response.changed() {
+        view.reset_filter();
+    }
+    ui.add_space(4.0);
 
-        ui.add_space(4.0);
-        egui::Frame::none()
-            .fill(row_type())
-            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("Exporting {name}"))
-                            .color(text_dark())
-                            .strong(),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Only ever an estimate, and said as one.
-                        if let Some(remaining) = remaining {
-                            ui.label(
-                                RichText::new(format!("{} left", format_remaining(remaining)))
-                                    .color(subtle_dark())
-                                    .small(),
-                            );
+    let ChimpMount::Ready(world) = &cx.model.kits[kit_index].chimp.mount else {
+        draw_chimp_mount_status(ui, cx, kit_index);
+        return;
+    };
+    view.refresh_filter(world);
+    // Container diagnostics are not surfaced here. A mount routinely skips
+    // archives that carry nothing Chimp reads, and reporting that above the
+    // browser on every view described the mount rather than anything the
+    // reader can act on. The Archives tab still lists what it could not
+    // open, which is where that question is actually being asked.
+    if view.browser == ChimpBrowser::Archives {
+        draw_chimp_archives(ui, view, world, kit);
+        return;
+    }
+    if view.browser == ChimpBrowser::Files {
+        draw_chimp_pak_files(ui, view, world, kit);
+        return;
+    }
+    if view.browser == ChimpBrowser::Folders {
+        draw_chimp_folders(ui, cx, view, world, kit_index);
+        return;
+    }
+    if view.browser == ChimpBrowser::Groups {
+        draw_chimp_groups(ui, cx, view, world, kit_index);
+        return;
+    }
+    let indices = Arc::clone(&view.filtered_packages);
+    let selected = cx.model.kits[kit_index].chimp.selected_package.clone();
+    let mut extract_texture = None;
+    let mut extract_mesh = None;
+    let mut export_level = None;
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_packages", kit.0))
+        .auto_shrink([false, false])
+        .show_rows(ui, 22.0, indices.len(), |ui, range| {
+            for row in range {
+                let package = &world.packages()[indices[row]];
+                let active = package.active_provider();
+                let overridden = package.providers.len() > 1;
+                let mut label = package.name.clone();
+                if overridden {
+                    label.push_str("  ⧉");
+                }
+                let response =
+                    ui.selectable_label(selected.as_deref() == Some(&package.name), label);
+                let response = if let Some(provider) = active {
+                    response.on_hover_text(format!(
+                        "{}\n{}\n{} provider(s)",
+                        package.name,
+                        world.containers()[provider.container].path.display(),
+                        package.providers.len()
+                    ))
+                } else {
+                    response
+                };
+                let actions = ChimpPackageActions::of(
+                    &package.name,
+                    view.package_types
+                        .get(indices[row])
+                        .and_then(Option::as_deref),
+                );
+                if actions.any() {
+                    context_menu(&response, |ui| {
+                        if actions.texture {
+                            chimp_texture_export_menu(ui, &package.name, &mut extract_texture);
+                        }
+                        if actions.mesh {
+                            chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
+                        }
+                        if actions.level {
+                            chimp_level_export_menu(ui, &package.name, &mut export_level);
                         }
                     });
-                });
-                ui.add_space(3.0);
-                ui.add(
-                    egui::ProgressBar::new(fraction).desired_height(10.0).text(
-                        RichText::new(format!(
-                            "{} ({}/3) — {done}/{total}",
-                            phase.label(),
-                            phase.step()
-                        ))
-                        .small(),
-                    ),
-                );
-            });
-        ui.add_space(2.0);
-    }
-
-    fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
-        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
-            crate::app::ui::centered_loading_state(
-                ui,
-                "Please wait — Chimp is starting up…",
-                "Discovering containers and indexing Unreal packages.",
-            );
-            return;
-        }
-        ui.vertical_centered(|ui| {
-            ui.add_space(48.0);
-            ui.heading("Chimp");
-            ui.add_space(8.0);
-            match &self.kits[kit_index].chimp.mount {
-                ChimpMount::Idle => {
-                    ui.label("The Unreal package index has not been started.");
-                    if ui.button("Start Chimp").clicked() {
-                        self.begin_chimp_mount(kit_index, ui.ctx().clone());
-                    }
                 }
-                ChimpMount::Loading => {}
-                ChimpMount::Failed(error) => {
-                    ui.colored_label(Color32::from_rgb(210, 80, 80), error);
-                    if ui.button("Retry").clicked() {
-                        self.begin_chimp_mount(kit_index, ui.ctx().clone());
-                    }
+                if response.clicked() {
+                    cx.send(ChimpCommand::Open {
+                        kit,
+                        package: package.name.clone(),
+                    });
                 }
-                ChimpMount::Ready(_) => {}
             }
         });
-    }
+    send_chimp_extractions(cx, kit, extract_texture, extract_mesh, export_level);
+}
 
-    fn draw_chimp_browser(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
-        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
-            // Allocate the whole browser body so an otherwise empty loading
-            // state cannot collapse the resizable side panel around its icon.
-            let available = ui.available_size();
-            let (container, _) = ui.allocate_exact_size(available, Sense::hover());
-            let spinner_size = 128.0_f32
-                .min(container.width())
-                .min(container.height());
-            let top_padding = 48.0_f32.min((container.height() - spinner_size).max(0.0));
-            let spinner_rect = egui::Rect::from_min_size(
-                egui::pos2(
-                    container.center().x - spinner_size * 0.5,
-                    container.top() + top_padding,
-                ),
-                Vec2::splat(spinner_size),
-            );
-            crate::app::ui::paint_loading_rings_sized(
-                ui,
-                spinner_rect,
-                spinner_size,
-            );
-            return;
-        }
+fn draw_chimp_groups(ui: &mut Ui, cx: &Ctx, view: &ChimpView, world: &World, kit_index: usize) {
+    let kit = cx.model.kits[kit_index].id;
+    if view.type_indexing {
         ui.horizontal(|ui| {
-            for (browser, label) in ChimpBrowser::TABS {
-                ui.selectable_value(&mut self.kits[kit_index].chimp.browser, browser, label);
-            }
+            ui.spinner();
+            ui.label(
+                RichText::new("Indexing Unreal package types…")
+                    .small()
+                    .color(subtle_dark()),
+            );
         });
         ui.add_space(4.0);
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut self.kits[kit_index].chimp.filter)
-                .hint_text(placeholder_text("Search package or container…"))
-                .desired_width(f32::INFINITY),
-        );
-        if response.changed() {
-            self.kits[kit_index].chimp.reset_filter();
-        }
-        ui.add_space(4.0);
+    }
 
-        let world = match &self.kits[kit_index].chimp.mount {
-            ChimpMount::Ready(world) => world.clone(),
-            _ => {
-                self.draw_chimp_mount_status(ui, kit_index);
-                return;
+    let groups = &view.filtered_groups;
+    let selected = cx.model.kits[kit_index].chimp.selected_package.clone();
+    let mut open_package = None;
+    let mut extract_texture = None;
+    let mut extract_mesh = None;
+    let mut export_level = None;
+    if groups.is_empty() && !view.type_indexing {
+        ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
+        return;
+    }
+
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_groups", kit.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (kind, indices) in groups {
+                egui::CollapsingHeader::new(format!("{kind}  ·  {}", indices.len()))
+                    .id_salt(("chimp_group", kit.0, &kind))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        for &index in indices {
+                            let package = &world.packages()[index];
+                            let label = package.name.rsplit('/').next().unwrap_or(&package.name);
+                            let response = ui
+                                .selectable_label(selected.as_deref() == Some(&package.name), label)
+                                .on_hover_text(&package.name);
+                            let actions =
+                                ChimpPackageActions::of(&package.name, Some(kind.as_str()));
+                            if actions.any() {
+                                context_menu(&response, |ui| {
+                                    if actions.texture {
+                                        chimp_texture_export_menu(
+                                            ui,
+                                            &package.name,
+                                            &mut extract_texture,
+                                        );
+                                    }
+                                    if actions.mesh {
+                                        chimp_mesh_export_menu(
+                                            ui,
+                                            &package.name,
+                                            &mut extract_mesh,
+                                        );
+                                    }
+                                    if actions.level {
+                                        chimp_level_export_menu(
+                                            ui,
+                                            &package.name,
+                                            &mut export_level,
+                                        );
+                                    }
+                                });
+                            }
+                            if response.clicked() {
+                                open_package = Some(package.name.clone());
+                            }
+                        }
+                    });
             }
-        };
-        self.kits[kit_index].chimp.refresh_filter(&world);
-        // Container diagnostics are not surfaced here. A mount routinely skips
-        // archives that carry nothing Chimp reads, and reporting that above the
-        // browser on every view described the mount rather than anything the
-        // reader can act on. The Archives tab still lists what it could not
-        // open, which is where that question is actually being asked.
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Archives {
-            self.draw_chimp_archives(ui, &world, kit_index);
-            return;
-        }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Files {
-            self.draw_chimp_pak_files(ui, &world, kit_index);
-            return;
-        }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Folders {
-            self.draw_chimp_folders(ui, ctx, &world, kit_index);
-            return;
-        }
-        if self.kits[kit_index].chimp.browser == ChimpBrowser::Groups {
-            self.draw_chimp_groups(ui, ctx, &world, kit_index);
-            return;
-        }
-        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_packages);
-        let selected = self.kits[kit_index].chimp.selected_package.clone();
-        let mut extract_texture = None;
-        let mut extract_mesh = None;
-        let mut export_level = None;
-        egui::ScrollArea::vertical()
-            .id_salt(("chimp_packages", self.kits[kit_index].id.0))
-            .auto_shrink([false, false])
-            .show_rows(ui, 22.0, indices.len(), |ui, range| {
-                for row in range {
-                    let package = &world.packages()[indices[row]];
-                    let active = package.active_provider();
-                    let overridden = package.providers.len() > 1;
-                    let mut label = package.name.clone();
-                    if overridden {
-                        label.push_str("  ⧉");
-                    }
-                    let response =
-                        ui.selectable_label(selected.as_deref() == Some(&package.name), label);
-                    let response = if let Some(provider) = active {
-                        response.on_hover_text(format!(
-                            "{}\n{}\n{} provider(s)",
-                            package.name,
-                            world.containers()[provider.container].path.display(),
-                            package.providers.len()
-                        ))
-                    } else {
-                        response
-                    };
-                    let actions = ChimpPackageActions::of(
-                        &package.name,
-                        self.kits[kit_index]
-                            .chimp
-                            .package_types
-                            .get(indices[row])
-                            .and_then(Option::as_deref),
-                    );
-                    if actions.any() {
-                        response.context_menu(|ui| {
-                            if actions.texture {
-                                chimp_texture_export_menu(ui, &package.name, &mut extract_texture);
-                            }
-                            if actions.mesh {
-                                chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
-                            }
-                            if actions.level {
-                                chimp_level_export_menu(ui, &package.name, &mut export_level);
-                            }
-                        });
-                    }
-                    if response.clicked() {
-                        self.begin_chimp_open_package(kit_index, package.name.clone(), ctx.clone());
-                    }
-                }
-            });
-        if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture(kit_index, &package);
-        }
-        if let Some((package, format)) = extract_mesh {
-            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
-        }
-        if let Some((package, format)) = export_level {
-            self.begin_export_chimp_level(kit_index, &package, format);
-        }
+        });
+    if let Some(package) = open_package {
+        cx.send(ChimpCommand::Open { kit, package });
     }
+    send_chimp_extractions(cx, kit, extract_texture, extract_mesh, export_level);
+}
 
-    fn draw_chimp_groups(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        world: &World,
-        kit_index: usize,
-    ) {
-        if self.kits[kit_index].chimp.type_indexing {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(
-                    RichText::new("Indexing Unreal package types…")
-                        .small()
-                        .color(subtle_dark()),
-                );
-            });
+fn draw_chimp_archives(ui: &mut Ui, view: &mut ChimpView, world: &World, kit: KitId) {
+    let selected = view.selected_archive;
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_archives", kit.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if ui
+                .selectable_label(selected.is_none(), "All mounted archives")
+                .clicked()
+            {
+                view.selected_archive = None;
+                view.browser = ChimpBrowser::Folders;
+                view.folder_selection = ChimpFolderSelection::Package;
+                view.filter.clear();
+                view.reset_filter();
+            }
             ui.add_space(4.0);
-        }
-
-        let groups = &self.kits[kit_index].chimp.filtered_groups;
-        let selected = self.kits[kit_index].chimp.selected_package.clone();
-        let mut open_package = None;
-        let mut extract_texture = None;
-        let mut extract_mesh = None;
-        let mut export_level = None;
-        if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
-            ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
-            return;
-        }
-
-        egui::ScrollArea::vertical()
-            .id_salt(("chimp_groups", self.kits[kit_index].id.0))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (kind, indices) in groups {
-                    egui::CollapsingHeader::new(format!("{kind}  ·  {}", indices.len()))
-                        .id_salt(("chimp_group", self.kits[kit_index].id.0, &kind))
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            for &index in indices {
-                                let package = &world.packages()[index];
-                                let label =
-                                    package.name.rsplit('/').next().unwrap_or(&package.name);
-                                let response = ui
-                                    .selectable_label(
-                                        selected.as_deref() == Some(&package.name),
-                                        label,
-                                    )
-                                    .on_hover_text(&package.name);
-                                let actions =
-                                    ChimpPackageActions::of(&package.name, Some(kind.as_str()));
-                                if actions.any() {
-                                    response.context_menu(|ui| {
-                                        if actions.texture {
-                                            chimp_texture_export_menu(
-                                                ui,
-                                                &package.name,
-                                                &mut extract_texture,
-                                            );
-                                        }
-                                        if actions.mesh {
-                                            chimp_mesh_export_menu(
-                                                ui,
-                                                &package.name,
-                                                &mut extract_mesh,
-                                            );
-                                        }
-                                        if actions.level {
-                                            chimp_level_export_menu(
-                                                ui,
-                                                &package.name,
-                                                &mut export_level,
-                                            );
-                                        }
-                                    });
-                                }
-                                if response.clicked() {
-                                    open_package = Some(package.name.clone());
-                                }
-                            }
-                        });
-                }
-            });
-        if let Some(package) = open_package {
-            self.begin_chimp_open_package(kit_index, package, ctx.clone());
-        }
-        if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture(kit_index, &package);
-        }
-        if let Some((package, format)) = extract_mesh {
-            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
-        }
-        if let Some((package, format)) = export_level {
-            self.begin_export_chimp_level(kit_index, &package, format);
-        }
-    }
-
-    fn draw_chimp_archives(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
-        let selected = self.kits[kit_index].chimp.selected_archive;
-        egui::ScrollArea::vertical()
-            .id_salt(("chimp_archives", self.kits[kit_index].id.0))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if ui
-                    .selectable_label(selected.is_none(), "All mounted archives")
-                    .clicked()
-                {
-                    let chimp = &mut self.kits[kit_index].chimp;
-                    chimp.selected_archive = None;
-                    chimp.browser = ChimpBrowser::Folders;
-                    chimp.folder_selection = ChimpFolderSelection::Package;
-                    chimp.filter.clear();
-                    chimp.reset_filter();
-                }
-                ui.add_space(4.0);
-                ui.label(RichText::new("IoStore").strong());
-                for container in world.containers() {
-                    let name = container
-                        .path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("container.utoc");
-                    let response = ui
-                        .selectable_label(
-                            selected == Some(ChimpArchive::IoStore(container.index)),
-                            format!("{name}  ·  {} packages", container.package_count),
-                        )
-                        .on_hover_text(format!(
-                            "{}\nMount order: {}{}",
-                            container.path.display(),
-                            container.read_order,
-                            if container.recovered_directory_index {
-                                "\nRecovered directory index"
-                            } else {
-                                ""
-                            }
-                        ));
-                    if response.clicked() {
-                        let chimp = &mut self.kits[kit_index].chimp;
-                        chimp.selected_archive = Some(ChimpArchive::IoStore(container.index));
-                        chimp.browser = ChimpBrowser::Folders;
-                        chimp.folder_selection = ChimpFolderSelection::Package;
-                        chimp.filter.clear();
-                        chimp.reset_filter();
-                    }
-                }
-                ui.add_space(6.0);
-                ui.label(RichText::new("Legacy pak").strong());
-                for container in world.pak_containers() {
-                    let name = container
-                        .path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("container.pak");
-                    let response = ui
-                        .selectable_label(
-                            selected == Some(ChimpArchive::Pak(container.index)),
-                            format!("{name}  ·  {} files", container.file_count),
-                        )
-                        .on_hover_text(format!(
-                            "{}\nMount order: {}",
-                            container.path.display(),
-                            container.read_order
-                        ));
-                    if response.clicked() {
-                        let chimp = &mut self.kits[kit_index].chimp;
-                        chimp.selected_archive = Some(ChimpArchive::Pak(container.index));
-                        chimp.browser = ChimpBrowser::Folders;
-                        chimp.folder_selection = ChimpFolderSelection::File;
-                        chimp.filter.clear();
-                        chimp.reset_filter();
-                    }
-                }
-                if !world.diagnostics().is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("Unavailable or empty").strong());
-                    for diagnostic in world.diagnostics() {
-                        let name = diagnostic
-                            .path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or("archive");
-                        ui.colored_label(Color32::from_rgb(210, 150, 70), name)
-                            .on_hover_text(format!(
-                                "{}\n{}",
-                                diagnostic.path.display(),
-                                diagnostic.message
-                            ));
-                    }
-                }
-            });
-    }
-
-    fn draw_chimp_folders(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        world: &World,
-        kit_index: usize,
-    ) {
-        let selected_archive = self.kits[kit_index].chimp.selected_archive;
-        if let Some(archive) = selected_archive {
-            ui.horizontal(|ui| {
-                let path = match archive {
-                    ChimpArchive::IoStore(index) => &world.containers()[index].path,
-                    ChimpArchive::Pak(index) => &world.pak_containers()[index].path,
-                };
-                let name = path
+            ui.label(RichText::new("IoStore").strong());
+            for container in world.containers() {
+                let name = container
+                    .path
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .unwrap_or("archive");
-                ui.label(RichText::new(name).strong());
-                if ui.small_button("Show all").clicked() {
-                    let chimp = &mut self.kits[kit_index].chimp;
-                    chimp.selected_archive = None;
-                    chimp.reset_filter();
+                    .unwrap_or("container.utoc");
+                let response = ui
+                    .selectable_label(
+                        selected == Some(ChimpArchive::IoStore(container.index)),
+                        format!("{name}  ·  {} packages", container.package_count),
+                    )
+                    .on_hover_text(format!(
+                        "{}\nMount order: {}{}",
+                        container.path.display(),
+                        container.read_order,
+                        if container.recovered_directory_index {
+                            "\nRecovered directory index"
+                        } else {
+                            ""
+                        }
+                    ));
+                if response.clicked() {
+                    view.selected_archive = Some(ChimpArchive::IoStore(container.index));
+                    view.browser = ChimpBrowser::Folders;
+                    view.folder_selection = ChimpFolderSelection::Package;
+                    view.filter.clear();
+                    view.reset_filter();
                 }
-            });
-            ui.separator();
-        }
-        let selected_package = self.kits[kit_index].chimp.selected_package.clone();
-        let selected_file = self.kits[kit_index].chimp.selected_file.clone();
-        // Borrowed, like the tree beside it: this used to clone the type of
-        // every mounted package (about 104k strings) every frame the default
-        // Folders tab was drawn, only to satisfy the borrow checker.
-        let chimp = &self.kits[kit_index].chimp;
-        let clicked = egui::ScrollArea::vertical()
-            .id_salt(("chimp_folders", self.kits[kit_index].id.0))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                draw_chimp_folder_node(
-                    ui,
-                    &chimp.content_tree,
-                    world,
-                    &chimp.package_types,
-                    selected_package.as_deref(),
-                    selected_file.as_deref(),
-                    "",
-                )
-            })
-            .inner;
-        match clicked {
-            Some(ChimpTreeClick::Package(package)) => {
-                self.kits[kit_index].chimp.folder_selection = ChimpFolderSelection::Package;
-                self.begin_chimp_open_package(kit_index, package, ctx.clone());
             }
-            Some(ChimpTreeClick::ExtractTexture(package)) => {
-                self.begin_extract_chimp_texture(kit_index, &package);
-            }
-            Some(ChimpTreeClick::ExportLevel(package, format)) => {
-                self.begin_export_chimp_level(kit_index, &package, format);
-            }
-            Some(ChimpTreeClick::ExtractMesh(package, format)) => {
-                self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
-            }
-            Some(ChimpTreeClick::File(file)) => {
-                let chimp = &mut self.kits[kit_index].chimp;
-                chimp.folder_selection = ChimpFolderSelection::File;
-                chimp.selected_file = Some(file);
-            }
-            None => {}
-        }
-    }
-
-    fn draw_chimp_pak_files(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
-        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_files);
-        let selected = self.kits[kit_index].chimp.selected_file.clone();
-        egui::ScrollArea::vertical()
-            .id_salt(("chimp_pak_files", self.kits[kit_index].id.0))
-            .auto_shrink([false, false])
-            .show_rows(ui, 22.0, indices.len(), |ui, range| {
-                for row in range {
-                    let file = &world.pak_files()[indices[row]];
-                    let active = file.active_provider();
-                    let mut label = file.path.clone();
-                    if file.providers.len() > 1 {
-                        label.push_str("  ⧉");
-                    }
-                    let response =
-                        ui.selectable_label(selected.as_deref() == Some(&file.path), label);
-                    let response = if let Some(provider) = active {
-                        response.on_hover_text(format!(
-                            "{}\n{}\n{} provider(s)",
-                            file.path,
-                            world.pak_containers()[provider.container].path.display(),
-                            file.providers.len()
-                        ))
-                    } else {
-                        response
-                    };
-                    if response.clicked() {
-                        self.kits[kit_index].chimp.selected_file = Some(file.path.clone());
-                    }
+            ui.add_space(6.0);
+            ui.label(RichText::new("Legacy pak").strong());
+            for container in world.pak_containers() {
+                let name = container
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("container.pak");
+                let response = ui
+                    .selectable_label(
+                        selected == Some(ChimpArchive::Pak(container.index)),
+                        format!("{name}  ·  {} files", container.file_count),
+                    )
+                    .on_hover_text(format!(
+                        "{}\nMount order: {}",
+                        container.path.display(),
+                        container.read_order
+                    ));
+                if response.clicked() {
+                    view.selected_archive = Some(ChimpArchive::Pak(container.index));
+                    view.browser = ChimpBrowser::Folders;
+                    view.folder_selection = ChimpFolderSelection::File;
+                    view.filter.clear();
+                    view.reset_filter();
                 }
-            });
-    }
+            }
+            if !world.diagnostics().is_empty() {
+                ui.add_space(6.0);
+                ui.label(RichText::new("Unavailable or empty").strong());
+                for diagnostic in world.diagnostics() {
+                    let name = diagnostic
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("archive");
+                    ui.colored_label(Color32::from_rgb(210, 150, 70), name)
+                        .on_hover_text(format!(
+                            "{}\n{}",
+                            diagnostic.path.display(),
+                            diagnostic.message
+                        ));
+                }
+            }
+        });
+}
 
-    fn draw_chimp_file(&mut self, ui: &mut Ui, kit_index: usize) {
-        let Some(path) = self.kits[kit_index].chimp.selected_file.clone() else {
-            crate::app::ui::centered_empty_state(
-                ui,
-                "Select a file from a legacy .pak container.",
-            );
-            return;
-        };
-        let world = match &self.kits[kit_index].chimp.mount {
-            ChimpMount::Ready(world) => world.clone(),
-            _ => return,
-        };
-        let Some(file) = world.pak_file(&path) else {
-            return;
-        };
-        let Some(provider) = file.active_provider() else {
-            return;
-        };
-        let container = &world.pak_containers()[provider.container];
-        ui.heading(&file.path);
-        ui.label(
-            RichText::new(format!(
-                "{} • {} provider(s)",
-                container.path.display(),
-                file.providers.len()
-            ))
-            .color(subtle_dark()),
-        );
-        ui.add_space(8.0);
-        ui.label("Legacy-pak entries are exposed as raw files.");
-        ui.label(
-            RichText::new(
-                "Wwise banks/media and other staged data can be extracted; Unreal package property editing uses the Packages view.",
-            )
-            .color(subtle_dark()),
-        );
-        if ui.button("Extract file…").clicked() {
-            let suggested = std::path::Path::new(&file.path)
+fn draw_chimp_folders(
+    ui: &mut Ui,
+    cx: &Ctx,
+    view: &mut ChimpView,
+    world: &World,
+    kit_index: usize,
+) {
+    let kit = cx.model.kits[kit_index].id;
+    let selected_archive = view.selected_archive;
+    if let Some(archive) = selected_archive {
+        ui.horizontal(|ui| {
+            let path = match archive {
+                ChimpArchive::IoStore(index) => &world.containers()[index].path,
+                ChimpArchive::Pak(index) => &world.pak_containers()[index].path,
+            };
+            let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .unwrap_or("extracted.bin");
-            let Some(output) = rfd::FileDialog::new()
-                .set_title("Extract legacy-pak file")
-                .set_file_name(suggested)
-                .save_file()
-            else {
-                return;
-            };
-            match world
-                .read_pak_provider(provider)
-                .and_then(|bytes| fs::write(&output, bytes).map_err(anyhow::Error::from))
-            {
-                Ok(()) => self.status = format!("Extracted {}", output.display()),
-                Err(error) => {
-                    self.status = format!("Could not extract {}: {error:#}", output.display())
+                .unwrap_or("archive");
+            ui.label(RichText::new(name).strong());
+            if ui.small_button("Show all").clicked() {
+                view.selected_archive = None;
+                view.reset_filter();
+            }
+        });
+        ui.separator();
+    }
+    let selected_package = cx.model.kits[kit_index].chimp.selected_package.as_deref();
+    // Borrowed, like the tree beside it: this used to clone the type of
+    // every mounted package (about 104k strings) every frame the default
+    // Folders tab was drawn, only to satisfy the borrow checker.
+    let clicked = egui::ScrollArea::vertical()
+        .id_salt(("chimp_folders", kit.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            draw_chimp_folder_node(
+                ui,
+                &view.content_tree,
+                world,
+                &view.package_types,
+                selected_package,
+                view.selected_file.as_deref(),
+                "",
+            )
+        })
+        .inner;
+    match clicked {
+        Some(ChimpTreeClick::Package(package)) => {
+            view.folder_selection = ChimpFolderSelection::Package;
+            cx.send(ChimpCommand::Open { kit, package });
+        }
+        Some(ChimpTreeClick::ExtractTexture(package)) => {
+            send_chimp_extractions(cx, kit, Some(package), None, None);
+        }
+        Some(ChimpTreeClick::ExportLevel(package, format)) => {
+            send_chimp_extractions(cx, kit, None, None, Some((package, format)));
+        }
+        Some(ChimpTreeClick::ExtractMesh(package, format)) => {
+            send_chimp_extractions(cx, kit, None, Some((package, format)), None);
+        }
+        Some(ChimpTreeClick::File(file)) => {
+            view.folder_selection = ChimpFolderSelection::File;
+            view.selected_file = Some(file);
+        }
+        None => {}
+    }
+}
+
+fn draw_chimp_pak_files(ui: &mut Ui, view: &mut ChimpView, world: &World, kit: KitId) {
+    let indices = Arc::clone(&view.filtered_files);
+    let selected = view.selected_file.clone();
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_pak_files", kit.0))
+        .auto_shrink([false, false])
+        .show_rows(ui, 22.0, indices.len(), |ui, range| {
+            for row in range {
+                let file = &world.pak_files()[indices[row]];
+                let active = file.active_provider();
+                let mut label = file.path.clone();
+                if file.providers.len() > 1 {
+                    label.push_str("  ⧉");
                 }
+                let response = ui.selectable_label(selected.as_deref() == Some(&file.path), label);
+                let response = if let Some(provider) = active {
+                    response.on_hover_text(format!(
+                        "{}\n{}\n{} provider(s)",
+                        file.path,
+                        world.pak_containers()[provider.container].path.display(),
+                        file.providers.len()
+                    ))
+                } else {
+                    response
+                };
+                if response.clicked() {
+                    view.selected_file = Some(file.path.clone());
+                }
+            }
+        });
+}
+
+fn draw_chimp_file(ui: &mut Ui, cx: &Ctx, view: &ChimpView, kit_index: usize) {
+    let kit = cx.model.kits[kit_index].id;
+    let Some(path) = view.selected_file.clone() else {
+        crate::app::shell::frame::centered_empty_state(
+            ui,
+            "Select a file from a legacy .pak container.",
+        );
+        return;
+    };
+    let ChimpMount::Ready(world) = &cx.model.kits[kit_index].chimp.mount else {
+        return;
+    };
+    let Some(file) = world.pak_file(&path) else {
+        return;
+    };
+    let Some(provider) = file.active_provider() else {
+        return;
+    };
+    let container = &world.pak_containers()[provider.container];
+    ui.heading(&file.path);
+    ui.label(
+        RichText::new(format!(
+            "{} • {} provider(s)",
+            container.path.display(),
+            file.providers.len()
+        ))
+        .color(subtle_dark()),
+    );
+    ui.add_space(8.0);
+    ui.label("Legacy-pak entries are exposed as raw files.");
+    ui.label(
+        RichText::new(
+            "Wwise banks/media and other staged data can be extracted; Unreal package property editing uses the Packages view.",
+        )
+        .color(subtle_dark()),
+    );
+    if ui.button("Extract file…").clicked() {
+        cx.send(ChimpCommand::ExtractPakFile {
+            kit,
+            path: file.path.clone(),
+        });
+    }
+}
+
+/// Send the extractions a package menu asked for.
+pub(super) fn send_chimp_extractions(
+    cx: &Ctx,
+    kit: KitId,
+    texture: Option<String>,
+    mesh: Option<(String, ChimpMeshFormat)>,
+    level: Option<(String, ChimpLevelFormat)>,
+) {
+    let extractions = [
+        texture.map(|package| (package, ChimpExtraction::Texture)),
+        mesh.map(|(package, format)| (package, ChimpExtraction::Mesh(format))),
+        level.map(|(package, format)| (package, ChimpExtraction::Level(format))),
+    ];
+    for (package, what) in extractions.into_iter().flatten() {
+        cx.send(ChimpCommand::Extract { kit, package, what });
+    }
+}
+
+impl Baboon {
+    /// Write a legacy-pak file to where the user picks.
+    pub(super) fn extract_chimp_pak_file(&mut self, kit_index: usize, path: &str) {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = Arc::clone(world);
+        let Some(provider) = world.pak_file(path).and_then(|file| file.active_provider()) else {
+            return;
+        };
+        let suggested = std::path::Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("extracted.bin");
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract legacy-pak file")
+            .set_file_name(suggested)
+            .save_file()
+        else {
+            return;
+        };
+        match world
+            .read_pak_provider(provider)
+            .and_then(|bytes| fs::write(&output, bytes).map_err(anyhow::Error::from))
+        {
+            Ok(()) => self.model.status = format!("Extracted {}", output.display()),
+            Err(error) => {
+                self.model.status = format!("Could not extract {}: {error:#}", output.display())
             }
         }
     }
@@ -743,7 +737,7 @@ fn draw_chimp_folder_node(
         let package_type = package_types.get(leaf.package).and_then(Option::as_deref);
         let actions = ChimpPackageActions::of(&package.name, package_type);
         if actions.any() {
-            response.context_menu(|ui| {
+            context_menu(&response, |ui| {
                 if actions.texture {
                     let mut request = None;
                     chimp_texture_export_menu(ui, &package.name, &mut request);
@@ -815,7 +809,8 @@ mod tests {
     fn chimp_workspace_toolbar_does_not_consume_the_editor_viewport() {
         let context = egui::Context::default();
         let mut toolbar_height = None;
-        let _ = context.run(
+        let _ = crate::app::run_ui_test(
+            &context,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -902,6 +897,186 @@ mod tests {
         assert!(!contains_ignore_ascii_case("StaticMesh", "skeletal"));
     }
 
+    /// Draw kit 0's Chimp surface and apply what it sent, as a frame does.
+    fn draw_workspace(app: &mut Baboon) -> impl FnMut(&mut egui::Ui) + '_ {
+        move |ui| {
+            let ctx = ui.ctx().clone();
+            let kit = app.model.kits[0].id;
+            egui::CentralPanel::default().show(ui, |ui| {
+                draw_chimp_workspace(
+                    ui,
+                    &cx!(app, &ctx),
+                    &mut app.chimp,
+                    &mut app.views[kit].chimp,
+                    0,
+                );
+            });
+            app.apply_commands(&ctx);
+        }
+    }
+
+    /// The folder tree nests packages by path; clicking one opens it beside
+    /// the tree.
+    #[test]
+    fn the_folder_tree_opens_a_package() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        let mut frames = Frames::new();
+        frames.click("Game  ·  2", &mut draw_workspace(&mut app));
+        frames.click("Test  ·  2", &mut draw_workspace(&mut app));
+        assert!(frames.shows("Other"));
+        frames.click_exact("Thing", 0, &mut draw_workspace(&mut app));
+        assert_eq!(
+            app.views[app.model.kits[0].id].chimp.folder_selection,
+            ChimpFolderSelection::Package
+        );
+        assert_eq!(app.model.kits[0].chimp.selected_package.as_deref(), Some(THING));
+        apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(THING));
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        assert!(frames.shows("1 exports • 2 imports •"), "the pane is drawn");
+    }
+
+    /// The flat package list opens what is clicked, and the search box
+    /// narrows it.
+    #[test]
+    fn the_package_list_opens_and_filters() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        let mut frames = Frames::new();
+        frames.click_exact("Packages", 0, &mut draw_workspace(&mut app));
+        assert_eq!(app.views[app.model.kits[0].id].chimp.browser, ChimpBrowser::Packages);
+        assert!(frames.shows(THING) && frames.shows(OTHER));
+        frames.click_exact(OTHER, 0, &mut draw_workspace(&mut app));
+        apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(OTHER));
+
+        frames.click("Search package or container…", &mut draw_workspace(&mut app));
+        frames.type_text("thing", &mut draw_workspace(&mut app));
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        let chimp = &app.model.kits[0].chimp;
+        let view = &app.views[app.model.kits[0].id].chimp;
+        assert_eq!(view.filter, "thing");
+        let ChimpMount::Ready(world) = &chimp.mount else {
+            unreachable!()
+        };
+        assert_eq!(
+            view
+                .filtered_packages
+                .iter()
+                .map(|&index| world.packages()[index].name.as_str())
+                .collect::<Vec<_>>(),
+            [THING]
+        );
+    }
+
+    /// The archive list names each container with its package count; picking
+    /// one scopes the folder tree to it until "Show all".
+    #[test]
+    fn the_archive_list_scopes_the_tree() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        let mut frames = Frames::new();
+        frames.click_exact("Archives", 0, &mut draw_workspace(&mut app));
+        for text in [
+            "All mounted archives",
+            "pakchunk0-Windows.utoc  ·  2 packages",
+            "pakchunk0-Windows.pak  ·  0 files",
+            "Unavailable or empty",
+            "Select an archive to browse its folder hierarchy.",
+        ] {
+            assert!(frames.shows(text), "{text}");
+        }
+        frames.click("pakchunk0-Windows.utoc  ·  2 packages", &mut draw_workspace(&mut app));
+        let chimp = &app.views[app.model.kits[0].id].chimp;
+        assert_eq!(chimp.selected_archive, Some(ChimpArchive::IoStore(0)));
+        assert_eq!(chimp.browser, ChimpBrowser::Folders);
+        assert!(frames.shows("Game  ·  2"));
+        frames.click("Show all", &mut draw_workspace(&mut app));
+        assert_eq!(app.views[app.model.kits[0].id].chimp.selected_archive, None);
+
+        frames.click_exact("Archives", 0, &mut draw_workspace(&mut app));
+        frames.click("pakchunk0-Windows.pak  ·  0 files", &mut draw_workspace(&mut app));
+        let chimp = &app.views[app.model.kits[0].id].chimp;
+        assert_eq!(chimp.selected_archive, Some(ChimpArchive::Pak(0)));
+        assert_eq!(chimp.folder_selection, ChimpFolderSelection::File);
+        assert!(frames.shows("Select a file from a legacy .pak container."));
+        assert!(!frames.shows("Game  ·  2"), "the pak holds no packages");
+    }
+
+    /// Packages group by their indexed type; a group opens onto its packages.
+    #[test]
+    fn the_group_list_opens_a_package_by_type() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        // Indexed by mount order, which sorts `Other` first.
+        app.views[app.model.kits[0].id].chimp.package_types = vec![Some("Texture2D".to_owned()), None];
+        let mut frames = Frames::new();
+        frames.click_exact("Groups", 0, &mut draw_workspace(&mut app));
+        assert!(frames.shows("Texture2D  ·  1"));
+        assert!(frames.shows("Unknown  ·  1"));
+        frames.click("Texture2D  ·  1", &mut draw_workspace(&mut app));
+        frames.click_exact("Other", 0, &mut draw_workspace(&mut app));
+        apply_until(&mut app, |app| app.model.kits[0].chimp.documents.contains_key(OTHER));
+    }
+
+    /// Before the mount, the workspace offers to start it, waits while it
+    /// runs, and browses once it lands; a failed mount offers a retry.
+    #[test]
+    fn the_mount_status_starts_waits_and_retries() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[]);
+        app.model.prefs.enable_chimp = true;
+        app.model.kits[0].chimp.mount = ChimpMount::Idle;
+        let mut frames = Frames::new();
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        assert!(frames.shows("The Unreal package index has not been started."));
+        frames.click("Start Chimp", &mut draw_workspace(&mut app));
+        assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        assert!(frames.shows("Please wait — Chimp is starting up…"));
+        apply_until(&mut app, |app| {
+            matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
+                && !app.views[app.model.kits[0].id].chimp.type_indexing
+        });
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        assert!(frames.shows("Game  ·  2"));
+
+        app.model.kits[0].chimp.mount = ChimpMount::Failed("no containers".to_owned());
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        assert!(frames.shows("no containers"));
+        frames.click("Retry", &mut draw_workspace(&mut app));
+        assert!(matches!(app.model.kits[0].chimp.mount, ChimpMount::Loading));
+        apply_until(&mut app, |app| {
+            matches!(app.model.kits[0].chimp.mount, ChimpMount::Ready(_))
+                && !app.views[app.model.kits[0].id].chimp.type_indexing
+        });
+    }
+
+    /// The toolbar's discard button opens the prompt for every modified
+    /// package, and does nothing while there are none.
+    #[test]
+    fn the_toolbar_discard_prompts_for_modified_packages() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        // The toolbar is right-aligned on the first row.
+        let button = egui::pos2(VALUE_X - 4.0, 8.0 + 12.0);
+        let mut frames = Frames::new();
+        frames.frame(Vec::new(), &mut draw_workspace(&mut app));
+        frames.click_at(button, &mut draw_workspace(&mut app));
+        assert!(
+            app.dialogs.get::<ChimpDiscardPrompt>().is_none(),
+            "disabled while clean"
+        );
+
+        app.model.kits[0].chimp.documents.get_mut(THING).unwrap().dirty = true;
+        frames.click_at(button, &mut draw_workspace(&mut app));
+        let prompt = app
+            .dialogs
+            .get::<ChimpDiscardPrompt>()
+            .expect("the prompt opened");
+        assert_eq!(prompt.packages, [THING]);
+        assert!(prompt.pending_action.is_none());
+    }
+
     #[test]
     #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
     fn real_file_types_filter_and_texture_preview() {
@@ -916,7 +1091,7 @@ mod tests {
             );
         }
 
-        let mut browser = ChimpState {
+        let mut browser = ChimpView {
             package_types: index.package_types,
             filter: "Texture2D".to_owned(),
             ..Default::default()
@@ -949,9 +1124,9 @@ mod tests {
             None => textures[0],
         };
         let package = world.packages()[package_index].name.clone();
-        let document = load_chimp_document(&world, &package).unwrap();
-        assert_eq!(document.view, ChimpDocumentView::Texture);
-        let decoded = document
+        let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        assert_eq!(pane.view, ChimpDocumentView::Texture);
+        let decoded = pane
             .texture_previews
             .iter()
             .find_map(|preview| {

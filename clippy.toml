@@ -1,0 +1,13 @@
+# Lints for the rules the codebase keeps that the compiler cannot see.
+
+disallowed-methods = [
+    # The typed enum readers panic when a tag's value has no option name this
+    # build knows: a tag from a newer kit, a damaged tag, a schema drift. In the
+    # editor that takes the whole app down with the user's unsaved work.
+    # Resolve enums by option name (`read_enum_name`, `TagFieldData::*Enum`'s
+    # `name`) and handle the miss.
+    { path = "blam_tags::api::TagStruct::read_enum", reason = "panics on a value with no known option name; read the option name and handle a miss" },
+    { path = "blam_tags::api::TagStruct::try_read_enum", reason = "panics on a present value with no known option name; read the option name and handle a miss" },
+    { path = "blam_tags::api::TagStruct::read_flags", reason = "panics on a set bit with no known name; read the flag names and handle a miss" },
+    { path = "blam_tags::api::TagStruct::try_read_flags", reason = "panics on a set bit with no known name; read the flag names and handle a miss" },
+]

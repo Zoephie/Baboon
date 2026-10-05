@@ -324,7 +324,7 @@ pub(in crate::app) fn compute_filter_matches(entries: &[TagEntry], filter: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{TagEntry, TagEntryLocation};
+    use crate::core::source::{TagEntry, TagEntryLocation};
     use std::path::PathBuf;
 
     #[test]
@@ -560,7 +560,7 @@ mod tests {
             entry("rasterizer/hlsl/post/tonemap.hlsl_include", b"hlsl"),
             entry("rasterizer/bitmaps/noise.bitmap", b"bitm"),
         ];
-        let tree = crate::source::build_tree(&entries);
+        let tree = crate::core::source::build_tree(&entries);
         let rasterizer = tree
             .children
             .iter()
@@ -589,7 +589,7 @@ mod tests {
             ),
             entry("shaders/material_shaders/decals/noise.bitmap", b"bitm"),
         ];
-        let tree = crate::source::build_tree(&entries);
+        let tree = crate::core::source::build_tree(&entries);
         let shaders = tree
             .children
             .iter()

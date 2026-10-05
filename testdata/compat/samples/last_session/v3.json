@@ -1,0 +1,54 @@
+{
+  "kits": [
+    {
+      "browser_mode": "groups",
+      "browser_sort": "name",
+      "source": {
+        "game": "halo3_mcc",
+        "kind": "loose_folder",
+        "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 2003132784,
+          "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon",
+          "label": "a - weapon",
+          "path": null
+        }
+      ]
+    },
+    {
+      "source": {
+        "game": null,
+        "kind": "monolithic_cache",
+        "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Halo The Master Chief Collection\\halo3\\maps",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651078253,
+          "key": "cache:bitm:objects\\weapons\\rifle\\assault_rifle\\bitmaps\\assault_rifle_diffuse",
+          "label": "b - bitmap",
+          "path": null
+        },
+        {
+          "group_tag": 1919754272,
+          "key": "cache:rm:shaders\\default",
+          "label": "shaders/default.shader - render_method",
+          "path": null
+        }
+      ]
+    },
+    {
+      "source": {
+        "game": "haloce_evolved",
+        "kind": "iostore_container_set",
+        "path": "D:\\XboxGames\\Halo Campaign Evolved\\Content",
+        "project_path": "C:\\Users\\me\\AppData\\Roaming\\Baboon\\campaign_evolved_recovery-a1b2c3d4e5f6.baboon"
+      },
+      "tags": []
+    }
+  ],
+  "version": 3
+}

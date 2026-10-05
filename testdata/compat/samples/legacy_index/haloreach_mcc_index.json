@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "display_path": "objects/characters/elite/elite.biped",
+      "group_name": "biped",
+      "group_tag": 1651077220,
+      "key": "file:C:/Kits/HREK/tags\\objects\\characters\\elite\\elite.biped",
+      "modified_nanos": 123000000,
+      "modified_secs": 1759500000,
+      "size": 123456
+    },
+    {
+      "display_path": "objects/weapons/rifle/new_rifle/new_rifle.weapon",
+      "group_name": "weapon",
+      "group_tag": 2003132784,
+      "key": "objects/weapons/rifle/new_rifle/new_rifle.weapon",
+      "modified_nanos": 123000000,
+      "modified_secs": 1759500000,
+      "size": 123456
+    }
+  ],
+  "root": "C:/Kits/HREK/tags"
+}

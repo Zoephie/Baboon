@@ -1,0 +1,23 @@
+{
+  "root": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags",
+  "tags": [
+    {
+      "dependencies": [
+        {
+          "group_tag": 1751936372,
+          "rel_path": "objects\\weapons\\rifle\\assault_rifle\\assault_rifle"
+        },
+        {
+          "group_tag": 1785754657,
+          "rel_path": "objects\\weapons\\rifle\\assault_rifle\\damage_effects\\assault_rifle_bullet"
+        }
+      ],
+      "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon"
+    },
+    {
+      "dependencies": [],
+      "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\characters\\masterchief\\masterchief.model"
+    }
+  ],
+  "version": 1
+}

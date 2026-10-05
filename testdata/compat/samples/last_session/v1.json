@@ -1,0 +1,16 @@
+{
+  "source": {
+    "game": "halo3_mcc",
+    "kind": "loose_folder",
+    "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags"
+  },
+  "tags": [
+    {
+      "group_tag": 2003132784,
+      "key": "file:C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon",
+      "label": "objects/weapons/rifle/assault_rifle/assault_rifle.weapon - weapon",
+      "path": "\\\\?\\C:\\Program Files (x86)\\Steam\\steamapps\\common\\H3EK\\tags\\objects\\weapons\\rifle\\assault_rifle\\assault_rifle.weapon"
+    }
+  ],
+  "version": 1
+}

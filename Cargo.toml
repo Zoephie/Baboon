@@ -31,20 +31,26 @@ atomic-write-file = "0.3"
 # Halo 2 preview meshes skinned to their real bones, Reach and Halo 4
 # meshes bound to theirs in the preview and in JMS export, JMA 16394 for
 # Halo 2 onwards, JMS conversion between Halo CE and Halo 2/3 with Halo CE's
-# node convention fixed, and the stray empty `tgst` H3/ODST/Reach scenarios
-# leave ahead of a chunk read past.
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "0dff753", features = ["audio", "iostore"] }
+# node convention fixed, the stray empty `tgst` H3/ODST/Reach scenarios
+# leave ahead of a chunk read past, and the restructure: games named by a
+# `GameId`, sampler modes by each game's own lists, Halo 2 block headers kept
+# for any block gaining elements, structure BSP limits from the schema, and
+# a warning-free build.
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "d19dcda", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
-eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
-egui_extras = { version = "0.29", features = ["image", "svg"] }
-# Tiling layout for the editor area (rerun-io). Targets egui 0.29 exactly, so it
+# Named because eframe 0.36's `glow` no longer brings them, as 0.29's did:
+# `links` lets a clicked link open the browser (without it egui's request to
+# open a URL is dropped), and Linux needs a windowing backend, `wayland`/`x11`.
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "links", "wayland", "x11"] }
+egui_extras = { version = "0.36", features = ["image", "svg"] }
+# Tiling layout for the editor area (rerun-io). Targets egui 0.36 exactly, so it
 # drops in against the pinned eframe without a version bump.
-egui_tiles = "0.10"
+egui_tiles = "0.17"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["ico", "png"] }
 libc = "0.2"
-rfd = "0.15"
+rfd = "0.17"
 rodio = { version = "0.20", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

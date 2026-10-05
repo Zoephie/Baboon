@@ -9,7 +9,8 @@ use super::*;
 /// bulk-data map is serialized at all, and the Zen version decides the header's
 /// own shape. That is why nothing here is applied without first writing the
 /// package and reading it back.
-pub(super) struct ChimpIdentityEdit {
+#[derive(Clone)]
+pub(in crate::app) struct ChimpIdentityEdit {
     /// Free hex, so an unnamed bit can be set without inventing a checkbox for
     /// every flag the engine defines.
     pub(super) package_flags: String,
@@ -21,7 +22,8 @@ pub(super) struct ChimpIdentityEdit {
 }
 
 /// A draft export-map entry.
-pub(super) struct ChimpExportEdit {
+#[derive(Clone)]
+pub(in crate::app) struct ChimpExportEdit {
     pub(super) index: usize,
     pub(super) object_name: String,
     pub(super) object_flags: u32,
@@ -651,8 +653,18 @@ pub(super) fn chimp_export_hash_desyncs(
         .collect()
 }
 
-/// Recompute who references each name-map entry and each import slot.
-pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument) {
+/// Who references each name-map entry and each import slot.
+/// Count the header's usage for `pane` if it shows the Header view and the
+/// count went stale. Done on the document's side rather than in the draw:
+/// the count walks every export's names, and the engine walks them only
+/// through `&mut`.
+pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument, pane: &mut ChimpDocumentUi) {
+    if pane.view == ChimpDocumentView::Header && pane.header_usage.is_none() {
+        pane.header_usage = Some(chimp_header_usage(document));
+    }
+}
+
+pub(super) fn chimp_header_usage(document: &mut ChimpDocument) -> ChimpHeaderUsage {
     let mut names = vec![ChimpNameUsage::default(); document.header.name_map.len()];
     let mut record = |mapped: FMappedName, site: &str| {
         if let Some(usage) = names.get_mut(mapped.index() as usize) {
@@ -706,10 +718,10 @@ pub(super) fn refresh_chimp_header_usage(document: &mut ChimpDocument) {
         }
     }
 
-    document.header_usage = Some(ChimpHeaderUsage {
+    ChimpHeaderUsage {
         names,
         import_references,
-    });
+    }
 }
 
 pub(super) fn validate_chimp_property_block(

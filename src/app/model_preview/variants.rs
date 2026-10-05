@@ -4,14 +4,14 @@
 use super::*;
 
 #[cfg(test)]
-mod picker_tests {
+mod tests {
     use super::*;
 
     #[test]
     fn variant_picker_filters_and_preserves_none_and_original_indices() {
         let ctx = egui::Context::default();
         ctx.set_fonts(foundation_fonts());
-        ctx.set_style(foundation_style());
+        ctx.set_global_style(foundation_style());
         let variants = ["minor", "major", "special veteran"]
             .into_iter()
             .map(|name| ModelVariantPreview {
@@ -23,7 +23,7 @@ mod picker_tests {
         let frame = |events| {
             let mut result = None;
             let mut popup_id = None;
-            let output = ctx.run(
+            let output = crate::app::run_ui_test(&ctx, 
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -32,8 +32,8 @@ mod picker_tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         popup_id = Some(ui.make_persistent_id(("model_preview_variant", "test")));
                         result = Some(draw_variant_picker(
                             ui,
@@ -75,7 +75,7 @@ mod picker_tests {
         frame(vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
         assert_eq!(frame(vec![pointer(pos, false)]).0, Some(Some(2)));
         ctx.data_mut(|data| data.insert_temp(popup_id.with("entry_search"), String::new()));
-        ctx.memory_mut(|memory| memory.open_popup(popup_id));
+        egui::Popup::open_id(&ctx, popup_id);
         frame(Vec::new());
         let (_, output, _) = frame(Vec::new());
         let pos = row_pos(&output, "<None>");
@@ -403,7 +403,7 @@ fn draw_variant_picker(
     selected: Option<usize>,
 ) -> (Option<Option<usize>>, Option<i32>) {
     let popup_id = ui.make_persistent_id(("model_preview_variant", source_key));
-    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let response = picker_button(
         ui,
         popup_id,
@@ -415,16 +415,17 @@ fn draw_variant_picker(
     );
     let just_opened = response.clicked() && !open;
     if response.clicked() {
-        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
     }
-    let popup_open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let popup_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     let mut choice = None;
-    egui::popup::popup_below_widget(
-        ui,
-        popup_id,
-        &response,
-        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
-        |ui| {
+    // Open while its id is open in memory, as the button above toggles it;
+    // left alone, a popup built from a response is always open.
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
             picker_popup_width(ui, &response);
             let filter_id = popup_id.with("entry_search");
             let mut filter = ui
@@ -440,7 +441,7 @@ fn draw_variant_picker(
                     shown += 1;
                     if ui.selectable_label(selected.is_none(), "<None>").clicked() {
                         choice = Some(None);
-                        ui.memory_mut(|memory| memory.close_popup());
+                        egui::Popup::close_id(ui.ctx(), popup_id);
                     }
                 }
                 for (index, variant) in variants.iter().enumerate() {
@@ -455,15 +456,14 @@ fn draw_variant_picker(
                     }
                     if row.clicked() {
                         choice = Some(Some(index));
-                        ui.memory_mut(|memory| memory.close_popup());
+                        egui::Popup::close_id(ui.ctx(), popup_id);
                     }
                 }
                 if shown == 0 {
                     ui.label(RichText::new("No variants match.").color(subtle_dark()));
                 }
             });
-        },
-    );
+        });
     (choice, dropdown_wheel_delta(ui, &response, popup_open))
 }
 
@@ -572,7 +572,7 @@ pub(super) fn draw_variant_header_actions(
             });
             state.new_variant_name.clear();
             mutation_requested = true;
-            ui.close_menu();
+            close_menu(ui);
         }
         let can_update =
             edit.editable && state.selected_variant.is_some() && !chosen_regions.is_empty();
@@ -588,7 +588,7 @@ pub(super) fn draw_variant_header_actions(
                 regions: chosen_regions,
             });
             mutation_requested = true;
-            ui.close_menu();
+            close_menu(ui);
         }
     });
     let can_delete = edit.editable && state.selected_variant.is_some();

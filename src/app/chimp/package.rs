@@ -148,7 +148,7 @@ pub(super) fn chimp_mesh_kind(exports: &[ChimpExport]) -> Option<ChimpMeshKind> 
 }
 
 /// The shared front half of loading a package: header, payloads, exports.
-fn decode_chimp_exports(
+pub(super) fn decode_chimp_exports(
     world: &World,
     provider: &PackageProvider,
     bytes: &[u8],
@@ -206,58 +206,92 @@ fn decode_chimp_exports(
     Ok((header, payloads, exports))
 }
 
+/// Load `package` with the pane it opens in: decoding its previews is work
+/// for the job that loads it, not for the frame that shows it.
+pub(super) fn load_chimp_document_with_pane(
+    world: &World,
+    package: &str,
+) -> Result<(ChimpDocument, ChimpDocumentUi), String> {
+    let document = load_chimp_document(world, package)?;
+    let pane = ChimpDocumentUi::new(world, &document);
+    Ok((document, pane))
+}
+
 pub(super) fn decode_chimp_document(
     world: &World,
     provider: PackageProvider,
     bytes: Vec<u8>,
 ) -> Result<ChimpDocument, String> {
     let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
-    let texture_previews =
-        chimp_texture_previews_for(world, &provider, &bytes, &header, &payloads, &exports);
-    let (mesh_kind, mesh_preview, mesh_preview_state) =
-        decode_chimp_mesh_preview(world, &provider, &bytes, &header, &exports);
-    let initial_view = if !texture_previews.is_empty() {
-        ChimpDocumentView::Texture
-    } else if mesh_kind.is_some() {
-        ChimpDocumentView::Mesh
-    } else {
-        ChimpDocumentView::default()
-    };
-    let mut document = ChimpDocument {
+    let mesh_kind = chimp_mesh_kind(&exports);
+    Ok(ChimpDocument {
         package: header.package_name(),
         provider,
         original: bytes,
         header,
         payloads,
         exports,
-        texture_previews,
         mesh_kind,
-        mesh_preview,
-        mesh_preview_state,
-        selected_export: 0,
         dirty: false,
-        view: initial_view,
-        document_text: String::new(),
-        document_lines: ChimpJsonLines::default(),
-        document_text_dirty: true,
-        metadata_text: String::new(),
-        metadata_lines: ChimpJsonLines::default(),
-        metadata_text_dirty: true,
-        header_usage: None,
-        header_name_filter: String::new(),
-        header_name_edit: None,
-        header_import_edit: None,
-        header_export_edit: None,
-        header_identity_edit: None,
-        header_error: None,
-        referrers: ChimpReferrerState::Idle,
         orphaned: false,
         checkpoint_due: None,
         edits: 0,
-    };
-    refresh_chimp_document_text(&mut document);
-    refresh_chimp_metadata_text(&mut document, world);
-    Ok(document)
+        journal: EditJournal::default(),
+    })
+}
+
+impl ChimpDocumentUi {
+    /// The pane a freshly opened `document` starts with: its previews
+    /// decoded, its texts rendered, and the tab that best shows it.
+    pub(super) fn new(world: &World, document: &ChimpDocument) -> Self {
+        let texture_previews = chimp_texture_previews_for(
+            world,
+            &document.provider,
+            &document.original,
+            &document.header,
+            &document.payloads,
+            &document.exports,
+        );
+        let (_, mesh_preview, mesh_preview_state) = decode_chimp_mesh_preview(
+            world,
+            &document.provider,
+            &document.original,
+            &document.header,
+            &document.exports,
+        );
+        let view = if !texture_previews.is_empty() {
+            ChimpDocumentView::Texture
+        } else if document.mesh_kind.is_some() {
+            ChimpDocumentView::Mesh
+        } else {
+            ChimpDocumentView::default()
+        };
+        let mut ui = Self {
+            texture_previews,
+            mesh_preview,
+            mesh_preview_state,
+            selected_export: 0,
+            view,
+            document_text: String::new(),
+            document_lines: ChimpJsonLines::default(),
+            document_text_dirty: true,
+            metadata_text: String::new(),
+            metadata_lines: ChimpJsonLines::default(),
+            metadata_text_dirty: true,
+            header_usage: None,
+            header_name_filter: String::new(),
+            header_name_edit: None,
+            header_import_edit: None,
+            header_export_edit: None,
+            header_identity_edit: None,
+            header_error: None,
+            referrers: ChimpReferrerState::Idle,
+            property_draft: None,
+        };
+        refresh_chimp_document_text(document, &mut ui);
+        refresh_chimp_metadata_text(document, &mut ui, world);
+        ui
+    }
 }
 
 /// Whether an imported package is one of the mesh's materials.
@@ -1008,18 +1042,18 @@ fn chimp_metadata_json(document: &ChimpDocument, world: &World) -> Value {
     })
 }
 
-pub(super) fn refresh_chimp_document_text(document: &mut ChimpDocument) {
-    document.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
+pub(super) fn refresh_chimp_document_text(document: &ChimpDocument, ui: &mut ChimpDocumentUi) {
+    ui.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
         .unwrap_or_else(|error| format!("Could not render package document: {error}"));
-    document.document_lines = ChimpJsonLines::default();
-    document.document_text_dirty = false;
+    ui.document_lines = ChimpJsonLines::default();
+    ui.document_text_dirty = false;
 }
 
-pub(super) fn refresh_chimp_metadata_text(document: &mut ChimpDocument, world: &World) {
-    document.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
+pub(super) fn refresh_chimp_metadata_text(document: &ChimpDocument, ui: &mut ChimpDocumentUi, world: &World) {
+    ui.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
         .unwrap_or_else(|error| format!("Could not render package metadata: {error}"));
-    document.metadata_lines = ChimpJsonLines::default();
-    document.metadata_text_dirty = false;
+    ui.metadata_lines = ChimpJsonLines::default();
+    ui.metadata_text_dirty = false;
 }
 
 fn chimp_block_json(block: &PropertyBlock) -> Value {
@@ -1163,6 +1197,131 @@ mod tests {
             chimp_value_json(&PropValue::Raw(vec![1, 2, 3])),
             json!({"unknown_bytes": 3})
         );
+    }
+
+    fn reopen(install: &SyntheticInstall, document: &ChimpDocument) -> ChimpDocument {
+        let (bytes, _) = rebuild_chimp_document(&install.world, document).unwrap();
+        decode_chimp_document(&install.world, document.provider.clone(), bytes).unwrap()
+    }
+
+    /// An unedited package rebuilds to exactly the bytes it was read from.
+    #[test]
+    fn an_unedited_package_rebuilds_to_its_own_bytes() {
+        let install = SyntheticInstall::new();
+        for package in [THING, OTHER] {
+            let document = install.document(package);
+            let (bytes, _) = rebuild_chimp_document(&install.world, &document).unwrap();
+            assert_eq!(bytes, document.original, "{package}");
+        }
+    }
+
+    /// An edited package rebuilds into bytes that decode to the edited model:
+    /// every property, the grown name map and the header alike.
+    #[test]
+    fn an_edited_package_rebuilds_into_the_same_model() {
+        let install = SyntheticInstall::new();
+        let mut document = install.document(THING);
+        set_first_value(&mut document, "Count", PropValue::Int(-12));
+        set_first_value(
+            &mut document,
+            "Values",
+            PropValue::Array(vec![PropValue::Int(1)]),
+        );
+        set_first_value(&mut document, "Later", PropValue::Int(5));
+        let comet =
+            blam_tags::iostore::object::edit::intern_name(&mut document.header.name_map, "Comet");
+        set_first_value(&mut document, "Tag", PropValue::Name(comet));
+
+        let reopened = reopen(&install, &document);
+        assert!(first_block(&reopened).semantic_eq(first_block(&document)));
+        assert_eq!(
+            reopened.header.name_map.names(),
+            document.header.name_map.names()
+        );
+        assert_eq!(
+            read_import_slots(&reopened.header).unwrap(),
+            read_import_slots(&document.header).unwrap()
+        );
+        assert!(matches!(first_value(&reopened, "Tag"), PropValue::Name(name) if name.as_str() == "Comet"));
+    }
+
+    /// The rebuild refuses what it cannot write back: an orphaned document, a
+    /// reference past the import map, and a value of the wrong type for its
+    /// slot. Each says which package and why.
+    #[test]
+    fn a_rebuild_refuses_orphans_bad_references_and_mistyped_values() {
+        let install = SyntheticInstall::new();
+        let mut document = install.document(THING);
+        document.orphaned = true;
+        let error = rebuild_chimp_document(&install.world, &document).unwrap_err();
+        assert!(
+            error.starts_with(
+                "/Game/Test/Thing is no longer in the mounted containers, so it cannot be written back."
+            ),
+            "{error}"
+        );
+
+        let mut document = install.document(THING);
+        set_first_value(&mut document, "Target", PropValue::Object(-9));
+        assert_eq!(
+            rebuild_chimp_document(&install.world, &document).unwrap_err(),
+            "/Game/Test/Thing: export 0 references import slot 8, but the import map has 2 slots"
+        );
+
+        let mut document = install.document(THING);
+        set_first_value(&mut document, "Count", PropValue::Bool(true));
+        let error = rebuild_chimp_document(&install.world, &document).unwrap_err();
+        assert!(
+            error.starts_with("Could not validate /Game/Test/Thing export Thing: Count:"),
+            "{error}"
+        );
+    }
+
+    /// The two text views a document opens with: the decoded package and its
+    /// header metadata, including where it is served from.
+    #[test]
+    fn a_documents_text_views_describe_the_package_and_where_it_lives() {
+        let install = SyntheticInstall::new();
+        let document = install.document(THING);
+        let pane = install.pane(&document);
+        let text: Value = serde_json::from_str(&pane.document_text).unwrap();
+        assert_eq!(text["Package"], THING);
+        assert_eq!(text["Source"], "Meteorite/Content/Test/Thing.uasset");
+        assert_eq!(text["Summary"]["Exports"], 1);
+        assert_eq!(text["Summary"]["Imports"], 2);
+        // Imported packages are ordered by package id, not by slot.
+        assert_eq!(text["Imports"], json!([SYNTHETIC_CLASS_PACKAGE, OTHER]));
+        let properties = &text["Exports"][0]["Properties"];
+        assert_eq!(text["Exports"][0]["Name"], "Thing");
+        assert_eq!(properties["Count"], 7);
+        assert_eq!(properties["Label"], "Warthog");
+        assert_eq!(properties["Tag"], "Rocket");
+        assert_eq!(properties["Values"], json!([10, 20, 30]));
+        assert_eq!(properties["Lookup"], json!([{"key": 1, "value": 100}]));
+        assert_eq!(properties["Target"], json!({"object_index": -1}));
+        assert_eq!(properties["Inner"]["Depth"], 3);
+        assert!(text["Exports"][0]["DecodeError"].is_null());
+
+        let metadata: Value = serde_json::from_str(&pane.metadata_text).unwrap();
+        assert_eq!(metadata["Summary"]["Package"], THING);
+        assert_eq!(metadata["Summary"]["IsUnversioned"], true);
+        assert_eq!(metadata["NameMap"], json!([THING, "Thing", "Rocket"]));
+        assert_eq!(metadata["ExportMap"][0]["ObjectName"], "Thing");
+        assert_eq!(metadata["ExportMap"][0]["ObjectFlags"], "0x0000000B");
+        assert_eq!(metadata["ExportMap"][0]["Class"], synthetic_class_key());
+        let provider = &metadata["PhysicalProviders"][0];
+        assert_eq!(provider["Active"], true);
+        assert_eq!(provider["EntryPath"], "Meteorite/Content/Test/Thing.uasset");
+        assert_eq!(
+            provider["Container"],
+            install
+                .root
+                .join("Paks")
+                .join("pakchunk0-Windows.utoc")
+                .display()
+                .to_string()
+        );
+        assert_eq!(provider["RecoveredDirectoryIndex"], false);
     }
 
     #[test]

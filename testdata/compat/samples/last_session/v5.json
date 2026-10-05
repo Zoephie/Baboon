@@ -1,0 +1,29 @@
+{
+  "kits": [
+    {
+      "active": false,
+      "active_chimp_package": null,
+      "bitmap_library": true,
+      "browser_mode": "folders",
+      "browser_sort": "natural",
+      "chimp_packages": [],
+      "source": {
+        "game": "haloreach_mcc",
+        "has_project": false,
+        "kind": "loose_folder",
+        "path": "C:/Kits/HREK",
+        "profile_id": "bab00000-0000-4000-8000-000000000004",
+        "project_path": null
+      },
+      "tags": [
+        {
+          "group_tag": 1651077220,
+          "key": "file:C:/Kits/HREK/tags\\objects\\characters\\elite\\elite.biped",
+          "label": "elite - biped",
+          "path": "\\\\?\\C:\\Kits\\HREK\\tags\\objects\\characters\\elite\\elite.biped"
+        }
+      ]
+    }
+  ],
+  "version": 5
+}

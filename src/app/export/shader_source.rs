@@ -251,7 +251,7 @@ fn sanitize_shader_path_segment(segment: &str) -> String {
 }
 
 #[cfg(test)]
-mod material_shader_source_tests {
+mod tests {
     use super::*;
 
     /// Build an expected relative path from components, so the comparison uses

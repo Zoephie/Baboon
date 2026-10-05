@@ -146,17 +146,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
         b"scnr" => extract_scenario_geometry(source, entry, output, target),
         b"sbsp" => {
             let tag = read_entry(source, entry)?;
-            let mut notes = Vec::new();
-            let version = ass_version_for(Game::of(&tag), target, &mut notes);
-            let ass = AssFile::from_scenario_structure_bsp(&tag)?;
-            fs::create_dir_all(output)?;
-            let path = output.join(format!("{}.ASS", tag_file_stem(entry)));
-            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
-            ass.write_version(&mut file, version)?;
-            Ok(with_notes(
-                format!("Extracted BSP geometry {}", path.display()),
-                &notes,
-            ))
+            extract_bsp_geometry(&tag, &tag_file_stem(entry), output, target)
         }
         b"mode" | b"mod2" => {
             let tag = read_entry(source, entry)?;
@@ -951,7 +941,7 @@ pub(in crate::app) fn load_referenced_tag_from_source(
         TagSource::LooseFolder { root, .. } => {
             let path = resolve_tag_path(root, reference, extension);
             let entry = TagEntry {
-                key: format!("file:{}", path.display()),
+                key: file_entry_key(&path),
                 display_path: format!("{}.{}", reference.replace('\\', "/"), extension),
                 group_tag,
                 group_name: Some(extension.to_owned()),
@@ -1110,6 +1100,47 @@ pub(in crate::app) fn extract_animations_for_entry(
 /// Extract per-BSP scenario geometry — one ASS (Halo 2 / Halo 3) or render +
 /// collision JMS (Halo CE) per structure BSP — under
 /// `<output>/<stem>/structure/`, in-process via `blam_tags::extract`.
+/// Write a structure BSP's geometry in its own game's form, as the scenario
+/// export does for each of a level's BSPs: Halo CE as render and collision JMS,
+/// Halo 2 as a version 2 ASS, Halo 3 on as an ASS at `target`'s version. Reading
+/// every game's BSP with the Halo 3 reader failed on Halo CE and Halo 2 ones.
+fn extract_bsp_geometry(
+    tag: &TagFile,
+    stem: &str,
+    output: &Path,
+    target: Game,
+) -> anyhow::Result<String> {
+    let source = Game::of(tag);
+    let mut notes = Vec::new();
+    if source != target && matches!(source, Game::Halo1 | Game::Halo2) {
+        notes.push("level geometry is written in this game's own form".to_owned());
+    }
+    fs::create_dir_all(output)?;
+    let written = match source {
+        Game::Halo1 => blam_tags::extract::geometry::emit_ce_bsp_jms(tag, output, stem, true)?
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect(),
+        Game::Halo2 => {
+            let path = output.join(format!("{stem}.ASS"));
+            let ass = AssFile::from_scenario_structure_bsp_h2(tag)?;
+            ass.write_version(&mut std::io::BufWriter::new(fs::File::create(&path)?), 2)?;
+            vec![path]
+        }
+        _ => {
+            let version = ass_version_for(source, target, &mut notes);
+            let path = output.join(format!("{stem}.ASS"));
+            let ass = AssFile::from_scenario_structure_bsp(tag)?;
+            ass.write_version(&mut std::io::BufWriter::new(fs::File::create(&path)?), version)?;
+            vec![path]
+        }
+    };
+    Ok(with_notes(
+        format!("Extracted BSP geometry {}", display_paths(&written)),
+        &notes,
+    ))
+}
+
 pub(in crate::app) fn extract_scenario_geometry(
     source: &TagSource,
     entry: &TagEntry,
@@ -1139,6 +1170,39 @@ pub(in crate::app) fn extract_scenario_geometry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blam_tags::JmsFile;
+    use blam_tags::game::Game;
+    use crate::app::browser::supports_tag_extract_menu;
+    use crate::app::export::{extract_animations_for_entry, extract_geometry_for_entry};
+    use crate::core::document::apply::{add_block_element, apply_field_edit};
+    use crate::core::game::GameId;
+    use crate::core::source::{TagEntry, TagEntryLocation, TagSource};
+    use crate::core::tag_key::file_entry_key;
+    use std::path::{Path, PathBuf};
+
+    /// A Halo CE or Halo 2 structure BSP extracts in its own game's form. The
+    /// single-BSP export read every BSP with the Halo 3 reader, so it failed on
+    /// both, while the same BSPs exported fine through their scenario.
+    #[test]
+    fn a_classic_structure_bsp_extracts_in_its_own_form() {
+        use blam_tags::classic::ClassicEngine;
+        let output = crate::core::test_kits::unique_temp_dir("classic-bsp");
+        let bsp = |definition: &str, engine| {
+            TagFile::new_classic(crate::core::test_kits::definitions().join(definition), engine).unwrap()
+        };
+
+        let ce = bsp("haloce_mcc/scenario_structure_bsp.json", ClassicEngine::HaloCe);
+        let message = extract_bsp_geometry(&ce, "level", &output.join("ce"), Game::Halo1)
+            .unwrap_or_else(|error| panic!("Halo CE: {error:#}"));
+        assert!(output.join("ce/level.render.jms").is_file(), "{message}");
+        assert!(output.join("ce/level.collision.jms").is_file(), "{message}");
+
+        let h2 = bsp("halo2_mcc/scenario_structure_bsp.json", ClassicEngine::Halo2V4);
+        let message = extract_bsp_geometry(&h2, "level", &output.join("h2"), Game::Halo2)
+            .unwrap_or_else(|error| panic!("Halo 2: {error:#}"));
+        assert!(output.join("h2/level.ASS").is_file(), "{message}");
+        let _ = std::fs::remove_dir_all(&output);
+    }
 
     fn add(tag: &mut TagFile, path: &str) {
         add_block_element(tag, path).unwrap_or_else(|error| panic!("add {path}: {error}"));
@@ -1271,7 +1335,7 @@ mod tests {
         let root = PathBuf::from("/kits/halo3/tags");
         let source = TagSource::LooseFolder {
             root: root.clone(),
-            game: Some("halo3_mcc".to_owned()),
+            game: Some(GameId::Halo3),
             definitions_root: PathBuf::from("/definitions"),
         };
         let loose = |relative: &str| TagEntry {
@@ -1335,8 +1399,8 @@ mod tests {
         let root = PathBuf::from(root);
         let source = TagSource::LooseFolder {
             root: root.clone(),
-            game: Some("halo3_mcc".to_owned()),
-            definitions_root: crate::app::locate_definitions_root(),
+            game: Some(GameId::Halo3),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         // A rigged character: its collision hulls and physics shapes are stored
         // per-bone, so an unposed export piles all of them on the origin.
@@ -1346,7 +1410,7 @@ mod tests {
             let path = root.join(format!("{stem}.{extension}"));
             assert!(path.is_file(), "{} is not in this tag tree", path.display());
             let entry = TagEntry {
-                key: format!("file:{}", path.display()),
+                key: file_entry_key(&path),
                 display_path: format!("{stem}.{extension}"),
                 group_tag: u32::from_be_bytes(group_tag),
                 group_name: Some(extension.to_owned()),
@@ -1472,8 +1536,8 @@ mod tests {
         let root = PathBuf::from(root);
         let source = TagSource::LooseFolder {
             root: root.clone(),
-            game: Some("haloreach_mcc".to_owned()),
-            definitions_root: crate::app::locate_definitions_root(),
+            game: Some(GameId::HaloReach),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         // The magnum's own graph: five gun bones, and not one `additional node
         // data` entry to place them with.
@@ -1481,7 +1545,7 @@ mod tests {
         let path = root.join(format!("{stem}.model_animation_graph"));
         assert!(path.is_file(), "{} is not in this tag tree", path.display());
         let entry = TagEntry {
-            key: format!("file:{}", path.display()),
+            key: file_entry_key(&path),
             display_path: format!("{stem}.model_animation_graph"),
             group_tag: u32::from_be_bytes(*b"jmad"),
             group_name: Some("model_animation_graph".to_owned()),
@@ -1563,13 +1627,13 @@ mod tests {
             return;
         };
         let root = PathBuf::from(root);
-        let paks = crate::source::find_paks_dir(&root)
+        let paks = crate::core::source::find_paks_dir(&root)
             .unwrap_or_else(|| panic!("no Paks dir under {}", root.display()));
 
-        let definitions = crate::app::locate_definitions_root();
-        let names = crate::format::TagNameIndex::load_game(&definitions, "haloce_evolved")
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let names = crate::core::format::TagNameIndex::load_game(&definitions, GameId::CampaignEvolved)
             .expect("load haloce_evolved tag-name index");
-        let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+        let loaded = crate::core::source::load_iostore_container_set(paks, &names, &definitions)
             .expect("mount CE container set");
 
         let find = |suffix: &str, group: &[u8; 4]| {
@@ -1635,11 +1699,437 @@ mod tests {
             assert!(len > 0, "{} is empty", e.path().display());
         }
     }
-}
 
-#[cfg(test)]
-#[path = "../tests/extract_targets.rs"]
-mod extract_targets;
-#[cfg(test)]
-#[path = "../tests/particle_model_extract_menu.rs"]
-mod particle_model_extract_menu;
+    // Extract Geometry / Extract Animations for another game's tools.
+    //
+    // Each test extracts a shipped tag through the entry point the target
+    // window calls and reads back what was written: the version each tool
+    // accepts, and — across the Halo CE boundary — every triangle still there,
+    // in one file per permutation for Halo CE or permutation-and-region material
+    // lines for the later tools. Kit-gated: set `BLAM_TEST_HCEEK` /
+    // `BLAM_TEST_H2EK` to the kits' `tags` folders.
+
+    /// The tag `rel` under a kit root, or `None` (saying why) when it is absent.
+    fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
+        if root.join(rel).is_file() {
+            Some(root)
+        } else {
+            eprintln!("skipping: {rel} not present under {}", root.display());
+            None
+        }
+    }
+
+    fn loose_source(root: &Path, game: &str) -> TagSource {
+        TagSource::LooseFolder {
+            root: root.to_path_buf(),
+            game: GameId::from_id(game),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        }
+    }
+
+    fn entry_for(root: &Path, rel: &str, group: &[u8; 4]) -> TagEntry {
+        let path = root.join(rel);
+        TagEntry {
+            key: file_entry_key(&path),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: Some(
+                match group {
+                    b"mod2" => "gbxmodel",
+                    b"mode" => "render_model",
+                    b"vehi" => "vehicle",
+                    b"jmad" => "model_animation_graph",
+                    other => panic!("no group name for {other:?}"),
+                }
+                .to_owned(),
+            ),
+            location: TagEntryLocation::LooseFile(path),
+        }
+    }
+
+    fn fresh_dir(name: &str) -> PathBuf {
+        let out = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).expect("create output dir");
+        out
+    }
+
+    fn files_with_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case(extension))
+                {
+                    found.push(path);
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// A Halo CE (8200) JMS, read section by section in the order Halo CE
+    /// tool.exe reads it (`sub_4372F0`): it has to come out exactly at the end.
+    struct Halo1Jms {
+        nodes: usize,
+        /// Every region, in order; a permutation's file lists the regions it has
+        /// no geometry in too.
+        regions: Vec<String>,
+        /// The regions its triangles use.
+        used_regions: std::collections::BTreeSet<String>,
+        triangles: usize,
+    }
+
+    fn read_halo1_jms(path: &Path) -> Halo1Jms {
+        let text = std::fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "8200", "{}: version", path.display());
+        let mut at = 2; // version, checksum
+        let count = |at: &mut usize| -> usize {
+            let n = lines[*at]
+                .parse()
+                .unwrap_or_else(|_| panic!("{}: expected a count at line {}", path.display(), *at + 1));
+            *at += 1;
+            n
+        };
+        let nodes = count(&mut at);
+        at += nodes * 5;
+        let materials = count(&mut at);
+        at += materials * 2;
+        let markers = count(&mut at);
+        at += markers * 6;
+        let region_count = count(&mut at);
+        let regions: Vec<String> = lines[at..at + region_count]
+            .iter()
+            .map(|r| r.to_string())
+            .collect();
+        at += region_count;
+        let vertices = count(&mut at);
+        at += vertices * 7;
+        let triangles = count(&mut at);
+        let used_regions = (0..triangles)
+            .map(|t| regions[lines[at + t * 3].parse::<usize>().unwrap()].clone())
+            .collect();
+        at += triangles * 3;
+        assert_eq!(at, lines.len(), "{}: trailing lines", path.display());
+        Halo1Jms {
+            used_regions,
+            nodes,
+            regions,
+            triangles,
+        }
+    }
+
+    const CE_WARTHOG: &str = "vehicles/warthog/warthog.gbxmodel";
+    const H2_ELITE: &str = "objects/characters/elite/elite.render_model";
+
+    /// Halo CE's warthog for its own tools: one 8200 file per permutation under
+    /// `models/`, the layout Halo CE tool.exe imports (it names a permutation
+    /// after its file). Before, every permutation went into one file and came
+    /// back as one.
+    #[test]
+    fn halo1_geometry_for_halo1_is_one_file_per_permutation() {
+        let Some(root) = kit_tag(crate::core::test_kits::hceek_tags(), CE_WARTHOG) else {
+            return;
+        };
+        let out = fresh_dir("baboon_extract_target_ce_ce");
+        let message = extract_geometry_for_entry(
+            &loose_source(&root, "haloce_mcc"),
+            &entry_for(&root, CE_WARTHOG, b"mod2"),
+            &out,
+            Game::Halo1,
+        )
+        .expect("extract");
+        let files = files_with_extension(&out.join("models"), "jms");
+        assert!(files.len() > 1, "expected several permutations: {message}");
+        for file in &files {
+            let jms = read_halo1_jms(file);
+            assert!(jms.nodes > 0 && jms.triangles > 0 && !jms.regions.is_empty());
+        }
+    }
+
+    /// The same warthog for Halo 2 and Halo 3's tools: one modern file at each
+    /// version, every triangle of every permutation in it, with material lines
+    /// naming the permutation and region each came from.
+    #[test]
+    fn halo1_geometry_for_later_tools_merges_permutations_into_labels() {
+        let Some(root) = kit_tag(crate::core::test_kits::hceek_tags(), CE_WARTHOG) else {
+            return;
+        };
+        let source = loose_source(&root, "haloce_mcc");
+        let entry = entry_for(&root, CE_WARTHOG, b"mod2");
+        let halo1 = fresh_dir("baboon_extract_target_ce_ce_count");
+        extract_geometry_for_entry(&source, &entry, &halo1, Game::Halo1).expect("extract for CE");
+        let per_permutation: Vec<(String, Halo1Jms)> =
+            files_with_extension(&halo1.join("models"), "jms")
+                .iter()
+                .map(|f| {
+                    (
+                        f.file_stem().unwrap().to_string_lossy().into_owned(),
+                        read_halo1_jms(f),
+                    )
+                })
+                .collect();
+        let triangles: usize = per_permutation.iter().map(|(_, j)| j.triangles).sum();
+
+        for (target, version) in [(Game::Halo2, 8210), (Game::Halo3, 8213)] {
+            let out = fresh_dir(&format!("baboon_extract_target_ce_{version}"));
+            extract_geometry_for_entry(&source, &entry, &out, target).expect("extract");
+            let path = out.join("warthog.render.jms");
+            let (jms, read_version) =
+                JmsFile::parse(&std::fs::read_to_string(&path).unwrap()).expect("parse");
+            assert_eq!(read_version, version);
+            assert_eq!(jms.triangles.len(), triangles, "triangles lost merging");
+            for (permutation, file) in &per_permutation {
+                for region in &file.used_regions {
+                    let region = region.split_whitespace().collect::<Vec<_>>().join("_");
+                    assert!(
+                        jms.materials.iter().any(|m| {
+                            let label = blam_tags::jms_split::MaterialLabel::parse(&m.material_name);
+                            label.permutation == *permutation && label.region == region
+                        }),
+                        "no material line for {permutation} {region}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Halo 2's elite for Halo CE's tools: split by the permutation in each
+    /// material line into 8200 files, with no triangle lost and none duplicated.
+    #[test]
+    fn later_geometry_for_halo1_splits_by_permutation() {
+        let Some(root) = kit_tag(crate::core::test_kits::h2ek_tags(), H2_ELITE) else {
+            return;
+        };
+        let source = loose_source(&root, "halo2_mcc");
+        let entry = entry_for(&root, H2_ELITE, b"mode");
+        let own = fresh_dir("baboon_extract_target_h2_h2");
+        extract_geometry_for_entry(&source, &entry, &own, Game::Halo2).expect("extract for H2");
+        let (modern, version) =
+            JmsFile::parse(&std::fs::read_to_string(own.join("elite.render.jms")).unwrap())
+                .expect("parse");
+        assert_eq!(version, 8210);
+        let permutations: std::collections::BTreeSet<String> = modern
+            .materials
+            .iter()
+            .map(|m| {
+                blam_tags::jms_split::MaterialLabel::parse(&m.material_name)
+                    .permutation
+                    .to_ascii_lowercase()
+            })
+            .collect();
+
+        let out = fresh_dir("baboon_extract_target_h2_ce");
+        let message = extract_geometry_for_entry(&source, &entry, &out, Game::Halo1).expect("extract");
+        let files = files_with_extension(&out.join("models"), "jms");
+        let written: std::collections::BTreeSet<String> = files
+            .iter()
+            .map(|f| {
+                f.file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+            })
+            .collect();
+        assert_eq!(written, permutations, "{message}");
+        let triangles: usize = files.iter().map(|f| read_halo1_jms(f).triangles).sum();
+        assert_eq!(triangles, modern.triangles.len());
+    }
+
+    /// Animations take the target's JMA version: 16392 for Halo CE, 16394 —
+    /// with the node checksum second and parent links — for Halo 2 on, whatever
+    /// game the graph came from.
+    #[test]
+    fn animations_take_the_target_jma_version() {
+        // Through the object tag: this graph has no nodes of its own and takes
+        // them from the vehicle's gbxmodel.
+        let ce = "vehicles/warthog/warthog.vehicle";
+        let h2 = "objects/characters/elite/elite.model_animation_graph";
+        let cases = [
+            (crate::core::test_kits::hceek_tags(), "haloce_mcc", ce, b"vehi"),
+            (crate::core::test_kits::h2ek_tags(), "halo2_mcc", h2, b"jmad"),
+        ];
+        for (root, game, rel, group) in cases {
+            let Some(root) = kit_tag(root, rel) else {
+                continue;
+            };
+            for (target, version) in [
+                (Game::Halo1, "16392"),
+                (Game::Halo2, "16394"),
+                (Game::Halo3, "16394"),
+            ] {
+                let out = fresh_dir(&format!("baboon_extract_target_anim_{game}_{version}"));
+                extract_animations_for_entry(
+                    &loose_source(&root, game),
+                    &entry_for(&root, rel, group),
+                    &out,
+                    target,
+                )
+                .expect("extract animations");
+                let files: Vec<PathBuf> = ["jmm", "jma", "jmt", "jmz", "jmo", "jmr", "jmw"]
+                    .iter()
+                    .flat_map(|ext| files_with_extension(&out, ext))
+                    .collect();
+                assert!(!files.is_empty(), "{game} → {target:?}: nothing written");
+                for file in files {
+                    let text = std::fs::read_to_string(&file).unwrap();
+                    let lines: Vec<&str> = text.lines().collect();
+                    assert_eq!(lines[0], version, "{}", file.display());
+                    if version == "16394" {
+                        // Node count is line 7; the first node's parent follows its name.
+                        let nodes: usize = lines[6].parse().unwrap();
+                        assert!(nodes > 0);
+                        assert_eq!(lines[8], "-1", "{}: the root node's parent", file.display());
+                    }
+                }
+            }
+        }
+    }
+
+    // Right-click → Extract → particle geometry actually extracts.
+    //
+    // This wiring has two halves that are edited in different files and can
+    // drift apart silently: the browser's `supports_*` gate decides whether
+    // the menu item is drawn, and `extract_geometry_for_entry`'s match arm
+    // decides whether the action does anything. Either one alone looks
+    // finished — a gate with no arm shows a menu entry that errors, an arm
+    // with no gate is unreachable.
+    //
+    // The gate half lives with the other groups in
+    // `browser::filter`'s `tag_extract_menu_covers_every_group_with_an_asset_extractor`.
+    // What is asserted here is the action half, each test opening by
+    // re-checking its own gate so the pair stays visible in one place.
+    //
+    // Skips, saying so, when the tag set is absent: set `BLAM_TEST_HREK` and
+    // `BLAM_TEST_H2EK` (see `crate::core::test_kits`).
+
+    fn particle_model_entry(root: &Path, rel: &str, group: &[u8; 4]) -> TagEntry {
+        let path = root.join(rel);
+        TagEntry {
+            key: file_entry_key(&path),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: Some("particle_model".to_owned()),
+            location: TagEntryLocation::LooseFile(path),
+        }
+    }
+
+    /// The gen3 action writes the manifest plus one JMS per object, at the
+    /// paths the manifest names.
+    #[test]
+    fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
+        assert!(
+            supports_tag_extract_menu(u32::from_be_bytes(*b"pmdf")),
+            "the menu item that reaches this action is not drawn",
+        );
+        let rel = "fx/particles/models/debris/generic_shards/generic_shards.particle_model";
+        let Some(root) = kit_tag(crate::core::test_kits::hrek_tags(), rel) else {
+            return;
+        };
+        let out = std::env::temp_dir().join("baboon_pm_extract_gen3");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).expect("create output dir");
+
+        let summary = extract_geometry_for_entry(
+            &loose_source(&root, "haloreach_mcc"),
+            &particle_model_entry(&root, rel, b"pmdf"),
+            &out,
+            blam_tags::game::Game::Halo3,
+        )
+        .expect("extract particle geometry");
+        assert!(
+            summary.contains("8 objects"),
+            "unexpected summary: {summary}"
+        );
+
+        // The manifest must sit where `import particle model` expects, and
+        // every line it names must resolve to a real JMS beside it. A
+        // dangling line is a silent import failure, not a warning.
+        let jmi = out.join("generic_shards").join("generic_shards.jmi");
+        assert!(jmi.is_file(), "no manifest at {}", jmi.display());
+        let text = std::fs::read_to_string(&jmi).expect("read manifest");
+        assert!(text.contains("\r\n"), "manifest must use CRLF");
+        let objects: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with(';'))
+            .skip(2)
+            .collect();
+        assert_eq!(objects.len(), 8, "manifest lists {} objects", objects.len());
+        for name in objects {
+            let jms = jmi
+                .parent()
+                .unwrap()
+                .join(name)
+                .join("render")
+                .join(format!("{name}.JMS"));
+            assert!(
+                jms.is_file(),
+                "manifest names `{name}` but {} is missing",
+                jms.display()
+            );
+            let body = std::fs::read_to_string(&jms).expect("read JMS");
+            assert!(
+                body.contains(";### VERTICES ###"),
+                "`{name}` JMS has no vertices section"
+            );
+        }
+
+        // Lowercase, because tool.exe's manifest-vs-directory check is a
+        // case-sensitive `strncmp(ext, ".jmi", 5)`.
+        assert_eq!(jmi.extension().and_then(|e| e.to_str()), Some("jmi"));
+
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    /// Halo 2 goes through the same action but a different decode, and its
+    /// summary must not claim the names were invented — `PRTM` stores them.
+    #[test]
+    fn extracting_a_halo2_particle_model_keeps_its_object_names() {
+        assert!(
+            supports_tag_extract_menu(u32::from_be_bytes(*b"PRTM")),
+            "the menu item that reaches this action is not drawn",
+        );
+        let rel = "effects/particle_models/urban_debris/urban_debris.particle_model";
+        let Some(root) = kit_tag(crate::core::test_kits::h2ek_tags(), rel) else {
+            return;
+        };
+        let out = std::env::temp_dir().join("baboon_pm_extract_h2");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).expect("create output dir");
+
+        let summary = extract_geometry_for_entry(
+            &loose_source(&root, "halo2_mcc"),
+            &particle_model_entry(&root, rel, b"PRTM"),
+            &out,
+            blam_tags::game::Game::Halo2,
+        )
+        .expect("extract particle geometry");
+        assert!(
+            summary.contains("10 objects"),
+            "unexpected summary: {summary}"
+        );
+        assert!(
+            !summary.contains("numbered from the tag name"),
+            "Halo 2 stores its object names — the summary must not say otherwise: {summary}",
+        );
+
+        assert!(
+            out.join("urban_debris")
+                .join("can_1")
+                .join("render")
+                .join("can_1.JMS")
+                .is_file(),
+            "shipped object name `can_1` did not reach the output tree",
+        );
+
+        let _ = std::fs::remove_dir_all(&out);
+    }
+}

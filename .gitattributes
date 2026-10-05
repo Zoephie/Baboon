@@ -1,0 +1,5 @@
+# Text is stored with LF and checked out with LF on every platform. Tests read
+# source and fixture text and match it against strings built with `\n` (the
+# smoke-case registry, the spawn and export checks), which a Windows CRLF
+# checkout breaks.
+* text=auto eol=lf

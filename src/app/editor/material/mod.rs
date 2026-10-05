@@ -1,0 +1,1047 @@
+//! Material-specific field presentation, color editing, and palette handling.
+//! It owns material-specific presentation and color workflows; generic field editing and document persistence belong elsewhere.
+
+use super::*;
+
+mod color_picker;
+pub(in crate::app) use color_picker::*;
+
+#[cfg(test)]
+thread_local! {
+    /// Shader editor models built, for the test that they are not rebuilt
+    /// every frame.
+    pub(in crate::app) static SHADER_MODELS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(in crate::app) fn draw_material_tag(
+    ui: &mut Ui,
+    tag: &TagFile,
+    document_revision: (u64, u64, u64, u64),
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+    rmdf_cache: &mut HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+    rmop_cache: &mut HashMap<String, Option<Arc<RenderMethodOption>>>,
+    h2_templates: &mut H2TemplateCache,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    expert_mode: bool,
+    edit: &mut FieldEditContext<'_>,
+) {
+    Frame::NONE
+        .fill(material_panel())
+        .stroke(Stroke::new(1.0_f32, material_panel_edge()))
+        // A 2-point inset: egui counts the stroke as padding.
+        .inner_margin(egui::Margin::same(1))
+        .show(ui, |ui| {
+            if is_shader_tag(entry) {
+                // Built once per revision of the document, not every frame:
+                // building it parses the tag's render method and walks its
+                // definition and options into rows. A failed build is kept
+                // too, so a definition that does not load is not retried
+                // every frame.
+                let memo = egui::Id::new(("shader_editor_model", document_revision.0));
+                let cached = ui.ctx().data(|data| {
+                    data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(memo)
+                });
+                let model = match cached {
+                    Some((revision, model)) if revision == document_revision => model,
+                    _ => {
+                        let model =
+                            build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates)
+                                .or_else(|| {
+                                    build_shader_editor_model(
+                                        tag,
+                                        entry.group_tag,
+                                        source,
+                                        rmdf_cache,
+                                        rmop_cache,
+                                    )
+                                })
+                                .map(Arc::new);
+                        #[cfg(test)]
+                        SHADER_MODELS_BUILT.with(|built| built.set(built.get() + 1));
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(memo, (document_revision, model.clone()))
+                        });
+                        model
+                    }
+                };
+                if let Some(model) = model {
+                    draw_shader_editor_model(
+                        ui,
+                        &model,
+                        color_popup,
+                        function_popup,
+                        edit,
+                        expert_mode,
+                    );
+                    return;
+                }
+                // Shader grid couldn't be built (rmdf/rmop chain didn't
+                // resolve). Fall back to the standard EDITABLE field view so
+                // the shader is still fully editable, rather than the
+                // read-only material struct view — and say so, because a
+                // silent downgrade reads as "the editor is broken" when the
+                // actual problem is the kit's render_method_definition.
+                ui.label(
+                    RichText::new(
+                        "Shader editor unavailable — the render method definition this shader \
+                         names did not load or parse. Showing raw fields.",
+                    )
+                    .color(subtle_dark()),
+                );
+                ui.add_space(4.0);
+                draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
+                return;
+            }
+            draw_material_template_summary(ui, tag, names, color_popup);
+            ui.add_space(2.0);
+            draw_material_struct_fields(
+                ui,
+                tag.root(),
+                names,
+                0,
+                color_popup,
+                function_popup,
+                expert_mode,
+            );
+        });
+}
+
+pub(in crate::app) fn draw_material_struct_fields(
+    ui: &mut Ui,
+    tag_struct: TagStruct<'_>,
+    names: &TagNameIndex,
+    depth: usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    expert_mode: bool,
+) {
+    for field in tag_struct.fields() {
+        draw_material_field(
+            ui,
+            field,
+            names,
+            depth,
+            color_popup,
+            function_popup,
+            expert_mode,
+        );
+    }
+}
+
+pub(in crate::app) fn draw_material_field(
+    ui: &mut Ui,
+    field: TagField<'_>,
+    names: &TagNameIndex,
+    depth: usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    expert_mode: bool,
+) {
+    let key = clean_field_key(field.name());
+    if is_shader_template_reference_key(&key) {
+        return;
+    }
+
+    if let Some(function) = field.as_function() {
+        draw_material_function_value_row(ui, field.name(), &function, depth, function_popup);
+        return;
+    }
+    if let Some(value) = field.value() {
+        if is_hidden_non_expert_value(&value, expert_mode) {
+            return;
+        }
+        let formatted = format_value(names, &value, false);
+        let color = color_popup_for_value(field.name(), &value, &formatted);
+        draw_material_value_row(
+            ui,
+            field.name(),
+            &formatted,
+            material_row_tint(&value),
+            material_value_kind(&value),
+            depth,
+            color,
+            color_popup,
+        );
+        return;
+    }
+
+    if let Some(nested) = field.as_struct() {
+        egui::CollapsingHeader::new(material_section_text(clean_field_name(field.name())))
+            .default_open(depth == 0)
+            .show(ui, |ui| {
+                draw_material_struct_fields(
+                    ui,
+                    nested,
+                    names,
+                    depth + 1,
+                    color_popup,
+                    function_popup,
+                    expert_mode,
+                )
+            });
+    } else if let Some(block) = field.as_block() {
+        if block.is_empty() {
+            return;
+        }
+        if is_material_parameters_field(field.name()) {
+            draw_material_parameters_block(ui, block, names, depth, color_popup, function_popup);
+            return;
+        }
+        egui::CollapsingHeader::new(material_section_text(format!(
+            "{}  [{} elements]",
+            clean_field_name(field.name()),
+            block.len()
+        )))
+        .default_open(depth == 0 || is_priority_section(field.name()))
+        .show(ui, |ui| {
+            for (index, element) in block.iter().enumerate() {
+                egui::CollapsingHeader::new(material_section_text(format!(
+                    "[{index}] {}",
+                    element.name()
+                )))
+                .default_open(index == 0 && is_priority_section(field.name()))
+                .show(ui, |ui| {
+                    draw_material_struct_fields(
+                        ui,
+                        element,
+                        names,
+                        depth + 1,
+                        color_popup,
+                        function_popup,
+                        expert_mode,
+                    )
+                });
+            }
+        });
+    } else if let Some(array) = field.as_array() {
+        if array.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(material_section_text(format!(
+            "{}  [{} elements]",
+            clean_field_name(field.name()),
+            array.len()
+        )))
+        .default_open(depth == 0)
+        .show(ui, |ui| {
+            for (index, element) in array.iter().enumerate() {
+                egui::CollapsingHeader::new(material_section_text(format!(
+                    "[{index}] {}",
+                    element.name()
+                )))
+                .show(ui, |ui| {
+                    draw_material_struct_fields(
+                        ui,
+                        element,
+                        names,
+                        depth + 1,
+                        color_popup,
+                        function_popup,
+                        expert_mode,
+                    )
+                });
+            }
+        });
+    } else if let Some(resource) = field.as_resource() {
+        draw_material_resource(
+            ui,
+            field.name(),
+            resource,
+            names,
+            depth,
+            color_popup,
+            function_popup,
+            expert_mode,
+        );
+    }
+}
+
+pub(in crate::app) fn draw_material_resource(
+    ui: &mut Ui,
+    name: &str,
+    resource: TagResource<'_>,
+    names: &TagNameIndex,
+    depth: usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    expert_mode: bool,
+) {
+    let kind = match resource.kind() {
+        TagResourceKind::Null => "null",
+        TagResourceKind::Exploded => "exploded",
+        TagResourceKind::Xsync => "xsync",
+    };
+    egui::CollapsingHeader::new(material_section_text(format!(
+        "{}  ({kind})",
+        clean_field_name(name)
+    )))
+    .show(ui, |ui| {
+        draw_material_value_row(
+            ui,
+            "inline bytes",
+            &hex_bytes(resource.inline_bytes()),
+            MATERIAL_DATA_ROW,
+            "value",
+            depth + 1,
+            None,
+            color_popup,
+        );
+        if let Some(payload) = resource.exploded_payload() {
+            draw_material_value_row(
+                ui,
+                "exploded payload",
+                &format!("{} bytes", payload.len()),
+                MATERIAL_DATA_ROW,
+                "value",
+                depth + 1,
+                None,
+                color_popup,
+            );
+        }
+        if let Some(payload) = resource.xsync_payload() {
+            draw_material_value_row(
+                ui,
+                "xsync payload",
+                &format!("{} bytes", payload.len()),
+                MATERIAL_DATA_ROW,
+                "value",
+                depth + 1,
+                None,
+                color_popup,
+            );
+        }
+        if let Some(nested) = resource.as_struct() {
+            draw_material_struct_fields(
+                ui,
+                nested,
+                names,
+                depth + 1,
+                color_popup,
+                function_popup,
+                expert_mode,
+            );
+        }
+    });
+}
+
+pub(in crate::app) fn draw_material_value_row(
+    ui: &mut Ui,
+    name: &str,
+    value: &str,
+    fill: Color32,
+    value_kind: &str,
+    depth: usize,
+    color: Option<MaterialColorPopup>,
+    color_popup: &mut Option<MaterialColorPopup>,
+) {
+    let available = ui.available_width().max(520.0);
+    let label_width = (210.0 - (depth as f32 * 10.0)).clamp(150.0, 210.0);
+    let value_width = (available - label_width - 30.0).max(220.0);
+    let height = 28.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0_f32, MATERIAL_GRID),
+    );
+
+    let label_rect = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(8.0 + depth as f32 * 10.0, 0.0),
+        Vec2::new(label_width, height),
+    );
+    ui.painter().text(
+        label_rect.left_center(),
+        Align2::LEFT_CENTER,
+        clean_field_name(name),
+        FontId::proportional(13.0),
+        MATERIAL_TEXT,
+    );
+
+    let value_rect = egui::Rect::from_min_size(
+        label_rect.right_top() + Vec2::new(8.0, 4.0),
+        Vec2::new(value_width.min(560.0), height - 8.0),
+    );
+    let (value_fill, value_text) = if value_kind == "default" {
+        (MATERIAL_DEFAULT_BOX, MATERIAL_MUTED_TEXT)
+    } else {
+        (Color32::WHITE, MATERIAL_TEXT)
+    };
+    ui.painter().rect_filled(value_rect, 0.0, value_fill);
+    ui.painter()
+        .rect_stroke(
+            value_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
+    let text_offset = if let Some(color) = color {
+        let swatch_size = (value_rect.height() - 4.0).max(12.0);
+        let swatch_rect = egui::Rect::from_min_size(
+            value_rect.left_top() + Vec2::new(4.0, 2.0),
+            Vec2::splat(swatch_size),
+        );
+        ui.painter().rect_filled(swatch_rect, 0.0, color.color32());
+        ui.painter()
+            .rect_stroke(
+                swatch_rect,
+                0.0,
+                Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+                egui::StrokeKind::Middle,
+            );
+        let swatch_response = ui
+            .interact(
+                swatch_rect,
+                ui.make_persistent_id(format!("material_color:{name}:{value}")),
+                Sense::click(),
+            )
+            .on_hover_text("Click to show Foundation color values");
+        if swatch_response.clicked() {
+            *color_popup = Some(color);
+        }
+        swatch_size + 12.0
+    } else {
+        0.0
+    };
+
+    ui.painter().text(
+        value_rect.left_center() + Vec2::new(6.0 + text_offset, 0.0),
+        Align2::LEFT_CENTER,
+        truncate_for_cell(value, value_rect.width() - text_offset),
+        FontId::monospace(12.5),
+        value_text,
+    );
+    if response.hovered() && value.len() > 40 {
+        response.on_hover_text(value);
+    }
+}
+
+pub(in crate::app) fn draw_material_function_value_row(
+    ui: &mut Ui,
+    name: &str,
+    function: &TagFunction,
+    depth: usize,
+    function_popup: &mut Option<FunctionPopup>,
+) {
+    let available = ui.available_width().max(520.0);
+    let label_width = (210.0 - (depth as f32 * 10.0)).clamp(150.0, 210.0);
+    let height = 34.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(available, height), Sense::click());
+    ui.painter().rect_filled(rect, 0.0, MATERIAL_FUNCTION_ROW);
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0_f32, MATERIAL_GRID),
+    );
+
+    let label_rect = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(8.0 + depth as f32 * 10.0, 0.0),
+        Vec2::new(label_width, height),
+    );
+    ui.painter().text(
+        label_rect.left_center(),
+        Align2::LEFT_CENTER,
+        clean_field_name(name),
+        FontId::proportional(13.0),
+        MATERIAL_TEXT,
+    );
+
+    let function_rect = egui::Rect::from_min_max(
+        label_rect.right_top() + Vec2::new(8.0, 5.0),
+        rect.right_bottom() - Vec2::new(44.0, 5.0),
+    );
+    ui.painter().rect_filled(function_rect, 0.0, Color32::WHITE);
+    ui.painter()
+        .rect_stroke(
+            function_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
+    ui.painter().text(
+        function_rect.left_center() + Vec2::new(6.0, 0.0),
+        Align2::LEFT_CENTER,
+        truncate_for_cell(
+            &shader_function_grid_text(function),
+            function_rect.width() - 12.0,
+        ),
+        FontId::monospace(12.5),
+        MATERIAL_TEXT,
+    );
+
+    let button_rect = egui::Rect::from_min_size(
+        rect.right_top() + Vec2::new(-36.0, 5.0),
+        Vec2::new(30.0, height - 10.0),
+    );
+    ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
+    ui.painter()
+        .rect_stroke(
+            button_rect,
+            0.0,
+            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+            egui::StrokeKind::Middle,
+        );
+    ui.painter().text(
+        button_rect.center(),
+        Align2::CENTER_CENTER,
+        "f()",
+        FontId::proportional(12.0),
+        MATERIAL_TEXT,
+    );
+
+    if response.hovered() {
+        response
+            .clone()
+            .on_hover_text("Click to open function viewer");
+    }
+    if response.clicked() {
+        *function_popup = Some(FunctionPopup::new(
+            String::new(),
+            clean_field_name(name),
+            FunctionView::from_function(function.clone()),
+            false,
+        ));
+    }
+}
+
+pub(in crate::app) fn material_section_text(text: String) -> RichText {
+    RichText::new(text).color(MATERIAL_TEXT).strong()
+}
+
+pub(in crate::app) fn clean_field_name(name: &str) -> String {
+    blam_tags::clean_field_name(name).into_owned()
+}
+
+pub(in crate::app) fn clean_field_name_basic(name: &str) -> String {
+    name.replace(['*', '!'], "")
+        .replace(['#', ':'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Canonical form of a field PATH (or a single field name): each `/`-segment
+/// has its markup stripped and its element index / ordinal dropped. Backed by
+/// the engine's `TagFieldPath`, so names and multi-segment paths normalize
+/// uniformly. Used for path/name comparison keys.
+pub(in crate::app) fn canonical_field_path(path: &str) -> String {
+    blam_tags::TagFieldPath::parse(path)
+        .strip_node_indices()
+        .to_string()
+}
+
+pub(in crate::app) fn clean_field_key(name: &str) -> String {
+    canonical_field_path(name).to_ascii_lowercase()
+}
+
+pub(in crate::app) fn clean_type_name(type_name: &str) -> String {
+    type_name.replace('_', " ")
+}
+
+pub(in crate::app) fn is_priority_section(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "material parameters" | "material parameters*"
+    )
+}
+
+pub(in crate::app) fn is_material_parameters_field(name: &str) -> bool {
+    matches!(
+        clean_field_key(name).as_str(),
+        "material parameters" | "parameters"
+    )
+}
+
+pub(in crate::app) fn is_material_parameter_metadata(key: &str) -> bool {
+    key.starts_with("parameter name")
+        || key.starts_with("parameter type")
+        || key.starts_with("parameter index")
+        || key.starts_with("display ")
+        || key.starts_with("register ")
+}
+
+pub(in crate::app) fn material_parameter_field_matches_type(key: &str, parameter_type: &str) -> bool {
+    if parameter_type.contains("bitmap") {
+        return key == "bitmap" || key == "bitmap path";
+    }
+    if parameter_type.contains("color") {
+        return key == "color";
+    }
+    if parameter_type.contains("real") || parameter_type.contains("scalar") {
+        return key == "real";
+    }
+    if parameter_type.contains("vector") {
+        return key == "vector";
+    }
+    if parameter_type.contains("int") || parameter_type.contains("bool") {
+        return key == "int/bool";
+    }
+
+    matches!(
+        key,
+        "bitmap" | "bitmap path" | "color" | "real" | "vector" | "int/bool"
+    )
+}
+
+pub(in crate::app) fn material_parameter_value_priority(key: &str) -> u8 {
+    match key {
+        "bitmap" => 0,
+        "bitmap path" => 1,
+        "color" => 2,
+        "real" => 3,
+        "vector" => 4,
+        "int/bool" => 5,
+        _ => 9,
+    }
+}
+
+pub(in crate::app) fn should_skip_material_parameter_value(key: &str, value: &str) -> bool {
+    if matches!(key, "bitmap" | "bitmap path") {
+        return is_none_like_value(value);
+    }
+    false
+}
+
+pub(in crate::app) fn is_none_like_value(value: &str) -> bool {
+    matches!(value.trim(), "" | "NONE" | "\"NONE\"")
+}
+
+pub(in crate::app) fn trim_formatted_value(value: &str) -> String {
+    value.trim().trim_matches('"').to_owned()
+}
+
+pub(in crate::app) fn enum_display_name(value: &str) -> Option<String> {
+    let start = value.find('(')?;
+    let end = value.rfind(')')?;
+    if start >= end {
+        return None;
+    }
+    Some(value[start + 1..end].trim().to_owned())
+}
+
+pub(in crate::app) fn float_channel_to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+pub(in crate::app) fn byte_to_float(value: u8) -> f32 {
+    value as f32 / 255.0
+}
+
+pub(in crate::app) fn format_pc_float(value: f32) -> String {
+    let mut text = format!("{:.7}", value.clamp(0.0, 1.0));
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
+pub(in crate::app) fn format_rgb_hex(red: f32, green: f32, blue: f32) -> String {
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        float_channel_to_u8(red),
+        float_channel_to_u8(green),
+        float_channel_to_u8(blue)
+    )
+}
+
+pub(in crate::app) fn parse_rgb_hex(input: &str) -> Result<[u8; 3], String> {
+    let hex = input.trim().strip_prefix('#').unwrap_or(input.trim());
+    if hex.len() != 6 {
+        return Err("Use #RRGGBB or RRGGBB".to_owned());
+    }
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Hex colour contains invalid characters".to_owned());
+    }
+    Ok([
+        u8::from_str_radix(&hex[0..2], 16)
+            .map_err(|_| "Hex colour contains invalid red value".to_owned())?,
+        u8::from_str_radix(&hex[2..4], 16)
+            .map_err(|_| "Hex colour contains invalid green value".to_owned())?,
+        u8::from_str_radix(&hex[4..6], 16)
+            .map_err(|_| "Hex colour contains invalid blue value".to_owned())?,
+    ])
+}
+
+pub(in crate::app) fn rgb_to_hsb_255(red: f32, green: f32, blue: f32) -> (u8, u8, u8) {
+    let red = red.clamp(0.0, 1.0);
+    let green = green.clamp(0.0, 1.0);
+    let blue = blue.clamp(0.0, 1.0);
+    let max = red.max(green).max(blue);
+    let min = red.min(green).min(blue);
+    let delta = max - min;
+
+    let mut hue = if delta == 0.0 {
+        0.0
+    } else if max == red {
+        60.0 * ((green - blue) / delta).rem_euclid(6.0)
+    } else if max == green {
+        60.0 * (((blue - red) / delta) + 2.0)
+    } else {
+        60.0 * (((red - green) / delta) + 4.0)
+    };
+    if hue < 0.0 {
+        hue += 360.0;
+    }
+
+    let saturation = if max == 0.0 { 0.0 } else { delta / max };
+    (
+        ((hue / 360.0) * 255.0).round() as u8,
+        float_channel_to_u8(saturation),
+        float_channel_to_u8(max),
+    )
+}
+
+pub(in crate::app) fn is_material_tag(entry: &TagEntry) -> bool {
+    entry.group_name.as_deref() == Some("material")
+        || entry.group_tag == u32::from_be_bytes(*b"mat ")
+        || entry.display_path.to_ascii_lowercase().ends_with(".mat")
+}
+
+pub(in crate::app) fn is_material_shader_tag(entry: &TagEntry) -> bool {
+    entry.group_name.as_deref() == Some("material_shader")
+        || entry.group_tag == u32::from_be_bytes(*b"mats")
+        || entry
+            .display_path
+            .to_ascii_lowercase()
+            .ends_with(".material_shader")
+}
+
+/// Whether a tag is drawn as a shader grid: Halo 2's `shad`, or a render-method
+/// shader from Halo 3 on (`rmsh`, `rmtr`, `rmgl`, …). Decided by group tag, not
+/// by name: Halo CE's `shader_*` groups and Halo 2's `shader_template`,
+/// `shader_pass` and `shader_light_response` share the prefix but have no grid,
+/// and routing them here showed "Shader editor unavailable" over their fields
+/// and turned off Find's field filter for them.
+pub(in crate::app) fn is_shader_tag(entry: &TagEntry) -> bool {
+    let fourcc = entry.group_tag.to_be_bytes();
+    if &fourcc == b"shad" {
+        return true;
+    }
+    if !fourcc.starts_with(b"rm") {
+        return false;
+    }
+    let group_name = entry.group_name.as_deref().unwrap_or_default();
+    group_name == "render_method"
+        || group_name.starts_with("shader")
+        || matches!(
+            &fourcc,
+            b"rmsh"
+                | b"rmtr"
+                | b"rmw "
+                | b"rmfl"
+                | b"rmd "
+                | b"rmhg"
+                | b"rmsk"
+                | b"rmct"
+                | b"rmcs"
+                | b"rmp "
+                | b"rmb "
+                | b"rmco"
+                | b"rmlv"
+        )
+}
+
+pub(in crate::app) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
+    matches!(
+        &group_tag.to_be_bytes(),
+        b"rmsh"
+            | b"shad"
+            | b"rmtr"
+            | b"rmcs"
+            | b"rmhg"
+            | b"rmfl"
+            | b"rmsk"
+            | b"rmct"
+            | b"rmp "
+            | b"rmb "
+            | b"rmd "
+            | b"rmw "
+    )
+}
+
+pub(in crate::app) fn material_row_tint(value: &TagFieldData) -> Color32 {
+    match value {
+        TagFieldData::Data(_) | TagFieldData::ApiInterop(_) | TagFieldData::Custom(_) => {
+            MATERIAL_DATA_ROW
+        }
+        TagFieldData::RealRgbColor(_)
+        | TagFieldData::RealArgbColor(_)
+        | TagFieldData::RealHsvColor(_)
+        | TagFieldData::RealAhsvColor(_)
+        | TagFieldData::RgbColor(_)
+        | TagFieldData::ArgbColor(_)
+        | TagFieldData::Real(_)
+        | TagFieldData::RealSlider(_)
+        | TagFieldData::RealFraction(_)
+        | TagFieldData::Angle(_)
+        | TagFieldData::CharInteger(_)
+        | TagFieldData::ShortInteger(_)
+        | TagFieldData::LongInteger(_)
+        | TagFieldData::Int64Integer(_)
+        | TagFieldData::ByteInteger(_)
+        | TagFieldData::WordInteger(_)
+        | TagFieldData::DwordInteger(_)
+        | TagFieldData::QwordInteger(_)
+        | TagFieldData::Point2d(_)
+        | TagFieldData::Rectangle2d(_)
+        | TagFieldData::RealPoint2d(_)
+        | TagFieldData::RealPoint3d(_)
+        | TagFieldData::RealVector2d(_)
+        | TagFieldData::RealVector3d(_)
+        | TagFieldData::RealQuaternion(_)
+        | TagFieldData::RealEulerAngles2d(_)
+        | TagFieldData::RealEulerAngles3d(_)
+        | TagFieldData::RealPlane2d(_)
+        | TagFieldData::RealPlane3d(_)
+        | TagFieldData::ShortIntegerBounds(_)
+        | TagFieldData::AngleBounds(_)
+        | TagFieldData::RealBounds(_)
+        | TagFieldData::FractionBounds(_) => MATERIAL_NUMERIC_ROW,
+        _ => MATERIAL_REF_ROW,
+    }
+}
+
+pub(in crate::app) fn material_value_kind(value: &TagFieldData) -> &'static str {
+    match value {
+        TagFieldData::StringId(s) | TagFieldData::OldStringId(s) if s.string.is_empty() => {
+            "default"
+        }
+        TagFieldData::TagReference(r) if r.group_tag_and_name.is_none() => "default",
+        _ => "value",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::editor::material::clean_field_key;
+    use crate::app::editor::{H2TemplateCache, canonical_field_path, clean_field_name, format_rgb_hex, parse_rgb_hex, strip_node_indices};
+
+    fn entry(fourcc: &[u8; 4], group_name: &str) -> TagEntry {
+        TagEntry {
+            key: format!("file:a.{group_name}"),
+            display_path: format!("a.{group_name}"),
+            group_tag: u32::from_be_bytes(*fourcc),
+            group_name: Some(group_name.to_owned()),
+            location: TagEntryLocation::LooseFile(format!("a.{group_name}").into()),
+        }
+    }
+
+    /// Only groups a shader grid can be built for are routed to it. Halo CE's
+    /// shaders and Halo 2's template and pass groups are field trees, and Find
+    /// filters them like any other tag.
+    #[test]
+    fn only_grid_shaders_are_routed_to_the_shader_grid() {
+        for (fourcc, name) in [
+            (b"shad", "shader"),
+            (b"rmsh", "shader"),
+            (b"rmgl", "shader_glass"),
+            (b"rm  ", "render_method"),
+        ] {
+            assert!(is_shader_tag(&entry(fourcc, name)), "{name}");
+        }
+        for (fourcc, name) in [
+            (b"shdr", "shader"),
+            (b"soso", "shader_model"),
+            (b"senv", "shader_environment"),
+            (b"swat", "shader_transparent_water"),
+            (b"stem", "shader_template"),
+            (b"spas", "shader_pass"),
+            (b"slit", "shader_light_response"),
+            (b"rmbl", "rumble"),
+        ] {
+            let entry = entry(fourcc, name);
+            assert!(!is_shader_tag(&entry), "{name}");
+            assert!(supports_field_search(&entry), "{name}");
+        }
+    }
+
+    /// The shader grid's model is built once for a revision of the document,
+    /// not on every frame, and again when the document changes.
+    #[test]
+    fn the_shader_grid_is_built_once_per_revision() {
+        let root = crate::core::test_kits::h3ek_tags();
+        if !root.is_dir() {
+            eprintln!("skipping: {} not present", root.display());
+            return;
+        }
+        let definitions_root = crate::core::bundled::locate_definitions_root();
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(GameId::Halo3),
+            definitions_root: definitions_root.clone(),
+        };
+        let names = TagNameIndex::default();
+        let mut rmdf_cache = HashMap::new();
+        let mut rmop_cache = HashMap::new();
+        let mut h2_templates = H2TemplateCache::default();
+        // A shader whose grid actually builds, so the path measured is the
+        // H3+ one rather than the raw-field fallback.
+        let (tag, entry) = walkdir::WalkDir::new(root.join("shaders"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|item| item.path().extension().is_some_and(|ext| ext == "shader"))
+            .find_map(|item| {
+                let entry = crate::core::source::loose_file_entry(&root, item.path(), &names).ok()??;
+                let tag = crate::core::source::read_tag_at_path(
+                    item.path(),
+                    Some(GameId::Halo3),
+                    Some(&definitions_root),
+                    entry.group_tag,
+                )
+                .ok()?;
+                build_shader_editor_model(
+                    &tag,
+                    entry.group_tag,
+                    Some(&source),
+                    &mut rmdf_cache,
+                    &mut rmop_cache,
+                )?;
+                Some((tag, entry))
+            })
+            .expect("a Halo 3 shader whose grid builds");
+
+        let ctx = egui::Context::default();
+        let mut draw = |revision: (u64, u64, u64, u64)| {
+            let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    crate::app::editor::fields::with_test_edit_context(
+                        |edit| {
+                            draw_material_tag(
+                                ui,
+                                &tag,
+                                revision,
+                                &entry,
+                                &names,
+                                Some(&source),
+                                &mut rmdf_cache,
+                                &mut rmop_cache,
+                                &mut h2_templates,
+                                &mut None,
+                                &mut None,
+                                false,
+                                edit,
+                            );
+                        },
+                    );
+                });
+            });
+        };
+        SHADER_MODELS_BUILT.with(|built| built.set(0));
+        for _ in 0..3 {
+            draw((7, 1, 0, 0));
+        }
+        assert_eq!(SHADER_MODELS_BUILT.with(std::cell::Cell::get), 1);
+        let memo = ctx.data(|data| {
+            data.get_temp::<((u64, u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::new((
+                "shader_editor_model",
+                7u64,
+            )))
+        });
+        assert!(
+            memo.is_some_and(|(_, model)| model.is_some()),
+            "the grid was drawn"
+        );
+        draw((7, 2, 0, 0));
+        assert_eq!(
+            SHADER_MODELS_BUILT.with(std::cell::Cell::get),
+            2,
+            "an edit rebuilds it"
+        );
+        draw((7, 2, 0, 1));
+        assert_eq!(
+            SHADER_MODELS_BUILT.with(std::cell::Cell::get),
+            3,
+            "and so does a saved definition or option"
+        );
+    }
+
+    #[test]
+    fn clean_field_name_strips_every_markup_form() {
+        // Display-label cleaning must strip all Guerilla markup so a segment
+        // built from a field name never carries a path-grammar character. These
+        // are the forms the compatibility sweep found across all 5 MCC kits.
+        assert_eq!(clean_field_name("jump velocity"), "jump velocity");
+        assert_eq!(clean_field_name("ambient color:[0,255]"), "ambient color");
+        assert_eq!(
+            clean_field_name("max sounds per tag [1,16]"),
+            "max sounds per tag"
+        );
+        assert_eq!(clean_field_name("shader flags*"), "shader flags");
+        assert_eq!(clean_field_name("activity!"), "activity");
+        assert_eq!(clean_field_name("activity name^"), "activity name");
+        assert_eq!(
+            clean_field_name("acoustics{background sounds}*"),
+            "acoustics"
+        );
+        assert_eq!(
+            clean_field_name("bounds 480i&bounds 4x3 (640x480)"),
+            "bounds 480i"
+        );
+        // H2 model_animation_graph dumper artifact `name|CODE`.
+        assert_eq!(clean_field_name("animations|ABCDCC"), "animations");
+    }
+
+    #[test]
+    fn canonical_field_path_normalizes_names_paths_and_codes() {
+        // Single names normalize to their clean form.
+        assert_eq!(
+            canonical_field_path("ambient color:[0,255]"),
+            "ambient color"
+        );
+        // Multi-segment paths drop element indices AND field ordinals per segment,
+        // cleaning each name — the form the conversion loss-detector relies on.
+        assert_eq!(
+            canonical_field_path("bitmaps#21[0]/signature#0"),
+            "bitmaps/signature"
+        );
+        assert_eq!(
+            canonical_field_path("resources#0/animations|ABCDCC#8"),
+            "resources/animations"
+        );
+        assert_eq!(
+            canonical_field_path(
+                "new damage info#19[0]/damage sections#26[0]/instant responses#3[0]/response type#0"
+            ),
+            "new damage info/damage sections/instant responses/response type"
+        );
+        // clean_field_key is the lowercased canonical form.
+        assert_eq!(clean_field_key("Shader Flags*"), "shader flags");
+        assert_eq!(
+            clean_field_key("Bitmaps#21[0]/Signature#0"),
+            "bitmaps/signature"
+        );
+    }
+
+    #[test]
+    fn resolvable_and_canonical_path_flavors_stay_consistent() {
+        // The search-filter invariant (see `collect_visible_paths` /
+        // `field_visible`): the canonical key a container is stored under equals
+        // `strip_node_indices` of the resolvable render path. This only holds
+        // because resolvable paths carry CLEAN names (a range hint left in the
+        // name would strip-to a different key and break the filter).
+        //
+        // Simulate the two flavors for a markup-named field. `resolvable` is what
+        // `append_field_path_for` emits (clean name + ordinal, plus a parent
+        // element index); `canon` is what `collect_visible_paths` records.
+        let seg = clean_field_name("max sounds per tag [1,16]"); // build-time clean
+        let resolvable = format!("ambient color#5[0]/{seg}#9");
+        let canon = format!("ambient color/{seg}");
+        assert_eq!(strip_node_indices(&resolvable), canon);
+        assert_eq!(canon, "ambient color/max sounds per tag");
+    }
+
+    #[test]
+    fn editable_color_hex_accepts_standard_rgb_codes() {
+        assert_eq!(parse_rgb_hex("#FF8040").unwrap(), [255, 128, 64]);
+        assert_eq!(parse_rgb_hex("00aaff").unwrap(), [0, 170, 255]);
+        assert_eq!(format_rgb_hex(1.0, 0.5, 0.0), "#FF8000");
+        assert!(parse_rgb_hex("#12345").is_err());
+        assert!(parse_rgb_hex("#12XX56").is_err());
+    }
+}

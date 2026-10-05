@@ -38,6 +38,19 @@ impl ChimpMeshTexturePrompt {
     pub(in crate::app) fn texture_subject(&self) -> Option<String> {
         chimp_mesh_texture_subject(&self.package)
     }
+
+    /// A prompt for `package` as a JMS export into a folder that does not
+    /// exist, for tests that draw it.
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        Self {
+            kit,
+            package: package.to_owned(),
+            format: ChimpMeshFormat::Jms,
+            texture_export: ChimpTextureExport::default(),
+            path: PathBuf::from("/no/such/folder/mesh.jms"),
+        }
+    }
 }
 
 /// How a Texture2D extraction should be written.
@@ -117,6 +130,16 @@ impl ChimpTextureExportPrompt {
     pub(in crate::app) fn name(&self) -> &str {
         self.package.rsplit('/').next().unwrap_or(&self.package)
     }
+
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        Self {
+            kit,
+            package: package.to_owned(),
+            export: ChimpTextureExport::default(),
+            export_index: None,
+        }
+    }
 }
 
 /// One entry; the format is chosen in the prompt it opens.
@@ -127,7 +150,7 @@ pub(super) fn chimp_texture_export_menu(
 ) {
     if ui.button("Extract Texture2D…").clicked() {
         *out = Some(package.to_owned());
-        ui.close_menu();
+        close_menu(ui);
     }
 }
 
@@ -195,6 +218,9 @@ impl ChimpLevelPhase {
 
 /// A level export in flight, and how far along it is.
 pub(in crate::app) struct ChimpLevelJob {
+    /// Never reused, so a finished export can tell whether it is still the
+    /// current job. See [`next_chimp_level_job_id`].
+    pub(in crate::app) id: u64,
     pub(in crate::app) kit: KitId,
     pub(super) name: String,
     pub(in crate::app) phase: ChimpLevelPhase,
@@ -205,7 +231,26 @@ pub(in crate::app) struct ChimpLevelJob {
     pub(in crate::app) phase_started: Instant,
 }
 
+/// A fresh id for a [`ChimpLevelJob`].
+pub(in crate::app) fn next_chimp_level_job_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl ChimpLevelJob {
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(id: u64, kit: KitId) -> Self {
+        Self {
+            id,
+            kit,
+            name: "level".to_owned(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done: 0,
+            total: 1,
+            phase_started: Instant::now(),
+        }
+    }
+
     pub(super) fn fraction(&self) -> f32 {
         if self.total == 0 {
             return 0.0;
@@ -267,6 +312,22 @@ pub(in crate::app) struct ChimpLevelExportPrompt {
 impl ChimpLevelExportPrompt {
     pub(in crate::app) fn format_label(&self) -> &'static str {
         self.format.label()
+    }
+
+    /// A prompt for a two-cell level, for tests that draw it.
+    #[cfg(test)]
+    pub(in crate::app) fn for_test(kit: KitId, package: &str) -> Self {
+        let default = SegmentBudget::default();
+        Self {
+            kit,
+            package: package.to_owned(),
+            cells: vec![format!("{package}_Generated_0"), format!("{package}_Generated_1")],
+            format: ChimpLevelFormat::SegmentedUsd,
+            nanite: true,
+            split: true,
+            triangles: default.triangles,
+            placements: default.placements,
+        }
     }
 
     pub(in crate::app) fn format_summary(&self) -> &'static str {
@@ -352,7 +413,7 @@ fn chimp_level_cells(world: &World, package: &str) -> Vec<String> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ChimpMeshFormat {
+pub(in crate::app) enum ChimpMeshFormat {
     Jms,
     Psk,
     Pskx,
@@ -376,19 +437,43 @@ impl ChimpMeshFormat {
     }
 }
 
+/// The bytes of export `index` as the document holds it now.
+///
+/// `payloads` are the bytes the package was read with. An edit changes the
+/// decoded export, not its payload, so for a dirty document those bytes are
+/// stale; `serialize` writes the decoded export instead, as rebuilding the
+/// package does. An export that never decoded has only its payload. `None`
+/// when there is no such export.
+fn chimp_export_bytes(
+    document: &ChimpDocument,
+    index: usize,
+    serialize: impl FnOnce(&str, &Export) -> Result<Vec<u8>, String>,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(payload) = document.payloads.get(index) else {
+        return Ok(None);
+    };
+    if document.dirty
+        && let Some(export) = document.exports.get(index)
+        && let (Some(class), Ok(decoded)) = (export.class.as_deref(), &export.decoded)
+    {
+        return serialize(class, decoded).map(Some);
+    }
+    Ok(Some(payload.clone()))
+}
+
 impl Baboon {
     pub(super) fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
         let bytes = if document.dirty {
-            let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
                 return;
             };
             match rebuild_chimp_document(world, document) {
                 Ok((bytes, _)) => bytes,
                 Err(error) => {
-                    self.status = error;
+                    self.model.status = error;
                     return;
                 }
             }
@@ -404,20 +489,39 @@ impl Baboon {
             return;
         };
         match fs::write(&path, bytes) {
-            Ok(()) => self.status = format!("Extracted {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Extracted {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
     pub(super) fn extract_chimp_export(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
-        let index = document
+        let Some(pane) = self.views[self.model.kits[kit_index].id].chimp.documents.get(package) else {
+            return;
+        };
+        let index = pane
             .selected_export
             .min(document.payloads.len().saturating_sub(1));
-        let Some(payload) = document.payloads.get(index) else {
-            return;
+        let world = match &self.model.kits[kit_index].chimp.mount {
+            ChimpMount::Ready(world) => Some(world),
+            _ => None,
+        };
+        let payload = match chimp_export_bytes(document, index, |class, decoded| {
+            let world = world.ok_or("Chimp must be mounted to extract an edited export")?;
+            validate_chimp_header(document)?;
+            let names = document.header.name_map.copy_raw_names();
+            let resolver = world.resolver(&document.header, &document.original, &names);
+            write_export_in(class, decoded, world.usmap(), Some(&resolver))
+                .map_err(|error| format!("Could not serialize export {index}: {error:#}"))
+        }) {
+            Ok(Some(payload)) => payload,
+            Ok(None) => return,
+            Err(error) => {
+                self.model.status = error;
+                return;
+            }
         };
         let name = document
             .exports
@@ -432,13 +536,13 @@ impl Baboon {
             return;
         };
         match fs::write(&path, payload) {
-            Ok(()) => self.status = format!("Extracted {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Extracted {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
     pub(super) fn extract_chimp_json(&mut self, kit_index: usize, package: &str) {
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+        let Some(document) = self.model.kits[kit_index].chimp.documents.get(package) else {
             return;
         };
         let value = chimp_document_json(document);
@@ -455,8 +559,8 @@ impl Baboon {
         match serde_json::to_vec_pretty(&value)
             .and_then(|bytes| fs::write(&path, bytes).map_err(serde_json::Error::io))
         {
-            Ok(()) => self.status = format!("Exported {}", path.display()),
-            Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
+            Ok(()) => self.model.status = format!("Exported {}", path.display()),
+            Err(error) => self.model.status = format!("Could not write {}: {error}", path.display()),
         }
     }
 
@@ -466,16 +570,16 @@ impl Baboon {
     /// what the export is — a numbered UDIM set or a single file, a mip chain or
     /// one flat image — and what the picker should be named and filtered for.
     pub(super) fn begin_extract_chimp_texture(&mut self, kit_index: usize, package: &str) {
-        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+        if !matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
-        let export_index = self.kits[kit_index]
+        let export_index = self.views[self.model.kits[kit_index].id]
             .chimp
             .documents
             .get(package)
-            .map(|document| document.selected_export);
-        self.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
-            kit: self.kits[kit_index].id,
+            .map(|pane| pane.selected_export);
+        self.dialogs.open(ChimpTextureExportPrompt {
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             // DDS and split UDIM: the pair that round-trips into Unreal.
             export: ChimpTextureExport::default(),
@@ -506,19 +610,17 @@ impl Baboon {
         else {
             return;
         };
-        let Some(kit_index) = self.kits.iter().position(|entry| entry.id == kit) else {
+        let Some(kit_index) = self.model.kits.iter().position(|entry| entry.id == kit) else {
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
         let tx = self.tx.clone();
-        self.status = format!("Extracting {package}…");
-        thread::spawn(move || {
-            let result = write_chimp_texture(&world, &package, &path, export, export_index);
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        self.model.status = format!("Extracting {package}…");
+        spawn_export(&tx, &ctx, move || {
+            write_chimp_texture(&world, &package, &path, export, export_index)
         });
     }
 
@@ -533,17 +635,17 @@ impl Baboon {
         package: &str,
         format: ChimpLevelFormat,
     ) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let cells = chimp_level_cells(world, package);
         if cells.is_empty() {
-            self.status = format!("{package} is not a World Partition level");
+            self.model.status = format!("{package} is not a World Partition level");
             return;
         }
         let default = SegmentBudget::default();
-        self.chimp_level_export_prompt = Some(ChimpLevelExportPrompt {
-            kit: self.kits[kit_index].id,
+        self.dialogs.open(ChimpLevelExportPrompt {
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             cells,
             format,
@@ -573,10 +675,10 @@ impl Baboon {
         else {
             return;
         };
-        let Some(kit_index) = self.kits.iter().position(|kit| kit.id == prompt.kit) else {
+        let Some(kit_index) = self.model.kits.iter().position(|kit| kit.id == prompt.kit) else {
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
@@ -590,7 +692,9 @@ impl Baboon {
             MeshDetail::Fallback
         };
         let ChimpLevelExportPrompt { cells, format, .. } = prompt;
-        self.chimp_level_job = Some(ChimpLevelJob {
+        let job = next_chimp_level_job_id();
+        self.chimp.chimp_level_job = Some(ChimpLevelJob {
+            id: job,
             kit,
             name: name.clone(),
             phase: ChimpLevelPhase::ReadingCells,
@@ -598,7 +702,7 @@ impl Baboon {
             total: cells.len(),
             phase_started: Instant::now(),
         });
-        self.status = format!("Exporting {name}…");
+        self.model.status = format!("Exporting {name}…");
         let panic_name = name.clone();
         spawn_worker(
             &self.tx.clone(),
@@ -659,15 +763,17 @@ impl Baboon {
                         )
                     }),
                 };
-                WorkerMessage::ExportFinished(result.map(|message| match left_out {
-                    Some(left_out) => format!("{message}. {left_out}"),
-                    None => message,
-                }))
+                WorkerMessage::ChimpLevelExportFinished {
+                    job,
+                    result: result.map(|message| match left_out {
+                        Some(left_out) => format!("{message}. {left_out}"),
+                        None => message,
+                    }),
+                }
             },
-            move |error| {
-                WorkerMessage::ExportFinished(Err(format!(
-                    "Exporting {panic_name} failed: {error}"
-                )))
+            move |error| WorkerMessage::ChimpLevelExportFinished {
+                job,
+                result: Err(format!("Exporting {panic_name} failed: {error}")),
             },
         );
     }
@@ -692,13 +798,13 @@ impl Baboon {
         else {
             return;
         };
-        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+        if !matches!(self.model.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
         // Asked once the destination is known, so the prompt can say exactly
         // where the textures would land.
-        self.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt {
-            kit: self.kits[kit_index].id,
+        self.dialogs.open(ChimpMeshTexturePrompt {
+            kit: self.model.kits[kit_index].id,
             package: package.to_owned(),
             format,
             texture_export: ChimpTextureExport::default(),
@@ -713,11 +819,11 @@ impl Baboon {
         textures: ChimpTextureScope,
         ctx: egui::Context,
     ) {
-        let Some(kit_index) = self.kit_index(prompt.kit) else {
-            self.status = "The workspace this export came from is closed".to_owned();
+        let Some(kit_index) = self.model.kit_index(prompt.kit) else {
+            self.model.status = "The workspace this export came from is closed".to_owned();
             return;
         };
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+        let ChimpMount::Ready(world) = &self.model.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
@@ -729,12 +835,9 @@ impl Baboon {
             ..
         } = prompt;
         let tx = self.tx.clone();
-        self.status = format!("Extracting {package} as {}…", format.label());
-        thread::spawn(move || {
-            let result =
-                write_chimp_mesh(&world, &package, &path, format, textures, texture_export);
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
+        self.model.status = format!("Extracting {package} as {}…", format.label());
+        spawn_export(&tx, &ctx, move || {
+            write_chimp_mesh(&world, &package, &path, format, textures, texture_export)
         });
     }
 }
@@ -1439,7 +1542,7 @@ pub(super) fn chimp_mesh_export_menu(
     .flatten();
     if let Some(format) = format {
         *requested = Some((package.to_owned(), format));
-        ui.close_menu();
+        close_menu(ui);
     }
 }
 
@@ -1467,13 +1570,36 @@ pub(super) fn chimp_level_export_menu(
     .flatten();
     if let Some(format) = selected {
         *requested = Some((package.to_owned(), format));
-        ui.close_menu();
+        close_menu(ui);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An edit changes the decoded export, not the payload it was read from,
+    /// so extracting a dirty document's export used to write the bytes from
+    /// before the edit.
+    #[test]
+    fn extracting_an_edited_export_writes_the_edit() {
+        let mut document = crate::app::chimp::test_support::rename_fixture();
+        document.payloads = vec![b"as read".to_vec()];
+        document.exports[0].class = Some("/Script/Engine.Material".to_owned());
+        let serialize = |_: &str, _: &Export| Ok(b"as edited".to_vec());
+
+        assert_eq!(
+            chimp_export_bytes(&document, 0, serialize).unwrap().as_deref(),
+            Some(&b"as read"[..]),
+            "an unedited export is its payload"
+        );
+        document.dirty = true;
+        assert_eq!(
+            chimp_export_bytes(&document, 0, serialize).unwrap().as_deref(),
+            Some(&b"as edited"[..])
+        );
+        assert_eq!(chimp_export_bytes(&document, 1, serialize).unwrap(), None);
+    }
 
     #[test]
     fn a_mesh_name_names_the_model_its_textures_belong_to() {
@@ -1584,6 +1710,7 @@ mod tests {
 
     fn job_at(done: usize, total: usize, elapsed: Duration) -> ChimpLevelJob {
         ChimpLevelJob {
+            id: 0,
             kit: KitId(0),
             name: "C10".to_owned(),
             phase: ChimpLevelPhase::ReadingCells,
@@ -1710,8 +1837,8 @@ mod tests {
             .map(|package| package.name.clone())
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
-        let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+        let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
         assert_eq!(
             (surfaces.width_in_blocks, surfaces.height_in_blocks),
             (3, 2)
@@ -1778,8 +1905,8 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no Texture2D package ending in {target:?}"));
 
-        let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+        let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
         assert!(surfaces.is_virtual, "{package} should be a virtual texture");
         assert!(surfaces.is_udim(), "{package} should be a UDIM set");
         // Tiles were cropped in block space, so the surface is still compressed.
@@ -1878,8 +2005,8 @@ mod tests {
             .map(|package| package.name.clone())
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
-        let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+        let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
         assert!(surfaces.is_udim());
 
         let directory =
@@ -2049,8 +2176,8 @@ mod tests {
             .map(|package| package.name.clone())
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no package ending in {target:?}"));
-        let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
+        let (_, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&pane.texture_previews, &package, None).unwrap();
         let data = chimp_texture_mip_data(surfaces, 0, level).unwrap();
         println!(
             "{package}: {}x{} {} ({})",
@@ -2099,15 +2226,15 @@ mod tests {
             let package = candidates
                 .into_iter()
                 .find_map(|package| {
-                    let document = load_chimp_document(&world, &package.name).ok()?;
-                    document.mesh_preview.as_ref()?.as_ref().ok()?;
+                    let (_, pane) = load_chimp_document_with_pane(&world, &package.name).ok()?;
+                    pane.mesh_preview.as_ref()?.as_ref().ok()?;
                     Some(package.name.clone())
                 })
                 .unwrap_or_else(|| panic!("no decodable {type_name} package"));
-            let document = load_chimp_document(&world, &package).unwrap();
-            assert_eq!(document.view, ChimpDocumentView::Mesh);
+            let (document, pane) = load_chimp_document_with_pane(&world, &package).unwrap();
+            assert_eq!(pane.view, ChimpDocumentView::Mesh);
             assert_eq!(document.mesh_kind, Some(expected_kind));
-            let preview = document.mesh_preview.as_ref().unwrap().as_ref().unwrap();
+            let preview = pane.mesh_preview.as_ref().unwrap().as_ref().unwrap();
             assert!(!preview.preview.vertices.is_empty());
             assert!(!preview.preview.indices.is_empty());
             assert!(!preview.preview.batches.is_empty());
@@ -2176,7 +2303,7 @@ mod tests {
                     .contains("sm_spiritdropship_body")
             })
             .unwrap_or_else(|| panic!("SM_SpiritDropShip_Body was not found"));
-        let document = load_chimp_document(&world, &package.name).unwrap();
+        let (document, pane) = load_chimp_document_with_pane(&world, &package.name).unwrap();
         assert_eq!(document.mesh_kind, Some(ChimpMeshKind::Static));
 
         let archive = &world.archives()[document.provider.container];
@@ -2226,7 +2353,7 @@ mod tests {
             }
         }
         let converted = StaticMesh::from_nanite(&nanite);
-        let preview = document
+        let preview = pane
             .mesh_preview
             .as_ref()
             .and_then(|preview| preview.as_ref().ok())

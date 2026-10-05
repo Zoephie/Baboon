@@ -158,7 +158,7 @@ pub(in crate::app) fn begin_folder_table(
     ui.painter()
         .rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()), egui::StrokeKind::Middle);
     let mut x = rect.left();
     let mut columns = Vec::new();
     let mut reorder = None;
@@ -191,6 +191,7 @@ pub(in crate::app) fn begin_folder_table(
                     cell.shrink(2.0),
                     0.0,
                     Stroke::new(1.0_f32, ui.visuals().selection.stroke.color),
+                egui::StrokeKind::Middle,
                 );
             }
             if let Some(source) = header.dnd_release_payload::<FolderColumn>() {
@@ -516,7 +517,7 @@ mod tests {
         let mut layout = FolderTableLayout::default();
         let frame = |layout: &mut FolderTableLayout, events: Vec<egui::Event>| {
             let mut columns = Vec::new();
-            let _ = ctx.run(
+            let _ = crate::app::run_ui_test(&ctx, 
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -525,8 +526,8 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         begin_folder_table(
                             ui,
                             None,
@@ -627,8 +628,8 @@ mod tests {
             ("z".into(), vec!["alpha".into()]),
             ("a".into(), vec!["wip".into()]),
         ]));
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut layout = FolderTableLayout::default();
                 for column in [
                     FolderColumn::Size,
@@ -680,7 +681,7 @@ mod tests {
         };
         let mut keyword_map = BTreeMap::new();
         keyword_map.insert(entry.key.clone(), vec!["wip".into(), "needs work".into()]);
-        let output = ctx.run(
+        let output = crate::app::run_ui_test(&ctx, 
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -688,8 +689,8 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let sidebar_clip = ui.clip_rect();
                     assert_eq!(folder_name_clip(ui), sidebar_clip);
                     begin_folder_table(

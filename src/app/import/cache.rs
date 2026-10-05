@@ -1,0 +1,772 @@
+//! Importing a monolithic cache's tags into an editing kit: the dialog's state,
+//! and the workflow that runs one.
+//! It owns choosing a destination kit and driving the conversion worker; what a
+//! tag becomes on the way is `blam_tags::convert`, and the run itself is
+//! the `conversion` module.
+
+use super::*;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+/// The Import Cache Folder window, from the question it asks to the report it
+/// leaves behind.
+///
+/// One window rather than a confirmation and a separate progress dialog: the run
+/// is long, the destination has to be chosen before it starts, and the report is
+/// what the user came for. Splitting those across three surfaces would leave
+/// three places to look for the answer to "what happened to my folder?".
+pub(in crate::app) struct CacheImportDialog {
+    /// The cache workspace the tags come out of. Resolved when the window opens,
+    /// so focusing another workspace mid-run still gives the import that was
+    /// asked for.
+    pub(in crate::app) kit: KitId,
+    /// Tag-name prefix. `""` is the whole cache.
+    pub(in crate::app) prefix: String,
+    /// How many tags sit under `prefix`, before any reference is followed.
+    pub(in crate::app) selected: usize,
+    /// The open loose kits this could land in. Resolved once when the window
+    /// opens: re-resolving every frame would move the list under the user's
+    /// cursor, and a kit that closes mid-run is caught by the stamp instead.
+    pub(in crate::app) targets: Vec<CacheImportTarget>,
+    pub(in crate::app) target_index: usize,
+    /// The last run's outside references as a folder tree.
+    pub(in crate::app) outside_tree: OutsideTree,
+    /// Which of them the user has ticked, keyed by [`OutsideReference::key`].
+    /// Rebuilt each time a run finishes, all ticked, because bringing
+    /// everything the folder needs is the common answer and leaving something
+    /// out is the deliberate one.
+    pub(in crate::app) outside_picked: BTreeMap<String, bool>,
+    /// Set when the window was opened for one tag rather than a folder.
+    pub(in crate::app) single: Option<SingleTagImport>,
+    /// Folder inside the target's tags root, or `None` for each tag's own path.
+    ///
+    /// Its own path is the default for both a folder and a single tag, and the
+    /// window says why: every reference names the path the build gave a tag,
+    /// and nothing rewrites those. A folder sent somewhere else keeps its shape
+    /// under the folder that was picked; a single tag keeps only its name.
+    pub(in crate::app) destination: Option<PathBuf>,
+    /// What to do about tags the destination kit already holds.
+    pub(in crate::app) replace: ReplaceChoice,
+    /// Those tags, as a folder tree, once the scan has run.
+    pub(in crate::app) conflicts: OutsideTree,
+    /// Which of them to replace, keyed by [`TagEntry::key`].
+    pub(in crate::app) conflict_picked: BTreeMap<String, bool>,
+    /// Set while the scan for them is running, and again whenever the answer it
+    /// gave stops being about the destination now selected.
+    pub(in crate::app) conflicts_stale: bool,
+    pub(in crate::app) scanning: bool,
+    pub(in crate::app) running: bool,
+    /// Set from the UI thread by Cancel; the worker reads it between tags.
+    pub(in crate::app) cancel: Arc<AtomicBool>,
+    pub(in crate::app) progress: Option<FolderConversionProgress>,
+    pub(in crate::app) report: Option<FolderConversionReport>,
+    pub(in crate::app) error: Option<String>,
+}
+
+/// The outside references arranged the way they are stored, so the question can
+/// be answered at whatever depth the answer lives at.
+///
+/// The flat list this replaces grouped by the first two path segments, which is
+/// readable but blunt: `objects/characters` is one tick and two thousand tags,
+/// and wanting the elite but not the whole cast meant taking both or neither.
+/// A folder here is a real folder, opens, and can be answered at any level down
+/// to the individual tag.
+///
+/// Built once when a run reports, not per frame: a run can reach thousands of
+/// references and the shape does not change while the answer is being given.
+#[derive(Default)]
+pub(in crate::app) struct OutsideTree {
+    /// Folder path → the folders directly inside it.
+    pub(in crate::app) folders: BTreeMap<String, BTreeSet<String>>,
+    /// Folder path → the tags directly in it, as `(key, leaf name)`.
+    pub(in crate::app) tags: BTreeMap<String, Vec<(String, String)>>,
+    /// Folder path → how many tags its whole subtree holds.
+    pub(in crate::app) totals: BTreeMap<String, usize>,
+    /// The folders with no parent.
+    pub(in crate::app) roots: BTreeSet<String>,
+}
+
+impl OutsideTree {
+    /// Arrange a run's outside references into folders.
+    pub(in crate::app) fn build(references: &[OutsideReference]) -> Self {
+        let mut tree = Self::default();
+        for reference in references {
+            let normalized = reference.display_path.replace('\\', "/");
+            let (folder, leaf) = match normalized.rsplit_once('/') {
+                Some((folder, leaf)) => (folder.to_owned(), leaf.to_owned()),
+                // A tag at the top with no folder of its own still needs one to
+                // hang from, and an empty name is what the roots loop skips.
+                None => (String::new(), normalized.clone()),
+            };
+            tree.tags
+                .entry(folder.clone())
+                .or_default()
+                .push((reference.key.clone(), leaf));
+            // Every ancestor, so a folder that only holds folders still appears.
+            let mut path = folder.as_str();
+            loop {
+                *tree.totals.entry(path.to_owned()).or_default() += 1;
+                match path.rsplit_once('/') {
+                    Some((parent, child)) => {
+                        tree.folders
+                            .entry(parent.to_owned())
+                            .or_default()
+                            .insert(child.to_owned());
+                        path = parent;
+                    }
+                    None => {
+                        if !path.is_empty() {
+                            tree.roots.insert(path.to_owned());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        for tags in tree.tags.values_mut() {
+            tags.sort();
+        }
+        tree
+    }
+
+    /// Every tag key at or under `folder`.
+    pub(in crate::app) fn keys_under(&self, folder: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut pending = vec![folder.to_owned()];
+        while let Some(path) = pending.pop() {
+            if let Some(tags) = self.tags.get(&path) {
+                out.extend(tags.iter().map(|(key, _)| key.clone()));
+            }
+            if let Some(children) = self.folders.get(&path) {
+                for child in children {
+                    pending.push(if path.is_empty() {
+                        child.clone()
+                    } else {
+                        format!("{path}/{child}")
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// How many tags under `folder` are ticked, and how many there are.
+    pub(in crate::app) fn tally(
+        &self,
+        folder: &str,
+        picked: &BTreeMap<String, bool>,
+    ) -> (usize, usize) {
+        let keys = self.keys_under(folder);
+        let total = keys.len();
+        let chosen = keys
+            .iter()
+            .filter(|key| picked.get(*key).copied().unwrap_or(false))
+            .count();
+        (chosen, total)
+    }
+}
+
+/// The one tag a single-tag import is for.
+pub(in crate::app) struct SingleTagImport {
+    /// The cache key, which is what the run converts.
+    pub(in crate::app) key: String,
+    /// Its path in the build, for the window to name it by.
+    pub(in crate::app) display_path: String,
+    /// The folder that path sits in, which is what a relocation strips so the
+    /// tag lands as its bare name.
+    pub(in crate::app) parent: String,
+}
+
+/// What the window has been told to do about tags the kit already has.
+///
+/// Separate from [`ReplacePolicy`] because the window holds a tick per tag and
+/// the job wants the set: the user changes their mind about individual tags
+/// several times before pressing Import, and rebuilding a `HashSet` each frame
+/// to store an answer nobody has given yet is work for nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum ReplaceChoice {
+    /// Overwrite whatever the kit has. What the importer always did.
+    Always,
+    /// Leave every tag the kit already has alone.
+    Never,
+    /// Replace the ones ticked in the conflict tree.
+    Chosen,
+}
+
+/// One editing kit an import could land in.
+pub(in crate::app) struct CacheImportTarget {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) label: String,
+    pub(in crate::app) game: GameId,
+    pub(in crate::app) tags_root: PathBuf,
+}
+
+impl CacheImportDialog {
+    pub(in crate::app) fn target(&self) -> Option<&CacheImportTarget> {
+        self.targets.get(self.target_index)
+    }
+}
+
+impl Baboon {
+    /// Open the window for a folder in the active cache workspace.
+    ///
+    /// Refuses up front rather than opening an empty window: with no loose kit
+    /// loaded there is nowhere for the tags to go, and finding that out after
+    /// choosing a folder is a worse way to learn it.
+    pub(in crate::app) fn open_cache_import_dialog(&mut self, prefix: String) {
+        if self.dialogs.get::<CacheImportDialog>().is_some() {
+            self.model.status = "A cache import is already open".to_owned();
+            return;
+        }
+        let kit = self.model.active_kit_id();
+        let Some(source_data) = self.model.source() else {
+            return;
+        };
+        if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
+            self.model.status = "This is not a monolithic cache workspace".to_owned();
+            return;
+        }
+        let selected = source_data
+            .entries
+            .iter()
+            .filter(|entry| cache_entry_is_under(entry, &prefix))
+            .count();
+        if selected == 0 {
+            self.model.status = format!("{prefix} holds no tags to import");
+            return;
+        }
+        let targets = self.model.cache_import_targets();
+        if targets.is_empty() {
+            self.model.status = "Open the editing kit these tags should land in first — File › Load \
+                 Folder"
+                .to_owned();
+            return;
+        }
+        self.dialogs.open(CacheImportDialog {
+            kit,
+            prefix,
+            selected,
+            targets,
+            target_index: 0,
+            outside_tree: OutsideTree::default(),
+            outside_picked: BTreeMap::new(),
+            single: None,
+            destination: None,
+            replace: ReplaceChoice::Always,
+            conflicts: OutsideTree::default(),
+            conflict_picked: BTreeMap::new(),
+            conflicts_stale: true,
+            scanning: false,
+            running: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
+            report: None,
+            error: None,
+        });
+    }
+
+    /// Open the window for one tag in the active cache workspace.
+    ///
+    /// Same window as the folder import, seeded with a single tag and a
+    /// destination the user chooses. Sharing the window rather than adding
+    /// another keeps one place to read what happened, and a single tag can
+    /// still reach for others -- the outside-reference question is the same
+    /// question whether one tag asked it or a thousand.
+    pub(in crate::app) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
+        if self.dialogs.get::<CacheImportDialog>().is_some() {
+            self.model.status = "A cache import is already open".to_owned();
+            return;
+        }
+        let kit = self.model.active_kit_id();
+        let Some(source_data) = self.model.source() else {
+            return;
+        };
+        if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
+            self.model.status = "This is not a monolithic cache workspace".to_owned();
+            return;
+        }
+        let Some(entry) = source_data.entries.iter().find(|entry| entry.key == key) else {
+            self.model.status = "That tag is no longer in this cache".to_owned();
+            return;
+        };
+        let display_path = entry.display_path.clone();
+        let targets = self.model.cache_import_targets();
+        if targets.is_empty() {
+            self.model.status = "Open the editing kit this tag should land in first — File › Load Folder"
+                .to_owned();
+            return;
+        }
+        self.dialogs.open(CacheImportDialog {
+            kit,
+            prefix: display_path.clone(),
+            selected: 1,
+            targets,
+            target_index: 0,
+            outside_tree: OutsideTree::default(),
+            outside_picked: BTreeMap::new(),
+            single: Some(SingleTagImport {
+                key,
+                parent: display_path
+                    .rsplit_once(['\\', '/'])
+                    .map(|(folder, _)| folder.to_owned())
+                    .unwrap_or_default(),
+                display_path,
+            }),
+            destination: None,
+            replace: ReplaceChoice::Always,
+            conflicts: OutsideTree::default(),
+            conflict_picked: BTreeMap::new(),
+            conflicts_stale: true,
+            scanning: false,
+            running: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
+            report: None,
+            error: None,
+        });
+    }
+
+
+}
+
+impl Baboon {
+    /// Start the run the window has been configured for.
+    ///
+    /// Everything the worker needs is resolved here, on the UI thread, and moved
+    /// in: the entry list, the destination, the kit roots. The worker never
+    /// reaches back into the application, which is what lets the user carry on
+    /// editing while thousands of tags convert.
+    /// `only` names the tags to convert instead of the folder — the second run,
+    /// after the user has seen what the folder reached for and ticked which of
+    /// it to bring.
+    pub(in crate::app) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
+        if let Some(index) = self
+            .dialogs
+            .get::<CacheImportDialog>()
+            .and_then(|dialog| self.model.kit_index(dialog.kit))
+            && self.refuse_read_only_edit(index)
+        {
+            return;
+        }
+        let Some(dialog) = self.dialogs.get::<CacheImportDialog>() else {
+            return;
+        };
+        if dialog.running {
+            return;
+        }
+        let Some(target) = dialog.target() else {
+            return;
+        };
+        let (kit, prefix) = (dialog.kit, dialog.prefix.clone());
+        // A single-tag run converts that tag on the first pass; a second pass
+        // for its references is the same as any other, and lands them at their
+        // own paths, because that is where the references point.
+        let single_seed = match (dialog.single.as_ref(), only.is_none()) {
+            (Some(single), true) => Some(HashSet::from([single.key.clone()])),
+            _ => None,
+        };
+        // A second pass brings the references the first one reached for, and
+        // those land at their own paths whatever the first pass chose: a
+        // reference names the path the build gave it, so a shader moved into
+        // the folder that needed it is a shader the next tag will not find.
+        let destination = match (dialog.destination.as_ref(), only.is_none()) {
+            (Some(root), true) => CacheDestination::Folder {
+                root: root.clone(),
+                strip: match dialog.single.as_ref() {
+                    Some(single) => single.parent.clone(),
+                    None => prefix.clone(),
+                },
+            },
+            _ => CacheDestination::OwnPath,
+        };
+        let replace = match dialog.replace {
+            ReplaceChoice::Always => ReplacePolicy::Always,
+            ReplaceChoice::Never => ReplacePolicy::Never,
+            // Only the ticked ones. A tag the kit does not have is not in this
+            // set and does not need to be -- nothing is being replaced, so
+            // nothing has to be allowed.
+            ReplaceChoice::Chosen => ReplacePolicy::Chosen(
+                dialog
+                    .conflict_picked
+                    .iter()
+                    .filter(|(_, wanted)| **wanted)
+                    .map(|(key, _)| key.clone())
+                    .collect(),
+            ),
+        };
+        let (target_game, target_tags_root) = (target.game.as_str().to_owned(), target.tags_root.clone());
+        let cancel = dialog.cancel.clone();
+        cancel.store(false, Ordering::Relaxed);
+
+        let Some(index) = self.model.kit_index(kit) else {
+            return;
+        };
+        let Some(source_data) = self.model.kits[index].source.as_ref() else {
+            return;
+        };
+        // Cloning the source shares the open cache rather than reopening it:
+        // `TagSource::MonolithicCache` holds it behind an `Arc`.
+        let source = source_data.source.clone();
+        let names = source_data.names.clone();
+        // The whole cache, not just the folder. The worker filters for the seed
+        // and keeps the rest as the index a followed reference resolves through.
+        let entries = source_data.entries.clone();
+        let stamp = KitStamp {
+            kit,
+            generation: self.model.kits[index].generation,
+        };
+        // A cache tag is Reach's own format at another byte order, so the source
+        // profile is the destination's. That pair is refused everywhere else and
+        // legal here only because the source is big-endian; see
+        // `blam_tags::convert::analyze_conversion_inner`.
+        let source_game = target_game.clone();
+        let job = FolderConversionJob {
+            source,
+            names,
+            scope: FolderConversionScope::CacheSubtree {
+                prefix,
+                entries,
+                seed: match (only, single_seed) {
+                    (Some(keys), _) | (None, Some(keys)) => CacheSeed::Keys(keys),
+                    (None, None) => CacheSeed::Folder,
+                },
+                destination,
+            },
+            source_game,
+            target_game,
+            target_tags_root,
+            kit_roots: self
+                .model.prefs
+                .editing_kit_paths
+                .iter()
+                .map(|(game, root)| (game.clone(), import_tags_root(root)))
+                .collect(),
+            accept_loss: false,
+            replace,
+            only: None,
+            cancel,
+        };
+        if let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() {
+            dialog.running = true;
+            dialog.report = None;
+            dialog.error = None;
+            dialog.progress = Some(FolderConversionProgress {
+                phase: "Preparing".to_owned(),
+                current: String::new(),
+                processed: 0,
+                total: 0,
+                converted: 0,
+                failed: 0,
+            });
+        }
+        self.model.status = "Importing cache tags".to_owned();
+        let tx = self.tx.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::CacheImportFinished { stamp, result: run_folder_conversion_job(job, &tx) },
+            move |_| WorkerMessage::CacheImportFinished {
+                stamp,
+                result: Err("The cache import worker crashed".to_owned()),
+            },
+        );
+    }
+
+    pub(in crate::app) fn handle_cache_import_progress(
+        &mut self,
+        progress: FolderConversionProgress,
+    ) -> bool {
+        if let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>()
+            && dialog.running
+        {
+            dialog.progress = Some(progress);
+        }
+        false
+    }
+
+    /// Find out which of the tags this import would write the kit already has.
+    ///
+    /// Predicted from the cache entry rather than measured by converting:
+    /// asking properly would mean converting every tag twice, and a cache
+    /// import is a byte-order upgrade, so a tag's group -- and therefore its
+    /// extension -- is the same on both sides. Where the prediction is wrong
+    /// the run errs towards keeping: [`ReplacePolicy::Chosen`] is keyed by the
+    /// source tag, so a tag whose extension turned out to differ is one that
+    /// was not at the path the scan checked, and so was never at risk.
+    pub(in crate::app) fn scan_cache_import_conflicts(&mut self, ctx: egui::Context) {
+        let Some(dialog) = self.dialogs.get::<CacheImportDialog>() else {
+            return;
+        };
+        let Some(target) = dialog.target() else {
+            return;
+        };
+        if dialog.running || dialog.scanning {
+            return;
+        }
+        let tags_root = target.tags_root.clone();
+        let destination = match dialog.destination.as_ref() {
+            Some(root) => CacheDestination::Folder {
+                root: root.clone(),
+                strip: match dialog.single.as_ref() {
+                    Some(single) => single.parent.clone(),
+                    None => dialog.prefix.clone(),
+                },
+            },
+            None => CacheDestination::OwnPath,
+        };
+        let (kit, prefix) = (dialog.kit, dialog.prefix.clone());
+        let single = dialog.single.as_ref().map(|single| single.key.clone());
+        let Some(index) = self.model.kit_index(kit) else {
+            return;
+        };
+        let Some(source_data) = self.model.kits[index].source.as_ref() else {
+            return;
+        };
+        let entries = source_data
+            .entries
+            .iter()
+            .filter(|entry| match single.as_ref() {
+                Some(key) => &entry.key == key,
+                None => cache_entry_is_under(entry, &prefix),
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let stamp = KitStamp {
+            kit,
+            generation: self.model.kits[index].generation,
+        };
+        if let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() {
+            dialog.scanning = true;
+            dialog.conflicts_stale = false;
+        }
+        // A scan that panicked used to leave the dialog scanning for good,
+        // which also refuses the import itself.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let mut conflicts = Vec::new();
+                for entry in &entries {
+                    let TagEntryLocation::Monolithic { name, group_tag } = &entry.location else {
+                        continue;
+                    };
+                    let extension = entry
+                        .group_name
+                        .clone()
+                        .or_else(|| group_tag_to_extension(*group_tag).map(str::to_owned));
+                    let Some(extension) = extension else { continue };
+                    let mut relative = destination.place(name);
+                    relative.set_extension(&extension);
+                    if !tags_root.join(&relative).exists() {
+                        continue;
+                    }
+                    conflicts.push(OutsideReference {
+                        key: entry.key.clone(),
+                        display_path: relative.to_string_lossy().replace('\\', "/"),
+                    });
+                }
+                WorkerMessage::CacheImportConflicts {
+                    stamp,
+                    conflicts: Ok(conflicts),
+                }
+            },
+            move |error| WorkerMessage::CacheImportConflicts {
+                stamp,
+                conflicts: Err(format!("Checking for existing tags failed: {error}")),
+            },
+        );
+    }
+
+    /// Take the scan's answer, ticked, because replacing is what the importer
+    /// has always done and keeping something is the deliberate choice.
+    pub(in crate::app) fn handle_cache_import_conflicts(
+        &mut self,
+        stamp: KitStamp,
+        conflicts: Result<Vec<OutsideReference>, String>,
+    ) -> bool {
+        let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() else {
+            return false;
+        };
+        if dialog.kit != stamp.kit {
+            return false;
+        }
+        dialog.scanning = false;
+        let conflicts = match conflicts {
+            Ok(conflicts) => conflicts,
+            Err(error) => {
+                // Left stale, so the scan runs again before an import.
+                dialog.conflicts_stale = true;
+                dialog.error = Some(error);
+                return true;
+            }
+        };
+        dialog.conflict_picked = conflicts
+            .iter()
+            .map(|conflict| (conflict.key.clone(), true))
+            .collect();
+        dialog.conflicts = OutsideTree::build(&conflicts);
+        true
+    }
+
+    pub(in crate::app) fn handle_cache_import_finished(
+        &mut self,
+        stamp: KitStamp,
+        result: Result<FolderConversionReport, String>,
+        ctx: &egui::Context,
+    ) -> bool {
+        // The tags landed in a kit that may since have closed or been reloaded.
+        // Dropping the result then is the point of the stamp: reporting it would
+        // attach a run's outcome to whatever workspace happens to hold that slot
+        // now.
+        if self.model.resolve_stamp(stamp).is_none() {
+            return false;
+        }
+        let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() else {
+            return false;
+        };
+        dialog.running = false;
+        dialog.progress = None;
+        // The kit holds what the run just wrote, so the tags it already has are
+        // not the tags it had a minute ago -- and a second pass over the
+        // references is asked for from this same window.
+        dialog.conflicts_stale = true;
+        let target_kit = dialog.target().map(|target| target.kit);
+        match result {
+            Ok(report) => {
+                // All ticked: bringing what the folder needs is the common
+                // answer, and leaving something out is the deliberate one.
+                dialog.outside_tree = OutsideTree::build(&report.outside_references);
+                dialog.outside_picked = report
+                    .outside_references
+                    .iter()
+                    .map(|reference| (reference.key.clone(), true))
+                    .collect();
+                self.model.status = format!(
+                    "Imported {} tag(s), {} failed, {} held back{}",
+                    report.converted_count(),
+                    report.failed_count(),
+                    report.held_back.len(),
+                    if report.cancelled { " (cancelled)" } else { "" },
+                );
+                dialog.report = Some(report);
+                // The destination gained files this application did not write
+                // through its own document layer, so its browser index is stale.
+                if let Some(kit) = target_kit {
+                    self.refresh_after_import(kit, &ctx);
+                }
+            }
+            Err(error) => {
+                self.model.status = format!("Cache import failed: {error}");
+                dialog.error = Some(error);
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference(path: &str) -> OutsideReference {
+        OutsideReference {
+            key: format!("cache:bitm:{}", path.replace('/', "\\")),
+            display_path: path.to_owned(),
+        }
+    }
+
+    /// A folder holds what is under it, however deep that is.
+    ///
+    /// The point of the tree over the flat list it replaced: `objects` counting
+    /// only the tags directly inside it would report two thousand tags as none,
+    /// and ticking it would bring nothing.
+    #[test]
+    fn a_folder_counts_and_carries_its_whole_subtree() {
+        let tree = OutsideTree::build(&[
+            reference("objects/characters/elite/elite.biped"),
+            reference("objects/characters/elite/bitmaps/elite_diffuse.bitmap"),
+            reference("objects/weapons/rifle/assault_rifle.weapon"),
+            reference("fx/decals/scorch.bitmap"),
+        ]);
+
+        assert_eq!(
+            tree.roots.iter().cloned().collect::<Vec<_>>(),
+            ["fx", "objects"]
+        );
+        assert_eq!(tree.totals.get("objects").copied(), Some(3));
+        assert_eq!(
+            tree.totals.get("objects/characters/elite").copied(),
+            Some(2)
+        );
+        assert_eq!(tree.keys_under("objects").len(), 3);
+        assert_eq!(tree.keys_under("objects/weapons").len(), 1);
+        // The leaves hang off the folder that actually holds them, not off the
+        // first two segments the old grouping used.
+        assert_eq!(
+            tree.tags
+                .get("objects/characters/elite")
+                .map(|tags| tags.len()),
+            Some(1),
+        );
+    }
+
+    /// A folder's tick reports how much of it is chosen, not just whether any is.
+    #[test]
+    fn a_partly_chosen_folder_says_so() {
+        let references = [
+            reference("objects/characters/elite/elite.biped"),
+            reference("objects/characters/elite/bitmaps/elite_diffuse.bitmap"),
+            reference("objects/weapons/rifle/assault_rifle.weapon"),
+        ];
+        let tree = OutsideTree::build(&references);
+        let mut picked: BTreeMap<String, bool> =
+            references.iter().map(|r| (r.key.clone(), false)).collect();
+
+        assert_eq!(tree.tally("objects", &picked), (0, 3));
+        picked.insert(references[0].key.clone(), true);
+        assert_eq!(tree.tally("objects", &picked), (1, 3));
+        assert_eq!(tree.tally("objects/characters", &picked), (1, 2));
+        assert_eq!(tree.tally("objects/weapons", &picked), (0, 1));
+        for wanted in picked.values_mut() {
+            *wanted = true;
+        }
+        assert_eq!(tree.tally("objects", &picked), (3, 3));
+    }
+
+    /// A tag with no folder still lands somewhere the window can draw it.
+    #[test]
+    fn a_tag_at_the_top_is_not_lost() {
+        let tree = OutsideTree::build(&[reference("globals.globals")]);
+        assert!(tree.roots.is_empty());
+        assert_eq!(tree.tags.get("").map(|tags| tags.len()), Some(1));
+        assert_eq!(tree.keys_under("").len(), 1);
+    }
+}
+
+impl Model {
+    /// Every open loose workspace with a detected game, as somewhere to land.
+    ///
+    /// Loose only, and for the same reason Import Tags is: a cache is read-only
+    /// and a Campaign Evolved container is a set of packages rather than files.
+    /// Ordered by label so the list does not shuffle between openings.
+    fn cache_import_targets(&self) -> Vec<CacheImportTarget> {
+        let mut targets: Vec<CacheImportTarget> = self
+            .kits
+            .iter()
+            .filter_map(|kit| {
+                let source = kit.source.as_ref()?;
+                let TagSource::LooseFolder { root, game, .. } = &source.source else {
+                    return None;
+                };
+                Some(CacheImportTarget {
+                    kit: kit.id,
+                    label: source.label.clone(),
+                    game: (*game)?,
+                    tags_root: root.clone(),
+                })
+            })
+            .collect();
+        targets.sort_by(|left, right| left.label.cmp(&right.label));
+        targets
+    }
+}

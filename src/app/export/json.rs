@@ -160,7 +160,7 @@ pub(in crate::app) fn field_value_to_json(value: TagFieldData) -> Value {
 }
 
 #[cfg(test)]
-mod import_info_tests {
+mod tests {
     use super::*;
 
     #[test]

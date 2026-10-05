@@ -2,6 +2,7 @@
 //! It owns the types every Chimp view reads and writes; decoding, saving and drawing belong elsewhere.
 
 use super::*;
+use crate::core::document::journal::EditJournal;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) enum KitSurface {
@@ -153,9 +154,26 @@ impl ChimpFolderNode {
     }
 }
 
+/// A kit's Chimp content: the mounted world, the open package documents and
+/// which are open or selected. How the Chimp surface is browsed and laid out
+/// is the kit view's [`ChimpView`].
 #[derive(Default)]
 pub(in crate::app) struct ChimpState {
     pub(in crate::app) mount: ChimpMount,
+    pub(in crate::app) selected_package: Option<String>,
+    pub(in crate::app) open_packages: Vec<String>,
+    pub(in crate::app) documents: HashMap<String, ChimpDocument>,
+    pub(super) loading_packages: HashSet<String>,
+}
+
+/// How a kit's Chimp surface is being browsed and laid out: the browser mode,
+/// filter and what it matched, the package-type index, selections in the
+/// browser, the document tile tree and the save dialog. Held in the kit's
+/// view, apart from the [`ChimpState`] content.
+#[derive(Default)]
+pub(in crate::app) struct ChimpView {
+    /// Each open document's pane, by package.
+    pub(super) documents: HashMap<String, ChimpDocumentUi>,
     pub(super) browser: ChimpBrowser,
     pub(super) filter: String,
     pub(super) filtered_for: Option<String>,
@@ -171,15 +189,13 @@ pub(in crate::app) struct ChimpState {
     pub(super) package_types: Vec<Option<String>>,
     pub(super) type_indexing: bool,
     pub(super) folder_selection: ChimpFolderSelection,
-    pub(in crate::app) selected_package: Option<String>,
     pub(super) selected_file: Option<String>,
-    pub(in crate::app) open_packages: Vec<String>,
     pub(super) document_tree: Option<egui_tiles::Tree<String>>,
-    pub(in crate::app) documents: HashMap<String, ChimpDocument>,
-    pub(super) loading_packages: HashSet<String>,
-    pub(super) save_dialog: Option<ChimpSaveDialog>,
 }
 
+/// One open Unreal package's content: its bytes and decoded header, payloads
+/// and exports, and its save and recovery bookkeeping. What its pane shows
+/// and drafts is its [`ChimpDocumentUi`] in the kit's [`ChimpView`].
 pub(in crate::app) struct ChimpDocument {
     pub(super) package: String,
     pub(super) provider: PackageProvider,
@@ -187,12 +203,31 @@ pub(in crate::app) struct ChimpDocument {
     pub(super) header: FZenPackageHeader,
     pub(super) payloads: Vec<Vec<u8>>,
     pub(super) exports: Vec<ChimpExport>,
-    pub(super) texture_previews: Vec<ChimpTexturePreview>,
     pub(super) mesh_kind: Option<ChimpMeshKind>,
+    pub(in crate::app) dirty: bool,
+    /// The mounted containers no longer provide this package, so `provider` no
+    /// longer describes anything and nothing may be written back through it.
+    /// The document keeps its bytes, so reading and extraction still work.
+    pub(super) orphaned: bool,
+    /// When (egui time) this document's recovery checkpoint is due. Set by an
+    /// edit and pushed back by the next one, so a burst of edits checkpoints
+    /// once, after it stops.
+    pub(super) checkpoint_due: Option<f64>,
+    /// Counts edits. A save records it when it rebuilds the package and, when
+    /// it finishes, clears `dirty` only if no edit landed while it ran.
+    pub(super) edits: u64,
+    /// Undo and redo, as rebuilt packages. See the `edit` module.
+    pub(super) journal: EditJournal,
+}
+
+/// One open package's pane: which tab and export it shows, the text and
+/// usage it derived from the document, header edits being drafted, who
+/// references it, and its texture and mesh previews.
+pub(in crate::app) struct ChimpDocumentUi {
+    pub(super) texture_previews: Vec<ChimpTexturePreview>,
     pub(super) mesh_preview: Option<Result<ModelPreviewData, String>>,
     pub(super) mesh_preview_state: ModelPreviewState,
     pub(super) selected_export: usize,
-    pub(in crate::app) dirty: bool,
     pub(super) view: ChimpDocumentView,
     pub(super) document_text: String,
     pub(super) document_lines: ChimpJsonLines,
@@ -218,17 +253,23 @@ pub(in crate::app) struct ChimpDocument {
     /// Who imports this package. Not derived at load: there is no reverse index
     /// in the paks, so answering it means reading every mounted header.
     pub(super) referrers: ChimpReferrerState,
-    /// The mounted containers no longer provide this package, so `provider` no
-    /// longer describes anything and nothing may be written back through it.
-    /// The document keeps its bytes, so reading and extraction still work.
-    pub(super) orphaned: bool,
-    /// When (egui time) this document's recovery checkpoint is due. Set by an
-    /// edit and pushed back by the next one, so a burst of edits checkpoints
-    /// once, after it stops.
-    pub(super) checkpoint_due: Option<f64>,
-    /// Counts edits. A save records it when it rebuilds the package and, when
-    /// it finishes, clears `dirty` only if no edit landed while it ran.
+    /// The selected export as the property editor edits it. See
+    /// [`ChimpPropertyDraft`].
+    pub(super) property_draft: Option<ChimpPropertyDraft>,
+}
+
+/// One export's values and the name map they intern into, edited in place by
+/// the property editor and sent to the document whole when they change.
+///
+/// Taken afresh whenever the document has moved on since — an undo, a header
+/// commit, or this draft's own last edit landing — so what the editor shows
+/// is always the document as it stands.
+pub(super) struct ChimpPropertyDraft {
+    pub(super) export: usize,
+    /// The document's [`ChimpDocument::edits`] when this was taken.
     pub(super) edits: u64,
+    pub(super) decoded: Export,
+    pub(super) name_map: blam_tags::iostore::package::name_map::FNameMap,
 }
 
 #[derive(Default)]
@@ -239,13 +280,13 @@ pub(super) enum ChimpReferrerState {
     Done(ChimpReferrerScan),
 }
 
-impl ChimpState {
+impl ChimpView {
     fn ensure_document_tree(&mut self, kit: KitId) -> &mut egui_tiles::Tree<String> {
         self.document_tree
             .get_or_insert_with(|| egui_tiles::Tree::empty(chimp_tree_id(kit)))
     }
 
-    pub(super) fn open_document_pane(&mut self, kit: KitId, package: &str) {
+    pub(super) fn open_document_pane(&mut self, chimp: &mut ChimpState, kit: KitId, package: &str) {
         let tree = self.ensure_document_tree(kit);
         let existing = tree.tiles.iter().find_map(|(id, tile)| match tile {
             egui_tiles::Tile::Pane(open) if open == package => Some(*id),
@@ -268,11 +309,11 @@ impl ChimpState {
             }
             tree.make_active(|id, _| id == tile_id);
         }
-        self.selected_package = Some(package.to_owned());
-        self.sync_open_packages();
+        chimp.selected_package = Some(package.to_owned());
+        self.sync_open_packages(chimp);
     }
 
-    pub(super) fn close_document_pane(&mut self, package: &str) {
+    pub(super) fn close_document_pane(&mut self, chimp: &mut ChimpState, package: &str) {
         if let Some(tree) = self.document_tree.as_mut() {
             let tile_id = tree.tiles.iter().find_map(|(id, tile)| match tile {
                 egui_tiles::Tile::Pane(open) if open == package => Some(*id),
@@ -282,11 +323,13 @@ impl ChimpState {
                 tree.remove_recursively(tile_id);
             }
         }
-        self.sync_open_packages();
+        self.sync_open_packages(chimp);
     }
 
-    pub(super) fn sync_open_packages(&mut self) {
-        self.open_packages = self
+    /// Re-derive the open and selected packages from the tile tree, which
+    /// owns the layout.
+    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) {
+        chimp.open_packages = self
             .document_tree
             .as_ref()
             .map(|tree| {
@@ -299,12 +342,12 @@ impl ChimpState {
                     .collect()
             })
             .unwrap_or_default();
-        if self
+        if chimp
             .selected_package
             .as_ref()
-            .is_some_and(|package| !self.open_packages.contains(package))
+            .is_some_and(|package| !chimp.open_packages.contains(package))
         {
-            self.selected_package = self.open_packages.first().cloned();
+            chimp.selected_package = chimp.open_packages.first().cloned();
         }
     }
 
@@ -421,6 +464,55 @@ fn chimp_tree_id(kit: KitId) -> egui::Id {
     egui::Id::new(("chimp_document_tree", kit.0))
 }
 
+impl Baboon {
+    /// Open `package`'s document pane in a kit's Chimp layout and select it.
+    pub(super) fn open_chimp_document_pane(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.open_document_pane(&mut kit.chimp, kit.id, package);
+    }
+
+    /// Add an open document to a kit, with its pane.
+    pub(super) fn insert_chimp_document(
+        &mut self,
+        kit_index: usize,
+        package: String,
+        document: ChimpDocument,
+        pane: ChimpDocumentUi,
+    ) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.documents.insert(package.clone(), pane);
+        kit.chimp.documents.insert(package, document);
+    }
+
+    /// Drop an open document from a kit, with its pane.
+    pub(super) fn remove_chimp_document(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.documents.remove(package);
+        kit.chimp.documents.remove(package);
+    }
+
+    /// Drop a kit's Chimp content and its view, as on a remount or when
+    /// Chimp is turned off.
+    pub(in crate::app) fn reset_chimp(&mut self, kit_index: usize) {
+        let kit = &mut self.model.kits[kit_index];
+        kit.chimp = ChimpState::default();
+        self.views[kit.id].chimp = ChimpView::default();
+        if self
+            .dialogs
+            .get::<ChimpSaveDialog>()
+            .is_some_and(|dialog| dialog.kit == kit.id)
+        {
+            self.dialogs.close::<ChimpSaveDialog>();
+        }
+    }
+
+    /// Close `package`'s document pane in a kit's Chimp layout.
+    pub(super) fn close_chimp_document_pane(&mut self, kit_index: usize, package: &str) {
+        let kit = &mut self.model.kits[kit_index];
+        self.views[kit.id].chimp.close_document_pane(&mut kit.chimp, package);
+    }
+}
+
 impl Kit {
     pub(super) fn documents_contains_chimp(&self, package: &str) -> bool {
         self.chimp.documents.contains_key(package)
@@ -434,12 +526,13 @@ mod tests {
     #[test]
     fn chimp_is_idle_and_unfiltered_by_default() {
         let state = ChimpState::default();
+        let view = ChimpView::default();
         assert!(matches!(state.mount, ChimpMount::Idle));
-        assert_eq!(state.browser, ChimpBrowser::Folders);
-        assert!(state.filter.is_empty());
+        assert_eq!(view.browser, ChimpBrowser::Folders);
+        assert!(view.filter.is_empty());
         assert!(state.open_packages.is_empty());
         assert!(
-            !state.filter_is_current(""),
+            !view.filter_is_current(""),
             "the initial empty query must populate the browser once"
         );
     }
@@ -469,22 +562,23 @@ mod tests {
     #[test]
     fn chimp_document_tree_tracks_open_close_and_selection() {
         let mut state = ChimpState::default();
+        let mut view = ChimpView::default();
         let kit = KitId(7);
-        state.open_document_pane(kit, "/Game/Textures/A");
-        state.open_document_pane(kit, "/Game/Textures/B");
+        view.open_document_pane(&mut state, kit, "/Game/Textures/A");
+        view.open_document_pane(&mut state, kit, "/Game/Textures/B");
         assert_eq!(state.open_packages.len(), 2);
         assert_eq!(state.selected_package.as_deref(), Some("/Game/Textures/B"));
         assert!(
-            state
+            view
                 .document_tree
                 .as_ref()
                 .is_some_and(|tree| !tree.is_empty())
         );
 
-        state.close_document_pane("/Game/Textures/B");
+        view.close_document_pane(&mut state, "/Game/Textures/B");
         assert_eq!(state.open_packages, ["/Game/Textures/A"]);
         assert_eq!(state.selected_package.as_deref(), Some("/Game/Textures/A"));
-        state.close_document_pane("/Game/Textures/A");
+        view.close_document_pane(&mut state, "/Game/Textures/A");
         assert!(state.open_packages.is_empty());
         assert!(state.selected_package.is_none());
     }

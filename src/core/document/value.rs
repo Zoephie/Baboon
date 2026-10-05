@@ -1,0 +1,1235 @@
+//! How typed text becomes a field value (numbers, angles, colours, bounds,
+//! flags, enums, references), how field paths are spelled, and which tags can
+//! be edited and saved.
+
+use blam_tags::{
+    Endian, StringIdData, TagField, TagFieldData, TagFieldType, TagFile, TagReferenceData,
+    parse_group_tag,
+};
+
+use crate::core::source::{TagEntry, TagEntryLocation};
+
+/// Whether this document's fields and block controls are live.
+///
+/// Every parsed tag is editable in memory, whatever it was read out of and
+/// whichever byte order it is in: an edit is a write into the document's own
+/// bytes ([`blam_tags`] encodes each field in the tag's own endian), so there
+/// is nothing about a big-endian tag out of a monolithic build that makes
+/// typing into it incoherent. Whether those edits can be written back
+/// afterwards is a separate question, answered by [`unsaveable_reason`] and
+/// enforced by the save paths.
+///
+/// Editability used to be gated on saveability, which made a monolithic tag
+/// build viewable and nothing else — its values could not even be selected and
+/// copied, because a read-only row is painted text rather than a text box.
+pub(crate) fn is_editable_tag(entry: &TagEntry, _tag: &TagFile) -> bool {
+    // Matched rather than defaulted so a new location has to state its answer.
+    match entry.location {
+        // Loose tags are edited in place; container (Campaign Evolved) tags are
+        // edited in memory and written out as an override on Save/Save
+        // As/Rename. A brand-new container tag (New Tag / Import of a new path)
+        // has no backing `.ubulk` at all — the in-memory document IS the tag.
+        TagEntryLocation::LooseFile(_)
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => true,
+        // A monolithic build has no writer, so its edits live and die with the
+        // session — which is the point: you edit to read values back out, to
+        // copy them, and to try a number against the rest of the tag.
+        TagEntryLocation::Monolithic { .. } => true,
+    }
+}
+
+/// Why this document's edits can never be written back, or `None` when they
+/// can. The single source of truth behind every save path's refusal, the
+/// read-only badge on the tag header, and the close prompt's decision not to
+/// treat these edits as unsaved work.
+pub(crate) fn unsaveable_reason(entry: &TagEntry, tag: &TagFile) -> Option<&'static str> {
+    if matches!(entry.location, TagEntryLocation::Monolithic { .. }) {
+        return Some(
+            "Tags in a monolithic build are read-only — edits stay in this session and are \
+             lost when the tag is closed",
+        );
+    }
+    // The MCC tag writer emits a little-endian header, so a big-endian tag
+    // (Xbox 360 / legacy debug build) has no round-trip. Classic tags carry
+    // their own writer and are fine either way.
+    if tag.classic_engine().is_none() && tag.endian != Endian::Le {
+        return Some(
+            "Only little-endian MCC tags can be saved — edits to this big-endian tag stay in \
+             this session",
+        );
+    }
+    None
+}
+
+/// Whether edits to this document can be written back anywhere.
+pub(crate) fn is_saveable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
+    unsaveable_reason(entry, tag).is_none()
+}
+
+pub(crate) fn append_field_path(prefix: &str, field_name: &str) -> String {
+    if prefix.is_empty() {
+        field_name.to_owned()
+    } else {
+        format!("{prefix}/{field_name}")
+    }
+}
+
+/// Like `append_field_path` but appends the field's positional `#ordinal`
+/// token (`name#N`), so the path resolves to this EXACT field even when a
+/// sibling shares its name/type — Foundation-style positional addressing
+/// (see `blam_tags::TagField::ordinal`). Use for RESOLVABLE paths (edits,
+/// block ops, function data). Canonical/display paths use the plain-name
+/// form and strip the ordinal via `strip_node_indices`.
+pub(crate) fn append_field_path_for(prefix: &str, field: &TagField<'_>) -> String {
+    // Emit the CLEAN (markup-free) name so field-name markup — `:units`,
+    // `[range]`, `#help` — can't collide with the path grammar's own `type:`,
+    // `[index]`, and `#ordinal` tokens (the range-hint-as-index bug). The engine
+    // resolves the ordinal positionally; the clean name is the readable/fallback
+    // key. See `blam_tags::field_name` / `blam_tags::TagFieldPath`.
+    let segment = format!("{}#{}", field.clean_name(), field.ordinal());
+    if prefix.is_empty() {
+        segment
+    } else {
+        format!("{prefix}/{segment}")
+    }
+}
+
+/// A field name as a path segment the resolver will accept.
+///
+/// The path grammar has **no escapes**: a segment is the field's *clean* name,
+/// and `blam_tags::field_name` is what defines that — including normalising a `/`
+/// inside a name to `\`, precisely so the name cannot split a path. Asking the
+/// engine is therefore the whole job.
+///
+/// This used to invent an escape, writing `int/bool` as `int\/bool`. Nothing
+/// parses that: the `/` still separated, leaving the nonsense segments `int\` and
+/// `bool`, so every write to a field with a slash in its name failed with "field
+/// path no longer resolves" — which in the shader grid meant no bool or int
+/// parameter could be created at all, since they are stored in a field named
+/// `int/bool`.
+pub(crate) fn escape_field_path_segment(field_name: &str) -> String {
+    blam_tags::field_name::clean_field_name(field_name).into_owned()
+}
+
+pub(crate) fn is_text_editable_value(value: &TagFieldData) -> bool {
+    !matches!(
+        value,
+        TagFieldData::Data(_)
+            | TagFieldData::ApiInterop(_)
+            | TagFieldData::Custom(_)
+            | TagFieldData::Point2d(_)
+            | TagFieldData::Rectangle2d(_)
+            | TagFieldData::RealPoint2d(_)
+            | TagFieldData::RealPoint3d(_)
+            | TagFieldData::RealVector2d(_)
+            | TagFieldData::RealVector3d(_)
+            | TagFieldData::RealQuaternion(_)
+            | TagFieldData::RealEulerAngles2d(_)
+            | TagFieldData::RealEulerAngles3d(_)
+            | TagFieldData::RealPlane2d(_)
+            | TagFieldData::RealPlane3d(_)
+            | TagFieldData::RgbColor(_)
+            | TagFieldData::ArgbColor(_)
+            | TagFieldData::RealRgbColor(_)
+            | TagFieldData::RealArgbColor(_)
+            | TagFieldData::RealHsvColor(_)
+            | TagFieldData::RealAhsvColor(_)
+            | TagFieldData::ShortIntegerBounds(_)
+            | TagFieldData::AngleBounds(_)
+            | TagFieldData::RealBounds(_)
+            | TagFieldData::FractionBounds(_)
+    )
+}
+
+/// A typed angle in whatever unit is selected, as the radians the tag stores.
+///
+/// The inverse of [`crate::app::editor::fields::fmt_angle`], and the two must be
+/// switched by the same flag: a display that showed degrees while the parser
+/// read radians would divide every angle the user retyped by 57.3.
+fn angle_to_radians(typed: f32) -> f32 {
+    if crate::core::format::angles_in_degrees() {
+        typed.to_radians()
+    } else {
+        typed
+    }
+}
+
+pub(crate) fn parse_gui_field_value(
+    field: &TagField<'_>,
+    input: &str,
+) -> Result<TagFieldData, String> {
+    let trimmed = input.trim();
+    match field.field_type() {
+        TagFieldType::CharInteger => parse_value(trimmed, "i8").map(TagFieldData::CharInteger),
+        TagFieldType::ShortInteger => parse_value(trimmed, "i16").map(TagFieldData::ShortInteger),
+        TagFieldType::LongInteger => parse_value(trimmed, "i32").map(TagFieldData::LongInteger),
+        TagFieldType::Int64Integer => parse_value(trimmed, "i64").map(TagFieldData::Int64Integer),
+        TagFieldType::ByteInteger => parse_value(trimmed, "u8").map(TagFieldData::ByteInteger),
+        TagFieldType::WordInteger => parse_value(trimmed, "u16").map(TagFieldData::WordInteger),
+        TagFieldType::DwordInteger => parse_value(trimmed, "u32").map(TagFieldData::DwordInteger),
+        TagFieldType::QwordInteger => parse_value(trimmed, "u64").map(TagFieldData::QwordInteger),
+        TagFieldType::Tag => parse_group_tag(trimmed)
+            .map(TagFieldData::Tag)
+            .ok_or_else(|| "expected 1..=4 ASCII group tag".to_owned()),
+        // Typed in the selected unit, always stored in radians. The display side
+        // (`foundation::fmt_angle`) is the other half of this; the two are kept
+        // honest by `angle_fields_round_trip_through_degrees`.
+        TagFieldType::Angle => parse_value(trimmed, "f32")
+            .map(|typed: f32| TagFieldData::Angle(angle_to_radians(typed))),
+        TagFieldType::ShortIntegerBounds => {
+            let (lower, upper) = parse_short_bounds(trimmed, "short bounds")?;
+            Ok(TagFieldData::ShortIntegerBounds(
+                blam_tags::math::ShortBounds { lower, upper },
+            ))
+        }
+        TagFieldType::AngleBounds => {
+            let (lower, upper) = parse_float_bounds(trimmed, "angle bounds")?;
+            Ok(TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
+                lower: angle_to_radians(lower),
+                upper: angle_to_radians(upper),
+            }))
+        }
+        TagFieldType::RealBounds => {
+            let (lower, upper) = parse_float_bounds(trimmed, "real bounds")?;
+            Ok(TagFieldData::RealBounds(blam_tags::math::RealBounds {
+                lower,
+                upper,
+            }))
+        }
+        TagFieldType::FractionBounds => {
+            let (lower, upper) = parse_float_bounds(trimmed, "fraction bounds")?;
+            Ok(TagFieldData::FractionBounds(
+                blam_tags::math::FractionBounds { lower, upper },
+            ))
+        }
+        TagFieldType::RealVector2d => {
+            let [i, j] = parse_float_channels::<2>(trimmed, "real vector 2d")?;
+            Ok(TagFieldData::RealVector2d(blam_tags::math::RealVector2d {
+                i,
+                j,
+            }))
+        }
+        TagFieldType::RealVector3d => {
+            let [i, j, k] = parse_float_channels::<3>(trimmed, "real vector 3d")?;
+            Ok(TagFieldData::RealVector3d(blam_tags::math::RealVector3d {
+                i,
+                j,
+                k,
+            }))
+        }
+        TagFieldType::RealPoint2d => {
+            let [x, y] = parse_float_channels::<2>(trimmed, "real point 2d")?;
+            Ok(TagFieldData::RealPoint2d(blam_tags::math::RealPoint2d {
+                x,
+                y,
+            }))
+        }
+        TagFieldType::RealPoint3d => {
+            let [x, y, z] = parse_float_channels::<3>(trimmed, "real point 3d")?;
+            Ok(TagFieldData::RealPoint3d(blam_tags::math::RealPoint3d {
+                x,
+                y,
+                z,
+            }))
+        }
+        TagFieldType::RealQuaternion => {
+            let [i, j, k, w] = parse_float_channels::<4>(trimmed, "real quaternion")?;
+            Ok(TagFieldData::RealQuaternion(
+                blam_tags::math::RealQuaternion { i, j, k, w },
+            ))
+        }
+        // Euler angles are angles: converted in, radians stored.
+        TagFieldType::RealEulerAngles2d => {
+            let [yaw, pitch] = parse_float_channels::<2>(trimmed, "real euler angles 2d")?;
+            Ok(TagFieldData::RealEulerAngles2d(
+                blam_tags::math::RealEulerAngles2d {
+                    yaw: angle_to_radians(yaw),
+                    pitch: angle_to_radians(pitch),
+                },
+            ))
+        }
+        TagFieldType::RealEulerAngles3d => {
+            let [yaw, pitch, roll] = parse_float_channels::<3>(trimmed, "real euler angles 3d")?;
+            Ok(TagFieldData::RealEulerAngles3d(
+                blam_tags::math::RealEulerAngles3d {
+                    yaw: angle_to_radians(yaw),
+                    pitch: angle_to_radians(pitch),
+                    roll: angle_to_radians(roll),
+                },
+            ))
+        }
+        TagFieldType::Real => parse_value(trimmed, "f32").map(TagFieldData::Real),
+        TagFieldType::RealSlider => parse_value(trimmed, "f32").map(TagFieldData::RealSlider),
+        TagFieldType::RealFraction => parse_value(trimmed, "f32").map(TagFieldData::RealFraction),
+        TagFieldType::CharEnum => Ok(TagFieldData::CharEnum {
+            value: narrow(parse_enum_value(field, trimmed)?, "char enum")?,
+            name: None,
+        }),
+        TagFieldType::ShortEnum => Ok(TagFieldData::ShortEnum {
+            value: narrow(parse_enum_value(field, trimmed)?, "short enum")?,
+            name: None,
+        }),
+        TagFieldType::LongEnum => Ok(TagFieldData::LongEnum {
+            value: parse_enum_value(field, trimmed)?,
+            name: None,
+        }),
+        TagFieldType::ByteFlags => Ok(TagFieldData::ByteFlags {
+            value: mask_bits(trimmed, 8)? as u8,
+            names: Vec::new(),
+        }),
+        TagFieldType::WordFlags => Ok(TagFieldData::WordFlags {
+            value: mask_bits(trimmed, 16)? as u16,
+            names: Vec::new(),
+        }),
+        TagFieldType::LongFlags => Ok(TagFieldData::LongFlags {
+            value: mask_bits(trimmed, 32)? as u32 as i32,
+            names: Vec::new(),
+        }),
+        TagFieldType::ByteBlockFlags => {
+            Ok(TagFieldData::ByteBlockFlags(mask_bits(trimmed, 8)? as u8))
+        }
+        TagFieldType::WordBlockFlags => {
+            Ok(TagFieldData::WordBlockFlags(mask_bits(trimmed, 16)? as u16))
+        }
+        TagFieldType::LongBlockFlags => Ok(TagFieldData::LongBlockFlags(
+            mask_bits(trimmed, 32)? as u32 as i32
+        )),
+        TagFieldType::CharBlockIndex => Ok(TagFieldData::CharBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "char block index",
+        )?)),
+        TagFieldType::CustomCharBlockIndex => Ok(TagFieldData::CustomCharBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "char block index",
+        )?)),
+        TagFieldType::ShortBlockIndex => Ok(TagFieldData::ShortBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "short block index",
+        )?)),
+        TagFieldType::CustomShortBlockIndex => Ok(TagFieldData::CustomShortBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "short block index",
+        )?)),
+        TagFieldType::LongBlockIndex => {
+            Ok(TagFieldData::LongBlockIndex(parse_block_index(trimmed)?))
+        }
+        TagFieldType::CustomLongBlockIndex => Ok(TagFieldData::CustomLongBlockIndex(
+            parse_block_index(trimmed)?,
+        )),
+        TagFieldType::String => Ok(TagFieldData::String(trimmed.to_owned())),
+        TagFieldType::LongString => Ok(TagFieldData::LongString(trimmed.to_owned())),
+        TagFieldType::StringId => Ok(TagFieldData::StringId(StringIdData {
+            string: parse_none_string(trimmed),
+        })),
+        TagFieldType::OldStringId => Ok(TagFieldData::OldStringId(StringIdData {
+            string: parse_none_string(trimmed),
+        })),
+        TagFieldType::TagReference => parse_tag_reference(trimmed).map(TagFieldData::TagReference),
+        // Color values: comma-separated floats, written by the color picker
+        // swatch. RGB = "r, g, b"; ARGB = "a, r, g, b".
+        TagFieldType::RgbColor => {
+            let (_, r, g, b) = parse_rgb_or_argb_color_channels(trimmed)?;
+            let raw = ((color_float_to_u8(r) as u32) << 16)
+                | ((color_float_to_u8(g) as u32) << 8)
+                | color_float_to_u8(b) as u32;
+            Ok(TagFieldData::RgbColor(blam_tags::math::RgbColor(raw)))
+        }
+        TagFieldType::ArgbColor => {
+            let (a, r, g, b) = parse_rgb_or_argb_color_channels(trimmed)?;
+            let raw = ((color_float_to_u8(a) as u32) << 24)
+                | ((color_float_to_u8(r) as u32) << 16)
+                | ((color_float_to_u8(g) as u32) << 8)
+                | color_float_to_u8(b) as u32;
+            Ok(TagFieldData::ArgbColor(blam_tags::math::ArgbColor(raw)))
+        }
+        TagFieldType::RealRgbColor => {
+            let [r, g, b] = parse_color_channels::<3>(trimmed)?;
+            Ok(TagFieldData::RealRgbColor(blam_tags::math::RealRgbColor {
+                red: r,
+                green: g,
+                blue: b,
+            }))
+        }
+        TagFieldType::RealArgbColor => {
+            let [a, r, g, b] = parse_color_channels::<4>(trimmed)?;
+            Ok(TagFieldData::RealArgbColor(
+                blam_tags::math::RealArgbColor {
+                    alpha: a,
+                    red: r,
+                    green: g,
+                    blue: b,
+                },
+            ))
+        }
+        // Raw byte blobs (e.g. a `mapping_function` `data` field) are
+        // carried through the string edit channel as lowercase hex. The
+        // function editor produces these via `push_function_edit`.
+        TagFieldType::Data => decode_hex(trimmed).map(TagFieldData::Data),
+        _ => Err(format!(
+            "editing {} fields is not supported yet",
+            field.type_name()
+        )),
+    }
+}
+
+/// Decode a contiguous lowercase/uppercase hex string (no separators)
+/// into bytes. Used to ferry function blobs through `PendingFieldEdit`.
+pub(crate) fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
+    let s = input.trim();
+    if s.len() % 2 != 0 {
+        return Err("hex blob must have an even number of digits".to_owned());
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let hi = (pair[0] as char)
+            .to_digit(16)
+            .ok_or_else(|| "invalid hex digit".to_owned())?;
+        let lo = (pair[1] as char)
+            .to_digit(16)
+            .ok_or_else(|| "invalid hex digit".to_owned())?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Ok(out)
+}
+
+/// Encode bytes as a contiguous lowercase hex string.
+pub(crate) fn encode_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+        out.push(char::from_digit((b & 0xF) as u32, 16).unwrap());
+    }
+    out
+}
+
+pub(crate) fn parse_value<T: std::str::FromStr>(
+    input: &str,
+    expected: &str,
+) -> Result<T, String> {
+    input
+        .parse()
+        .map_err(|_| format!("expected {expected} value"))
+}
+
+/// Parse exactly `N` comma-separated float channels (used for color values).
+pub(crate) fn parse_color_channels<const N: usize>(
+    input: &str,
+) -> Result<[f32; N], String> {
+    let parts: Vec<f32> = input
+        .split(',')
+        .map(|part| part.trim().parse::<f32>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| format!("expected {N} comma-separated color channels"))?;
+    parts
+        .try_into()
+        .map_err(|_: Vec<f32>| format!("expected {N} comma-separated color channels"))
+}
+
+pub(crate) fn parse_rgb_or_argb_color_channels(
+    input: &str,
+) -> Result<(f32, f32, f32, f32), String> {
+    let parts = input
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| parse_value::<f32>(part, "color channel"))
+        .collect::<Result<Vec<_>, _>>()?;
+    match parts.as_slice() {
+        [r, g, b] => Ok((1.0, *r, *g, *b)),
+        [a, r, g, b] => Ok((*a, *r, *g, *b)),
+        _ => Err("expected 3 or 4 comma-separated color channels".to_owned()),
+    }
+}
+
+pub(crate) fn color_float_to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+pub(crate) fn parse_float_channels<const N: usize>(
+    input: &str,
+    expected: &str,
+) -> Result<[f32; N], String> {
+    let parts = if input.contains(',') {
+        input
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        input.split_whitespace().collect::<Vec<_>>()
+    };
+    let values = parts
+        .into_iter()
+        .map(|part| part.parse::<f32>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| format!("expected {N} values for {expected}"))?;
+    values
+        .try_into()
+        .map_err(|_: Vec<f32>| format!("expected {N} values for {expected}"))
+}
+
+pub(crate) fn parse_float_bounds(
+    input: &str,
+    expected: &str,
+) -> Result<(f32, f32), String> {
+    let (lower, upper) = parse_bounds_parts(input, expected)?;
+    Ok((
+        lower
+            .parse()
+            .map_err(|_| format!("expected {expected} as lower..upper"))?,
+        upper
+            .parse()
+            .map_err(|_| format!("expected {expected} as lower..upper"))?,
+    ))
+}
+
+pub(crate) fn parse_short_bounds(
+    input: &str,
+    expected: &str,
+) -> Result<(i16, i16), String> {
+    let (lower, upper) = parse_bounds_parts(input, expected)?;
+    Ok((
+        lower
+            .parse()
+            .map_err(|_| format!("expected {expected} as lower..upper"))?,
+        upper
+            .parse()
+            .map_err(|_| format!("expected {expected} as lower..upper"))?,
+    ))
+}
+
+pub(crate) fn parse_bounds_parts<'a>(
+    input: &'a str,
+    expected: &str,
+) -> Result<(&'a str, &'a str), String> {
+    if let Some((lower, upper)) = input.split_once("..") {
+        return Ok((lower.trim(), upper.trim()));
+    }
+
+    if let Some((lower, upper)) = input.split_once(" to ") {
+        return Ok((lower.trim(), upper.trim()));
+    }
+
+    let parts = if input.contains(',') {
+        input
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        input.split_whitespace().collect::<Vec<_>>()
+    };
+    let [lower, upper]: [&str; 2] = parts
+        .try_into()
+        .map_err(|_| format!("expected {expected} as lower..upper"))?;
+    Ok((lower, upper))
+}
+
+pub(crate) fn parse_none_string(input: &str) -> String {
+    if input.eq_ignore_ascii_case("none") {
+        String::new()
+    } else {
+        input.to_owned()
+    }
+}
+
+pub(crate) fn parse_block_index(input: &str) -> Result<i32, String> {
+    if input.eq_ignore_ascii_case("none") {
+        Ok(-1)
+    } else {
+        parse_value(input, "block index")
+    }
+}
+
+pub(crate) fn parse_int_mask(input: &str) -> Result<u64, String> {
+    if let Some(hex) = input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).map_err(|_| "expected integer mask".to_owned())
+    } else {
+        input
+            .parse()
+            .map_err(|_| "expected integer mask".to_owned())
+    }
+}
+
+pub(crate) fn parse_enum_value(field: &TagField<'_>, input: &str) -> Result<i32, String> {
+    let names = match field.options() {
+        Some(blam_tags::TagOptions::Enum { names, .. }) => Some(names),
+        _ => None,
+    };
+    if let Ok(value) = input.parse::<i64>() {
+        // A typed index has to name an option: anything else is a value no
+        // editing kit tool would write.
+        if let Some(names) = names.as_ref().filter(|names| !names.is_empty()) {
+            if !(0..names.len() as i64).contains(&value) {
+                return Err(format!(
+                    "{value} is not an option of this enum (0 to {})",
+                    names.len() - 1
+                ));
+            }
+        }
+        return narrow(value, "enum");
+    }
+    let Some(names) = names else {
+        return Err("expected enum name or integer".to_owned());
+    };
+    let Some((index, _)) = names
+        .iter()
+        .enumerate()
+        .find(|(_, name)| name.eq_ignore_ascii_case(input))
+    else {
+        return Err("expected enum name or integer".to_owned());
+    };
+    narrow(index as i64, "enum")
+}
+
+/// `value` in the field's storage type, or an error naming the field kind.
+/// These used to be `as` casts, which wrap: 200 in a char block index was
+/// written as -56.
+fn narrow<T: TryFrom<i64>>(value: impl Into<i64>, what: &str) -> Result<T, String> {
+    let value = value.into();
+    T::try_from(value).map_err(|_| format!("{value} does not fit in a {what}"))
+}
+
+/// A flags mask that sets no bit beyond the field's `bits`. Masks are bit
+/// patterns, so the whole unsigned width is allowed (0xFFFFFFFF is a valid
+/// long flags value), but a higher bit is an error rather than dropped.
+fn mask_bits(input: &str, bits: u32) -> Result<u64, String> {
+    let mask = parse_int_mask(input)?;
+    if bits < 64 && mask >> bits != 0 {
+        return Err(format!("0x{mask:X} sets bits beyond this {bits}-bit field"));
+    }
+    Ok(mask)
+}
+
+pub(crate) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, String> {
+    if input.eq_ignore_ascii_case("none") || input.is_empty() {
+        return Ok(TagReferenceData {
+            group_tag_and_name: None,
+        });
+    }
+    if let Some((group, path)) = input.split_once(':') {
+        let group_tag = parse_group_tag(group)
+            .ok_or_else(|| "tag reference group must be 1..=4 ASCII chars".to_owned())?;
+        return Ok(TagReferenceData {
+            group_tag_and_name: Some((group_tag, path.replace('/', "\\"))),
+        });
+    }
+    let Some((path, extension)) = input.rsplit_once('.') else {
+        return Err("expected <path>.<group> or GROUP:<path>".to_owned());
+    };
+    let group_tag = extension_to_group_tag(extension)
+        .or_else(|| parse_group_tag(extension))
+        .ok_or_else(|| format!("unknown tag group {extension:?}"))?;
+    Ok(TagReferenceData {
+        group_tag_and_name: Some((group_tag, path.replace('/', "\\"))),
+    })
+}
+
+pub(crate) fn extension_to_group_tag(extension: &str) -> Option<u32> {
+    // The games' own `_meta.json` first — it covers every group Baboon can
+    // open, and does not have to be kept in step by hand. The table below
+    // remains for the cases that run before any definitions are loaded.
+    if let Some(group_tag) = crate::core::format::process_group_tag_for(extension) {
+        return Some(group_tag);
+    }
+    fallback_extension_to_group_tag(extension)
+}
+
+/// [`extension_to_group_tag`] before any definitions are loaded.
+fn fallback_extension_to_group_tag(extension: &str) -> Option<u32> {
+    let fourcc = match extension {
+        "material" => "mat",
+        "material_shader" => "mats",
+        "material_effects" => "foot",
+        "object" => "obje",
+        "model" => "hlmt",
+        "character" => "char",
+
+        "style" => "styl",
+        "unit" => "unit",
+        "render_model" => "mode",
+        "collision_model" => "coll",
+        "physics_model" => "phmo",
+        "model_animation_graph" => "jmad",
+        "biped" => "bipd",
+        "vehicle" => "vehi",
+        "weapon" => "weap",
+        "equipment" => "eqip",
+        "item" => "item",
+        "giant" => "gint",
+        "creature" => "crea",
+        "scenery" => "scen",
+        "crate" => "bloc",
+        "bitmap" => "bitm",
+        "scenario_structure_bsp" => "sbsp",
+        "structure_design" => "sddt",
+        "scenario" => "scnr",
+        "projectile" => "proj",
+        "effect" => "effe",
+        "effect_scenery" => "efsc",
+        "damage_effect" => "jpt!",
+        "sound" => "snd!",
+        "sound_looping" => "lsnd",
+        "sound_scenery" => "ssce",
+        "dialogue" => "udlg",
+        "light" => "ligh",
+        "lens_flare" => "lens",
+        "camera_track" => "trak",
+        "device" => "devi",
+        "device_control" => "ctrl",
+        "device_machine" => "mach",
+        "device_terminal" => "term",
+        "globals" => "matg",
+        "shader" => "rmsh",
+        "shader_terrain" => "rmtr",
+        "shader_water" => "rmw ",
+        "shader_foliage" => "rmfl",
+        "shader_decal" => "rmd ",
+        "shader_halogram" => "rmhg",
+        "shader_skin" => "rmsk",
+        "shader_cortana" => "rmct",
+        "shader_custom" => "rmcs",
+        "shader_particle" => "rmp ",
+        "shader_beam" => "rmb ",
+        "shader_contrail" => "rmco",
+        "shader_light_volume" => "rmlv",
+        _ => return None,
+    };
+    parse_group_tag(fourcc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blam_tags::Endian;
+    use blam_tags::{TagField, TagFieldData, TagFieldType, TagFile, TagStruct};
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::apply::add_block_element;
+    use crate::core::document::apply::apply_field_edit;
+    use crate::core::source::NewContainerTemplate;
+    use crate::core::test_kits::test_definition_path;
+
+    /// `crate` is `bloc` in every game that has it; there is no `crat` group.
+    #[test]
+    fn the_fallback_table_files_a_crate_under_bloc() {
+        assert_eq!(
+            fallback_extension_to_group_tag("crate"),
+            Some(u32::from_be_bytes(*b"bloc"))
+        );
+        assert_eq!(
+            fallback_extension_to_group_tag("device_control"),
+            Some(u32::from_be_bytes(*b"ctrl"))
+        );
+    }
+
+    /// Run `check` on the first field of `wanted` type found in a fresh tag of
+    /// any Halo 3 group, following inline structs (a fresh tag's blocks are
+    /// empty). Fails rather than skips when there is none, so the test can
+    /// never pass by finding nothing.
+    fn with_field(wanted: TagFieldType, check: impl Fn(&TagField<'_>)) {
+        fn find<'a>(root: TagStruct<'a>, wanted: TagFieldType) -> Option<TagField<'a>> {
+            root.fields_all().find_map(|field| {
+                if field.field_type() == wanted {
+                    return Some(field);
+                }
+                field.as_struct().and_then(|inner| find(inner, wanted))
+            })
+        }
+        let schemas = locate_definitions_root().join("halo3_mcc");
+        let mut paths: Vec<_> = std::fs::read_dir(&schemas)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension().is_some_and(|ext| ext == "json")
+                    && !path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with('_'))
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            let Ok(tag) = TagFile::new(&path) else {
+                continue;
+            };
+            if let Some(field) = find(tag.root(), wanted) {
+                check(&field);
+                return;
+            }
+        }
+        panic!("no fresh Halo 3 tag has a {wanted:?} field outside a block");
+    }
+
+    /// A typed value that does not fit its field is an error. These were `as`
+    /// casts, which wrap: 200 in a char block index became -56 and 0x1FF in
+    /// byte flags became 0xFF, both written without a word.
+    #[test]
+    fn a_typed_value_that_does_not_fit_its_field_is_refused() {
+        with_field(TagFieldType::CharBlockIndex, |field| {
+            assert!(
+                parse_gui_field_value(field, "200").is_err(),
+                "200 in a char block index"
+            );
+            assert!(matches!(
+                parse_gui_field_value(field, "none"),
+                Ok(TagFieldData::CharBlockIndex(-1))
+            ));
+            assert!(matches!(
+                parse_gui_field_value(field, "127"),
+                Ok(TagFieldData::CharBlockIndex(127))
+            ));
+        });
+        with_field(TagFieldType::ByteFlags, |field| {
+            assert!(
+                parse_gui_field_value(field, "0x1FF").is_err(),
+                "0x1FF in byte flags"
+            );
+            assert!(matches!(
+                parse_gui_field_value(field, "0xFF"),
+                Ok(TagFieldData::ByteFlags { value: 0xFF, .. })
+            ));
+        });
+        with_field(TagFieldType::LongFlags, |field| {
+            // A mask is a bit pattern: every bit of the field is fair game.
+            assert!(matches!(
+                parse_gui_field_value(field, "0xFFFFFFFF"),
+                Ok(TagFieldData::LongFlags { value: -1, .. })
+            ));
+            assert!(parse_gui_field_value(field, "0x100000000").is_err());
+        });
+        with_field(TagFieldType::CharEnum, |field| {
+            let Some(blam_tags::TagOptions::Enum { names, .. }) = field.options() else {
+                panic!("a char enum without options");
+            };
+            let past_the_end = names.len().to_string();
+            assert!(
+                parse_gui_field_value(field, &past_the_end).is_err(),
+                "index {past_the_end} of {} options",
+                names.len()
+            );
+            assert!(
+                parse_gui_field_value(field, "300").is_err(),
+                "300 in a char enum"
+            );
+            assert!(parse_gui_field_value(field, "0").is_ok());
+        });
+    }
+
+    // Editor unit and fixture tests.
+    // It owns test-only characterization and does not participate in runtime application behavior.
+
+    #[test]
+    fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
+        let _units = crate::core::format::AngleUnitGuard::set(true);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let euler2d = root.field("real euler angles 2d").unwrap();
+        let euler3d = root.field("real euler angles 3d").unwrap();
+
+        // Typed in degrees, stored in radians — the editor's angle contract.
+        let TagFieldData::RealEulerAngles2d(value) =
+            parse_gui_field_value(&euler2d, "0.25, -0.5").unwrap()
+        else {
+            panic!("expected real euler angles 2d");
+        };
+        assert!((value.yaw - 0.25f32.to_radians()).abs() < 0.0001);
+        assert!((value.pitch + 0.5f32.to_radians()).abs() < 0.0001);
+
+        let TagFieldData::RealEulerAngles3d(value) =
+            parse_gui_field_value(&euler3d, "-0.65 0 1.25").unwrap()
+        else {
+            panic!("expected real euler angles 3d");
+        };
+        assert!((value.yaw + 0.65f32.to_radians()).abs() < 0.0001);
+        assert!(value.pitch.abs() < 0.0001);
+        assert!((value.roll - 1.25f32.to_radians()).abs() < 0.0001);
+
+        for invalid in ["1, 2", "1, 2, 3, 4", "yaw, pitch, roll"] {
+            assert!(
+                parse_gui_field_value(&euler3d, invalid).is_err(),
+                "{invalid:?} should be rejected"
+            );
+        }
+    }
+
+    /// A brand-new Campaign Evolved tag must be editable the moment it is
+    /// created. `is_editable_tag` drives `FieldEditContext::editable`, which
+    /// gates every value widget and every block grow/shrink button, so a
+    /// `NewContainer` entry missing from the match rendered the whole tag
+    /// read-only until it was exported as a mod and remounted.
+    #[test]
+    fn a_new_container_tag_is_editable() {
+        let tag = TagFile::new("definitions/haloce_evolved/camera_track.json").unwrap();
+        let entry = TagEntry {
+            key: "newtag:/Game/Tags/test/example-camera_track".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: tag.header.group_tag,
+            group_name: Some("camera_track".into()),
+            location: TagEntryLocation::NewContainer {
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/other-camera_track.uasset".into(),
+                },
+                package: "/Game/Tags/test/example-camera_track".into(),
+                group_tag: tag.header.group_tag,
+            },
+        };
+
+        assert!(
+            is_editable_tag(&entry, &tag),
+            "a newly created container tag must be editable"
+        );
+
+        // And the block op the UI defers actually appends to the fresh tag.
+        let mut tag = tag;
+        let index = add_block_element(&mut tag, "control points").unwrap();
+        assert_eq!(index, 0);
+        assert_eq!(
+            tag.root()
+                .field_path("control points")
+                .and_then(|field| field.as_block())
+                .map(|block| block.len()),
+            Some(1)
+        );
+    }
+
+    fn camera_track_entry(location: TagEntryLocation) -> TagEntry {
+        TagEntry {
+            key: "cache:trak:test\\example".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: u32::from_be_bytes(*b"trak"),
+            group_name: Some("camera_track".into()),
+            location,
+        }
+    }
+
+    /// A tag carrying the wire marker a Xbox 360 / monolithic build parses as.
+    /// Only the file-level marker — the one the save gate reads — is flipped;
+    /// the block data underneath is still whatever the schema built, which is
+    /// why the byte-order behaviour is checked against a real build instead.
+    fn camera_track_with_wire_endian(endian: Endian) -> TagFile {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        tag.endian = endian;
+        tag
+    }
+
+    /// A monolithic build's tags are fully editable and never saveable, and the
+    /// two answers come from different questions.
+    ///
+    /// They used to come from one: editability was gated on saveability, so a
+    /// tag build rendered as painted text — its values could not be typed into,
+    /// and (the actual complaint) could not be selected and copied either.
+    #[test]
+    fn a_monolithic_tag_is_editable_but_never_saveable() {
+        let tag = camera_track_with_wire_endian(Endian::Be);
+        let monolithic = camera_track_entry(TagEntryLocation::Monolithic {
+            name: "test\\example".into(),
+            group_tag: tag.header.group_tag,
+        });
+
+        assert!(
+            is_editable_tag(&monolithic, &tag),
+            "a monolithic build's fields and block controls must be live"
+        );
+        assert!(!is_saveable_tag(&monolithic, &tag));
+        assert!(
+            unsaveable_reason(&monolithic, &tag)
+                .is_some_and(|reason| reason.contains("monolithic")),
+            "the refusal has to name the build, not the byte order"
+        );
+
+        // The same tag out of a loose folder is refused for the other reason —
+        // the MCC writer emits a little-endian header, so there is no
+        // round-trip for these bytes wherever they came from.
+        let loose_be =
+            camera_track_entry(TagEntryLocation::LooseFile("example.camera_track".into()));
+        assert!(is_editable_tag(&loose_be, &tag));
+        assert!(
+            unsaveable_reason(&loose_be, &tag).is_some_and(|reason| reason.contains("big-endian"))
+        );
+
+        // And the gate can still say yes: an ordinary little-endian loose tag
+        // saves exactly as it did before.
+        let le = camera_track_with_wire_endian(Endian::Le);
+        assert!(is_saveable_tag(&loose_be, &le));
+    }
+
+    // Classic Halo 2 regression tests that exercise real tag fixtures when available.
+
+    /// Editing a field inside an H2 particle's `Mapping` struct must target
+    /// the struct field rather than an earlier custom placeholder with the
+    /// same name.
+    #[test]
+    fn h2_particle_mapping_field_edit_targets_exact_field() {
+        let tag_path = crate::core::test_kits::tag_path("halo2_mcc", "effects/generic/smoke/steam.particle");
+        let def = test_definition_path("halo2_mcc/particle.json");
+        if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
+            eprintln!("skipping: H2 particle/definition not present");
+            return;
+        }
+        let bytes = std::fs::read(tag_path).unwrap();
+        let layout = blam_tags::layout::TagLayout::from_json(&def).unwrap();
+        let mut tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).unwrap();
+
+        let path = {
+            let root = tag.root();
+            let color_field = root
+                .fields_all()
+                .find(|f| f.name() == "color" && f.as_struct().is_some())
+                .expect("color struct");
+            let color = color_field.as_struct().unwrap();
+            // `color` used to hold two fields named `Mapping` -- the struct, and a
+            // `custom` placeholder ahead of it -- and this reached the struct
+            // through that ambiguity. The ambiguity was Baboon's own: a
+            // kit-authored layout names no `custom`, and once the builder stopped
+            // naming them the duplicate went away. The placeholder is still there,
+            // unnamed. Disambiguation against a duplicate a tag really has is
+            // gated by `h2_contrail_derived_path_targets_the_second_duplicate`.
+            assert!(
+                color.fields_all().any(|f| f.name().is_empty()),
+                "the custom placeholder should still be there, just unnamed"
+            );
+            let mapping_field = color
+                .fields_all()
+                .find(|f| f.name() == "Mapping" && f.as_struct().is_some())
+                .expect("Mapping struct");
+            let mapping = mapping_field.as_struct().unwrap();
+            let function_type = mapping
+                .fields_all()
+                .find(|f| f.name() == "Function Type")
+                .expect("Function Type");
+            let path = append_field_path_for("", &color_field);
+            let path = append_field_path_for(&path, &mapping_field);
+            append_field_path_for(&path, &function_type)
+        };
+        assert!(
+            path.contains("Mapping#"),
+            "path should carry ordinals: {path}"
+        );
+
+        apply_field_edit(&mut tag, &path, "4").unwrap();
+        let value = tag.root().field_path(&path).and_then(|field| field.value());
+        assert!(
+            matches!(value, Some(TagFieldData::CharInteger(4))),
+            "Function Type not set via positional path: {value:?}"
+        );
+    }
+
+    /// The path the editor derives for a field must reach *that* field, when the
+    /// tag really does name two the same.
+    ///
+    /// This is the case positional paths exist for. It runs against a duplicate an
+    /// H2 contrail actually ships -- `bitmap` twice at the root -- rather than one
+    /// Baboon created for itself by naming a `custom`, which is what the particle
+    /// fixture above used to rely on. 709 of the kit's 28,195 tags carry a real
+    /// duplicate.
+    #[test]
+    fn h2_contrail_derived_path_targets_the_second_duplicate() {
+        let tag_path = crate::core::test_kits::tag_path(
+            "halo2_mcc",
+            "effects/objects/weapons/rifle/sniper_rifle/sniper.contrail",
+        );
+        let def = test_definition_path("halo2_mcc/contrail.json");
+        if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
+            eprintln!("skipping: H2 contrail/definition not present");
+            return;
+        }
+        let bytes = std::fs::read(tag_path).unwrap();
+        let layout = blam_tags::layout::TagLayout::from_json(&def).unwrap();
+        let tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).unwrap();
+        let root = tag.root();
+
+        let duplicates: Vec<_> = root.fields_all().filter(|f| f.name() == "bitmap").collect();
+        assert_eq!(
+            duplicates.len(),
+            2,
+            "this contrail should declare `bitmap` twice"
+        );
+
+        // Derive each path the way the editor does, then resolve it back. The
+        // second is the one a bare name can never reach.
+        for field in &duplicates {
+            let path = append_field_path_for("", field);
+            let resolved = root
+                .field_path(&path)
+                .unwrap_or_else(|| panic!("derived path {path} no longer resolves"));
+            assert_eq!(
+                resolved.ordinal(),
+                field.ordinal(),
+                "derived path {path} resolved to a different field"
+            );
+        }
+
+        // And the two really are distinct, so the loop above is not passing by
+        // resolving the same field twice.
+        let derived: Vec<String> = duplicates
+            .iter()
+            .map(|f| append_field_path_for("", f))
+            .collect();
+        assert_ne!(derived[0], derived[1], "both duplicates derived one path");
+    }
+
+    fn load_h2_tag(tag_path: &str, def_rel: &str) -> Option<blam_tags::TagFile> {
+        let def = test_definition_path(def_rel);
+        if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
+            eprintln!("skipping: {tag_path} / {def_rel} not present");
+            return None;
+        }
+        let bytes = std::fs::read(tag_path).ok()?;
+        let layout = blam_tags::layout::TagLayout::from_json(&def).ok()?;
+        blam_tags::classic::read_classic_tag_file(&bytes, layout).ok()
+    }
+
+    /// A field inside a **versioned** classic block (H2 `bitmap_data`, on-disk 116
+    /// bytes vs its base struct 140) must resolve and edit. The path descent used to
+    /// bounds-check against the base size and reject the descent entirely.
+    #[test]
+    fn h2_bitmap_versioned_block_field_resolves_and_edits() {
+        let Some(mut tag) = load_h2_tag(
+            crate::core::test_kits::tag_path("halo2_mcc", "globals/loading_screen.bitmap"),
+            "halo2_mcc/bitmap.json",
+        ) else {
+            return;
+        };
+
+        let path = {
+            let root = tag.root();
+            let bitmaps = root
+                .fields_all()
+                .find(|f| f.clean_name() == "bitmaps" && f.as_block().is_some())
+                .expect("bitmaps block");
+            let block_path = format!("{}[0]", append_field_path_for("", &bitmaps));
+            let element = bitmaps.as_block().unwrap().element(0).expect("bitmaps[0]");
+            let depth = element
+                .fields_all()
+                .find(|f| f.clean_name() == "depth")
+                .expect("depth field inside bitmap_data");
+            append_field_path_for(&block_path, &depth)
+        };
+
+        // The fix: descent into the versioned block resolves.
+        assert!(
+            tag.root().field_path(&path).is_some(),
+            "versioned-block descent failed for {path}"
+        );
+        apply_field_edit(&mut tag, &path, "2").unwrap();
+        let value = tag.root().field_path(&path).and_then(|f| f.value());
+        assert!(
+            matches!(
+                value,
+                Some(TagFieldData::ShortInteger(2)) | Some(TagFieldData::CharInteger(2))
+            ),
+            "depth not written through versioned-block path: {value:?}"
+        );
+    }
+
+    /// Recursively find the first field whose RAW name carries the `|CODE` dumper
+    /// artifact, returning (clean resolvable path, raw name). Descends struct/block/
+    /// array via element 0.
+    fn find_coded_field(st: &blam_tags::TagStruct<'_>, prefix: &str) -> Option<(String, String)> {
+        for field in st.fields_all() {
+            let path = append_field_path_for(prefix, &field);
+            if field.name().contains('|') {
+                return Some((path, field.name().to_owned()));
+            }
+            let nested = if let Some(inner) = field.as_struct() {
+                Some((inner, path.clone()))
+            } else if let Some(el) = field.as_block().and_then(|b| b.element(0)) {
+                Some((el, format!("{path}[0]")))
+            } else if let Some(el) = field.as_array().and_then(|a| a.element(0)) {
+                Some((el, format!("{path}[0]")))
+            } else {
+                None
+            };
+            if let Some((child, child_prefix)) = nested {
+                if let Some(found) = find_coded_field(&child, &child_prefix) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    /// An H2 `model_animation_graph` block whose stored name carries the `|CODE`
+    /// dumper artifact (e.g. `animations|ABCDCC`) must resolve. `clean_field_name`
+    /// now strips the code, so the built path (`resources[0]/animations#N`) matches.
+    #[test]
+    fn h2_jmad_name_code_block_resolves() {
+        let Some(tag) = load_h2_tag(
+            crate::core::test_kits::tag_path(
+                "halo2_mcc",
+                "objects/cinematics/cigar/cigar.model_animation_graph",
+            ),
+            "halo2_mcc/model_animation_graph.json",
+        ) else {
+            return;
+        };
+
+        let found = find_coded_field(&tag.root(), "");
+        let Some((path, raw_name)) = found else {
+            eprintln!("skipping: no populated |CODE block in this jmad fixture");
+            return;
+        };
+
+        assert!(
+            raw_name.contains('|'),
+            "expected a |CODE raw name, got {raw_name:?}"
+        );
+        assert!(
+            !path.contains('|'),
+            "built path must carry the CLEAN name: {path}"
+        );
+        assert!(
+            tag.root().field_path(&path).is_some(),
+            "jmad |CODE field {raw_name:?} did not resolve via clean path {path}"
+        );
+    }
+
+    #[test]
+    fn color_channel_parsing_matches_swatch_output() {
+        // The color picker writes "r, g, b" / "a, r, g, b"; the field parser
+        // must accept exactly that and reject the wrong channel count.
+        let [r, g, b] = parse_color_channels::<3>("0.14902, 0.662745, 0.145098").unwrap();
+        assert!((r - 0.14902).abs() < 1e-6);
+        assert!((g - 0.662745).abs() < 1e-6);
+        assert!((b - 0.145098).abs() < 1e-6);
+
+        let [a, r, _, _] = parse_color_channels::<4>("0.5, 1.0, 0.0, 0.25").unwrap();
+        assert_eq!(a, 0.5);
+        assert_eq!(r, 1.0);
+        assert_eq!(
+            parse_rgb_or_argb_color_channels("1.0, 0.0, 0.25").unwrap(),
+            (1.0, 1.0, 0.0, 0.25)
+        );
+        assert_eq!(
+            parse_rgb_or_argb_color_channels("0.5, 1.0, 0.0, 0.25").unwrap(),
+            (0.5, 1.0, 0.0, 0.25)
+        );
+        assert_eq!(color_float_to_u8(1.0), 255);
+        assert_eq!(color_float_to_u8(0.0), 0);
+        assert_eq!(color_float_to_u8(0.5), 128);
+
+        assert!(parse_color_channels::<3>("0.1, 0.2").is_err());
+        assert!(parse_color_channels::<3>("0.1, 0.2, x").is_err());
+        assert!(parse_rgb_or_argb_color_channels("0.1, 0.2").is_err());
+    }
+
+    #[test]
+    fn hex_blob_ferry_round_trips() {
+        // The shader function editor ships edited blobs through the string
+        // edit channel as hex. encode_hex -> decode_hex must be lossless for
+        // arbitrary bytes, or saved shader functions would corrupt.
+        let blob: Vec<u8> = (0u16..=255).map(|b| b as u8).collect();
+        let encoded = encode_hex(&blob);
+        assert_eq!(encoded.len(), blob.len() * 2);
+        let decoded = decode_hex(&encoded).expect("decode hex");
+        assert_eq!(decoded, blob);
+        // Odd-length / invalid input is rejected, not silently truncated.
+        assert!(decode_hex("abc").is_err());
+        assert!(decode_hex("zz").is_err());
+    }
+}

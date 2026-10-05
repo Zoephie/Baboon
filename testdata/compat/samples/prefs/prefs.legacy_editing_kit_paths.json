@@ -1,0 +1,25 @@
+{
+  "auto_restore_last_session": true,
+  "browser_mode": "groups",
+  "browser_sort": "type",
+  "custom_color_swatches": [
+    "#FF0000FF",
+    null,
+    "#33669980",
+    "not-a-color"
+  ],
+  "editing_kit_paths": {
+    "halo2_mcc": "C:\\Kits\\halo2_mcc",
+    "halo2amp_mcc": "C:\\Kits\\halo2amp_mcc",
+    "halo3_mcc": "C:\\Kits\\halo3_mcc",
+    "halo3odst_mcc": "C:\\Kits\\halo3odst_mcc",
+    "halo4_mcc": "C:\\Kits\\halo4_mcc",
+    "halo5_mcc": "C:\\Kits\\H5",
+    "haloce_evolved": "C:\\Kits\\haloce_evolved",
+    "haloce_mcc": "C:\\Kits\\haloce_mcc",
+    "haloreach_mcc": "C:\\Kits\\haloreach_mcc"
+  },
+  "terminal_open_games": [
+    "halo3_mcc"
+  ]
+}
