@@ -12,11 +12,6 @@ env:
   # an old CMake; allow the runners' modern CMake (4.x) to configure it.
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
-# TODO(restructure): Cargo.toml's `[patch]` points blam-tags at a sibling
-# checkout (`../blam-tags/blam-tags`) that does not exist on the runners, so
-# these jobs resolve only once the patch is replaced by a `rev` bump of the
-# blam-tags dependency, as it is before every PR.
-
 jobs:
   build:
     name: ${{ matrix.os }}
