@@ -960,6 +960,75 @@ mod tests {
         );
     }
 
+    /// The game applies a Halo CE overlay as `delta × base` on the stored
+    /// rotations (`overlay_animation_apply`); the preview, which inverts
+    /// every CE rotation, composed `base × delta` and inverted the product,
+    /// reversing the order. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
+    #[test]
+    fn a_halo_ce_overlay_is_applied_in_the_games_order() {
+        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
+        let rel = "characters/cyborg/cyborg.biped";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: tags.clone(),
+            game: Some(GameId::HaloCe),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        };
+        let entry = TagEntry {
+            key: file_entry_key(&tags.join(rel)),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*b"bipd"),
+            group_name: Some("biped".to_owned()),
+            location: TagEntryLocation::LooseFile(tags.join(rel)),
+        };
+        let name = "stand rifle aim-still";
+        let list = list_model_animations(&source, &entry).expect("animation list");
+        let index = list
+            .iter()
+            .position(|animation| animation.name == name)
+            .expect("the cyborg has no aim-still");
+        let decoded = decode_model_animation(&source, &entry, index).expect("decode");
+
+        let object = crate::core::source::read_entry(&source, &entry).unwrap();
+        let antr = load_object_animations(&source, &object).unwrap();
+        let animations = CeAnimations::new(&antr);
+        let animation = animations.get(index).unwrap();
+        assert_eq!(ce_jma_kind(animation), JmaKind::Jmo, "{name} is not an overlay");
+        let gbxmodel = halo1_object_reference(&object, "model").and_then(|reference| {
+            load_referenced_tag_from_source(&source, &reference, "gbxmodel", b"mod2").ok()
+        });
+        let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
+        let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
+        let clip = animation.decode();
+        let flags = clip.node_flags.as_ref().expect("node flags");
+        let tracks = clip.animated_tracks.as_ref().expect("animated tracks");
+
+        let (mut track, mut orders_differ) = (0, false);
+        for node in 0..skeleton.len() {
+            if !flags.animated_rotation.bit(node) {
+                continue;
+            }
+            for (frame, delta) in tracks.rotations[track].iter().enumerate() {
+                let want = (*delta * rest[node].rotation).conjugate().normalized();
+                let reversed = (rest[node].rotation * *delta).conjugate().normalized();
+                orders_differ |= want.dot(reversed).abs() < 0.999;
+                let got = decoded.frames[frame][node].rotation;
+                let dot: f32 = got.iter().zip(want.to_array()).map(|(a, b)| a * b).sum();
+                assert!(
+                    dot.abs() > 0.9999,
+                    "{} frame {frame}: {got:?} vs {want:?}",
+                    decoded.skeleton_names[node]
+                );
+            }
+            track += 1;
+        }
+        assert!(track > 0, "{name} animates no rotation");
+        assert!(orders_differ, "{name} can't tell the two orders apart");
+    }
+
     /// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
     #[test]
     fn a_halo_2_model_plays_its_idle() {
@@ -1438,8 +1507,9 @@ fn decode_model_animation(
     Ok(DecodedAnimationPose::new(&skeleton, &pose))
 }
 
-/// The Halo CE half of [`decode_model_animation`]: the extractor's recipe
-/// (`write_ce_group_jma`), on the gbxmodel's rest pose.
+/// The Halo CE half of [`decode_model_animation`]: the extractor's skeleton
+/// and the gbxmodel's rest pose, with overlays applied as the game applies
+/// them.
 fn decode_ce_animation(
     source: &TagSource,
     object: &TagFile,
@@ -1456,25 +1526,29 @@ fn decode_ce_animation(
     // The extractor's skeleton: a graph that lists no nodes of its own
     // animates its gbxmodel's, when their node list checksums agree.
     let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
-    let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
-    let clip = animation.decode();
-    let mut pose = match ce_jma_kind(animation) {
-        JmaKind::Jmo => clip.overlay_pose(&skeleton, &rest).1,
-        JmaKind::Jmr => clip.replacement_pose(&skeleton, &rest),
-        _ => clip.pose(&skeleton, Some(&rest)),
-    };
     // CE rotations, rest pose and animation alike, are stored inverted
     // relative to the forward chaining the preview runs: the engine feeds
     // both into the same orientations (`model_get_node_orientations`, CE
     // Anniversary X360), and `RenderModel` conjugates the gbxmodel's. Over
     // the standing animations of six characters, frame 0 sits a median 20-36°
     // from the bind pose conjugated and 49-102° as stored; Halo 2 is the
-    // mirror image, closer as stored.
-    for frame in &mut pose.frames {
-        for transform in frame {
-            let q = transform.rotation;
-            transform.rotation = RealQuaternion { i: -q.i, j: -q.j, k: -q.k, w: q.w };
+    // mirror image, closer as stored. Both are inverted before composing: the
+    // game applies an overlay as `delta × base` on the stored values
+    // (`overlay_animation_apply`), which is `base × delta` once inverted.
+    let mut rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
+    for transform in &mut rest {
+        transform.rotation = transform.rotation.conjugate();
+    }
+    let mut clip = animation.decode();
+    for tracks in std::iter::once(&mut clip.static_tracks).chain(clip.animated_tracks.as_mut()) {
+        for rotation in tracks.rotations.iter_mut().flatten() {
+            *rotation = rotation.conjugate();
         }
     }
+    let pose = match ce_jma_kind(animation) {
+        JmaKind::Jmo => clip.runtime_overlay_pose(&skeleton, &rest),
+        JmaKind::Jmr => clip.replacement_pose(&skeleton, &rest),
+        _ => clip.pose(&skeleton, Some(&rest)),
+    };
     Ok(DecodedAnimationPose::new(&skeleton, &pose))
 }
