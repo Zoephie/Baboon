@@ -195,16 +195,10 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
+/// Whether two kit paths name the same folder: the same answer as
+/// `same_recent_path`, which a verbatim `\\?\` spelling and a plain one agree on.
 pub(in crate::app) fn same_path_text(a: &Path, b: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        a.to_string_lossy()
-            .eq_ignore_ascii_case(&b.to_string_lossy())
-    }
-    #[cfg(not(windows))]
-    {
-        a == b
-    }
+    crate::app::prefs::same_recent_path(a, b)
 }
 
 #[cfg(test)]
@@ -229,7 +223,7 @@ mod tests {
             (r"C:\Kits\H3EK", "C:/Kits/H3EK", false, false),
             ("/kits/h3ek/", "/kits/h3ek", false, true),
             ("/kits/./h3ek", "/kits/h3ek", false, true),
-            (r"\\?\C:\Kits\H3EK", r"C:\Kits\H3EK", false, false),
+            (r"\\?\C:\Kits\H3EK", r"C:\Kits\H3EK", true, false),
             (r"\\Server\Share\H2EK", r"\\server\share\h2ek", true, false),
         ];
         for (a, b, windows, elsewhere) in paths {
