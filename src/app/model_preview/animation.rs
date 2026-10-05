@@ -135,6 +135,9 @@ pub(crate) struct PreviewAnimationPlayback {
     /// the selected and decoded animation.
     pub stopped: bool,
     pub looped: bool,
+    /// Blend between frames. Off, the pose holds each frame whole, which is
+    /// how an overlay animation is read frame by frame.
+    pub interpolate: bool,
     pub speed: f32,
     /// Seconds into the animation.
     pub time: f32,
@@ -160,6 +163,7 @@ impl Default for PreviewAnimationPlayback {
             playing: false,
             stopped: false,
             looped: true,
+            interpolate: true,
             speed: 1.0,
             time: 0.0,
             pose: None,
@@ -170,6 +174,32 @@ impl Default for PreviewAnimationPlayback {
             advanced_in_pass: None,
         }
     }
+}
+
+/// Where playback stands within `frame_count` frames, in frames: wrapped when
+/// looping, held at the last frame when not, and on a whole frame when not
+/// interpolating.
+pub(super) fn playback_frame_position(playback: &PreviewAnimationPlayback, frame_count: usize) -> f32 {
+    let mut position = (playback.time * ANIMATION_FRAME_RATE).max(0.0);
+    if playback.looped && frame_count > 1 {
+        position %= frame_count as f32;
+    } else {
+        position = position.min(frame_count.saturating_sub(1) as f32);
+    }
+    if playback.interpolate { position } else { position.floor() }
+}
+
+/// The two frames playback lies between and how far it is from the first to
+/// the second. `frame_count` must not be 0.
+fn sampled_frames(playback: &PreviewAnimationPlayback, frame_count: usize) -> (usize, usize, f32) {
+    let position = playback_frame_position(playback, frame_count);
+    let a = (position.floor() as usize).min(frame_count - 1);
+    let b = if playback.looped {
+        (a + 1) % frame_count
+    } else {
+        (a + 1).min(frame_count - 1)
+    };
+    (a, b, position - a as f32)
 }
 
 /// Sample the playback state into skinning-matrix rows for this draw frame —
@@ -190,20 +220,7 @@ pub(super) fn animation_skinning_rows(
         return None;
     }
 
-    let frame_count = pose.frames.len();
-    let mut frame_position = (playback.time * ANIMATION_FRAME_RATE).max(0.0);
-    if playback.looped && frame_count > 1 {
-        frame_position %= frame_count as f32;
-    } else {
-        frame_position = frame_position.min((frame_count - 1) as f32);
-    }
-    let frame_a = (frame_position.floor() as usize).min(frame_count - 1);
-    let frame_b = if playback.looped {
-        (frame_a + 1) % frame_count
-    } else {
-        (frame_a + 1).min(frame_count - 1)
-    };
-    let blend = frame_position - frame_a as f32;
+    let (frame_a, frame_b, blend) = sampled_frames(playback, pose.frames.len());
     let (frame_a, frame_b) = (&pose.frames[frame_a], &pose.frames[frame_b]);
 
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
@@ -269,20 +286,8 @@ pub(super) fn armature_node_positions(
             if pose.frames.is_empty() {
                 return None;
             }
-            let frame_count = pose.frames.len();
-            let mut position = (state.animation.time * ANIMATION_FRAME_RATE).max(0.0);
-            if state.animation.looped && frame_count > 1 {
-                position %= frame_count as f32;
-            } else {
-                position = position.min((frame_count - 1) as f32);
-            }
-            let a = (position.floor() as usize).min(frame_count - 1);
-            let b = if state.animation.looped {
-                (a + 1) % frame_count
-            } else {
-                (a + 1).min(frame_count - 1)
-            };
-            Some((&pose.frames[a], &pose.frames[b], position - a as f32))
+            let (a, b, blend) = sampled_frames(&state.animation, pose.frames.len());
+            Some((&pose.frames[a], &pose.frames[b], blend))
         });
 
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
@@ -517,6 +522,35 @@ mod tests {
         assert_eq!(animated.len(), 2);
         assert!((animated[0][0] - bind_positions[0][0] - 0.5).abs() < 1e-4);
         assert!((animated[1][0] - bind_positions[1][0] - 0.5).abs() < 1e-4);
+    }
+
+    /// Halfway between two frames, the pose is a blend of them; with
+    /// interpolation off it is the first frame exactly, which is how an
+    /// overlay animation is read frame by frame.
+    #[test]
+    fn without_interpolation_the_pose_holds_each_frame() {
+        let nodes = test_nodes();
+        let data = preview_with_nodes(nodes.clone());
+        let bind = armature_node_positions(&data, &ModelPreviewState::default());
+        let first = bind_pose_frame(&nodes);
+        let mut second = bind_pose_frame(&nodes);
+        second[0].translation[0] += 1.0;
+        let mut state = ModelPreviewState::default();
+        state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, vec![first, second])));
+        state.animation.looped = false;
+        state.animation.time = 0.5 / ANIMATION_FRAME_RATE;
+
+        let blended = armature_node_positions(&data, &state);
+        assert!((blended[0][0] - bind[0][0] - 0.5).abs() < 1e-4, "halfway between the frames");
+
+        state.animation.interpolate = false;
+        let held = armature_node_positions(&data, &state);
+        assert!((held[0][0] - bind[0][0]).abs() < 1e-4, "still on the first frame");
+        assert_eq!(playback_frame_position(&state.animation, 2), 0.0);
+
+        state.animation.time = 1.0 / ANIMATION_FRAME_RATE;
+        let next = armature_node_positions(&data, &state);
+        assert!((next[0][0] - bind[0][0] - 1.0).abs() < 1e-4, "on the second frame");
     }
 
     #[test]

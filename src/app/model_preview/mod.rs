@@ -214,13 +214,7 @@ pub(crate) struct RenderModelPreviewNode {
 static NEXT_MODEL_GEOMETRY_ID: AtomicU64 = AtomicU64::new(1);
 
 fn animation_frame_position(playback: &PreviewAnimationPlayback, pose_frames: usize) -> f32 {
-    let last_frame = pose_frames.saturating_sub(1) as f32;
-    let position = playback.time * ANIMATION_FRAME_RATE;
-    if playback.looped && pose_frames > 1 {
-        position % pose_frames as f32
-    } else {
-        position.min(last_frame)
-    }
+    animation::playback_frame_position(playback, pose_frames)
 }
 
 fn animation_frame_label(position: f32, pose_frames: usize) -> String {
@@ -230,6 +224,34 @@ fn animation_frame_label(position: f32, pose_frames: usize) -> String {
         0
     };
     format!("{frame} / {pose_frames}")
+}
+
+/// Where each frame lands on the timeline slider in `rect`, whose value runs
+/// 0..=`range_end`: along the handle's own travel, which egui insets from the
+/// rect by the handle's radius at each end. Ticks closer than 3 points would
+/// merge into a bar, so a long animation is ticked every 5th, 10th, 30th…
+/// frame instead.
+fn frame_tick_xs(rect: egui::Rect, handle_shape: egui::style::HandleShape, range_end: f32, pose_frames: usize) -> Vec<f32> {
+    if pose_frames < 2 || range_end <= 0.0 {
+        return Vec::new();
+    }
+    let radius = rect.height() / 2.5;
+    let radius = match handle_shape {
+        egui::style::HandleShape::Circle => radius,
+        egui::style::HandleShape::Rect { aspect_ratio } => radius * aspect_ratio,
+    };
+    let travel = rect.x_range().shrink(radius);
+    let per_frame = travel.span() / range_end;
+    let Some(every) = [1usize, 5, 10, 30, 60, 150, 300, 600, 1500]
+        .into_iter()
+        .find(|&every| per_frame * every as f32 >= 3.0)
+    else {
+        return Vec::new();
+    };
+    (0..pose_frames)
+        .step_by(every)
+        .map(|frame| travel.min + per_frame * frame as f32)
+        .collect()
 }
 
 fn animation_header_group(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
@@ -459,7 +481,7 @@ pub(super) fn draw_model_preview_panel(
                                 ui.spinner();
                             }
                         });
-                        animation_header_group(ui, 112.0, |ui| {
+                        animation_header_group(ui, 140.0, |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             if selectable_icon_button(
                                 ui,
@@ -516,6 +538,17 @@ pub(super) fn draw_model_preview_panel(
                             {
                                 state.animation.looped = !state.animation.looped;
                             }
+                            if selectable_icon_button(
+                                ui,
+                                ButtonIcon::Function,
+                                "Interpolate between frames (off: step frame by frame)",
+                                state.animation.interpolate,
+                                controls_enabled,
+                            )
+                            .clicked()
+                            {
+                                state.animation.interpolate = !state.animation.interpolate;
+                            }
                         });
                         let speed_label_width = ui
                             .painter()
@@ -554,14 +587,37 @@ pub(super) fn draw_model_preview_panel(
                     ui.scope(|ui| {
                         let mut scrub = animation_frame_position(&state.animation, pose_frames);
                         ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
-                        if ui
-                            .add_enabled(
-                                controls_enabled,
-                                egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
-                                    .show_value(false),
-                            )
-                            .changed()
-                        {
+                        // Reserved before the slider so the ticks lie under its handle.
+                        let ticks = ui.painter().add(egui::Shape::Noop);
+                        let mut slider = egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
+                            .show_value(false);
+                        if !state.animation.interpolate {
+                            slider = slider.step_by(1.0);
+                        }
+                        let response = ui.add_enabled(controls_enabled, slider);
+                        let tick_xs = frame_tick_xs(
+                            response.rect,
+                            ui.style().visuals.handle_shape,
+                            last_frame.max(1.0),
+                            pose_frames,
+                        );
+                        let rail_y = response.rect.center().y;
+                        let stroke = egui::Stroke::new(1.0, subtle_dark());
+                        ui.painter().set(
+                            ticks,
+                            egui::Shape::Vec(
+                                tick_xs
+                                    .into_iter()
+                                    .map(|x| {
+                                        egui::Shape::line_segment(
+                                            [egui::pos2(x, rail_y - 5.0), egui::pos2(x, rail_y + 5.0)],
+                                            stroke,
+                                        )
+                                    })
+                                    .collect(),
+                            ),
+                        );
+                        if response.changed() {
                             state.animation.time = scrub / ANIMATION_FRAME_RATE;
                             state.animation.playing = false;
                             state.animation.stopped = false;

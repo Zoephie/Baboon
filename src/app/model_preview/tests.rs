@@ -780,3 +780,58 @@ fn textured_shading_is_limited_to_supported_editing_kits() {
         assert!(!model_preview_supports_textures(game), "{game:?}");
     }
 }
+
+/// Each frame's tick sits exactly where the timeline's handle lands for that
+/// frame: the handle travels a range inset from the slider's ends, and ticks
+/// spread across the whole slider would drift off it towards each end.
+#[test]
+fn frame_ticks_sit_where_the_handle_lands() {
+    let frames = 12usize;
+    let last = (frames - 1) as f32;
+    for frame in [0usize, 3, 7, 11] {
+        let ctx = egui::Context::default();
+        let mut slider_rect = egui::Rect::NOTHING;
+        let mut handle_shape = egui::style::HandleShape::Circle;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.spacing_mut().slider_width = 400.0;
+                let mut value = frame as f32;
+                let response = ui.add(egui::Slider::new(&mut value, 0.0..=last).show_value(false).step_by(1.0));
+                slider_rect = response.rect;
+                handle_shape = ui.style().visuals.handle_shape;
+            });
+        });
+        // The handle is the one narrow shape inside the slider: not the
+        // panel's background, and not the rail, which spans the slider.
+        fn handle_x(shape: &egui::Shape, slider: egui::Rect) -> Option<f32> {
+            let rect = match shape {
+                egui::Shape::Rect(rect) => rect.rect,
+                egui::Shape::Circle(circle) => egui::Rect::from_center_size(circle.center, egui::Vec2::splat(circle.radius * 2.0)),
+                egui::Shape::Vec(shapes) => return shapes.iter().find_map(|shape| handle_x(shape, slider)),
+                _ => return None,
+            };
+            (slider.contains(rect.center()) && rect.width() < slider.height() * 2.0).then(|| rect.center().x)
+        }
+        let handle_x = output
+            .shapes
+            .iter()
+            .find_map(|clipped| handle_x(&clipped.shape, slider_rect))
+            .expect("the slider paints its handle");
+        let ticks = frame_tick_xs(slider_rect, handle_shape, last, frames);
+        assert_eq!(ticks.len(), frames, "a tick per frame at this width");
+        assert!(
+            (ticks[frame] - handle_x).abs() < 0.5,
+            "frame {frame}: tick at {} but the handle at {handle_x}",
+            ticks[frame]
+        );
+    }
+}
+
+/// A long animation is ticked sparsely rather than drawn as a solid bar.
+#[test]
+fn a_long_animation_is_ticked_every_few_frames() {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 18.0));
+    let ticks = frame_tick_xs(rect, egui::style::HandleShape::Circle, 999.0, 1000);
+    assert!(ticks.len() < 100 && ticks.len() > 10, "{} ticks", ticks.len());
+    assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 3.0));
+}
