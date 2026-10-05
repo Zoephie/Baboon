@@ -9219,7 +9219,7 @@ impl Baboon {
             );
             return;
         }
-        let key = format!("file:{}", abs.display());
+        let key = loose_file_key(&abs);
         // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
         // the scanner's own constructor: this used to derive the display path
         // from the unstripped reference, which could double the extension.
@@ -11753,7 +11753,7 @@ fn run_tag_rename_job(
         .to_string_lossy()
         .replace('\\', "/");
     let new_entry = TagEntry {
-        key: format!("file:{}", new_path.display()),
+        key: loose_file_key(&new_path),
         display_path: new_display,
         group_tag: entry.group_tag,
         group_name: entry.group_name.clone(),
@@ -12235,7 +12235,7 @@ fn transform_folder_entries(
                 .to_string_lossy()
                 .replace('\\', "/");
             Some(TagEntry {
-                key: format!("file:{}", new_path.display()),
+                key: loose_file_key(&new_path),
                 display_path,
                 group_tag: entry.group_tag,
                 group_name: entry.group_name.clone(),
@@ -12767,7 +12767,7 @@ fn moved_key_map(
         };
         let new_path = destination.join(inner_rel);
         if new_path.starts_with(tags_root) {
-            map.insert(entry.key.clone(), format!("file:{}", new_path.display()));
+            map.insert(entry.key.clone(), loose_file_key(&new_path));
         }
     }
     map
@@ -12790,7 +12790,7 @@ fn remap_favorite_paths(
     old_to_new_keys: &HashMap<String, String>,
 ) {
     for relative_path in relative_paths {
-        let old_key = format!("file:{}", root.join(&*relative_path).display());
+        let old_key = loose_file_key(&root.join(&*relative_path));
         let Some(new_key) = old_to_new_keys
             .iter()
             .find_map(|(old, new)| same_entry_key(old, &old_key).then_some(new))

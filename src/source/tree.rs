@@ -3,6 +3,13 @@
 
 use super::*;
 
+/// One lexical identity for loose files, independent of the separators used
+/// to reach them. Do not canonicalize: that changes the root spelling (and
+/// adds a verbatim prefix on Windows) compared with the folder scanner.
+pub fn loose_file_key(path: &Path) -> String {
+    format!("file:{}", path.components().collect::<PathBuf>().display())
+}
+
 /// Builds a path hierarchy whose stored indices address `entries` exactly.
 pub fn build_tree(entries: &[TagEntry]) -> TagTree {
     build_tree_with_folders(entries, &[])
@@ -482,7 +489,7 @@ where
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: loose_file_key(&path),
             display_path,
             group_tag,
             group_name,
@@ -534,7 +541,7 @@ pub fn loose_file_entry(
     let group_name = names.name_for(group_tag).map(str::to_owned);
     let display_path = display_path_with_friendly_extension(rel, group_tag, names);
     Ok(Some(TagEntry {
-        key: format!("file:{}", path.display()),
+        key: loose_file_key(&path),
         display_path,
         group_tag,
         group_name,
@@ -563,7 +570,7 @@ fn scan_folder_entries(root: &Path, names: &TagNameIndex) -> Result<Vec<TagEntry
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: loose_file_key(&path),
             display_path,
             group_tag,
             group_name,
@@ -637,7 +644,7 @@ fn scan_folder_direct_entries(
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: format!("file:{}", path.display()),
+            key: loose_file_key(&path),
             display_path,
             group_tag,
             group_name,

@@ -1,5 +1,81 @@
 use super::*;
 
+fn loose_shader_fixture() -> (Baboon, PathBuf, PathBuf, TagFile) {
+    let root = crate::test_kits::unique_temp_path("tag-key-refresh");
+    let path = root.join("objects").join("characters").join("brute")
+        .join("shaders").join("brute.shader");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let tag = TagFile::new(crate::app::test_definition_path("halo2_mcc/shader.json")).unwrap();
+    std::fs::write(&path, tag.write_to_bytes().unwrap()).unwrap();
+    let mut app = Baboon::for_test();
+    app.install_loaded_source(LoadedSourceData {
+        label: "test".to_owned(),
+        source: TagSource::LooseFolder {
+            root: root.clone(), game: None, definitions_root: PathBuf::new(),
+        },
+        names: TagNameIndex::default(), game: None,
+        entries: Vec::new(), all_entries: Vec::new(),
+        tree: crate::source::build_folder_directory_tree(&root).unwrap(),
+        group_tree: TagTree::default(), reverse_dependencies: None,
+        initial_tag: None, key_hints: Default::default(), complete_scan: false,
+        chosen_kit_layout: None,
+    });
+    (app, root, path, tag)
+}
+
+#[test]
+fn mixed_separator_lazy_tag_keeps_its_open_document_after_index_refresh() {
+    let (mut app, root, path, tag) = loose_shader_fixture();
+    // A folder browser uses '/' for its relative path, then appends child
+    // folders with the platform separator. This reproduces the Windows key.
+    let mut node = TagTreeNode {
+        rel_path: PathBuf::from("objects/characters/brute").join("shaders"),
+        ..Default::default()
+    };
+    let source = app.kits[0].source.as_mut().unwrap();
+    load_folder_node_entries(&root, &mut node, &mut source.entries, &source.names).unwrap();
+    let key = source.entries[0].key.clone();
+    assert_eq!(key, loose_file_key(&path));
+    let bytes = tag.write_to_bytes().unwrap();
+    let document = TagDocument::modified(tag);
+    let stamp = document.content_stamp();
+    app.kits[0].parsed_tags.insert(key.clone(), document);
+    let ctx = egui::Context::default();
+    app.select_entry(key.clone(), ctx.clone());
+
+    for _ in 0..2 {
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &TagNameIndex::default()).unwrap();
+        app.apply_entry_index_refresh(0, EntryIndexRefresh {
+            entries, changed: true, added: 0, updated: 0, removed: 0,
+            touched: Vec::new(), removed_keys: Vec::new(), touched_dependencies: Vec::new(),
+        }, ctx.clone());
+        assert!(app.kits[0].source.as_ref().unwrap().entries.is_empty());
+        assert!(app.entry_for_key_in(0, &key).is_some(), "the full index still resolves the open tab");
+        assert!(app.kits[0].open_tabs.contains(&key));
+        let document = &app.kits[0].parsed_tags[&key];
+        assert_eq!(document.content_stamp(), stamp, "refresh must not reload or replace unsaved edits");
+        assert!(document.dirty.is_set());
+        assert_eq!(document.tag.write_to_bytes().unwrap(), bytes);
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reference_open_uses_the_same_key_as_the_entry_it_registers() {
+    let (mut app, root, path, tag) = loose_shader_fixture();
+    let group_tag = tag.group().tag;
+    let key = loose_file_key(&path);
+    app.kits[0].parsed_tags.insert(key.clone(), TagDocument::modified(tag));
+    app.pending_open = Some(OpenTagRequest {
+        group_tag, rel_path: "objects/characters/brute/shaders/brute".to_owned(), float: false,
+    });
+    app.process_pending_open(&egui::Context::default());
+    assert_eq!(app.kits[0].selected_key.as_deref(), Some(key.as_str()));
+    assert!(app.entry_for_key_in(0, &key).is_some());
+    assert!(app.kits[0].loading_tags.is_empty(), "the existing document remains attached");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn browser_refresh_discards_lazy_entries_and_relists_folders() {
     let root = std::env::temp_dir().join(format!(

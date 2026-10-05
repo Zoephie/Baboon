@@ -224,7 +224,7 @@ pub(super) fn bitmap_reference_hover_entry(
     let root = tags_root?;
     let path = blam_tags::paths::resolve_tag_path(root, &rel_path, "bitmap");
     Some(TagEntry {
-        key: format!("file:{}", path.display()),
+        key: loose_file_key(&path),
         display_path: format!("{}.bitmap", rel_path.replace('\\', "/")),
         group_tag,
         group_name: names
