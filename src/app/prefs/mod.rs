@@ -541,10 +541,14 @@ pub(super) fn clean_recent_path(path: PathBuf) -> PathBuf {
 }
 
 pub(super) fn same_recent_path(a: &Path, b: &Path) -> bool {
+    // A verbatim `\\?\` spelling (what `canonicalize` returns) names the same
+    // folder as the plain one prefs store; compared raw, a favorite toggled
+    // twice was added twice, and a kit root never found its saved entry.
     #[cfg(windows)]
     {
-        a.to_string_lossy()
-            .eq_ignore_ascii_case(&b.to_string_lossy())
+        clean_recent_path(a.to_path_buf())
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&clean_recent_path(b.to_path_buf()).to_string_lossy())
     }
     #[cfg(not(windows))]
     {
@@ -1036,6 +1040,21 @@ mod tests {
         );
         assert!(!paths.contains_key("halo4_mcc"));
         assert!(!paths.contains_key("unknown"));
+    }
+
+    /// A verbatim spelling and a plain one of the same folder are the same
+    /// recent path: kit roots can arrive from `canonicalize` as `\\?\C:\…`
+    /// while prefs store them plain, and a favorite toggled twice was added
+    /// twice.
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_path_is_the_same_recent_path_as_its_plain_spelling() {
+        assert!(same_recent_path(Path::new(r"\\?\C:\Kits\H3EK\tags"), Path::new(r"C:\kits\h3ek\tags")));
+        assert!(same_recent_path(
+            Path::new(r"\\?\UNC\server\share\tags"),
+            Path::new(r"\\server\share\tags")
+        ));
+        assert!(!same_recent_path(Path::new(r"\\?\C:\Kits\H3EK\tags"), Path::new(r"C:\Kits\H2EK\tags")));
     }
 
     #[cfg(windows)]
