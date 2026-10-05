@@ -105,22 +105,21 @@ impl Baboon {
             dialog.error = Some(format!("{} already exists", output.display()));
             return false;
         }
-        // `TagFile::new` can only build an MCC container — it hard-codes
-        // `TagContainer::Mcc` and `Endian::Le`, and nothing synthesizes a classic
-        // 64-byte header. Writing one into an H1EK/H2EK tags tree produces a file
-        // Guerilla cannot load, and one Baboon itself re-reads as MCC, so nothing
-        // surfaces the mistake. Refuse until there is a classic constructor.
-        if CLASSIC_CONVERSION_GAMES.contains(&dialog.game.as_str()) {
-            dialog.error = Some(format!(
-                "Baboon cannot create a new {} tag: classic Halo CE and Halo 2 \
-                 tags carry a 64-byte header it has no writer for, so the file \
-                 would not load in the editing kit. Duplicate an existing tag \
-                 instead.",
-                dialog.game
-            ));
-            return false;
-        }
-        let tag = match TagFile::new(&group.schema_path) {
+        // A Halo CE or Halo 2 kit takes the classic file, with the 64-byte
+        // header its tool writes; `TagFile::new` makes the MCC container, which
+        // that kit's Guerilla cannot load.
+        let classic = match dialog.game.as_str() {
+            "haloce_mcc" => Some(blam_tags::classic::ClassicEngine::HaloCe),
+            "halo2_mcc" => Some(blam_tags::classic::ClassicEngine::Halo2V4),
+            _ => None,
+        };
+        let created = match classic {
+            Some(engine) => {
+                TagFile::new_classic(&group.schema_path, engine).map_err(|e| e.to_string())
+            }
+            None => TagFile::new(&group.schema_path).map_err(|e| e.to_string()),
+        };
+        let tag = match created {
             Ok(mut tag) => {
                 if CONVERSION_PROFILES.contains(&dialog.game.as_str())
                     && let Err(error) = apply_editing_kit_mcc_header(&mut tag, &dialog.game)
@@ -1082,6 +1081,11 @@ mod dialog_tests {
 
     /// A loose Halo 3 editing kit in a fresh temporary folder, holding nothing.
     fn loose_app() -> (Baboon, PathBuf) {
+        loose_kit(GameId::Halo3)
+    }
+
+    /// A loose `game` editing kit in a fresh temporary folder, holding nothing.
+    fn loose_kit(game: GameId) -> (Baboon, PathBuf) {
         let root = std::env::temp_dir()
             .join(format!("baboon-new-tag-{}", uuid::Uuid::new_v4()))
             .join("tags");
@@ -1090,7 +1094,7 @@ mod dialog_tests {
         let source = crate::core::source::load_editing_kit_layout(
             root.clone(),
             "New Tag Kit".to_owned(),
-            GameId::Halo3,
+            game,
             &app.model.default_names,
             &crate::core::bundled::locate_definitions_root(),
         )
@@ -1133,6 +1137,52 @@ mod dialog_tests {
         assert!(created, "{}", app.model.status);
         assert!(app.dialogs.get::<NewTagDialog>().is_none());
         assert_eq!(app.model.status, format!("Created {}", output.display()));
+    }
+
+    /// A Halo CE or Halo 2 kit gets a classic tag, with the header its tool
+    /// writes, that reads back as that game's. New Tag refused both games,
+    /// saying it had no writer for the classic header.
+    #[test]
+    fn a_classic_kit_gets_a_classic_tag() {
+        use blam_tags::classic::ClassicEngine;
+        for (game, group, engine) in [
+            (GameId::HaloCe, "scenery", ClassicEngine::HaloCe),
+            (GameId::Halo2, "weapon", ClassicEngine::Halo2V4),
+        ] {
+            let (mut app, root) = loose_kit(game);
+            app.open_new_tag_dialog();
+            let output = root.join(format!("objects/new/new.{group}"));
+            {
+                let dialog = app.dialogs.get_mut::<NewTagDialog>().expect("open");
+                assert_eq!(dialog.game, game.as_str());
+                dialog.selected_group = dialog
+                    .groups
+                    .iter()
+                    .position(|candidate| candidate.name == group)
+                    .unwrap_or_else(|| panic!("{game:?} defines {group}"));
+                dialog.output_path = Some(output.clone());
+            }
+            app.create_new_tag();
+            let still_open = app
+                .dialogs
+                .get::<NewTagDialog>()
+                .map(|dialog| dialog.error.clone());
+            let read = crate::core::source::read_tag_at_path(
+                &output,
+                Some(game),
+                Some(&crate::core::bundled::locate_definitions_root()),
+                load_new_tag_groups(game.as_str())
+                    .unwrap()
+                    .iter()
+                    .find(|candidate| candidate.name == group)
+                    .unwrap()
+                    .group_tag,
+            );
+            let _ = fs::remove_dir_all(root.parent().unwrap());
+            assert_eq!(still_open, None, "{game:?}: {}", app.model.status);
+            let tag = read.unwrap_or_else(|error| panic!("{game:?}: {error:#}"));
+            assert_eq!(tag.classic_engine(), Some(engine), "{game:?}");
+        }
     }
 }
 
