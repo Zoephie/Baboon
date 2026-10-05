@@ -1349,7 +1349,7 @@ mod shader_option_read_tests {
     //! GUI an unreadable option tag is a dead process rather than a message.
 
     static H3_SHADERS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::tag_path("halo3_mcc", "shaders"));
+        std::sync::LazyLock::new(|| crate::core::test_kits::tag_path("halo3_mcc", "shaders"));
 
     /// Every `render_method_option` in the kit must decode through the typed reader
     /// the shader grid uses. Named tags are called out because they are the ones that
@@ -2685,7 +2685,7 @@ mod frame_smoke_tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = crate::test_kits::unique_temp_dir(name);
+        let dir = crate::core::test_kits::unique_temp_dir(name);
         TEMP_DIRS.with(|dirs| dirs.borrow_mut().push(dir.clone()));
         dir
     }
@@ -3294,7 +3294,7 @@ mod frame_smoke_tests {
             case(
                 "content_explorer",
                 &["dialog:ContentExplorer"],
-                &["references/explorer/window.rs"],
+                &["references/explorer.rs"],
                 memory_kit,
                 |h| {
                     let focus = h.app.model.kits[h.app.model.active]
@@ -3422,13 +3422,13 @@ mod frame_smoke_tests {
             case(
                 "last_opened_windows",
                 &["dialog:LastOpenedWindowsPrompt"],
-                &["shell/session/mod.rs"],
+                &["shell/session.rs"],
                 welcome,
                 |h| {
                     h.app.dialogs.open(LastOpenedWindowsPrompt {
-                        kits: vec![LastOpenedWindowsKit {
+                        kits: vec![crate::app::shell::session::LastOpenedWindowsKit {
                             checked: true,
-                            source_kind: LastSessionSourceKind::LooseFolder,
+                            source_kind: crate::app::shell::session::LastSessionSourceKind::LooseFolder,
                             source_path: PathBuf::from("/no/such/smoke/tags"),
                             game: Some(fixture::GAME.to_owned()),
                             profile_id: None,
@@ -3439,8 +3439,8 @@ mod frame_smoke_tests {
                             has_project: false,
                             browser_mode: None,
                             browser_sort: None,
-                            entries: vec![LastOpenedWindowEntry {
-                                tag: LastSessionTag {
+                            entries: vec![crate::app::shell::session::LastOpenedWindowEntry {
+                                tag: crate::app::shell::session::LastSessionTag {
                                     key: "file:/no/such/smoke.biped".to_owned(),
                                     label: "smoke.biped".to_owned(),
                                     group_tag: u32::from_be_bytes(*b"bipd"),

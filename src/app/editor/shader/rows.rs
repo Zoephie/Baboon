@@ -1661,7 +1661,7 @@ mod sampler_mode_tests {
     /// name.
     #[test]
     fn reach_sampler_modes_are_named_from_reach_lists() {
-        let defs = crate::test_kits::definitions();
+        let defs = crate::core::test_kits::definitions();
         let mut rmop = TagFile::new(defs.join("haloreach_mcc/render_method_option.json")).unwrap();
         add_block_element(&mut rmop, "parameters").unwrap();
         set(&mut rmop, "parameters[0]/parameter name", "base_map");

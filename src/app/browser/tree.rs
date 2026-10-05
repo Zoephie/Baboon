@@ -5004,7 +5004,7 @@ mod browser_tree_virtualization_tests {
     /// bottom up so the rows above keep their places.
     #[test]
     fn the_lazy_tree_skips_rows_without_moving_any() {
-        let root = crate::test_kits::unique_temp_dir("baboon-lazy-virtualization");
+        let root = crate::core::test_kits::unique_temp_dir("baboon-lazy-virtualization");
         let mut header = [0u8; 64];
         header[48..52].copy_from_slice(b"bipd");
         header[60..64].copy_from_slice(b"BLAM");

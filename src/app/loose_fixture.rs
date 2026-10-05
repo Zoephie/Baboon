@@ -152,7 +152,7 @@ impl LooseKit {
         // Canonical, so a key made from this path agrees with one made from
         // its canonical form (the temp dir is `/var` -> `/private/var` on
         // macOS); a real kit's root has no such alias.
-        let base = fs::canonicalize(crate::test_kits::unique_temp_dir(name)).unwrap();
+        let base = fs::canonicalize(crate::core::test_kits::unique_temp_dir(name)).unwrap();
         let root = base.join(ek_folder(game)).join("tags");
         fs::create_dir_all(&root).unwrap();
         Self { base, root, game }

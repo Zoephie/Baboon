@@ -115,7 +115,7 @@ mod editing_kit_card_tests {
     /// own `tags` and `data`; a folder the user picked survives a root change.
     #[test]
     fn choosing_a_root_fills_only_the_folders_still_on_auto() {
-        let outer = crate::test_kits::unique_temp_dir("kit-folder-autofill");
+        let outer = crate::core::test_kits::unique_temp_dir("kit-folder-autofill");
         let first = outer.join("H2EK");
         let second = outer.join("H2EK-copy");
         for root in [&first, &second] {

@@ -1178,9 +1178,9 @@ mod tests {
     #[test]
     fn a_classic_structure_bsp_extracts_in_its_own_form() {
         use blam_tags::classic::ClassicEngine;
-        let output = crate::test_kits::unique_temp_dir("classic-bsp");
+        let output = crate::core::test_kits::unique_temp_dir("classic-bsp");
         let bsp = |definition: &str, engine| {
-            TagFile::new_classic(crate::test_kits::definitions().join(definition), engine).unwrap()
+            TagFile::new_classic(crate::core::test_kits::definitions().join(definition), engine).unwrap()
         };
 
         let ce = bsp("haloce_mcc/scenario_structure_bsp.json", ClassicEngine::HaloCe);
@@ -1839,7 +1839,7 @@ mod extract_targets_tests {
     /// back as one.
     #[test]
     fn halo1_geometry_for_halo1_is_one_file_per_permutation() {
-        let Some(root) = kit_tag(crate::test_kits::hceek_tags(), CE_WARTHOG) else {
+        let Some(root) = kit_tag(crate::core::test_kits::hceek_tags(), CE_WARTHOG) else {
             return;
         };
         let out = fresh_dir("baboon_extract_target_ce_ce");
@@ -1863,7 +1863,7 @@ mod extract_targets_tests {
     /// naming the permutation and region each came from.
     #[test]
     fn halo1_geometry_for_later_tools_merges_permutations_into_labels() {
-        let Some(root) = kit_tag(crate::test_kits::hceek_tags(), CE_WARTHOG) else {
+        let Some(root) = kit_tag(crate::core::test_kits::hceek_tags(), CE_WARTHOG) else {
             return;
         };
         let source = loose_source(&root, "haloce_mcc");
@@ -1909,7 +1909,7 @@ mod extract_targets_tests {
     /// material line into 8200 files, with no triangle lost and none duplicated.
     #[test]
     fn later_geometry_for_halo1_splits_by_permutation() {
-        let Some(root) = kit_tag(crate::test_kits::h2ek_tags(), H2_ELITE) else {
+        let Some(root) = kit_tag(crate::core::test_kits::h2ek_tags(), H2_ELITE) else {
             return;
         };
         let source = loose_source(&root, "halo2_mcc");
@@ -1957,8 +1957,8 @@ mod extract_targets_tests {
         let ce = "vehicles/warthog/warthog.vehicle";
         let h2 = "objects/characters/elite/elite.model_animation_graph";
         let cases = [
-            (crate::test_kits::hceek_tags(), "haloce_mcc", ce, b"vehi"),
-            (crate::test_kits::h2ek_tags(), "halo2_mcc", h2, b"jmad"),
+            (crate::core::test_kits::hceek_tags(), "haloce_mcc", ce, b"vehi"),
+            (crate::core::test_kits::h2ek_tags(), "halo2_mcc", h2, b"jmad"),
         ];
         for (root, game, rel, group) in cases {
             let Some(root) = kit_tag(root, rel) else {
@@ -2062,7 +2062,7 @@ mod particle_model_extract_menu_tests {
             "the menu item that reaches this action is not drawn",
         );
         let rel = "fx/particles/models/debris/generic_shards/generic_shards.particle_model";
-        let Some(root) = kit_tag(crate::test_kits::hrek_tags(), rel) else {
+        let Some(root) = kit_tag(crate::core::test_kits::hrek_tags(), rel) else {
             return;
         };
         let out = std::env::temp_dir().join("baboon_pm_extract_gen3");
@@ -2130,7 +2130,7 @@ mod particle_model_extract_menu_tests {
             "the menu item that reaches this action is not drawn",
         );
         let rel = "effects/particle_models/urban_debris/urban_debris.particle_model";
-        let Some(root) = kit_tag(crate::test_kits::h2ek_tags(), rel) else {
+        let Some(root) = kit_tag(crate::core::test_kits::h2ek_tags(), rel) else {
             return;
         };
         let out = std::env::temp_dir().join("baboon_pm_extract_h2");

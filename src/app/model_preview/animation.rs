@@ -726,7 +726,7 @@ mod tests {
     /// check is the one a wrong conjugation fails.
     fn plays_a_classic_idle(source: TagSource, entry: TagEntry, game: &str, idle: &str) {
         let tag = crate::core::source::read_entry(&source, &entry).expect("tag reads");
-        let names = TagNameIndex::load_game(crate::test_kits::definitions(), GameId::from_id(game).unwrap()).expect("tag names");
+        let names = TagNameIndex::load_game(crate::core::test_kits::definitions(), GameId::from_id(game).unwrap()).expect("tag names");
         let data = crate::app::model_preview::loading::load_model_preview(
             &tag,
             &entry,
@@ -799,7 +799,7 @@ mod tests {
     /// `model_animations` both. `BLAM_TEST_HCEEK` names the kit's `tags` folder.
     #[test]
     fn a_halo_ce_biped_plays_its_idle() {
-        let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
         let rel = "characters/cyborg/cyborg.biped";
         if !tags.join(rel).is_file() {
             eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
@@ -808,7 +808,7 @@ mod tests {
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::HaloCe),
-            definitions_root: crate::test_kits::definitions().to_path_buf(),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
         };
         let entry = TagEntry {
             key: file_entry_key(&tags.join(rel)),
@@ -827,7 +827,7 @@ mod tests {
     /// `tags` folder.
     #[test]
     fn a_halo_ce_vehicle_animates_its_gbxmodels_nodes() {
-        let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
         let rel = "vehicles/warthog/warthog.vehicle";
         if !tags.join(rel).is_file() {
             eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
@@ -836,7 +836,7 @@ mod tests {
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::HaloCe),
-            definitions_root: crate::test_kits::definitions().to_path_buf(),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
         };
         let entry = TagEntry {
             key: file_entry_key(&tags.join(rel)),
@@ -861,7 +861,7 @@ mod tests {
     /// `BLAM_TEST_H2EK` names a Halo 2 kit's `tags` folder.
     #[test]
     fn a_halo_2_model_plays_its_idle() {
-        let tags = crate::test_kits::h2ek_tags();
+        let tags = crate::core::test_kits::h2ek_tags();
         let rel = "objects/characters/masterchief/masterchief.model";
         if !tags.join(rel).is_file() {
             eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
@@ -870,7 +870,7 @@ mod tests {
         let source = TagSource::LooseFolder {
             root: tags.clone(),
             game: Some(GameId::Halo2),
-            definitions_root: crate::test_kits::definitions().to_path_buf(),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
         };
         let entry = TagEntry {
             key: file_entry_key(&tags.join(rel)),

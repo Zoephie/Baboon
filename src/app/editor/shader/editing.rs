@@ -2392,7 +2392,7 @@ mod h2_template_switch_tests {
     /// backslash-joined path, which found nothing outside Windows.
     #[test]
     fn switching_a_template_reads_its_parameters() {
-        let root = crate::test_kits::h2ek_tags();
+        let root = crate::core::test_kits::h2ek_tags();
         let reference = "shaders/shader_templates/water/water_static";
         if !root.join(format!("{reference}.shader_template")).is_file() {
             eprintln!("skipping: {reference} not present under {}", root.display());
@@ -2403,7 +2403,7 @@ mod h2_template_switch_tests {
             current: String::new(),
             kind: ShaderRowEditKind::ShaderTemplateRef,
         };
-        let root: &'static std::path::Path = std::path::Path::new(crate::test_kits::leak(root));
+        let root: &'static std::path::Path = std::path::Path::new(crate::core::test_kits::leak(root));
         with_test_edit_context(|edit| {
             edit.tags_root = Some(root);
             edit.game = Some(GameId::Halo2);

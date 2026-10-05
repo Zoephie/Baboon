@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn a_missing_definition_names_the_file_it_wanted() {
-        let empty = crate::test_kits::unique_temp_dir("no-definitions");
+        let empty = crate::core::test_kits::unique_temp_dir("no-definitions");
         let error = scenario_palettes(&empty, GameId::Halo3).unwrap_err();
         let _ = fs::remove_dir_all(&empty);
         assert!(error.contains("halo3_mcc"), "{error}");

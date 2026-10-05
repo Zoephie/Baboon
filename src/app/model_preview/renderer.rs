@@ -2020,7 +2020,7 @@ mod gpu_renderer_tests {
             eprintln!("skipping: glslangValidator is not on PATH (brew install glslang)");
             return;
         }
-        let dir = crate::test_kits::unique_temp_dir("model_preview_glsl");
+        let dir = crate::core::test_kits::unique_temp_dir("model_preview_glsl");
         for (index, (declaration, modern, precision)) in [
             ("#version 330\n", true, ""),
             ("#version 140\n", true, ""),

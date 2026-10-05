@@ -300,6 +300,8 @@ mod tests {
     //! It owns test-only characterization and does not participate in runtime application behavior.
 
     use super::*;
+    use serde_json::{Value, json};
+    use crate::core::test_kits::{compat_json, compat_samples, unique_temp_dir};
 
     /// A search reads a snapshot: the same one until the store changes, and a
     /// change leaves a snapshot already taken as it was.
@@ -433,5 +435,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(reloaded.keywords("file:a"), &["hero"]);
         assert_eq!(reloaded.keywords("file:c"), &["new"], "the pending change lands once readable");
+    }
+
+    // Every saved format Baboon reads, fed through the real readers from the
+    // synthetic samples in `testdata/compat` (see its README; regenerate with
+    // `gen_samples.py`). Old files must keep loading, files a newer build wrote
+    // must not be destroyed by this one, and the cases a reader refuses are
+    // pinned beside the ones it accepts, so a reader that accepted everything
+    // would fail here too.
+
+    #[test]
+    fn compat_keyword_sidecars() {
+        let mut store = crate::core::keywords::KeywordStore::default();
+        store.load_at(Some(compat_samples().join("keywords/haloce_evolved_keywords.json")));
+        let keys = compat_json("tag_keys.json");
+        let key = |kind: &str| keys[kind].as_str().unwrap().to_owned();
+        assert_eq!(store.keywords(&key("newtag_ce")), ["cinematic"]);
+        assert_eq!(store.keywords(&key("ublock_mod")), ["copy"]);
+        store.load_at(Some(compat_samples().join("keywords/halo3_mcc_keywords.json")));
+        assert_eq!(store.keywords(&key("legacy_bare")), ["wip"], "bare keys are read");
+        assert_eq!(store.keywords(&key("file_windows")), ["favorite", "rifle"]);
+
+        // A sidecar cut short mid-write reads as empty and says so; the next save
+        // moves it aside byte for byte before starting a new one (41bd542).
+        let corrupt = std::fs::read(compat_samples().join("keywords/halo4_mcc_keywords.corrupt.json")).unwrap();
+        let scratch = unique_temp_dir("keywords");
+        let sidecar = scratch.join("halo4_mcc_keywords.json");
+        std::fs::write(&sidecar, &corrupt).unwrap();
+        store.load_at(Some(sidecar.clone()));
+        assert!(store.all_keywords().is_empty());
+        assert!(store.take_notice().is_some());
+        store.add(&key("file_posix"), "Storm");
+        store.save_if_dirty();
+        assert_eq!(
+            std::fs::read(scratch.join("halo4_mcc_keywords.json.unreadable")).unwrap(),
+            corrupt
+        );
+        let written: Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        assert_eq!(written, json!({ key("file_posix"): ["storm"] }));
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 }

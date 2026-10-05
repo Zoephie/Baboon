@@ -3257,7 +3257,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
+            let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -3407,7 +3407,7 @@ mod palette_repro_tests {
         let mut checked = 0usize;
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
+            let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -3510,7 +3510,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
+            let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: missing");
                 continue;

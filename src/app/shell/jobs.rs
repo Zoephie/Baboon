@@ -307,7 +307,7 @@ mod worker_panic_tests {
     /// switches to. A loader that panicked used to keep it forever.
     #[test]
     fn a_source_load_that_panics_releases_its_kit() {
-        let folder = crate::test_kits::unique_temp_dir("panicking-load");
+        let folder = crate::core::test_kits::unique_temp_dir("panicking-load");
         std::fs::create_dir_all(&folder).unwrap();
         let file = folder.join("rifle.weapon");
         type Begin = fn(&mut Baboon, PathBuf, egui::Context);
@@ -401,7 +401,7 @@ mod worker_panic_tests {
     /// field-value search without its index for the session.
     #[test]
     fn a_field_index_build_that_panics_stops_building() {
-        let root = crate::test_kits::unique_temp_dir("panicking-field-index");
+        let root = crate::core::test_kits::unique_temp_dir("panicking-field-index");
         let mut app = Baboon::for_test();
         loose_kit(&mut app, &root);
         let ctx = egui::Context::default();
@@ -417,7 +417,7 @@ mod worker_panic_tests {
     /// frame; a resolve that panicked left it doing so for good.
     #[test]
     fn an_import_source_check_that_panics_stops_spinning() {
-        let root = crate::test_kits::unique_temp_dir("panicking-import");
+        let root = crate::core::test_kits::unique_temp_dir("panicking-import");
         std::fs::create_dir_all(root.join("tags")).unwrap();
         let mut app = Baboon::for_test();
         loose_kit(&mut app, &root.join("tags"));

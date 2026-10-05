@@ -289,7 +289,7 @@ fn overlay_permutations_follow_the_selection_or_fall_back() {
 /// permutation name, which hid the collision layer entirely.
 #[test]
 fn halo_ce_monitor_collision_overlay_is_drawn() {
-    let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+    let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
     let biped = tags.join("characters/monitor/monitor.biped");
     if !biped.is_file() {
         eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");

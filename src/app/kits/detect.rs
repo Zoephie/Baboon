@@ -253,7 +253,7 @@ mod kit_path_tests {
 
     #[test]
     fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
-        let common = crate::test_kits::unique_temp_path("ek-detect-all");
+        let common = crate::core::test_kits::unique_temp_path("ek-detect-all");
         for shortcut in EDITING_KIT_SHORTCUTS {
             if shortcut.game.is_campaign_evolved() {
                 continue;
@@ -283,7 +283,7 @@ mod kit_path_tests {
 
     #[test]
     fn detect_editing_kit_paths_ignores_campaign_evolved_without_containers() {
-        let common = crate::test_kits::unique_temp_path("ek-detect-campaign-evolved-containers-required");
+        let common = crate::core::test_kits::unique_temp_path("ek-detect-campaign-evolved-containers-required");
         std::fs::create_dir_all(common.join("Halo Campaign Evolved")).unwrap();
 
         let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
@@ -294,7 +294,7 @@ mod kit_path_tests {
 
     #[test]
     fn detect_editing_kit_paths_ignores_folder_without_tags_child() {
-        let common = crate::test_kits::unique_temp_path("ek-detect-tags-required");
+        let common = crate::core::test_kits::unique_temp_path("ek-detect-tags-required");
         std::fs::create_dir_all(common.join("H3EK")).unwrap();
         std::fs::create_dir_all(common.join("H4EK").join("tags")).unwrap();
 

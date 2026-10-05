@@ -796,7 +796,7 @@ mod saved_tag_index_tests {
     /// without a word; they now reach the status line.
     #[test]
     fn a_refresh_reports_a_tag_whose_references_cannot_be_read() {
-        let root = crate::test_kits::unique_temp_dir("refresh-errors");
+        let root = crate::core::test_kits::unique_temp_dir("refresh-errors");
         std::fs::create_dir_all(root.join("objects")).unwrap();
         let good = root.join("objects/good.model");
         TagFile::new(locate_definitions_root().join("halo3_mcc/model.json"))
@@ -942,7 +942,7 @@ mod save_as_tests {
 
     #[test]
     fn save_as_registers_classic_ce_copy_in_loaded_folder() {
-        let root = crate::test_kits::unique_temp_path("save-as-register-ce");
+        let root = crate::core::test_kits::unique_temp_path("save-as-register-ce");
         let old_path = root.join("objects").join("old").join("old.gbxmodel");
         write_classic_ce_tag(&old_path, b"mod2");
         std::fs::create_dir_all(root.join("objects")).unwrap();

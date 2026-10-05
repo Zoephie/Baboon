@@ -128,7 +128,7 @@ mod slashed_field_names {
     /// grid's "Override Default" does, and read back what landed.
     #[test]
     fn enabling_a_bool_shader_parameter_writes_it() {
-        let path = std::path::Path::new(crate::test_kits::tag_path(
+        let path = std::path::Path::new(crate::core::test_kits::tag_path(
             "halo3_mcc",
             "objects/characters/brute/shaders/armor_lights.shader",
         ));

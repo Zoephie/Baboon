@@ -422,7 +422,7 @@ mod tests {
     /// so its data folder and tool options come with it.
     #[test]
     fn a_chosen_tags_folder_belongs_to_its_profile() {
-        let outer = crate::test_kits::unique_temp_dir("chosen-tags-profile");
+        let outer = crate::core::test_kits::unique_temp_dir("chosen-tags-profile");
         let root = outer.join("H2EK");
         for folder in ["tags", "data", "tags_moda", "data_moda"] {
             std::fs::create_dir_all(root.join(folder)).unwrap();

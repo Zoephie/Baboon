@@ -452,7 +452,7 @@ mod field_search_tests {
     #[test]
     fn text_inside_an_array_is_searched() {
         let mut tag =
-            TagFile::new(crate::test_kits::definitions().join("halo3_mcc/test_tag.json")).unwrap();
+            TagFile::new(crate::core::test_kits::definitions().join("halo3_mcc/test_tag.json")).unwrap();
         crate::core::document::apply::apply_field_edit(
             &mut tag,
             "complex array[2]/string in array",

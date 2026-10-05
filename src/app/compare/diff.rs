@@ -809,7 +809,7 @@ mod deletion_repro_tests {
     use super::*;
 
     static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+        std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
     fn read_a15() -> Option<TagFile> {
         if !std::path::Path::new(*PAKS).exists() {

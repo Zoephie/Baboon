@@ -1041,7 +1041,7 @@ mod block_index_remap_tests {
     use super::*;
 
     fn test_tag() -> TagFile {
-        TagFile::new(crate::test_kits::definitions().join(
+        TagFile::new(crate::core::test_kits::definitions().join(
             "haloreach_mcc/test_tag.json",
         ))
         .expect("load test-tag definition")
@@ -1151,7 +1151,7 @@ mod block_index_remap_tests {
     #[test]
     fn nested_declared_reference_resolves_its_ancestor_target() {
         let mut tag =
-            TagFile::new(crate::test_kits::definitions().join("halo2_mcc/model.json")).unwrap();
+            TagFile::new(crate::core::test_kits::definitions().join("halo2_mcc/model.json")).unwrap();
         add_elements_at(&mut tag, "variants", 3);
         add_elements_at(&mut tag, "variants[0]/regions", 1);
         apply_field_edit(&mut tag, "variants[0]/regions[0]/parent variant", "2").unwrap();
@@ -1175,7 +1175,7 @@ mod block_index_remap_tests {
     #[test]
     fn classic_parent_node_reference_is_remapped() {
         let mut tag =
-            TagFile::new(crate::test_kits::definitions().join("haloce_mcc/model.json")).unwrap();
+            TagFile::new(crate::core::test_kits::definitions().join("haloce_mcc/model.json")).unwrap();
         add_elements_at(&mut tag, "nodes", 3);
         apply_field_edit(&mut tag, "nodes[0]/parent node index", "2").unwrap();
 

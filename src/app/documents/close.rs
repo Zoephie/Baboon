@@ -709,7 +709,8 @@ mod save_close_session_tests {
 
     use crate::app::loose_fixture::*;
     use super::*;
-    use crate::app::shell::{FolderRefactorUiState, LastSessionSourceKind};
+    use crate::app::shell::FolderRefactorUiState;
+    use crate::app::shell::session::LastSessionSourceKind;
     use crate::app::browser::{BrowserAction, BrowserMode, BrowserSort};
 
     const MODEL: &str = "objects/props/crate.model";

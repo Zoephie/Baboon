@@ -18,7 +18,7 @@ const WHITE: &str = "ui/shell/bitmaps/white.bitmap";
 const NO_PLATE: &str = "digsite/placeholder/000-000-000-000-invisible.bitmap";
 
 fn ce_kit() -> Option<(PathBuf, TagSource)> {
-    let tags = PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+    let tags = PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
     if !tags.join(WHITE).is_file() || !tags.join(NO_PLATE).is_file() {
         eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
         return None;
@@ -26,7 +26,7 @@ fn ce_kit() -> Option<(PathBuf, TagSource)> {
     let source = TagSource::LooseFolder {
         root: tags.clone(),
         game: Some(GameId::HaloCe),
-        definitions_root: crate::test_kits::definitions().to_path_buf(),
+        definitions_root: crate::core::test_kits::definitions().to_path_buf(),
     };
     Some((tags, source))
 }
@@ -37,7 +37,7 @@ fn a_bitmaps_source_lands_in_the_picked_folder() {
         return;
     };
     let entry = ce_bitmap(&tags, WHITE);
-    let out = crate::test_kits::unique_temp_dir("bitmap-source");
+    let out = crate::core::test_kits::unique_temp_dir("bitmap-source");
 
     let plate = blam_tags::bitmap::color_plate(&read_entry(&source, &entry).unwrap())
         .unwrap()
@@ -86,7 +86,7 @@ fn a_bitmap_without_a_source_says_so_and_writes_nothing() {
     let Some((tags, source)) = ce_kit() else {
         return;
     };
-    let out = crate::test_kits::unique_temp_dir("bitmap-source-none");
+    let out = crate::core::test_kits::unique_temp_dir("bitmap-source-none");
     let entry = ce_bitmap(&tags, NO_PLATE);
 
     let error = extract_bitmap_source(&source, &entry, &out).unwrap_err();

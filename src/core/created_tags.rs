@@ -378,6 +378,8 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use super::*;
+    use serde_json::Value;
+    use crate::core::test_kits::{compat_json, compat_samples, unique_temp_dir};
 
     fn record(utoc: &str, ubulk: &str) -> CreatedTagRecord {
         CreatedTagRecord {
@@ -683,5 +685,71 @@ mod tests {
 
         assert!(saved.is_err(), "the save is refused and says why");
         assert_eq!(on_disk, original, "the file is left exactly as it was");
+    }
+
+    // Every saved format Baboon reads, fed through the real readers from the
+    // synthetic samples in `testdata/compat` (see its README; regenerate with
+    // `gen_samples.py`). Old files must keep loading, files a newer build wrote
+    // must not be destroyed by this one, and the cases a reader refuses are
+    // pinned beside the ones it accepts, so a reader that accepted everything
+    // would fail here too.
+
+    #[test]
+    fn compat_duplicate_ledger() {
+        use crate::core::created_tags::{CreatedTagLedger, CreatedTagOrigin};
+        let ledger_dir = compat_samples().join("ledger");
+        let utoc = Path::new(
+            r"D:\XboxGames\Halo Campaign Evolved\Content\Meteorite\Content\Paks\~mods\mymod_P.utoc",
+        );
+        let copy = "Meteorite/Content/Tags/objects/characters/marine/marine_copy-biped.ubulk";
+
+        let current = CreatedTagLedger::load_from(&ledger_dir.join("campaign_duplicates.json"));
+        assert_eq!(
+            current.find(utoc, &copy.to_ascii_uppercase()).map(|record| &record.origin),
+            Some(&CreatedTagOrigin::Authored),
+            "payload paths compare without case"
+        );
+        let v0 = CreatedTagLedger::load_from(
+            &ledger_dir.join("campaign_duplicates.v0_no_version_no_origin.json"),
+        );
+        assert_eq!(
+            v0.find(utoc, copy).map(|record| &record.origin),
+            Some(&CreatedTagOrigin::Authored),
+            "a row from before `origin` existed was a duplicate"
+        );
+
+        // A newer build's ledger: the unknown origin is kept and is not deletable
+        // as Authored; the row of an unknown shape is kept raw. Saving writes all
+        // three back (8c6da07). Before that, the next save erased the file.
+        let future_path = ledger_dir.join("campaign_duplicates.future_origin.json");
+        let future = CreatedTagLedger::load_from(&future_path);
+        assert_eq!(
+            future.find(utoc, copy).map(|record| &record.origin),
+            Some(&CreatedTagOrigin::Unrecognized("ImportedFromMod".to_owned()))
+        );
+        assert_eq!(
+            future.find(utoc, "x.ubulk").map(|record| &record.origin),
+            Some(&CreatedTagOrigin::Authored)
+        );
+        let scratch = unique_temp_dir("ledger");
+        let saved = scratch.join("campaign_duplicates.json");
+        future.save_to(&saved).expect("save");
+        let written: Value = serde_json::from_slice(&std::fs::read(&saved).unwrap()).unwrap();
+        let stored = compat_json("ledger/campaign_duplicates.future_origin.json");
+        let rows = written["tags"].as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        for row in stored["tags"].as_array().unwrap() {
+            assert!(rows.contains(row), "{row} written back unchanged");
+        }
+
+        // Not a ledger at all: it loads empty, and saving leaves it as it is.
+        let truncated = std::fs::read(ledger_dir.join("campaign_duplicates.truncated.json")).unwrap();
+        let damaged = scratch.join("damaged.json");
+        std::fs::write(&damaged, &truncated).unwrap();
+        let empty = CreatedTagLedger::load_from(&damaged);
+        assert!(empty.is_empty());
+        assert!(empty.save_to(&damaged).is_err());
+        assert_eq!(std::fs::read(&damaged).unwrap(), truncated);
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 }

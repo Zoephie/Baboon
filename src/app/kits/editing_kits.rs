@@ -736,7 +736,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(label: &str) -> PathBuf {
-        crate::test_kits::unique_temp_dir(&format!("editing-kits-{label}"))
+        crate::core::test_kits::unique_temp_dir(&format!("editing-kits-{label}"))
     }
 
     #[test]

@@ -1165,7 +1165,7 @@ mod container_dependency_tests {
     use super::*;
 
     static CE_PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+        std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
     fn find_entry<'a>(
         loaded: &'a crate::core::source::LoadedSourceData,

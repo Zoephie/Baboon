@@ -113,6 +113,7 @@ use kits::{EditingKitValidationCache, Kit, KitId, KitView, KitViews, KitsFeature
 pub(in crate::app) mod documents;
 use documents::DocumentsFeature;
 pub(in crate::app) mod shell;
+use shell::session::load_last_session;
 use shell::{ArtworkCache, LastOpenedWindowsPrompt, ShellFeature, WorkerMessage};
 mod ui_kit;
 use ui_kit::*;

@@ -13,6 +13,8 @@ pub(crate) mod process;
 pub(crate) mod source;
 pub(crate) mod storage;
 pub(crate) mod tag_key;
+#[cfg(test)]
+pub(crate) mod test_kits;
 pub(crate) mod tool_commands;
 
 #[cfg(test)]

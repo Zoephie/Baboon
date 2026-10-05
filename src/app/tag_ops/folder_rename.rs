@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn empty_folder_rename_is_rejected_without_moving_the_folder() {
-        let root = crate::test_kits::unique_temp_dir("empty-folder-rename");
+        let root = crate::core::test_kits::unique_temp_dir("empty-folder-rename");
         fs::create_dir_all(root.join("old/nested")).unwrap();
         let (tx, _rx) = mpsc::channel();
         let result = run_folder_refactor_job(
@@ -399,7 +399,7 @@ mod tests {
             eprintln!("skipping: set {var} to a {game} kit's tags folder");
             return;
         };
-        let root = crate::test_kits::unique_temp_dir("folder-rename");
+        let root = crate::core::test_kits::unique_temp_dir("folder-rename");
         copy_tree(&kit.join(vehicle), &root.join(vehicle));
         let old_prefix = format!("{}\\{folder}\\", vehicle.replace('/', "\\"));
         let new_prefix = format!("{}\\{folder}_renamed\\", vehicle.replace('/', "\\"));

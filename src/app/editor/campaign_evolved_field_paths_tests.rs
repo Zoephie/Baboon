@@ -2,7 +2,7 @@ use crate::core::source::{load_iostore_container_set, read_entry};
 use std::path::{Path, PathBuf};
 
 static PAKS: std::sync::LazyLock<&'static str> =
-    std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+    std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
 /// Mirrors how the editor builds paths: the inherited-parent chain
 /// contributes a name-only prefix, leaves add `name#ordinal`.

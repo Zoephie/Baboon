@@ -1,9 +1,9 @@
-//! Static map-name tables and section mappings.
+//! Static map-name catalogs and their presentation UI.
 //! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 
 use super::*;
 
-pub(super) const MAP_TABS: &[(MapNamesGameTab, &str)] = &[
+const MAP_TABS: &[(MapNamesGameTab, &str)] = &[
     (MapNamesGameTab::HaloCe, "Halo CE"),
     (MapNamesGameTab::Halo2, "Halo 2"),
     (MapNamesGameTab::Halo2Anniversary, "Halo 2: Anniversary"),
@@ -14,32 +14,32 @@ pub(super) const MAP_TABS: &[(MapNamesGameTab, &str)] = &[
     (MapNamesGameTab::Stubbs, "Stubbs"),
 ];
 
-pub(super) const CAMPAIGN_MULTIPLAYER: &[(MapKind, &str)] = &[
+const CAMPAIGN_MULTIPLAYER: &[(MapKind, &str)] = &[
     (MapKind::Campaign, "Campaign"),
     (MapKind::Multiplayer, "Multiplayer"),
 ];
 
-pub(super) const CAMPAIGN_FIREFIGHT: &[(MapKind, &str)] = &[
+const CAMPAIGN_FIREFIGHT: &[(MapKind, &str)] = &[
     (MapKind::Campaign, "Campaign"),
     (MapKind::Survival, "Firefight"),
 ];
 
-pub(super) const REACH_SECTIONS: &[(MapKind, &str)] = &[
+const REACH_SECTIONS: &[(MapKind, &str)] = &[
     (MapKind::Campaign, "Campaign"),
     (MapKind::Survival, "Firefight"),
     (MapKind::Multiplayer, "Multiplayer"),
 ];
 
-pub(super) const HALO4_SECTIONS: &[(MapKind, &str)] = &[
+const HALO4_SECTIONS: &[(MapKind, &str)] = &[
     (MapKind::Campaign, "Campaign"),
     (MapKind::Survival, "Spartan Ops"),
     (MapKind::Multiplayer, "Multiplayer"),
 ];
 
-pub(super) const MULTIPLAYER_ONLY: &[(MapKind, &str)] = &[(MapKind::Multiplayer, "Multiplayer")];
-pub(super) const CAMPAIGN_ONLY: &[(MapKind, &str)] = &[(MapKind::Campaign, "Campaign")];
+const MULTIPLAYER_ONLY: &[(MapKind, &str)] = &[(MapKind::Multiplayer, "Multiplayer")];
+const CAMPAIGN_ONLY: &[(MapKind, &str)] = &[(MapKind::Campaign, "Campaign")];
 
-pub(super) fn map_sections(tab: MapNamesGameTab) -> &'static [(MapKind, &'static str)] {
+fn map_sections(tab: MapNamesGameTab) -> &'static [(MapKind, &'static str)] {
     match tab {
         MapNamesGameTab::HaloCe | MapNamesGameTab::Halo2 | MapNamesGameTab::Halo3 => {
             CAMPAIGN_MULTIPLAYER
@@ -52,7 +52,7 @@ pub(super) fn map_sections(tab: MapNamesGameTab) -> &'static [(MapKind, &'static
     }
 }
 
-pub(super) fn map_entries(tab: MapNamesGameTab) -> &'static [MapEntry] {
+fn map_entries(tab: MapNamesGameTab) -> &'static [MapEntry] {
     match tab {
         MapNamesGameTab::HaloCe => HALO_CE,
         MapNamesGameTab::Halo2 => HALO_2,
@@ -65,7 +65,7 @@ pub(super) fn map_entries(tab: MapNamesGameTab) -> &'static [MapEntry] {
     }
 }
 
-pub(super) const HALO_CE: &[MapEntry] = &[
+const HALO_CE: &[MapEntry] = &[
     MapEntry {
         internal_name: "a10",
         name: "The Pillar of Autumn",
@@ -242,7 +242,7 @@ pub(super) const HALO_CE: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_2: &[MapEntry] = &[
+const HALO_2: &[MapEntry] = &[
     MapEntry {
         internal_name: "00a_introduction",
         name: "The Heretic",
@@ -485,7 +485,7 @@ pub(super) const HALO_2: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_2_ANNIVERSARY: &[MapEntry] = &[
+const HALO_2_ANNIVERSARY: &[MapEntry] = &[
     MapEntry {
         internal_name: "ca_ascension.map",
         name: "Zenith",
@@ -548,7 +548,7 @@ pub(super) const HALO_2_ANNIVERSARY: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_3: &[MapEntry] = &[
+const HALO_3: &[MapEntry] = &[
     MapEntry {
         internal_name: "005_intro",
         name: "Arrival",
@@ -780,7 +780,7 @@ pub(super) const HALO_3: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_3_ODST: &[MapEntry] = &[
+const HALO_3_ODST: &[MapEntry] = &[
     MapEntry {
         internal_name: "c100",
         name: "Prepare To Drop",
@@ -909,7 +909,7 @@ pub(super) const HALO_3_ODST: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_REACH: &[MapEntry] = &[
+const HALO_REACH: &[MapEntry] = &[
     MapEntry {
         internal_name: "m05",
         name: "Noble Actual",
@@ -1164,7 +1164,7 @@ pub(super) const HALO_REACH: &[MapEntry] = &[
     },
 ];
 
-pub(super) const HALO_4: &[MapEntry] = &[
+const HALO_4: &[MapEntry] = &[
     MapEntry {
         internal_name: "m05_prologue",
         name: "Prologue",
@@ -1468,7 +1468,7 @@ pub(super) const HALO_4: &[MapEntry] = &[
     },
 ];
 
-pub(super) const STUBBS: &[MapEntry] = &[
+const STUBBS: &[MapEntry] = &[
     MapEntry {
         internal_name: "a10_plaza",
         name: "Welcome to Punchbowl",
@@ -1542,3 +1542,79 @@ pub(super) const STUBBS: &[MapEntry] = &[
         kind: MapKind::Campaign,
     },
 ];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum MapNamesGameTab {
+    HaloCe,
+    Halo2,
+    Halo2Anniversary,
+    Halo3,
+    Halo3Odst,
+    HaloReach,
+    Halo4,
+    Stubbs,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MapKind {
+    Campaign,
+    Multiplayer,
+    Survival,
+}
+
+struct MapEntry {
+    internal_name: &'static str,
+    name: &'static str,
+    map_id: &'static str,
+    kind: MapKind,
+}
+
+pub(in crate::app) fn draw_map_names_tab(ui: &mut Ui, active_tab: &mut MapNamesGameTab) {
+    ui.horizontal_wrapped(|ui| {
+        for (tab, label) in MAP_TABS {
+            ui.selectable_value(active_tab, *tab, *label);
+        }
+    });
+    ui.add_space(8.0);
+
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (kind, title) in map_sections(*active_tab) {
+                let entries = map_entries(*active_tab)
+                    .iter()
+                    .filter(|entry| entry.kind == *kind)
+                    .collect::<Vec<_>>();
+                if entries.is_empty() {
+                    continue;
+                }
+                ui.label(
+                    RichText::new(format!("{title};"))
+                        .color(subtle_dark())
+                        .font(FontId::proportional(14.0))
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                egui::Grid::new(("map_names_grid", title))
+                    .num_columns(3)
+                    .spacing(Vec2::new(28.0, 4.0))
+                    .striped(false)
+                    .show(ui, |ui| {
+                        for entry in entries {
+                            map_cell(ui, entry.map_id, 76.0);
+                            map_cell(ui, entry.internal_name, 170.0);
+                            map_cell(ui, entry.name, 260.0);
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(16.0);
+            }
+        });
+}
+
+fn map_cell(ui: &mut Ui, text: &str, width: f32) {
+    ui.add_sized(
+        Vec2::new(width, 18.0),
+        egui::Label::new(RichText::new(text).color(foundation_blue())),
+    );
+}

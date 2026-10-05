@@ -588,7 +588,7 @@ mod tests {
     }
 
     fn scratch_dir(name: &str) -> PathBuf {
-        crate::test_kits::unique_temp_dir(name)
+        crate::core::test_kits::unique_temp_dir(name)
     }
 
     fn run_job(

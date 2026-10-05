@@ -4,7 +4,7 @@ use super::*;
 /// not on every frame, and again when the document changes.
 #[test]
 fn the_shader_grid_is_built_once_per_revision() {
-    let root = crate::test_kits::h3ek_tags();
+    let root = crate::core::test_kits::h3ek_tags();
     if !root.is_dir() {
         eprintln!("skipping: {} not present", root.display());
         return;

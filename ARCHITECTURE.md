@@ -182,7 +182,7 @@ file as `mod tests { … }` or a topic-named `mod …_tests { … }`, or as
 `tests.rs` or `…_tests.rs` files when the module is a folder with other
 children. Most build what they need synthetically from the bundled
 definitions. Tests that need a real editing kit read its location from the
-environment through `src/test_kits.rs` (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`, `BLAM_TEST_H3EK`,
+environment through `src/core/test_kits.rs` (`BLAM_TEST_HCEEK`, `BLAM_TEST_H2EK`, `BLAM_TEST_H3EK`,
 `BLAM_TEST_HREK`) and skip, by name, when it is not set; Campaign Evolved ones
 read `CE_PAKS` and are `#[ignore]`d otherwise. No tag files are checked in.
 

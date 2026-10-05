@@ -1028,7 +1028,7 @@ mod tests {
         let mut app = Baboon::for_test();
         let kit = app.model.kits[0].id;
         let ctx = egui::Context::default();
-        let root = crate::test_kits::unique_temp_dir("chimp-staging");
+        let root = crate::core::test_kits::unique_temp_dir("chimp-staging");
         let output = root.join("Mod_P.utoc");
         let staging = staging_utoc_for(&output);
         assert_eq!(staging.file_name(), output.file_name());

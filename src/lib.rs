@@ -20,8 +20,6 @@ macro_rules! include_root_bytes {
 
 mod app;
 mod core;
-#[cfg(test)]
-mod test_kits;
 
 /// Start the application and run it until its window closes.
 pub fn run() -> anyhow::Result<()> {

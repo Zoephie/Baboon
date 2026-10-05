@@ -1083,7 +1083,7 @@ mod tests {
     /// ignored the flag fails one of them.
     #[test]
     fn halo_ce_shaders_resolve_as_the_engine_composes_them() {
-        let tags = std::path::PathBuf::from(crate::test_kits::tag_path("haloce_mcc", ""));
+        let tags = std::path::PathBuf::from(crate::core::test_kits::tag_path("haloce_mcc", ""));
         if !tags.join("characters/cyborg/shaders/armor.shader_model").is_file() {
             eprintln!("skipping: set BLAM_TEST_HCEEK to a Halo CE kit's tags folder");
             return;
@@ -1149,7 +1149,7 @@ mod tests {
     /// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).
     #[test]
     fn halo_2_shaders_resolve_parameters_over_template_defaults() {
-        let tags = crate::test_kits::h2ek_tags();
+        let tags = crate::core::test_kits::h2ek_tags();
         if !tags.join("objects/characters/masterchief/shaders/masterchief.shader").is_file() {
             eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
             return;

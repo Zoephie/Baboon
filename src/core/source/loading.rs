@@ -1173,7 +1173,7 @@ mod container_tests {
     }
 
     static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+        std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
     #[test]
     fn container_ref_key_normalizes() {
@@ -1327,7 +1327,7 @@ mod paks_dir_tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        crate::test_kits::unique_temp_path(&format!("paks-{name}"))
+        crate::core::test_kits::unique_temp_path(&format!("paks-{name}"))
     }
 
     fn touch(path: &Path) {
@@ -1511,7 +1511,7 @@ mod paks_dir_tests {
     #[test]
     fn the_real_install_root_resolves_to_its_paks_directory() {
         static ROOT: std::sync::LazyLock<&'static str> =
-            std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_install()));
+            std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_install()));
         if !Path::new(*ROOT).is_dir() {
             return;
         }
@@ -1541,7 +1541,7 @@ mod mod_export_tests {
     use super::*;
 
     static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+        std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
 
     /// End-to-end check of what Export Mod actually writes, short of the game
     /// loading it: take a real container tag, change a byte, write an override
@@ -1950,7 +1950,7 @@ mod classic_layout_tests {
     /// A fresh classic tag of `definition`, as the bytes it saves to.
     fn classic_bytes(definition: &str, engine: blam_tags::classic::ClassicEngine) -> Vec<u8> {
         let tag =
-            TagFile::new_classic(crate::test_kits::definitions().join(definition), engine).unwrap();
+            TagFile::new_classic(crate::core::test_kits::definitions().join(definition), engine).unwrap();
         let bytes = tag.write_to_bytes().unwrap();
         assert!(ClassicHeader::parse(&bytes).is_some(), "{definition} is not classic");
         bytes
@@ -1963,8 +1963,8 @@ mod classic_layout_tests {
     /// layout" when re-read from bytes or from disk.
     #[test]
     fn classic_tags_read_back_with_their_own_games_layout() {
-        let defs = crate::test_kits::definitions();
-        let dir = crate::test_kits::unique_temp_dir("classic-layout");
+        let defs = crate::core::test_kits::definitions();
+        let dir = crate::core::test_kits::unique_temp_dir("classic-layout");
         use blam_tags::classic::ClassicEngine;
         for (game, engine, definition, group) in [
             (GameId::HaloCe, ClassicEngine::HaloCe, "haloce_mcc/model.json", *b"mode"),

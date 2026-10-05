@@ -805,7 +805,7 @@ mod rekey_tag_tests {
     //! though it worked. These tests are the cheapest place to catch that.
 
     use super::*;
-    use crate::app::shell::LastSessionTag;
+    use crate::app::shell::session::LastSessionTag;
     use crate::app::kits::{KitView, tag_tree_id};
     use crate::app::mods::TagHistory;
     use crate::app::editor::{AppliedFindFilter, EditorCaches};

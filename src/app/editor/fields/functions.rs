@@ -512,7 +512,7 @@ mod function_editor_routing_tests {
     #[test]
     fn shipped_h2_effect_functions_derive_h2_and_write_back() {
         let tag_path =
-            crate::test_kits::tag_path("halo2_mcc", "effects/cinematics/03/iac_engine_fire.effect");
+            crate::core::test_kits::tag_path("halo2_mcc", "effects/cinematics/03/iac_engine_fire.effect");
         let def = test_definition_path("halo2_mcc/effect.json");
         if !std::path::Path::new(tag_path).exists() || !def.exists() {
             eprintln!("skipping: H2 effect/definition not present");

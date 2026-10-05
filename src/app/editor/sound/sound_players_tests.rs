@@ -26,7 +26,7 @@ fn plays(queued: &VecDeque<SoundRequest>) -> Vec<&SoundRequest> {
 }
 
 fn h3_tag(rel: &str) -> Option<(std::path::PathBuf, TagFile)> {
-    let root = crate::test_kits::h3ek_tags();
+    let root = crate::core::test_kits::h3ek_tags();
     let path = root.join(rel);
     if !path.is_file() {
         eprintln!("skipping: {rel} not present under {}", root.display());

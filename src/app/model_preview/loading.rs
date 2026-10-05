@@ -2250,7 +2250,7 @@ mod ce_repro_tests {
     /// they replaced did, sampled across a real install.
     #[test]
     fn indexed_package_lookups_match_a_linear_scan() {
-        let paks = crate::test_kits::ce_paks();
+        let paks = crate::core::test_kits::ce_paks();
         if !paks.is_dir() {
             eprintln!(
                 "skipping: Campaign Evolved not present at {}",
@@ -2261,7 +2261,7 @@ mod ce_repro_tests {
         let loaded = crate::core::source::load_iostore_container_set(
             paks,
             &TagNameIndex::default(),
-            crate::test_kits::definitions(),
+            crate::core::test_kits::definitions(),
         )
         .expect("mount Campaign Evolved");
         let TagSource::IoStoreContainerSet { containers, .. } = &loaded.source else {
@@ -2911,7 +2911,7 @@ mod model_preview_worker_tests {
             eprintln!("skipping: {} is not present", path.display());
             return None;
         }
-        let definitions = crate::test_kits::definitions();
+        let definitions = crate::core::test_kits::definitions();
         let entry = TagEntry {
             key: file_entry_key(&path),
             display_path: rel.to_owned(),
@@ -3022,7 +3022,7 @@ mod model_preview_worker_tests {
     #[test]
     fn a_halo3_render_model_loads_on_a_worker() {
         check(
-            &crate::test_kits::h3ek_tags(),
+            &crate::core::test_kits::h3ek_tags(),
             "halo3_mcc",
             "objects/weapons/rifle/assault_rifle/assault_rifle.render_model",
         );
@@ -3031,7 +3031,7 @@ mod model_preview_worker_tests {
     #[test]
     fn a_classic_halo2_render_model_loads_on_a_worker() {
         check(
-            &crate::test_kits::h2ek_tags(),
+            &crate::core::test_kits::h2ek_tags(),
             "halo2_mcc",
             "objects/weapons/rifle/battle_rifle/battle_rifle.render_model",
         );
@@ -3054,7 +3054,7 @@ mod model_preview_worker_tests {
     /// installed as current and left for a later frame to notice.
     #[test]
     fn a_result_for_a_superseded_request_is_dropped() {
-        let tags = crate::test_kits::h3ek_tags();
+        let tags = crate::core::test_kits::h3ek_tags();
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -3086,7 +3086,7 @@ mod model_preview_worker_tests {
     /// parsing the bytes from before the edit, so its result must not land.
     #[test]
     fn invalidating_drops_the_load_in_flight() {
-        let tags = crate::test_kits::h3ek_tags();
+        let tags = crate::core::test_kits::h3ek_tags();
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;
@@ -3107,7 +3107,7 @@ mod model_preview_worker_tests {
     /// preview must ask again rather than wait on a request nobody will answer.
     #[test]
     fn a_result_dropped_for_a_generation_bump_is_requested_again() {
-        let tags = crate::test_kits::h3ek_tags();
+        let tags = crate::core::test_kits::h3ek_tags();
         let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
         let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
             return;

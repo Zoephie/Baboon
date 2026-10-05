@@ -3,19 +3,12 @@
 
 use crate::app::kits::detect::add_standard_editing_kit_profiles;
 use super::*;
-use crate::app::shell::{
-    LastSessionFolder, LastSessionKit, LastSessionSourceKind, LastSessionState, LastSessionTag,
-};
 use crate::app::kits::safe_custom_icon_relative_path;
 use crate::app::editor::default_color_swatches;
 use crate::app::browser::{BrowserMode, BrowserSearchScope, BrowserSort};
 
 pub(super) fn prefs_path() -> PathBuf {
     crate::core::storage::data_path("prefs.json")
-}
-
-pub(super) fn last_session_path() -> PathBuf {
-    crate::core::storage::data_path("last_session.json")
 }
 
 pub(super) fn terminal_logs_dir() -> PathBuf {
@@ -51,17 +44,9 @@ fn first_run_complete_from_text(text: Option<&str>) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(test)]
-mod first_run_tests;
 
-#[cfg(test)]
-mod update_channel_tests;
 
-#[cfg(test)]
-mod bitmap_preview_tests;
 
-#[cfg(test)]
-mod compat_fixtures_tests;
 
 pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Some(text) = read_prefs_text() else {
@@ -824,7 +809,7 @@ fn prefs_to_value(
 /// Replace `path` with `text` so a crash leaves either the old file or the
 /// new one. This used to remove the old file before renaming the new one in,
 /// so a crash between the two left no file at all.
-fn write_text_atomic(path: &Path, text: &str, what: &str) -> Result<(), String> {
+pub(in crate::app) fn write_text_atomic(path: &Path, text: &str, what: &str) -> Result<(), String> {
     use std::io::Write as _;
     let mut file = atomic_write_file::AtomicWriteFile::open(path)
         .map_err(|error| format!("Could not save {what}: {error}"))?;
@@ -861,7 +846,7 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 /// by any earlier build still restores rather than being silently dropped.
 /// The browser view enums travel as strings in both `prefs.json` and
 /// `last_session.json`. Mapped in one place so the two files cannot drift.
-fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
+pub(in crate::app) fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
     match text? {
         "folders" => Some(BrowserMode::Folders),
         "groups" => Some(BrowserMode::Groups),
@@ -869,14 +854,14 @@ fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
     }
 }
 
-fn browser_mode_str(mode: BrowserMode) -> &'static str {
+pub(in crate::app) fn browser_mode_str(mode: BrowserMode) -> &'static str {
     match mode {
         BrowserMode::Folders => "folders",
         BrowserMode::Groups => "groups",
     }
 }
 
-fn browser_sort_from_str(text: Option<&str>) -> Option<BrowserSort> {
+pub(in crate::app) fn browser_sort_from_str(text: Option<&str>) -> Option<BrowserSort> {
     match text? {
         "natural" => Some(BrowserSort::Natural),
         "name" => Some(BrowserSort::Name),
@@ -902,7 +887,7 @@ fn nested_default_str(nested: NestedDefault) -> &'static str {
     }
 }
 
-fn browser_sort_str(sort: BrowserSort) -> &'static str {
+pub(in crate::app) fn browser_sort_str(sort: BrowserSort) -> &'static str {
     match sort {
         BrowserSort::Natural => "natural",
         BrowserSort::Name => "name",
@@ -910,290 +895,10 @@ fn browser_sort_str(sort: BrowserSort) -> &'static str {
     }
 }
 
-pub(super) fn load_last_session() -> Option<LastSessionState> {
-    let text = fs::read_to_string(last_session_path()).ok()?;
-    let value = serde_json::from_str::<Value>(&text).ok()?;
-    parse_last_session(&value)
-}
 
-/// Pure parse of a session document, split out from the file read so every
-/// format version is covered by tests.
-fn parse_last_session(value: &Value) -> Option<LastSessionState> {
-    let kits = match value.get("version").and_then(Value::as_u64)? {
-        // Versions 1 and 2 each describe a single source, so they load as one
-        // kit. They are both accepted because they were both written: v1 by
-        // released Baboon, v2 by the build that added `.baboon` projects.
-        1 | 2 => vec![parse_session_kit(value)?],
-        // Versions 3 to 6 are that same per-kit object, once per open kit.
-        // Version 4 adds optional Chimp package tabs, version 5 the Bitmap
-        // Library flag, and version 6 folder panes. Each field is optional on
-        // the way in, so older files still load and only lack what they never
-        // recorded.
-        3 | 4 | 5 | 6 => value
-            .get("kits")?
-            .as_array()?
-            .iter()
-            .filter_map(parse_session_kit)
-            .collect(),
-        _ => return None,
-    };
-    if kits.is_empty() {
-        return None;
-    }
-    Some(LastSessionState { kits })
-}
 
-/// Parse one kit's `{source, tags}` object. Both format versions use the same
-/// shape for this part, which is what makes the v1 upgrade a one-liner.
-fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
-    let source = value.get("source")?;
-    let source_kind = LastSessionSourceKind::from_str(source.get("kind")?.as_str()?.trim())?;
-    let source_path = source
-        .get("path")?
-        .as_str()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)?;
-    let game = source
-        .get("game")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|game| !game.is_empty())
-        .map(str::to_owned);
-    let profile_id = source
-        .get("profile_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned);
-    let project_path = source
-        .get("project_path")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from);
-    // Absent in sessions written while `project_path` still meant "the file this
-    // workspace autosaves to", which was set for every workspace that had a
-    // project at all — so its presence is exactly what this flag now records.
-    let has_project = source
-        .get("has_project")
-        .and_then(Value::as_bool)
-        .unwrap_or(project_path.is_some());
-    // Absent in every session written before the focused workspace was
-    // recorded, which reads back as "no kit was active" and leaves the restore
-    // picking whichever kit it used to.
-    let was_active = value
-        .get("active")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    // Absent in sessions written before the browser view became per-kit, and
-    // in every version-1 and version-2 file. `None` means "use the default".
-    let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str));
-    let browser_sort = browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str));
-    let mut tags = Vec::new();
-    for item in value
-        .get("tags")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let Some(key) = item
-            .get("key")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-        else {
-            continue;
-        };
-        let label = item
-            .get("label")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|label| !label.is_empty())
-            .unwrap_or(key)
-            .to_owned();
-        let group_tag = item.get("group_tag").and_then(Value::as_u64).unwrap_or(0) as u32;
-        let path = item
-            .get("path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from);
-        tags.push(LastSessionTag {
-            key: key.to_owned(),
-            label,
-            group_tag,
-            path,
-        });
-    }
-    let folders = value
-        .get("folders")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let rel_path = item
-                .get("path")?
-                .as_str()
-                .map(str::trim)
-                .filter(|path| !path.is_empty())?;
-            let label = item
-                .get("label")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|label| !label.is_empty())
-                .or_else(|| rel_path.rsplit(['/', '\\']).next())?;
-            Some(LastSessionFolder {
-                rel_path: PathBuf::from(rel_path),
-                label: label.to_owned(),
-            })
-        })
-        .collect::<Vec<_>>();
-    let chimp_packages = value
-        .get("chimp_packages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|package| !package.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    let active_chimp_package = value
-        .get("active_chimp_package")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|package| chimp_packages.iter().any(|open| open == package))
-        .map(str::to_owned);
-    // Absent in every session written before the Bitmap Library existed, which
-    // reads back as "it was not open" — the right answer for those files.
-    let bitmap_library_open = value
-        .get("bitmap_library")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let model_library_open = value
-        .get("model_library")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    // Keep source-only workspaces. The source path is meaningful session state
-    // even when no tag window or project was open in that workspace.
-    Some(LastSessionKit {
-        source_kind,
-        source_path,
-        game,
-        profile_id,
-        project_path,
-        has_project,
-        browser_mode,
-        browser_sort,
-        tags,
-        folders,
-        chimp_packages,
-        active_chimp_package,
-        bitmap_library_open,
-        model_library_open,
-        was_active,
-    })
-}
 
-/// Persist every kit's source and open tag/folder panes for the launch-time restore
-/// prompt, along with which of them was focused. Written from the confirmed
-/// app-exit path and again as the event loop tears down, so a quit that never
-/// asks the window to close — macOS Cmd+Q — still records the session; a crash
-/// leaves the previous one intact.
-pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String> {
-    let path = last_session_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Could not create session folder: {error}"))?;
-    }
-    let text = serde_json::to_string_pretty(&session_value(session))
-        .map_err(|error| format!("Could not encode session: {error}"))?;
-    // Atomic, as the doc above promises: this runs after every autosave, so a
-    // plain write left a window for a crash to truncate the session to nothing.
-    write_text_atomic(&path, &text, "session")
-}
 
-/// Pure encode of a session document, split out from the file write so the
-/// round trip through [`parse_last_session`] is covered by tests.
-fn session_value(session: &LastSessionState) -> Value {
-    let kits = session
-        .kits
-        .iter()
-        .map(|kit| {
-            let tags = kit
-                .tags
-                .iter()
-                .map(|tag| {
-                    json!({
-                        "key": tag.key,
-                        "label": tag.label,
-                        "group_tag": tag.group_tag,
-                        "path": tag.path.as_ref().map(|path| path.display().to_string()),
-                    })
-                })
-                .collect::<Vec<_>>();
-            let folders = kit
-                .folders
-                .iter()
-                .map(|folder| {
-                    json!({
-                        "path": folder.rel_path.to_string_lossy().replace('\\', "/"),
-                        "label": folder.label,
-                    })
-                })
-                .collect::<Vec<_>>();
-            json!({
-                "source": {
-                    "kind": kit.source_kind.as_str(),
-                    "path": kit.source_path.display().to_string(),
-                    "game": kit.game,
-                    "profile_id": kit.profile_id,
-                    "project_path": kit.project_path.as_ref().map(|path| path.display().to_string()),
-                    "has_project": kit.has_project,
-                },
-                "browser_mode": kit.browser_mode.map(browser_mode_str),
-                "browser_sort": kit.browser_sort.map(browser_sort_str),
-                "tags": tags,
-                "folders": folders,
-                "chimp_packages": kit.chimp_packages,
-                "active_chimp_package": kit.active_chimp_package,
-                "bitmap_library": kit.bitmap_library_open,
-                "model_library": kit.model_library_open,
-                // Which workspace the user was looking at. Written as a flag on
-                // the kit rather than an index beside the list: the restore
-                // prompt can drop kits, and an index would then point at
-                // whichever one moved into that slot. Absent in sessions
-                // written before this, which read back as "no kit was active"
-                // and leave the restore picking as it used to.
-                "active": kit.was_active,
-            })
-        })
-        .collect::<Vec<_>>();
-    json!({
-        "version": 6,
-        "kits": kits,
-    })
-}
-
-pub(super) fn clear_last_session() {
-    let _ = fs::remove_file(last_session_path());
-}
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod nested_default_tests;
-
-#[cfg(test)]
-mod chimp_pref_tests;
-
-#[cfg(test)]
-mod session_tests;
-
-#[cfg(test)]
-mod prefs_round_trip_tests;
 
 impl Baboon {
     pub(in crate::app) fn current_prefs(&self) -> GuiPrefs {
@@ -1253,7 +958,823 @@ impl Baboon {
     }
 }
 
-#[cfg(test)]
-mod prefs_throttle_tests;
 pub(in crate::app) mod state;
 pub(in crate::app) use state::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::browser::BrowserAction;
+    use crate::core::test_kits::{compat_json, compat_samples};
+    use std::path::PathBuf;
+
+    #[test]
+    fn legacy_custom_color_swatches_migrate_to_last_row() {
+        let value = serde_json::json!({
+            "custom_color_swatches": [
+                "#FF0000FF",
+                null,
+                "#33669980",
+                "not-a-color"
+            ]
+        });
+
+        let swatches = load_custom_color_swatches(&value);
+        assert_eq!(swatches.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(
+            swatches[0],
+            Some(ColorPaletteSwatch::unnamed([255, 0, 0, 255]))
+        );
+        assert_eq!(
+            swatches[48],
+            Some(ColorPaletteSwatch::unnamed([255, 0, 0, 255]))
+        );
+        assert_eq!(swatches[49], None);
+        assert_eq!(
+            swatches[50],
+            Some(ColorPaletteSwatch::unnamed([51, 102, 153, 128]))
+        );
+        assert_eq!(swatches[51], None);
+    }
+
+    #[test]
+    fn named_color_swatches_load_from_preferences() {
+        let value = serde_json::json!({
+            "custom_color_swatches": [
+                { "rgba": "#FF0000FF", "name": "Red" }
+            ]
+        });
+
+        let swatches = load_custom_color_swatches(&value);
+        assert_eq!(
+            swatches[48],
+            Some(ColorPaletteSwatch::named([255, 0, 0, 255], "Red"))
+        );
+    }
+
+    #[test]
+    fn load_editing_kit_paths_ignores_empty_and_unknown_entries() {
+        let value = json!({
+            "editing_kit_paths": {
+                "halo3_mcc": "C:/Games/H3EK",
+                "haloce_evolved": "D:/Games/Halo Campaign Evolved",
+                "halo4_mcc": "",
+                "unknown": "C:/Games/Unknown"
+            }
+        });
+
+        let paths = load_editing_kit_paths(&value);
+
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths.get("halo3_mcc"),
+            Some(&PathBuf::from("C:/Games/H3EK"))
+        );
+        assert_eq!(
+            paths.get("haloce_evolved"),
+            Some(&PathBuf::from("D:/Games/Halo Campaign Evolved"))
+        );
+        assert!(!paths.contains_key("halo4_mcc"));
+        assert!(!paths.contains_key("unknown"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clean_recent_path_hides_windows_verbatim_prefixes() {
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"\\?\D:\Games\H2EK")),
+            PathBuf::from(r"D:\Games\H2EK")
+        );
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"\\?\UNC\server\share\H3EK")),
+            PathBuf::from(r"\\server\share\H3EK")
+        );
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"D:\Games\H4EK")),
+            PathBuf::from(r"D:\Games\H4EK")
+        );
+    }
+
+    #[test]
+    fn custom_editing_kit_profiles_round_trip_in_creation_order() {
+        assert!(load_custom_editing_kit_profiles(&json!({})).is_empty());
+        let value = json!({
+            "custom_editing_kit_profiles": [
+                {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "name": "Reach Project",
+                    "read_only": true,
+                    "git_tracked": true,
+                    "game": "haloreach_mcc",
+                    "root": "\\\\?\\D:\\Kits\\ReachProject",
+                    "icon": "editing kit icons/reach-11111111/icon-a.png"
+                },
+                {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "name": "Second Project",
+                    "game": "halo3_mcc",
+                    "root": "D:/Kits/H3Project",
+                    "icon": "../../unsafe.png"
+                }
+            ]
+        });
+        let profiles = load_custom_editing_kit_profiles(&value);
+        assert!(profiles[0].read_only);
+        assert!(profiles[0].git_tracked);
+        assert!(!profiles[1].read_only, "old entries must remain writable");
+        assert!(!profiles[1].git_tracked, "old entries must not enable Git");
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|profile| profile.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Reach Project", "Second Project"]
+        );
+        assert_eq!(
+            profiles[0].icon.as_deref(),
+            Some(Path::new("editing kit icons/reach-11111111/icon-a.png"))
+        );
+        assert_eq!(profiles[1].icon, None);
+        #[cfg(windows)]
+        assert_eq!(profiles[0].root, PathBuf::from(r"D:\Kits\ReachProject"));
+
+        let serialized = json!({
+            "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)
+        });
+        assert_eq!(load_custom_editing_kit_profiles(&serialized), profiles);
+    }
+
+    #[test]
+    fn editing_kit_favorites_are_scoped_by_tags_root() {
+        let value = json!({
+            "editing_kit_favorites": [
+                {
+                    "tags_root": "C:/Games/H2EK/tags",
+                    "tags": [
+                        "objects/brute.model",
+                        "objects/brute.model",
+                        "../outside.model"
+                    ],
+                    "folders": [
+                        "objects/characters/brute",
+                        "objects/characters/brute",
+                        "../outside"
+                    ]
+                },
+                {
+                    "tags_root": "C:/Games/H3EK/tags",
+                    "tags": ["objects/brute.model"]
+                }
+            ]
+        });
+
+        let favorites = load_editing_kit_favorites(&value);
+
+        assert_eq!(favorites.len(), 2);
+        assert_eq!(favorites[0].tags_root, PathBuf::from("C:/Games/H2EK/tags"));
+        assert_eq!(
+            favorites[0].tags,
+            vec![PathBuf::from("objects/brute.model")]
+        );
+        assert_eq!(
+            favorites[0].folders,
+            vec![PathBuf::from("objects/characters/brute")]
+        );
+        assert_eq!(favorites[1].tags_root, PathBuf::from("C:/Games/H3EK/tags"));
+        assert_eq!(
+            favorites[1].tags,
+            vec![PathBuf::from("objects/brute.model")]
+        );
+        assert!(favorites[1].folders.is_empty());
+    }
+
+    #[test]
+    fn favorite_paths_must_be_relative_and_normalized() {
+        assert_eq!(
+            clean_favorite_relative_path(PathBuf::from("objects/brute.model")),
+            Some(PathBuf::from("objects/brute.model"))
+        );
+        assert!(clean_favorite_relative_path(PathBuf::from("../brute.model")).is_none());
+        assert!(clean_favorite_relative_path(PathBuf::from("./brute.model")).is_none());
+        assert!(clean_favorite_relative_path(PathBuf::new()).is_none());
+    }
+
+    #[test]
+    fn browser_search_scope_defaults_to_tags_and_round_trips_every_selection() {
+        let tags_only = BrowserSearchScope::default();
+        assert!(tags_only.tags && !tags_only.folders && !tags_only.keywords);
+        assert_eq!(prefs_from_value(&json!({})).browser_search_scope, tags_only);
+        for selection in 1..8 {
+            let scope = BrowserSearchScope {
+                tags: selection & 1 != 0,
+                folders: selection & 2 != 0,
+                keywords: selection & 4 != 0,
+            };
+            let prefs = GuiPrefs {
+                browser_search_scope: scope,
+                ..GuiPrefs::default()
+            };
+            let saved = prefs_to_value(&prefs, &HashSet::new(), false);
+            assert_eq!(prefs_from_value(&saved).browser_search_scope, scope);
+        }
+        assert_eq!(
+            prefs_from_value(&json!({"browser_search_scope": {
+                "tags": false, "folders": false, "keywords": false
+            }}))
+            .browser_search_scope,
+            tags_only
+        );
+    }
+
+    // Every saved format Baboon reads, fed through the real readers from the
+    // synthetic samples in `testdata/compat` (see its README; regenerate with
+    // `gen_samples.py`). Old files must keep loading, files a newer build wrote
+    // must not be destroyed by this one, and the cases a reader refuses are
+    // pinned beside the ones it accepts, so a reader that accepted everything
+    // would fail here too.
+
+    #[test]
+    fn compat_prefs() {
+        let prefs = prefs_from_value(&compat_json("prefs/prefs.current.json"));
+        assert_eq!(prefs.custom_editing_kit_profiles.len(), 10);
+        let games: Vec<&str> = prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .map(|profile| profile.game.as_str())
+            .collect();
+        for game in [
+            "haloce_mcc",
+            "halo2_mcc",
+            "halo2amp_mcc",
+            "halo3_mcc",
+            "halo3odst_mcc",
+            "haloreach_mcc",
+            "halo4_mcc",
+            "haloce_evolved",
+        ] {
+            assert!(games.contains(&game), "{game}");
+        }
+        let moda = prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .find(|profile| profile.name == "H2 (moda tags)")
+            .unwrap();
+        assert!(moda.read_only && moda.git_tracked);
+        // A backslash icon path is one component on Unix, so it is not under the
+        // icon folder there and is dropped; Windows keeps it.
+        #[cfg(not(windows))]
+        assert!(moda.icon.is_none());
+        assert!(moda.tags_folder.is_some());
+        let reach = prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .find(|profile| profile.name == "Reach ignored folder")
+            .unwrap();
+        assert!(
+            reach.tags_folder.is_none(),
+            "tags_folder is ignored for a game whose folders are not choosable"
+        );
+        assert_eq!(prefs.ek_folder_aliases.len(), 2);
+        assert_eq!(prefs.editing_kit_favorites.len(), 2);
+
+        let encoded = prefs_to_value(&prefs, &HashSet::from(["halo3_mcc".to_owned()]), true);
+        let decoded = prefs_from_value(&encoded);
+        let ids = |prefs: &GuiPrefs| {
+            prefs
+                .custom_editing_kit_profiles
+                .iter()
+                .map(|profile| (profile.id.clone(), profile.game.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&prefs), ids(&decoded));
+
+        // Kits for games this build does not support are not offered, but they
+        // are written back as they were read (63b257d). Before that, the next
+        // save of any preference deleted them.
+        let stored = compat_json("prefs/prefs.unknown_game.json");
+        let unknown = prefs_from_value(&stored);
+        assert_eq!(
+            ids(&unknown),
+            [(
+                "bab00000-0000-4000-8000-000000000002".to_owned(),
+                "halo3_mcc".to_owned()
+            )]
+        );
+        assert!(unknown.ek_folder_aliases.is_empty());
+        let resaved = prefs_to_value(&unknown, &HashSet::new(), true);
+        let profiles = resaved["editing_kit_profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 3, "{profiles:#?}");
+        for kept in [
+            &stored["editing_kit_profiles"][0],
+            &stored["editing_kit_profiles"][2],
+        ] {
+            assert!(profiles.contains(kept), "{kept} kept field for field");
+        }
+        assert_eq!(
+            resaved["ek_folder_aliases"],
+            stored["ek_folder_aliases"],
+            "the alias for an unknown game is kept"
+        );
+        assert!(prefs_from_value(&resaved) == unknown, "stable once written");
+
+        // Before unified profiles: `editing_kit_paths`, one standard kit per game.
+        let legacy = prefs_from_value(&compat_json("prefs/prefs.legacy_editing_kit_paths.json"));
+        assert_eq!(legacy.custom_editing_kit_profiles.len(), 8);
+        assert!(
+            legacy
+                .custom_editing_kit_profiles
+                .iter()
+                .all(|profile| profile.id.starts_with("bab00000-0000-4000-8000-00000000000"))
+        );
+        assert_eq!(legacy.session_restore, SessionRestore::Always);
+        assert_eq!(
+            legacy.custom_color_swatches.len(),
+            CUSTOM_COLOR_SWATCH_COUNT
+        );
+
+        // The older `custom_editing_kit_profiles` key, a mixed-case game id.
+        let old = prefs_from_value(&compat_json("prefs/prefs.legacy_custom_profiles.json"));
+        assert!(
+            old.custom_editing_kit_profiles
+                .iter()
+                .any(|profile| profile.game == "halo3_mcc" && profile.name == "Old custom")
+        );
+        assert!(
+            old.custom_editing_kit_profiles
+                .iter()
+                .any(|profile| profile.game == "haloreach_mcc")
+        );
+
+        // A file cut short is not a first run.
+        let text = std::fs::read_to_string(compat_samples().join("prefs/prefs.malformed.json")).unwrap();
+        assert!(first_run_complete_from_text(Some(&text)));
+        assert!(!first_run_complete_from_text(None));
+    }
+
+    #[test]
+    fn no_preferences_starts_first_run() {
+        assert!(!first_run_complete_from_text(None));
+    }
+
+    #[test]
+    fn existing_preferences_without_marker_are_complete() {
+        assert!(first_run_complete_from_text(Some("{}")));
+    }
+
+    #[test]
+    fn explicit_false_resumes_and_true_finishes_setup() {
+        assert!(!first_run_complete_from_text(Some(
+            r#"{"first_run_complete":false}"#
+        )));
+        assert!(first_run_complete_from_text(Some(
+            r#"{"first_run_complete":true}"#
+        )));
+    }
+
+    #[test]
+    fn malformed_existing_preferences_still_skip_first_run() {
+        assert!(first_run_complete_from_text(Some("not json")));
+    }
+
+    fn stored(prefs: &GuiPrefs) -> GuiPrefs {
+        prefs_from_value(&prefs_to_value(prefs, &HashSet::new(), true))
+    }
+
+    #[test]
+    fn the_stable_channel_is_the_default() {
+        let prefs = prefs_from_value(&json!({}));
+        assert_eq!(prefs.update_channel, UpdateChannel::Stable);
+        assert!(prefs.check_updates_on_startup);
+    }
+
+    #[test]
+    fn preferences_written_before_this_setting_existed_load_as_stable() {
+        // No `update_channel` key, but plenty of other settings: an existing user's
+        // file must not silently move them onto development builds.
+        let prefs = prefs_from_value(&json!({
+            "session_restore": "always",
+            "dark_mode": true,
+        }));
+        assert_eq!(prefs.update_channel, UpdateChannel::Stable);
+        assert!(prefs.check_updates_on_startup);
+        assert_eq!(prefs.session_restore, SessionRestore::Always);
+    }
+
+    #[test]
+    fn the_chosen_channel_survives_a_save_and_load() {
+        let mut prefs = GuiPrefs::default();
+        prefs.update_channel = UpdateChannel::Development;
+        prefs.check_updates_on_startup = false;
+
+        let reloaded = stored(&prefs);
+        assert_eq!(reloaded.update_channel, UpdateChannel::Development);
+        assert!(!reloaded.check_updates_on_startup);
+
+        prefs.update_channel = UpdateChannel::Stable;
+        prefs.check_updates_on_startup = true;
+        let reloaded = stored(&prefs);
+        assert_eq!(reloaded.update_channel, UpdateChannel::Stable);
+        assert!(reloaded.check_updates_on_startup);
+    }
+
+    #[test]
+    fn an_unrecognised_channel_falls_back_to_stable() {
+        let prefs = prefs_from_value(&json!({"update_channel": "nightly"}));
+        assert_eq!(prefs.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn old_preferences_keep_the_bitmap_view_defaults() {
+        let prefs = prefs_from_value(&json!({}));
+        assert_eq!(
+            prefs.bitmap_preview_view,
+            BitmapPreviewViewSettings::default()
+        );
+    }
+
+    #[test]
+    fn bitmap_view_choices_survive_a_save_and_load() {
+        let mut prefs = GuiPrefs::default();
+        prefs.bitmap_preview_view = BitmapPreviewViewSettings {
+            bg: BitmapPreviewBg::Magenta,
+            show_checkerboard: false,
+            show_border: false,
+        };
+
+        assert_eq!(
+            stored(&prefs).bitmap_preview_view,
+            prefs.bitmap_preview_view
+        );
+    }
+
+    #[test]
+    fn an_unknown_bitmap_background_uses_the_default() {
+        let prefs = prefs_from_value(&json!({
+            "bitmap_preview_background": "chartreuse",
+            "bitmap_preview_checkerboard": false,
+            "bitmap_preview_border": false,
+        }));
+
+        assert_eq!(prefs.bitmap_preview_view.bg, BitmapPreviewBg::DarkGray);
+        assert!(!prefs.bitmap_preview_view.show_checkerboard);
+        assert!(!prefs.bitmap_preview_view.show_border);
+    }
+
+    /// The stored spelling has to round trip, or the setting silently reverts
+    /// to Default on the next launch.
+    #[test]
+    fn every_nested_default_round_trips_through_its_stored_name() {
+        for option in NestedDefault::ALL {
+            assert_eq!(
+                nested_default_from_str(Some(nested_default_str(option))),
+                Some(option),
+                "{} did not round trip",
+                option.label()
+            );
+        }
+        // An absent or unrecognised value falls back rather than failing the
+        // whole preferences load.
+        assert_eq!(nested_default_from_str(None), None);
+        assert_eq!(nested_default_from_str(Some("nonsense")), None);
+    }
+
+    #[test]
+    fn editing_kit_migration_is_stable_and_saves_only_unified_profiles() {
+        let legacy = json!({
+            "editing_kit_paths": {
+                "halo2_mcc": "Z:/Unavailable/H2EK",
+                "haloce_evolved": "Z:/Unavailable/Halo Campaign Evolved"
+            },
+            "custom_editing_kit_profiles": [{
+                "id": "11111111-1111-4111-8111-111111111111",
+                "name": "My mod", "game": "halo3_mcc", "root": "Z:/Unavailable/Mod",
+                "icon": "editing kit icons/mod/icon.png"
+            }]
+        });
+        let prefs = prefs_from_value(&legacy);
+        assert!(prefs.editing_kit_paths.is_empty());
+        assert_eq!(prefs.custom_editing_kit_profiles.len(), 3);
+        assert_eq!(
+            prefs.custom_editing_kit_profiles,
+            prefs_from_value(&legacy).custom_editing_kit_profiles
+        );
+        assert_eq!(prefs.custom_editing_kit_profiles[0].name, "My mod");
+        assert!(prefs.custom_editing_kit_profiles[0].icon.is_some());
+        let saved = prefs_to_value(&prefs, &HashSet::new(), true);
+        assert!(saved.get("editing_kit_paths").is_none());
+        assert!(saved.get("custom_editing_kit_profiles").is_none());
+        assert_eq!(
+            prefs.custom_editing_kit_profiles,
+            prefs_from_value(&saved).custom_editing_kit_profiles
+        );
+        let mut removed = saved;
+        removed["editing_kit_profiles"] = json!([]);
+        removed["editing_kit_paths"] = legacy["editing_kit_paths"].clone();
+        assert!(
+            prefs_from_value(&removed)
+                .custom_editing_kit_profiles
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn editing_kit_detection_profiles_deduplicate_roots_without_changing_edits() {
+        let paths = HashMap::from([("halo2_mcc".to_owned(), PathBuf::from("Z:/Unavailable/H2EK"))]);
+        let mut profiles = Vec::new();
+        assert_eq!(add_standard_editing_kit_profiles(&mut profiles, &paths), 1);
+        profiles[0].name = "Renamed kit".to_owned();
+        profiles[0].icon = Some(PathBuf::from("editing kit icons/mod/icon.png"));
+        let previous = profiles.clone();
+        assert_eq!(add_standard_editing_kit_profiles(&mut profiles, &paths), 0);
+        assert_eq!(profiles, previous);
+        let legacy = json!({
+            "editing_kit_paths": { "halo2_mcc": "Z:/Unavailable/H2EK" },
+            "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)
+        });
+        assert_eq!(
+            prefs_from_value(&legacy).custom_editing_kit_profiles,
+            previous
+        );
+    }
+
+    /// A profile or folder alias naming a game this build does not know (one
+    /// a newer Baboon supports, or none) used to be dropped on load, and so
+    /// deleted from the file by the next save of any preference.
+    #[test]
+    fn kits_for_unsupported_games_survive_a_save_but_are_not_offered() {
+        let usable = json!({
+            "id": "6f1c3f9e-1d1b-4c2a-9a55-0d6f1d1b2c3a",
+            "name": "Halo 3",
+            "game": "halo3_mcc",
+            "root": "/kits/h3",
+        });
+        let future = json!({
+            "id": "0b5e2a7c-3a43-4f37-8f2e-6a9d2c1b4e5f",
+            "name": "Halo Infinite",
+            "game": "haloinfinite",
+            "root": "/kits/hi",
+            "some_newer_setting": [1, 2, 3],
+        });
+        let gameless = json!({
+            "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+            "name": "No game",
+            "game": "",
+            "root": "/kits/none",
+        });
+        let future_alias = json!({ "folder_name": "HIEK", "game": "haloinfinite" });
+        let usable_alias = json!({ "folder_name": "H3EK", "game": "halo3_mcc" });
+        let stored = json!({
+            "editing_kit_profiles": [usable, future, gameless],
+            "ek_folder_aliases": [usable_alias, future_alias],
+        });
+
+        let prefs = prefs_from_value(&stored);
+        let offered: Vec<&str> = prefs
+            .custom_editing_kit_profiles
+            .iter()
+            .map(|profile| profile.game.as_str())
+            .collect();
+        assert_eq!(offered, ["halo3_mcc"], "only a supported game is a kit");
+        assert_eq!(prefs.ek_folder_aliases.len(), 1);
+
+        let written = prefs_to_value(&prefs, &HashSet::new(), true);
+        let profiles = written["editing_kit_profiles"].as_array().unwrap();
+        assert!(profiles.contains(&future), "{profiles:#?}");
+        assert!(profiles.contains(&gameless), "{profiles:#?}");
+        assert_eq!(profiles.len(), 3);
+        let aliases = written["ek_folder_aliases"].as_array().unwrap();
+        assert!(aliases.contains(&future_alias), "{aliases:#?}");
+        assert_eq!(aliases.len(), 2);
+
+        // Written back and read again, nothing changes.
+        assert!(prefs_from_value(&written) == prefs);
+    }
+
+    #[test]
+    fn chimp_is_enabled_for_preferences_written_before_it_existed() {
+        let prefs = prefs_from_value(&json!({}));
+        assert!(prefs.enable_chimp);
+        assert_eq!(prefs.chimp_output_dir, None);
+        assert_eq!(prefs.chimp_usmap_path, None);
+    }
+
+    #[test]
+    fn chimp_visibility_and_output_directory_round_trip() {
+        let prefs = GuiPrefs {
+            enable_chimp: false,
+            chimp_output_dir: Some(PathBuf::from("D:/Mods/Chimp")),
+            chimp_usmap_path: Some(PathBuf::from("D:/Mappings/Meteorite.usmap")),
+            ..GuiPrefs::default()
+        };
+        let value = prefs_to_value(&prefs, &HashSet::new(), true);
+        let restored = prefs_from_value(&value);
+        assert!(!restored.enable_chimp);
+        assert_eq!(
+            restored.chimp_output_dir,
+            Some(PathBuf::from("D:/Mods/Chimp"))
+        );
+        assert_eq!(
+            restored.chimp_usmap_path,
+            Some(PathBuf::from("D:/Mappings/Meteorite.usmap"))
+        );
+    }
+
+    // Preferences are held once, as the `GuiPrefs` that was loaded, so what is
+    // written back is what was read plus what the user changed — with no
+    // mirrored field for a new preference to be forgotten in.
+
+    fn app_with(prefs: GuiPrefs) -> Baboon {
+        Baboon::assemble(
+            &egui::Context::default(),
+            crate::app::shell::window_state::WindowStateTracker::for_test(),
+            prefs,
+            HashSet::new(),
+            None,
+            TagNameIndex::default(),
+            None,
+        )
+    }
+
+    /// Loaded, then written back untouched: every field survives. Most are set
+    /// away from their defaults, so a writer that rebuilt the struct from
+    /// defaults, or dropped a field on the way through, would differ.
+    #[test]
+    fn loaded_prefs_are_written_back_unchanged() {
+        let prefs = GuiPrefs {
+            browser_mode: BrowserMode::Groups,
+            browser_search_scope: BrowserSearchScope {
+                tags: false,
+                folders: true,
+                keywords: true,
+            },
+            show_browser_prefixes: true,
+            folders_before_tags: true,
+            double_click_to_open_tags: true,
+            check_updates_on_startup: false,
+            show_block_sizes: true,
+            angles_in_degrees: false,
+            scroll_to_cycle_dropdowns: false,
+            confirm_container_overwrite: false,
+            confirm_runtime_poke: false,
+            enable_chimp: false,
+            chimp_output_dir: Some(PathBuf::from("/out")),
+            chimp_usmap_path: Some(PathBuf::from("/mappings.usmap")),
+            expert_mode: true,
+            dark_mode: true,
+            ui_scale: 1.25,
+            scroll_speed: 2.5,
+            zoom_speed: 0.75,
+            model_preview_size: 333.0,
+            model_preview_perspective: false,
+            blender_path: Some(PathBuf::from("/blender")),
+            tool_commands_window_pos: Some(egui::pos2(10.0, 20.0)),
+            tool_commands_window_size: Some(egui::vec2(700.0, 500.0)),
+            tool_commands_left_width: MIN_TOOL_COMMANDS_LEFT_WIDTH + 40.0,
+            tool_commands_collapsed_categories: HashSet::from(["build".to_owned()]),
+            recent_folders: vec![PathBuf::from("/recent")],
+            custom_color_swatches: vec![Some(ColorPaletteSwatch::named([1, 2, 3, 4], "Sample"))],
+            palette_last_dir: Some(PathBuf::from("/palettes")),
+            ..GuiPrefs::default()
+        };
+        let app = app_with(prefs.clone());
+        assert!(
+            app.current_prefs() == prefs,
+            "a loaded preference did not survive"
+        );
+    }
+
+    /// A value out of range in the file is brought into range once, and that is
+    /// what is written back.
+    #[test]
+    fn out_of_range_prefs_are_corrected_when_loaded() {
+        let app = app_with(GuiPrefs {
+            tool_commands_window_size: None,
+            tool_commands_left_width: 0.0,
+            ..GuiPrefs::default()
+        });
+        let written = app.current_prefs();
+        assert_eq!(
+            written.tool_commands_window_size,
+            Some(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE)
+        );
+        assert_eq!(
+            written.tool_commands_left_width,
+            MIN_TOOL_COMMANDS_LEFT_WIDTH
+        );
+        assert!(
+            written != app.saved_prefs,
+            "the correction is written back once"
+        );
+    }
+
+    /// A change made through the live prefs is what gets written.
+    #[test]
+    fn a_changed_pref_is_what_gets_written() {
+        let mut app = app_with(GuiPrefs::default());
+        app.model.prefs.expert_mode = true;
+        app.model.prefs.browser_search_scope = BrowserSearchScope {
+            tags: false,
+            folders: false,
+            keywords: true,
+        };
+        app.views[app.model.kits[0].id].browser.mode = BrowserMode::Groups;
+        let written = app.current_prefs();
+        assert!(written.expert_mode);
+        assert_eq!(written.browser_search_scope, app.model.prefs.browser_search_scope);
+        assert_eq!(
+            written.browser_mode,
+            BrowserMode::Groups,
+            "the focused kit's view"
+        );
+    }
+
+    /// The saved search scope seeds the first workspace, a new one, and a folder
+    /// browser opened in it.
+    #[test]
+    fn saved_search_scope_seeds_startup_and_new_workspaces() {
+        let scope = BrowserSearchScope {
+            tags: true,
+            folders: false,
+            keywords: true,
+        };
+        let mut app = app_with(GuiPrefs {
+            browser_search_scope: scope,
+            ..GuiPrefs::default()
+        });
+        assert_eq!(app.views[app.model.kits[0].id].browser.search_scope, scope);
+        let kit = app.add_kit();
+        assert_eq!(app.views[kit].browser.search_scope, scope);
+        app.model.active = app.model.kit_index(kit).expect("the new kit");
+        app.handle_browser_action(
+            BrowserAction::OpenFolderBrowser {
+                rel_path: PathBuf::from("objects"),
+                label: "objects".into(),
+                open_in_new_tab: true,
+            },
+            egui::Context::default(),
+        );
+        let pane = app.views[kit].browser.folder_browsers.values().next().expect("a folder browser");
+        assert_eq!(pane.search_scope, scope);
+    }
+
+    /// The per-frame prefs check runs at most once a second. It ran every
+    /// frame, and wrote prefs.json every frame while a slider was dragged.
+    #[test]
+    fn the_per_frame_prefs_check_runs_once_a_second() {
+        // Unchanged prefs, so nothing is written: this only watches the clock.
+        let mut app = Baboon::for_test();
+        app.persist_prefs_throttled(10.0);
+        assert_eq!(app.shell.prefs_next_check_at, 11.0);
+        app.persist_prefs_throttled(10.5);
+        assert_eq!(app.shell.prefs_next_check_at, 11.0, "inside the second: skipped");
+        app.persist_prefs_throttled(11.2);
+        assert_eq!(app.shell.prefs_next_check_at, 12.2);
+    }
+
+    /// A kit's chosen folders survive a save and load. A kit on its root's own
+    /// folders saves no folder keys at all, exactly as before they existed,
+    /// and an engine whose tools can't use them reads them as unset.
+    #[test]
+    fn chosen_kit_folders_round_trip_and_stay_out_of_other_kits() {
+        let profile = |id: &str, game: &str, tags: Option<&str>, data: Option<&str>| {
+            CustomEditingKitProfile {
+                read_only: false,
+                git_tracked: false,
+                id: id.to_owned(),
+                name: id.to_owned(),
+                game: game.to_owned(),
+                root: PathBuf::from("/kits/H2EK"),
+                icon: None,
+                tags_folder: tags.map(PathBuf::from),
+                data_folder: data.map(PathBuf::from),
+            }
+        };
+        let moda = profile(
+            "00000000-0000-4000-8000-00000000000a",
+            "halo2_mcc",
+            Some("tags_moda"),
+            Some("/elsewhere/data_moda"),
+        );
+        let stock = profile(
+            "00000000-0000-4000-8000-00000000000b",
+            "halo2_mcc",
+            None,
+            None,
+        );
+        let saved = custom_editing_kit_profiles_value(&[moda.clone(), stock.clone()]);
+        assert!(saved[1].get("tags_folder").is_none() && saved[1].get("data_folder").is_none());
+        let loaded = load_custom_editing_kit_profiles(&json!({ "editing_kit_profiles": saved }));
+        assert_eq!(loaded, vec![moda, stock]);
+
+        let mut halo3 = custom_editing_kit_profiles_value(&[profile(
+            "00000000-0000-4000-8000-00000000000c",
+            "halo3_mcc",
+            None,
+            None,
+        )]);
+        halo3[0]["tags_folder"] = json!("tags_moda");
+        let loaded = load_custom_editing_kit_profiles(&json!({ "editing_kit_profiles": halo3 }));
+        assert_eq!(loaded[0].tags_folder, None);
+    }
+
+}

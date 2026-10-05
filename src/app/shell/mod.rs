@@ -56,7 +56,7 @@ pub(in crate::app) mod menus;
 pub(in crate::app) use menus::draw_menu_bar;
 pub(in crate::app) mod jobs;
 pub(in crate::app) mod session;
-pub(in crate::app) use session::state::*;
+pub(in crate::app) use session::{LastOpenedWindowsPrompt, RestoreKit};
 pub(in crate::app) mod frame;
 pub(in crate::app) use frame::{draw_keyword_bar, draw_scenario_launcher_buttons};
 pub(in crate::app) mod workspace;

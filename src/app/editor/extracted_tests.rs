@@ -213,7 +213,7 @@ mod tests {
         use blam_tags::audio::{SoundBanks, decode_subsound};
         // Overridable so the same check runs against any game's tags + banks.
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| crate::test_kits::tag_path("halo3_mcc", "").to_owned());
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo3_mcc", "").to_owned());
         let rel = std::env::var("SND_TAG")
             .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -272,7 +272,7 @@ mod tests {
     fn h4_event_resolves_and_decodes() {
         use blam_tags::audio::WwiseBanks;
         let root = std::env::var("H4_TAGS_ROOT")
-            .unwrap_or_else(|_| crate::test_kits::tag_path("halo4_mcc", "").to_owned());
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo4_mcc", "").to_owned());
         let rel = std::env::var("H4_SND_TAG")
             .unwrap_or_else(|_| "sound/ui/m30_a_60_sfx.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -317,7 +317,7 @@ mod tests {
         use blam_tags::audio::{SoundBanks, fmod_bank_subsound_id_hash, fmod_pitch_range_folder};
 
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| crate::test_kits::tag_path("haloreach_mcc", "").to_owned());
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("haloreach_mcc", "").to_owned());
         let tags_root = std::path::Path::new(&root);
         if !tags_root.exists() {
             eprintln!("skip: no tags at {}", tags_root.display());
@@ -479,10 +479,10 @@ mod tests {
             }
         }
 
-        let defs = crate::test_kits::definitions();
+        let defs = crate::core::test_kits::definitions();
         let rel =
             std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
             return;
@@ -564,8 +564,8 @@ mod tests {
     #[test]
     #[ignore]
     fn ce_shader_model_clear_reference_saves() {
-        let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
             "haloce_mcc",
             "characters/crewman/shaders/crewman_body.shader_model",
         ));
@@ -633,8 +633,8 @@ mod tests {
     #[ignore]
     fn ce_inline_permutation_extracts_and_decodes() {
         use blam_tags::audio::decode_ogg_vorbis;
-        let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
             "haloce_mcc",
             "sound/sinomatixx_music/b40_extraction_music.sound",
         ));
@@ -670,8 +670,8 @@ mod tests {
     #[ignore]
     fn ce_inline_xbox_adpcm_extracts_and_decodes() {
         use super::audio::InlineCodec;
-        let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
             "haloce_mcc",
             "sound/sfx/weapons/sniper rifle/fire.sound",
         ));
@@ -729,8 +729,8 @@ mod tests {
     #[test]
     #[ignore]
     fn ce_extract_writes_wav_and_raw_ogg() {
-        let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::core::test_kits::tag_path(
             "haloce_mcc",
             "sound/sinomatixx_music/b40_extraction_music.sound",
         ));
@@ -793,8 +793,8 @@ mod tests {
     /// Read a Halo 2 kit sound, or `None` (with a skip message naming the
     /// variable) when `BLAM_TEST_H2EK` isn't set.
     fn h2_kit_sound(rel: &str) -> Option<TagFile> {
-        let defs = crate::test_kits::definitions();
-        let tag_path = crate::test_kits::h2ek_tags().join(rel);
+        let defs = crate::core::test_kits::definitions();
+        let tag_path = crate::core::test_kits::h2ek_tags().join(rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: set BLAM_TEST_H2EK to a Halo 2 kit's tags ({})", tag_path.display());
             return None;
@@ -817,7 +817,7 @@ mod tests {
         };
         let h2 = H2Sound::read(&tag).expect("H2 language entries");
         let rows = sound_permutation_rows(&tag, Some(&h2));
-        let dir = crate::test_kits::unique_temp_dir("h2_extract_german");
+        let dir = crate::core::test_kits::unique_temp_dir("h2_extract_german");
         let source = RowSource {
             h2: Some(&h2),
             language: Some("german"),
@@ -859,7 +859,7 @@ mod tests {
     #[ignore]
     fn bank_extract_writes_wav() {
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| crate::test_kits::tag_path("halo3_mcc", "").to_owned());
+            .unwrap_or_else(|_| crate::core::test_kits::tag_path("halo3_mcc", "").to_owned());
         let rel = std::env::var("SND_TAG")
             .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -1189,7 +1189,7 @@ mod tests {
     #[test]
     #[ignore]
     fn h2_every_language_entry_decodes_to_the_engine_length() {
-        let root = crate::test_kits::h2ek_tags();
+        let root = crate::core::test_kits::h2ek_tags();
         if !root.exists() {
             eprintln!("skip: set BLAM_TEST_H2EK");
             return;
@@ -1266,7 +1266,7 @@ mod tests {
     #[ignore]
     fn fmod_language_selection_resolves() {
         use blam_tags::audio::SoundBanks;
-        let tags_root = std::path::Path::new(crate::test_kits::tag_path("halo3_mcc", ""));
+        let tags_root = std::path::Path::new(crate::core::test_kits::tag_path("halo3_mcc", ""));
         if !tags_root.join("../fmod/pc/sfx.fsb").exists() {
             eprintln!("skip: no H3 fmod banks");
             return;
@@ -1299,7 +1299,7 @@ mod tests {
     #[test]
     #[ignore]
     fn h3_sound_player_action_reaches_playback() {
-        let tags_root = crate::test_kits::h3ek_tags();
+        let tags_root = crate::core::test_kits::h3ek_tags();
         let path = tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound");
         if !path.exists() {
             eprintln!("skip: set BLAM_TEST_H3EK");
@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     #[ignore]
     fn h3_extraction_writes_non_silent_pcm() {
-        let tags_root = crate::test_kits::h3ek_tags();
+        let tags_root = crate::core::test_kits::h3ek_tags();
         let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
         if !path.exists() {
             eprintln!("skip: set BLAM_TEST_H3EK");
@@ -1415,7 +1415,7 @@ mod tests {
     fn h3_all_language_extraction_reads_the_explicit_english_bank() {
         use crate::app::export::sound_extract::ExtractSource;
 
-        let tags_root = crate::test_kits::h3ek_tags();
+        let tags_root = crate::core::test_kits::h3ek_tags();
         let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
         if !path.exists() {
             eprintln!("skip: set BLAM_TEST_H3EK");

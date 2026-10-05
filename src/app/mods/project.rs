@@ -2128,6 +2128,9 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::mods::{CampaignProjectSnapshot, CampaignProjectTagKind, campaign_entry_project_parts};
+    use crate::core::test_kits::{compat_json, compat_samples, unique_temp_dir};
+    use std::path::PathBuf;
 
     /// A container tag with a dot in its name has a new identity now that its
     /// display path keeps the dot; a project written before still names it
@@ -2485,7 +2488,7 @@ mod tests {
     }
 
     fn temp_project(name: &str) -> PathBuf {
-        crate::test_kits::unique_temp_path(name).with_extension("baboon")
+        crate::core::test_kits::unique_temp_path(name).with_extension("baboon")
     }
 
     fn identities_in(path: &Path) -> Vec<String> {
@@ -2871,7 +2874,7 @@ mod tests {
     #[test]
     fn container_tag_identities_are_unique() {
         static PAKS: std::sync::LazyLock<&'static str> =
-            std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+            std::sync::LazyLock::new(|| crate::core::test_kits::leak(crate::core::test_kits::ce_paks()));
         if !std::path::Path::new(*PAKS).exists() {
             eprintln!("skipping: Campaign Evolved not present");
             return;
@@ -2923,6 +2926,186 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+    }
+
+    // Every saved format Baboon reads, fed through the real readers from the
+    // synthetic samples in `testdata/compat` (see its README; regenerate with
+    // `gen_samples.py`). Old files must keep loading, files a newer build wrote
+    // must not be destroyed by this one, and the cases a reader refuses are
+    // pinned beside the ones it accepts, so a reader that accepted everything
+    // would fail here too.
+
+    #[test]
+    fn compat_projects() {
+        use crate::app::mods::project::{
+            ProjectScope, is_campaign_recovery_file, load_campaign_project, save_campaign_project,
+        };
+        let project = compat_samples().join("project");
+        let recovery = project.join("campaign_evolved_recovery-46ec1ffb674b.baboon");
+        assert!(is_campaign_recovery_file(&recovery));
+        assert!(!is_campaign_recovery_file(
+            &project.join("user_project.history_table_only.baboon")
+        ));
+        let snap = load_campaign_project(&recovery).expect("recovery");
+        assert_eq!(snap.game, "haloce_evolved");
+        assert_eq!(snap.tabs.len(), 4);
+        assert_eq!(snap.overlays.len(), 2);
+        assert_eq!(snap.folders.len(), 2);
+        let marine = "62697064:objects/characters/marine/marine";
+        assert_eq!(snap.selected_identity.as_deref(), Some(marine));
+        let history = &snap.history[marine];
+        assert_eq!(
+            (history.undo.len(), history.redo.len()),
+            (2, 1),
+            "a stack name this build does not know is skipped"
+        );
+        // The recovery file is named by sha256(source_path); the loader compares
+        // source_path exactly, so renormalizing the root orphans the file.
+        let expected = {
+            use sha2::Digest;
+            let digest = sha2::Sha256::digest(snap.source_path.to_string_lossy().as_bytes());
+            digest[..6]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(expected, "46ec1ffb674b");
+
+        let scratch = unique_temp_dir("project");
+        let out = scratch.join("roundtrip.baboon");
+        save_campaign_project(&out, &snap, None, ProjectScope::Session).unwrap();
+        let back = load_campaign_project(&out).unwrap();
+        let identities =
+            |snap: &CampaignProjectSnapshot| snap.tabs.iter().map(|tab| tab.identity.clone()).collect::<Vec<_>>();
+        assert_eq!(identities(&back), identities(&snap));
+        assert_eq!(back.folders, snap.folders);
+        let _ = std::fs::remove_dir_all(&scratch);
+
+        let legacy = load_campaign_project(&project.join("user_project.history_table_only.baboon"))
+            .expect("history table only");
+        assert_eq!(legacy.history[marine].undo.len(), 1);
+        let original = load_campaign_project(&project.join("user_project.original_v1_schema.baboon"))
+            .expect("original schema");
+        assert!(original.history.is_empty() && original.folders.is_empty());
+        for rejected in [
+            "rejected.version2.baboon",
+            "rejected.game_halo3_mcc.baboon",
+            "rejected.unknown_kind.baboon",
+        ] {
+            assert!(
+                load_campaign_project(&project.join(rejected)).is_err(),
+                "{rejected} must be refused"
+            );
+        }
+    }
+
+    /// A Campaign Evolved tag's project identity is `{group:08x}:{logical path}`,
+    /// the display path lowered without its extension. Dotted names keep their
+    /// dots (bb6315b); an identity written before that, cut at the last dot, still
+    /// finds its tag when only one tag had it.
+    #[test]
+    fn compat_campaign_identities() {
+        let container = |logical: &str, group: &[u8; 4], extension: &str| TagEntry {
+            key: crate::core::source::container_entry_key(
+                "pakchunk0-WinGDK",
+                &format!("Meteorite/Content/Tags/{logical}-{extension}.ubulk"),
+            ),
+            display_path: format!("{logical}.{extension}"),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: Some(extension.to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: format!("Meteorite/Content/Tags/{logical}-{extension}.ubulk"),
+            },
+        };
+        let identity = |entry: &TagEntry| campaign_entry_project_parts(entry).unwrap().0;
+        assert_eq!(
+            identity(&container("objects/characters/marine/marine", b"bipd", "biped")),
+            "62697064:objects/characters/marine/marine"
+        );
+        assert_eq!(
+            identity(&container("Levels/V1.2/Bitmaps/Rock", b"bitm", "bitmap")),
+            "6269746d:levels/v1.2/bitmaps/rock"
+        );
+        assert_eq!(
+            identity(&container("sound/machines/piston_close2.l", b"snd!", "sound")),
+            "736e6421:sound/machines/piston_close2.l"
+        );
+        let package = "/Game/Tags/objects/foo/bar-camera_track";
+        assert_eq!(
+            crate::core::tag_key::new_tag_entry_key(package),
+            compat_json("tag_keys.json")["newtag_ce"].as_str().unwrap()
+        );
+        let authored = TagEntry {
+            key: crate::core::tag_key::new_tag_entry_key(package),
+            display_path: "objects/foo/bar.camera_track".to_owned(),
+            group_tag: u32::from_be_bytes(*b"trak"),
+            group_name: Some("camera_track".to_owned()),
+            location: TagEntryLocation::NewContainer {
+                template: crate::core::source::NewContainerTemplate::Derived {
+                    group: "camera_track".to_owned(),
+                },
+                package: package.to_owned(),
+                group_tag: u32::from_be_bytes(*b"trak"),
+            },
+        };
+        let (new_identity, _, kind, new_package) = campaign_entry_project_parts(&authored).unwrap();
+        assert_eq!(new_identity, "7472616b:objects/foo/bar");
+        assert_eq!(kind, CampaignProjectTagKind::New);
+        assert_eq!(new_package.as_deref(), Some(package));
+
+        // The project file holding both spellings, against a mounted source with
+        // one dotted tag in it.
+        let snap = crate::app::mods::project::load_campaign_project(
+            &compat_samples().join("project/user_project.dotted_identities.baboon"),
+        )
+        .expect("dotted identities");
+        let tabs: Vec<&str> = snap.tabs.iter().map(|tab| tab.identity.as_str()).collect();
+        assert_eq!(
+            tabs,
+            [
+                "6269746d:levels/v1.2/bitmaps/rock",
+                "6269746d:levels/v1",
+                "736e6421:sound/machines/piston_close2.l",
+            ]
+        );
+        let mut app = Baboon::for_test();
+        let mounted = |entries: Vec<TagEntry>| LoadedSourceData {
+            label: "ce".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("/ce"),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let rock = container("levels/v1.2/bitmaps/rock", b"bitm", "bitmap");
+        app.install_loaded_source(mounted(vec![rock.clone()]));
+        for tab in &tabs[..2] {
+            assert_eq!(
+                app.model.campaign_entry_for_identity(0, tab).map(|entry| entry.key),
+                Some(rock.key.clone()),
+                "{tab}"
+            );
+        }
+        assert!(app.model.campaign_entry_for_identity(0, tabs[2]).is_none());
+        // Two tags that had the same old identity: neither is guessed.
+        app.install_loaded_source(mounted(vec![
+            rock.clone(),
+            container("levels/v1.3/bitmaps/rock", b"bitm", "bitmap"),
+        ]));
+        assert!(app.model.campaign_entry_for_identity(0, tabs[1]).is_none());
+        assert!(app.model.campaign_entry_for_identity(0, tabs[0]).is_some());
     }
 }
 
@@ -3016,7 +3199,7 @@ mod campaign_project_round_trip_tests {
 
     impl CeKit {
         fn new(name: &str) -> Self {
-            let root = fs::canonicalize(crate::test_kits::unique_temp_dir(name)).unwrap();
+            let root = fs::canonicalize(crate::core::test_kits::unique_temp_dir(name)).unwrap();
             Self { root }
         }
 

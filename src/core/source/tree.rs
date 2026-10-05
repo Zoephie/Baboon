@@ -822,7 +822,7 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        crate::test_kits::unique_temp_path(name)
+        crate::core::test_kits::unique_temp_path(name)
     }
 
     fn write_fake_tag(path: &Path, group: &[u8; 4]) {

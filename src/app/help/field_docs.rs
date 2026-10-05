@@ -537,7 +537,7 @@ mod tests {
     /// element. Keyed by name, each struct gets only its own.
     #[test]
     fn halo2_structs_get_only_their_own_explanations() {
-        let tag_path = crate::test_kits::tag_path(
+        let tag_path = crate::core::test_kits::tag_path(
             "halo2_mcc",
             "objects/characters/masterchief/masterchief.biped",
         );

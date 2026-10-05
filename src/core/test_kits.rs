@@ -95,3 +95,16 @@ pub(crate) fn unique_temp_dir(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("create a temporary test directory");
     dir
 }
+
+/// The synthetic saved-format samples in `testdata/compat/samples` (see its
+/// README; regenerate with `gen_samples.py`).
+pub(crate) fn compat_samples() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/compat/samples")
+}
+
+/// One JSON sample from [`compat_samples`], parsed.
+pub(crate) fn compat_json(rel: &str) -> serde_json::Value {
+    let text = std::fs::read_to_string(compat_samples().join(rel))
+        .unwrap_or_else(|error| panic!("{rel}: {error}"));
+    serde_json::from_str(&text).unwrap_or_else(|error| panic!("{rel}: {error}"))
+}
