@@ -2881,7 +2881,8 @@ mod tests {
                 let sub = &bank.subsounds[sub_index];
                 let data = bank.read_subsound_data(sub_index).unwrap();
                 let pcm =
-                    decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash).unwrap();
+                    decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash, sub.num_samples)
+                        .unwrap();
                 assert!(pcm.frame_count() > 0, "'{name}' decoded to nothing");
                 resolved += 1;
             }
@@ -3349,6 +3350,7 @@ mod tests {
             sub.channels,
             sub.frequency,
             sub.setup_hash,
+            sub.num_samples,
         )
         .expect("decode H3 player row");
         let peak = pcm
@@ -4177,5 +4179,69 @@ mod tests {
                 .any(|text| text == "Sound Classes Overview (3)"),
             "{painted:?}"
         );
+    }
+
+    /// One Halo CE permutation's inline Ogg, decoded the way the player does.
+    fn ce_inline_ogg_frames(rel: &str, permutation: usize) -> Option<usize> {
+        let path = crate::core::test_kits::hceek_tags().join(rel);
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_HCEEK to a Halo CE kit's tags ({})", path.display());
+            return None;
+        }
+        let defs = crate::core::test_kits::definitions();
+        let tag = crate::core::source::read_tag_at_path(&path, Some(GameId::HaloCe), Some(defs), u32::from_be_bytes(*b"snd!"))
+            .expect("read the CE sound");
+        let root = tag.root();
+        let ranges = root.field_path("pitch ranges").and_then(|f| f.as_block()).unwrap();
+        let range = ranges.element(0).unwrap();
+        let permutations = range.field("permutations").and_then(|f| f.as_block()).unwrap();
+        let bytes = permutations.element(permutation).unwrap().field("samples").and_then(|f| f.as_data()).unwrap().to_vec();
+        let pcm = super::audio::decode_inline(super::audio::InlineCodec::OggVorbis, &bytes, 2, 44_100)
+            .expect("the permutation decodes");
+        Some(pcm.frame_count())
+    }
+
+    /// A Halo CE Ogg permutation plays for the length its stream states:
+    /// `bat1_ww`'s seventh piece decoded 448 frames of padding past it, a fade
+    /// to silence that clicked where the next piece continues the music. The
+    /// lengths are ffmpeg's decode of the same bytes.
+    #[test]
+    fn a_ce_ogg_permutation_plays_for_its_stated_length() {
+        if let Some(frames) = ce_inline_ogg_frames("sound/music/battle1_themes/bat1_ww.sound", 6) {
+            assert_eq!(frames, 232_960);
+        }
+    }
+
+    /// The one Halo CE permutation the Rust Vorbis decoder panics on still
+    /// plays, through libvorbis, at ffmpeg's length.
+    #[test]
+    fn the_ce_ogg_permutation_lewton_cannot_read_still_plays() {
+        if let Some(frames) = ce_inline_ogg_frames("sound/music/spooky1/in.sound", 1) {
+            assert_eq!(frames, 232_960);
+        }
+    }
+
+    /// Every FMOD subsound decodes to the length its bank's header gives. The
+    /// stream is padded to a whole packet, and nearly every Halo 3 subsound
+    /// ran up to 1,024 frames long.
+    #[test]
+    fn h3_subsounds_decode_to_their_header_length() {
+        let bank_path = crate::core::test_kits::h3ek_tags().join("../fmod/pc/sfx.fsb");
+        if !bank_path.exists() {
+            eprintln!("skip: no Halo 3 FMOD bank at {}", bank_path.display());
+            return;
+        }
+        let bank = blam_tags::audio::fsb5::Fsb5::open(&bank_path).unwrap();
+        let step = (bank.subsounds.len() / 200).max(1);
+        let mut checked = 0;
+        for index in (0..bank.subsounds.len()).step_by(step) {
+            let sub = &bank.subsounds[index];
+            let data = bank.read_subsound_data(index).unwrap();
+            let pcm = blam_tags::audio::decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash, sub.num_samples)
+                .unwrap_or_else(|error| panic!("subsound {index}: {error}"));
+            assert_eq!(pcm.frame_count(), sub.num_samples as usize, "subsound {index} ({})", sub.name);
+            checked += 1;
+        }
+        assert!(checked >= 100, "only {checked} subsounds checked");
     }
 }

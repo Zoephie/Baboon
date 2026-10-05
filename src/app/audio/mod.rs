@@ -917,7 +917,7 @@ fn decode_bank_subsound(
     let bank = banks.bank(bank_index);
     let sub = &bank.subsounds[sub_index];
     let data = bank.read_subsound_data(sub_index)?;
-    decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash)
+    decode_subsound(&data, sub.channels, sub.frequency, sub.setup_hash, sub.num_samples)
 }
 
 /// What an extraction batch reads from, captured on the UI thread.
