@@ -591,4 +591,34 @@ mod tests {
             "Portuguese"
         );
     }
+
+    // Recovering a bitmap tag's source image to a folder the user picks.
+    // `BLAM_TEST_HCEEK` names a Halo CE kit's `tags` folder.
+
+    /// The menu items read the game the browser panel publishes, and are offered
+    /// only where bitmaps keep their source.
+    #[test]
+    fn only_ce_and_halo_2_offer_bitmap_source_extraction() {
+        let ctx = egui::Context::default();
+        let mut offered = Vec::new();
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                for game in [
+                    "haloce_mcc",
+                    "halo2_mcc",
+                    "halo3_mcc",
+                    "haloreach_mcc",
+                    "haloce_evolved",
+                ] {
+                    crate::app::browser::set_browser_game(ui, GameId::from_id(game));
+                    if crate::app::browser::browser_game_keeps_bitmap_sources(ui) {
+                        offered.push(game);
+                    }
+                }
+                crate::app::browser::set_browser_game(ui, None);
+                assert!(!crate::app::browser::browser_game_keeps_bitmap_sources(ui));
+            });
+        });
+        assert_eq!(offered, ["haloce_mcc", "halo2_mcc"]);
+    }
 }

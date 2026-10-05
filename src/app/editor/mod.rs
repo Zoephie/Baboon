@@ -27,8 +27,6 @@ mod sound;
 pub(super) use sound::*;
 mod apply_doc;
 pub(in crate::app) mod actions;
-#[cfg(test)]
-mod campaign_evolved_field_paths_tests;
 mod field_meta;
 pub(super) use crate::core::document::apply::*;
 pub(super) use crate::core::document::value::*;
