@@ -67,8 +67,10 @@ impl Baboon {
         }
         self.model.status = loaded_source_status(&loaded);
         self.install_loaded_source(loaded);
-        self.dialogs.close::<ColorPopupWindow>();
-        self.dialogs.close::<FunctionPopupWindow>();
+        // Every tag of the kit's old source is gone; another kit's popups
+        // are not.
+        let kit = self.model.kits[self.model.active].id;
+        self.close_tag_popups(kit, |_| true);
         self.apply_loaded_source_identity(game);
         if let Some((key, tag)) = initial_tag {
             let mut kit = self.kit_and_view(self.model.active);

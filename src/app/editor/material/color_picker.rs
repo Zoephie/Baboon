@@ -100,6 +100,18 @@ impl MaterialColorPopup {
         }
     }
 
+    /// The tag OK writes to; empty for a function editor's draft color,
+    /// which goes to that editor instead.
+    pub(in crate::app) fn tag_key(&self) -> &str {
+        &self.tag_key
+    }
+
+    /// Whether OK sets a color in the open function editor's draft rather
+    /// than writing to a tag.
+    pub(in crate::app) fn edits_function_draft(&self) -> bool {
+        self.function_draft_color.is_some()
+    }
+
     pub(in crate::app) fn with_write(
         mut self,
         tag_key: impl Into<String>,

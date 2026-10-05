@@ -99,8 +99,33 @@ impl Baboon {
         // a removed tag, so there is nothing to fix up afterwards.
         self.kit_and_view(self.model.active).close_tag_pane(key);
         self.unload_tag(key);
-        self.dialogs.close::<ColorPopupWindow>();
-        self.dialogs.close::<FunctionPopupWindow>();
+        let kit = self.model.kits[self.model.active].id;
+        self.close_tag_popups(kit, |tag| tag == key);
+    }
+
+    /// Close the color and function popups editing those of `kit`'s tags
+    /// that `closing` names. A popup for any other tag stays, with its
+    /// unconfirmed edits: closing one tab used to throw away the popup open
+    /// on another. A function editor's own color picker goes with it.
+    pub(in crate::app) fn close_tag_popups(&mut self, kit: KitId, closing: impl Fn(&str) -> bool) {
+        let function_closes = self.dialogs.get::<FunctionPopupWindow>().is_some_and(|window| {
+            window.kit == kit && window.popup.as_ref().is_none_or(|popup| closing(popup.tag_key()))
+        });
+        if function_closes {
+            self.dialogs.close::<FunctionPopupWindow>();
+        }
+        let color_closes = self.dialogs.get::<ColorPopupWindow>().is_some_and(|window| {
+            window.popup.as_ref().is_none_or(|popup| {
+                if popup.edits_function_draft() {
+                    function_closes
+                } else {
+                    window.kit == kit && closing(popup.tag_key())
+                }
+            })
+        });
+        if color_closes {
+            self.dialogs.close::<ColorPopupWindow>();
+        }
     }
 
     pub(in crate::app) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
@@ -242,8 +267,7 @@ impl Baboon {
             PendingCloseAction::CloseAllButThis(key) => self.close_all_tabs_but(&key),
             PendingCloseAction::CloseKit(id) => {
                 self.remove_kit(id);
-                self.dialogs.close::<ColorPopupWindow>();
-                self.dialogs.close::<FunctionPopupWindow>();
+                self.close_tag_popups(id, |_| true);
                 self.model.status = "Closed kit".to_owned();
             }
         }
@@ -255,8 +279,7 @@ impl Baboon {
         self.model.kits[self.model.active].open_tabs.clear();
         self.kit_and_view(self.model.active).drop_documents_except(None);
         self.model.kits[self.model.active].selected_key = None;
-        self.dialogs.close::<ColorPopupWindow>();
-        self.dialogs.close::<FunctionPopupWindow>();
+        self.close_tag_popups(id, |_| true);
     }
 
     pub(in crate::app) fn close_all_tabs_but(&mut self, key: &str) {
@@ -267,8 +290,8 @@ impl Baboon {
         }
         self.kit_and_view(self.model.active).drop_documents_except(Some(key));
         self.model.kits[self.model.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
-        self.dialogs.close::<ColorPopupWindow>();
-        self.dialogs.close::<FunctionPopupWindow>();
+        let kit = self.model.kits[self.model.active].id;
+        self.close_tag_popups(kit, |tag| tag != key);
     }
 
     /// Carry out the save-changes prompt's answer.
@@ -1619,5 +1642,27 @@ mod tests {
             ClosePromptSave::File
         );
         assert_eq!(close_prompt_save_route(None), ClosePromptSave::File);
+    }
+
+    /// Closing one tab leaves a color popup open on another tag, with its
+    /// unconfirmed color; closing the popup's own tag closes it.
+    #[test]
+    fn closing_a_tab_keeps_another_tags_popup() {
+        use crate::app::editor::{ColorPopupWindow, MaterialColorPopup};
+        let kit = LooseKit::new("close-popups", "haloce_mcc");
+        kit.write_classic_ce("weapons/a", "weapon");
+        kit.write_classic_ce("weapons/b", "weapon");
+        let mut app = app();
+        kit.install(&mut app);
+        let a = kit.open(&mut app, "weapons/a.weapon");
+        let b = kit.open(&mut app, "weapons/b.weapon");
+        let kit_id = app.model.kits[0].id;
+        let popup = MaterialColorPopup::new("tint", 1.0, 0.5, 0.0, 1.0).with_write(&a, "tint");
+        app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit: kit_id });
+
+        app.close_tab(&b);
+        assert!(app.dialogs.get::<ColorPopupWindow>().is_some(), "a's popup outlives b's tab");
+        app.close_tab(&a);
+        assert!(app.dialogs.get::<ColorPopupWindow>().is_none(), "and goes with a's");
     }
 }
