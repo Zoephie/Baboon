@@ -221,6 +221,16 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
         }
+        // Clicking a tab focuses its tag, by the same rule as a press inside
+        // its pane: `selected_key` is what Save and Save As act on, and a tab
+        // brought forward by its title used to leave them on the tag before,
+        // so Save As offered that tag's type and saved that tag.
+        if button_response.clicked() && !is_folder_pane_key(&key) {
+            self.cx.send(EditorCommand::FocusTab {
+                kit: self.kit,
+                key: key.clone(),
+            });
+        }
         if is_folder_pane_key(&key) || key == GIT_REVIEW_KEY {
             context_menu(&button_response, |ui| {
                 if ui.button("Close").clicked() {

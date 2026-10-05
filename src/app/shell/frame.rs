@@ -5074,6 +5074,22 @@ mod tests {
         );
     }
 
+    /// Clicking a tab makes its tag the one the file actions act on, as a
+    /// press inside its pane does. It used to only bring the tab forward, so
+    /// Save As on the tag in view offered another open tag's type and saved
+    /// that tag instead.
+    #[test]
+    fn clicking_a_tab_focuses_its_tag() {
+        let (mut h, keys) = three_tabs();
+        let active = h.app.model.active;
+        h.app.model.kits[active].selected_key = Some(keys[2].clone());
+        press(&mut h, "tag_000.biped", egui::PointerButton::Primary);
+        assert_eq!(
+            h.app.model.kits[active].selected_key.as_ref(),
+            Some(&keys[0])
+        );
+    }
+
     /// A middle-click on a tab closes it, and only it.
     #[test]
     fn a_middle_click_closes_a_tab() {
