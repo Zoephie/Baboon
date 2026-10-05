@@ -193,21 +193,64 @@ pub(super) struct SoundPermRow {
     pub(super) inline_bytes: usize,
 }
 
-/// Extract a permutation's own `samples` bytes (CE, older Halo 2).
-/// Re-navigates from the root so it only clones the played permutation's blob.
-pub(super) fn inline_permutation_samples(
+/// A Halo CE permutation's audio with the pieces chained after it: the bytes of
+/// each, end to end, and where each starts (empty when there is one piece).
+///
+/// CE stores a long sound, mostly music, as a chain: the pitch range's first
+/// `actual permutation count` permutations are the ones a sound plays, and each
+/// names the piece that continues it in `next permutation index`, until -1.
+/// 268 pitch ranges in Halo CE's kit chain this way, `long.sound`'s into 122
+/// pieces. Each piece is a whole stream of its own, so they are decoded one at
+/// a time and joined. A pitch range whose actual count is 0 chains nothing:
+/// its `next` fields are unset (0), and every permutation stands alone.
+pub(super) fn inline_permutation_chain(
     tag: &TagFile,
     pr_index: usize,
     perm_index: usize,
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, Vec<usize>)> {
     let root = tag.root();
     let pitch_ranges = find_block_field(&root, "pitch range")?;
     let pitch_range = pitch_ranges.element(pr_index)?;
     let permutations = find_block_field(&pitch_range, "permutation")?;
-    let perm = permutations.element(perm_index)?;
-    let full = find_full_field_name(&perm, "samples")?;
-    let data = perm.field(full)?.as_data()?;
-    (!data.is_empty()).then(|| data.to_vec())
+    let samples = |index: usize| -> Option<Vec<u8>> {
+        let perm = permutations.element(index)?;
+        let data = perm.field(find_full_field_name(&perm, "samples")?)?.as_data()?;
+        (!data.is_empty()).then(|| data.to_vec())
+    };
+    let mut bytes = samples(perm_index)?;
+    let mut offsets = vec![0];
+    if actual_permutation_count(&pitch_range) > 0 {
+        let mut seen = std::collections::HashSet::from([perm_index]);
+        let mut current = perm_index;
+        while let Some(next) = next_permutation(&permutations, current)
+            && seen.insert(next)
+        {
+            let Some(piece) = samples(next) else { break };
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(&piece);
+            current = next;
+        }
+    }
+    if offsets.len() == 1 {
+        offsets.clear();
+    }
+    Some((bytes, offsets))
+}
+
+/// A CE pitch range's `actual permutation count`: how many of its permutations
+/// are sounds rather than pieces chained after one. 0 where it has none.
+fn actual_permutation_count(pitch_range: &TagStruct) -> usize {
+    find_full_field_name(pitch_range, "actual permutation count")
+        .and_then(|full| pitch_range.read_int_any(full))
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(0)
+}
+
+/// The permutation chained after `index`, if it names one in range.
+fn next_permutation(permutations: &TagBlock, index: usize) -> Option<usize> {
+    let perm = permutations.element(index)?;
+    let next = perm.read_int_any(find_full_field_name(&perm, "next permutation index")?)?;
+    usize::try_from(next).ok().filter(|&next| next < permutations.len())
 }
 
 /// Read the `file offset` of each `sound_permutation_chunk_block` element in a
@@ -673,6 +716,9 @@ pub(super) fn sound_permutation_rows_for_game(
         let Some(permutations) = find_block_field(&pitch_range, "permutation") else {
             continue;
         };
+        // Past a CE pitch range's actual count are the pieces its sounds chain
+        // into, played as part of them; see `inline_permutation_chain`.
+        let actual = actual_permutation_count(&pitch_range);
         for perm_index in 0..permutations.len() {
             if rows.len() >= MAX_ROWS {
                 break;
@@ -688,6 +734,9 @@ pub(super) fn sound_permutation_rows_for_game(
                 .and_then(|full| perm.field(full))
                 .and_then(|field| field.as_data())
                 .map_or(0, <[u8]>::len);
+            if !bank_backed && h2.is_none() && inline_bytes > 0 && actual > 0 && perm_index >= actual {
+                continue;
+            }
             let kind = if bank_backed {
                 RowKind::Bank
             } else if inline_bytes > 0 {
@@ -833,14 +882,14 @@ pub(super) fn row_play_action(
             channels,
             sample_rate,
         } => {
-            let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
+            let (bytes, chunk_offsets) = inline_permutation_chain(tag, row.pr_index, row.perm_index)?;
 
             Some(SoundAction::PlayInline {
                 bytes,
                 codec: *codec,
                 channels: *channels,
                 sample_rate: *sample_rate,
-                chunk_offsets: Vec::new(),
+                chunk_offsets,
                 label: row.name.clone(),
             })
         }
@@ -890,9 +939,10 @@ fn row_extract_source(
             channels,
             sample_rate,
         } => {
-            let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
+            let (bytes, chunk_offsets) = inline_permutation_chain(tag, row.pr_index, row.perm_index)?;
             // Raw passthrough writes the stream verbatim — only meaningful (and
-            // only a valid `.ogg`) when the CE format actually is Ogg Vorbis.
+            // only a valid `.ogg`) when the CE format actually is Ogg Vorbis. A
+            // chain's pieces, end to end, are a chained Ogg file.
             let raw_ogg = raw_ce && matches!(codec, InlineCodec::OggVorbis);
             Some(if raw_ogg {
                 ExtractSource::Raw(bytes)
@@ -902,7 +952,7 @@ fn row_extract_source(
                     codec: *codec,
                     channels: *channels,
                     sample_rate: *sample_rate,
-                    chunk_offsets: Vec::new(),
+                    chunk_offsets,
                 }
             })
         }
@@ -3084,7 +3134,7 @@ mod tests {
         let group = u32::from_be_bytes(*b"snd!");
         let tag = crate::core::source::read_tag_at_path(tag_path, Some(GameId::HaloCe), Some(defs), group)
             .expect("read CE sound tag");
-        let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
+        let bytes = inline_permutation_chain(&tag, 0, 0).expect("inline samples present").0;
         assert!(
             bytes.starts_with(b"OggS"),
             "CE samples should be an Ogg stream"
@@ -3147,7 +3197,7 @@ mod tests {
             })
         ));
 
-        let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
+        let bytes = inline_permutation_chain(&tag, 0, 0).expect("inline samples present").0;
         assert!(!bytes.starts_with(b"OggS"), "adpcm stream, not Ogg");
         let pcm = super::audio::decode_inline(codec, &bytes, channels, sample_rate)
             .expect("decode CE xbox adpcm");
@@ -3221,7 +3271,7 @@ mod tests {
             .expect("ogg written");
         assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
         let inline =
-            inline_permutation_samples(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
+            inline_permutation_chain(&tag, rows[0].pr_index, rows[0].perm_index).unwrap().0;
         assert_eq!(ogg, inline, "raw passthrough must be verbatim tag bytes");
 
         let _ = std::fs::remove_dir_all(&wav_dir);
@@ -4243,5 +4293,68 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 100, "only {checked} subsounds checked");
+    }
+
+    /// A Halo CE sound stored as a chain is one row, whose audio is every
+    /// piece, end to end: here the pitch range's one actual permutation
+    /// continues into the other two.
+    #[test]
+    fn a_chained_ce_sound_is_one_row_playing_every_piece() {
+        let mut tag = ce_sound(3, SAMPLE_RATE);
+        {
+            let mut root = tag.root_mut();
+            let mut field = root.field_path_mut("pitch ranges[0]/actual permutation count").unwrap();
+            field.set(TagFieldData::ShortInteger(1)).unwrap();
+            for (index, next) in [(0, 1i16), (1, 2), (2, -1)] {
+                let mut field = root
+                    .field_path_mut(&format!("pitch ranges[0]/permutations[{index}]/next permutation index"))
+                    .unwrap();
+                field.set(TagFieldData::ShortInteger(next)).unwrap();
+            }
+        }
+
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
+        assert_eq!(rows.len(), 1, "the chained pieces are not rows of their own");
+        assert_eq!(rows[0].name, "perm_0");
+
+        let (bytes, offsets) = inline_permutation_chain(&tag, 0, 0).unwrap();
+        let piece = SAMPLE_RATE * 2;
+        assert_eq!(offsets, vec![0, piece, 2 * piece]);
+        assert_eq!(bytes.len(), 3 * piece);
+        let RowKind::InlinePermutation { codec, channels, sample_rate } = rows[0].kind else {
+            panic!("not an inline permutation");
+        };
+        let pcm = super::audio::decode_inline_chunked(codec, &bytes, &offsets, channels, sample_rate).unwrap();
+        assert_eq!(pcm.frame_count(), 3 * SAMPLE_RATE, "all three pieces play");
+    }
+
+    /// Halo CE's own chained music: `anfast.sound` is one track in 18 pieces,
+    /// and was listed as 18 rows, each playing its own fragment.
+    #[test]
+    fn a_chained_ce_music_track_plays_whole() {
+        let path = crate::core::test_kits::hceek_tags().join("sound/music/anfast/anfast.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_HCEEK to a Halo CE kit's tags ({})", path.display());
+            return;
+        }
+        let defs = crate::core::test_kits::definitions();
+        let tag = crate::core::source::read_tag_at_path(&path, Some(GameId::HaloCe), Some(defs), u32::from_be_bytes(*b"snd!"))
+            .unwrap();
+        let rows = sound_permutation_rows_for_game(&tag, None, Some(GameId::HaloCe));
+        assert_eq!(rows.len(), 1);
+        let (bytes, offsets) = inline_permutation_chain(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
+        assert_eq!(offsets.len(), 18, "every piece of the track");
+        let RowKind::InlinePermutation { codec, channels, sample_rate } = rows[0].kind else {
+            panic!("not an inline permutation");
+        };
+        let whole = super::audio::decode_inline_chunked(codec, &bytes, &offsets, channels, sample_rate).unwrap();
+        let mut ends = offsets.clone();
+        ends.push(bytes.len());
+        let pieces: usize = ends
+            .windows(2)
+            .map(|span| super::audio::decode_inline(codec, &bytes[span[0]..span[1]], channels, sample_rate).unwrap().frame_count())
+            .sum();
+        assert_eq!(whole.frame_count(), pieces);
+        assert!(whole.frame_count() > 18 * 200_000, "{} frames", whole.frame_count());
     }
 }
