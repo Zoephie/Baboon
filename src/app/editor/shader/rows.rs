@@ -1716,6 +1716,8 @@ mod sampler_mode_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::editor::{constant_color_function_hex, extract_constant_color, shader_function_grid_text};
+    use crate::core::document::value::decode_hex;
 
     // Shader model, editing, and thumbnail unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.
@@ -1757,5 +1759,75 @@ mod tests {
                 "{raw} disagreed with the engine's clean name"
             );
         }
+    }
+
+    #[test]
+    fn shader_function_summary_uses_curve_points_instead_of_placeholder() {
+        let mut blob = vec![0u8; 32];
+        blob[0] = 5; // LinearKey
+        blob[4..8].copy_from_slice(&0.0f32.to_le_bytes());
+        blob[8..12].copy_from_slice(&1.0f32.to_le_bytes());
+        for &(x, y) in &[(0.0_f32, 0.0_f32), (0.25, 1.0), (0.75, 1.0), (1.0, 0.0)] {
+            blob.extend_from_slice(&x.to_le_bytes());
+            blob.extend_from_slice(&y.to_le_bytes());
+        }
+        for _ in 0..4 {
+            blob.extend_from_slice(&0.0_f32.to_le_bytes());
+        }
+        for _ in 0..4 {
+            blob.extend_from_slice(&0.0_f32.to_le_bytes());
+        }
+        for &v in &[1.0_f32, 0.0, -1.0, 0.0] {
+            blob.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let function = TagFunction::parse(&blob).unwrap();
+        let summary = shader_function_grid_text(&function);
+
+        assert!(summary.contains("curve:"));
+        assert!(summary.contains("(0.25, 1.0)"));
+        assert!(!summary.contains("function data goes here"));
+    }
+
+    #[test]
+    fn shader_function_summary_reads_static_color_data() {
+        let mut blob = [0u8; 32];
+        blob[0] = 1; // Constant
+        blob[2] = ColorGraphType::OneColor as u8;
+        blob[4..8].copy_from_slice(&0xFF_33_66_99u32.to_le_bytes());
+
+        let function = TagFunction::parse(&blob).unwrap();
+        let summary = shader_function_grid_text(&function);
+
+        assert!(summary.contains("RGB"));
+        assert!(summary.contains("0.2, 0.4, 0.6"));
+    }
+
+    #[test]
+    fn shader_constant_color_with_unset_alpha_displays_opaque() {
+        let mut blob = [0u8; 32];
+        blob[0] = 1; // Constant
+        blob[2] = ColorGraphType::TwoColor as u8;
+        blob[4..8].copy_from_slice(&0x00_C0_C0_C0u32.to_le_bytes());
+        blob[16..20].copy_from_slice(&0x00_00_00_00u32.to_le_bytes());
+
+        let function = TagFunction::parse(&blob).unwrap();
+        let [r, g, b, a] = extract_constant_color(&function).unwrap();
+
+        assert_eq!(
+            (r, g, b, a),
+            (192.0 / 255.0, 192.0 / 255.0, 192.0 / 255.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn generated_constant_color_functions_use_render_method_gpu_flag() {
+        let bytes = decode_hex(&constant_color_function_hex(1.0, 0.0, 0.0, 1.0)).unwrap();
+        let function = TagFunction::parse(&bytes).unwrap();
+
+        assert_eq!(function.color_graph_type(), ColorGraphType::OneColor);
+        let function = function.as_blob().unwrap();
+        assert!(function.flags().is_gpu());
+        assert_eq!(function.header().colors[0], 0xFFFF0000);
     }
 }

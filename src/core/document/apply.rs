@@ -1632,6 +1632,7 @@ mod deferred_ops_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::apply::apply_field_edit;
     use crate::core::bundled::locate_definitions_root;
     use crate::core::document::value::{append_field_path, is_editable_tag, is_saveable_tag};
     use crate::core::format::TagNameIndex;
@@ -2148,5 +2149,40 @@ mod tests {
             }
         }
         None
+    }
+
+    /// The root element of a freshly created tag gets every block index at 0,
+    /// while an element added to a block gets NONE (-1). The engine's
+    /// invariant is NONE everywhere; the root is a known gap in
+    /// `TagBlockData::new_root_default`. This pins today's behaviour so that
+    /// closing the gap is a deliberate change, and shows the contrast.
+    #[test]
+    fn a_fresh_root_has_block_indices_at_zero_unlike_a_new_element() {
+        let block_index = |tag: &TagFile, path: &str| match tag.root().field_path(path)?.value()? {
+            TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => {
+                Some(v as i64)
+            }
+            TagFieldData::ShortBlockIndex(v) | TagFieldData::CustomShortBlockIndex(v) => {
+                Some(v as i64)
+            }
+            TagFieldData::LongBlockIndex(v) | TagFieldData::CustomLongBlockIndex(v) => {
+                Some(v as i64)
+            }
+            _ => None,
+        };
+        let effect = TagFile::new(test_definition_path("haloreach_mcc/effect.json")).unwrap();
+        // Known gap: the engine invariant says this should be NONE (-1).
+        assert_eq!(block_index(&effect, "loop start event"), Some(0));
+
+        let mut physics =
+            TagFile::new(test_definition_path("haloreach_mcc/physics_model.json")).unwrap();
+        physics
+            .root_mut()
+            .field_path_mut("materials")
+            .unwrap()
+            .as_block_mut()
+            .unwrap()
+            .add_element();
+        assert_eq!(block_index(&physics, "materials[0]/phantom type"), Some(-1));
     }
 }

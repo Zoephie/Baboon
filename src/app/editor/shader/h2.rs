@@ -2305,3 +2305,1702 @@ pub(super) fn empty_shader_grid_row() -> ShaderGridRow {
         constant_function_view: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::editor::{H2TemplateCache, build_h2ek_shader_editor_model, extract_constant_color, first_h2_function_edit_summary, first_halo2_byte_block_function_row, h2_constant_color_function_data, h2_constant_scalar_function_data, h2_function_data_range_for_test, h2_function_data_with_range_for_test, h2_shader_template_reference_for_test, h2_tag_function, h2_template_row_edit_kind_for_test, h2_template_row_function_data_path_for_test, h2_template_row_labels_for_test, h2_template_row_value_color_for_test, h2_template_row_value_text_for_test, halo2_function_bytes_from_struct, shader_row_edit_path_and_kind, shader_row_value_text_for_test};
+    use crate::core::document::apply::{apply_field_edit, apply_one_block_op, apply_one_h2_shader_param_op, replace_halo2_function_byte_block};
+
+    #[test]
+    fn halo2_function_byte_block_replacement_roundtrips_bytes() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let bytes = h2_constant_scalar_function_data(-0.25, None);
+
+        seed_halo2_function_byte_block_for_test(
+            &mut tag,
+            "parameters[0]/animation properties[0]/function/data",
+            &bytes,
+        );
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), bytes);
+        let function = h2_tag_function(&bytes).unwrap();
+        let reparsed =
+            h2_tag_function(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
+        assert_eq!(reparsed.to_bytes(), function.to_bytes());
+    }
+
+    #[test]
+    fn classic_halo2_shader_model_exposes_byte_block_function_row() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
+        tag.container = blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header: vec![0; 64],
+        };
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
+        seed_halo2_function_byte_block_for_test(
+            &mut tag,
+            "parameters[0]/animation properties[0]/function/data",
+            &bytes,
+        );
+
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &entry,
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
+        let (function_bytes, path) = first_halo2_byte_block_function_row(&model).unwrap();
+
+        assert_eq!(function_bytes, bytes);
+        assert_eq!(path, "parameters[0]/animation properties[0]/function/data");
+    }
+
+    #[test]
+    fn h2ek_shader_model_routes_only_classic_halo2_shader_family() {
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"rmsh"));
+        let mut classic = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
+        classic.container = blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header: vec![0; 64],
+        };
+        assert!(
+            build_h2ek_shader_editor_model(
+                &classic,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_some()
+        );
+
+        let mcc = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
+        assert!(
+            build_h2ek_shader_editor_model(
+                &mcc,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_none()
+        );
+
+        let non_shader = classic;
+        let non_shader_entry = h2_shader_entry(u32::from_be_bytes(*b"bitm"));
+        assert!(
+            build_h2ek_shader_editor_model(
+                &non_shader,
+                &non_shader_entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_model_exposes_schema_backed_value_rows() {
+        let mut tag = h2_classic_shader_tag();
+        apply_field_edit(
+            &mut tag,
+            "template",
+            "stem:shaders/shader_templates/transparent/plasma_mask_offset",
+        )
+        .unwrap();
+        apply_field_edit(&mut tag, "material name", "test_material").unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut tag, "parameters[0]/name", "diffuse_map").unwrap();
+        apply_field_edit(&mut tag, "parameters[0]/type", "1").unwrap();
+        apply_field_edit(&mut tag, "parameters[0]/const value", "0.5").unwrap();
+
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
+
+        let material_name = shader_row_edit_path_and_kind(&model, "material_name").unwrap();
+        assert_eq!(material_name, ("material name".to_owned(), "string_id"));
+
+        let template = shader_row_edit_path_and_kind(&model, "template").unwrap();
+        assert_eq!(template, ("template".to_owned(), "shader_template_ref"));
+
+        let const_value = shader_row_edit_path_and_kind(&model, "diffuse_map").unwrap();
+        assert_eq!(
+            const_value,
+            ("parameters[0]/const value".to_owned(), "scalar")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_standard_rows_use_guerilla_widgets() {
+        let mut tag = h2_classic_shader_tag();
+        apply_field_edit(&mut tag, "flags", "5").unwrap();
+        apply_field_edit(&mut tag, "specular type", "1").unwrap();
+        apply_field_edit(&mut tag, "lightmap type", "2").unwrap();
+        apply_field_edit(&mut tag, "shader LOD bias", "1").unwrap();
+
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            shader_row_edit_path_and_kind(&model, "flags"),
+            Some(("flags".to_owned(), "flags"))
+        );
+        assert_eq!(
+            shader_row_edit_path_and_kind(&model, "dynamic_light_specular_type"),
+            Some(("specular type".to_owned(), "enum"))
+        );
+        assert_eq!(
+            shader_row_value_text_for_test(&model, "dynamic_light_specular_type").as_deref(),
+            Some("default shiny")
+        );
+        assert_eq!(
+            shader_row_value_text_for_test(&model, "lightmap_type").as_deref(),
+            Some("dull specular")
+        );
+        assert_eq!(
+            shader_row_value_text_for_test(&model, "shader_lod_bias").as_deref(),
+            Some("4x size")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_range_flag_updates_same_length_function_data() {
+        let mut data = vec![0; 28];
+        data[0] = 1;
+        data[4..8].copy_from_slice(&1.0f32.to_le_bytes());
+        data[8..12].copy_from_slice(&1.0f32.to_le_bytes());
+
+        let ranged = h2_function_data_with_range_for_test(&data, true, Some(2.5));
+        assert_eq!(ranged.len(), data.len());
+        assert_eq!(h2_function_data_range_for_test(&ranged), (true, Some(2.5)));
+        assert_eq!(ranged[4..8], data[4..8], "the range minimum is left alone");
+
+        let unranged = h2_function_data_with_range_for_test(&ranged, false, None);
+        assert_eq!(unranged.len(), data.len());
+        assert_eq!(h2_function_data_range_for_test(&unranged).0, false);
+    }
+
+    /// A color function's bytes 4-19 are its color slots, not a range: a range
+    /// edit wrote its value over color slot 1 and set the range flag on a function
+    /// that has none. It now leaves a color function alone.
+    #[test]
+    fn h2ek_shader_range_edit_leaves_a_color_function_alone() {
+        let mut data = vec![0; 28];
+        data[0] = 1;
+        data[1] = 2 << 4;
+        data[4..8].copy_from_slice(&0xFF11_2233u32.to_le_bytes());
+        data[8..12].copy_from_slice(&0xFF44_5566u32.to_le_bytes());
+
+        assert_eq!(h2_function_data_with_range_for_test(&data, true, Some(2.5)), data);
+    }
+
+    #[test]
+    fn h2ek_shader_template_reference_accepts_h2ek_extension_path() {
+        let mut tag = h2_classic_shader_tag();
+        apply_field_edit(
+            &mut tag,
+            "template",
+            "stem:shaders\\shader_templates\\transparent\\plasma_mask_offset.shader_template",
+        )
+        .unwrap();
+
+        assert_eq!(
+            h2_shader_template_reference_for_test(&tag).as_deref(),
+            Some("shaders\\shader_templates\\transparent\\plasma_mask_offset")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_template_rows_drive_visible_parameters() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut shader, "parameters[0]/name", "self_illum_color").unwrap();
+        apply_field_edit(&mut shader, "parameters[0]/type", "2").unwrap();
+
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        for index in 0..2 {
+            apply_one_block_op(
+                &mut template,
+                &BlockOp {
+                    path: "categories[0]/parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            let parameter_path = format!("categories[0]/parameters[{index}]");
+            let name = if index == 0 {
+                "noise_map1"
+            } else {
+                "plasma_mask"
+            };
+            apply_field_edit(&mut template, &format!("{parameter_path}/name"), name).unwrap();
+            apply_field_edit(&mut template, &format!("{parameter_path}/type"), "0").unwrap();
+        }
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap animation flags",
+            "6",
+        )
+        .unwrap();
+
+        let labels = h2_template_row_labels_for_test(&shader, &template);
+
+        for expected in [
+            "noise_map1",
+            "noise_map1_scale_x",
+            "noise_map1_scale_y",
+            "noise_map1_translation_x",
+            "noise_map1_translation_y",
+            "plasma_mask",
+        ] {
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "missing {expected} in {labels:?}"
+            );
+        }
+        assert!(!labels.iter().any(|label| label == "self_illum_color"));
+    }
+
+    #[test]
+    fn h2ek_shader_3d_bitmap_template_rows_include_z_transform() {
+        let shader = h2_classic_shader_tag();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/name", "noyze0").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "0").unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap type",
+            "3D",
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap animation flags",
+            "5",
+        )
+        .unwrap();
+
+        let labels = h2_template_row_labels_for_test(&shader, &template);
+
+        for expected in [
+            "noyze0",
+            "noyze0_scale",
+            "noyze0_translation_x",
+            "noyze0_translation_y",
+            "noyze0_translation_z",
+        ] {
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "missing {expected} in {labels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn h2ek_shader_missing_function_rows_are_numeric_create_fields() {
+        let shader = h2_classic_shader_tag();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/name", "noyze0").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "0").unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap animation flags",
+            "5",
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap scale",
+            "7.5",
+        )
+        .unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_scale"),
+            Some("h2_create_function_scalar")
+        );
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
+            Some("value: 7.5")
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_translation_x"),
+            Some("h2_create_function_scalar")
+        );
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_translation_x")
+                .as_deref(),
+            Some("value: 0.0")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_existing_constant_function_rows_stay_numeric() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_h2_shader_param_op(
+            &mut shader,
+            &H2ShaderParamOp::EnsureAnimationProperty {
+                parameters_block_path: "parameters".to_owned(),
+                parameter_name: "noyze0".to_owned(),
+                parameter_type_index: 0,
+                animation_type_index: 0,
+                initial_function_data: h2_constant_scalar_function_data(7.5, None),
+            },
+        )
+        .unwrap();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/name", "noyze0").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "0").unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap animation flags",
+            "1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_scale"),
+            Some("h2_function_scalar")
+        );
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
+            Some("value: 7.5")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_color_tint_rows_use_color_animation_type() {
+        let shader = h2_classic_shader_tag();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/name",
+            "color_wide",
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "2").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/flags", "1").unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/default const color",
+            "1, 1, 1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "color_wide_tint"),
+            Some("h2_create_function_color")
+        );
+        assert_eq!(
+            h2_template_row_value_color_for_test(&shader, &template, "color_wide_tint"),
+            Some((255, 255, 255, 255))
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_existing_constant_color_functions_render_swatch() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_h2_shader_param_op(
+            &mut shader,
+            &H2ShaderParamOp::EnsureAnimationProperty {
+                parameters_block_path: "parameters".to_owned(),
+                parameter_name: "color_sharp".to_owned(),
+                parameter_type_index: 2,
+                animation_type_index: 12,
+                initial_function_data: h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None),
+            },
+        )
+        .unwrap();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/name",
+            "color_sharp",
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "2").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/flags", "1").unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "color_sharp_tint"),
+            Some("h2_function_color")
+        );
+        assert_eq!(
+            h2_template_row_value_color_for_test(&shader, &template, "color_sharp_tint"),
+            Some((255, 0, 0, 255))
+        );
+        assert_h2_write_atomic_verifies(&shader, "h2_color_function_existing");
+    }
+
+    #[test]
+    fn h2ek_shader_postprocess_constants_initialize_template_rows() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/value properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/value properties[0]/value",
+            "7.5",
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/color properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/color properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/color properties[1]/color",
+            "1, 0, 0",
+        )
+        .unwrap();
+
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        for (index, (name, ty, flags)) in [("noyze0", "0", "1"), ("color_sharp", "2", "0")]
+            .into_iter()
+            .enumerate()
+        {
+            apply_one_block_op(
+                &mut template,
+                &BlockOp {
+                    path: "categories[0]/parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            let path = format!("categories[0]/parameters[{index}]");
+            apply_field_edit(&mut template, &format!("{path}/name"), name).unwrap();
+            apply_field_edit(&mut template, &format!("{path}/type"), ty).unwrap();
+            apply_field_edit(&mut template, &format!("{path}/flags"), flags).unwrap();
+            if name == "noyze0" {
+                apply_field_edit(
+                    &mut template,
+                    &format!("{path}/bitmap animation flags"),
+                    "1",
+                )
+                .unwrap();
+            }
+        }
+
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
+            Some("value: 7.5")
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_scale"),
+            Some("scalar")
+        );
+        assert_eq!(
+            h2_template_row_value_color_for_test(&shader, &template, "color_sharp"),
+            Some((255, 0, 0, 255))
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "color_sharp"),
+            Some("color")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_legacy_animation_bytes_initialize_template_rows() {
+        let mut shader = h2_classic_shader_tag();
+        for (index, (name, ty, anim_ty, data)) in [
+            ("noyze0", "0", "0", {
+                let mut data = vec![0; 28];
+                data[0] = 1;
+                data[4..8].copy_from_slice(&7.5f32.to_le_bytes());
+                data[8..12].copy_from_slice(&1.0f32.to_le_bytes());
+                data
+            }),
+            ("color_sharp", "2", "12", {
+                let mut data = vec![0; 28];
+                data[0] = 1;
+                data[1] = 0x20;
+                data[4] = 0;
+                data[5] = 0;
+                data[6] = 255;
+                data[7] = 255;
+                data
+            }),
+            ("noyze1", "0", "5", {
+                let mut data = vec![0; 52];
+                data[0] = 3;
+                data[2] = 0x0a;
+                data[10] = 0x80;
+                data[11] = 0x3f;
+                data[22] = 0x80;
+                data[23] = 0x3f;
+                data
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            apply_one_block_op(
+                &mut shader,
+                &BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            let path = format!("parameters[{index}]");
+            apply_field_edit(&mut shader, &format!("{path}/name"), name).unwrap();
+            apply_field_edit(&mut shader, &format!("{path}/type"), ty).unwrap();
+            apply_one_block_op(
+                &mut shader,
+                &BlockOp {
+                    path: format!("{path}/animation properties"),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            apply_field_edit(
+                &mut shader,
+                &format!("{path}/animation properties[0]/type"),
+                anim_ty,
+            )
+            .unwrap();
+            seed_halo2_raw_function_byte_block_for_test(
+                &mut shader,
+                &format!("{path}/animation properties[0]/function/data"),
+                &data,
+            );
+        }
+
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        for (index, (name, ty, flags, bitmap_flags)) in [
+            ("noyze0", "0", "1", "1"),
+            ("color_sharp", "2", "1", "0"),
+            ("noyze1", "0", "1", "4"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            apply_one_block_op(
+                &mut template,
+                &BlockOp {
+                    path: "categories[0]/parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            let path = format!("categories[0]/parameters[{index}]");
+            apply_field_edit(&mut template, &format!("{path}/name"), name).unwrap();
+            apply_field_edit(&mut template, &format!("{path}/type"), ty).unwrap();
+            apply_field_edit(&mut template, &format!("{path}/flags"), flags).unwrap();
+            apply_field_edit(
+                &mut template,
+                &format!("{path}/bitmap animation flags"),
+                bitmap_flags,
+            )
+            .unwrap();
+            if name == "noyze1" {
+                apply_field_edit(&mut template, &format!("{path}/bitmap type"), "3D").unwrap();
+            }
+        }
+
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
+            Some("value: 7.5")
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_scale"),
+            Some("h2_function_scalar")
+        );
+        assert_eq!(
+            h2_template_row_value_color_for_test(&shader, &template, "color_sharp"),
+            Some((255, 0, 0, 255))
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "color_sharp"),
+            Some("h2_function_color")
+        );
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze1_translation_y")
+                .as_deref(),
+            Some("<function data goes here>")
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze1_translation_y"),
+            None
+        );
+        assert_eq!(
+            h2_template_row_function_data_path_for_test(&shader, &template, "noyze1_translation_y")
+                .as_deref(),
+            Some("parameters[2]/animation properties[0]/function/data")
+        );
+
+        let mut legacy_scale = vec![0; 28];
+        legacy_scale[0] = 1;
+        legacy_scale[4..8].copy_from_slice(&7.5f32.to_le_bytes());
+        let scale_edit = h2_constant_scalar_function_data(5.0, Some(&legacy_scale));
+        assert_eq!(scale_edit.len(), 28);
+        assert_eq!(
+            f32::from_le_bytes(scale_edit[4..8].try_into().unwrap()),
+            5.0
+        );
+        let color_edit = h2_constant_color_function_data(
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            Some(&[
+                1, 0x20, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]),
+        );
+        assert_eq!(&color_edit[..8], &[1, 0x20, 0, 0, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn h2_shader_template_switch_prunes_unmatched_parameters() {
+        let mut shader = h2_classic_shader_tag();
+        for (index, name) in ["keep_me", "drop_me"].into_iter().enumerate() {
+            apply_one_block_op(
+                &mut shader,
+                &BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            apply_field_edit(&mut shader, &format!("parameters[{index}]/name"), name).unwrap();
+            apply_field_edit(&mut shader, &format!("parameters[{index}]/type"), "0").unwrap();
+        }
+
+        apply_one_h2_shader_param_op(
+            &mut shader,
+            &H2ShaderParamOp::SwitchTemplate {
+                parameters_block_path: "parameters".to_owned(),
+                allowed_parameter_names: vec!["keep_me".to_owned()],
+            },
+        )
+        .unwrap();
+
+        let parameters = shader
+            .root()
+            .field("parameters")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(
+            parameters
+                .element(0)
+                .and_then(|parameter| parameter.read_string_id("name")),
+            Some("keep_me".to_owned())
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_postprocess_color_overlay_initializes_tint_swatch() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/overlays".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/overlay references".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/overlay references[0]/overlay index",
+            "0",
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/overlay references[0]/transform index",
+            "0",
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/animated parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/animated parameters[0]/overlay references/block index data",
+            "0",
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition[0]/animated parameter references".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut shader,
+            "postprocess definition[0]/animated parameter references[0]/parameter index",
+            "0",
+        )
+        .unwrap();
+        seed_halo2_wrapped_function_byte_block_for_test(
+            &mut shader,
+            "postprocess definition[0]/overlays[0]/function",
+            &h2_constant_color_function_data(1.0, 1.0, 0.0, 1.0, None),
+        );
+
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/name", "transparent").unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/name",
+            "center_line",
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "2").unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/flags", "1").unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "center_line_tint"),
+            Some("h2_function_color")
+        );
+        assert_eq!(
+            h2_template_row_value_color_for_test(&shader, &template, "center_line_tint"),
+            Some((255, 255, 0, 255))
+        );
+
+        apply_one_h2_shader_param_op(
+            &mut shader,
+            &H2ShaderParamOp::EditFunctionData {
+                block_path: "postprocess definition[0]/overlays[0]/function/function/data"
+                    .to_owned(),
+                data: h2_constant_color_function_data(0.0, 0.0, 0.0, 1.0, None),
+            },
+        )
+        .unwrap();
+        let overlay = shader
+            .root()
+            .descend("postprocess definition[0]/overlays[0]/function")
+            .unwrap();
+        let function_struct = overlay
+            .fields()
+            .find(|field| field.name() == "function" && field.field_type() == TagFieldType::Struct)
+            .and_then(|field| field.as_struct())
+            .unwrap();
+        let bytes = halo2_function_bytes_from_struct(function_struct).unwrap();
+        let function = h2_tag_function(&bytes).unwrap();
+        assert_eq!(
+            extract_constant_color(&function),
+            Some([0.0, 0.0, 0.0, 1.0])
+        );
+    }
+
+    #[test]
+    fn h2_shader_color_function_create_and_edit_reparse() {
+        let mut tag = h2_classic_shader_tag();
+        let red = h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None);
+        apply_one_h2_shader_param_op(
+            &mut tag,
+            &H2ShaderParamOp::EnsureAnimationProperty {
+                parameters_block_path: "parameters".to_owned(),
+                parameter_name: "center_line".to_owned(),
+                parameter_type_index: 2,
+                animation_type_index: 12,
+                initial_function_data: red,
+            },
+        )
+        .unwrap();
+
+        let parameters = tag
+            .root()
+            .field("parameters")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let animation = parameters
+            .element(0)
+            .unwrap()
+            .field("animation properties")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+            .unwrap();
+        assert_eq!(animation.read_int_any("type"), Some(12));
+        let data_path = "parameters[0]/animation properties[0]/function/data";
+        let grey = h2_constant_color_function_data(0.5, 0.5, 0.5, 1.0, None);
+        apply_one_h2_shader_param_op(
+            &mut tag,
+            &H2ShaderParamOp::EditFunctionData {
+                block_path: data_path.to_owned(),
+                data: grey.clone(),
+            },
+        )
+        .unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), grey);
+        let function =
+            h2_tag_function(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
+        let color = extract_constant_color(&function).unwrap();
+        for (actual, expected) in
+            color
+                .iter()
+                .zip([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0])
+        {
+            assert!((actual - expected).abs() < 0.0001);
+        }
+        assert_h2_write_atomic_verifies(&tag, "h2_color_function_edit");
+    }
+
+    #[test]
+    fn h2ek_shader_missing_template_value_row_is_create_editable() {
+        let shader = h2_classic_shader_tag();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/name",
+            "plasma_factor",
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/type", "1").unwrap();
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/default const value",
+            "0.35",
+        )
+        .unwrap();
+
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "plasma_factor"),
+            Some("h2_create_template_value")
+        );
+    }
+
+    #[test]
+    fn h2_shader_template_value_edit_creates_single_parameter() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_h2_shader_param_op(
+            &mut tag,
+            &H2ShaderParamOp::EditTemplateBackedValue {
+                parameters_block_path: "parameters".to_owned(),
+                parameter_name: "plasma_brightness".to_owned(),
+                parameter_type_index: 1,
+                field: "const value".to_owned(),
+                input: "1.25".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let parameters = tag
+            .root()
+            .field("parameters")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(parameters.len(), 1);
+        let parameter = parameters.element(0).unwrap();
+        assert_eq!(
+            parameter.read_string_id("name").as_deref(),
+            Some("plasma_brightness")
+        );
+        assert_eq!(parameter.read_int_any("type"), Some(1));
+        assert_eq!(parameter.read_real("const value"), Some(1.25));
+    }
+
+    #[test]
+    fn h2_shader_template_function_create_materializes_backing_data() {
+        let mut tag = h2_classic_shader_tag();
+        let bytes = h2_constant_scalar_function_data(0.5, None);
+        apply_one_h2_shader_param_op(
+            &mut tag,
+            &H2ShaderParamOp::EnsureAnimationProperty {
+                parameters_block_path: "parameters".to_owned(),
+                parameter_name: "noise_map1".to_owned(),
+                parameter_type_index: 0,
+                animation_type_index: 5,
+                initial_function_data: bytes.clone(),
+            },
+        )
+        .unwrap();
+
+        let parameters = tag
+            .root()
+            .field("parameters")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(parameters.len(), 1);
+        let parameter = parameters.element(0).unwrap();
+        assert_eq!(
+            parameter.read_string_id("name").as_deref(),
+            Some("noise_map1")
+        );
+        assert_eq!(parameter.read_int_any("type"), Some(0));
+        let animation = parameter
+            .field("animation properties")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+            .unwrap();
+        assert_eq!(animation.read_int_any("type"), Some(5));
+        let mapping = animation
+            .field("function")
+            .and_then(|field| field.as_struct())
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), bytes);
+        assert_h2_write_atomic_verifies(&tag, "h2_function_create");
+    }
+
+    #[test]
+    fn h2ek_shader_function_row_exposes_byte_block_and_wrapper_paths() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut tag, "parameters[0]/name", "animated_scalar").unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut tag, "parameters[0]/animation properties[0]/type", "8").unwrap();
+        apply_field_edit(
+            &mut tag,
+            "parameters[0]/animation properties[0]/input name",
+            "time",
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut tag,
+            "parameters[0]/animation properties[0]/range name",
+            "random",
+        )
+        .unwrap();
+        apply_field_edit(
+            &mut tag,
+            "parameters[0]/animation properties[0]/time period",
+            "2.5",
+        )
+        .unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
+        seed_halo2_function_byte_block_for_test(
+            &mut tag,
+            "parameters[0]/animation properties[0]/function/data",
+            &bytes,
+        );
+
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
+        let summary = first_h2_function_edit_summary(&model).expect("function row");
+
+        assert_eq!(summary.bytes, bytes);
+        assert_eq!(summary.output_index, Some(8));
+        assert_eq!(summary.input_name, "time");
+        assert_eq!(summary.range_name, "random");
+        assert_eq!(summary.time_period, 2.5);
+        assert_eq!(
+            summary.data_path,
+            "parameters[0]/animation properties[0]/function/data"
+        );
+        assert_eq!(
+            summary.parameter_type_path,
+            "parameters[0]/animation properties[0]/type"
+        );
+        assert_eq!(
+            summary.input_name_path,
+            "parameters[0]/animation properties[0]/input name"
+        );
+        assert_eq!(
+            summary.range_name_path,
+            "parameters[0]/animation properties[0]/range name"
+        );
+        assert_eq!(
+            summary.time_period_path,
+            "parameters[0]/animation properties[0]/time period"
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_input_name_edit_writes_without_truncated_struct_panic() {
+        let mut tag = h2_classic_shader_tag();
+        for _ in 0..2 {
+            apply_one_block_op(
+                &mut tag,
+                &BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+        }
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[1]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
+        seed_halo2_function_byte_block_for_test(
+            &mut tag,
+            "parameters[1]/animation properties[0]/function/data",
+            &bytes,
+        );
+
+        apply_field_edit(
+            &mut tag,
+            "parameters[1]/animation properties[0]/input name",
+            "shield_strength",
+        )
+        .unwrap();
+
+        assert_h2_write_atomic_verifies(&tag, "h2_input_name_edit");
+        let written = tag.write_to_bytes().expect("write edited h2 shader");
+        assert!(
+            written
+                .windows("shield_strength".len())
+                .any(|window| { window == "shield_strength".as_bytes() })
+        );
+    }
+
+    #[test]
+    fn halo2_function_byte_block_rejects_invalid_mapping_function_before_clear() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let original = h2_constant_scalar_function_data(0.25, None);
+        let block_path = "parameters[0]/animation properties[0]/function/data";
+        seed_halo2_function_byte_block_for_test(&mut tag, block_path, &original);
+
+        assert!(replace_halo2_function_byte_block(&mut tag, block_path, &[1, 2, 3]).is_err());
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), original);
+    }
+
+    #[test]
+    fn halo2_function_byte_block_same_length_edit_writes_in_place() {
+        let mut tag = h2_classic_shader_tag();
+        for _ in 0..7 {
+            apply_one_block_op(
+                &mut tag,
+                &BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+        }
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[6]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let block_path = "parameters[6]/animation properties[0]/function/data";
+        let original = h2_constant_scalar_function_data(0.25, None);
+        seed_halo2_function_byte_block_for_test(&mut tag, block_path, &original);
+        let edited = h2_constant_scalar_function_data(0.75, None);
+
+        replace_halo2_function_byte_block(&mut tag, block_path, &edited).unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[6]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), edited);
+        assert_h2_write_atomic_verifies(&tag, "h2_function_same_len");
+    }
+
+    #[test]
+    fn damage_effect_vibration_byte_block_same_length_edit_preserves_36_bytes() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let block_path = "parameters[0]/animation properties[0]/function/data";
+        let mut original = vec![0; 36];
+        original[0] = 2;
+        original[1] = 0;
+        original[2] = 1;
+        original[20..24].copy_from_slice(&0.8f32.to_le_bytes());
+        original[24..28].copy_from_slice(&0.4f32.to_le_bytes());
+        original[32..36].copy_from_slice(&1.0f32.to_le_bytes());
+        seed_halo2_raw_function_byte_block_for_test(&mut tag, block_path, &original);
+        let mut edited = original.clone();
+        edited[2] = 2;
+        edited[20..24].copy_from_slice(&1.0f32.to_le_bytes());
+        edited[24..28].copy_from_slice(&0.7f32.to_le_bytes());
+
+        replace_halo2_function_byte_block(&mut tag, block_path, &edited).unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        let written = halo2_function_bytes_from_struct(mapping).unwrap();
+        assert_eq!(written.len(), 36);
+        assert_eq!(written, edited);
+        assert_eq!(&written[32..36], &original[32..36]);
+    }
+
+    #[test]
+    fn halo2_function_byte_block_existing_length_change_rebuilds_block() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let block_path = "parameters[0]/animation properties[0]/function/data";
+        seed_halo2_function_byte_block_for_test(
+            &mut tag,
+            block_path,
+            &h2_constant_scalar_function_data(0.25, None),
+        );
+        let mut linear_key = vec![0u8; 32];
+        linear_key[0] = 5;
+        linear_key[4..8].copy_from_slice(&0.0f32.to_le_bytes());
+        linear_key[8..12].copy_from_slice(&1.0f32.to_le_bytes());
+        for &(x, y) in &[(0.0_f32, 0.0_f32), (0.25, 1.0), (0.75, 1.0), (1.0, 0.0)] {
+            linear_key.extend_from_slice(&x.to_le_bytes());
+            linear_key.extend_from_slice(&y.to_le_bytes());
+        }
+        for _ in 0..12 {
+            linear_key.extend_from_slice(&0.0_f32.to_le_bytes());
+        }
+
+        replace_halo2_function_byte_block(&mut tag, block_path, &linear_key).unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(
+            halo2_function_bytes_from_struct(mapping).unwrap(),
+            linear_key
+        );
+        assert_h2_write_atomic_verifies(&tag, "h2_function_resize");
+    }
+
+    #[test]
+    fn halo2_function_byte_block_empty_creation_rebuilds_block() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let bytes = h2_constant_scalar_function_data(0.25, None);
+        replace_halo2_function_byte_block(
+            &mut tag,
+            "parameters[0]/animation properties[0]/function/data",
+            &bytes,
+        )
+        .unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), bytes);
+        assert_h2_write_atomic_verifies(&tag, "h2_function_empty_create");
+    }
+
+    fn h2_classic_shader_tag() -> TagFile {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
+        let mut header = vec![0; 64];
+        header[36..40].copy_from_slice(b"hsmr");
+        header[56..58].copy_from_slice(&0u16.to_le_bytes());
+        header[60..64].copy_from_slice(b"!MLB");
+        tag.container = blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header,
+        };
+        tag
+    }
+
+    fn assert_h2_write_atomic_verifies(tag: &TagFile, name: &str) {
+        let mut path = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!(
+            "baboon_{name}_{}_{}.shader",
+            std::process::id(),
+            stamp
+        ));
+        let _ = fs::remove_file(&path);
+        tag.write_atomic(&path).unwrap_or_else(|error| {
+            panic!(
+                "write_atomic verification failed for {}: {error}",
+                path.display()
+            )
+        });
+        let _ = fs::remove_file(&path);
+    }
+
+    fn seed_halo2_function_byte_block_for_test(tag: &mut TagFile, block_path: &str, data: &[u8]) {
+        h2_tag_function(data).expect("seed data is an H2 block");
+        seed_halo2_raw_function_byte_block_for_test(tag, block_path, data);
+    }
+
+    fn seed_halo2_raw_function_byte_block_for_test(
+        tag: &mut TagFile,
+        block_path: &str,
+        data: &[u8],
+    ) {
+        apply_one_block_op(
+            tag,
+            &BlockOp {
+                path: block_path.to_owned(),
+                kind: BlockOpKind::DeleteAll,
+            },
+        )
+        .unwrap();
+        for (index, byte) in data.iter().copied().enumerate() {
+            apply_one_block_op(
+                tag,
+                &BlockOp {
+                    path: block_path.to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            apply_field_edit(
+                tag,
+                &format!("{block_path}[{index}]/Value"),
+                &(byte as i8).to_string(),
+            )
+            .unwrap();
+        }
+    }
+
+    fn seed_halo2_wrapped_function_byte_block_for_test(
+        tag: &mut TagFile,
+        wrapper_path: &str,
+        data: &[u8],
+    ) {
+        h2_tag_function(data).expect("seed data is an H2 block");
+        let mut root = tag.root_mut();
+        let mut wrapper_field = root.field_path_mut(wrapper_path).unwrap();
+        let mut wrapper = wrapper_field.as_struct_mut().unwrap();
+        let mut wrote = false;
+        wrapper.for_each_field_mut(|mut field| {
+            if wrote
+                || field.as_ref().name() != "function"
+                || field.as_ref().field_type() != TagFieldType::Struct
+            {
+                return;
+            }
+            let Some(mut mapping) = field.as_struct_mut() else {
+                return;
+            };
+            let Some(mut data_field) = mapping.field_mut("data") else {
+                return;
+            };
+            let Some(mut block) = data_field.as_block_mut() else {
+                return;
+            };
+            block.clear();
+            for byte in data.iter().copied() {
+                let index = block.add_element();
+                let mut element = block.element_mut(index).unwrap();
+                element
+                    .field_mut("Value")
+                    .unwrap()
+                    .set(TagFieldData::CharInteger(byte as i8))
+                    .unwrap();
+            }
+            wrote = true;
+        });
+        assert!(wrote, "failed to seed wrapped H2 function bytes");
+    }
+
+    /// The H2 shader grid is rebuilt every frame, and used to read and parse
+    /// its `.shader_template` off disk each time. Now the template is read
+    /// once, and again only when the file changes.
+    #[test]
+    fn the_h2_shader_grid_reads_its_template_once_per_change() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-h2-template-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        let template_path = root.join("shaders/test.shader_template");
+        std::fs::write(&template_path, b"not a template").unwrap();
+
+        let mut tag = h2_classic_shader_tag();
+        crate::core::document::apply::apply_field_edit(&mut tag, "template", "stem:shaders/test")
+            .unwrap();
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let mut templates = H2TemplateCache::default();
+        let frames = |templates: &mut H2TemplateCache| {
+            for _ in 0..3 {
+                build_h2ek_shader_editor_model(
+                    &tag,
+                    &entry,
+                    &TagNameIndex::default(),
+                    Some(&source),
+                    templates,
+                );
+            }
+        };
+
+        frames(&mut templates);
+        assert_eq!(templates.loads, 1, "three frames, one read");
+        // A different size is a different file, whatever the clock says.
+        std::fs::write(&template_path, b"still not a template, but longer").unwrap();
+        frames(&mut templates);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(templates.loads, 2, "a changed file is read again, once");
+    }
+
+    fn h2_shader_entry(group_tag: u32) -> TagEntry {
+        TagEntry {
+            key: "objects/test/example.shader".into(),
+            display_path: "objects/test/example.shader".into(),
+            group_tag,
+            group_name: Some("shader".into()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("example.shader")),
+        }
+    }
+}

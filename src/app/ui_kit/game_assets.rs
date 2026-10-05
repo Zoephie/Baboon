@@ -51,3 +51,26 @@ pub(in crate::app) fn game_platform_label(game: GameId) -> &'static str {
         "MCC"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_emblems_are_separate_from_game_banners() {
+        // Every game has an emblem, distinct from its banner and from the others.
+        let emblems: std::collections::HashSet<_> =
+            GameId::ALL.iter().map(|game| get_game_emblem_bytes(*game)).collect();
+        assert_eq!(emblems.len(), GameId::ALL.len());
+        assert_ne!(
+            get_game_emblem_bytes(GameId::HaloCe),
+            get_game_banner_bytes(Some(GameId::HaloCe))
+        );
+        assert_ne!(
+            get_game_banner_bytes(Some(GameId::CampaignEvolved)),
+            get_game_banner_bytes(Some(GameId::HaloCe))
+        );
+        // A saved id this build does not know falls back to Halo CE's banner.
+        assert_eq!(get_game_banner_bytes(None), get_game_banner_bytes(Some(GameId::HaloCe)));
+    }
+}

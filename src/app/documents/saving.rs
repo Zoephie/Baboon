@@ -1034,3 +1034,42 @@ mod new_tag_group_tests {
         assert_eq!(extension(b"hsc*").as_deref(), Some("hsc"));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::documents::saving::new_tag_output_path_from_dialog;
+
+    #[test]
+    fn new_tag_dialog_path_uses_selected_file_name_inside_tags_root() {
+        let root = Path::new("C:/kit/tags");
+
+        let (output, display) =
+            new_tag_output_path_from_dialog(root, Path::new("C:/kit/tags/objects/foo"), "shader")
+                .unwrap();
+        assert_eq!(output, PathBuf::from("C:/kit/tags/objects/foo.shader"));
+        assert_eq!(display, "objects/foo.shader");
+
+        let (output, display) = new_tag_output_path_from_dialog(
+            root,
+            Path::new("C:/kit/tags/objects/foo.model"),
+            "shader",
+        )
+        .unwrap();
+        assert_eq!(output, PathBuf::from("C:/kit/tags/objects/foo.shader"));
+        assert_eq!(display, "objects/foo.shader");
+
+        assert!(
+            new_tag_output_path_from_dialog(root, Path::new("C:/other/foo.shader"), "shader")
+                .is_err()
+        );
+        assert!(
+            new_tag_output_path_from_dialog(
+                root,
+                Path::new("C:/kit/tags/../other/foo.shader"),
+                "shader",
+            )
+            .is_err()
+        );
+    }
+}

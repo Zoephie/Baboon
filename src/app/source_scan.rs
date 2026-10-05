@@ -83,4 +83,30 @@ mod tests {
             "fn a() {}\n\n#[cfg(test)]\nfn helper() {}\nfn b() {}\n"
         );
     }
+
+    /// Helper programs Baboon runs out of sight must go through
+    /// `background_command`, or a release build (a GUI-subsystem program)
+    /// flashes a console window for each one on Windows. `git` and `taskkill`
+    /// were launched with a bare `Command::new`. The flag cannot be observed
+    /// off Windows, so this checks the launches themselves.
+    #[test]
+    fn helper_programs_launch_through_background_command() {
+        let mut bare = Vec::new();
+        let mut routed = 0;
+        for (file, text) in crate::app::source_scan::app_product_sources() {
+            let text = text.as_str();
+            // Test code launches git to build fixtures; only what ships counts.
+            let shipped = text.split("#[cfg(test)]").next().unwrap_or(text);
+            for program in ["git", "taskkill", "powershell.exe", "cmd"] {
+                for call in ["Command::new", "process::Command::new"] {
+                    if shipped.contains(&format!("{call}(\"{program}\")")) {
+                        bare.push(format!("{file}: {program}"));
+                    }
+                }
+                routed += shipped.matches(&format!("background_command(\"{program}\")")).count();
+            }
+        }
+        assert!(bare.is_empty(), "launched without CREATE_NO_WINDOW: {bare:?}");
+        assert!(routed >= 10, "only {routed} launches found; the scan is not looking");
+    }
 }

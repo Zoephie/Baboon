@@ -3446,6 +3446,7 @@ pub(in crate::app) fn supports_delete_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::browser::{collect_bitmap_keys, tag_json_relative_path};
 
     /// Expanding a folder lazily loads its tags and, when handed the Groups
     /// view's tree, rebuilds it from the lazily loaded entries. Handed the tree
@@ -4371,6 +4372,61 @@ mod tests {
         assert!(!sound_key_may_have_languages(
             r"file:C:\kit\tags\sound\visual_fx\explosion.sound"
         ));
+    }
+
+    #[test]
+    fn folder_bitmap_collector_finds_nested_bitmap_entries() {
+        let entries = vec![
+            TagEntry {
+                key: "bitmap".into(),
+                display_path: "objects/test/diffuse.bitmap".into(),
+                group_tag: u32::from_be_bytes(*b"bitm"),
+                group_name: Some("bitmap".into()),
+                location: TagEntryLocation::LooseFile(PathBuf::from("diffuse.bitmap")),
+            },
+            TagEntry {
+                key: "model".into(),
+                display_path: "objects/test/object.model".into(),
+                group_tag: u32::from_be_bytes(*b"hlmt"),
+                group_name: Some("model".into()),
+                location: TagEntryLocation::LooseFile(PathBuf::from("object.model")),
+            },
+        ];
+        let node = TagTreeNode {
+            label: "objects".into(),
+            rel_path: PathBuf::from("objects"),
+            entries: vec![],
+            children: vec![TagTreeNode {
+                label: "test".into(),
+                rel_path: PathBuf::from("objects/test"),
+                entries: vec![0, 1],
+                children: vec![],
+                children_loaded: true,
+                entries_loaded: true,
+                ..Default::default()
+            }],
+            children_loaded: true,
+            entries_loaded: true,
+            ..Default::default()
+        };
+
+        assert_eq!(collect_bitmap_keys(&node, &entries), vec!["bitmap"]);
+    }
+
+    #[test]
+    fn folder_json_path_preserves_tag_extension_under_source_tree() {
+        let entry = TagEntry {
+            key: "model".into(),
+            display_path: "objects/test/spartans.model".into(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: Some("model".into()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("spartans.model")),
+        };
+
+        assert_eq!(
+            tag_json_relative_path(&entry),
+            PathBuf::from("objects/test/spartans.model.json")
+        );
     }
 }
 

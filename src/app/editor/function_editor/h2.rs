@@ -12,6 +12,8 @@ pub(in crate::app) fn h2_tag_function(bytes: &[u8]) -> Option<TagFunction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::editor::{FunctionDataStorage, FunctionEditPaths, FunctionSnapshot, FunctionView, constant_function_hex, extract_constant_color, h2_constant_color_function_data, h2_constant_scalar_function_data, h2_tag_function, push_function_edit};
+    use crate::core::document::value::{decode_hex, encode_hex};
 
     #[test]
     fn foundation_master_types_keep_all_curve_variants_in_curve_mode() {
@@ -74,9 +76,7 @@ mod tests {
 
     #[test]
     fn h2_option_tables_are_the_engines() {
-        use blam_tags::tag_function::h2::{
-            FUNCTION_TYPES, TRANSITION_FUNCTION_NAMES, color_graph_type_name, function_type_name,
-        };
+        use blam_tags::tag_function::h2::{FUNCTION_TYPES, TRANSITION_FUNCTION_NAMES, color_graph_type_name, function_type_name};
         // Guerilla's picker lists every type, the multi types included.
         assert_eq!(FUNCTION_TYPES.len(), 11);
         assert_eq!(
@@ -323,6 +323,56 @@ mod tests {
             popup.view.function.as_blob().unwrap().header().colors[3],
             0x00AA_BBCC
         );
+    }
+
+    #[test]
+    fn function_edit_data_field_still_emits_hex_field_edit() {
+        let bytes = decode_hex(&constant_function_hex(0.25)).unwrap();
+        let function = TagFunction::parse(&bytes).unwrap();
+        let view = FunctionView::from_function(function).with_edit(FunctionEditPaths {
+            data: FunctionDataStorage::DataField("function/data".to_owned()),
+            parameter_type: String::new(),
+            input_name: String::new(),
+            range_name: String::new(),
+            time_period: String::new(),
+            block_path: String::new(),
+            block_index: 0,
+        });
+        let previous_function =
+            TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap()).unwrap();
+        let previous = FunctionSnapshot::from_view(&FunctionView::from_function(previous_function));
+
+        let batch = push_function_edit(view.edit.as_ref().unwrap(), &previous, &view);
+
+        assert_eq!(batch.data_ops.len(), 0);
+        assert_eq!(batch.edits.len(), 1);
+        assert_eq!(batch.edits[0].path, "function/data");
+        assert_eq!(batch.edits[0].input, encode_hex(&bytes));
+    }
+
+    #[test]
+    fn function_edit_halo2_byte_block_emits_data_op() {
+        let bytes = h2_constant_scalar_function_data(0.5, None);
+        let function = h2_tag_function(&bytes).unwrap();
+        let view = FunctionView::from_function(function).with_edit(FunctionEditPaths {
+            data: FunctionDataStorage::Halo2ByteBlock("parameters[0]/function/data".to_owned()),
+            parameter_type: String::new(),
+            input_name: String::new(),
+            range_name: String::new(),
+            time_period: String::new(),
+            block_path: String::new(),
+            block_index: 0,
+        });
+        let previous_function =
+            h2_tag_function(&h2_constant_scalar_function_data(0.0, None)).unwrap();
+        let previous = FunctionSnapshot::from_view(&FunctionView::from_function(previous_function));
+
+        let batch = push_function_edit(view.edit.as_ref().unwrap(), &previous, &view);
+
+        assert!(batch.edits.is_empty());
+        assert_eq!(batch.data_ops.len(), 1);
+        assert_eq!(batch.data_ops[0].block_path, "parameters[0]/function/data");
+        assert_eq!(batch.data_ops[0].data, bytes);
     }
 }
 

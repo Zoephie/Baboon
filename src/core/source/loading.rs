@@ -1988,3 +1988,71 @@ mod classic_layout_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::bundled::locate_definitions_root;
+    use crate::core::document::apply::apply_field_edit;
+    use blam_tags::TagFieldData;
+
+    /// Undo and redo snapshot a document as `write_to_bytes` and restore it
+    /// through `read_tag_from_bytes`. A classic (Halo CE / Halo 2) document
+    /// snapshots in classic format, which only the classic reader with the
+    /// game's layout can parse; the MCC reader refuses it.
+    #[test]
+    fn a_classic_snapshot_restores_through_the_classic_reader() {
+        // A Halo 2 `sound_mix` as a classic file: the 64-byte header (group
+        // and `BLM!` stored reversed), the root block header, one zeroed
+        // element. Read through the same reader a loose classic tag uses.
+        let group = u32::from_be_bytes(*b"snmx");
+        let definitions = locate_definitions_root();
+        let layout =
+            blam_tags::TagLayout::from_json(definitions.join("halo2_mcc/sound_mix.json")).unwrap();
+        let root = layout.block_layouts[layout.header.tag_group_block_index as usize].struct_index;
+        let size = layout.struct_layouts[root as usize].size as usize;
+        let mut bytes = vec![0u8; 64];
+        bytes[36..40].copy_from_slice(b"xmns");
+        bytes[60..64].copy_from_slice(b"!MLB");
+        bytes.extend_from_slice(b"dfbt");
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&(size as u32).to_le_bytes());
+        bytes.resize(bytes.len() + size, 0);
+        let mut tag = crate::core::source::read_tag_from_bytes(
+            &bytes,
+            Some(GameId::Halo2),
+            Some(&definitions),
+            group,
+        )
+        .expect("a classic tag");
+        apply_field_edit(&mut tag, "left stereo gain", "-3").unwrap();
+        let snapshot = tag.write_to_bytes().expect("snapshot");
+
+        assert!(
+            TagFile::read_from_bytes(&snapshot).is_err(),
+            "the MCC reader cannot parse a classic snapshot"
+        );
+        assert!(
+            crate::core::source::read_tag_from_bytes(&snapshot, None, None, group).is_err(),
+            "a classic snapshot needs the game to find its layout"
+        );
+        let restored = crate::core::source::read_tag_from_bytes(
+            &snapshot,
+            Some(GameId::Halo2),
+            Some(&locate_definitions_root()),
+            group,
+        )
+        .expect("restore");
+        assert!(matches!(
+            restored.container,
+            blam_tags::file::TagContainer::Classic { .. }
+        ));
+        let gain = |tag: &TagFile| match tag.root().field_path("left stereo gain")?.value()? {
+            TagFieldData::Real(value) => Some(value),
+            _ => None,
+        };
+        assert_eq!(gain(&restored), Some(-3.0), "the edit survives the round trip");
+        assert_eq!(restored.write_to_bytes().unwrap(), snapshot);
+    }
+}

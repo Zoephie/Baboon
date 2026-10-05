@@ -181,6 +181,7 @@ pub(in crate::app) fn find_filter_block_jump_id(view_scope: &str, tag_key: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::editor::{clean_field_name, strip_element_indices, strip_node_indices};
 
     fn object_with_one_ai_properties_element() -> TagFile {
         let mut tag = TagFile::new(crate::app::test_definition_path("halo2_mcc/object.json"))
@@ -262,6 +263,51 @@ mod tests {
                 .visible_paths
                 .iter()
                 .any(|path| path.starts_with("@documentation "))
+        );
+    }
+
+    #[test]
+    fn strip_node_indices_drops_element_subscripts() {
+        // Search-fields paths must be element-independent so a match resolves
+        // regardless of which block element happens to be selected.
+        assert_eq!(strip_node_indices("contact points"), "contact points");
+        assert_eq!(
+            strip_node_indices("contact points[0]/markers[12]"),
+            "contact points/markers"
+        );
+        assert_eq!(strip_node_indices("unit/object"), "unit/object");
+        assert_eq!(
+            strip_node_indices("color#10/Mapping#5/Function Type#1"),
+            "color/Mapping/Function Type"
+        );
+        assert_eq!(
+            strip_node_indices("regions#3[0]/permutations#7[2]"),
+            "regions/permutations"
+        );
+    }
+
+    #[test]
+    fn strip_element_indices_keeps_ordinals_drops_subscripts() {
+        // Block-clipboard compatibility must ignore which parent element is
+        // selected (the `[N]` subscript) but keep the field ordinal (`#N`) so a
+        // copied element pastes into the same block under a *different* parent
+        // index, while distinct same-named sibling blocks stay separate.
+        assert_eq!(
+            strip_element_indices("damage sections#3[0]/instant responses#5"),
+            "damage sections#3/instant responses#5"
+        );
+        assert_eq!(
+            strip_element_indices("damage sections#3[1]/instant responses#5"),
+            "damage sections#3/instant responses#5"
+        );
+        // The two paths above — same block, different parent index — match.
+        assert_eq!(
+            strip_element_indices("damage sections#3[0]/instant responses#5"),
+            strip_element_indices("damage sections#3[7]/instant responses#5"),
+        );
+        assert_eq!(
+            strip_element_indices("regions#3[0]/permutations#7[2]"),
+            "regions#3/permutations#7"
         );
     }
 }

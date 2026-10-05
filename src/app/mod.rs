@@ -566,9 +566,6 @@ fn editing_kit_path_inputs(paths: &HashMap<String, PathBuf>) -> HashMap<String, 
         .collect()
 }
 
-#[cfg(test)]
-mod tests;
-
 fn hex_bytes(bytes: &[u8]) -> String {
     bytes
         .iter()

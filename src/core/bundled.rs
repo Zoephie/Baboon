@@ -59,3 +59,42 @@ pub(crate) fn locate_help_docs_root() -> PathBuf {
     }
     expected.unwrap_or(dev_at_manifest)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::format::TagNameIndex;
+    use crate::core::game::GameId;
+    use blam_tags::TagFile;
+
+    #[test]
+    fn copied_classic_definitions_load_halo2_shader_layout() {
+        let schema_path = locate_definitions_root()
+            .join("halo2_mcc")
+            .join("shader.json");
+        assert!(schema_path.is_file());
+        TagFile::new(&schema_path).expect("copied halo2 shader schema loads");
+        let names = TagNameIndex::load_game(&locate_definitions_root(), GameId::Halo2)
+            .expect("copied halo2 meta loads");
+        assert_eq!(names.name_for(u32::from_be_bytes(*b"shad")), Some("shader"));
+    }
+
+    #[test]
+    fn copied_definitions_include_all_known_games() {
+        let root = locate_definitions_root();
+        for game in [
+            "haloce_mcc",
+            "halo2_mcc",
+            "halo2amp_mcc",
+            "halo3_mcc",
+            "halo3odst_mcc",
+            "haloreach_mcc",
+            "halo4_mcc",
+        ] {
+            assert!(
+                root.join(game).join("_meta.json").is_file(),
+                "missing copied definitions for {game}"
+            );
+        }
+    }
+}

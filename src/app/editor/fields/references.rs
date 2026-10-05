@@ -897,6 +897,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::editor::{model_source_dir, sanitize_ref_path};
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.
@@ -1494,5 +1495,20 @@ mod tests {
             tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE"),
             None
         );
+    }
+
+    #[test]
+    fn tag_ref_path_helpers() {
+        // Null terminator stripped so the ref resolves on disk.
+        assert_eq!(
+            sanitize_ref_path("objects\\characters\\masterchief\\masterchief\u{0}"),
+            "objects\\characters\\masterchief\\masterchief"
+        );
+        // tool source dir is the parent of the tag path.
+        assert_eq!(
+            model_source_dir("objects\\characters\\masterchief\\masterchief"),
+            "objects\\characters\\masterchief"
+        );
+        assert_eq!(model_source_dir("solo"), "solo");
     }
 }
