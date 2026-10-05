@@ -688,6 +688,74 @@ mod tests {
 
     /// Point `BABOON_MODEL_KIT` at an H3-family kit's `tags` folder to decode a
     /// real animation end to end; absent, this self-skips.
+    /// The game retargets a Halo 3 replacement's object-space entries onto
+    /// the named node's animated children only, so every bone the
+    /// animation doesn't animate stays on the base pose. The export
+    /// reconstruction re-oriented the pelvis entry's whole subtree, legs
+    /// included.
+    #[test]
+    fn a_halo3_replacement_leaves_unanimated_bones_on_the_base() {
+        let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from) else {
+            eprintln!("skipping: set BABOON_MODEL_KIT to an editing kit's tags folder");
+            return;
+        };
+        let folder = tags_root.join("objects/characters/masterchief");
+        let model_path = folder.join("masterchief.model");
+        if !model_path.is_file() {
+            eprintln!("skipping: no masterchief.model under {}", tags_root.display());
+            return;
+        }
+        let name = "combat:pistol:hp:reload_1";
+        let jmad = blam_tags::TagFile::read(folder.join("masterchief.model_animation_graph")).unwrap();
+        let render = blam_tags::TagFile::read(folder.join("masterchief.render_model")).ok();
+        let animation = Animation::new(&jmad).unwrap();
+        let skeleton = Skeleton::from_tag(&jmad);
+        let object_space = blam_tags::extract::animation::additional_node_data_is_object_space(&animation);
+        let defaults = blam_tags::extract::animation::build_defaults(&skeleton, &jmad, render.as_ref(), object_space);
+        let group = (0..animation.len())
+            .filter_map(|index| animation.get(index))
+            .find(|group| group.name.as_deref() == Some(name))
+            .expect("the chief's graph has no pistol reload");
+        assert!(!group.object_space_parents.is_empty(), "{name} carries no object-space entries");
+        let base = animation
+            .overlay_base_pose(&AnimationGraph::from_tag(&jmad), group, &skeleton, &defaults)
+            .unwrap_or_else(|| defaults.clone());
+        let flags = group.decode().unwrap().node_flags.expect("node flags");
+
+        let source = TagSource::LooseFolder {
+            root: tags_root,
+            game: Some(GameId::Halo3),
+            definitions_root: std::path::PathBuf::new(),
+        };
+        let entry = TagEntry {
+            key: file_entry_key(&model_path),
+            display_path: "objects/characters/masterchief/masterchief.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: Some("model".to_owned()),
+            location: TagEntryLocation::LooseFile(model_path),
+        };
+        let decoded = decode_model_animation(&source, &entry, group.index).expect("decode");
+
+        let mut unanimated = 0;
+        for (node, rest) in base.iter().enumerate() {
+            if flags.animated_rotation.bit(node) {
+                continue;
+            }
+            unanimated += 1;
+            let want = PreviewNodeTransform::from_node_transform(rest).rotation;
+            for (index, frame) in decoded.frames.iter().enumerate() {
+                let got = frame[node].rotation;
+                let dot: f32 = got.iter().zip(want).map(|(a, b)| a * b).sum();
+                assert!(
+                    dot.abs() > 0.9999,
+                    "{} moved off the base at frame {index}: {got:?} vs {want:?}",
+                    decoded.skeleton_names[node]
+                );
+            }
+        }
+        assert!(unanimated > 0, "{name} animates every bone");
+    }
+
     #[test]
     fn a_real_kits_animation_decodes_into_frames() {
         let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from) else {
@@ -1331,7 +1399,18 @@ fn decode_model_animation(
         }
         _ => defaults.clone(),
     };
+    // Halo 2, Halo 3 and ODST compose as their solver does. Graphs with
+    // Reach's data-driven blocks (Reach, Halo 4, H2A, Campaign Evolved) keep
+    // the export composition until their solver's rules are checked.
+    let solver_rules = jmad
+        .root()
+        .field_path("definitions/NEW blend screens")
+        .is_none();
     let pose = match kind {
+        JmaKind::Jmo if solver_rules => clip.runtime_overlay_pose(&skeleton, &base),
+        JmaKind::Jmr if solver_rules => {
+            clip.retargeted_replacement_pose(&skeleton, &base, &group.object_space_parents)
+        }
         JmaKind::Jmo => {
             let (mut reference, mut body) = clip.overlay_pose(&skeleton, &base);
             body.apply_object_space_corrections(
