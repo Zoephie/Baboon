@@ -1597,4 +1597,175 @@ mod tests {
             vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
         );
     }
+
+    // Lazily listed tags have to be keyed exactly as the full scan keys them:
+    // an index refresh drops the lazy entries, and a tab whose key the full
+    // index spells differently is orphaned with "no longer in the source".
+    // The browser holds relative folder paths with '/', so on Windows, where
+    // both separators work, a path joined as it was came out mixed.
+
+    /// Removes the fixture's folder however the test ends.
+    struct TempRoot(PathBuf);
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A loose kit holding one shader directly in `objects/characters/brute`
+    /// and one beneath it in `shaders`, installed with nothing scanned yet.
+    fn lazy_shader_kit(forward_slash_root: bool) -> (Baboon, TempRoot, TagFile) {
+        let mut root = crate::core::test_kits::unique_temp_path("tag-key-refresh");
+        if forward_slash_root {
+            root = PathBuf::from(root.to_string_lossy().replace('\\', "/"));
+        }
+        let cleanup = TempRoot(root.clone());
+        let brute = root.join("objects").join("characters").join("brute");
+        let tag = TagFile::new(crate::app::test_definition_path("halo2_mcc/shader.json")).unwrap();
+        for folder in [brute.clone(), brute.join("shaders")] {
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("brute.shader"), tag.write_to_bytes().unwrap()).unwrap();
+        }
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            all_entries: Vec::new(),
+            tree: crate::core::source::build_folder_directory_tree(&root).unwrap(),
+            group_tree: TagTree::default(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        (app, cleanup, tag)
+    }
+
+    /// The key the full scan gives the tag at `rel` (with '/').
+    fn full_scan_key(root: &Path, rel: &str) -> String {
+        crate::core::source::scan_folder_subtree_entries(root, Path::new(""), &TagNameIndex::default())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.display_path.replace('\\', "/") == rel)
+            .unwrap_or_else(|| panic!("the full scan has no {rel}"))
+            .key
+    }
+
+    /// Open `key` with an unsaved edit, refresh the index twice, and check the
+    /// tab and its edit are still there.
+    fn assert_open_tag_survives_refresh(app: &mut Baboon, root: &Path, key: &str, tag: TagFile) {
+        let bytes = tag.write_to_bytes().unwrap();
+        let document = TagDocument::modified(tag);
+        let stamp = document.content_stamp();
+        app.model.kits[0].parsed_tags.insert(key.to_owned(), document);
+        let ctx = egui::Context::default();
+        app.select_entry(key.to_owned(), ctx.clone());
+        for _ in 0..2 {
+            let entries = crate::core::source::scan_folder_subtree_entries(
+                root,
+                Path::new(""),
+                &TagNameIndex::default(),
+            )
+            .unwrap();
+            app.apply_entry_index_refresh(
+                0,
+                EntryIndexRefresh {
+                    entries,
+                    changed: true,
+                    added: 0,
+                    updated: 0,
+                    removed: 0,
+                    touched: Vec::new(),
+                    removed_keys: Vec::new(),
+                    touched_dependencies: Vec::new(),
+                    errors: Default::default(),
+                },
+                ctx.clone(),
+            );
+            assert!(app.model.kits[0].source.as_ref().unwrap().entries.is_empty());
+            assert!(
+                app.model.entry_for_key_in(0, key).is_some(),
+                "the full index still resolves the open tab"
+            );
+            assert!(app.model.kits[0].open_tabs.iter().any(|tab| tab == key));
+            let document = &app.model.kits[0].parsed_tags[key];
+            assert_eq!(document.content_stamp(), stamp, "refresh must not reload unsaved edits");
+            assert!(document.dirty.is_set());
+            assert_eq!(document.tag.write_to_bytes().unwrap(), bytes);
+        }
+    }
+
+    /// Expanding a folder: its node path is held with '/', and its children
+    /// are joined with the platform's separator.
+    #[cfg(windows)]
+    fn assert_expanded_tag_survives_refresh(forward_slash_root: bool) {
+        let (mut app, cleanup, tag) = lazy_shader_kit(forward_slash_root);
+        let root = cleanup.0.clone();
+        let mut node = crate::core::source::TagTreeNode {
+            rel_path: PathBuf::from("objects/characters/brute").join("shaders"),
+            ..Default::default()
+        };
+        let source = app.model.kits[0].source.as_mut().unwrap();
+        let names = source.names.clone();
+        crate::core::source::load_folder_node_entries(&root, &mut node, &mut source.entries, &names)
+            .unwrap();
+        let key = source.entries[0].key.clone();
+        assert_eq!(key, full_scan_key(&root, "objects/characters/brute/shaders/brute.shader"));
+        assert_eq!(
+            node.rel_path,
+            PathBuf::from("objects").join("characters").join("brute").join("shaders")
+        );
+        assert_open_tag_survives_refresh(&mut app, &root, &key, tag);
+    }
+
+    // Only Windows accepts both separators; elsewhere the path has one
+    // spelling and the mismatch cannot arise.
+    #[cfg(windows)]
+    #[test]
+    fn an_expanded_folders_tag_keeps_its_tab_through_a_refresh() {
+        assert_expanded_tag_survives_refresh(false);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_forward_slash_root_keeps_its_spelling_through_a_refresh() {
+        assert_expanded_tag_survives_refresh(true);
+    }
+
+    /// A folder tab restored from the last session: its path comes back with
+    /// '/', and the tags directly in it are listed by
+    /// `build_lazy_folder_tree_beneath` rather than by expanding a node. Run
+    /// everywhere; only on Windows can the two spellings differ.
+    #[test]
+    fn a_restored_folder_tabs_own_tag_keeps_its_tab_through_a_refresh() {
+        let (mut app, cleanup, tag) = lazy_shader_kit(false);
+        let root = cleanup.0.clone();
+        let source = app.model.kits[0].source.as_mut().unwrap();
+        let names = source.names.clone();
+        let tree = crate::core::source::build_lazy_folder_tree_beneath(
+            &root,
+            Path::new("objects/characters/brute"),
+            &mut source.entries,
+            &names,
+        )
+        .unwrap();
+        assert_eq!(tree.entries.len(), 1, "the folder's own tag, not the nested one");
+        let key = source.entries[tree.entries[0]].key.clone();
+        assert_eq!(key, full_scan_key(&root, "objects/characters/brute/brute.shader"));
+        assert!(
+            tree.children
+                .iter()
+                .all(|child| child.rel_path == child.rel_path.components().collect::<PathBuf>()),
+            "child folders are respelled too"
+        );
+        assert_open_tag_survives_refresh(&mut app, &root, &key, tag);
+    }
 }
