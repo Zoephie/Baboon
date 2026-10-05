@@ -4,6 +4,8 @@
 use super::*;
 use crate::app::mods::in_place::ContainerSaveRoute;
 use crate::app::mods::in_place::container_save_route;
+use crate::app::kits::KitMut;
+use crate::app::tag_ops::rename_in_place::rekey_tag_in_kit;
 
 use std::time::Instant;
 
@@ -215,27 +217,30 @@ pub(in crate::app) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Optio
         .filter(|extension| !extension.is_empty())
 }
 
+/// Add a tag just written to `path` to the loaded folder it landed in, and
+/// return its entry; `None` when the source is not a loose folder or the file
+/// is outside it.
 pub(in crate::app) fn register_saved_copy_in_loaded_source(
     source: &mut LoadedSourceData,
     path: &Path,
-) -> Result<bool, String> {
+) -> Result<Option<TagEntry>, String> {
     let TagSource::LooseFolder { root, .. } = &source.source else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(path) = crate::core::source::path_on_root(root, path)
         .map_err(|error| format!("Could not resolve saved tag path: {error}"))?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(entry) = loose_file_entry(root, &path, &source.names)
         .map_err(|error| format!("Could not inspect saved tag: {error:#}"))?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     // The folder tree is re-read from disk, so pending (empty) folders are
     // not needed here.
-    source.upsert_entry(entry, &[]);
-    Ok(true)
+    source.upsert_entry(entry.clone(), &[]);
+    Ok(Some(entry))
 }
 
 pub(in crate::app) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {
@@ -590,18 +595,91 @@ impl Baboon {
             }
         }
 
-        match doc.tag.write_atomic(&output) {
-            Ok(()) => {
-                self.model.status = match self.register_saved_copy_if_in_loaded_folder(&output) {
-                    Ok(_) => format!("Saved copy to {}", output.display()),
-                    Err(error) => format!(
-                        "Saved copy to {}, but did not update browser: {error}",
-                        output.display()
-                    ),
-                };
-            }
-            Err(error) => self.model.status = format!("Save As failed: {error}"),
+        self.save_tag_as_to(&key, &output);
+    }
+
+    /// Save As, once the file is chosen: write the document `key` to `output`
+    /// and, when that lands in the loaded folder, carry on editing it there.
+    pub(in crate::app) fn save_tag_as_to(&mut self, key: &str, output: &Path) {
+        // The document is about to become the file it is saved as, and the tab
+        // of a tag already open there gives way to it. That tag's own unsaved
+        // edits would go with its tab, so saving over it is refused first.
+        if let Some(open) = self.modified_tag_open_at(output, key) {
+            self.model.status =
+                format!("{open} is open with unsaved changes; save or close it first");
+            return;
         }
+        let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(key) else {
+            self.model.status = "Load the selected tag before saving".to_owned();
+            return;
+        };
+        if let Err(error) = doc.tag.write_atomic(output) {
+            self.model.status = format!("Save As failed: {error}");
+            return;
+        }
+        let dependencies = {
+            let mut refs = Vec::new();
+            collect_tag_dependency_refs(doc.tag.root(), &mut refs);
+            refs
+        };
+        self.model.status = match self.register_saved_copy_if_in_loaded_folder(output) {
+            Ok(Some(saved)) => {
+                self.switch_to_saved_copy(key, saved, dependencies);
+                format!("Saved as {}", output.display())
+            }
+            Ok(None) => format!(
+                "Saved copy to {}; it is outside the loaded tags folder, so it was not opened",
+                output.display()
+            ),
+            Err(error) => format!(
+                "Saved copy to {}, but did not update browser: {error}",
+                output.display()
+            ),
+        };
+    }
+
+    /// Make the open document `old` the tag Save As just wrote, as `saved`.
+    ///
+    /// It moves onto the copy's key whole — undo history, tab and pane — and
+    /// is clean, since it holds exactly what was written. The original file is
+    /// untouched on disk; any edits it had not saved went into the copy.
+    fn switch_to_saved_copy(&mut self, old: &str, saved: TagEntry, dependencies: Vec<DependencyRef>) {
+        let active = self.model.active;
+        let new = saved.key.clone();
+        if new != old {
+            // Saved over another open tag: `modified_tag_open_at` has made sure
+            // it holds nothing unsaved, so its tab simply closes.
+            let kit = &self.model.kits[active];
+            if kit.parsed_tags.contains_key(&new) || kit.open_tabs.contains(&new) {
+                self.close_tab(&new);
+            }
+            let KitMut { kit, view } = self.kit_and_view(active);
+            rekey_tag_in_kit(kit, view, old, &new);
+        }
+        let kit = &mut self.model.kits[active];
+        if let Some(doc) = kit.parsed_tags.get_mut(&new) {
+            doc.dirty.clear();
+        }
+        kit.selected_key = Some(new);
+        self.record_saved_tag_in_indexes(&saved, dependencies);
+    }
+
+    /// The display path of a tag other than `except` that is open with unsaved
+    /// edits and lives at `path`.
+    fn modified_tag_open_at(&self, path: &Path, except: &str) -> Option<String> {
+        let target = std::fs::canonicalize(path).ok()?;
+        self.model.kits[self.model.active]
+            .parsed_tags
+            .iter()
+            .filter(|(key, doc)| key.as_str() != except && doc.dirty.is_set())
+            .filter_map(|(key, _)| self.model.entry_for_key(key))
+            .find(|entry| match &entry.location {
+                TagEntryLocation::LooseFile(open) => {
+                    std::fs::canonicalize(open).is_ok_and(|open| open == target)
+                }
+                _ => false,
+            })
+            .map(|entry| entry.display_path.clone())
     }
 }
 
@@ -975,7 +1053,11 @@ mod tests {
             .key;
 
         let _ = std::fs::remove_dir_all(&root);
-        assert!(registered);
+        assert_eq!(
+            registered.map(|entry| entry.key),
+            Some(scanned_key.clone()),
+            "the registered entry is the one the browser now holds"
+        );
         assert!(
             source.entries.iter().any(|entry| entry.key == scanned_key),
             "the copy is keyed like the folder scan"

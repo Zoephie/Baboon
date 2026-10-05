@@ -782,7 +782,7 @@ mod tests {
     // A Campaign Evolved source would route the prompt's Save into the pak
     // (`overwrite_current_tag_in_place` / `save_new_container_tag`), which needs a
     // mounted install; those branches are not reached here. The stash half of the
-    // prompt is covered in `campaign_project_round_trip_tests.rs`.
+    // prompt is covered by the tests in `mods/project.rs`.
 
     const MODEL: &str = "objects/props/crate.model";
     const OTHER: &str = "objects/props/barrel.model";
@@ -1300,16 +1300,86 @@ mod tests {
         let generation = app.model.kits[0].generation;
         let copy = kit.write_mcc("objects/copies/crate_copy", "model", |_| {});
 
-        assert_eq!(app.register_saved_copy_if_in_loaded_folder(&copy), Ok(true));
-
         let key = kit.key("objects/copies/crate_copy.model");
+        let registered = app.register_saved_copy_if_in_loaded_folder(&copy);
+        assert_eq!(registered.map(|entry| entry.map(|entry| entry.key)), Ok(Some(key.clone())));
+
         assert!(app.model.entry_for_key(&key).is_some());
         assert_ne!(app.model.kits[0].generation, generation);
 
         // Outside the tags folder there is nothing to register.
         let outside = kit.base.join("elsewhere.model");
         fs::copy(&copy, &outside).unwrap();
-        assert_eq!(app.register_saved_copy_if_in_loaded_folder(&outside), Ok(false));
+        assert!(matches!(app.register_saved_copy_if_in_loaded_folder(&outside), Ok(None)));
+    }
+
+    /// After Save As the editor is on the copy: the document, its tab and its
+    /// undo history move to the new file, clean, and the original is left as
+    /// it was on disk.
+    #[test]
+    fn save_as_switches_the_editor_to_the_copy() {
+        let (kit, mut app, key, _other) = edited("save-as-switch");
+        const COPY: &str = "objects/copies/crate_copy.model";
+        std::fs::create_dir_all(kit.root.join("objects/copies")).unwrap();
+
+        app.save_tag_as_to(&key, &kit.root.join(COPY));
+
+        let copy = kit.key(COPY);
+        assert!(app.model.status.starts_with("Saved as"), "{}", app.model.status);
+        assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(copy.as_str()));
+        assert!(tab_open(&app, &copy) && !tab_open(&app, &key));
+        assert!(!app.model.kits[0].parsed_tags.contains_key(&key));
+        assert!(!is_dirty(&app, &copy), "it holds exactly what was written");
+        assert_eq!(distance_on_disk(&kit, COPY), 12.5);
+        assert_eq!(distance_on_disk(&kit, MODEL), 0.0, "the original is untouched");
+
+        app.undo_current_tag();
+        assert_eq!(distance_in_document(&app, &copy), 0.0, "the undo history came along");
+    }
+
+    /// Saving over a tag that is open with unsaved edits would close its tab
+    /// and lose them, so it is refused before anything is written.
+    #[test]
+    fn save_as_over_an_open_modified_tag_is_refused() {
+        let (kit, mut app, key, other) = edited("save-as-over-modified");
+        edit_field(&mut app, &other, DISTANCE, "3");
+
+        app.save_tag_as_to(&key, &kit.root.join(OTHER));
+
+        assert!(app.model.status.contains("unsaved changes"), "{}", app.model.status);
+        assert_eq!(distance_on_disk(&kit, OTHER), 0.0, "nothing was written");
+        assert_eq!(distance_in_document(&app, &other), 3.0);
+        assert!(tab_open(&app, &key) && is_dirty(&app, &key));
+    }
+
+    /// Saving over an open tag with nothing unsaved replaces it: one tab for
+    /// that file, now holding the saved document.
+    #[test]
+    fn save_as_over_an_open_clean_tag_takes_its_place() {
+        let (kit, mut app, key, other) = edited("save-as-over-clean");
+
+        app.save_tag_as_to(&key, &kit.root.join(OTHER));
+
+        assert_eq!(distance_on_disk(&kit, OTHER), 12.5);
+        assert_eq!(distance_in_document(&app, &other), 12.5);
+        let tabs = &app.model.kits[0].open_tabs;
+        assert_eq!(tabs.iter().filter(|tab| **tab == other).count(), 1);
+        assert!(!tab_open(&app, &key));
+        assert!(!is_dirty(&app, &other));
+    }
+
+    /// A copy saved outside the loaded tags folder cannot be opened from it,
+    /// so the editor stays on the original, still unsaved.
+    #[test]
+    fn save_as_outside_the_tags_folder_stays_on_the_original() {
+        let (kit, mut app, key, _other) = edited("save-as-outside");
+        let outside = kit.base.join("elsewhere.model");
+
+        app.save_tag_as_to(&key, &outside);
+
+        assert!(outside.is_file());
+        assert!(app.model.status.contains("outside the loaded tags folder"), "{}", app.model.status);
+        assert!(tab_open(&app, &key) && is_dirty(&app, &key));
     }
 
     #[test]

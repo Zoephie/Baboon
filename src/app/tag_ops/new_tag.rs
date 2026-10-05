@@ -402,12 +402,15 @@ impl Baboon {
         self.model.kits[self.model.active].selected_key = Some(key.clone());
     }
 
-    pub(in crate::app) fn register_saved_copy_if_in_loaded_folder(&mut self, path: &Path) -> Result<bool, String> {
+    pub(in crate::app) fn register_saved_copy_if_in_loaded_folder(
+        &mut self,
+        path: &Path,
+    ) -> Result<Option<TagEntry>, String> {
         let Some(source) = self.source_mut() else {
-            return Ok(false);
+            return Ok(None);
         };
         let registered = register_saved_copy_in_loaded_source(source, path)?;
-        if registered {
+        if registered.is_some() {
             self.model.kits[self.model.active].generation = self.model.kits[self.model.active].generation.wrapping_add(1);
         }
         Ok(registered)
