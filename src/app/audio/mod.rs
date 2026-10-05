@@ -54,10 +54,17 @@ pub(super) fn decode_inline(
     }
 }
 
-/// Decode a possibly-chunked H2 inline stream: each chunk (delimited by the
-/// `sound_permutation_chunk_block` file offsets) is an independent Opus/ADPCM/PCM
-/// stream, so decode each `[offset..next]` slice and concatenate. `chunk_offsets`
-/// empty or single = one stream (CE, single-chunk H2).
+/// Decode a possibly-chunked H2 inline stream, its chunks delimited by the
+/// `sound_permutation_chunk_block` file offsets. `chunk_offsets` empty or
+/// single = one stream (CE, single-chunk H2).
+///
+/// An Opus entry's chunks are slices of one continuous stream, each ending in
+/// a packet whose length is stored negated: the encoder's state carries across
+/// them, so they are decoded as one. A fresh decoder per chunk clicked at every
+/// boundary, every 65,520 samples (issue #96): over the H2 kit's 715 chunked
+/// entries, all Opus, one decoder throughout removed all 2,834 of those clicks
+/// and added none. Other codecs are decoded chunk by chunk and concatenated;
+/// the kit has no chunked entry in them to say otherwise.
 pub(super) fn decode_inline_chunked(
     codec: InlineCodec,
     bytes: &[u8],
@@ -65,7 +72,7 @@ pub(super) fn decode_inline_chunked(
     channels: u16,
     sample_rate: u32,
 ) -> Result<DecodedPcm, String> {
-    if chunk_offsets.len() <= 1 {
+    if chunk_offsets.len() <= 1 || matches!(codec, InlineCodec::Opus) {
         return decode_inline(codec, bytes, channels, sample_rate);
     }
     let mut bounds: Vec<usize> = chunk_offsets.iter().map(|&o| o.min(bytes.len())).collect();

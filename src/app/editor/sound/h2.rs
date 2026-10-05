@@ -843,4 +843,37 @@ mod tests {
         }
         assert!(failures.is_empty());
     }
+
+    /// The tag issue #96 reported: cinematic music clicked every 65,520
+    /// samples, at each chunk boundary, played or extracted. Every boundary has
+    /// to be as smooth as the music around it.
+    #[test]
+    fn cinematic_music_has_no_click_at_its_chunk_boundaries() {
+        let Some(tag) =
+            h2_kit_sound("sound/cinematics/01_spacestation/c01_outro/music/c01_outro_01_mus.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let (entry, _) = h2.entry_for(0, None).unwrap();
+        let (bytes, offsets) = h2.samples(&tag, entry).unwrap();
+        assert!(offsets.len() > 1, "the entry is chunked");
+        let (codec, channels, rate) = h2.decode_params(entry);
+        let pcm = super::audio::decode_inline_chunked(codec, &bytes, &offsets, channels, rate).unwrap();
+
+        let ch = usize::from(pcm.channels);
+        let l = |i: usize| f64::from(pcm.samples[i * ch]);
+        let d2 = |i: usize| (l(i) - 2.0 * l(i - 1) + l(i - 2)).abs();
+        // Every chunk of this entry holds 65,520 frames.
+        let mut cut = 65_520;
+        let mut checked = 0;
+        while cut + 3 < pcm.frame_count() {
+            let local: f64 = (cut - 200..cut - 3).map(d2).sum::<f64>() / 197.0;
+            let jump = d2(cut) / (local + 1.0);
+            assert!(jump < 8.0, "a click at frame {cut}: {jump:.1}x the music around it");
+            cut += 65_520;
+            checked += 1;
+        }
+        assert!(checked > 50, "only {checked} boundaries checked");
+    }
 }

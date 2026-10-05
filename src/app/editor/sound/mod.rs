@@ -212,8 +212,8 @@ pub(super) fn inline_permutation_samples(
 
 /// Read the `file offset` of each `sound_permutation_chunk_block` element in a
 /// raw-info-block struct (the block whose elements carry a `file offset` field).
-/// H2 splits an entry's audio into ~1.36 s chunks, each an independent stream;
-/// these offsets let the decoder slice + concatenate them. Empty if unchunked.
+/// H2 splits an entry's audio into ~1.36 s chunks; see
+/// `decode_inline_chunked` for how each codec's are joined. Empty if unchunked.
 fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
     for field in raw_el.fields() {
         let Some(block) = field.as_block() else {

@@ -736,3 +736,55 @@ fn setting_the_speed_reaches_the_sound_playing() {
     audio.process(None, &egui::Context::default());
     assert_eq!(audio.speed(), 0.0);
 }
+
+/// How far the left channel's second difference at frame `f` stands out from
+/// the 200 frames before it: about 1 for continuous audio, tens for a click.
+fn boundary_jump(pcm: &DecodedPcm, f: usize) -> f64 {
+    let ch = usize::from(pcm.channels);
+    let l = |i: usize| f64::from(pcm.samples[i * ch]);
+    let d2 = |i: usize| (l(i) - 2.0 * l(i - 1) + l(i - 2)).abs();
+    let local: f64 = (f - 200..f - 3).map(d2).sum::<f64>() / 197.0;
+    d2(f) / (local + 1.0)
+}
+
+/// Halo 2 splits an Opus entry into chunks that are slices of one continuous
+/// stream, each ending in a packet whose length is stored negated. Built here
+/// the same way, from one encoder: a tone cut into three chunks has to come
+/// back without a click at either cut, which a fresh decoder per chunk made.
+#[test]
+fn chunked_opus_decodes_as_one_stream() {
+    let frames = 48_000 * 2;
+    let tone: Vec<i16> = (0..frames)
+        .flat_map(|i| {
+            let s = (8000.0 * (i as f64 * 440.0 * std::f64::consts::TAU / 48_000.0).sin()) as i16;
+            [s, s]
+        })
+        .collect();
+    let mut bytes = blam_tags::audio::encode_opus(&tone, 2).unwrap();
+
+    // Packet starts, then three chunks of equal packet count, each ending in
+    // a negated length.
+    let mut packets = Vec::new();
+    let mut pos = 0;
+    while pos + 2 <= bytes.len() {
+        packets.push(pos);
+        pos += 2 + usize::from(u16::from_le_bytes([bytes[pos], bytes[pos + 1]]));
+    }
+    let per_chunk = packets.len() / 3;
+    let offsets: Vec<usize> = (0..3).map(|c| packets[c * per_chunk]).collect();
+    for c in 1..=3 {
+        let last = if c == 3 { packets.len() - 1 } else { c * per_chunk - 1 };
+        let at = packets[last];
+        let len = i16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        bytes[at..at + 2].copy_from_slice(&(-len).to_le_bytes());
+    }
+
+    let pcm = decode_inline_chunked(InlineCodec::Opus, &bytes, &offsets, 2, 48_000).unwrap();
+    // Each packet is 20 ms, so a cut falls at a multiple of 960 frames.
+    for c in 1..3 {
+        let cut = c * per_chunk * 960;
+        let jump = boundary_jump(&pcm, cut);
+        assert!(jump < 8.0, "a click at the cut after chunk {c}: {jump:.1}x the audio around it");
+    }
+    assert_eq!(pcm.frame_count(), packets.len() * 960, "every packet decoded once");
+}
