@@ -255,7 +255,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
 
     let droppable = edit.editable && !meta.read_only;
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
-    let accepted = tag_reference_accepted_groups(meta, target.as_ref(), &hierarchy);
+    let accepted = tag_reference_accepted_groups(meta, &hierarchy);
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
@@ -467,15 +467,14 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
 /// descended from them (an `object` field takes bipeds, weapons, scenery …),
 /// or — when the schema names none — the group it already points at. `None`
 /// when nothing narrows it.
+/// The groups a reference takes: those its schema allows and every group
+/// descended from them, or `None` — any group — when the schema lists none,
+/// as the tool does for such a field.
 pub(super) fn tag_reference_accepted_groups(
     meta: &FieldDisplayMeta,
-    target: Option<&(u32, String)>,
     hierarchy: &GroupHierarchy,
 ) -> Option<Vec<u32>> {
-    if !meta.tag_reference_allowed.is_empty() {
-        return Some(hierarchy.expand(&meta.tag_reference_allowed));
-    }
-    target.map(|(group, _)| vec![*group])
+    (!meta.tag_reference_allowed.is_empty()).then(|| hierarchy.expand(&meta.tag_reference_allowed))
 }
 
 /// A group's file extension, or its four-character code.

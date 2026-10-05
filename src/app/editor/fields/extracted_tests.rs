@@ -442,20 +442,19 @@ pub(in crate::app) mod tests {
         };
 
         assert_eq!(
-            tag_reference_accepted_groups(&meta, None, &GroupHierarchy::default()),
+            tag_reference_accepted_groups(&meta, &GroupHierarchy::default()),
             Some(vec![structure_design])
         );
     }
 
-    /// What the schema allows decides, not the group the field happens to
-    /// point at; with no schema list the current group does, and with
-    /// neither anything goes.
+    /// The schema decides what a reference takes: an `object` field takes
+    /// every object type, and a field whose schema lists no group takes any,
+    /// as in the tool. The group it points at now has no say: it once
+    /// narrowed a list-less Halo CE shader reference to its current type.
     #[test]
-    fn the_schema_not_the_current_target_decides_the_accepted_groups() {
+    fn the_schema_decides_the_accepted_groups() {
         let hierarchy = group_hierarchy(Some(&locate_definitions_root()), Some(GameId::HaloReach));
         let object = parse_group_tag("obje").unwrap();
-        let scenery = parse_group_tag("scen").unwrap();
-        let weapon = parse_group_tag("weap").unwrap();
         let meta = |allowed| FieldDisplayMeta {
             label: "object".to_owned(),
             unit: None,
@@ -465,29 +464,49 @@ pub(in crate::app) mod tests {
             read_only: false,
             advanced: false,
         };
-        let pointing_at_scenery = (scenery, r"objects\levels\crate\crate".to_owned());
-        let accepted = tag_reference_accepted_groups(
-            &meta(vec![object]),
-            Some(&pointing_at_scenery),
-            &hierarchy,
-        )
-        .unwrap();
-        assert!(
-            accepted.contains(&weapon),
-            "a field pointing at scenery refused a weapon"
-        );
-        assert_eq!(
-            tag_reference_accepted_groups(
-                &meta(Vec::new()),
-                Some(&pointing_at_scenery),
-                &hierarchy
-            ),
-            Some(vec![scenery])
-        );
-        assert_eq!(
-            tag_reference_accepted_groups(&meta(Vec::new()), None, &hierarchy),
-            None
-        );
+        let accepted = tag_reference_accepted_groups(&meta(vec![object]), &hierarchy).unwrap();
+        for group in ["scen", "weap"] {
+            assert!(accepted.contains(&parse_group_tag(group).unwrap()), "{group}");
+        }
+        assert_eq!(tag_reference_accepted_groups(&meta(Vec::new()), &hierarchy), None);
+    }
+
+    /// A Halo CE model's shader reference allows `shader`, as tool.exe
+    /// declares it, and so takes every shader type: changing a shader_model
+    /// to a shader_environment needs no clearing first. The definitions
+    /// carried no groups for any Halo CE or Halo 2 reference before.
+    #[test]
+    fn a_halo_ce_model_shader_takes_every_shader_type() {
+        let definitions_root = locate_definitions_root();
+        let hierarchy = group_hierarchy(Some(&definitions_root), Some(GameId::HaloCe));
+        let docs =
+            crate::app::help::field_docs::build_def_docs(&definitions_root, GameId::HaloCe, "gbxmodel");
+        let allowed: Vec<u32> = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Field {
+                    clean_name,
+                    tag_reference_allowed,
+                    ..
+                } if clean_name == "shader" => Some(tag_reference_allowed.clone()),
+                _ => None,
+            })
+            .expect("no shader field in gbxmodel");
+        assert_eq!(allowed, [parse_group_tag("shdr").unwrap()]);
+        let meta = FieldDisplayMeta {
+            label: "shader".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+        let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
+        for group in ["shdr", "soso", "senv", "schi", "swat"] {
+            assert!(accepted.contains(&parse_group_tag(group).unwrap()), "{group}");
+        }
+        assert!(!accepted.contains(&parse_group_tag("bitm").unwrap()));
     }
 
     /// Issue #46: Reach's multiplayer object type list `object` field allows
@@ -525,7 +544,7 @@ pub(in crate::app) mod tests {
             read_only: false,
             advanced: false,
         };
-        let accepted = tag_reference_accepted_groups(&meta, None, &hierarchy).unwrap();
+        let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
         for (extension, group) in [
             ("biped", "bipd"),
             ("weapon", "weap"),
