@@ -3307,7 +3307,6 @@ mod frame_smoke_tests {
                             tag_key: ce_key(),
                             field_path: "model".to_owned(),
                             allowed_groups: vec![u32::from_be_bytes(*b"hlmt")],
-                            current_group: None,
                             search: String::new(),
                         },
                         kit,

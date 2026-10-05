@@ -222,7 +222,6 @@ pub(in crate::app) struct TagReferencePickerState {
     pub(in crate::app) tag_key: String,
     pub(in crate::app) field_path: String,
     pub(in crate::app) allowed_groups: Vec<u32>,
-    pub(in crate::app) current_group: Option<u32>,
     pub(in crate::app) search: String,
 }
 

@@ -595,88 +595,22 @@ pub(in crate::app) mod tests {
         assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
     }
 
+    /// The catalog picker offers what the schema allows, or every group when
+    /// it allows none: the group the reference points at now has no say.
     #[test]
-    fn catalog_picker_uses_schema_then_current_group_then_all_groups() {
+    fn catalog_picker_offers_the_schema_groups_or_any() {
         let animation = parse_group_tag("jmad").unwrap();
         let biped = parse_group_tag("bipd").unwrap();
         let vehicle = parse_group_tag("vehi").unwrap();
         let weapon = parse_group_tag("weap").unwrap();
-        let target = (weapon, r"objects\weapons\rifle\rifle".to_owned());
-        let meta = |allowed| FieldDisplayMeta {
-            label: "reference".to_owned(),
-            unit: None,
-            range: None,
-            help: None,
-            tag_reference_allowed: allowed,
-            read_only: false,
-            advanced: false,
-        };
 
-        let single = meta(vec![animation]);
-        assert!(tag_reference_catalog_group_allowed(
-            &single,
-            Some(&target),
-            animation,
-            false,
-        ));
-        assert!(!tag_reference_catalog_group_allowed(
-            &single,
-            Some(&target),
-            weapon,
-            false,
-        ));
-
-        let multiple = meta(vec![biped, vehicle]);
-        assert!(tag_reference_catalog_group_allowed(
-            &multiple,
-            Some(&target),
-            biped,
-            false,
-        ));
-        assert!(tag_reference_catalog_group_allowed(
-            &multiple,
-            Some(&target),
-            vehicle,
-            false,
-        ));
-        assert!(!tag_reference_catalog_group_allowed(
-            &multiple,
-            Some(&target),
-            weapon,
-            false,
-        ));
-
-        let unconstrained = meta(Vec::new());
-        assert!(tag_reference_catalog_group_allowed(
-            &unconstrained,
-            Some(&target),
-            weapon,
-            false,
-        ));
-        assert!(!tag_reference_catalog_group_allowed(
-            &unconstrained,
-            Some(&target),
-            animation,
-            false,
-        ));
-        assert!(tag_reference_catalog_group_allowed(
-            &unconstrained,
-            None,
-            animation,
-            false,
-        ));
-        assert!(tag_reference_catalog_group_allowed(
-            &unconstrained,
-            None,
-            weapon,
-            false,
-        ));
-        assert!(tag_reference_catalog_group_allowed(
-            &single,
-            Some(&target),
-            weapon,
-            true,
-        ));
+        assert!(tag_reference_picker_group_allowed(&[animation], animation, false));
+        assert!(!tag_reference_picker_group_allowed(&[animation], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[biped, vehicle], vehicle, false));
+        assert!(!tag_reference_picker_group_allowed(&[biped, vehicle], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[], animation, false));
+        assert!(tag_reference_picker_group_allowed(&[], weapon, false));
+        assert!(tag_reference_picker_group_allowed(&[animation], weapon, true));
     }
 
     #[test]

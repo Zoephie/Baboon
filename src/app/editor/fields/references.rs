@@ -14,36 +14,15 @@ pub(in crate::app) fn tag_reference_catalog_for_source(
     })
 }
 
-#[cfg(test)]
-pub(super) fn tag_reference_catalog_group_allowed(
-    meta: &FieldDisplayMeta,
-    target: Option<&(u32, String)>,
-    candidate_group: u32,
-    expert_mode: bool,
-) -> bool {
-    tag_reference_picker_group_allowed(
-        &meta.tag_reference_allowed,
-        target.map(|(group, _)| *group),
-        candidate_group,
-        expert_mode,
-    )
-}
-
-fn tag_reference_picker_group_allowed(
+/// Whether the picker offers a tag of `candidate_group`: one of
+/// `allowed_groups` (already expanded to their descendants), or any group
+/// when the schema allows none, as the tool takes any for such a field.
+pub(super) fn tag_reference_picker_group_allowed(
     allowed_groups: &[u32],
-    current_group: Option<u32>,
     candidate_group: u32,
     expert_mode: bool,
 ) -> bool {
-    if expert_mode {
-        return true;
-    }
-    if !allowed_groups.is_empty() {
-        return allowed_groups.contains(&candidate_group);
-    }
-    current_group
-        .map(|group| group == candidate_group)
-        .unwrap_or(true)
+    expert_mode || allowed_groups.is_empty() || allowed_groups.contains(&candidate_group)
 }
 
 pub(super) fn tag_reference_catalog_entry_matches(entry: &TagEntry, filter: &str) -> bool {
@@ -55,7 +34,6 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
     picker_id: egui::Id,
     catalog: TagReferenceCatalog<'_>,
     allowed_groups: &[u32],
-    current_group: Option<u32>,
     filter: &mut String,
 ) -> Option<String> {
     let search = ui.add(
@@ -90,7 +68,6 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
                         catalog.entries.get(index).is_some_and(|entry| {
                             tag_reference_picker_group_allowed(
                                 allowed_groups,
-                                current_group,
                                 entry.group_tag,
                                 catalog.expert_mode,
                             ) && tag_reference_catalog_entry_matches(entry, query)
@@ -353,7 +330,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                             tag_key: edit.tag_key.to_owned(),
                             field_path: path.to_owned(),
                             allowed_groups: hierarchy.expand(&meta.tag_reference_allowed),
-                            current_group: target.as_ref().map(|(group, _)| *group),
                             search: String::new(),
                         });
                     }

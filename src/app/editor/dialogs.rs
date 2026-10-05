@@ -47,7 +47,6 @@ impl Dialog for TagReferencePickerWindow {
                     egui::Id::new("campaign_evolved_tag_reference_picker_contents"),
                     catalog,
                     &picker.allowed_groups,
-                    picker.current_group,
                     &mut picker.search,
                 );
             });
