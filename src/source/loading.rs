@@ -15,7 +15,7 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("loaded tag"));
     let display_path = display_path_with_friendly_extension(&file_name, group_tag, names);
-    let key = loose_file_key(&path);
+    let key = format!("file:{}", path.display());
     let entry = TagEntry {
         key: key.clone(),
         display_path: display_path.clone(),

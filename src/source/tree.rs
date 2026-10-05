@@ -3,13 +3,6 @@
 
 use super::*;
 
-/// One lexical identity for loose files, independent of the separators used
-/// to reach them. Do not canonicalize: that changes the root spelling (and
-/// adds a verbatim prefix on Windows) compared with the folder scanner.
-pub fn loose_file_key(path: &Path) -> String {
-    format!("file:{}", path.components().collect::<PathBuf>().display())
-}
-
 /// Builds a path hierarchy whose stored indices address `entries` exactly.
 pub fn build_tree(entries: &[TagEntry]) -> TagTree {
     build_tree_with_folders(entries, &[])
@@ -311,6 +304,9 @@ pub fn load_folder_node_entries(
     entries: &mut Vec<TagEntry>,
     names: &TagNameIndex,
 ) -> Result<()> {
+    // Browser display paths use '/', but file keys must keep the full scan's
+    // spelling. Normalize only the relative part, preserving the saved root.
+    node.rel_path = node.rel_path.components().collect();
     if !node.children_loaded {
         node.children = list_direct_child_nodes(root, &node.rel_path)?;
         node.children_loaded = true;
@@ -489,7 +485,7 @@ where
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: loose_file_key(&path),
+            key: format!("file:{}", path.display()),
             display_path,
             group_tag,
             group_name,
@@ -541,7 +537,7 @@ pub fn loose_file_entry(
     let group_name = names.name_for(group_tag).map(str::to_owned);
     let display_path = display_path_with_friendly_extension(rel, group_tag, names);
     Ok(Some(TagEntry {
-        key: loose_file_key(&path),
+        key: format!("file:{}", path.display()),
         display_path,
         group_tag,
         group_name,
@@ -570,7 +566,7 @@ fn scan_folder_entries(root: &Path, names: &TagNameIndex) -> Result<Vec<TagEntry
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: loose_file_key(&path),
+            key: format!("file:{}", path.display()),
             display_path,
             group_tag,
             group_name,
@@ -588,6 +584,7 @@ pub(crate) fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
 }
 
 fn list_direct_child_nodes(root: &Path, rel_path: &Path) -> Result<Vec<TagTreeNode>> {
+    let rel_path: PathBuf = rel_path.components().collect();
     let folder = root.join(&rel_path);
     let mut children = Vec::new();
     for item in std::fs::read_dir(&folder)
@@ -644,7 +641,7 @@ fn scan_folder_direct_entries(
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
         entries.push(TagEntry {
-            key: loose_file_key(&path),
+            key: format!("file:{}", path.display()),
             display_path,
             group_tag,
             group_name,

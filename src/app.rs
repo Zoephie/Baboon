@@ -42,7 +42,7 @@ use crate::source::{
     NewContainerTemplate, ReverseDependencyIndex, SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation,
     TagSource, TagTree, TagTreeNode, load_editing_kit_layout, load_folder,
     load_folder_node_entries, load_iostore_container, load_iostore_container_set,
-    load_monolithic_blob_index, load_single_file, loose_file_entry, loose_file_key, read_entry,
+    load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
     resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
     supported_ek_game_id,
 };
