@@ -3,18 +3,37 @@
 
 use super::*;
 
-/// Whether `response`'s widget gave up keyboard focus this frame.
+/// Whether `response`'s widget gave up keyboard focus, reported on one pass
+/// only.
 ///
-/// egui 0.36 reports [`egui::Response::lost_focus`] on two frames in a row,
-/// so that a focus taken mid-frame still reaches a widget drawn earlier.
-/// Every caller here acts on the loss — commits an edit, resolves a path —
-/// and must act once, so this keeps only the frame egui 0.29 reported: the
-/// widget had focus when the frame began and has it no longer.
+/// egui 0.36 reports [`egui::Response::lost_focus`] for two passes after the
+/// widget last had focus at the start of one, so that a focus taken after the
+/// widget was drawn still reaches it on the next pass. Every caller here acts
+/// on the loss — commits an edit, resolves a path — and must act once, so
+/// this reports the first of them and drops its repeat on the pass after.
+///
+/// It used to keep only a loss seen while the widget still had focus at the
+/// start of the pass. Clicking from one text box into another drawn after it
+/// is not that: the second takes focus on the press, after the first was
+/// drawn, so the first learns of it a pass later, and its edit was dropped.
 pub(in crate::app) fn lost_focus_once(response: &egui::Response) -> bool {
-    response.lost_focus()
-        && response
-            .ctx
-            .memory(|memory| memory.had_focus_last_frame(response.id))
+    if !response.lost_focus() {
+        return false;
+    }
+    let ctx = &response.ctx;
+    let key = response.id.with("lost_focus_once");
+    let pass = ctx.cumulative_pass_nr();
+    // Focused when this pass began: lost during it, so new, even right after
+    // an earlier loss (Find's query box takes focus back after each Enter).
+    // Otherwise it was lost during the pass before; that pass reported it
+    // only if the widget was drawn after the loss.
+    let had_focus = ctx.memory(|memory| memory.had_focus_last_frame(response.id));
+    let reported_last_pass = ctx.data(|data| data.get_temp::<u64>(key)) == Some(pass.wrapping_sub(1));
+    if !had_focus && reported_last_pass {
+        return false;
+    }
+    ctx.data_mut(|data| data.insert_temp(key, pass));
+    true
 }
 
 /// Paint text through the original painter path unless this cell has a Find match.
@@ -1435,5 +1454,101 @@ mod tests {
             "header should include the `name` column"
         );
         assert!(tsv.contains("alpha") && tsv.contains("beta"));
+    }
+
+    /// Two text boxes drawn in `order`, driven through `steps` of input, one
+    /// frame each; returns how many frames `lost_focus_once` reported for
+    /// box "a", the one typed into.
+    fn losses_of_a(order: [&str; 2], steps: &[Vec<egui::Event>]) -> usize {
+        let ctx = egui::Context::default();
+        let mut texts = std::collections::HashMap::from([("a", String::new()), ("b", String::new())]);
+        let mut losses = 0;
+        for (frame, events) in steps.iter().enumerate() {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))),
+                time: Some(frame as f64 / 60.0),
+                events: events.clone(),
+                ..Default::default()
+            };
+            let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    for name in order {
+                        let text = texts.get_mut(name).unwrap();
+                        let response = ui.add(
+                            egui::TextEdit::singleline(text)
+                                .id(egui::Id::new(name))
+                                .desired_width(200.0),
+                        );
+                        if name == "a" && lost_focus_once(&response) {
+                            losses += 1;
+                        }
+                    }
+                });
+            });
+        }
+        losses
+    }
+
+    /// Slide the pointer to `to` over a few frames, then press and release
+    /// there, each its own frame, as a hand does.
+    fn click_at(to: egui::Pos2) -> Vec<Vec<egui::Event>> {
+        let mut steps: Vec<Vec<egui::Event>> = (1..=3)
+            .map(|step| {
+                let pos = to - egui::vec2(0.0, 3.0 - step as f32);
+                vec![egui::Event::PointerMoved(pos)]
+            })
+            .collect();
+        for pressed in [true, false] {
+            steps.push(vec![egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        steps
+    }
+
+    /// Typing into one text box and then clicking straight into another
+    /// reports the first box's loss exactly once, whichever is drawn first.
+    /// egui 0.36 gives focus to the clicked box on the press but takes it
+    /// from the first only on the click, so a first box drawn earlier learns
+    /// of the loss a frame late; requiring that it had focus at the start of
+    /// that frame dropped the loss, and with it the edit.
+    #[test]
+    fn moving_from_one_text_box_to_another_loses_focus_once() {
+        // The panel puts the first box at the top and the second below it.
+        let first = egui::pos2(100.0, 18.0);
+        let second = egui::pos2(100.0, 42.0);
+        for (order, a, b) in [(["a", "b"], first, second), (["b", "a"], second, first)] {
+            let mut steps = click_at(a);
+            steps.push(vec![egui::Event::Text("5".to_owned())]);
+            steps.extend(click_at(b));
+            steps.extend([Vec::new(), Vec::new(), Vec::new()]);
+            assert_eq!(losses_of_a(order, &steps), 1, "drawn in the order {order:?}");
+        }
+    }
+
+    /// Enter in the box, and a click on nothing, each report it once too.
+    #[test]
+    fn leaving_a_text_box_by_enter_or_a_click_elsewhere_loses_focus_once() {
+        let a = egui::pos2(100.0, 18.0);
+        let mut enter = click_at(a);
+        enter.push(vec![egui::Event::Text("5".to_owned())]);
+        enter.push(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        enter.extend([Vec::new(), Vec::new(), Vec::new()]);
+        assert_eq!(losses_of_a(["a", "b"], &enter), 1);
+
+        let mut elsewhere = click_at(a);
+        elsewhere.push(vec![egui::Event::Text("5".to_owned())]);
+        elsewhere.extend(click_at(egui::pos2(350.0, 150.0)));
+        elsewhere.extend([Vec::new(), Vec::new(), Vec::new()]);
+        assert_eq!(losses_of_a(["a", "b"], &elsewhere), 1);
     }
 }
