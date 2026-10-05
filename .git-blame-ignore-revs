@@ -1,0 +1,72 @@
+# Commits that only moved code between files, folded folders or re-indented
+# test modules while the codebase was restructured. `git blame` skips them
+# (GitHub reads this file by itself; locally, run
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs`), so a line is
+# attributed to the commit that wrote it rather than to the one that moved it.
+#
+# Each is at least 92% lines it removed elsewhere in the same commit; the
+# conversions that rewrote code on the way (drawing from a Ctx, moving a
+# window into the dialog host) are not listed, since their edits are real.
+
+# Adopt mod.rs modules and move path-included tests beside their modules
+c67c9f0fd39f35a3ce7725344b2aa3adb872b8d3
+# Move the build tools' code into their binaries
+f45ae9c4bfa543916e8a56b3e956fa36005911e9
+# Fold single-module folders into one file
+095a03b16f693de644133ebb6a415df29d4d1c16
+# Fold folders of a module and its tests into one file
+8b3d83178490216f993685e8329fd36cc9997bcf
+# Move inline test modules out of source files
+7057ead806643f162cc00759ff1009256c700895
+# Gather the tag editor into app/editor
+bdde02d4ee290b7037a63f364d708cc8a201fc76
+# Gather tag comparison into app/compare
+84d010d8fa4f9b93e509d510212b41a3c638142b
+# Dissolve app/ui into the shell and the features
+fe3318599e41e9ebafa28eb12b9e6a6e142af24e
+# Dissolve app/tests into the modules its tests exercise
+c892acd06da627aa5ab4de92dbc8468b1b9c435e
+# Gather the tag browser into app/browser
+6b6ce340344edece830862811edb4ad1d94bef8d
+# Dissolve app/state into the features
+1a1ed947e33217ea464663cd0dddad126ccf96ef
+# Gather import into app/import
+0932d16dd8303f36b5dd64ffaab6da699edb3704
+# Gather tag operations into app/tag_ops
+4467314fbf23715e9a7d347b9363abae4e685b67
+# Move process startup and window placement into the shell
+b1ab78a8c42a534a62b5baf9553715779f5360ce
+# Gather help into app/help
+c6ab58a8bc1faaadb08d68f2c0abb225466ad37c
+# Split the editor's catch-all test files into the modules they test
+e52a42828d56cca05fd92fae71f364adcde4f320
+# Gather search into app/search
+f41e7cc9db6f785a83727f16bb5b3fa9a32aa9ed
+# Retire the controller into the shell and the features
+ff4cf7dc34fb41b30772949d100e2607d8920e20
+# Put single-destination test files inline in the modules they test
+5fdaa3729b27ef05c47f587c868d811b179d9bc2
+# Gather Campaign Evolved mods into app/mods
+1c65b33bdfbc4ccf1c0570fe1498760bf996d296
+# Put the sound, bitmap source, import gate and CE field path tests inline
+976d318f7b2278be966c59e3edbd5914b334d6de
+# Gather open documents into app/documents
+1985a3ac2728ab0f3bffa94df71d466b67990c9a
+# Gather editing kits into app/kits
+932c0612628d1d6a15168b222daa45852df7f92a
+# Fold single-file folders, move session I/O beside its types, and put prefs tests inline
+73d95c25de916a309e3baa34a91564da754c2aae
+# Gather export into app/export
+e590be990cd11d2049393cd5c053ef2b5a620c9b
+# Gather references into app/references
+303f92174a634c702da050577886b57ac6054ca7
+# Move keyword storage and the created-tag ledger into core
+f6ebe0ae7fdc0a75c53669be81aebf39c92352b6
+# Gather the tag document model into core::document
+0eb15abf4a83814585b975e262ce2445446c258c
+# Gather the UI-free modules under core, with a test that keeps them so
+7a87def68e5d567e767bb329ddc67435ffbfe6a0
+# Gather the UI kit into app/ui_kit and startup into the shell
+1733e8af01ebcf3c2b8e8ab261f2dcfd859c9dcf
+# Give every file one test module
+b204c9290ec3b2ca66e5a06429d889fe479ec644
