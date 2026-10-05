@@ -1121,4 +1121,54 @@ mod tests {
         assert_eq!(data, vec!["data".to_owned(), "data_moda".to_owned()]);
         assert_eq!(default_tags.as_deref(), Some("tags"));
     }
+
+    /// A command-line launch into a kit configured as a profile leaves that
+    /// game's built-in kit as it was. It used to record the profile's root
+    /// as the built-in's status, so the menu listed a built-in kit with no
+    /// path configured, and drawing it panicked on the first frame.
+    #[test]
+    fn a_launch_into_a_profile_does_not_configure_the_built_in_kit() {
+        use crate::app::shell::frame::{EditingKitMenuEntry, visible_editing_kit_menu_entries};
+        use crate::app::shell::launch::CommandLineLaunch;
+        let base = temp_dir("launch-into-profile");
+        let root = base.join("HCEEK");
+        let tag = root.join("tags").join("weapons").join("rifle.weapon");
+        fs::create_dir_all(tag.parent().unwrap()).unwrap();
+        fs::write(&tag, crate::app::loose_fixture::classic_ce_bytes("weapon")).unwrap();
+        let launch = || CommandLineLaunch {
+            game: GameId::HaloCe,
+            kit_label: "HCEEK",
+            tag_paths: vec![tag.clone()],
+        };
+        let built_in_listed = |app: &Baboon| {
+            visible_editing_kit_menu_entries(
+                &app.model.prefs.custom_editing_kit_profiles,
+                &app.kit_tools.editing_kit_validation,
+            )
+            .iter()
+            .any(|entry| {
+                matches!(entry, EditingKitMenuEntry::BuiltIn(shortcut) if shortcut.game == GameId::HaloCe)
+            })
+        };
+        let ctx = egui::Context::default();
+
+        let mut app = Baboon::for_test();
+        app.model.prefs.custom_editing_kit_profiles =
+            vec![profile("ce", "haloce_mcc", &root, None, None)];
+        app.begin_command_line_launch(launch(), ctx.clone());
+        assert!(!built_in_listed(&app), "the profile's root became the built-in kit's");
+        app.menu_state(&ctx);
+
+        // A built-in kit whose path is configured is still checked and listed.
+        let mut app = Baboon::for_test();
+        app.model
+            .prefs
+            .editing_kit_paths
+            .insert("haloce_mcc".to_owned(), root.clone());
+        app.begin_command_line_launch(launch(), ctx.clone());
+        assert!(built_in_listed(&app));
+        app.menu_state(&ctx);
+
+        let _ = fs::remove_dir_all(base);
+    }
 }

@@ -92,6 +92,7 @@ impl Baboon {
             }
             return;
         }
+        let from_profile = profile.is_some();
         let Some(path) = profile
             .map(|profile| profile.root)
             .or_else(|| self.model.prefs.editing_kit_paths.get(shortcut.game.as_str()).cloned())
@@ -102,9 +103,16 @@ impl Baboon {
             );
             return;
         };
-        let status = self
-            .kit_tools.editing_kit_validation
-            .refresh_builtin(shortcut, Some(&path));
+        // A profile's root is the profile's, not the built-in kit's: cached as
+        // the built-in's status, it listed a built-in kit in the menu with no
+        // path configured, and drawing the menu panicked.
+        let status = if from_profile {
+            validate_builtin_editing_kit(shortcut, Some(&path))
+        } else {
+            self.kit_tools
+                .editing_kit_validation
+                .refresh_builtin(shortcut, Some(&path))
+        };
         let Some(layout) = status.layout().cloned() else {
             self.model.status = format!("Command line: {}", status.message());
             return;
