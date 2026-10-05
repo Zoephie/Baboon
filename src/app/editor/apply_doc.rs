@@ -192,4 +192,88 @@ mod tests {
         assert!(!draft.changed, "the applied draft still reads as unsaved");
         assert_eq!(draft.text, "7");
     }
+
+    /// A popup's OK is refused once the tag's blocks have changed shape since
+    /// it opened: its path's element indices may name another element now.
+    /// A value edit in between doesn't count.
+    #[test]
+    fn a_popup_is_refused_after_the_blocks_change_under_it() {
+        let mut app = app_with_open_tag();
+        let ctx = egui::Context::default();
+        let kit = app.model.kits[0].id;
+        let stamp = |app: &Baboon| app.model.kits[0].parsed_tags[KEY].layout_stamp();
+        let confirm = |app: &mut Baboon, opened_at, input: &str| {
+            app.commands.send(EditorCommand::ApplyPopupOps {
+                opened_from: Some(kit),
+                opened_at: Some(opened_at),
+                tag_key: KEY.to_owned(),
+                label: "Edit color",
+                ops: set(input),
+            });
+            app.apply_commands(&ctx);
+        };
+
+        let opened = stamp(&app);
+        app.apply_doc_ops(0, KEY, "Edit", set("3"), UndoStep::Own);
+        confirm(&mut app, opened, "5");
+        assert_eq!(value(&app), "5", "a value edit leaves the popup's target where it was");
+
+        let opened = stamp(&app);
+        let add = DeferredOps {
+            block_ops: vec![BlockOp {
+                path: "regions".to_owned(),
+                kind: BlockOpKind::Add,
+            }],
+            ..DeferredOps::default()
+        };
+        app.apply_doc_ops(0, KEY, "Block edit", add, UndoStep::Own);
+        confirm(&mut app, opened, "9");
+        assert_eq!(value(&app), "5", "nothing written");
+        assert!(app.model.status.contains("blocks changed"), "{}", app.model.status);
+    }
+
+    /// The same for a block delete waiting on its confirm: once the block has
+    /// changed shape, the element it names may be another one.
+    #[test]
+    fn a_block_delete_is_refused_after_the_block_changes_under_it() {
+        let mut app = app_with_open_tag();
+        let ctx = egui::Context::default();
+        let kit = app.model.kits[0].id;
+        let add = || DeferredOps {
+            block_ops: vec![BlockOp {
+                path: "regions".to_owned(),
+                kind: BlockOpKind::Add,
+            }],
+            ..DeferredOps::default()
+        };
+        let regions = |app: &Baboon| {
+            app.model.kits[0].parsed_tags[KEY].tag.root().field_path("regions").and_then(|field| field.as_block()).map_or(0, |block| block.len())
+        };
+        let ask = |app: &mut Baboon| {
+            let opened_at = Some(app.model.kits[0].parsed_tags[KEY].layout_stamp());
+            app.dialogs.open(BlockConfirm {
+                kit: Some(kit),
+                opened_at,
+                tag_key: KEY.to_owned(),
+                path: "regions".to_owned(),
+                kind: BlockOpKind::Delete(0),
+                message: String::new(),
+                confirm_label: "Delete".to_owned(),
+            });
+        };
+        app.apply_doc_ops(0, KEY, "Block edit", add(), UndoStep::Own);
+        app.apply_doc_ops(0, KEY, "Block edit", add(), UndoStep::Own);
+
+        ask(&mut app);
+        app.apply_doc_ops(0, KEY, "Block edit", add(), UndoStep::Own);
+        app.commands.send(EditorCommand::ApplyBlockConfirm);
+        app.apply_commands(&ctx);
+        assert_eq!(regions(&app), 3, "nothing deleted");
+        assert!(app.model.status.contains("nothing was deleted"), "{}", app.model.status);
+
+        ask(&mut app);
+        app.commands.send(EditorCommand::ApplyBlockConfirm);
+        app.apply_commands(&ctx);
+        assert_eq!(regions(&app), 2, "a confirm on the block as it stands deletes");
+    }
 }

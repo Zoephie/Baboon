@@ -447,6 +447,23 @@ impl Baboon {
             self.dialogs.close::<BlockConfirm>();
             return;
         }
+        // The element index it holds names another element once the block
+        // has changed shape since the confirm was raised.
+        let moved = self.dialogs.get::<BlockConfirm>().is_some_and(|confirm| {
+            confirm.opened_at.is_some_and(|stamp| {
+                self.model.kits[self.model.active]
+                    .parsed_tags
+                    .get(&confirm.tag_key)
+                    .is_some_and(|doc| doc.layout_stamp() != stamp)
+            })
+        });
+        if routed && moved {
+            self.dialogs.close::<BlockConfirm>();
+            self.model.status =
+                "The block changed after the delete was asked for, so nothing was deleted. Ask again."
+                    .to_owned();
+            return;
+        }
         if let Some(confirm) = self.dialogs.close::<BlockConfirm>()
             && routed
         {

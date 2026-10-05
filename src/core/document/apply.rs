@@ -92,6 +92,14 @@ pub(crate) fn apply_deferred_ops(
         };
     }
     doc.journal.begin_edit(&doc.tag, label);
+    if !(ops.block_ops.is_empty()
+        && ops.shader_ops.is_empty()
+        && ops.shader_param_ops.is_empty()
+        && ops.h2_shader_param_ops.is_empty()
+        && ops.model_variant_ops.is_empty())
+    {
+        doc.note_layout_change();
+    }
     let DeferredOps {
         pending,
         block_ops,

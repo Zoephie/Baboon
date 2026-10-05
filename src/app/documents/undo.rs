@@ -75,6 +75,7 @@ impl Baboon {
                         if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
                             doc.tag = tag;
                             doc.dirty.touch();
+                            doc.note_layout_change();
                         }
                         let active = self.model.active;
                         self.invalidate_tag_caches_in(active, key);

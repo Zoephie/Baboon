@@ -600,6 +600,7 @@ pub(super) fn draw_variant_header_actions(
             .selected_variant
             .expect("button enabled only when a variant is selected");
         *edit.block_confirm = Some(BlockConfirm {
+            opened_at: None,
             kit: None,
             tag_key: edit.tag_key.to_owned(),
             path: "variants".to_owned(),

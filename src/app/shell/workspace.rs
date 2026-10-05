@@ -1149,6 +1149,7 @@ pub(in crate::app) mod tests {
         app.dialogs.open(ColorPopupWindow {
             popup: Some(MaterialColorPopup::new("color", 1.0, 0.5, 0.25, 1.0)),
             kit,
+            opened_at: None,
         });
     }
 

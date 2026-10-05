@@ -1658,7 +1658,7 @@ mod tests {
         let b = kit.open(&mut app, "weapons/b.weapon");
         let kit_id = app.model.kits[0].id;
         let popup = MaterialColorPopup::new("tint", 1.0, 0.5, 0.0, 1.0).with_write(&a, "tint");
-        app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit: kit_id });
+        app.dialogs.open(ColorPopupWindow { popup: Some(popup), kit: kit_id, opened_at: None });
 
         app.close_tab(&b);
         assert!(app.dialogs.get::<ColorPopupWindow>().is_some(), "a's popup outlives b's tab");

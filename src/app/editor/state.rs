@@ -314,6 +314,10 @@ pub(in crate::app) struct BlockConfirm {
     /// every pane and have no kit of their own. `None` only inside that one
     /// render; the apply drops a confirm that somehow never got stamped.
     pub(in crate::app) kit: Option<KitId>,
+    /// The tag's layout stamp when the confirm was raised, stamped with
+    /// `kit`. The confirm isn't modal, and its element index names another
+    /// element once the block changes shape, so the apply refuses it then.
+    pub(in crate::app) opened_at: Option<(u64, u64)>,
     pub(in crate::app) tag_key: String,
     pub(in crate::app) path: String,
     pub(in crate::app) kind: BlockOpKind,

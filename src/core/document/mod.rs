@@ -57,6 +57,11 @@ pub(crate) struct TagDocument {
     pub(crate) tag: TagFile,
     pub(crate) dirty: Dirty,
     pub(crate) journal: EditJournal,
+    /// Advances whenever blocks may have gained, lost or moved elements: a
+    /// block or parameter op, an undo or redo, a reorganize. A popup holds a
+    /// field path with element indices in it, which point somewhere else
+    /// once this moves.
+    layout_revision: u64,
 }
 
 fn next_document_id() -> u64 {
@@ -71,6 +76,7 @@ impl TagDocument {
             tag,
             dirty: Dirty::default(),
             journal: EditJournal::default(),
+            layout_revision: 0,
         }
     }
 
@@ -86,6 +92,7 @@ impl TagDocument {
             tag,
             dirty,
             journal: EditJournal::default(),
+            layout_revision: 0,
         }
     }
 
@@ -93,5 +100,17 @@ impl TagDocument {
     /// redo, or the document being replaced by a reload.
     pub(crate) fn content_stamp(&self) -> (u64, u64) {
         (self.id, self.dirty.revision())
+    }
+
+    /// Changes whenever a field path with element indices in it may stop
+    /// pointing where it did; see [`Self::layout_revision`]. Value edits
+    /// leave it alone.
+    pub(crate) fn layout_stamp(&self) -> (u64, u64) {
+        (self.id, self.layout_revision)
+    }
+
+    /// Record that blocks may have changed shape.
+    pub(crate) fn note_layout_change(&mut self) {
+        self.layout_revision += 1;
     }
 }

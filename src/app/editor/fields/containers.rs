@@ -1094,6 +1094,7 @@ pub(in crate::app) fn draw_foundation_block(
                 // Stamped by the pane once this render returns; the field
                 // renderers are shared and have no kit of their own.
                 kit: None,
+                opened_at: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path_prefix.to_owned(),
                 kind: BlockOpKind::ReplaceBlock { elements },
@@ -1178,6 +1179,7 @@ pub(in crate::app) fn handle_block_actions(
                 // Stamped by the pane once this render returns; the field
                 // renderers are shared and have no kit of their own.
                 kit: None,
+                opened_at: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path.to_owned(),
                 kind: BlockOpKind::Delete(sel),
@@ -1191,6 +1193,7 @@ pub(in crate::app) fn handle_block_actions(
             // Stamped by the pane once this render returns; the field
             // renderers are shared and have no kit of their own.
             kit: None,
+            opened_at: None,
             tag_key: edit.tag_key.to_owned(),
 
             path: path.to_owned(),

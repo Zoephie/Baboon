@@ -306,6 +306,7 @@ mod tests {
         app.dialogs.open(FunctionPopupWindow {
             popup: Some(popup),
             kit,
+            opened_at: None,
         });
 
         app.commands.send(EditorCommand::FunctionDraftColor {

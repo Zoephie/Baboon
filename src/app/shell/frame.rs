@@ -3696,6 +3696,7 @@ mod tests {
                     h.app.dialogs.open(ColorPopupWindow {
                         popup: Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0)),
                         kit,
+                        opened_at: None,
                     });
                 },
                 &["Color Picker"],
@@ -3717,6 +3718,7 @@ mod tests {
                             true,
                         )),
                         kit,
+                        opened_at: None,
                     });
                 },
                 &["Smoke Function"],
@@ -3795,6 +3797,7 @@ mod tests {
                 },
                 |h| {
                     h.app.dialogs.open(BlockConfirm {
+                        opened_at: None,
                         kit: Some(active_id(h)),
                         tag_key: fixture::entry_key(SCENARIO),
                         path: "skies".to_owned(),

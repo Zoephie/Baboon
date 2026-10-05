@@ -168,6 +168,8 @@ pub(in crate::app) fn draw_tag_pane(
         }
         return;
     };
+    // Recorded on any popup this draw opens; see `ColorPopupWindow::opened_at`.
+    let layout_stamp = doc.layout_stamp();
 
     let filter_in_scope = match find.within {
         FindWithin::CurrentTag => {
@@ -446,12 +448,14 @@ pub(in crate::app) fn draw_tag_pane(
         cx.open_dialog(ColorPopupWindow {
             popup: Some(popup),
             kit: kit_id,
+            opened_at: Some(layout_stamp),
         });
     }
     if let Some(popup) = grid_function_popup.or(function_request) {
         cx.open_dialog(FunctionPopupWindow {
             popup: Some(popup),
             kit: kit_id,
+            opened_at: Some(layout_stamp),
         });
     }
     // A referenced sound was played/extracted from a container source. It
@@ -468,6 +472,7 @@ pub(in crate::app) fn draw_tag_pane(
     }
     if let Some(mut confirm) = block_confirm {
         confirm.kit = Some(kit_id);
+        confirm.opened_at = Some(layout_stamp);
         cx.open_dialog(confirm);
     }
     // Element(s) were copied: stash them on the clipboard.
