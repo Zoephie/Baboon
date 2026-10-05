@@ -349,6 +349,12 @@ pub(in crate::app) fn wrapper_origin_for(
     use blam_tags::iostore::writer::WrapperOrigin;
     match location {
         TagEntryLocation::Container { .. } => Some(WrapperOrigin::Copy),
+        // A Save As copy is wrapped in its source's own `.uasset`, whose
+        // bindings are this tag's too; a donor's say nothing true about it.
+        TagEntryLocation::NewContainer {
+            template: NewContainerTemplate::Copy { .. },
+            ..
+        } => Some(WrapperOrigin::Copy),
         TagEntryLocation::NewContainer { .. } => Some(WrapperOrigin::Template),
         _ => None,
     }

@@ -374,13 +374,18 @@ impl Baboon {
         // duplicate does not) instead of moving a loose file.
         if is_container {
             self.dialogs.close::<RenameTagState>();
-            let redirect = matches!(operation, TagNameOperation::Rename);
-            match self.export_container_override(&key, Some((new_rel, redirect))) {
+            if matches!(operation, TagNameOperation::SaveAsOverlay) {
+                match self.save_container_tag_as_copy(&key, &new_rel) {
+                    Ok(message) | Err(message) => self.model.status = message,
+                }
+                return;
+            }
+            // A rename: the new tag plus a redirect from the old package.
+            match self.export_container_override(&key, Some((new_rel, true))) {
                 Ok(Some(path)) => {
-                    let what = if redirect { "renamed tag" } else { "tag copy" };
                     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
                     self.model.status = format!(
-                        "Exported {what} → {stem}.utoc/.ucas/.pak — copy all three into \
+                        "Exported renamed tag → {stem}.utoc/.ucas/.pak — copy all three into \
                          Meteorite/Content/Paks/ (base game unchanged)"
                     );
                 }

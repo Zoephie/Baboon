@@ -4,6 +4,7 @@
 use super::*;
 use crate::app::tag_ops::group_report::{group_authorability, shipped_counts_by_group};
 use crate::app::documents::saving::register_saved_copy_in_loaded_source;
+use crate::app::mods::campaign_entry_project_parts;
 use crate::app::documents::saving::new_tag_output_path_from_dialog;
 use crate::app::documents::saving::load_new_tag_groups;
 
@@ -254,6 +255,92 @@ impl Baboon {
         Ok(())
     }
 
+    /// Save As for a tag the game ships: an unsaved copy at `new_rel`, which the
+    /// editor moves to. Nothing is written until Save or Export Mod, as with New
+    /// Tag. The copy is wrapped in the original's own `.uasset`, so it keeps the
+    /// Unreal bindings the original has. The original's tab gives way, unless
+    /// it holds unsaved edits: those stay with it. Returns the status line.
+    pub(in crate::app) fn save_container_tag_as_copy(
+        &mut self,
+        key: &str,
+        new_rel: &str,
+    ) -> Result<String, String> {
+        let Some(entry) = self.model.entry_for_key(key).cloned() else {
+            return Err("Tag is no longer in the source".to_owned());
+        };
+        let TagEntryLocation::Container {
+            container,
+            rel_path,
+        } = &entry.location
+        else {
+            return Err("Not a Campaign Evolved container tag".to_owned());
+        };
+        if new_rel.is_empty() {
+            return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+        }
+        let uasset = rel_path
+            .strip_suffix(".ubulk")
+            .map(|stem| format!("{stem}.uasset"))
+            .ok_or("This tag is not stored as a .ubulk")?;
+        let (source, ..) = campaign_entry_project_parts(&entry)
+            .ok_or("This tag has no project identity to copy it from")?;
+        let group_name = entry
+            .group_name
+            .clone()
+            .unwrap_or_else(|| format_group_tag(entry.group_tag));
+        let extension = entry
+            .display_path
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_owned())
+            .unwrap_or_else(|| group_name.clone());
+        let package = new_container_package(new_rel, &group_name);
+        let copy_entry = TagEntry {
+            key: new_tag_entry_key(&package),
+            display_path: format!("{new_rel}.{extension}"),
+            group_tag: entry.group_tag,
+            group_name: Some(group_name),
+            location: TagEntryLocation::NewContainer {
+                template: NewContainerTemplate::Copy {
+                    container: *container,
+                    rel_path: uasset,
+                    source,
+                },
+                package,
+                group_tag: entry.group_tag,
+            },
+        };
+        // By identity rather than key: a shipped tag at that path is keyed
+        // differently from a new one, and either would be shadowed by the copy.
+        let kit = self.model.active;
+        let taken = self.model.kits[kit].parsed_tags.contains_key(&copy_entry.key)
+            || campaign_entry_project_parts(&copy_entry)
+                .is_some_and(|(identity, ..)| self.model.campaign_entry_for_identity(kit, &identity).is_some());
+        if taken {
+            return Err(format!("A tag already exists at {}", copy_entry.display_path));
+        }
+        // `TagFile` is not `Clone`; its own bytes are how a document is copied,
+        // and they are exactly what Save would write.
+        let document = self.model.kits[kit]
+            .parsed_tags
+            .get(key)
+            .ok_or("Load the tag before saving it as a copy")?;
+        let original_clean = !document.dirty.is_set();
+        let bytes = document
+            .tag
+            .write_to_bytes()
+            .map_err(|error| format!("Could not serialize the tag: {error}"))?;
+        let copy = TagFile::read_from_bytes(&bytes)
+            .map_err(|error| format!("Could not re-read the copied tag: {error}"))?;
+        let copy_key = copy_entry.key.clone();
+        let display = copy_entry.display_path.clone();
+        self.register_in_memory_tag(copy_entry, copy);
+        if original_clean {
+            self.close_tab(key);
+            self.model.kits[kit].selected_key = Some(copy_key);
+        }
+        Ok(format!("Saved as {display} (unsaved until Save or Export Mod)"))
+    }
+
     /// Rename/move (`duplicate == false`) or copy (`duplicate == true`) a
     /// brand-new container tag to `new_rel`. Nothing is written: a new tag lives
     /// only in its document until Save/Export Mod, so this rewrites the entry
@@ -303,7 +390,36 @@ impl Baboon {
                 .map_err(|error| format!("Could not serialize the tag: {error}"))?;
             let copy = TagFile::read_from_bytes(&bytes)
                 .map_err(|error| format!("Could not re-read the copied tag: {error}"))?;
-            self.add_new_container_tag(new_rel, group_tag, &group_name, &extension, copy)?;
+            // A copy of a Save As copy wears the same shipped tag's wrapper; a
+            // fresh donor would drop the bindings it was made to keep.
+            if let NewContainerTemplate::Copy { .. } = &template {
+                let package = new_container_package(new_rel, &group_name);
+                let copy_key = new_tag_entry_key(&package);
+                if self.model.kits[self.model.active].parsed_tags.contains_key(&copy_key)
+                    || self
+                        .model
+                        .source()
+                        .is_some_and(|source| source.entry_for_key(&copy_key).is_some())
+                {
+                    return Err(format!("A new tag already exists at {new_rel}"));
+                }
+                self.register_in_memory_tag(
+                    TagEntry {
+                        key: copy_key,
+                        display_path: format!("{new_rel}.{extension}"),
+                        group_tag,
+                        group_name: Some(group_name),
+                        location: TagEntryLocation::NewContainer {
+                            template,
+                            package,
+                            group_tag,
+                        },
+                    },
+                    copy,
+                );
+            } else {
+                self.add_new_container_tag(new_rel, group_tag, &group_name, &extension, copy)?;
+            }
             return Ok(format!("Copied to {new_rel}.{extension} (unsaved)"));
         }
 
@@ -594,6 +710,16 @@ pub(in crate::app) fn new_container_template_bytes(
                 .read(&rel_path)
                 .map_err(|error| format!("Failed to read template .uasset: {error}"))
         }
+        NewContainerTemplate::Copy {
+            container,
+            rel_path,
+            source,
+        } => containers
+            .get(*container)
+            .and_then(|mounted| mounted.archive.read(rel_path).ok())
+            .ok_or_else(|| {
+                format!("{source}, the tag this was copied from, is no longer in the mounted paks")
+            }),
         NewContainerTemplate::Derived { group } => {
             let usmap = blam_tags::iostore::object::usmap::Usmap::meteorite()
                 .map_err(|error| format!("Could not load the Unreal mappings: {error}"))?;
@@ -847,6 +973,46 @@ mod tests {
                 rel_path: format!("Tags/{path}-{group}.ubulk"),
             },
         }
+    }
+
+    /// An app with `entries` mounted as a Campaign Evolved container set, and
+    /// `open` open as a clean document.
+    fn campaign_app(entries: Vec<TagEntry>, open: &TagEntry) -> Baboon {
+        let mut app = Baboon::for_test();
+        let tree = crate::core::source::build_tree(&entries);
+        let group_tree = crate::core::source::build_group_tree(&entries);
+        app.install_loaded_source(LoadedSourceData {
+            label: "save as test containers".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/save-as-test/Paks"),
+                containers: Vec::new(),
+                index: Arc::new(crate::core::source::ContainerTagIndex::default()),
+                packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree,
+            group_tree,
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let group = open.group_name.clone().unwrap();
+        app.model.kits[0]
+            .parsed_tags
+            .insert(open.key.clone(), TagDocument::clean(TagFile::new(definition(&group)).unwrap()));
+        app.kit_and_view(0).open_tag_pane(&open.key);
+        app.model.kits[0].selected_key = Some(open.key.clone());
+        app
+    }
+
+    fn tab_open(app: &Baboon, key: &str) -> bool {
+        app.model.kits[0].open_tabs.iter().any(|tab| tab == key)
     }
 
     fn group_tag_of(group: &str) -> u32 {
@@ -1337,5 +1503,99 @@ mod tests {
         );
         // And it must still round-trip cleanly.
         TagFile::read_from_bytes(&bytes).expect("stripped tag must parse");
+    }
+
+    /// Save As of a shipped tag makes an unsaved copy and moves the editor to
+    /// it. The copy is wrapped in the original's own `.uasset`, so it keeps the
+    /// original's Unreal bindings when it is written.
+    #[test]
+    fn save_as_of_a_shipped_tag_switches_to_an_unsaved_copy() {
+        let original = container_entry(0, "objects/props/crate", "camera_track");
+        let mut app = campaign_app(vec![original.clone()], &original);
+
+        let status = app
+            .save_container_tag_as_copy(&original.key, "objects/props/crate_copy")
+            .unwrap();
+
+        assert!(status.starts_with("Saved as objects/props/crate_copy"), "{status}");
+        let selected = app.model.kits[0].selected_key.clone().unwrap();
+        let copy = app.model.entry_for_key(&selected).cloned().expect("the copy is in the browser");
+        assert_eq!(copy.display_path, "objects/props/crate_copy.camera_track");
+        match &copy.location {
+            TagEntryLocation::NewContainer {
+                template: NewContainerTemplate::Copy { container, rel_path, source },
+                ..
+            } => {
+                assert_eq!(*container, 0);
+                assert_eq!(rel_path, "Tags/objects/props/crate-camera_track.uasset");
+                assert_eq!(
+                    Some(source.as_str()),
+                    campaign_entry_project_parts(&original).map(|parts| parts.0).as_deref()
+                );
+            }
+            _ => panic!("expected a copy of the original's wrapper"),
+        }
+        assert_eq!(
+            crate::app::mods::review::wrapper_origin_for(&copy.location),
+            Some(blam_tags::iostore::writer::WrapperOrigin::Copy),
+            "the copy keeps its bindings"
+        );
+        assert!(app.model.kits[0].parsed_tags[&selected].dirty.is_set(), "nothing is written yet");
+        assert!(tab_open(&app, &selected));
+        assert!(!tab_open(&app, &original.key), "the clean original gives way");
+    }
+
+    /// An original with unsaved edits keeps its tab: the edits stay with it
+    /// rather than closing with the tab.
+    #[test]
+    fn save_as_keeps_an_original_with_unsaved_edits_open() {
+        let original = container_entry(0, "objects/props/crate", "camera_track");
+        let mut app = campaign_app(vec![original.clone()], &original);
+        app.model.kits[0].parsed_tags.get_mut(&original.key).unwrap().dirty.touch();
+
+        app.save_container_tag_as_copy(&original.key, "objects/props/crate_copy")
+            .unwrap();
+
+        let selected = app.model.kits[0].selected_key.clone().unwrap();
+        assert_ne!(selected, original.key, "the editor is on the copy");
+        assert!(tab_open(&app, &original.key));
+        assert!(app.model.kits[0].parsed_tags[&original.key].dirty.is_set());
+    }
+
+    /// A path a shipped tag already holds is refused: the copy would shadow it.
+    #[test]
+    fn save_as_onto_a_shipped_tag_is_refused() {
+        let original = container_entry(0, "objects/props/crate", "camera_track");
+        let other = container_entry(0, "objects/props/barrel", "camera_track");
+        let mut app = campaign_app(vec![original.clone(), other], &original);
+
+        let error = app
+            .save_container_tag_as_copy(&original.key, "objects/props/barrel")
+            .unwrap_err();
+
+        assert!(error.contains("already exists"), "{error}");
+        assert_eq!(app.model.kits[0].selected_key.as_deref(), Some(original.key.as_str()));
+        assert!(tab_open(&app, &original.key));
+    }
+
+    /// Save As of an unsaved copy keeps wearing the shipped tag's wrapper.
+    #[test]
+    fn a_copy_of_a_copy_keeps_the_shipped_wrapper() {
+        let original = container_entry(0, "objects/props/crate", "camera_track");
+        let mut app = campaign_app(vec![original.clone()], &original);
+        app.save_container_tag_as_copy(&original.key, "objects/props/crate_copy")
+            .unwrap();
+        let first = app.model.kits[0].selected_key.clone().unwrap();
+
+        app.apply_new_container_rename(&first, "objects/props/crate_copy_2", true)
+            .unwrap();
+
+        let second = app.model.kits[0].selected_key.clone().unwrap();
+        assert_ne!(second, first);
+        let location = &app.model.entry_for_key(&second).unwrap().location;
+        assert!(matches!(
+            location,
+            TagEntryLocation::NewContainer { template: NewContainerTemplate::Copy { .. }, .. }
+        ));
     }
 }

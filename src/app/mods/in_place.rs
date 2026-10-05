@@ -13,7 +13,7 @@ impl Baboon {
     /// - `rename_to == None`: same-name override (Save) — replaces this tag's
     ///   chunk(s), with the `.uasset` SerialSize patched on a size change.
     /// - `Some((new_rel, redirect))`: a new tag at `/Game/Tags/<new_rel>-<group>`
-    ///   (Save As / Rename); `redirect` adds an old→new package redirect so
+    ///   (Rename); `redirect` adds an old→new package redirect so
     ///   existing references resolve to the renamed tag.
     /// Returns the output path, or `None` if the save dialog was cancelled.
     pub(in crate::app) fn export_container_override(

@@ -102,6 +102,16 @@ pub enum NewContainerTemplate {
     /// long name is carried because deriving needs it and `group_tag` alone
     /// cannot produce it.
     Derived { group: String },
+    /// A copy of a shipped tag, made by Save As: that tag's own `.uasset`
+    /// (`rel_path` in `container`), kept with the Unreal bindings it carries.
+    /// `source` is that tag's project identity, which finds it again after a
+    /// remount. A donor will not do in its place: another tag's wrapper would
+    /// bind the copy to that tag's assets.
+    Copy {
+        container: usize,
+        rel_path: String,
+        source: String,
+    },
 }
 
 #[derive(Clone)]

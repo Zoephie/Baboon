@@ -198,17 +198,20 @@ impl Dialog for RenameTagState {
                         } else {
                             ui.label(
                                 RichText::new(
-                                    "Writes an independent new tag; existing references are \
-                                     unchanged.",
+                                    "Creates an unsaved copy at the new path and switches to it; \
+                                     existing references are unchanged.",
                                 )
                                 .color(text_dark()),
                             );
                         }
                         ui.label(
-                            RichText::new(
+                            RichText::new(if state.operation == TagNameOperation::Rename {
                                 "A higher-priority overlay container is written; base game files \
-                                 are never modified.",
-                            )
+                                 are never modified."
+                            } else {
+                                "It is written when you Save it or Export Mod, keeping this tag's \
+                                 Unreal bindings; base game files are never modified."
+                            })
                             .color(subtle_dark())
                             .small(),
                         );
@@ -263,7 +266,8 @@ impl Dialog for RenameTagState {
                                     "Copy this unsaved tag to the new path (nothing is written yet)"
                                 }
                                 TagNameOperation::SaveAsOverlay if state.is_container => {
-                                    "Write a higher-priority overlay container (base game unchanged)"
+                                    "Copy this tag to the new path and edit the copy (nothing is \
+                                     written yet)"
                                 }
                                 TagNameOperation::Rename if state.whole_path_editable => {
                                     "Move this tag inside the pak that already holds it"

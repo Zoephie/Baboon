@@ -62,6 +62,20 @@ pub(in crate::app) struct CampaignProjectOverlay {
     /// holding a 105 MiB animation graph cost 230 ms a tick to re-hash, twice a
     /// second, purely to learn nothing had changed.
     pub(in crate::app) digest: [u8; 32],
+    /// For a copy Save As made of a shipped tag, that tag's identity: the copy
+    /// is wrapped in its `.uasset`, and finds it again by this on restore.
+    pub(in crate::app) copied_from: Option<String>,
+}
+
+/// The identity of the tag `entry` is a Save As copy of, if it is one.
+pub(in crate::app) fn copied_from_of(entry: &TagEntry) -> Option<String> {
+    match &entry.location {
+        TagEntryLocation::NewContainer {
+            template: NewContainerTemplate::Copy { source, .. },
+            ..
+        } => Some(source.clone()),
+        _ => None,
+    }
 }
 
 /// One tag's undo and redo stacks as the session holds them, oldest first.
@@ -667,6 +681,13 @@ pub(in crate::app) fn save_campaign_project(
              );
              CREATE TABLE IF NOT EXISTS folders (
                  path TEXT PRIMARY KEY
+             );
+             -- What a Save As copy was copied from, by the copy's identity.
+             -- A table of its own so older builds, which ignore it, still
+             -- read the project.
+             CREATE TABLE IF NOT EXISTS overlay_origins (
+                 identity TEXT PRIMARY KEY,
+                 copied_from TEXT NOT NULL
              );",
         )
         .map_err(|error| format!("Could not initialize project database: {error}"))?;
@@ -772,6 +793,22 @@ pub(in crate::app) fn save_campaign_project(
     // reconciling it would cost more than rewriting it. Session scope only —
     // like history, a folder is the author's own organisation, and the sidecar
     // travels to whoever installs the mod.
+    // Replaced wholesale, like folders: a row per copy, and few of those.
+    transaction
+        .execute("DELETE FROM overlay_origins", [])
+        .map_err(|error| format!("Could not reset project tag origins: {error}"))?;
+    for overlay in snapshot.overlays.values() {
+        if let Some(source) = &overlay.copied_from {
+            transaction
+                .execute(
+                    "INSERT INTO overlay_origins (identity, copied_from) VALUES (?1, ?2)",
+                    params![overlay.identity, source],
+                )
+                .map_err(|error| {
+                    format!("Could not write project tag origin {}: {error}", overlay.logical_path)
+                })?;
+        }
+    }
     transaction
         .execute("DELETE FROM folders", [])
         .map_err(|error| format!("Could not reset project folders: {error}"))?;
@@ -785,6 +822,19 @@ pub(in crate::app) fn save_campaign_project(
     transaction
         .commit()
         .map_err(|error| format!("Could not commit project database: {error}"))
+}
+
+/// Each Save As copy's source identity, by the copy's identity; empty for a
+/// project written before the table existed.
+fn read_overlay_origins(connection: &Connection) -> Vec<(String, String)> {
+    let Ok(mut statement) = connection.prepare("SELECT identity, copied_from FROM overlay_origins")
+    else {
+        return Vec::new();
+    };
+    statement
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
 }
 
 /// Read the pending-folder set, tolerating a project written before the table
@@ -894,10 +944,17 @@ pub(in crate::app) fn load_campaign_project(path: &Path) -> Result<CampaignProje
                     package,
                     digest: overlay_digest(&bytes),
                     bytes: Arc::new(bytes),
+                    copied_from: None,
                 },
             ))
         })
         .collect::<Result<HashMap<_, _>, String>>()?;
+    let mut overlays = overlays;
+    for (identity, source) in read_overlay_origins(&connection) {
+        if let Some(overlay) = overlays.get_mut(&identity) {
+            overlay.copied_from = Some(source);
+        }
+    }
 
     // A project written before history existed simply has no table. That is a
     // session with nothing to undo, not a project that fails to open. One
@@ -1198,6 +1255,7 @@ impl Baboon {
                 package,
                 digest: overlay_digest(&bytes),
                 bytes: Arc::new(bytes),
+                copied_from: copied_from_of(entry),
             },
         );
     }
@@ -1408,6 +1466,7 @@ impl Baboon {
                     package,
                     digest: overlay_digest(&bytes),
                     bytes: Arc::new(bytes),
+                    copied_from: copied_from_of(entry),
                 },
             );
         }
@@ -2225,12 +2284,42 @@ impl Model {
         // A stashed tag of a group the game ships none of has no donor to point
         // back at, and recovering it must not depend on finding one — otherwise
         // the tag survives the save and vanishes on reopen.
-        let template = match crate::app::tag_ops::new_tag::new_container_template_for(
-            self.find_container_template_in(kit, overlay.group_tag),
-            &group_name,
-        ) {
-            Ok(template) => template,
-            Err(error) => return OverlayAdoption::Failed(error),
+        let template = match &overlay.copied_from {
+            // A copy is wrapped in its source's own `.uasset`, wherever this
+            // mount put it. Without the source there is no wrapper that is
+            // right for it, so it waits rather than take on a donor's bindings.
+            Some(source) => match self
+                .campaign_entry_for_identity(kit, source)
+                .map(|entry| entry.location)
+            {
+                Some(TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                }) => match rel_path.strip_suffix(".ubulk") {
+                    Some(stem) => NewContainerTemplate::Copy {
+                        container,
+                        rel_path: format!("{stem}.uasset"),
+                        source: source.clone(),
+                    },
+                    None => {
+                        return OverlayAdoption::Failed(format!(
+                            "{source}, the tag it was copied from, is not stored as a .ubulk"
+                        ));
+                    }
+                },
+                _ => {
+                    return OverlayAdoption::Failed(format!(
+                        "{source}, the tag it was copied from, is not in the mounted paks"
+                    ));
+                }
+            },
+            None => match crate::app::tag_ops::new_tag::new_container_template_for(
+                self.find_container_template_in(kit, overlay.group_tag),
+                &group_name,
+            ) {
+                Ok(template) => template,
+                Err(error) => return OverlayAdoption::Failed(error),
+            },
         };
         let tag = match TagFile::read_from_bytes(&overlay.bytes) {
             Ok(tag) => tag,
@@ -2358,6 +2447,7 @@ mod tests {
             package: None,
             digest: overlay_digest(bytes),
             bytes: Arc::new(bytes.to_vec()),
+            copied_from: None,
         }
     }
 
@@ -2921,6 +3011,7 @@ mod tests {
             package: None,
             digest: overlay_digest(&[0, 1, 2, 0xff]),
             bytes: Arc::new(vec![0, 1, 2, 0xff]),
+            copied_from: None,
         };
         let snapshot = CampaignProjectSnapshot {
             game: "haloce_evolved".to_owned(),
@@ -3281,6 +3372,7 @@ mod tests {
             package: None,
             bytes: Arc::new(Vec::new()),
             digest: [0; 32],
+            copied_from: None,
         });
         app.model.kits[0].project.active = Some(project);
 
@@ -3428,6 +3520,7 @@ mod tests {
                 .then(|| format!("/Game/Tags/{logical_path}")),
             digest: overlay_digest(bytes),
             bytes: Arc::new(bytes.to_vec()),
+            copied_from: None,
         }
     }
 
@@ -3947,5 +4040,131 @@ mod tests {
         app.export_mod();
         assert!(app.dialogs.get::<ModExportDialog>().is_none());
         assert_eq!(app.model.status, "Export Mod is only for Campaign Evolved containers");
+    }
+
+    /// A Save As copy remembers which shipped tag it was copied from across
+    /// the project file. A project an older build wrote has no table for it,
+    /// and loads with no origins rather than failing.
+    #[test]
+    fn a_copy_s_origin_round_trips_through_the_project() {
+        let path = unique_temp_dir("copy-origin").join("project.baboon");
+        let copy = CampaignProjectOverlay {
+            kind: CampaignProjectTagKind::New,
+            copied_from: Some("6374726b:objects/props/crate".to_owned()),
+            ..overlay("6374726b:objects/props/crate_copy", &[1, 2, 3])
+        };
+        let plain = overlay("6374726b:objects/props/barrel", &[4]);
+        let snapshot = CampaignProjectSnapshot {
+            game: "haloce_evolved".to_owned(),
+            source_path: PathBuf::from("Paks"),
+            selected_identity: None,
+            tabs: Vec::new(),
+            overlays: HashMap::from([
+                (copy.identity.clone(), copy.clone()),
+                (plain.identity.clone(), plain.clone()),
+            ]),
+            history: BTreeMap::new(),
+            folders: BTreeSet::new(),
+        };
+        save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
+
+        let loaded = load_campaign_project(&path).unwrap();
+        assert_eq!(loaded.overlays[&copy.identity].copied_from, copy.copied_from);
+        assert_eq!(loaded.overlays[&plain.identity].copied_from, None);
+
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("DROP TABLE overlay_origins")
+            .unwrap();
+        let older = load_campaign_project(&path).unwrap();
+        assert_eq!(older.overlays[&copy.identity].copied_from, None);
+        assert_eq!(older.overlays.len(), 2);
+    }
+
+    /// A stashed copy comes back wrapped in its source's `.uasset`, wherever
+    /// this mount put the source. With the source gone it is not restored with
+    /// some other tag's wrapper, which would bind it to that tag's assets.
+    #[test]
+    fn a_restored_copy_is_wrapped_in_its_source_or_not_at_all() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let tag = TagFile::new(definitions.join("haloce_evolved/camera_track.json")).unwrap();
+        let group_tag = tag.header.group_tag;
+        let source = TagEntry {
+            key: "ublock:pakchunk3:objects/props/crate".to_owned(),
+            display_path: "objects/props/crate.camera_track".to_owned(),
+            group_tag,
+            group_name: Some("camera_track".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 3,
+                rel_path: "Tags/objects/props/crate-camera_track.ubulk".to_owned(),
+            },
+        };
+        let (source_identity, ..) = campaign_entry_project_parts(&source).unwrap();
+        let bytes = tag.write_to_bytes().unwrap();
+        let copy = CampaignProjectOverlay {
+            identity: format!("{group_tag:08x}:objects/props/crate_copy"),
+            group_tag,
+            logical_path: "objects/props/crate_copy".to_owned(),
+            kind: CampaignProjectTagKind::New,
+            package: Some("/Game/Tags/objects/props/crate_copy-camera_track".to_owned()),
+            digest: overlay_digest(&bytes),
+            bytes: Arc::new(bytes),
+            copied_from: Some(source_identity.clone()),
+        };
+        let mounted = |entries: Vec<TagEntry>| {
+            let mut app = Baboon::for_test();
+            app.install_loaded_source(LoadedSourceData {
+                label: "copy origin".to_owned(),
+                source: TagSource::IoStoreContainerSet {
+                    root: PathBuf::from("C:/copy-origin/Paks"),
+                    containers: Vec::new(),
+                    index: Arc::new(crate::core::source::ContainerTagIndex::default()),
+                    packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                    shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
+                },
+                names: TagNameIndex::load_game(&definitions, GameId::CampaignEvolved).unwrap(),
+                game: Some(GameId::CampaignEvolved),
+                tree: crate::core::source::build_tree(&entries),
+                group_tree: crate::core::source::build_group_tree(&entries),
+                entries,
+                all_entries: Vec::new(),
+                reverse_dependencies: None,
+                initial_tag: None,
+                key_hints: Default::default(),
+                complete_scan: false,
+                chosen_kit_layout: None,
+            });
+            app
+        };
+
+        let app = mounted(vec![source]);
+        match app.model.new_overlay_entry(0, &copy) {
+            OverlayAdoption::Ready(entry, _) => match entry.location {
+                TagEntryLocation::NewContainer {
+                    template:
+                        NewContainerTemplate::Copy {
+                            container,
+                            rel_path,
+                            source,
+                        },
+                    ..
+                } => {
+                    assert_eq!(container, 3, "found where this mount put it");
+                    assert_eq!(rel_path, "Tags/objects/props/crate-camera_track.uasset");
+                    assert_eq!(source, source_identity);
+                }
+                _ => panic!("restored without its source's wrapper"),
+            },
+            OverlayAdoption::Failed(reason) => panic!("not restored: {reason}"),
+            _ => panic!("not restored"),
+        }
+
+        let app = mounted(Vec::new());
+        match app.model.new_overlay_entry(0, &copy) {
+            OverlayAdoption::Failed(reason) => {
+                assert!(reason.contains("not in the mounted paks"), "{reason}")
+            }
+            _ => panic!("a copy without its source must not be restored"),
+        }
     }
 }
