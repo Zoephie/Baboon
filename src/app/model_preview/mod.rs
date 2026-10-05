@@ -1635,7 +1635,10 @@ fn advance_playback_clock(
     playback.time += dt * playback.speed.max(0.0);
     if playback.looped {
         if duration > 0.0 {
-            playback.time %= duration;
+            let frames = (duration * ANIMATION_FRAME_RATE).round() as usize;
+            let position = playback.time * ANIMATION_FRAME_RATE;
+            playback.time =
+                animation::looped_frame_position(playback, position, frames) / ANIMATION_FRAME_RATE;
         }
     } else if playback.time * ANIMATION_FRAME_RATE >= last_frame {
         playback.time = last_frame / ANIMATION_FRAME_RATE;

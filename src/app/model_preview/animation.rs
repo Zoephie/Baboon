@@ -57,11 +57,14 @@ impl PreviewNodeTransform {
 pub(crate) struct DecodedAnimationPose {
     pub skeleton_names: Vec<String>,
     pub frames: Vec<Vec<PreviewNodeTransform>>,
+    /// The animation's `loop frame index`.
+    pub loop_frame: usize,
 }
 
 impl DecodedAnimationPose {
-    fn new(skeleton: &Skeleton, pose: &blam_tags::Pose) -> Self {
+    fn new(skeleton: &Skeleton, pose: &blam_tags::Pose, loop_frame: usize) -> Self {
         Self {
+            loop_frame,
             skeleton_names: skeleton
                 .nodes
                 .iter()
@@ -93,6 +96,8 @@ pub(crate) struct PreviewAnimationPose {
     /// [`PreviewAnimationPose::new`]. Worked out once here: the camera needs
     /// it every frame, and it walks every node of every frame.
     pub reach: f32,
+    /// The frame looping playback continues from after the last; 0 restarts.
+    pub loop_frame: usize,
 }
 
 impl PreviewAnimationPose {
@@ -102,6 +107,7 @@ impl PreviewAnimationPose {
             animation_index,
             frames,
             reach,
+            loop_frame: 0,
         }
     }
 }
@@ -176,29 +182,47 @@ impl Default for PreviewAnimationPlayback {
     }
 }
 
-/// Where playback stands within `frame_count` frames, in frames: wrapped when
-/// looping, held at the last frame when not, and on a whole frame when not
-/// interpolating.
+/// Where playback stands within `frame_count` frames: past the end of a
+/// looping clip it continues from the loop frame, and a clip that doesn't
+/// loop holds its last frame. On a whole frame when not interpolating.
 pub(super) fn playback_frame_position(playback: &PreviewAnimationPlayback, frame_count: usize) -> f32 {
     let mut position = (playback.time * ANIMATION_FRAME_RATE).max(0.0);
     if playback.looped && frame_count > 1 {
-        position %= frame_count as f32;
+        position = looped_frame_position(playback, position, frame_count);
     } else {
         position = position.min(frame_count.saturating_sub(1) as f32);
     }
     if playback.interpolate { position } else { position.floor() }
 }
 
+/// `position` frames into a looping clip of `frame_count` frames. The game
+/// plays to the end, then continues from the animation's loop frame, or
+/// restarts at frame 0 when that is 0; nothing blends the last frame back
+/// into the loop frame.
+pub(super) fn looped_frame_position(
+    playback: &PreviewAnimationPlayback,
+    position: f32,
+    frame_count: usize,
+) -> f32 {
+    let count = frame_count as f32;
+    if position < count {
+        return position;
+    }
+    let start = playback
+        .pose
+        .as_ref()
+        .map_or(0, |pose| pose.loop_frame)
+        .min(frame_count.saturating_sub(1)) as f32;
+    start + (position - start) % (count - start)
+}
+
 /// The two frames playback lies between and how far it is from the first to
-/// the second. `frame_count` must not be 0.
+/// the second. The last frame is held rather than blended into the next
+/// loop. `frame_count` must not be 0.
 fn sampled_frames(playback: &PreviewAnimationPlayback, frame_count: usize) -> (usize, usize, f32) {
     let position = playback_frame_position(playback, frame_count);
     let a = (position.floor() as usize).min(frame_count - 1);
-    let b = if playback.looped {
-        (a + 1) % frame_count
-    } else {
-        (a + 1).min(frame_count - 1)
-    };
+    let b = (a + 1).min(frame_count - 1);
     (a, b, position - a as f32)
 }
 
@@ -527,6 +551,40 @@ mod tests {
     /// Halfway between two frames, the pose is a blend of them; with
     /// interpolation off it is the first frame exactly, which is how an
     /// overlay animation is read frame by frame.
+    /// The game plays a looping clip to its last frame, holds it, then
+    /// continues from the loop frame (0 restarts it); the preview blended the
+    /// last frame into frame 0 and always restarted at 0.
+    #[test]
+    fn a_looping_clip_holds_its_last_frame_then_continues_from_the_loop_frame() {
+        let nodes = test_nodes();
+        let data = preview_with_nodes(nodes.clone());
+        let bind = armature_node_positions(&data, &ModelPreviewState::default());
+        let frames: Vec<_> = (0..3)
+            .map(|frame| {
+                let mut pose = bind_pose_frame(&nodes);
+                pose[0].translation[0] += frame as f32;
+                pose
+            })
+            .collect();
+        let mut state = ModelPreviewState::default();
+        state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+            loop_frame: 1,
+            ..PreviewAnimationPose::new(0, frames)
+        }));
+        let offset_at = |state: &mut ModelPreviewState, frames: f32| {
+            state.animation.time = frames / ANIMATION_FRAME_RATE;
+            armature_node_positions(&data, state)[0][0] - bind[0][0]
+        };
+
+        assert!((offset_at(&mut state, 2.5) - 2.0).abs() < 1e-4, "the last frame holds");
+        assert!((offset_at(&mut state, 3.25) - 1.25).abs() < 1e-4, "continues from the loop frame");
+        assert!((offset_at(&mut state, 5.25) - 1.25).abs() < 1e-4, "loops between frame 1 and the end");
+
+        let restarting = state.animation.pose.as_ref().unwrap().frames.clone();
+        state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(0, restarting)));
+        assert!((offset_at(&mut state, 3.25) - 0.25).abs() < 1e-4, "a loop frame of 0 restarts");
+    }
+
     #[test]
     fn without_interpolation_the_pose_holds_each_frame() {
         let nodes = test_nodes();
@@ -1298,10 +1356,10 @@ impl Baboon {
                             .collect()
                     })
                     .collect();
-                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
-                    animation_index,
-                    frames,
-                )));
+                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+                    loop_frame: decoded.loop_frame,
+                    ..PreviewAnimationPose::new(animation_index, frames)
+                }));
                 state.animation.time = 0.0;
                 state.animation.playing = true;
                 state.animation.stopped = false;
@@ -1504,7 +1562,8 @@ fn decode_model_animation(
         _ => clip.pose(&skeleton, Some(&defaults)),
     };
 
-    Ok(DecodedAnimationPose::new(&skeleton, &pose))
+    let loop_frame = usize::try_from(group.loop_frame_index).unwrap_or(0);
+    Ok(DecodedAnimationPose::new(&skeleton, &pose, loop_frame))
 }
 
 /// The Halo CE half of [`decode_model_animation`]: the extractor's skeleton
@@ -1550,5 +1609,5 @@ fn decode_ce_animation(
         JmaKind::Jmr => clip.replacement_pose(&skeleton, &rest),
         _ => clip.pose(&skeleton, Some(&rest)),
     };
-    Ok(DecodedAnimationPose::new(&skeleton, &pose))
+    Ok(DecodedAnimationPose::new(&skeleton, &pose, animation.loop_frame_index as usize))
 }

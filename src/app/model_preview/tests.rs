@@ -764,6 +764,24 @@ fn two_panes_advance_the_clock_once_per_pass() {
     assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
 }
 
+/// A looping clock wraps to the animation's loop frame, not to 0, so the
+/// slider and the pose agree on where playback is.
+#[test]
+fn a_looping_clock_wraps_to_the_loop_frame() {
+    let frames = vec![Vec::new(); 10];
+    let mut playback = PreviewAnimationPlayback {
+        playing: true,
+        pose: Some(std::sync::Arc::new(PreviewAnimationPose {
+            loop_frame: 4,
+            ..PreviewAnimationPose::new(0, frames)
+        })),
+        ..Default::default()
+    };
+    playback.time = 9.5 / ANIMATION_FRAME_RATE;
+    advance_playback_clock(&mut playback, 1, 1.0 / ANIMATION_FRAME_RATE, 10.0 / ANIMATION_FRAME_RATE, 9.0);
+    assert!((playback.time * ANIMATION_FRAME_RATE - 4.5).abs() < 1e-3, "{}", playback.time * ANIMATION_FRAME_RATE);
+}
+
 #[test]
 fn textured_shading_is_limited_to_supported_editing_kits() {
     assert!(model_preview_supports_textures(Some(GameId::Halo3)));
