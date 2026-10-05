@@ -1418,7 +1418,7 @@ mod tests {
     fn a_created_tag_closes_the_dialog() {
         let (mut app, root) = loose_app();
         app.open_new_tag_dialog();
-        let output = root.join("objects/new/new.scenery");
+        let output = root.join("objects").join("new").join("new.scenery");
         {
             let dialog = app.dialogs.get_mut::<NewTagDialog>().expect("open");
             dialog.selected_group = dialog
