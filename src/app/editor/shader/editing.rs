@@ -5,6 +5,36 @@ use super::*;
 
 const SHADER_MODIFIED_ACCENT: Color32 = Color32::from_rgb(224, 158, 62);
 
+/// Queue a shader row's commit, or put why it was refused on the status line.
+/// A number box used to drop text that wasn't a number without a word.
+fn push_shader_commit(edit: &mut FieldEditContext<'_>, commit: Result<DeferredOps, String>) {
+    match commit {
+        Ok(ops) => edit.push_ops(ops),
+        Err(error) => {
+            if let Some(status) = edit.status.as_deref_mut() {
+                *status = error;
+            }
+        }
+    }
+}
+
+/// The number typed into a shader box.
+fn parse_shader_number(text: &str) -> Result<f32, String> {
+    let text = text.trim();
+    text.parse::<f32>()
+        .map_err(|_| format!("{text:?} is not a number"))
+}
+
+/// How a shader row's one box commits without the row, from the same
+/// function the row's own commit runs.
+fn shader_draft_commit(
+    tag_key: &str,
+    buffer_key: &str,
+    ops: impl Fn(&str) -> Result<DeferredOps, String> + 'static,
+) -> DraftCommit {
+    DraftCommit::new(tag_key, vec![buffer_key.to_owned()], move |texts| ops(texts[0]))
+}
+
 /// Whether an explicitly overridden row's value differs from its default.
 /// Colors render identical text (`"color: RGB"`) so are compared by hex;
 /// inherited rows never count as modified.
@@ -835,9 +865,14 @@ fn h2_push_range_data_edit(
     control: &H2RangeControl,
     data: Vec<u8>,
 ) {
+    edit.push_ops(h2_range_data_ops(control, data));
+}
+
+fn h2_range_data_ops(control: &H2RangeControl, data: Vec<u8>) -> DeferredOps {
+    let mut ops = DeferredOps::default();
     match control {
         H2RangeControl::Existing { block_path, .. } => {
-            edit.h2_shader_param_ops
+            ops.h2_shader_param_ops
                 .push(H2ShaderParamOp::EditFunctionData {
                     block_path: block_path.clone(),
                     data,
@@ -851,10 +886,21 @@ fn h2_push_range_data_edit(
             } = &mut op
             {
                 *initial_function_data = data;
-                edit.h2_shader_param_ops.push(op);
+                ops.h2_shader_param_ops.push(op);
             }
         }
     }
+    ops
+}
+
+/// The edit a range box commits: the range turned on at the typed value.
+fn h2_range_value_ops(
+    control: &H2RangeControl,
+    data: &[u8],
+    text: &str,
+) -> Result<DeferredOps, String> {
+    let value = parse_shader_number(text)?;
+    Ok(h2_range_data_ops(control, h2_function_data_with_range(data, true, Some(value))))
 }
 
 fn draw_h2_function_range_control(
@@ -907,8 +953,8 @@ fn draw_h2_function_range_control(
     };
     let id = edit.widget_id(("h2_range", row.label.as_str()));
     let buffer_key = format!("{}|h2_range:{}", edit.tag_key, row.label);
-    let draft = edit.buffers.draft_mut(buffer_key, &current);
-    let mut commit_value = None;
+    let draft = edit.buffers.draft_mut(&buffer_key, &current);
+    let mut commit = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(value_rect), |ui| {
         ui.visuals_mut().extreme_bg_color = material_input();
         let resp = ui.add_enabled(
@@ -922,19 +968,20 @@ fn draw_h2_function_range_control(
         text_edit_cursor_to_start_on_tab_focus(ui, &resp);
         select_all_on_double_click(ui, &resp, &draft.text);
         draft.note_response(&resp);
-        if draft.should_commit(ui, &resp)
-            && enabled
-            && let Ok(value) = draft.text.trim().parse::<f32>()
-        {
-            commit_value = Some(value);
+        if draft.should_commit(ui, &resp) && enabled {
+            commit = Some(h2_range_value_ops(control, data, &draft.text));
+        }
+        if enabled {
+            draft.keep_commit(|| {
+                let (control, data) = (control.clone(), data.to_vec());
+                shader_draft_commit(edit.tag_key, &buffer_key, move |text| {
+                    h2_range_value_ops(&control, &data, text)
+                })
+            });
         }
     });
-    if let Some(value) = commit_value {
-        h2_push_range_data_edit(
-            edit,
-            control,
-            h2_function_data_with_range(data, true, Some(value)),
-        );
+    if let Some(commit) = commit {
+        push_shader_commit(edit, commit);
     }
 }
 
@@ -1140,8 +1187,8 @@ pub(in crate::app) fn draw_shader_editable_value(
                 Vec2::new((rect.width() - 22.0).max(40.0), rect.height()),
             );
             let id = edit.widget_id(("shader_fn_scalar", &buffer_key));
-            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
-            let mut commit_val: Option<f32> = None;
+            let draft = edit.buffers.draft_mut(&buffer_key, &current);
+            let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
@@ -1155,16 +1202,17 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    if let Ok(v) = draft.text.trim().parse::<f32>() {
-                        commit_val = Some(v);
-                    }
+                    commit = Some(function_scalar_ops(&row_edit.path, &draft.text));
                 }
-            });
-            if let Some(v) = commit_val {
-                edit.pending.push(PendingFieldEdit {
-                    path: row_edit.path.clone(),
-                    input: constant_function_hex(v),
+                draft.keep_commit(|| {
+                    let path = row_edit.path.clone();
+                    shader_draft_commit(edit.tag_key, &buffer_key, move |text| {
+                        function_scalar_ops(&path, text)
+                    })
                 });
+            });
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
@@ -1212,8 +1260,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 drop_value: |payload| format!("{}.bitmap", payload.rel_path),
                 normalize: normalize_bitmap_browse_path,
             };
+            let commit_ops = |_: &FieldEditContext<'_>| -> ReferenceCommitOps {
+                let (path, create) = (row_edit.path.clone(), create.clone());
+                Box::new(move |text| Ok(shader_value_edit_ops(&path, create.as_ref(), text.trim().to_owned())))
+            };
             if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
             {
                 push_shader_value_edit(edit, row_edit, create.as_ref(), input);
             }
@@ -1229,8 +1281,23 @@ pub(in crate::app) fn draw_shader_editable_value(
                 drop_value: |payload| payload.rel_path.clone(),
                 normalize: normalize_shader_template_browse_path,
             };
+            let commit_ops = |edit: &FieldEditContext<'_>| -> ReferenceCommitOps {
+                let path = row_edit.path.clone();
+                let tags_root = edit.tags_root.map(std::path::Path::to_path_buf);
+                let definitions_root = edit.definitions_root.map(std::path::Path::to_path_buf);
+                let game = edit.game;
+                Box::new(move |text| {
+                    Ok(h2_template_reference_ops(
+                        &path,
+                        text,
+                        tags_root.as_deref(),
+                        game,
+                        definitions_root.as_deref(),
+                    ))
+                })
+            };
             if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
             {
                 push_h2_template_reference_edit(edit, row_edit, input);
             }
@@ -1257,13 +1324,14 @@ pub(in crate::app) fn draw_shader_editable_value(
                 drop_value: |payload| payload.input.clone(),
                 normalize: normalize_bitmap_browse_path,
             };
+            let commit_ops = |_: &FieldEditContext<'_>| -> ReferenceCommitOps {
+                let path = row_edit.path.clone();
+                Box::new(move |text| Ok(field_edit_ops(&path, text)))
+            };
             if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
             {
-                edit.pending.push(PendingFieldEdit {
-                    path: row_edit.path.clone(),
-                    input,
-                });
+                edit.push_ops(field_edit_ops(&row_edit.path, &input));
             }
         }
 
@@ -1464,8 +1532,8 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create_fn_scalar:{label}", edit.tag_key);
             let id = edit.widget_id(("shader_create_fn_scalar", label));
-            let draft = edit.buffers.draft_mut(create_buf_key, &current);
-            let mut commit_val: Option<f32> = None;
+            let draft = edit.buffers.draft_mut(&create_buf_key, &current);
+            let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = ui.add(
@@ -1479,14 +1547,17 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    if let Ok(v) = draft.text.trim().parse::<f32>() {
-                        commit_val = Some(v);
-                    }
+                    commit = Some(create_function_scalar_ops(target, &draft.text));
                 }
+                draft.keep_commit(|| {
+                    let target = target.clone();
+                    shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
+                        create_function_scalar_ops(&target, text)
+                    })
+                });
             });
-            if let Some(v) = commit_val {
-                let action = shader_function_action(target, constant_function_hex(v));
-                push_shader_context_action(edit, &action);
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
         }
 
@@ -1594,8 +1665,8 @@ pub(in crate::app) fn draw_shader_editable_value(
         } => {
             let current = row_edit.current.clone();
             let id = edit.widget_id(("h2_shader_fn_scalar", &buffer_key));
-            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
-            let mut commit_val: Option<f32> = None;
+            let draft = edit.buffers.draft_mut(&buffer_key, &current);
+            let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
@@ -1603,17 +1674,17 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    if let Ok(v) = draft.text.trim().parse::<f32>() {
-                        commit_val = Some(v);
-                    }
+                    commit = Some(h2_function_scalar_ops(block_path, legacy_data.as_deref(), &draft.text));
                 }
+                draft.keep_commit(|| {
+                    let (block_path, legacy_data) = (block_path.clone(), legacy_data.clone());
+                    shader_draft_commit(edit.tag_key, &buffer_key, move |text| {
+                        h2_function_scalar_ops(&block_path, legacy_data.as_deref(), text)
+                    })
+                });
             });
-            if let Some(v) = commit_val {
-                edit.h2_shader_param_ops
-                    .push(H2ShaderParamOp::EditFunctionData {
-                        block_path: block_path.clone(),
-                        data: h2_constant_scalar_function_data(v, legacy_data.as_deref()),
-                    });
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
         }
 
@@ -1621,8 +1692,8 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|{}", edit.tag_key, row_edit.path);
             let id = edit.widget_id(("h2_shader_create_fn_scalar", label));
-            let draft = edit.buffers.draft_mut(create_buf_key, &current);
-            let mut commit_val: Option<f32> = None;
+            let draft = edit.buffers.draft_mut(&create_buf_key, &current);
+            let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
@@ -1630,21 +1701,17 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    if let Ok(v) = draft.text.trim().parse::<f32>() {
-                        commit_val = Some(v);
-                    }
+                    commit = Some(h2_create_function_scalar_ops(create_op, &draft.text));
                 }
+                draft.keep_commit(|| {
+                    let create_op = create_op.clone();
+                    shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
+                        h2_create_function_scalar_ops(&create_op, text)
+                    })
+                });
             });
-            if let Some(v) = commit_val {
-                let mut op = create_op.clone();
-                if let H2ShaderParamOp::EnsureAnimationProperty {
-                    initial_function_data,
-                    ..
-                } = &mut op
-                {
-                    *initial_function_data = h2_constant_scalar_function_data(v, None);
-                }
-                edit.h2_shader_param_ops.push(op);
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
         }
 
@@ -1657,8 +1724,8 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create:{label}", edit.tag_key);
             let id = edit.widget_id(("shader_create_scalar", label));
-            let draft = edit.buffers.draft_mut(create_buf_key, &current);
-            let mut commit_val: Option<f32> = None;
+            let draft = edit.buffers.draft_mut(&create_buf_key, &current);
+            let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = ui.add(
@@ -1672,24 +1739,23 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    if let Ok(v) = draft.text.trim().parse::<f32>() {
-                        commit_val = Some(v);
-                    }
+                    commit = Some(create_scalar_param_ops(
+                        parameters_block_path,
+                        parameter_name,
+                        *parameter_type_index,
+                        &draft.text,
+                    ));
                 }
-            });
-            if let Some(v) = commit_val {
-                edit.shader_param_ops.push(ShaderParamOp {
-                    parameters_block_path: parameters_block_path.clone(),
-                    parameter_name: parameter_name.clone(),
-                    initial_fields: vec![
-                        shader_parameter_type_initial_field(*parameter_type_index),
-                        ShaderParamInitialField {
-                            field: "real".to_owned(),
-                            input: v.to_string(),
-                        },
-                    ],
-                    animated_parameters: Vec::new(),
+                draft.keep_commit(|| {
+                    let (block, name, type_index) =
+                        (parameters_block_path.clone(), parameter_name.clone(), *parameter_type_index);
+                    shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
+                        create_scalar_param_ops(&block, &name, type_index, text)
+                    })
                 });
+            });
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
         }
 
@@ -1702,7 +1768,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|h2_create:{label}", edit.tag_key);
             let id = edit.widget_id(("h2_shader_create_value", label));
-            let draft = edit.buffers.draft_mut(create_buf_key, &current);
+            let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
@@ -1711,18 +1777,28 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    commit = Some(draft.text.trim().to_owned());
+                    commit = Some(h2_create_template_value_ops(
+                        parameters_block_path,
+                        parameter_name,
+                        *parameter_type_index,
+                        field,
+                        &draft.text,
+                    ));
                 }
+                draft.keep_commit(|| {
+                    let (block, name, type_index, field) = (
+                        parameters_block_path.clone(),
+                        parameter_name.clone(),
+                        *parameter_type_index,
+                        field.clone(),
+                    );
+                    shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
+                        h2_create_template_value_ops(&block, &name, type_index, &field, text)
+                    })
+                });
             });
-            if let Some(input) = commit {
-                edit.h2_shader_param_ops
-                    .push(H2ShaderParamOp::EditTemplateBackedValue {
-                        parameters_block_path: parameters_block_path.clone(),
-                        parameter_name: parameter_name.clone(),
-                        parameter_type_index: *parameter_type_index,
-                        field: field.clone(),
-                        input: h2_template_value_input(field, &input),
-                    });
+            if let Some(commit) = commit {
+                push_shader_commit(edit, commit);
             }
         }
 
@@ -1777,7 +1853,7 @@ pub(in crate::app) fn draw_shader_editable_value(
         ShaderRowEditKind::Scalar | ShaderRowEditKind::Int | ShaderRowEditKind::StringId => {
             let current = row_edit.current.clone();
             let id = edit.widget_id(("shader_text", &buffer_key));
-            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
+            let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
@@ -1792,14 +1868,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    commit = Some(draft.text.trim().to_owned());
+                    commit = Some(field_edit_ops(&row_edit.path, &draft.text));
                 }
+                draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, &row_edit.path));
             });
-            if let Some(input) = commit {
-                edit.pending.push(PendingFieldEdit {
-                    path: row_edit.path.clone(),
-                    input,
-                });
+            if let Some(ops) = commit {
+                edit.push_ops(ops);
             }
         }
     }
@@ -1822,6 +1896,10 @@ struct ShaderReferenceCell<'a> {
     normalize: fn(&std::path::Path, Option<&std::path::Path>) -> Result<String, String>,
 }
 
+/// How a reference cell's text becomes edits, for committing it without the
+/// cell; the same edits the cell's caller makes from the text it returns.
+type ReferenceCommitOps = Box<dyn Fn(&str) -> Result<DeferredOps, String>>;
+
 /// A tag-reference cell in the shader grid: an optional thumbnail, the path
 /// in a text box, Open, "..." browse, and a drop target for a tag dragged
 /// from the browser. Returns the text to commit; the caller decides how it
@@ -1838,6 +1916,7 @@ fn draw_shader_reference_cell(
     buffer_key: &str,
     row_edit: &ShaderRowEdit,
     cell: &ShaderReferenceCell<'_>,
+    commit_ops: &dyn Fn(&FieldEditContext<'_>) -> ReferenceCommitOps,
 ) -> Option<String> {
     let current = row_edit.current.clone();
     let extension = cell.extension;
@@ -1976,6 +2055,10 @@ fn draw_shader_reference_cell(
             commit = Some(draft.text.trim().to_owned());
         }
     });
+    draft.keep_commit(|| {
+        let ops = commit_ops(edit);
+        DraftCommit::new(edit.tag_key, vec![buffer_key.to_owned()], move |texts| ops(texts[0]))
+    });
 
     // Drop a tag of the right group from the browser onto the cell, received
     // by a hover interaction laid over the text box — the structure the
@@ -2054,6 +2137,102 @@ fn draw_shader_reference_cell(
     commit
 }
 
+/// The edit a function-scalar box commits: a constant function of the
+/// typed value.
+fn function_scalar_ops(path: &str, text: &str) -> Result<DeferredOps, String> {
+    Ok(field_edit_ops(path, &constant_function_hex(parse_shader_number(text)?)))
+}
+
+/// The edit a not-yet-created function-scalar box commits.
+fn create_function_scalar_ops(
+    target: &ShaderFunctionCreateTarget,
+    text: &str,
+) -> Result<DeferredOps, String> {
+    let value = parse_shader_number(text)?;
+    Ok(shader_context_action_ops(&shader_function_action(target, constant_function_hex(value))))
+}
+
+/// The edit a Halo 2 function-scalar box commits.
+fn h2_function_scalar_ops(
+    block_path: &str,
+    legacy_data: Option<&[u8]>,
+    text: &str,
+) -> Result<DeferredOps, String> {
+    let value = parse_shader_number(text)?;
+    Ok(DeferredOps {
+        h2_shader_param_ops: vec![H2ShaderParamOp::EditFunctionData {
+            block_path: block_path.to_owned(),
+            data: h2_constant_scalar_function_data(value, legacy_data),
+        }],
+        ..DeferredOps::default()
+    })
+}
+
+/// The edit a not-yet-created Halo 2 function-scalar box commits.
+fn h2_create_function_scalar_ops(
+    create_op: &H2ShaderParamOp,
+    text: &str,
+) -> Result<DeferredOps, String> {
+    let value = parse_shader_number(text)?;
+    let mut op = create_op.clone();
+    if let H2ShaderParamOp::EnsureAnimationProperty {
+        initial_function_data,
+        ..
+    } = &mut op
+    {
+        *initial_function_data = h2_constant_scalar_function_data(value, None);
+    }
+    Ok(DeferredOps {
+        h2_shader_param_ops: vec![op],
+        ..DeferredOps::default()
+    })
+}
+
+/// The edit a not-yet-created scalar parameter box commits.
+fn create_scalar_param_ops(
+    parameters_block_path: &str,
+    parameter_name: &str,
+    parameter_type_index: i32,
+    text: &str,
+) -> Result<DeferredOps, String> {
+    let value = parse_shader_number(text)?;
+    Ok(DeferredOps {
+        shader_param_ops: vec![ShaderParamOp {
+            parameters_block_path: parameters_block_path.to_owned(),
+            parameter_name: parameter_name.to_owned(),
+            initial_fields: vec![
+                shader_parameter_type_initial_field(parameter_type_index),
+                ShaderParamInitialField {
+                    field: "real".to_owned(),
+                    input: value.to_string(),
+                },
+            ],
+            animated_parameters: Vec::new(),
+        }],
+        ..DeferredOps::default()
+    })
+}
+
+/// The edit a not-yet-created Halo 2 template value box commits.
+fn h2_create_template_value_ops(
+    parameters_block_path: &str,
+    parameter_name: &str,
+    parameter_type_index: i32,
+    field: &str,
+    text: &str,
+) -> Result<DeferredOps, String> {
+    Ok(DeferredOps {
+        h2_shader_param_ops: vec![H2ShaderParamOp::EditTemplateBackedValue {
+            parameters_block_path: parameters_block_path.to_owned(),
+            parameter_name: parameter_name.to_owned(),
+            parameter_type_index,
+            field: field.to_owned(),
+            input: h2_template_value_input(field, text.trim()),
+        }],
+        ..DeferredOps::default()
+    })
+}
+
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
@@ -2080,8 +2259,19 @@ pub(in crate::app) fn push_shader_value_edit(
     create: Option<&ShaderParamCreateTarget>,
     input: String,
 ) {
+    edit.push_ops(shader_value_edit_ops(&row_edit.path, create, input));
+}
+
+/// The edit setting a shader value: the field at `path`, or a new parameter
+/// holding it when `create` says it doesn't exist yet.
+fn shader_value_edit_ops(
+    path: &str,
+    create: Option<&ShaderParamCreateTarget>,
+    input: String,
+) -> DeferredOps {
+    let mut ops = DeferredOps::default();
     if let Some(create) = create {
-        edit.shader_param_ops.push(ShaderParamOp {
+        ops.shader_param_ops.push(ShaderParamOp {
             parameters_block_path: create.parameters_block_path.clone(),
             parameter_name: create.parameter_name.clone(),
             initial_fields: vec![
@@ -2094,11 +2284,12 @@ pub(in crate::app) fn push_shader_value_edit(
             animated_parameters: Vec::new(),
         });
     } else {
-        edit.pending.push(PendingFieldEdit {
-            path: row_edit.path.clone(),
+        ops.pending.push(PendingFieldEdit {
+            path: path.to_owned(),
             input,
         });
     }
+    ops
 }
 
 fn push_h2_template_reference_edit(
@@ -2106,31 +2297,48 @@ fn push_h2_template_reference_edit(
     row_edit: &ShaderRowEdit,
     input: String,
 ) {
-    let normalized = h2_normalize_shader_template_reference(&sanitize_ref_path(&input));
+    let ops = h2_template_reference_ops(
+        &row_edit.path,
+        &input,
+        edit.tags_root,
+        edit.game,
+        edit.definitions_root,
+    );
+    edit.push_ops(ops);
+}
+
+/// The edits switching a Halo 2 shader to the template `input` names: the
+/// reference, and pruning the parameters the new template lacks.
+fn h2_template_reference_ops(
+    path: &str,
+    input: &str,
+    tags_root: Option<&std::path::Path>,
+    game: Option<GameId>,
+    definitions_root: Option<&std::path::Path>,
+) -> DeferredOps {
+    let normalized = h2_normalize_shader_template_reference(&sanitize_ref_path(input));
     let pending_input = if normalized.is_empty() || normalized.eq_ignore_ascii_case("none") {
         "none".to_owned()
     } else {
         format!("stem:{}", normalized.replace('/', "\\"))
     };
-    edit.pending.push(PendingFieldEdit {
-        path: row_edit.path.clone(),
-        input: pending_input,
-    });
-
-    if let Some(tags_root) = edit.tags_root {
-        if let Some(allowed_parameter_names) = h2_template_parameter_names_from_reference(
-            tags_root,
-            edit.game,
-            edit.definitions_root,
-            &normalized,
-        ) {
-            edit.h2_shader_param_ops
-                .push(H2ShaderParamOp::SwitchTemplate {
-                    parameters_block_path: "parameters".to_owned(),
-                    allowed_parameter_names,
-                });
-        }
+    let mut ops = DeferredOps {
+        pending: vec![PendingFieldEdit {
+            path: path.to_owned(),
+            input: pending_input,
+        }],
+        ..DeferredOps::default()
+    };
+    if let Some(tags_root) = tags_root
+        && let Some(allowed_parameter_names) =
+            h2_template_parameter_names_from_reference(tags_root, game, definitions_root, &normalized)
+    {
+        ops.h2_shader_param_ops.push(H2ShaderParamOp::SwitchTemplate {
+            parameters_block_path: "parameters".to_owned(),
+            allowed_parameter_names,
+        });
     }
+    ops
 }
 
 /// The parameter names the template `reference` declares, read with the
@@ -2288,7 +2496,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let top = ui.cursor().min;
-                        draw_entry(ui, entry, None, false, false, None, None, true);
+                        draw_entry(ui, entry, None, false, false, None, None, true, None);
                         row_rect.set(egui::Rect::from_min_size(
                             top,
                             Vec2::new(240.0, ui.spacing().interact_size.y),

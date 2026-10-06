@@ -43,8 +43,11 @@ pub(in crate::app) struct PaneDrawn {
 }
 
 impl Baboon {
-    /// Apply what a tag pane collected while it drew.
-    pub(in crate::app) fn apply_pane_drawn(&mut self, drawn: PaneDrawn, ctx: &egui::Context) {
+    /// Apply what a tag pane collected while it drew, returning whether that
+    /// changed anything the next frame draws. A pane sends this every frame,
+    /// so a frame of looking at the tag must come back false or it draws
+    /// the next one for nothing.
+    pub(in crate::app) fn apply_pane_drawn(&mut self, drawn: PaneDrawn, ctx: &egui::Context) -> bool {
         let PaneDrawn {
             kit,
             key,
@@ -54,8 +57,10 @@ impl Baboon {
             bitmap_hover_requests,
         } = drawn;
         let Some(kit_index) = self.model.kit_index(kit) else {
-            return;
+            return false;
         };
+        // An edit the kit refuses changes the status line, so any op counts.
+        let mut changed = !ops.is_empty();
         // Applying them opens the undo window, or closes it on a frame with
         // none, which is why a pane sends this every frame.
         self.apply_doc_ops(kit_index, &key, "Edit", ops, UndoStep::Coalesce);
@@ -65,6 +70,9 @@ impl Baboon {
             self.search.find.filter_results = false;
         }
         let kit_id = self.model.kits[kit_index].id;
+        changed |= bitmap_hover_requests
+            .lock()
+            .is_ok_and(|requests| !requests.is_empty());
         queue_bitmap_hover_thumbnails(
             &cx!(self, ctx),
             kit_index,
@@ -77,22 +85,24 @@ impl Baboon {
         // visible until something else happens to wake the UI -- an added
         // block element missing from that block's own instance selector, for
         // one.
-        if mutated {
-            ctx.request_repaint();
-        }
+        changed |= mutated;
         if let Some(block_path) = find_filter_block_jump {
-            self.navigate_to_field(ctx, &key, &block_path);
+            // The pane's own workspace: side by side, it need not be active.
+            self.navigate_to_field_in(ctx, kit, &key, &block_path);
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
+            changed = true;
         }
         // Model preview work starts only after the pane has drawn its shell,
         // so switching tabs can reach the screen before a complex geometry
         // parse begins. Follow-up texture/overlay/animation workers use the
-        // same post-draw hook once the base preview lands.
-        self.maybe_request_model_preview(kit_index, &key, ctx);
-        self.maybe_request_model_textures(kit_index, &key, ctx);
-        self.maybe_request_model_overlays(kit_index, &key, ctx);
-        self.maybe_request_model_animations(kit_index, &key, ctx);
-        self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+        // same post-draw hook once the base preview lands. Starting one puts
+        // the preview into a waiting state that has to be drawn.
+        changed |= self.maybe_request_model_preview(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_textures(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_overlays(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_animations(kit_index, &key, ctx);
+        changed |= self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+        changed
     }
 }
 
@@ -136,7 +146,15 @@ pub(in crate::app) fn draw_tag_pane(
         );
     }
 
-    let supports_field_search = supports_field_search(entry);
+    let supports_field_search = supports_field_search(
+        entry,
+        &bundled_group_hierarchy(
+            cx.model.kits[kit_index]
+                .source
+                .as_ref()
+                .and_then(|source| source.game),
+        ),
+    );
 
     // Filled by the field renderers, which open these by assigning them.
     let mut tag_reference_picker = None;
@@ -159,6 +177,8 @@ pub(in crate::app) fn draw_tag_pane(
         }
         return;
     };
+    // Recorded on any popup this draw opens; see `ColorPopupWindow::opened_at`.
+    let layout_stamp = doc.layout_stamp();
 
     let filter_in_scope = match find.within {
         FindWithin::CurrentTag => {
@@ -269,6 +289,27 @@ pub(in crate::app) fn draw_tag_pane(
         _ => None,
     });
     let kit_layout = source.and_then(LoadedSourceData::kit_layout);
+    // Drafts the rows below touch are stamped as drawn this pass; the sweep
+    // after the UI commits the changed ones that weren't.
+    view.edit_buffers.begin_pass(ui.ctx().cumulative_pass_nr());
+    // Rows out of view are skipped, except while a text box has focus (a row
+    // scrolled away mid-edit would end the edit), while a jump is heading
+    // for a field (it has to be drawn to be scrolled to), on the frame that
+    // expands or collapses everything, and while Find filters the fields.
+    let filtering = matches!(field_filter, Some(FieldFilterAction::Apply(_)));
+    let navigating = field_nav.is_some_and(|nav| nav.kit == kit_id && nav.tag_key == key);
+    let editing = ui.ctx().memory(|memory| memory.focused().is_some());
+    let row_heights = view.row_heights.entry(format!("{scope}\u{1f}{key}")).or_default();
+    row_heights.begin(
+        RowHeightsBasis {
+            layout: layout_stamp,
+            width: ui.available_width(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            expert_mode,
+            filtering,
+        },
+        !(editing || navigating || filtering || expand_all.is_some()),
+    );
     let mut edit_context = FieldEditContext {
         view_scope: scope,
         tag_key: &key,
@@ -336,6 +377,7 @@ pub(in crate::app) fn draw_tag_pane(
         field_nav: field_nav.filter(|nav| nav.kit == kit_id && nav.tag_key == key),
         expand_all,
         nested_default: cx.model.prefs.nested_default,
+        row_heights: Some(row_heights),
     };
 
     if is_bitmap_tag(entry) {
@@ -434,12 +476,14 @@ pub(in crate::app) fn draw_tag_pane(
         cx.open_dialog(ColorPopupWindow {
             popup: Some(popup),
             kit: kit_id,
+            opened_at: Some(layout_stamp),
         });
     }
     if let Some(popup) = grid_function_popup.or(function_request) {
         cx.open_dialog(FunctionPopupWindow {
             popup: Some(popup),
             kit: kit_id,
+            opened_at: Some(layout_stamp),
         });
     }
     // A referenced sound was played/extracted from a container source. It
@@ -456,6 +500,7 @@ pub(in crate::app) fn draw_tag_pane(
     }
     if let Some(mut confirm) = block_confirm {
         confirm.kit = Some(kit_id);
+        confirm.opened_at = Some(layout_stamp);
         cx.open_dialog(confirm);
     }
     // Element(s) were copied: stash them on the clipboard.
@@ -551,7 +596,15 @@ fn draw_responsive_tag_header(
                             Vec2::splat(PANE_HEADER_ICON_SIZE),
                             Sense::hover(),
                         );
-                        paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
+                        paint_tag_icon_at(
+                            ui,
+                            Some(entry.group_tag),
+                            cx.model.kits[kit_index]
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.game),
+                            icon_rect,
+                        );
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;

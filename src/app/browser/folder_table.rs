@@ -701,13 +701,13 @@ mod tests {
                         &mut FolderTableLayout::default(),
                     );
                     assert!(folder_name_clip(ui).right() < sidebar_clip.right());
-                    draw_entry(ui, &entry, None, false, true, None, None, true);
+                    draw_entry(ui, &entry, None, false, true, None, None, true, None);
                     ui.indent("nested", |ui| {
-                        draw_entry(ui, &entry, None, false, true, None, None, true);
+                        draw_entry(ui, &entry, None, false, true, None, None, true, None);
                     });
                     end_folder_table(ui);
                     assert_eq!(folder_name_clip(ui), sidebar_clip);
-                    draw_entry(ui, &entry, None, false, true, None, None, true);
+                    draw_entry(ui, &entry, None, false, true, None, None, true, None);
                 });
             },
         );

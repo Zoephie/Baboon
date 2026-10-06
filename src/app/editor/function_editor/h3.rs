@@ -1012,6 +1012,42 @@ mod tests {
         TagFunctionEditor::from_function(TagFunction::H2(H2Function::new(kind)))
     }
 
+    /// The points after one press in the graph's top margin whose pointer
+    /// ends at `to_y` before release.
+    fn press_in_the_top_margin(to_y: f32) -> Vec<(f32, f32)> {
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        let ctx = egui::Context::default();
+        let mut selected = (0, 0);
+        let (start, end) = (egui::pos2(230.0, 0.5), egui::pos2(230.0, to_y));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![egui::Event::PointerMoved(start)]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![button(start, true)]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![egui::Event::PointerMoved(end)]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![button(end, false)]);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        let count = editor.curve_control_point_count(0).unwrap();
+        (0..count).filter_map(|point| editor.curve_control_point(0, point)).collect()
+    }
+
+    /// A click that slips a few points off the graph adds its point where a
+    /// steady click does. egui 0.36 starts a drag as soon as the pointer leaves
+    /// the widget, even within click distance, and that drag pulled the new
+    /// point to the top edge.
+    #[test]
+    fn a_click_that_slips_off_the_graph_is_still_a_click() {
+        let steady = press_in_the_top_margin(3.0);
+        let slipped = press_in_the_top_margin(-5.2);
+        assert_eq!(slipped, steady);
+    }
+
     #[test]
     fn dragging_an_h2_linear_key_point_holds_it_between_its_neighbours() {
         let mut editor = h2_editor(FunctionType::LinearKey);

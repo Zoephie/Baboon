@@ -149,6 +149,7 @@ pub(in crate::app) enum ExportCommand {
     /// Extract the geometry or animations of the tag at `key` for `target`'s
     /// tools, starting with the folder picker.
     Extract {
+        kit: KitId,
         kind: ExtractKind,
         key: String,
         target: blam_tags::game::Game,
@@ -165,10 +166,19 @@ impl Baboon {
                     self.start_container_dump(kit, output, scope, ctx.clone());
                 }
             }
-            ExportCommand::Extract { kind, key, target } => match kind {
-                ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx.clone()),
-                ExtractKind::Animation => self.begin_extract_animation(key, target, ctx.clone()),
-            },
+            ExportCommand::Extract { kit, kind, key, target } => {
+                // The key names a tag in the workspace the window was opened
+                // from; two workspaces of one game share keys, so it used to
+                // extract the other workspace's tag if that one was active.
+                if !self.focus_navigation_kit(kit) {
+                    self.model.status = "The workspace this extraction was for is closed.".to_owned();
+                    return;
+                }
+                match kind {
+                    ExtractKind::Geometry => self.begin_extract_geometry(key, target, ctx.clone()),
+                    ExtractKind::Animation => self.begin_extract_animation(key, target, ctx.clone()),
+                }
+            }
             ExportCommand::QueueSoundExtract(request) => self.export.pending_sound_extract = Some(request),
         }
     }

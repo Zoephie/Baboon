@@ -306,6 +306,7 @@ mod tests {
         app.dialogs.open(FunctionPopupWindow {
             popup: Some(popup),
             kit,
+            opened_at: None,
         });
 
         app.commands.send(EditorCommand::FunctionDraftColor {
@@ -446,6 +447,11 @@ pub(in crate::app) struct FunctionPopup {
 }
 
 impl FunctionPopup {
+    /// The tag the editor's edits go to.
+    pub(in crate::app) fn tag_key(&self) -> &str {
+        &self.tag_key
+    }
+
     pub(in crate::app) fn new(
         tag_key: String,
         title: String,

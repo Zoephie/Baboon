@@ -160,6 +160,12 @@ impl ChimpFolderNode {
 #[derive(Default)]
 pub(in crate::app) struct ChimpState {
     pub(in crate::app) mount: ChimpMount,
+    /// The generation the mount in flight (or the one that produced the
+    /// mounted world) was started at. The world depends only on the Paks
+    /// folder, which a tag edit bumping the generation doesn't change; a new
+    /// source rebuilds this state, so a mount from the old one finds no
+    /// match.
+    pub(in crate::app) mount_request: Option<u64>,
     pub(in crate::app) selected_package: Option<String>,
     pub(in crate::app) open_packages: Vec<String>,
     pub(in crate::app) documents: HashMap<String, ChimpDocument>,
@@ -256,6 +262,18 @@ pub(in crate::app) struct ChimpDocumentUi {
     /// The selected export as the property editor edits it. See
     /// [`ChimpPropertyDraft`].
     pub(super) property_draft: Option<ChimpPropertyDraft>,
+    /// A view or export chosen while a text box had focus, taken up on the
+    /// next frame. The box is still drawn on the frame of the click, so it
+    /// sees itself lose focus and commits; switched at once, it was never
+    /// drawn again and the typed name was lost.
+    pub(super) pending_switch: Option<ChimpPaneSwitch>,
+}
+
+/// What a deferred switch in a package pane goes to.
+#[derive(Clone, Copy)]
+pub(super) enum ChimpPaneSwitch {
+    View(ChimpDocumentView),
+    Export(usize),
 }
 
 /// One export's values and the name map they intern into, edited in place by
@@ -327,9 +345,10 @@ impl ChimpView {
     }
 
     /// Re-derive the open and selected packages from the tile tree, which
-    /// owns the layout.
-    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) {
-        chimp.open_packages = self
+    /// owns the layout. Returns whether the open packages or the selection
+    /// changed.
+    pub(super) fn sync_open_packages(&mut self, chimp: &mut ChimpState) -> bool {
+        let open_packages: Vec<String> = self
             .document_tree
             .as_ref()
             .map(|tree| {
@@ -342,13 +361,17 @@ impl ChimpView {
                     .collect()
             })
             .unwrap_or_default();
+        let mut changed = open_packages != chimp.open_packages;
+        chimp.open_packages = open_packages;
         if chimp
             .selected_package
             .as_ref()
             .is_some_and(|package| !chimp.open_packages.contains(package))
         {
             chimp.selected_package = chimp.open_packages.first().cloned();
+            changed = true;
         }
+        changed
     }
 
     fn filter_is_current(&self, query: &str) -> bool {
@@ -497,13 +520,8 @@ impl Baboon {
         let kit = &mut self.model.kits[kit_index];
         kit.chimp = ChimpState::default();
         self.views[kit.id].chimp = ChimpView::default();
-        if self
-            .dialogs
-            .get::<ChimpSaveDialog>()
-            .is_some_and(|dialog| dialog.kit == kit.id)
-        {
-            self.dialogs.close::<ChimpSaveDialog>();
-        }
+        let id = kit.id;
+        self.dialogs.close_where::<ChimpSaveDialog>(|dialog| dialog.kit == id);
     }
 
     /// Close `package`'s document pane in a kit's Chimp layout.

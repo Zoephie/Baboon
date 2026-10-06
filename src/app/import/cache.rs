@@ -618,14 +618,21 @@ impl Baboon {
         // Dropping the result then is the point of the stamp: reporting it would
         // attach a run's outcome to whatever workspace happens to hold that slot
         // now.
+        // The run is over whatever became of its kit, and its window waits on
+        // this to close: cleared after the stale check, a run that outlived a
+        // reload or a periodic refresh left it "running" for good.
+        if let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() {
+            dialog.running = false;
+            dialog.progress = None;
+        }
         if self.model.resolve_stamp(stamp).is_none() {
+            self.model.status =
+                "The import finished after its workspace changed, so its report isn't shown.".to_owned();
             return false;
         }
         let Some(dialog) = self.dialogs.get_mut::<CacheImportDialog>() else {
             return false;
         };
-        dialog.running = false;
-        dialog.progress = None;
         // The kit holds what the run just wrote, so the tags it already has are
         // not the tags it had a minute ago -- and a second pass over the
         // references is asked for from this same window.

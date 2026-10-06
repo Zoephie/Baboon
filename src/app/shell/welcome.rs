@@ -371,7 +371,11 @@ pub(in crate::app) fn draw_welcome_screen(
                                                         - remove_width
                                                         - ui.spacing().item_spacing.x)
                                                         .max(0.0);
-                                                    let image = welcome_recent_icon(ui, path);
+                                                    let image = welcome_recent_icon(
+                                                        ui,
+                                                        path,
+                                                        &cx.model.prefs.custom_editing_kit_profiles,
+                                                    );
                                                     let open_clicked = ui
                                                         .allocate_ui(
                                                             Vec2::new(
@@ -570,25 +574,53 @@ fn welcome_icon_button(
     welcome_image_button(ui, image, text, color, true)
 }
 
-fn welcome_recent_icon(ui: &Ui, path: &std::path::Path) -> egui::Image<'static> {
-    let Some(group) = recent_tag_icon_group(path) else {
+fn welcome_recent_icon(
+    ui: &Ui,
+    path: &std::path::Path,
+    profiles: &[CustomEditingKitProfile],
+) -> egui::Image<'static> {
+    let Some(extension) = recent_tag_extension(path) else {
         return button_icon_image(ui, ButtonIcon::FolderClosed, text_dark(), 16.0);
     };
-    egui::Image::from_bytes(
-        tag_icon_uri(ui.ctx(), &group),
-        get_icon_svg(&group).as_bytes(),
-    )
-    .fit_to_exact_size(Vec2::splat(16.0))
+    // An extension is a group's name, and which group that is depends on
+    // the game, so a recent tag is read as the game of the kit it lies in.
+    let game = recent_tag_game(path, profiles);
+    let group = game.and_then(|game| {
+        crate::app::help::bundled_group_hierarchy(Some(game)).group_named(extension)
+    });
+    tag_icon_image(ui.ctx(), tag_icon(group, game), 16.0).fit_to_exact_size(Vec2::splat(16.0))
+}
+
+/// The game of the kit whose tags folder holds `path`, the innermost when
+/// kits nest; `None` for a tag outside every kit.
+fn recent_tag_game(path: &std::path::Path, profiles: &[CustomEditingKitProfile]) -> Option<GameId> {
+    profiles
+        .iter()
+        .map(|profile| {
+            (
+                profile,
+                crate::app::kits::editing_kits::profile_tags_folder(profile),
+            )
+        })
+        .filter(|(_, tags)| path.starts_with(tags))
+        .max_by_key(|(_, tags)| tags.components().count())
+        .and_then(|(profile, _)| profile.game_id())
 }
 
 /// Classify a recent path without touching the filesystem. Welcome rendering
 /// runs every frame, and metadata checks can block on stale network paths or
 /// disconnected drives.
-fn recent_tag_icon_group(path: &std::path::Path) -> Option<String> {
+/// A path is a tag when its extension names a tag group in some game.
+fn recent_tag_extension(path: &std::path::Path) -> Option<&str> {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .and_then(extension_to_group_tag)
-        .map(format_group_tag)
+        .filter(|extension| {
+            GameId::ALL.into_iter().any(|game| {
+                crate::app::help::bundled_group_hierarchy(Some(game))
+                    .group_named(extension)
+                    .is_some()
+            })
+        })
 }
 
 #[cfg(test)]
@@ -706,7 +738,56 @@ mod tests {
         let missing_tag = std::path::Path::new("Z:/missing/network/path/example.scenario");
         let missing_folder = std::path::Path::new("Z:/missing/network/path/tags");
 
-        assert_eq!(recent_tag_icon_group(missing_tag).as_deref(), Some("scnr"));
-        assert_eq!(recent_tag_icon_group(missing_folder), None);
+        assert_eq!(recent_tag_extension(missing_tag), Some("scenario"));
+        assert_eq!(recent_tag_extension(missing_folder), None);
+    }
+
+    /// A recent tag's icon is its group's in the game of the kit it lies in:
+    /// `.chocolate_mountain` is Halo 2's `gldf`, `.shader` is Halo CE's `shdr`
+    /// and Halo 3's `rmsh`. Outside every kit nothing says which game it is.
+    #[test]
+    fn a_recent_tags_icon_comes_from_the_kit_it_lies_in() {
+        let profile = |game: &str, root: &str| CustomEditingKitProfile {
+            read_only: false,
+            git_tracked: false,
+            id: root.to_owned(),
+            name: game.to_owned(),
+            game: game.to_owned(),
+            root: PathBuf::from(root),
+            icon: None,
+            tags_folder: None,
+            data_folder: None,
+        };
+        let profiles = [
+            profile("halo2_mcc", "/kits/h2"),
+            profile("haloce_mcc", "/kits/ce"),
+            profile("halo3_mcc", "/kits/h3"),
+            profile("haloreach_mcc", "/kits/h3/nested_reach"),
+        ];
+        let icon_for = |path: &str| {
+            let path = std::path::Path::new(path);
+            let game = recent_tag_game(path, &profiles);
+            let extension = recent_tag_extension(path).unwrap();
+            let group = game.and_then(|game| {
+                crate::app::help::bundled_group_hierarchy(Some(game)).group_named(extension)
+            });
+            tag_icon(group, game).name
+        };
+        assert_eq!(
+            icon_for("/kits/h2/tags/a.chocolate_mountain"),
+            "chocolate_mountain"
+        );
+        assert_eq!(icon_for("/kits/ce/tags/a.shader"), "shader");
+        assert_eq!(
+            icon_for("/kits/ce/tags/a.shader_transparent_meter"),
+            "shader"
+        );
+        assert_eq!(icon_for("/kits/h3/tags/a.shader"), "shader");
+        assert_eq!(
+            icon_for("/kits/h3/nested_reach/tags/a.shader_screen"),
+            "shader"
+        );
+        assert_eq!(icon_for("/kits/h3/tags/a.biped"), "biped");
+        assert_eq!(icon_for("/elsewhere/a.biped"), "default_tag");
     }
 }

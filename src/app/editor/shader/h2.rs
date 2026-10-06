@@ -2397,7 +2397,7 @@ mod tests {
 
     #[test]
     fn h2ek_shader_model_routes_only_classic_halo2_shader_family() {
-        let entry = h2_shader_entry(u32::from_be_bytes(*b"rmsh"));
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
         let mut classic = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
         classic.container = blam_tags::file::TagContainer::Classic {
             engine: blam_tags::classic::ClassicEngine::Halo2V4,
@@ -2464,7 +2464,7 @@ mod tests {
 
         let model = build_h2ek_shader_editor_model(
             &tag,
-            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &h2_shader_entry(u32::from_be_bytes(*b"shad")),
             &TagNameIndex::default(),
             None,
             &mut H2TemplateCache::default(),
@@ -2494,7 +2494,7 @@ mod tests {
 
         let model = build_h2ek_shader_editor_model(
             &tag,
-            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &h2_shader_entry(u32::from_be_bytes(*b"shad")),
             &TagNameIndex::default(),
             None,
             &mut H2TemplateCache::default(),
@@ -3557,7 +3557,7 @@ mod tests {
 
         let model = build_h2ek_shader_editor_model(
             &tag,
-            &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
+            &h2_shader_entry(u32::from_be_bytes(*b"shad")),
             &TagNameIndex::default(),
             None,
             &mut H2TemplateCache::default(),

@@ -10,34 +10,41 @@ use super::*;
 use super::recents::RecentAction;
 
 /// The keyboard shortcuts: each sends the action its menu item sends, so a
-/// key does exactly what the menu does. Checked in order, the first match
+/// key does exactly what the menu does. `COMMAND` is Ctrl on Windows and Linux
+/// and Cmd on macOS, where Ctrl alone used to be all that worked. Checked in order, the first match
 /// consuming the key. egui matches modifiers logically — Ctrl+Shift+Z matches
 /// a plain Ctrl+Z pattern — so Ctrl+Shift+Z has to come first; checked the
 /// other way round it was an undo.
 pub(in crate::app) const SHORTCUTS: &[(egui::Modifiers, egui::Key, fn() -> AppAction)] = &[
-    (egui::Modifiers::CTRL, egui::Key::F, || AppAction::OpenFind),
-    (egui::Modifiers::CTRL, egui::Key::S, || {
+    (egui::Modifiers::COMMAND, egui::Key::F, || AppAction::OpenFind),
+    (egui::Modifiers::COMMAND, egui::Key::S, || {
         AppAction::Defer(DeferredFileAction::SaveCurrentTag)
     }),
-    (egui::Modifiers::CTRL, egui::Key::P, || {
+    (egui::Modifiers::COMMAND, egui::Key::P, || {
         AppAction::Defer(DeferredFileAction::PokeCurrentTag)
     }),
     // Deferred like the File menu's Close Current Tag: the close runs after
     // the editor renders, so an edit still focused in a field is committed
     // before the dirty check decides whether to prompt.
-    (egui::Modifiers::CTRL, egui::Key::W, || {
+    (egui::Modifiers::COMMAND, egui::Key::W, || {
         AppAction::Defer(DeferredFileAction::CloseCurrentTab)
     }),
     (
-        egui::Modifiers::CTRL.plus(egui::Modifiers::SHIFT),
+        egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
         egui::Key::Z,
         || AppAction::Redo,
     ),
-    (egui::Modifiers::CTRL, egui::Key::Z, || AppAction::Undo),
-    (egui::Modifiers::CTRL, egui::Key::Y, || AppAction::Redo),
+    (egui::Modifiers::COMMAND, egui::Key::Z, || AppAction::Undo),
+    (egui::Modifiers::COMMAND, egui::Key::Y, || AppAction::Redo),
 ];
 
 /// The actions this frame's key presses ask for, each press consumed.
+/// How the shortcut for `key` with `modifiers` reads on this platform, for a
+/// menu item: "Ctrl+S" on Windows and Linux, "⌘S" on macOS.
+pub(in crate::app) fn shortcut_text(ctx: &egui::Context, modifiers: egui::Modifiers, key: egui::Key) -> String {
+    ctx.format_shortcut(&egui::KeyboardShortcut::new(modifiers, key))
+}
+
 pub(in crate::app) fn pressed_shortcuts(ctx: &egui::Context) -> Vec<AppAction> {
     SHORTCUTS
         .iter()
@@ -264,7 +271,8 @@ mod tests {
     /// when undo was checked first that is what it did.
     #[test]
     fn ctrl_shift_z_redoes_and_ctrl_z_undoes() {
-        let ctrl = egui::Modifiers::CTRL;
+        // As Windows reports Ctrl: `command` set with it.
+        let ctrl = egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND);
         let redo = pressed(ctrl.plus(egui::Modifiers::SHIFT), egui::Key::Z);
         assert!(matches!(redo.as_slice(), [AppAction::Redo]));
         assert!(matches!(
@@ -280,6 +288,18 @@ mod tests {
     /// A key the table does not list asks for nothing.
     #[test]
     fn an_unlisted_key_asks_for_nothing() {
-        assert!(pressed(egui::Modifiers::CTRL, egui::Key::Q).is_empty());
+        assert!(pressed(egui::Modifiers::COMMAND, egui::Key::Q).is_empty());
+    }
+
+    /// Cmd+S saves on macOS, which reports Cmd as `mac_cmd` with `command`;
+    /// the shortcuts used to want Ctrl, so none of them worked there.
+    #[test]
+    fn cmd_works_on_macos() {
+        let cmd = egui::Modifiers::MAC_CMD.plus(egui::Modifiers::COMMAND);
+        assert!(matches!(
+            pressed(cmd, egui::Key::S).as_slice(),
+            [AppAction::Defer(DeferredFileAction::SaveCurrentTag)]
+        ));
+        assert!(matches!(pressed(cmd, egui::Key::Z).as_slice(), [AppAction::Undo]));
     }
 }

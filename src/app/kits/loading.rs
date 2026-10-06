@@ -67,8 +67,10 @@ impl Baboon {
         }
         self.model.status = loaded_source_status(&loaded);
         self.install_loaded_source(loaded);
-        self.dialogs.close::<ColorPopupWindow>();
-        self.dialogs.close::<FunctionPopupWindow>();
+        // Every tag of the kit's old source is gone; another kit's popups
+        // are not.
+        let kit = self.model.kits[self.model.active].id;
+        self.close_tag_popups(kit, |_| true);
         self.apply_loaded_source_identity(game);
         if let Some((key, tag)) = initial_tag {
             let mut kit = self.kit_and_view(self.model.active);
@@ -149,11 +151,23 @@ impl Baboon {
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
+        // A scan refuses to start while another runs, so this is the only one:
+        // it is over whatever became of its source. Cleared only for a current
+        // result, a refresh during the scan left every later scan refused and
+        // everything waiting on one -- Find All, the libraries -- waiting.
+        if let Some(kit_index) = self.model.resolve_kit(stamp.kit) {
+            self.model.kits[kit_index].scanning_entries = false;
+            self.model.kits[kit_index].index_jobs.entry_progress = None;
+            if self.model.resolve_stamp(stamp).is_none() {
+                // Whatever asked for the whole folder still needs it, now as
+                // the folder stands.
+                self.begin_scan_all_entries_in(kit_index, ctx.clone(), "Indexing tags...");
+                return true;
+            }
+        }
         let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
-        self.model.kits[kit_index].scanning_entries = false;
-        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
@@ -222,11 +236,16 @@ impl Baboon {
         label: String,
         result: Result<Vec<TagEntry>, String>,
     ) -> bool {
+        // Over whatever became of its source, as a full scan is.
+        if let Some(kit_index) = self.model.resolve_kit(stamp.kit) {
+            self.model.kits[kit_index].scanning_entries = false;
+            self.model.kits[kit_index].index_jobs.entry_progress = None;
+        }
         let Some(kit_index) = self.model.resolve_stamp(stamp) else {
+            self.model.status =
+                format!("The {label} folder changed while it was loading; load it again.");
             return true;
         };
-        self.model.kits[kit_index].scanning_entries = false;
-        self.model.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(entries) => {
                 let count = entries.len();
@@ -1165,8 +1184,23 @@ pub(in crate::app) fn persist_entry_index_changes(
     tag_source: &TagSource,
     mut refresh: EntryIndexRefresh,
 ) -> EntryIndexRefresh {
+    // One connection for the whole refresh. `None` when the folder has no
+    // index yet, which writes nothing, as the per-tag calls did.
+    let mut writer = if refresh.removed_keys.is_empty() && refresh.touched.is_empty() {
+        None
+    } else {
+        match crate::core::source::EntryIndexWriter::open(game, root) {
+            Ok(writer) => writer,
+            Err(error) => {
+                refresh.errors.push(format!("could not open the index: {error:#}"));
+                None
+            }
+        }
+    };
     for key in &refresh.removed_keys {
-        if let Err(error) = crate::core::source::delete_entry_with_dependencies(game, root, key) {
+        if let Some(writer) = writer.as_mut()
+            && let Err(error) = writer.delete_with_dependencies(key)
+        {
             refresh.errors.push(format!("{key}: {error:#}"));
         }
     }
@@ -1176,12 +1210,10 @@ pub(in crate::app) fn persist_entry_index_changes(
     // refresh would look at that tag again.
     for entry in &refresh.touched {
         let references = read_entry_dependencies(tag_source, entry);
-        let written = crate::core::source::upsert_entry_with_dependencies(
-            game,
-            root,
-            entry,
-            references.as_deref().ok(),
-        );
+        let written = match writer.as_mut() {
+            Some(writer) => writer.upsert_with_dependencies(root, entry, references.as_deref().ok()),
+            None => Ok(()),
+        };
         if let Err(error) = written {
             refresh
                 .errors

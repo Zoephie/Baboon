@@ -30,7 +30,6 @@ use crate::app::chimp::{
     ChimpTypeIndex, ChimpWritten, KitSurface, draw_chimp_workspace, format_remaining,
 };
 use crate::app::runtime_poke::{LastPoke, PokePlan, PokeReport};
-use crate::core::document::value::extension_to_group_tag;
 use crate::app::editor::{
     DeferredFileAction, EditorCommand, EditorFeature, PaneInputs, apply_scroll_speed,
     begin_wheel_gesture, draw_tag_pane, end_wheel_gesture, lost_focus_once,
@@ -70,7 +69,7 @@ pub(in crate::app) use settings::{
     SettingsCommand, SettingsWindow, draw_nested_default_picker, draw_update_channel_picker,
 };
 pub(in crate::app) mod kit_tiles;
-pub(in crate::app) use kit_tiles::TileParts;
+pub(in crate::app) use kit_tiles::{TileParts, middle_clicked};
 pub(in crate::app) mod tag_tiles;
 pub(in crate::app) use tag_tiles::{TileInputs, draw_tag_tiles};
 pub(in crate::app) mod loading;

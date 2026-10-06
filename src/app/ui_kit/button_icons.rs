@@ -4,7 +4,7 @@
 use super::*;
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(in crate::app) enum ButtonIcon {
     Add,
     About,
@@ -178,12 +178,64 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 }
 
 pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
-    let svg = colorized_icon_svg(icon, color);
-    let uri = button_icon_uri(ui.ctx(), icon, color, rect.width());
-    egui::Image::from_bytes(uri, svg.into_bytes())
+    paint_icon_tinted(ui, icon, rect, color, Color32::WHITE);
+}
+
+/// Paint `icon` recolored to `color` into `rect`, multiplied by `tint`, as
+/// `egui::Image::paint_at` would: the rect rounded to pixels and the SVG
+/// rasterized at exactly that pixel size.
+fn paint_icon_tinted(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32, tint: Color32) {
+    use egui::emath::GuiRounding as _;
+    let pixels_per_point = ui.pixels_per_point();
+    let rect = rect.round_to_pixels(pixels_per_point);
+    let pixels = (pixels_per_point * rect.size()).round();
+    if let Some(texture) = icon_texture(ui.ctx(), icon, color, rect.width(), pixels) {
+        let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+        ui.painter().image(texture, rect, uv, tint);
+        return;
+    }
+    egui::Image::from_bytes(button_icon_uri(ui.ctx(), icon, color, rect.width()), colorized_icon_bytes(icon, color))
         .fit_to_exact_size(rect.size())
-        .tint(Color32::WHITE)
+        .tint(tint)
         .paint_at(ui, rect);
+}
+
+/// The textures of recolored icons, by icon, color and pixel size. Kept in
+/// the egui context whose textures they are.
+#[derive(Clone, Default)]
+struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32), egui::TextureId>);
+
+/// The texture of `icon` recolored to `color` at `pixels`, once egui has
+/// loaded it. Icons are painted on every frame, a dozen to a block header,
+/// and each used to format its URI and have egui's loaders hash it to find
+/// the texture; this is a lookup of a small key instead.
+fn icon_texture(
+    ctx: &egui::Context,
+    icon: ButtonIcon,
+    color: Color32,
+    size: f32,
+    pixels: Vec2,
+) -> Option<egui::TextureId> {
+    let key = (icon, color, pixels.x as u32, pixels.y as u32);
+    let id = egui::Id::new("baboon_icon_textures");
+    let cached = ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.get(&key).copied());
+    if cached.is_some() {
+        return cached;
+    }
+    let uri = button_icon_uri(ctx, icon, color, size);
+    ctx.include_bytes(uri.clone(), colorized_icon_bytes(icon, color));
+    let size_hint = egui::load::SizeHint::Size {
+        width: key.2,
+        height: key.3,
+        maintain_aspect_ratio: false,
+    };
+    let Ok(egui::load::TexturePoll::Ready { texture }) =
+        ctx.try_load_texture(&uri, egui::TextureOptions::default(), size_hint)
+    else {
+        return None;
+    };
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.insert(key, texture.id));
+    Some(texture.id)
 }
 
 pub(in crate::app) fn button_icon_image(
@@ -193,9 +245,9 @@ pub(in crate::app) fn button_icon_image(
     size: f32,
 ) -> egui::Image<'static> {
     let color = icon_color(icon, color);
-    let svg = colorized_icon_svg(icon, color);
+    let svg = colorized_icon_bytes(icon, color);
     let uri = button_icon_uri(ui.ctx(), icon, color, size);
-    egui::Image::from_bytes(uri, svg.into_bytes())
+    egui::Image::from_bytes(uri, svg)
         .fit_to_exact_size(Vec2::splat(size))
         .tint(Color32::WHITE)
 }
@@ -220,16 +272,20 @@ pub(in crate::app) fn icon_button(
     enabled: bool,
     color: Color32,
 ) -> egui::Response {
-    // Paint in the button's enabled scope so egui fades the whole SVG,
-    // including accent colors embedded in the asset itself.
-    ui.add_enabled_ui(enabled, |ui| {
-        let response = ui.add(egui::Button::new("").min_size(ICON_BUTTON_SIZE));
-        let icon_rect =
-            egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
-        paint_button_icon_at(ui, icon, icon_rect, icon_color(icon, color));
-        response.on_hover_text(tooltip)
-    })
-    .inner
+    let response = ui.add_enabled(enabled, egui::Button::new("").min_size(ICON_BUTTON_SIZE));
+    let icon_rect =
+        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+    // A disabled button fades the whole SVG, accent colors embedded in the
+    // asset included, as egui fades a disabled widget. It used to do that by
+    // drawing the button in a child `Ui` of its own, which with a dozen of
+    // these on every block header was a real share of each frame.
+    let tint = if enabled {
+        Color32::WHITE
+    } else {
+        Color32::WHITE.gamma_multiply(ui.visuals().disabled_alpha())
+    };
+    paint_icon_tinted(ui, icon, icon_rect, icon_color(icon, color), tint);
+    response.on_hover_text(tooltip)
 }
 
 /// Repaint a native checkbox with its hovered visuals when an adjacent icon
@@ -281,6 +337,25 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
         ButtonIcon::Clear | ButtonIcon::Garbage | ButtonIcon::Remove => material_delete_text(),
         _ => fallback,
     }
+}
+
+/// [`colorized_icon_svg`], made once per icon and color. Icons are painted
+/// every frame and egui drops the bytes it is handed once it has the texture,
+/// so rebuilding the SVG each time (five passes over its text) was all waste:
+/// a sixth of a frame with one weapon tag open.
+fn colorized_icon_bytes(icon: ButtonIcon, color: Color32) -> egui::load::Bytes {
+    thread_local! {
+        static COLORIZED: std::cell::RefCell<HashMap<(ButtonIcon, Color32), Arc<[u8]>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    let bytes = COLORIZED.with(|colorized| {
+        colorized
+            .borrow_mut()
+            .entry((icon, color))
+            .or_insert_with(|| colorized_icon_svg(icon, color).into_bytes().into())
+            .clone()
+    });
+    egui::load::Bytes::Shared(bytes)
 }
 
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
@@ -660,13 +735,23 @@ fn nested_menu_button<R>(
             widget.fg_stroke.color = Color32::TRANSPARENT;
         }
     }
-    let menu = ui.menu_button(
-        egui::RichText::new(label).color(Color32::TRANSPARENT),
-        |ui| {
-            ui.set_min_width(popup_width);
-            add_contents(ui)
-        },
-    );
+    let text = egui::RichText::new(label).color(Color32::TRANSPARENT);
+    let contents = |ui: &mut Ui| {
+        ui.set_min_width(popup_width);
+        add_contents(ui)
+    };
+    // Inside a menu this is a submenu, which takes that menu's config. On its
+    // own it is a menu of its own and needs Baboon's: with egui 0.36's
+    // default it closed on any click inside, its scrollbar included, so only
+    // one item could be picked per opening.
+    let menu = if egui::containers::menu::is_in_menu(ui) {
+        ui.menu_button(text, contents)
+    } else {
+        let (response, inner) = egui::containers::menu::MenuButton::new(text)
+            .config(menu_config())
+            .ui(ui, contents);
+        egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
+    };
     *ui.visuals_mut() = original_visuals;
     ui.spacing_mut().menu_spacing = original_menu_spacing;
     let color = if ui.is_enabled() {
@@ -812,6 +897,25 @@ mod tests {
         assert!(!svg.contains("currentColor"));
     }
 
+    /// Painting an icon again hands egui the bytes made the first time, not
+    /// a fresh recoloring: icons are painted on every frame.
+    #[test]
+    fn a_colorized_icon_is_made_once_per_color() {
+        let shared = |color| match colorized_icon_bytes(ButtonIcon::Open, color) {
+            egui::load::Bytes::Shared(bytes) => bytes,
+            egui::load::Bytes::Static(_) => panic!("a recolored icon is not static"),
+        };
+        let first = shared(Color32::from_rgb(1, 2, 3));
+        assert_eq!(
+            &*first,
+            colorized_icon_svg(ButtonIcon::Open, Color32::from_rgb(1, 2, 3)).as_bytes()
+        );
+        assert!(Arc::ptr_eq(&first, &shared(Color32::from_rgb(1, 2, 3))));
+        let other = shared(Color32::from_rgb(4, 5, 6));
+        assert!(!Arc::ptr_eq(&first, &other));
+        assert!(std::str::from_utf8(&other).unwrap().contains("#040506"));
+    }
+
     #[test]
     fn submenu_directions_use_distinct_assets() {
         assert_ne!(
@@ -845,5 +949,72 @@ mod tests {
         );
         assert_ne!(small, large);
         assert!(large.contains("32px"));
+    }
+
+    /// A menu opened from a button of its own stays open when an item in it
+    /// is clicked, as every Baboon menu does, so several can be picked in one
+    /// opening. With egui 0.36's default it closed on any click inside.
+    #[test]
+    fn a_standalone_menu_stays_open_after_a_pick() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut picks = 0;
+        let mut time = 0.0;
+        let mut frame = |events: Vec<egui::Event>, picks: &mut i32| -> Vec<(String, egui::Rect)> {
+            time += 0.1;
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        right_opening_menu_button(ui, "Add", 200.0, |ui| {
+                            for item in ["first item", "second item"] {
+                                if ui.button(item).clicked() {
+                                    *picks += 1;
+                                }
+                            }
+                        });
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                    _ => None,
+                })
+                .collect()
+        };
+        fn click(
+            frame: &mut impl FnMut(Vec<egui::Event>, &mut i32) -> Vec<(String, egui::Rect)>,
+            at: egui::Pos2,
+            picks: &mut i32,
+        ) -> Vec<(String, egui::Rect)> {
+            for step in 1..=3 {
+                frame(vec![egui::Event::PointerMoved(at - egui::vec2(0.0, 3.0 - step as f32))], picks);
+            }
+            for pressed in [true, false] {
+                frame(
+                    vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }],
+                    picks,
+                );
+            }
+            frame(Vec::new(), picks)
+        }
+        let find = |shown: &[(String, egui::Rect)], text: &str| shown.iter().find(|(shown, _)| shown == text).map(|(_, rect)| rect.center());
+        frame(Vec::new(), &mut picks);
+        let shown = frame(Vec::new(), &mut picks);
+        let button = find(&shown, "Add").expect("the menu button");
+        let shown = click(&mut frame, button, &mut picks);
+        let first = find(&shown, "first item").expect("the menu opened");
+        let shown = click(&mut frame, first, &mut picks);
+        assert_eq!(picks, 1);
+        assert!(find(&shown, "second item").is_some(), "the menu is still open");
     }
 }

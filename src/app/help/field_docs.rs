@@ -242,6 +242,12 @@ fn parse_guid_hex(s: &str) -> Option<[u8; 16]> {
 #[derive(Debug, Default)]
 pub(in crate::app) struct GroupHierarchy {
     parents: HashMap<u32, u32>,
+    /// Every group the game defines, by its name in this game: a FOURCC can
+    /// name different groups in different games (`gldf` is Halo 2's
+    /// `chocolate_mountain` and Reach's `cheap_light`).
+    names: HashMap<u32, String>,
+    /// The other way: a name to its group in this game.
+    groups_by_name: HashMap<String, u32>,
 }
 
 impl GroupHierarchy {
@@ -250,6 +256,7 @@ impl GroupHierarchy {
     fn load(definitions_root: &Path, game: GameId) -> Self {
         use std::io::Read;
         let mut parents = HashMap::new();
+        let mut names = HashMap::new();
         let mut by_name: HashMap<String, u32> = HashMap::new();
         let mut named_parents: Vec<(u32, String)> = Vec::new();
         let Ok(dir) = std::fs::read_dir(definitions_root.join(game.as_str())) else {
@@ -281,6 +288,7 @@ impl GroupHierarchy {
                 continue;
             };
             if let Some(name) = value("name") {
+                names.insert(tag, name.clone());
                 by_name.insert(name, tag);
             }
             if let Some(parent) = value("parent_tag").filter(|parent| !parent.is_empty()) {
@@ -299,7 +307,23 @@ impl GroupHierarchy {
                 parents.insert(tag, parent);
             }
         }
-        Self { parents }
+        let groups_by_name = by_name;
+        Self {
+            parents,
+            names,
+            groups_by_name,
+        }
+    }
+
+    /// The group this game calls `name` (a tag file's extension), if any.
+    pub(in crate::app) fn group_named(&self, name: &str) -> Option<u32> {
+        self.groups_by_name.get(name).copied()
+    }
+
+    /// The name of `group` in this game, or `None` when the game has no such
+    /// group.
+    pub(in crate::app) fn name(&self, group: u32) -> Option<&str> {
+        self.names.get(&group).map(String::as_str)
     }
 
     /// Whether `group` is `ancestor` or descends from it.
@@ -352,6 +376,35 @@ pub(in crate::app) fn group_hierarchy(
     cache
         .entry((root.to_path_buf(), game))
         .or_insert_with(|| Arc::new(GroupHierarchy::load(root, game)))
+        .clone()
+}
+
+/// The game's group hierarchy from the definitions Baboon ships with, for
+/// deciding what a tag is by its group's ancestry whatever kind of source
+/// it came from.
+///
+/// Tag icons ask this for every row they paint, so each game's is kept in a
+/// cell of its own rather than looked up under a lock by path.
+pub(in crate::app) fn bundled_group_hierarchy(
+    game: Option<GameId>,
+) -> std::sync::Arc<GroupHierarchy> {
+    use std::sync::{Arc, OnceLock};
+    static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+    static GAMES: [OnceLock<Arc<GroupHierarchy>>; GameId::ALL.len()] =
+        [const { OnceLock::new() }; GameId::ALL.len()];
+    let Some(game) = game else {
+        return Arc::default();
+    };
+    let Some(slot) = GameId::ALL.iter().position(|known| *known == game) else {
+        return Arc::default();
+    };
+    GAMES[slot]
+        .get_or_init(|| {
+            group_hierarchy(
+                Some(ROOT.get_or_init(crate::core::bundled::locate_definitions_root)),
+                Some(game),
+            )
+        })
         .clone()
 }
 

@@ -56,9 +56,17 @@ pub(in crate::app) struct KitView {
     pub(in crate::app) blam: BlamUiState,
     /// How the kit's Chimp surface is browsed and laid out.
     pub(in crate::app) chimp: ChimpView,
+    /// Each tag pane's field row heights, by pane scope and tag key.
+    pub(in crate::app) row_heights: HashMap<String, crate::app::editor::RowHeights>,
 }
 
 impl KitView {
+    /// Forget the field row heights measured for `key`, in every pane scope.
+    pub(in crate::app) fn forget_row_heights(&mut self, key: &str) {
+        let suffix = format!("\u{1f}{key}");
+        self.row_heights.retain(|pane, _| !pane.ends_with(&suffix));
+    }
+
     /// The view a kit opens with: nothing laid out, drafted or cached, and
     /// its browser showing as `browser` says.
     pub(in crate::app) fn new(kit: KitId, browser: KitBrowser) -> Self {
@@ -76,6 +84,7 @@ impl KitView {
             surface: KitSurface::Tags,
             blam: BlamUiState::default(),
             chimp: ChimpView::default(),
+            row_heights: HashMap::new(),
         }
     }
 }
@@ -192,6 +201,7 @@ impl<'a> KitMut<'a> {
         self.view.caches.model_previews.remove(key);
         self.view.find_filter_applied.remove(key);
         self.view.edit_buffers.forget_tag(key);
+        self.view.forget_row_heights(key);
         self.view.browser.folder_browsers.remove(key);
     }
 
@@ -249,8 +259,11 @@ impl<'a> KitMut<'a> {
 
     /// Re-derive `open_tabs` from the tree. Called after anything that can
     /// change the layout: a frame of `tree.ui`, an open, or a close.
-    pub(in crate::app) fn sync_open_tabs(&mut self) {
-        self.kit.open_tabs = self.view.tabs_from_tree();
+    /// Returns whether the open tabs or the selection changed.
+    pub(in crate::app) fn sync_open_tabs(&mut self) -> bool {
+        let open_tabs = self.view.tabs_from_tree();
+        let mut changed = open_tabs != self.kit.open_tabs;
+        self.kit.open_tabs = open_tabs;
         if self
             .kit
             .selected_key
@@ -263,7 +276,9 @@ impl<'a> KitMut<'a> {
                 .iter()
                 .find(|key| !is_folder_pane_key(key))
                 .cloned();
+            changed = true;
         }
+        changed
     }
 
     /// Add `key` as a pane if it is not already laid out, and select it.

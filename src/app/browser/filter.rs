@@ -605,18 +605,54 @@ mod tests {
         );
     }
 
+    /// An entry of `group` in `game`, named as that game names it.
+    fn game_entry(game: GameId, group: &[u8; 4]) -> TagEntry {
+        let group_tag = u32::from_be_bytes(*group);
+        let name = crate::app::help::bundled_group_hierarchy(Some(game))
+            .name(group_tag)
+            .map(str::to_owned);
+        assert!(
+            name.is_some(),
+            "{game:?} has no {}",
+            String::from_utf8_lossy(group)
+        );
+        TagEntry {
+            key: format!("file:a.{group_tag:08x}"),
+            display_path: "a".to_owned(),
+            group_tag,
+            group_name: name,
+            location: TagEntryLocation::LooseFile(PathBuf::from("a")),
+        }
+    }
+
     #[test]
     fn tag_extract_menu_covers_every_group_with_an_asset_extractor() {
-        for group in [
-            b"hlmt", b"mode", b"mod2", b"coll", b"phmo", b"jmad", b"antr",
+        for (game, group) in [
+            (GameId::HaloReach, b"hlmt"),
+            (GameId::HaloReach, b"mode"),
+            (GameId::HaloCe, b"mode"),
+            (GameId::HaloCe, b"mod2"),
+            (GameId::HaloReach, b"coll"),
+            (GameId::HaloCe, b"coll"),
+            (GameId::HaloReach, b"phmo"),
+            (GameId::HaloReach, b"jmad"),
+            (GameId::HaloCe, b"antr"),
         ] {
-            assert!(supports_tag_extract_menu(u32::from_be_bytes(*group)));
+            assert!(
+                supports_tag_extract_menu(&game_entry(game, group)),
+                "{game:?} {}",
+                String::from_utf8_lossy(group)
+            );
         }
         // Per-asset extraction moved into this menu, so the button has to enable
         // for these groups too — otherwise the items are unreachable.
-        for group in [b"bitm", b"mats", b"hlsl"] {
+        for (game, group) in [
+            (GameId::HaloReach, b"bitm"),
+            (GameId::Halo4, b"mats"),
+            (GameId::HaloReach, b"hlsl"),
+        ] {
             assert!(
-                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                supports_tag_extract_menu(&game_entry(game, group)),
                 "{} should enable the Extract menu",
                 String::from_utf8_lossy(group)
             );
@@ -627,7 +663,7 @@ mod tests {
         // menu must enable for both groups.
         for group in [b"sbsp", b"scnr"] {
             assert!(
-                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                supports_tag_extract_menu(&game_entry(GameId::HaloReach, group)),
                 "{} should enable the Extract menu",
                 String::from_utf8_lossy(group)
             );
@@ -635,14 +671,24 @@ mod tests {
         // A particle_model exports its source JMI plus one JMS per object.
         // `pmdf` is Halo 3 / Reach / Halo 4; `PRTM` is Halo 2's unrelated
         // tag of the same name, which routes through the same menu item.
-        for group in [b"pmdf", b"PRTM"] {
+        for (game, group) in [(GameId::HaloReach, b"pmdf"), (GameId::Halo2, b"PRTM")] {
             assert!(
-                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                supports_tag_extract_menu(&game_entry(game, group)),
                 "{} should enable the Extract menu",
                 String::from_utf8_lossy(group)
             );
         }
         // A plain weapon has no extractor at all — it must leave it disabled.
-        assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"weap")));
+        assert!(!supports_tag_extract_menu(&game_entry(
+            GameId::HaloReach,
+            b"weap"
+        )));
+        // A model FOURCC its game doesn't name as one, or doesn't name at all,
+        // is not a model: the FOURCC alone says nothing.
+        let mut renamed = game_entry(GameId::HaloReach, b"mode");
+        renamed.group_name = Some("structure_meta".to_owned());
+        assert!(!supports_tag_geometry_extraction(&renamed));
+        renamed.group_name = None;
+        assert!(!supports_tag_geometry_extraction(&renamed));
     }
 }

@@ -2,6 +2,7 @@
 //! It owns generic schema-driven field presentation; tag-specific panels and application workflow coordination belong elsewhere.
 
 use super::*;
+use std::borrow::Cow;
 
 pub(in crate::app) fn tag_reference_catalog_for_source(
     source: &LoadedSourceData,
@@ -228,7 +229,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
-    let draft = edit.buffers.draft_mut(buffer_key, value);
+    let draft = edit.buffers.draft_mut(&buffer_key, value);
 
     let droppable = edit.editable && !meta.read_only;
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
@@ -239,19 +240,21 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
-            let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
+            let icon_group =
+                tag_reference_value_icon_group(meta, target.as_ref(), &draft.text, edit.game);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
                 reference_target_missing_cached(ui, edit.names, edit.tags_root, *group, rel)
             });
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
+            let icon = tag_icon(icon_group, edit.game);
             let value_response = if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
                     &mut draft.text,
                     value_width,
                     id,
-                    icon_group,
+                    icon,
                 );
 
                 draft.note_response(&response);
@@ -264,8 +267,15 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         input,
                         accepted.as_deref(),
                         edit.names,
+                        edit.game,
                     );
                 }
+                draft.keep_commit(|| {
+                    let (path, accepted, game) = (path.to_owned(), accepted.clone(), edit.game);
+                    DraftCommit::new(edit.tag_key, vec![buffer_key.clone()], move |texts| {
+                        tag_reference_input_ops(&path, texts[0], accepted.as_deref(), None, game)
+                    })
+                });
                 response
             } else if !has_ref {
                 foundation_tag_reference_input_cell_colored(
@@ -274,7 +284,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     subtle_dark(),
                     Some("This reference is empty"),
-                    icon_group,
+                    icon,
                     true,
                 )
             } else if missing {
@@ -284,7 +294,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     REFERENCE_MISSING_COLOR,
                     Some("Referenced tag not found on disk"),
-                    icon_group,
+                    icon,
                     true,
                 )
             } else {
@@ -294,7 +304,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     text_dark(),
                     None,
-                    icon_group,
+                    icon,
                     !is_bitmap_reference,
                 )
             };
@@ -495,39 +505,69 @@ fn accepted_groups_label(accepted: &[u32], names: Option<&TagNameIndex>) -> Stri
 
 pub(super) fn commit_tag_reference_input(
     pending: &mut Vec<PendingFieldEdit>,
-    mut status: Option<&mut String>,
+    status: Option<&mut String>,
     path: &str,
     input: String,
     accepted: Option<&[u32]>,
     names: Option<&TagNameIndex>,
+    game: Option<GameId>,
 ) {
-    if let Some(accepted) = accepted {
-        match parse_tag_reference(&input) {
-            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {
-                pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input,
-                });
-            }
-            Ok(_) => {
-                if let Some(status) = status.as_deref_mut() {
-                    *status = format!(
-                        "Reference must be a {} tag",
-                        accepted_groups_label(accepted, names)
-                    );
-                }
-            }
-            Err(error) => {
-                if let Some(status) = status.as_deref_mut() {
-                    *status = format!("Invalid tag reference: {error}");
-                }
+    match tag_reference_input_ops(path, &input, accepted, names, game) {
+        Ok(ops) => pending.extend(ops.pending),
+        Err(error) => {
+            if let Some(status) = status {
+                *status = error;
             }
         }
-    } else {
-        pending.push(PendingFieldEdit {
-            path: path.to_owned(),
-            input,
-        });
+    }
+}
+
+/// The edit setting the reference at `path` to `input`, or why it is
+/// refused: a group the field doesn't take, or text that isn't a reference.
+pub(super) fn tag_reference_input_ops(
+    path: &str,
+    input: &str,
+    accepted: Option<&[u32]>,
+    names: Option<&TagNameIndex>,
+    game: Option<GameId>,
+) -> Result<DeferredOps, String> {
+    let input = tag_reference_input_in_game(input, game);
+    let input = input.as_ref();
+    if let Some(accepted) = accepted {
+        match parse_tag_reference(input) {
+            Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {}
+            Ok(_) => {
+                return Err(format!(
+                    "Reference must be a {} tag",
+                    accepted_groups_label(accepted, names)
+                ));
+            }
+            Err(error) => return Err(format!("Invalid tag reference: {error}")),
+        }
+    }
+    Ok(field_edit_ops(path, input))
+}
+
+/// A typed `path.extension` reference spelled out as `GROUP:path`, with the
+/// group the tag's game gives that extension. An extension is a group's name,
+/// and games name different groups alike: `.shader` is Halo CE's `shdr`,
+/// Halo 2's `shad` and Halo 3's `rmsh`, `.model` Halo CE's `mode` and
+/// everyone else's `hlmt`. Left as typed when it already names its group, is
+/// empty or `none`, or the game has no group by that name.
+pub(in crate::app) fn tag_reference_input_in_game(
+    input: &str,
+    game: Option<GameId>,
+) -> Cow<'_, str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.contains(':') {
+        return Cow::Borrowed(input);
+    }
+    let Some((path, extension)) = trimmed.rsplit_once('.') else {
+        return Cow::Borrowed(input);
+    };
+    match crate::app::help::bundled_group_hierarchy(game).group_named(extension) {
+        Some(group_tag) => Cow::Owned(format_tag_reference_input(group_tag, path)),
+        None => Cow::Borrowed(input),
     }
 }
 
@@ -535,8 +575,9 @@ pub(super) fn tag_reference_value_icon_group(
     meta: &FieldDisplayMeta,
     target: Option<&(u32, String)>,
     input: &str,
+    game: Option<GameId>,
 ) -> Option<u32> {
-    if let Ok(parsed) = parse_tag_reference(input)
+    if let Ok(parsed) = parse_tag_reference(&tag_reference_input_in_game(input, game))
         && let Some((group, _)) = parsed.group_tag_and_name
     {
         return Some(group);
@@ -1024,7 +1065,7 @@ mod tests {
             with_test_edit_context(|edit| {
                 let path = "model";
                 if let Some(text) = draft_text {
-                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    let draft = edit.buffers.draft_mut(&format!("{}|{path}", edit.tag_key), value);
                     draft.text = text.to_owned();
                     draft.changed = true;
                 }
@@ -1063,7 +1104,7 @@ mod tests {
                     assert_eq!(edit.pending[0].input, "NONE");
                 }
                 if draft_text.is_some() {
-                    let draft = edit.buffers.draft_mut(format!("{}|{path}", edit.tag_key), value);
+                    let draft = edit.buffers.draft_mut(&format!("{}|{path}", edit.tag_key), value);
                     assert!(!draft.changed);
                     assert!(draft.text.is_empty() || draft.text.eq_ignore_ascii_case("none"));
                 }
@@ -1331,6 +1372,7 @@ mod tests {
             "weap:objects\\weapons\\rifle\\assault_rifle\\assault_rifle".to_owned(),
             Some(&accepted),
             Some(&names),
+            Some(GameId::HaloReach),
         );
         assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
     }
@@ -1475,7 +1517,8 @@ mod tests {
             tag_reference_value_icon_group(
                 &meta(vec![render_model]),
                 Some(&target),
-                r"objects\foo\foo.bitmap"
+                r"objects\foo\foo.bitmap",
+                Some(GameId::Halo3)
             ),
             Some(bitmap)
         );
@@ -1483,18 +1526,61 @@ mod tests {
             tag_reference_value_icon_group(
                 &meta(vec![render_model]),
                 Some(&target),
-                r"objects\foo\foo"
+                r"objects\foo\foo",
+                Some(GameId::Halo3)
             ),
             Some(collision_model)
         );
         assert_eq!(
-            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE"),
+            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE", None),
             Some(render_model)
         );
         assert_eq!(
-            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE"),
+            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE", None),
             None
         );
+    }
+
+    /// A typed `path.extension` reference names the group the tag's game
+    /// gives that extension, not whichever game's was loaded first: `.shader`
+    /// is Halo CE's `shdr`, Halo 2's `shad` and Reach's `rmsh`.
+    #[test]
+    fn a_typed_reference_takes_its_group_from_the_tags_game() {
+        let typed = r"levels\a\shaders\floor.shader";
+        for (game, group) in [
+            (GameId::HaloCe, "shdr"),
+            (GameId::Halo2, "shad"),
+            (GameId::HaloReach, "rmsh"),
+        ] {
+            assert_eq!(
+                tag_reference_input_in_game(typed, Some(game)),
+                format!(r"{group}:levels\a\shaders\floor"),
+                "{game:?}"
+            );
+        }
+        assert_eq!(
+            tag_reference_input_in_game(r"a\b.model", Some(GameId::HaloCe)),
+            r"mode:a\b"
+        );
+        assert_eq!(
+            tag_reference_input_in_game(r"a\b.model", Some(GameId::HaloReach)),
+            r"hlmt:a\b"
+        );
+        // Already naming its group, empty, none, or no such group: as typed.
+        for input in [r"weap:a\b", "", "NONE", r"a\b.not_a_group"] {
+            assert_eq!(
+                tag_reference_input_in_game(input, Some(GameId::HaloCe)),
+                input
+            );
+        }
+
+        // A Halo CE field that takes shaders takes a typed `.shader`.
+        let shader = u32::from_be_bytes(*b"shdr");
+        let ops =
+            tag_reference_input_ops("shader", typed, Some(&[shader]), None, Some(GameId::HaloCe))
+                .expect("a typed Halo CE shader reference is a shader");
+        assert_eq!(ops.pending.len(), 1);
+        assert_eq!(ops.pending[0].input, r"shdr:levels\a\shaders\floor");
     }
 
     #[test]

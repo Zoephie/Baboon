@@ -208,25 +208,25 @@ impl Baboon {
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let Some(state) = self.views[self.model.kits[kit_index].id].caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         if !state.render_mode.uses_textures() || state.textures_pending {
-            return;
+            return false;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
-            return;
+            return false;
         };
         if data.textures.is_some() || data.preview.materials.is_empty() {
-            return;
+            return false;
         }
         let Some(source) = self.model.kits[kit_index]
             .source
             .as_ref()
             .map(|source| source.source.clone())
         else {
-            return;
+            return false;
         };
         let materials = data.preview.materials.clone();
         let textures_id = data.textures_id;
@@ -256,6 +256,7 @@ impl Baboon {
                 textures: Vec::new(),
             },
         );
+        true
     }
 
     pub(in crate::app) fn handle_model_textures_resolved(
@@ -317,6 +318,13 @@ impl Baboon {
         let block_path = paste.block_path.clone();
         let text = paste.text.clone();
 
+        // Pasted references are written `path.extension`, and which group an
+        // extension names depends on the game, so each is spelled out with
+        // this kit's group before it is parsed.
+        let game = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .and_then(|source| source.game);
         let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(&tag_key) else {
             self.set_tsv_paste_status("Tag is no longer open.");
             return;
@@ -359,9 +367,18 @@ impl Baboon {
             }
             for (col_index, cell) in line.split('\t').enumerate() {
                 if let Some(Some(full)) = header_to_full.get(col_index) {
+                    let is_reference = block
+                        .element(row_index)
+                        .and_then(|element| element.field_path(full))
+                        .is_some_and(|field| field.field_type() == TagFieldType::TagReference);
+                    let input = if is_reference {
+                        tag_reference_input_in_game(cell.trim(), game).into_owned()
+                    } else {
+                        cell.trim().to_owned()
+                    };
                     edits.push(PendingFieldEdit {
                         path: format!("{block_path}[{row_index}]/{full}"),
-                        input: cell.trim().to_owned(),
+                        input,
                     });
                 }
             }
@@ -444,6 +461,23 @@ impl Baboon {
         let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
         if routed && self.refuse_read_only_edit(self.model.active) {
             self.dialogs.close::<BlockConfirm>();
+            return;
+        }
+        // The element index it holds names another element once the block
+        // has changed shape since the confirm was raised.
+        let moved = self.dialogs.get::<BlockConfirm>().is_some_and(|confirm| {
+            confirm.opened_at.is_some_and(|stamp| {
+                self.model.kits[self.model.active]
+                    .parsed_tags
+                    .get(&confirm.tag_key)
+                    .is_some_and(|doc| doc.layout_stamp() != stamp)
+            })
+        });
+        if routed && moved {
+            self.dialogs.close::<BlockConfirm>();
+            self.model.status =
+                "The block changed after the delete was asked for, so nothing was deleted. Ask again."
+                    .to_owned();
             return;
         }
         if let Some(confirm) = self.dialogs.close::<BlockConfirm>()

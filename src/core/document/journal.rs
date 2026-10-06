@@ -156,6 +156,12 @@ impl EditJournal {
         self.coalescing = false;
     }
 
+    /// The step on top of the undo stack: what an undo would go back to. It
+    /// names the state the document is in, as far as the journal can tell.
+    pub(crate) fn top_id(&self) -> Option<u64> {
+        self.undo.last().map(|snapshot| snapshot.id)
+    }
+
     pub(crate) fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

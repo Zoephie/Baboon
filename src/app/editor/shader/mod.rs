@@ -950,6 +950,38 @@ mod tests {
         assert_eq!(grid.count("Override Default"), 7);
     }
 
+    /// A shader value typed and not yet committed leaves behind the edit its
+    /// box would commit, for a save or a close to commit without the row.
+    #[test]
+    fn a_typed_shader_value_commits_without_its_row() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 3);
+        grid.apply();
+        let value = grid.find("2.0", 0);
+        grid.click_at(value.center());
+        let select_all = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        grid.frame(vec![select_all]);
+        grid.frame(vec![egui::Event::Text("5.5".to_owned())]);
+        assert!(grid.ops.pending.is_empty(), "nothing committed yet");
+
+        let commits = grid.buffers.take_uncommitted(DraftFlush::All);
+        let [(tag, Ok(ops))] = commits.as_slice() else {
+            panic!("one commit, got {}", commits.len());
+        };
+        assert_eq!(tag, TAG_KEY);
+        assert_eq!(ops.pending.len(), 1);
+        assert_eq!(ops.pending[0].path, "render_method/parameters[0]/real");
+        assert_eq!(ops.pending[0].input, "5.5");
+        assert!(grid.buffers.take_uncommitted(DraftFlush::All).is_empty(), "and only once");
+    }
+
     /// Frames of a free-standing popup (the colour picker, the function editor),
     /// drawn by `draw` against the popup state it owns.
     struct Popup {
@@ -1319,7 +1351,9 @@ mod tests {
         assert_eq!(applied.outcomes[0].result, Ok(()), "{input}");
         let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
         assert_eq!(render_method.parameters[0].bitmap_path, "shaders\\textures\\rock");
-        assert_eq!(grid.count("shaders\\textures\\rock.bitmap"), 1, "{:?}", grid.texts());
+        // The box shows the reference as the tag holds it now, not the text
+        // typed: a committed box goes back to the tag's value.
+        assert_eq!(grid.count("shaders/textures/rock.bitmap"), 1, "{:?}", grid.texts());
 
         // Its context menu adds optional sampler and transform arguments;
         // "filter mode" sets the flag and the mode, which then gets a row.

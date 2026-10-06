@@ -1135,35 +1135,35 @@ impl Baboon {
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let kit = &self.model.kits[kit_index];
         let view = &self.views[kit.id];
         let Some(state) = view.caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         if state.animation.requested_list {
-            return;
+            return false;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
-            return;
+            return false;
         };
         // No skeleton (or one past the GPU bone budget) means nothing could
         // play; don't spend a worker discovering that.
         if data.preview.nodes.is_empty() || data.preview.nodes.len() > MAX_PREVIEW_BONES {
-            return;
+            return false;
         }
         let Some(entry) = kit.entry_for_key(key).cloned() else {
-            return;
+            return false;
         };
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
-            return;
+            return false;
         };
         // A `.model` names its graph; a Halo CE object has no `.model` and
         // names its `model_animations` itself, the way it names its gbxmodel.
         let names_a_graph = entry.group_tag == u32::from_be_bytes(*b"hlmt")
             || (is_object_family_group(entry.group_tag) && source_is_halo1(&source));
         if !names_a_graph {
-            return;
+            return false;
         }
         let stamp = KitStamp {
             kit: kit.id,
@@ -1188,23 +1188,24 @@ impl Baboon {
                 result: Err("the animation graph crashed the reader".to_owned()),
             },
         );
+        true
     }
 
     /// Start decoding the animation the panel selected, if it is not the one
-    /// already decoded or being decoded.
+    /// already decoded or being decoded. Returns whether it started.
     pub(in crate::app) fn maybe_request_model_animation_decode(
         &mut self,
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let kit = &self.model.kits[kit_index];
         let view = &self.views[kit.id];
         let Some(state) = view.caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         let Some(selected) = state.animation.selected else {
-            return;
+            return false;
         };
         if state.animation.decoding.is_some()
             || state
@@ -1213,10 +1214,10 @@ impl Baboon {
                 .as_ref()
                 .is_some_and(|pose| pose.animation_index == selected)
         {
-            return;
+            return false;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
-            return;
+            return false;
         };
         if !data
             .animations
@@ -1224,13 +1225,13 @@ impl Baboon {
             .and_then(|animations| animations.get(selected))
             .is_some_and(|entry| entry.playable)
         {
-            return;
+            return false;
         }
         let Some(entry) = kit.entry_for_key(key).cloned() else {
-            return;
+            return false;
         };
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
-            return;
+            return false;
         };
         let stamp = KitStamp {
             kit: kit.id,
@@ -1258,6 +1259,7 @@ impl Baboon {
                 result: Err("this animation crashed the decoder".to_owned()),
             },
         );
+        true
     }
 
     pub(in crate::app) fn handle_model_animations_listed(

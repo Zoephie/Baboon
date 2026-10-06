@@ -674,7 +674,6 @@ pub(super) fn draw_model_preview_panel(
                             ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
                                 ui,
                                 tag,
-                                entry,
                                 data,
                                 state,
                                 model_preview_size,
@@ -743,7 +742,6 @@ pub(super) fn draw_model_preview_panel(
                 ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
                     ui,
                     tag,
-                    entry,
                     data,
                     state,
                     model_preview_size,
@@ -1083,7 +1081,6 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
 fn draw_model_view_settings_menu(
     ui: &mut Ui,
     tag: &TagFile,
-    entry: &TagEntry,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
@@ -1099,25 +1096,17 @@ fn draw_model_view_settings_menu(
         |ui| {
             const VIEW_SETTINGS_WIDTH: f32 = 280.0;
             // Fix both bounds: a menu's sizing pass can otherwise let the
-            // full-width marker filter grow wider than the shading combo.
+            // full-width marker filter grow wider than the shading choices.
             ui.set_width(VIEW_SETTINGS_WIDTH);
-            ui.scope(|ui| {
-                // Menu styling uses a compact 2 px inset; match the variant
-                // selector's normal button padding for this combo box.
-                ui.spacing_mut().button_padding.x = BUTTON_TEXT_PADDING_X;
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    foundation_visuals().widgets.inactive.weak_bg_fill;
-                egui::ComboBox::from_id_salt(("model_render_mode", &entry.key))
-                    .selected_text(state.render_mode.label())
-                    .width(VIEW_SETTINGS_WIDTH)
-                    .show_ui(ui, |ui| {
-                        for mode in ModelRenderMode::ALL {
-                            if supports_textures || !mode.uses_textures() {
-                                ui.selectable_value(&mut state.render_mode, mode, mode.label());
-                            }
-                        }
-                    });
-            });
+            // Shading is picked right here. It was a combo box, whose list is
+            // a popup of its own; egui 0.36 keeps one popup open at a time, so
+            // opening it closed this menu and nothing could be picked.
+            ui.label(RichText::new("Shading").color(subtle_dark()).small());
+            for mode in ModelRenderMode::ALL {
+                if supports_textures || !mode.uses_textures() {
+                    ui.radio_value(&mut state.render_mode, mode, mode.label());
+                }
+            }
             if is_campaign_evolved {
                 ui.checkbox(&mut state.high_detail, "High Detail")
                     .on_hover_text(
@@ -1135,6 +1124,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_render,
                     ModelViewCheckboxIcon::Tag(*b"mode"),
                     "Render Model",
+                    source_game,
                 );
                 let has_collision =
                     overlay_layer_available(data, state, ModelPreviewLayer::Collision);
@@ -1144,6 +1134,7 @@ fn draw_model_view_settings_menu(
                         &mut state.show_collision,
                         ModelViewCheckboxIcon::Tag(*b"coll"),
                         "Collision Model",
+                        source_game,
                     )
                     .on_disabled_hover_text("This model has no collision model, or it has no drawable geometry.");
                 });
@@ -1153,6 +1144,7 @@ fn draw_model_view_settings_menu(
                         &mut state.show_physics,
                         ModelViewCheckboxIcon::Tag(*b"phmo"),
                         "Physics Model",
+                        source_game,
                     );
                 }
                 if state.overlays_pending && (state.show_collision || state.show_physics) {
@@ -1165,6 +1157,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_armature,
                     ModelViewCheckboxIcon::Tag(*b"jmad"),
                     "Armature",
+                    source_game,
                 )
                 .on_hover_text("Draw the model skeleton; hover a joint to see its name.");
             });
@@ -1175,6 +1168,7 @@ fn draw_model_view_settings_menu(
                 &mut state.show_markers,
                 ModelViewCheckboxIcon::Markers,
                 "Show Markers",
+                source_game,
             );
             draw_marker_filter_field(ui, &mut state.marker_filter);
 
@@ -1185,6 +1179,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_errors,
                     ModelViewCheckboxIcon::Errors,
                     "Show Errors",
+                    source_game,
                 )
                 .on_hover_text(format!(
                     "Highlight {error_count} error/warning report primitive(s); hover one to see its report."
@@ -1278,6 +1273,7 @@ fn model_view_icon_checkbox(
     checked: &mut bool,
     icon: ModelViewCheckboxIcon,
     label: &str,
+    game: Option<GameId>,
 ) -> egui::Response {
     let row = ui.horizontal(|ui| {
         let checkbox_response = ui.checkbox(checked, "");
@@ -1297,7 +1293,7 @@ fn model_view_icon_checkbox(
         );
         match icon {
             ModelViewCheckboxIcon::Tag(group) => {
-                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), icon_rect);
+                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect);
             }
             ModelViewCheckboxIcon::Markers => {
                 paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());

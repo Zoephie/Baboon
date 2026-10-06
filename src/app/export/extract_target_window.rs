@@ -84,6 +84,7 @@ impl Dialog for ExtractTargetPrompt {
             });
         if extract {
             cx.send(ExportCommand::Extract {
+                kit: self.kit,
                 kind: self.kind,
                 key: self.key.clone(),
                 target: self.target,
@@ -133,6 +134,7 @@ mod tests {
 
     fn prompt(source: Game) -> ExtractTargetPrompt {
         ExtractTargetPrompt {
+            kit: KitId(0),
             key: "file:objects/elite.render_model".to_owned(),
             display_path: "objects/elite.render_model".to_owned(),
             kind: ExtractKind::Geometry,

@@ -444,6 +444,69 @@ fn draw_thumbnail_grid<S: ThumbnailSource>(
     }
 }
 
+/// Which of `entries` a folder pane's Asset Browser shows, in order, as
+/// indices. Worked out again only when the entries, the folder, the sort or
+/// the asset kinds change: done every frame, it re-split the folder path for
+/// every entry and lowercased each name to sort them, about 19 ms a frame at
+/// the root of the Halo 3 kit. `entries_signature` names the entries; without
+/// one nothing is kept.
+fn asset_grid_order(
+    ui: &Ui,
+    pane_key: &str,
+    pane: &FolderBrowserState,
+    entries: &[TagEntry],
+    entries_signature: Option<u64>,
+) -> std::sync::Arc<Vec<usize>> {
+    use std::hash::{Hash, Hasher};
+    let key = entries_signature.map(|signature| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (
+            signature,
+            entries.len(),
+            &pane.rel_path,
+            pane.sort,
+            pane.asset_bitmaps,
+            pane.asset_models,
+        )
+            .hash(&mut hasher);
+        hasher.finish()
+    });
+    let id = egui::Id::new(("asset_grid_order", pane_key));
+    if let Some(key) = key
+        && let Some((cached, order)) = ui.data(|data| data.get_temp::<(u64, std::sync::Arc<Vec<usize>>)>(id))
+        && cached == key
+    {
+        return order;
+    }
+    let mut order: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| {
+            crate::core::source::entry_is_beneath_folder(entry, &pane.rel_path)
+                && ((pane.asset_bitmaps && Bitmaps::lists(entry))
+                    || (pane.asset_models && Models::lists(entry)))
+        })
+        .map(|(index, _)| index)
+        .collect();
+    match pane.sort {
+        BrowserSort::Natural => {}
+        BrowserSort::Name => order.sort_by_cached_key(|&index| {
+            tag_leaf_name(&entries[index].display_path).to_ascii_lowercase()
+        }),
+        BrowserSort::Type => order.sort_by_cached_key(|&index| {
+            (
+                format_group_tag(entries[index].group_tag),
+                tag_leaf_name(&entries[index].display_path).to_ascii_lowercase(),
+            )
+        }),
+    }
+    let order = std::sync::Arc::new(order);
+    if let Some(key) = key {
+        ui.data_mut(|data| data.insert_temp(id, (key, order.clone())));
+    }
+    order
+}
+
 /// A mixed folder grid using the same cells, caches, workers and commands as
 /// the standalone bitmap and model libraries: a folder pane's Asset Browser.
 #[allow(clippy::too_many_arguments)]
@@ -454,28 +517,16 @@ pub(in crate::app) fn draw_folder_asset_grid(
     pane_key: &str,
     pane: &FolderBrowserState,
     entries: &[TagEntry],
+    entries_signature: Option<u64>,
     bitmaps: &mut ThumbnailLibrary<Bitmaps>,
     models: &mut ThumbnailLibrary<Models>,
 ) {
-    let mut visible: Vec<_> = entries
-        .iter()
-        .filter(|entry| {
-            crate::core::source::entry_is_beneath_folder(entry, &pane.rel_path)
-                && ((pane.asset_bitmaps && Bitmaps::lists(entry))
-                    || (pane.asset_models && Models::lists(entry)))
-        })
-        .collect();
-    match pane.sort {
-        BrowserSort::Natural => {}
-        BrowserSort::Name => visible
-            .sort_by_cached_key(|entry| tag_leaf_name(&entry.display_path).to_ascii_lowercase()),
-        BrowserSort::Type => visible.sort_by_cached_key(|entry| {
-            (
-                format_group_tag(entry.group_tag),
-                tag_leaf_name(&entry.display_path).to_ascii_lowercase(),
-            )
-        }),
-    }
+    let order = asset_grid_order(ui, pane_key, pane, entries, entries_signature);
+    let visible: Vec<&TagEntry> = order.iter().map(|&index| &entries[index]).collect();
+    let game = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .and_then(|source| source.game);
     if visible.is_empty() {
         ui.label(RichText::new("No matching assets in this folder").color(subtle_dark()));
         return;
@@ -499,11 +550,11 @@ pub(in crate::app) fn draw_folder_asset_grid(
                     for entry in visible.iter().skip(row * columns).take(columns) {
                         let cell_action = if Bitmaps::lists(entry) {
                             let wanted = &mut wanted_bitmaps;
-                            draw_thumbnail_entry(ui, bitmaps, entry, cell, wanted, true)
+                            draw_thumbnail_entry(ui, bitmaps, entry, cell, wanted, Some(game))
                                 .map(|action| (Bitmaps::LIBRARY, action))
                         } else {
                             let wanted = &mut wanted_models;
-                            draw_thumbnail_entry(ui, models, entry, cell, wanted, true)
+                            draw_thumbnail_entry(ui, models, entry, cell, wanted, Some(game))
                                 .map(|action| (Models::LIBRARY, action))
                         };
                         if cell_action.is_some() {
@@ -544,18 +595,19 @@ fn draw_thumbnail_cell<S: ThumbnailSource>(
 ) -> Option<CellAction> {
     let entry_index = *library.matches.get(index)?;
     let entry = library.entries.get(entry_index)?.clone();
-    draw_thumbnail_entry(ui, library, &entry, cell, wanted, false)
+    draw_thumbnail_entry(ui, library, &entry, cell, wanted, None)
 }
 
 /// One cell for `entry`, from `library`'s caches. `type_badge` marks it with
-/// its group's icon, for a grid that mixes bitmaps and models.
+/// its group's icon in the kit's game, for a grid that mixes bitmaps and
+/// models.
 fn draw_thumbnail_entry<S: ThumbnailSource>(
     ui: &mut Ui,
     library: &mut ThumbnailLibrary<S>,
     entry: &TagEntry,
     cell: f32,
     wanted: &mut Vec<String>,
-    type_badge: bool,
+    type_badge: Option<Option<GameId>>,
 ) -> Option<CellAction> {
     let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
 
@@ -635,13 +687,13 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
         }
     }
 
-    if type_badge {
+    if let Some(game) = type_badge {
         let badge = egui::Rect::from_min_size(
             image_rect.right_bottom() - Vec2::splat(22.0),
             Vec2::splat(20.0),
         );
         ui.painter().rect_filled(badge, 2.0, foundation_input());
-        paint_tag_icon_at(ui, Some(entry.group_tag), badge.shrink(2.0));
+        paint_tag_icon_at(ui, Some(entry.group_tag), game, badge.shrink(2.0));
     }
     let name = tag_leaf_name(&display_path);
     ui.painter().text(
@@ -874,7 +926,10 @@ mod tests {
             key: format!("file:{display_path}"),
             display_path: display_path.to_owned(),
             group_tag: u32::from_be_bytes(*group),
-            group_name: None,
+            // Named as a scan names it: by its game, which is its extension.
+            group_name: display_path
+                .rsplit_once('.')
+                .map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(PathBuf::from(display_path)),
         }
     }
@@ -1090,9 +1145,35 @@ mod tests {
             key: path.into(),
             display_path: path.into(),
             group_tag: u32::from_be_bytes(*group),
-            group_name: None,
+            group_name: path.rsplit_once('.').map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(path.into()),
         }
+    }
+
+    /// The Asset Browser's order is worked out once per set of entries,
+    /// folder, sort and asset kinds, and again when any of them changes.
+    #[test]
+    fn the_asset_order_is_kept_until_its_inputs_change() {
+        let entries = vec![
+            loose_entry("objects/brute/zeta.bitmap", b"bitm"),
+            loose_entry("objects/brute/alpha.bitmap", b"bitm"),
+            loose_entry("objects/other/beta.bitmap", b"bitm"),
+        ];
+        let ctx = egui::Context::default();
+        let mut pane = folder_pane();
+        let mut orders = Vec::new();
+        let mut order = |pane: &FolderBrowserState, signature| {
+            let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                orders.push(asset_grid_order(ui, "pane", pane, &entries, signature));
+            });
+            orders.last().unwrap().clone()
+        };
+        let first = order(&pane, Some(1));
+        assert_eq!(*first, [1, 0], "beneath the folder, by name");
+        assert!(std::sync::Arc::ptr_eq(&first, &order(&pane, Some(1))), "kept");
+        pane.sort = BrowserSort::Natural;
+        assert_eq!(*order(&pane, Some(1)), [0, 1], "a new sort orders again");
+        assert!(!std::sync::Arc::ptr_eq(&order(&pane, None), &order(&pane, None)), "nothing kept without a signature");
     }
 
     /// The Asset Browser grid shows only what is beneath its folder, of the
@@ -1155,6 +1236,7 @@ mod tests {
                             "test",
                             &pane,
                             &entries,
+                            None,
                             &mut view.bitmap_browser,
                             &mut view.model_browser,
                         );

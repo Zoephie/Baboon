@@ -98,7 +98,19 @@ pub(super) fn draw_foundation_graph(
                 // happened to be selected before it.
                 ui.data_mut(|data| data.insert_temp(response.id, grabbed));
             }
+            // egui 0.36 calls it a drag as soon as the pointer leaves the
+            // graph, even within click distance, so a click that slipped off
+            // the edge moved the point it had just added. A point moves once
+            // the pointer has gone further than a click may.
+            let max_click_dist = ui.ctx().options(|options| options.input_options.max_click_dist);
+            let past_click_distance = ui.input(|input| {
+                input
+                    .pointer
+                    .press_origin()
+                    .is_none_or(|origin| origin.distance(pos) > max_click_dist)
+            });
             if response.dragged()
+                && past_click_distance
                 && ui
                     .data(|data| data.get_temp::<bool>(response.id))
                     .unwrap_or(false)

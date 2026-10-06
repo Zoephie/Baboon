@@ -198,29 +198,42 @@ pub(in crate::app) enum ChimpClose {
 }
 
 impl Baboon {
+    /// Apply `command`, returning whether it may have changed what the next
+    /// frame draws. Only the two sent every frame a package is open can say
+    /// no.
     pub(in crate::app) fn apply_chimp_command(
         &mut self,
         command: ChimpCommand,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         match command {
             ChimpCommand::PaneDrawn { kit, package, edit } => {
                 let Some(kit_index) = self.model.kit_index(kit) else {
-                    return;
+                    return false;
                 };
                 let now = ctx.input(|input| input.time);
                 let Some((world, document, pane)) =
                     self.chimp_document_and_pane(kit_index, &package)
                 else {
-                    return;
+                    return false;
                 };
+                // A refused edit still changed the pane: its draft stays and
+                // the reason shows.
+                let edited = edit.is_some();
                 match edit {
                     Some(edit) => {
                         apply_chimp_edit(&world, document, pane, edit, now);
                     }
                     None => end_chimp_edit_run(document),
                 }
-                refresh_chimp_header_usage(document, pane);
+                return refresh_chimp_header_usage(document, pane) || edited;
+            }
+            ChimpCommand::SyncOpenPackages { kit } => {
+                let Some(kit_index) = self.model.kit_index(kit) else {
+                    return false;
+                };
+                let kit = &mut self.model.kits[kit_index];
+                return self.views[kit.id].chimp.sync_open_packages(&mut kit.chimp);
             }
             ChimpCommand::ExportMesh { with_textures } => {
                 if let Some(prompt) = self.dialogs.close::<ChimpMeshTexturePrompt>() {
@@ -259,7 +272,7 @@ impl Baboon {
             }
             ChimpCommand::Extract { kit, package, what } => {
                 let Some(kit_index) = self.model.kit_index(kit) else {
-                    return;
+                    return true;
                 };
                 match what {
                     ChimpExtraction::Package => self.extract_chimp_package(kit_index, &package),
@@ -306,13 +319,8 @@ impl Baboon {
                     self.extract_chimp_pak_file(kit_index, &path);
                 }
             }
-            ChimpCommand::SyncOpenPackages { kit } => {
-                if let Some(kit_index) = self.model.kit_index(kit) {
-                    let kit = &mut self.model.kits[kit_index];
-                    self.views[kit.id].chimp.sync_open_packages(&mut kit.chimp);
-                }
-            }
         }
+        true
     }
 
     /// Close `which` of a kit's open packages, saying so if a modified one

@@ -1552,29 +1552,29 @@ impl Baboon {
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let kit = &self.model.kits[kit_index];
         let view = &self.views[kit.id];
         let Some(state) = view.caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         if state.overlays_loaded || state.overlays_pending {
-            return;
+            return false;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
-            return;
+            return false;
         };
         let geometry_id = data.geometry_id;
         let Some(entry) = kit.entry_for_key(key).cloned() else {
-            return;
+            return false;
         };
         if entry.group_tag != u32::from_be_bytes(*b"hlmt")
             && !is_object_family_group(entry.group_tag)
         {
-            return;
+            return false;
         }
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
-            return;
+            return false;
         };
         let stamp = KitStamp {
             kit: kit.id,
@@ -1618,6 +1618,7 @@ impl Baboon {
                 physics: None,
             },
         );
+        true
     }
 
     /// Merge a worker's overlay geometry into the preview it was built for.

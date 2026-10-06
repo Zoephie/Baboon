@@ -344,30 +344,34 @@ mod tests {
         }
     }
 
-    /// `is_render_model_tag` is lenient the way `is_bitmap_tag` is — group naming
-    /// varies across the games — so every identification route must list, and the
-    /// geometry-less `.model` (hlmt) must not.
+    /// The Model Library lists render geometry by its group as its own game
+    /// names it: `render_model`, Halo CE's `gbxmodel`, and Halo CE's legacy
+    /// `mode`, which that game calls `model`. The geometry-less `.model`
+    /// (hlmt) — also called `model` — must not list, nor a FOURCC without its
+    /// game's name, nor a name on another group's FOURCC.
     #[test]
-    fn every_way_a_render_model_identifies_itself_is_listed() {
-        let by_fourcc = entry("objects/warthog.render_model", b"mode", None);
-        let by_gbx_fourcc = entry("vehicles/hog.gbxmodel", b"mod2", None);
-        let by_group_name = entry("objects/a", b"____", Some("render_model"));
-        let by_gbx_group_name = entry("vehicles/b", b"____", Some("gbxmodel"));
-        let by_extension = entry("objects/c.render_model", b"____", None);
-        let by_gbx_extension = entry("vehicles/d.gbxmodel", b"____", None);
+    fn render_geometry_is_listed_by_its_group_in_its_game() {
+        let render_model = entry(
+            "objects/warthog.render_model",
+            b"mode",
+            Some("render_model"),
+        );
+        let gbxmodel = entry("vehicles/hog.gbxmodel", b"mod2", Some("gbxmodel"));
+        let halo_ce_model = entry("weapons/rifle.model", b"mode", Some("model"));
         let the_owning_model = entry("objects/warthog.model", b"hlmt", Some("model"));
+        let unnamed = entry("objects/warthog.render_model", b"mode", None);
+        let misnamed = entry("objects/a", b"____", Some("render_model"));
         let a_bitmap = entry("bitmaps/e.bitmap", b"bitm", Some("bitmap"));
 
-        assert!(is_render_model_tag(&by_fourcc));
-        assert!(is_render_model_tag(&by_gbx_fourcc));
-        assert!(is_render_model_tag(&by_group_name));
-        assert!(is_render_model_tag(&by_gbx_group_name));
-        assert!(is_render_model_tag(&by_extension));
-        assert!(is_render_model_tag(&by_gbx_extension));
+        assert!(is_render_model_tag(&render_model));
+        assert!(is_render_model_tag(&gbxmodel));
+        assert!(is_render_model_tag(&halo_ce_model));
         assert!(
             !is_render_model_tag(&the_owning_model),
             "an hlmt has no geometry of its own and must not be listed"
         );
+        assert!(!is_render_model_tag(&unnamed));
+        assert!(!is_render_model_tag(&misnamed));
         assert!(!is_render_model_tag(&a_bitmap));
     }
 

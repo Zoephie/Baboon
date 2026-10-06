@@ -164,10 +164,14 @@ impl Baboon {
         outcomes: Vec<(String, Result<String, String>)>,
         created: Vec<(TagEntry, TagFile)>,
     ) -> bool {
+        // The run is over whatever became of the kit's source; cleared only
+        // for a current result, the Import button stayed disabled for good.
+        if let Some(kit_index) = self.model.resolve_kit(stamp.kit) {
+            self.views[self.model.kits[kit_index].id].blam.running = false;
+        }
         let Some(kit_index) = self.model.resolve_stamp(stamp) else {
             return true;
         };
-        self.views[self.model.kits[kit_index].id].blam.running = false;
         let created_count = created.len();
         let folder_seeds = self.model.kits[kit_index].folder_seeds();
         for (entry, tag) in created {

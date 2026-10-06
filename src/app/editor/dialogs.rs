@@ -72,6 +72,10 @@ impl Dialog for TagReferencePickerWindow {
 pub(in crate::app) struct ColorPopupWindow {
     pub(in crate::app) popup: Option<MaterialColorPopup>,
     pub(in crate::app) kit: KitId,
+    /// The tag's [`TagDocument::layout_stamp`] when the popup opened, if it
+    /// writes to one: OK is refused once it moves, since the path the popup
+    /// holds may point at another element by then.
+    pub(in crate::app) opened_at: Option<(u64, u64)>,
 }
 
 impl Dialog for ColorPopupWindow {
@@ -124,6 +128,7 @@ impl Dialog for ColorPopupWindow {
             };
             cx.send(EditorCommand::ApplyPopupOps {
                 opened_from: Some(self.kit),
+                opened_at: self.opened_at,
                 tag_key,
                 label,
                 ops,
@@ -137,6 +142,8 @@ impl Dialog for ColorPopupWindow {
 pub(in crate::app) struct FunctionPopupWindow {
     pub(in crate::app) popup: Option<FunctionPopup>,
     pub(in crate::app) kit: KitId,
+    /// As [`ColorPopupWindow::opened_at`].
+    pub(in crate::app) opened_at: Option<(u64, u64)>,
 }
 
 impl Dialog for FunctionPopupWindow {
@@ -153,15 +160,18 @@ impl Dialog for FunctionPopupWindow {
             };
             cx.send(EditorCommand::ApplyPopupOps {
                 opened_from: Some(self.kit),
+                opened_at: self.opened_at,
                 tag_key: batch.tag_key,
                 label: "Edit function",
                 ops,
             });
         }
         if let Some(popup) = color {
+            // Its color goes to this editor's draft, not to the tag.
             cx.open_dialog(ColorPopupWindow {
                 popup: Some(popup),
                 kit: self.kit,
+                opened_at: None,
             });
         }
         self.popup.is_some()
@@ -180,6 +190,8 @@ pub(in crate::app) enum EditorCommand {
     /// from, or the active kit when it recorded none.
     ApplyPopupOps {
         opened_from: Option<KitId>,
+        /// The tag's layout stamp when the popup opened.
+        opened_at: Option<(u64, u64)>,
         tag_key: String,
         label: &'static str,
         ops: DeferredOps,
@@ -211,17 +223,20 @@ pub(in crate::app) enum EditorCommand {
 }
 
 impl Baboon {
-    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) {
+    /// Apply `command`, returning whether it may have changed what the next
+    /// frame draws. Only the two sent every frame a tag is open can say no.
+    pub(in crate::app) fn apply_editor_command(&mut self, command: EditorCommand, ctx: &egui::Context) -> bool {
         match command {
-            EditorCommand::PaneDrawn(drawn) => self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::PaneDrawn(drawn) => return self.apply_pane_drawn(*drawn, ctx),
+            EditorCommand::SyncOpenTabs { kit } => {
+                return self
+                    .model
+                    .kit_index(kit)
+                    .is_some_and(|index| self.kit_and_view(index).sync_open_tabs());
+            }
             EditorCommand::FocusTab { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
                     self.model.kits[index].selected_key = Some(key);
-                }
-            }
-            EditorCommand::SyncOpenTabs { kit } => {
-                if let Some(index) = self.model.kit_index(kit) {
-                    self.kit_and_view(index).sync_open_tabs();
                 }
             }
             EditorCommand::ReimportBitmap { kit, key } => {
@@ -235,13 +250,29 @@ impl Baboon {
             EditorCommand::SaveBlockTable => self.save_block_table(ctx),
             EditorCommand::ApplyPopupOps {
                 opened_from,
+                opened_at,
                 tag_key,
                 label,
                 ops,
             } => {
-                if let Some(kit) = self.popup_target_kit(opened_from) {
-                    self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
+                let Some(kit) = self.popup_target_kit(opened_from) else {
+                    return true;
+                };
+                let Some(doc) = self.model.kits[kit].parsed_tags.get(&tag_key) else {
+                    self.model.status = format!("{label}: the tag is no longer open; nothing was written.");
+                    return true;
+                };
+                // The popup's path has element indices in it. Once the tag's
+                // blocks change shape it can point at a different element: a
+                // color for the first parameter, written after that parameter
+                // was deleted, landed in the next one and reported success.
+                if opened_at.is_some_and(|stamp| stamp != doc.layout_stamp()) {
+                    self.model.status = format!(
+                        "{label}: the tag's blocks changed while the editor was open, so nothing was written. Open it again."
+                    );
+                    return true;
                 }
+                self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
             }
             EditorCommand::PickTagReference {
                 kit,
@@ -259,6 +290,7 @@ impl Baboon {
                 }
             }
         }
+        true
     }
 
     fn apply_picked_tag_reference(&mut self, kit: KitId, tag_key: &str, field_path: &str, input: String) {

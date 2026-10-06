@@ -760,6 +760,7 @@ impl eframe::App for Baboon {
         // second would otherwise be lost.
         self.persist_prefs_if_changed();
         self.window_state.persist_now();
+        self.save_keyword_sidecars();
         self.persist_session_on_exit();
     }
 }
@@ -793,6 +794,7 @@ impl Baboon {
         // Raised by the previous frame, whose UI has since committed any edit
         // that was still focused, so the action sees it.
         self.run_deferred_file_action(ctx);
+        self.save_keyword_sidecars();
         if self.dialogs.get::<FirstRunWizardState>().is_none() {
             // Defers the close, so the UI commits a focused edit before the
             // next frame decides whether there is anything to save.
@@ -1822,6 +1824,10 @@ mod tests {
     // - `BABOON_PERF_PPP`     pixels per point (default 1.0; 2.0 for Retina)
     // - `BABOON_PERF_CSV`     append one CSV row per scenario to this file
     // - `BABOON_PERF_LABEL`   the CSV's label column, e.g. `before` / `after`
+    // - `BABOON_PERF_REAL_TAG` `game|path/in/tags`, e.g.
+    //   `haloreach_mcc|levels/solo/m10/m10.scenario`: also time that tag from
+    //   the kit its game's `BLAM_TEST_*` variable names (tags folder),
+    //   collapsed, expanded and scrolling; skipped when unset
     //
     // Surviving a restructure: scenarios only describe *what is on screen*
     // through the [`fixture`] module below, which is the one place that knows
@@ -1913,6 +1919,9 @@ mod tests {
         pub(super) painted_rects: Vec<(String, egui::Rect)>,
         /// What the last frame asked the platform to do.
         pub(super) commands: Vec<egui::OutputCommand>,
+        /// How long the last frame asked egui to wait before the next one;
+        /// `Duration::MAX` when it asked for none.
+        pub(super) repaint_delay: Duration,
     }
 
     impl Harness {
@@ -1945,6 +1954,7 @@ mod tests {
                 painted: Vec::new(),
                 painted_rects: Vec::new(),
                 commands: Vec::new(),
+                repaint_delay: Duration::MAX,
             }
         }
 
@@ -1988,6 +1998,7 @@ mod tests {
                 .collect();
             self.painted = self.painted_rects.iter().map(|(text, _)| text.clone()).collect();
             self.commands = output.platform_output.commands;
+            self.repaint_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             FrameSample {
                 run,
                 tessellate,
@@ -2458,6 +2469,89 @@ mod tests {
         h.idle(3);
     }
 
+    /// The real tag `BABOON_PERF_REAL_TAG` names, as `game|path/in/tags`
+    /// (`haloreach_mcc|levels/solo/m10/m10.scenario`), from the kit its game's
+    /// `BLAM_TEST_*` variable points at.
+    const REAL_TAG: &str = "BABOON_PERF_REAL_TAG";
+
+    /// Load the [`REAL_TAG`] kit and open the tag in it, settled, its
+    /// sections collapsed.
+    fn setup_real_tag(h: &mut Harness) {
+        let spec = std::env::var(REAL_TAG).unwrap_or_else(|_| panic!("{REAL_TAG} is not set"));
+        let (game_id, rel) = spec
+            .split_once('|')
+            .unwrap_or_else(|| panic!("{REAL_TAG} should be game|path, not {spec:?}"));
+        let game = GameId::from_id(game_id).unwrap_or_else(|| panic!("no game {game_id:?}"));
+        let root = PathBuf::from(crate::core::test_kits::tag_path(game_id, ""));
+        let names = TagNameIndex::load_game(&locate_definitions_root(), game).unwrap();
+        let entries = crate::core::source::scan_folder_subtree_entries(
+            &root,
+            std::path::Path::new(""),
+            &names,
+        )
+        .unwrap();
+        let key = entries
+            .iter()
+            .find(|entry| entry.display_path.replace('\\', "/") == rel)
+            .unwrap_or_else(|| panic!("{rel} is not in {}", root.display()))
+            .key
+            .clone();
+        h.app.install_loaded_source(LoadedSourceData {
+            label: "perf".to_owned(),
+            source: TagSource::LooseFolder {
+                root,
+                game: Some(game),
+                definitions_root: locate_definitions_root(),
+            },
+            names,
+            game: Some(game),
+            tree: crate::core::source::build_tree(&entries),
+            group_tree: crate::core::source::build_group_tree(&entries),
+            all_entries: entries.clone(),
+            entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: true,
+            chosen_kit_layout: None,
+        });
+        // The periodic index refresh would rescan the kit mid-measurement.
+        let active = h.app.model.active;
+        h.app.model.kits[active].index_jobs.next_refresh_at = f64::INFINITY;
+        h.idle(3);
+        let ctx = h.ctx.clone();
+        h.app.select_entry(key.clone(), ctx);
+        let started = Instant::now();
+        while !h.app.model.kits[h.app.model.active]
+            .parsed_tags
+            .contains_key(&key)
+        {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(5));
+            assert!(
+                started.elapsed().as_secs() < 120,
+                "{rel} took over 2 minutes to open"
+            );
+        }
+        h.idle(5);
+    }
+
+    /// [`setup_real_tag`] with every section expanded.
+    fn setup_real_tag_expanded(h: &mut Harness) {
+        setup_real_tag(h);
+        let key = h.app.model.kits[h.app.model.active].open_tabs[0].clone();
+        fixture::expand_all(&mut h.app, &key);
+        h.idle(5);
+    }
+
+    /// The real tag's pane drew its fields.
+    fn real_tag_shown(h: &Harness, _: &Measured) -> Result<(), String> {
+        let open = h.app.model.kits[h.app.model.active].open_tabs.len();
+        (open == 1 && h.painted.len() > 20)
+            .then_some(())
+            .ok_or_else(|| format!("{open} tabs open, {} texts painted", h.painted.len()))
+    }
+
     /// Every one of the 400 subfolders opened (by revealing a tag in each, the
     /// way "Reveal in browser" does), then the middle tag revealed: 60,440 rows
     /// expanded, the viewport in the middle of them.
@@ -2500,6 +2594,27 @@ mod tests {
 
     fn scenarios() -> Vec<Scenario> {
         vec![
+            Scenario {
+                name: "real_tag_collapsed",
+                what: "the BABOON_PERF_REAL_TAG tag open, sections collapsed, no input",
+                setup: setup_real_tag,
+                step: no_events,
+                check: real_tag_shown,
+            },
+            Scenario {
+                name: "real_tag_expanded",
+                what: "the BABOON_PERF_REAL_TAG tag open, every section expanded, no input",
+                setup: setup_real_tag_expanded,
+                step: no_events,
+                check: real_tag_shown,
+            },
+            Scenario {
+                name: "real_tag_expanded_wheel",
+                what: "the BABOON_PERF_REAL_TAG tag expanded, mouse wheel over the fields every frame",
+                setup: setup_real_tag_expanded,
+                step: |_, index| vec![pointer_at(PANE_POINT), wheel(ping_pong_wheel(index))],
+                check: real_tag_shown,
+            },
             Scenario {
                 name: "idle_welcome",
                 what: "no kit loaded; the welcome screen",
@@ -2804,6 +2919,10 @@ mod tests {
                     .iter()
                     .any(|part| scenario.name.contains(part.as_str()))
             {
+                continue;
+            }
+            if scenario.name.starts_with("real_tag") && std::env::var_os(REAL_TAG).is_none() {
+                eprintln!("[perf] {} skipped: {REAL_TAG} is not set", scenario.name);
                 continue;
             }
             eprintln!("[perf] {} — {}", scenario.name, scenario.what);
@@ -3696,6 +3815,7 @@ mod tests {
                     h.app.dialogs.open(ColorPopupWindow {
                         popup: Some(MaterialColorPopup::new("Smoke Tint", 1.0, 0.5, 0.25, 1.0)),
                         kit,
+                        opened_at: None,
                     });
                 },
                 &["Color Picker"],
@@ -3717,6 +3837,7 @@ mod tests {
                             true,
                         )),
                         kit,
+                        opened_at: None,
                     });
                 },
                 &["Smoke Function"],
@@ -3728,6 +3849,7 @@ mod tests {
                 memory_kit,
                 |h| {
                     h.app.dialogs.open(SaveChangesPrompt {
+                        kit: h.app.model.kits[0].id,
                         can_stash: false,
                         dirty_tags: vec![DirtyTagEntry {
                             path: "objects/smoke.biped".to_owned(),
@@ -3795,6 +3917,7 @@ mod tests {
                 },
                 |h| {
                     h.app.dialogs.open(BlockConfirm {
+                        opened_at: None,
                         kit: Some(active_id(h)),
                         tag_key: fixture::entry_key(SCENARIO),
                         path: "skies".to_owned(),
@@ -4237,6 +4360,7 @@ mod tests {
                 memory_kit,
                 |h| {
                     h.app.dialogs.open(ExtractTargetPrompt {
+                        kit: h.app.model.kits[0].id,
                         key: biped_key(),
                         display_path: "objects/smoke.render_model".to_owned(),
                         kind: ExtractKind::Geometry,
@@ -4404,6 +4528,68 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
         (h.painted, h.app.model.status)
+    }
+
+    /// Frames run in `secs` of egui time when the app gets one only when it
+    /// asks: right away, or after the delay it asked for.
+    fn frames_while_idle(h: &mut Harness, secs: f64) -> usize {
+        let end = h.time + secs;
+        let mut frames = 0;
+        while h.repaint_delay != Duration::MAX {
+            let step = h.repaint_delay.as_secs_f64().max(1.0 / 60.0);
+            if h.time + step > end {
+                break;
+            }
+            // `frame` moves the clock on by a 60 Hz frame itself.
+            h.time += step - 1.0 / 60.0;
+            h.frame(Vec::new());
+            frames += 1;
+        }
+        frames
+    }
+
+    /// Every surface the smoke cases open goes quiet once nothing happens.
+    /// Baboon used to redraw at the display's rate for as long as a tag was
+    /// open, about 12% of a CPU for a weapon tag: a command the panes send
+    /// every frame asked for the next frame. A blinking text cursor or an
+    /// animation finishing may still wake it; redrawing every frame may not.
+    #[test]
+    fn every_surface_goes_quiet_when_nothing_happens() {
+        let mut counts = Vec::new();
+        for case in cases() {
+            let mut h = Harness::new();
+            (case.base)(&mut h);
+            (case.open)(&mut h);
+            for _ in 0..FRAMES {
+                h.frame(Vec::new());
+            }
+            let frames = frames_while_idle(&mut h, 10.0);
+            for dir in TEMP_DIRS.with(|dirs| std::mem::take(&mut *dirs.borrow_mut())) {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            counts.push((case.name, frames));
+        }
+        // Redrawing every frame is 600 frames in 10 s. The busiest surface
+        // that is merely waiting wakes under 100 times: a background check
+        // every 0.6 s, a focused box's cursor blinking.
+        const BUDGET: usize = 200;
+        // Shows a spinner while a background job builds the poke plan, which
+        // in the app ends when the job does; the case has no job to end it.
+        const SPINNING: &[&str] = &["poke_scanning"];
+        let busy: Vec<_> = counts
+            .iter()
+            .filter(|(name, frames)| *frames > BUDGET && !SPINNING.contains(name))
+            .collect();
+        assert!(
+            busy.is_empty(),
+            "redrawing with nothing to do (frames in 10 s): {busy:?}"
+        );
+        assert!(
+            counts
+                .iter()
+                .any(|(name, frames)| SPINNING.contains(name) && *frames > BUDGET),
+            "the spinner case no longer spins, so the test can't tell busy from quiet"
+        );
     }
 
     fn missing(painted: &[String], expect: &[&'static str]) -> Vec<&'static str> {
@@ -5005,8 +5191,8 @@ mod tests {
         assert_eq!(draft.error.as_deref(), Some("Enter an editing kit name"));
     }
 
-    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click closes
-    // a tab, and the tab menu's closes reach the right tabs. Each goes through a
+    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click
+    // leaves a tab alone, and the tab menu's closes reach the right tabs. Each goes through a
     // command sent while the tiles draw, so these drive whole frames.
 
     const PATHS: [&str; 3] = [
@@ -5090,13 +5276,14 @@ mod tests {
         );
     }
 
-    /// A middle-click on a tab closes it, and only it.
+    /// A middle-click on a tab leaves it open: tabs close only from their
+    /// close button or menu.
     #[test]
-    fn a_middle_click_closes_a_tab() {
+    fn a_middle_click_leaves_a_tab_open() {
         let (mut h, keys) = three_tabs();
         assert_eq!(open_tabs(&h), keys);
         press(&mut h, "tag_000.biped", egui::PointerButton::Middle);
-        assert_eq!(open_tabs(&h), keys[1..]);
+        assert_eq!(open_tabs(&h), keys);
     }
 
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
@@ -5143,5 +5330,360 @@ mod tests {
         };
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
+    }
+
+    /// An open tag that nobody touches does not keep the window drawing. The
+    /// pane and the tile tree send a command every frame; applying one that
+    /// changed nothing used to ask for the next frame, which sent them again,
+    /// keeping a core busy for as long as any tag was open.
+    #[test]
+    fn an_open_tag_left_alone_lets_the_window_sleep() {
+        let kit = LooseKit::new("idle-repaint", "haloce_mcc");
+        kit.write_classic_ce("weapons/rifle", "weapon");
+        let mut app = app();
+        kit.install(&mut app);
+        let key = kit.open(&mut app, "weapons/rifle.weapon");
+        assert!(
+            app.views[app.model.kits[0].id].tag_tree.tiles.iter().any(
+                |(_, tile)| matches!(tile, egui_tiles::Tile::Pane(pane) if *pane == key)
+            ),
+            "the tag is laid out as a pane, so its frames send the commands"
+        );
+
+        let idle = repaint_delay_after(&mut app, Baboon::run_frame, |_| {});
+        assert!(
+            idle > Duration::from_millis(100),
+            "an idle open tag repaints every {idle:?}"
+        );
+
+        // The same measurement sees a frame that did change something.
+        let changed = repaint_delay_after(&mut app, Baboon::run_frame, |app| {
+            app.commands.send(crate::app::context::Command::Status("Changed".to_owned()));
+        });
+        assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
+    }
+
+    /// Rows out of view are not built, and what shows is what drawing every
+    /// row shows, scrolled anywhere. Painted text alone can't tell: egui
+    /// skips painting text out of view by itself, so rows built are counted.
+    #[test]
+    fn rows_out_of_view_are_skipped_and_nothing_in_view_changes() {
+        use crate::app::editor::{FIELD_ROWS_BUILT, ROW_CULLING_OFF};
+        let kit = LooseKit::new("row-culling", "haloce_mcc");
+        kit.write_classic_ce("weapons/b", "weapon");
+        let run = |culling: bool| {
+            ROW_CULLING_OFF.with(|off| off.set(!culling));
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            kit.open(&mut h.app, "weapons/b.weapon");
+            settle(&mut h, 8);
+            let mut views = Vec::new();
+            let mut built = Vec::new();
+            for _ in 0..6 {
+                FIELD_ROWS_BUILT.with(|rows| rows.set(0));
+                h.frame(vec![pointer_at(PANE_POINT), wheel(-600.0)]);
+                settle(&mut h, 2);
+                FIELD_ROWS_BUILT.with(|rows| rows.set(0));
+                h.frame(Vec::new());
+                built.push(FIELD_ROWS_BUILT.with(std::cell::Cell::get));
+                // What the field area shows: below the pane's tabs and header,
+                // above its bottom edge. Rows scrolled above or below it are
+                // laid out without culling but clipped, so not seen.
+                let mut shown: Vec<String> = h
+                    .painted_rects
+                    .iter()
+                    .filter(|(_, rect)| rect.top() > 200.0 && rect.bottom() < SCREEN.y * 0.8)
+                    .map(|(text, rect)| format!("{text}@{:.0},{:.0}", rect.left(), rect.top()))
+                    .collect();
+                shown.sort();
+                views.push(shown);
+            }
+            ROW_CULLING_OFF.with(|off| off.set(false));
+            (views, built)
+        };
+        let (culled, culled_built) = run(true);
+        let (all, all_built) = run(false);
+        assert_eq!(culled, all, "the same rows show at every scroll position");
+        for (culled, all) in culled_built.iter().zip(&all_built) {
+            assert!(culled * 2 < *all, "built {culled} rows of {all}");
+        }
+    }
+
+    /// A pasted reference is written `path.extension`, and in a Halo CE kit
+    /// `.shader` is `shdr`: the paste must not take another game's `shader`.
+    #[test]
+    fn a_pasted_reference_takes_its_group_from_the_kits_game() {
+        let kit = LooseKit::new("tsv-reference", "haloce_mcc");
+        kit.write_classic_ce("weapons/b", "weapon");
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "weapons/b.weapon");
+        settle(&mut h, 2);
+        let active = h.app.model.active;
+        let block = "item/object/attachments";
+        crate::core::document::apply::add_block_element(
+            &mut h.app.model.kits[active]
+                .parsed_tags
+                .get_mut(&key)
+                .unwrap()
+                .tag,
+            block,
+        )
+        .unwrap();
+        h.app.dialogs.open(TsvPasteState {
+            kit: h.app.model.kits[active].id,
+            tag_key: key.clone(),
+            block_path: block.to_owned(),
+            block_label: "attachments".to_owned(),
+            element_count: 1,
+            text: "type\neffects\\glow.shader\n".to_owned(),
+            status: None,
+        });
+        h.app.apply_tsv_paste();
+        let doc = &h.app.model.kits[active].parsed_tags[&key];
+        let value = doc
+            .tag
+            .root()
+            .field_path(&format!("{block}[0]/type"))
+            .and_then(|field| field.value());
+        let Some(TagFieldData::TagReference(reference)) = value else {
+            panic!("no reference at {block}[0]/type: {value:?}");
+        };
+        assert_eq!(
+            reference.group_tag_and_name,
+            Some((u32::from_be_bytes(*b"shdr"), r"effects\glow".to_owned()))
+        );
+    }
+
+    /// A Halo CE kit with two weapons open, "b" the tab shown, settled.
+    struct TypedEdit {
+        h: Harness,
+        kit: LooseKit,
+        key: String,
+    }
+
+    /// Where a field row's text box sits: right of its label.
+    fn field_box(h: &Harness, label: &str) -> egui::Pos2 {
+        let rect = h
+            .painted_rects
+            .iter()
+            .find(|(text, _)| text == label)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{label:?} is not painted"));
+        egui::pos2(rect.left() + 310.0, rect.center().y)
+    }
+
+    fn painted_at(h: &Harness, label: &str) -> egui::Pos2 {
+        h.painted_rects
+            .iter()
+            .find(|(text, _)| text == label)
+            .map(|(_, rect)| rect.center())
+            .unwrap_or_else(|| panic!("{label:?} is not painted"))
+    }
+
+    /// Slide onto `target` over three frames, then press and release there.
+    fn click_point(h: &mut Harness, target: egui::Pos2) {
+        let from = target - egui::vec2(30.0, 30.0);
+        for step in 1..=3 {
+            h.frame(vec![egui::Event::PointerMoved(from + (target - from) * step as f32 / 3.0)]);
+        }
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+    }
+
+    fn press_key(h: &mut Harness, key: egui::Key, modifiers: egui::Modifiers) {
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers }]);
+        }
+    }
+
+    fn settle(h: &mut Harness, frames: usize) {
+        for _ in 0..frames {
+            h.frame(Vec::new());
+        }
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers { ctrl: true, command: true, ..egui::Modifiers::NONE };
+    const RADIUS: &str = "item/object/bounding radius#2";
+
+    impl TypedEdit {
+        /// Type `5` into "bounding radius" and leave the box focused.
+        fn new(name: &str) -> Self {
+            let kit = LooseKit::new(name, "haloce_mcc");
+            kit.write_classic_ce("weapons/a", "weapon");
+            kit.write_classic_ce("weapons/b", "weapon");
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            kit.open(&mut h.app, "weapons/a.weapon");
+            let key = kit.open(&mut h.app, "weapons/b.weapon");
+            settle(&mut h, 8);
+            let at = field_box(&h, "bounding radius");
+            click_point(&mut h, at);
+            settle(&mut h, 1);
+            h.frame(vec![egui::Event::Text("5".to_owned())]);
+            settle(&mut h, 1);
+            let edit = Self { h, kit, key };
+            assert_eq!(edit.radius(), Some(0.0), "typing alone commits nothing");
+            edit
+        }
+
+        fn doc(&self) -> Option<&crate::core::document::TagDocument> {
+            self.h.app.model.kits[0].parsed_tags.get(&self.key)
+        }
+
+        fn radius(&self) -> Option<f32> {
+            real_of(&self.doc()?.tag, RADIUS)
+        }
+
+        fn dirty(&self) -> bool {
+            self.doc().is_some_and(|doc| doc.dirty.is_set())
+        }
+
+        /// The radius the file on disk holds.
+        fn saved_radius(&self) -> Option<f32> {
+            let bytes = std::fs::read(self.kit.root.join("weapons/b.weapon")).unwrap();
+            let tag = crate::core::source::read_tag_from_bytes(
+                &bytes,
+                GameId::from_id("haloce_mcc"),
+                Some(&locate_definitions_root()),
+                group_tag("haloce_mcc", "weapon"),
+            )
+            .unwrap();
+            real_of(&tag, RADIUS)
+        }
+    }
+
+    /// Ctrl+S while still typing saves what was typed. The shortcut used to
+    /// give up the field's focus only after the panes had drawn, and the save
+    /// ran before the next draw, so the file got the old value and the edit
+    /// landed a frame later, leaving the tag modified.
+    #[test]
+    fn ctrl_s_while_typing_saves_the_typed_value() {
+        let mut edit = TypedEdit::new("edit-ctrl-s");
+        press_key(&mut edit.h, egui::Key::S, CTRL);
+        settle(&mut edit.h, 4);
+        assert_eq!(edit.saved_radius(), Some(5.0), "the file holds the typed value");
+        assert!(!edit.dirty(), "and the tag is saved");
+    }
+
+    /// Ctrl+W while still typing asks to save the typed value rather than
+    /// closing the tab and dropping it.
+    #[test]
+    fn ctrl_w_while_typing_asks_to_save_the_typed_value() {
+        let mut edit = TypedEdit::new("edit-ctrl-w");
+        press_key(&mut edit.h, egui::Key::W, CTRL);
+        settle(&mut edit.h, 4);
+        assert!(edit.h.app.dialogs.get::<SaveChangesPrompt>().is_some(), "the close asks first");
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// Collapsing the section of a field being typed into commits it. The
+    /// box stops being drawn on that click, so it never saw itself lose focus,
+    /// and kept the typed text to itself while the tag stayed unchanged.
+    #[test]
+    fn collapsing_the_section_of_a_typed_field_commits_it() {
+        let mut edit = TypedEdit::new("edit-collapse");
+        let header = painted_at(&edit.h, "OBJECT_BLOCK_STRUCT");
+        click_point(&mut edit.h, header);
+        settle(&mut edit.h, 3);
+        assert!(!edit.h.painted.iter().any(|text| text == "bounding radius"), "the section is collapsed");
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// The same for switching the pane to its Model Preview sub-tab.
+    #[test]
+    fn switching_sub_tab_commits_a_typed_field() {
+        let mut edit = TypedEdit::new("edit-sub-tab");
+        let tab = painted_at(&edit.h, "Model Preview");
+        click_point(&mut edit.h, tab);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(5.0));
+        assert!(edit.dirty());
+    }
+
+    /// Closing the window while it is minimized asks about a field still
+    /// being typed in. eframe runs no UI pass for a minimized window, so the
+    /// field never committed, the tags looked saved, and the app quit.
+    #[test]
+    fn closing_while_minimized_asks_about_a_typed_field() {
+        let mut edit = TypedEdit::new("edit-minimized");
+        let mut commands = Vec::new();
+        for (frame, close) in [true, false, false].into_iter().enumerate() {
+            let mut input = screen(Vec::new(), 500.0 + frame as f64 / 60.0);
+            let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            viewport.minimized = Some(true);
+            if close {
+                viewport.events.push(egui::ViewportEvent::Close);
+            }
+            let app = &mut edit.h.app;
+            let output = edit.h.ctx.run_logic(&input, |ctx| app.run_logic(ctx));
+            if let Some(sent) = output.viewport_commands.get(&egui::ViewportId::ROOT) {
+                commands.extend(sent.iter().cloned());
+            }
+        }
+        assert!(!commands.contains(&egui::ViewportCommand::Close), "the app quit: {commands:?}");
+        assert!(edit.h.app.dialogs.get::<SaveChangesPrompt>().is_some(), "it asks first");
+        assert_eq!(edit.radius(), Some(5.0));
+    }
+
+    /// Escape in a field puts the tag's value back and commits nothing.
+    #[test]
+    fn escape_restores_the_original_value() {
+        let mut edit = TypedEdit::new("edit-escape");
+        press_key(&mut edit.h, egui::Key::Escape, egui::Modifiers::NONE);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(0.0));
+        assert!(!edit.dirty());
+        let row = painted_at(&edit.h, "bounding radius");
+        assert!(
+            !edit.h.painted_rects.iter().any(|(text, rect)| text == "05" && (rect.center().y - row.y).abs() < 6.0),
+            "the box shows the tag's value again"
+        );
+        // Enter still commits.
+        let at = field_box(&edit.h, "bounding radius");
+        click_point(&mut edit.h, at);
+        edit.h.frame(vec![egui::Event::Text("7".to_owned())]);
+        press_key(&mut edit.h, egui::Key::Enter, egui::Modifiers::NONE);
+        settle(&mut edit.h, 3);
+        assert_eq!(edit.radius(), Some(7.0), "the box held 0 again, so it reads 07");
+    }
+
+    /// An undo shows through a multi-part row after its edit committed. The
+    /// row's boxes kept the typed text (`05`, shown back as `5`), so the undo
+    /// was hidden and clicking in and out of the box applied it again.
+    #[test]
+    fn an_undo_shows_through_a_committed_component_row() {
+        let mut edit = TypedEdit::new("edit-components");
+        press_key(&mut edit.h, egui::Key::Escape, egui::Modifiers::NONE);
+        settle(&mut edit.h, 2);
+        // The first component's box, just right of where a one-box row's
+        // box starts.
+        let x_box = field_box(&edit.h, "bounding offset") + egui::vec2(10.0, 0.0);
+        click_point(&mut edit.h, x_box);
+        edit.h.frame(vec![egui::Event::Text("5".to_owned())]);
+        press_key(&mut edit.h, egui::Key::Enter, egui::Modifiers::NONE);
+        settle(&mut edit.h, 2);
+        let offset = |edit: &TypedEdit| {
+            edit.doc().and_then(|doc| doc.tag.root().field_path("item/object/bounding offset#2")?.value()).map(|value| format!("{value:?}"))
+        };
+        let edited = offset(&edit);
+        assert!(edit.dirty(), "the component edit committed: {edited:?}");
+        press_key(&mut edit.h, egui::Key::Z, CTRL);
+        settle(&mut edit.h, 2);
+        let undone = offset(&edit);
+        assert_ne!(undone, edited, "the undo reverted it");
+        // In and out of the box without typing re-applies nothing.
+        click_point(&mut edit.h, x_box);
+        click_point(&mut edit.h, egui::pos2(1400.0, 900.0));
+        settle(&mut edit.h, 2);
+        assert_eq!(offset(&edit), undone, "the undo stays undone");
     }
 }

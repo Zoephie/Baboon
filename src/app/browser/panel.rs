@@ -368,6 +368,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                     pane_key,
                     &pane,
                     &pane.filter_cache.entries,
+                    pane.filter_cache.signature(),
                     bitmap_library,
                     model_library,
                 );
@@ -479,6 +480,7 @@ fn draw_folder_pane_tree(
     load_requests: &mut Vec<PathBuf>,
     action: &mut Option<BrowserAction>,
 ) {
+    let game = source.game;
     let filter = pane.filter.trim().to_owned();
     let groups_mode = pane.mode == BrowserMode::Groups;
     let needs_complete_index = reads.is_loose && (groups_mode || !filter.is_empty());
@@ -513,6 +515,7 @@ fn draw_folder_pane_tree(
                     pane.sort,
                     reads.folders_before_tags,
                     Some(reads.favorite_keys),
+                    game,
                 );
                 if action.is_none() {
                     *action = tree_action;
@@ -589,6 +592,7 @@ fn draw_folder_pane_tree(
                 !groups_mode && reads.folders_before_tags,
                 reads.is_loose.then_some(reads.favorite_keys),
                 reads.is_container,
+                game,
             );
             if action.is_none() {
                 *action = tree_action;
@@ -642,6 +646,10 @@ fn draw_kit_browser_inner(
     blender_icon: Option<&egui::TextureHandle>,
     sound_language: Option<&str>,
 ) {
+    let game = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .and_then(|source| source.game);
     // This kit's own source, not `source()` — that reads the *active* kit,
     // so in a split every browser drew the focused kit's banner and the
     // header flickered between games as the cursor moved between panes.
@@ -856,6 +864,7 @@ fn draw_kit_browser_inner(
                     &favorite_keys,
                     view.browser.search_scope,
                     &search_keywords,
+                    game,
                 );
                 if favorites_visible {
                     ui.add_space(8.0);
@@ -965,6 +974,7 @@ fn draw_kit_browser_inner(
                                 !groups_mode && folders_before_tags,
                                 favorite_context,
                                 is_container_source,
+                                game,
                             )
                         }
                     }
@@ -985,6 +995,7 @@ fn draw_kit_browser_inner(
                                     sort,
                                     folders_before_tags,
                                     favorite_context,
+                                    game,
                                 )
                             } else {
                                 draw_tree(
@@ -1002,6 +1013,7 @@ fn draw_kit_browser_inner(
                                     folders_before_tags,
                                     None,
                                     is_container_source,
+                                    game,
                                 )
                             }
                         }
@@ -1034,6 +1046,7 @@ fn draw_kit_browser_inner(
                                     false,
                                     favorite_context,
                                     false,
+                                    game,
                                 )
                             }
                         }

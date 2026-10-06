@@ -83,6 +83,27 @@ pub(crate) fn apply_deferred_ops(
     ops: DeferredOps,
     label: &str,
 ) -> AppliedDeferredOps {
+    let mut ops = ops;
+    // An edit that sets a field to the value it already holds changes
+    // nothing: taken as an edit, it marked the tag modified, took an undo step
+    // and cleared the redo history. It still reports as applied, so the box
+    // it came from settles.
+    let unchanged: Vec<FieldEditOutcome> = ops
+        .pending
+        .extract_if(.., |edit| edit_changes_nothing(&doc.tag, edit))
+        .map(|edit| FieldEditOutcome {
+            path: edit.path,
+            input: edit.input,
+            result: Ok(()),
+        })
+        .collect();
+    if ops.is_empty() && !unchanged.is_empty() {
+        return AppliedDeferredOps {
+            status: None,
+            outcomes: unchanged,
+            model_variants_changed: false,
+        };
+    }
     if ops.is_empty() {
         doc.journal.end_edit_window();
         return AppliedDeferredOps {
@@ -92,6 +113,14 @@ pub(crate) fn apply_deferred_ops(
         };
     }
     doc.journal.begin_edit(&doc.tag, label);
+    if !(ops.block_ops.is_empty()
+        && ops.shader_ops.is_empty()
+        && ops.shader_param_ops.is_empty()
+        && ops.h2_shader_param_ops.is_empty()
+        && ops.model_variant_ops.is_empty())
+    {
+        doc.note_layout_change();
+    }
     let DeferredOps {
         pending,
         block_ops,
@@ -118,11 +147,27 @@ pub(crate) fn apply_deferred_ops(
     let model_variants_changed = variant_status.is_some();
     keep(variant_status);
     keep(apply_function_data_ops(tag, function_data_ops, dirty));
+    let mut outcomes = applied.outcomes;
+    outcomes.extend(unchanged);
     AppliedDeferredOps {
         status,
-        outcomes: applied.outcomes,
+        outcomes,
         model_variants_changed,
     }
+}
+
+/// Whether `edit` would set its field to the value the field already holds.
+/// Compared through the values' `Debug` forms, which are exact: `TagFieldData`
+/// has no equality of its own.
+fn edit_changes_nothing(tag: &TagFile, edit: &PendingFieldEdit) -> bool {
+    let root = tag.root();
+    let Some(field) = root.field_path(&edit.path) else {
+        return false;
+    };
+    let (Some(current), Ok(parsed)) = (field.value(), parse_gui_field_value(&field, &edit.input)) else {
+        return false;
+    };
+    format!("{current:?}") == format!("{parsed:?}")
 }
 
 pub(crate) fn apply_pending_edits(

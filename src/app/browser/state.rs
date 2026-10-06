@@ -405,6 +405,9 @@ pub(in crate::app) enum ExtractKind {
 /// The window that asks which game's tools an extraction is for, before the
 /// folder is picked: the JMS, ASS and JMA versions follow it.
 pub(in crate::app) struct ExtractTargetPrompt {
+    /// The workspace the tag is in; the extraction runs there, whichever is
+    /// active when the window is confirmed.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
     pub(in crate::app) display_path: String,
     pub(in crate::app) kind: ExtractKind,
@@ -449,7 +452,7 @@ pub(in crate::app) enum BrowserMode {
 }
 
 /// Ordering of tags within a browser folder/group node.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub(in crate::app) enum BrowserSort {
     /// Filesystem / natural order (as built).
     #[default]
@@ -508,6 +511,12 @@ impl Drop for FilterCache {
     }
 }
 impl FilterCache {
+    /// Names the result set `entries` holds once a search has answered: it
+    /// changes with the scope, the query and the source.
+    pub(in crate::app) fn signature(&self) -> Option<u64> {
+        self.scoped_signature
+    }
+
     pub(in crate::app) fn is_searching(&self) -> bool {
         self.pending_since.is_some() || self.receiver.is_some()
     }

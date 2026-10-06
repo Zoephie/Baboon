@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::shell::actions::pressed_shortcuts;
+use crate::app::editor::DraftFlush;
 use crate::app::shell::frame::terminal_line_is_strong;
 use crate::app::shell::frame::terminal_line_color;
 use crate::app::kits::terminal::open_terminal_log;
@@ -47,18 +48,6 @@ impl Baboon {
                 self.draw_workspace_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
-        // Every kit, not just the active one: a background kit's sidecar can be
-        // dirty from edits made before the user switched away.
-        let mut keyword_notice = None;
-        for kit in &mut self.model.kits {
-            kit.keywords.save_if_dirty();
-            if let Some(notice) = kit.keywords.take_notice() {
-                keyword_notice = Some(notice);
-            }
-        }
-        if let Some(notice) = keyword_notice {
-            self.model.status = notice;
-        }
         // The draws' commands land first: some of them queue the very requests
         // processed next (the tag pane sends its sound player's plays this way),
         // and the next frame's draws have to see those requests settled, or
@@ -66,6 +55,13 @@ impl Baboon {
         self.apply_commands(ctx);
         self.process_frame_requests(ctx);
         self.apply_commands(ctx);
+        // A field typed into and then not drawn on this pass -- its section
+        // collapsed, its pane switched to another sub-tab or block element,
+        // its tab closed or hidden -- never sees its box lose focus, so it
+        // commits here instead of keeping the edit to itself.
+        if self.commit_drafts(DraftFlush::NotDrawnOn(ctx.cumulative_pass_nr())) {
+            ctx.request_repaint();
+        }
     }
 
     /// The kit a confirmed popup applies to: the one it was opened from, or
@@ -173,6 +169,13 @@ impl Baboon {
     }
 
     pub(in crate::app) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
+        // A save, poke or close reads the tags as they stand, so every field
+        // still holding a typed change commits first. Usually the pass that
+        // queued the action already committed it; but a window that is
+        // minimized runs no UI pass at all, and the close is decided here.
+        if self.editor.deferred_file_action.is_some() {
+            self.commit_drafts(DraftFlush::All);
+        }
         match self.editor.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
                 if self.model.prefs.enable_chimp
@@ -214,6 +217,25 @@ impl Baboon {
                 }
             }
             None => {}
+        }
+    }
+
+    /// Write every kit's keyword sidecar that has unsaved changes. Every kit,
+    /// not just the active one: a background kit's sidecar can be dirty from
+    /// edits made before the user switched away. Run with a frame's logic, so
+    /// it also happens while the window is minimized, and on exit; it used to
+    /// run only in a UI pass, and keywords edited just before minimizing or
+    /// quitting were never written.
+    pub(in crate::app) fn save_keyword_sidecars(&mut self) {
+        let mut keyword_notice = None;
+        for kit in &mut self.model.kits {
+            kit.keywords.save_if_dirty();
+            if let Some(notice) = kit.keywords.take_notice() {
+                keyword_notice = Some(notice);
+            }
+        }
+        if let Some(notice) = keyword_notice {
+            self.model.status = notice;
         }
     }
 
@@ -260,8 +282,26 @@ impl Baboon {
             });
             return;
         }
-        for action in pressed_shortcuts(ctx) {
-            self.commands.send(action);
+        let shortcuts = pressed_shortcuts(ctx);
+        // Save, close and poke act on the tags as they stand. Giving up the
+        // focused field now, before any pane draws, lets it see the loss and
+        // commit on this pass; given up when the action is applied, after
+        // the draw, the field committed a frame after the save had run.
+        if shortcuts.iter().any(|action| matches!(action, AppAction::Defer(_))) {
+            ctx.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
+        }
+        for action in shortcuts {
+            // Opened now, before Find refreshes and draws below; applied with
+            // the frame's commands, it opened a frame late.
+            if matches!(action, AppAction::OpenFind) {
+                self.open_find();
+            } else {
+                self.commands.send(action);
+            }
         }
         self.refresh_find(ctx);
         let dropped_paths = ctx.input(|input| {
@@ -1079,7 +1119,8 @@ pub(in crate::app) mod tests {
                 physical_key: None,
                 pressed: true,
                 repeat: false,
-                modifiers: egui::Modifiers::CTRL,
+                // As Windows reports Ctrl: `command` set with it.
+                modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
             }]),
             |_| {
                 app.prepare_root_frame(&ctx);
@@ -1122,6 +1163,7 @@ pub(in crate::app) mod tests {
         app.dialogs.open(ColorPopupWindow {
             popup: Some(MaterialColorPopup::new("color", 1.0, 0.5, 0.25, 1.0)),
             kit,
+            opened_at: None,
         });
     }
 
@@ -1179,5 +1221,40 @@ pub(in crate::app) mod tests {
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| app.draw_root_ui(ui));
 
         assert!(app.audio.pending.is_empty(), "the request is still waiting for another frame");
+    }
+
+    /// A keyword added just before the window is minimized is written by the
+    /// logic that still runs then; it used to be written only in a UI pass.
+    #[test]
+    fn keywords_are_written_without_a_ui_pass() {
+        let dir = crate::core::test_kits::unique_temp_dir("keywords-logic");
+        let sidecar = dir.join("keywords.json");
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        app.model.kits[0].keywords.load_at(Some(sidecar.clone()));
+        app.model.kits[0].keywords.add("file:a.weapon", "rocket");
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.run_logic(ctx));
+        let written = std::fs::read_to_string(&sidecar).expect("the sidecar was written");
+        assert!(written.contains("rocket"), "{written}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ctrl+F opens Find on the frame the key is pressed, before Find draws.
+    #[test]
+    fn ctrl_f_opens_find_before_it_draws() {
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            input(vec![egui::Event::Key {
+                key: egui::Key::F,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
+            }]),
+            |_| app.prepare_root_frame(&ctx),
+        );
+        assert!(app.search.find.open, "open before the frame's commands are applied");
     }
 }

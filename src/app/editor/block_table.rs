@@ -295,6 +295,7 @@ fn commit_table_document(table: &BlockTableState, doc: &mut TagDocument) -> Resu
     doc.journal.begin_edit(&doc.tag, "Reorganize Block Entries");
     doc.tag = candidate;
     doc.dirty.touch();
+    doc.note_layout_change();
     doc.journal.end_edit_window();
     Ok(true)
 }

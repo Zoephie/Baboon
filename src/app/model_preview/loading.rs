@@ -51,27 +51,27 @@ impl Baboon {
         kit_index: usize,
         key: &str,
         ctx: &egui::Context,
-    ) {
+    ) -> bool {
         let kit = &self.model.kits[kit_index];
         let view = &self.views[kit.id];
         let Some(state) = view.caches.model_previews.get(key) else {
-            return;
+            return false;
         };
         if state.active_tab != ModelTagPanelTab::ModelPreview {
-            return;
+            return false;
         }
         let desired_matches = state.loaded_key.as_deref() == Some(key)
             && state.loaded_high_detail == state.high_detail
             && state.loaded_scenario_selection == state.scenario_bsp_selection;
         if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
-            return;
+            return false;
         }
 
         let Some(entry) = kit.entry_for_key(key).cloned() else {
-            return;
+            return false;
         };
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
-            return;
+            return false;
         };
         // Preserve unsaved model/variant edits. Clean documents are re-read on
         // the worker so a large BSP does not have to serialize on the UI
@@ -156,6 +156,7 @@ impl Baboon {
                 result: Err("Render model preview crashed while parsing this tag.".to_owned()),
             },
         );
+        true
     }
 
     pub(in crate::app) fn handle_model_preview_loaded(

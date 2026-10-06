@@ -10,7 +10,7 @@ default-members = ["."]
 
 [package]
 name = "baboon"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 build = "build.rs"
 default-run = "Baboon"
@@ -36,7 +36,7 @@ atomic-write-file = "0.3"
 # `GameId`, sampler modes by each game's own lists, Halo 2 block headers kept
 # for any block gaining elements, structure BSP limits from the schema, and
 # a warning-free build.
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "d19dcda", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "c7190c4", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 # Named because eframe 0.36's `glow` no longer brings them, as 0.29's did:

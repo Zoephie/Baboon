@@ -853,3 +853,91 @@ fn a_long_animation_is_ticked_every_few_frames() {
     assert!(ticks.len() < 100 && ticks.len() > 10, "{} ticks", ticks.len());
     assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 3.0));
 }
+
+/// A shading mode is picked from inside the View menu. It was a combo box
+/// there, whose list is a popup of its own; egui 0.36 keeps one popup open at
+/// a time, so opening the list closed the menu and nothing could be picked.
+#[test]
+fn a_shading_mode_is_picked_inside_the_view_menu() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::app::foundation_fonts());
+    ctx.set_global_style(crate::app::foundation_style());
+    let tag = TagFile::new(locate_definitions_root().join("halo3_mcc/render_model.json")).unwrap();
+    let data = model_preview_data("test".to_owned(), "test".to_owned(), RenderModelPreview::default(), Vec::new());
+    let mut state = ModelPreviewState::default();
+    let target = ModelRenderMode::ALL
+        .into_iter()
+        .find(|mode| *mode != state.render_mode)
+        .expect("more than one mode");
+    let mut size = 300.0;
+    let mut time = 0.0;
+    type Painted = Vec<(String, egui::Rect)>;
+    let mut frame = |events: Vec<egui::Event>, state: &mut ModelPreviewState| -> Painted {
+        time += 0.1;
+        let output = crate::app::run_ui_test(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 900.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_model_view_settings_menu(
+                        ui,
+                        &tag,
+                        &data,
+                        state,
+                        &mut size,
+                        true,
+                        false,
+                        Some(GameId::Halo3),
+                        false,
+                    );
+                });
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((text.galley.text().trim().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                _ => None,
+            })
+            .collect()
+    };
+    fn click(
+        frame: &mut impl FnMut(Vec<egui::Event>, &mut ModelPreviewState) -> Vec<(String, egui::Rect)>,
+        at: egui::Pos2,
+        state: &mut ModelPreviewState,
+    ) -> Vec<(String, egui::Rect)> {
+        for step in 1..=3 {
+            frame(vec![egui::Event::PointerMoved(at - egui::vec2(0.0, 3.0 - step as f32))], state);
+        }
+        for pressed in [true, false] {
+            frame(
+                vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }],
+                state,
+            );
+        }
+        frame(Vec::new(), state)
+    }
+    frame(Vec::new(), &mut state);
+    let shown = frame(Vec::new(), &mut state);
+    let menu = shown
+        .iter()
+        .find(|(text, _)| text.starts_with("View:"))
+        .unwrap_or_else(|| panic!("the View button: {shown:?}"))
+        .1
+        .center();
+    let shown = click(&mut frame, menu, &mut state);
+    let option = shown
+        .iter()
+        .find(|(text, _)| text == target.label())
+        .unwrap_or_else(|| panic!("the menu lists {:?}: {shown:?}", target.label()))
+        .1
+        .center();
+    click(&mut frame, option, &mut state);
+    assert_eq!(state.render_mode, target, "the mode was picked");
+}

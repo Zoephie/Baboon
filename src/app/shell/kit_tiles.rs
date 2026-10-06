@@ -193,6 +193,11 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         tiles: &mut egui_tiles::Tiles<KitId>,
         tile_id: egui_tiles::TileId,
     ) -> bool {
+        // egui_tiles also asks on a middle-click on the tab; tabs close only
+        // from their close button or menu.
+        if middle_clicked(self.cx.egui) {
+            return false;
+        }
         if let Some(egui_tiles::Tile::Pane(kit_id)) = tiles.get(tile_id) {
             self.close_requests.push(*kit_id);
         }
@@ -430,6 +435,12 @@ impl Baboon {
     }
 }
 
+/// Whether a middle-click landed this frame: egui_tiles asks to close a tab
+/// on one, which Baboon's tabs don't do.
+pub(in crate::app) fn middle_clicked(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.pointer.button_clicked(egui::PointerButton::Middle))
+}
+
 #[cfg(test)]
 mod tests {
     //! Which workspace is active decides where Ctrl+S, the save prompt and open
@@ -496,5 +507,54 @@ mod tests {
         frame(&mut app, vec![press(over_right, true)]);
         frame(&mut app, vec![press(over_right, false)]);
         assert_eq!(app.model.active, 1);
+    }
+
+    /// A middle-click on a workspace tab leaves it open. egui_tiles asks to
+    /// close a tab on one; Baboon's tabs close only from their close button
+    /// or menu.
+    #[test]
+    fn a_middle_click_leaves_a_workspace_tab_open() {
+        let mut app = Baboon::for_test();
+        app.add_kit();
+        let (left, right) = (app.model.kits[0].id, app.model.kits[1].id);
+        app.kit_tree = egui_tiles::Tree::new_tabs("kit_middle_click_test", vec![left, right]);
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |app: &mut Baboon, events: Vec<egui::Event>| {
+            time += 0.1;
+            let output = crate::app::run_ui_test(&ctx, input(time, events), |ui| {
+                let ctx = ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |ui| app.draw_workspace_tiles(ui, &ctx));
+                app.apply_commands(&ctx);
+            });
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.rect.translate(text.pos.to_vec2())),
+                    _ => None,
+                })
+                .filter(|rect| rect.top() < 40.0)
+                .collect::<Vec<_>>()
+        };
+        let tabs = frame(&mut app, Vec::new());
+        let tabs = if tabs.len() < 2 { frame(&mut app, Vec::new()) } else { tabs };
+        let tab = tabs.get(1).expect("two workspace tabs").center();
+        for _ in 0..3 {
+            frame(&mut app, vec![egui::Event::PointerMoved(tab)]);
+        }
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: tab,
+                    button: egui::PointerButton::Middle,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        frame(&mut app, Vec::new());
+        assert_eq!(app.model.kits.len(), 2, "the workspace is still open");
     }
 }

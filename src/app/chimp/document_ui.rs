@@ -73,6 +73,11 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
         tiles: &mut egui_tiles::Tiles<String>,
         tile_id: egui_tiles::TileId,
     ) -> bool {
+        // egui_tiles also asks on a middle-click on the tab; tabs close only
+        // from their close button or menu.
+        if crate::app::shell::middle_clicked(self.cx.egui) {
+            return false;
+        }
         if let Some(egui_tiles::Tile::Pane(package)) = tiles.get(tile_id) {
             self.close_requests.push(package.clone());
         }
@@ -91,9 +96,6 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
         let package = package.clone();
         if button_response.clicked() {
             self.focused = Some(package.clone());
-        }
-        if button_response.middle_clicked() {
-            self.close_requests.push(package.clone());
         }
         let has_texture = self
             .view
@@ -250,6 +252,30 @@ pub(super) fn draw_chimp_tiles(
     send_chimp_extractions(cx, kit, extract_texture, extract_mesh, export_level);
 }
 
+/// Go to another view or export of a package pane. With a text box holding
+/// focus, its focus is given up now and the switch waits a frame, so the box
+/// is drawn once more, sees the loss and commits what was typed.
+fn switch_chimp_pane(ui: &Ui, pane: &mut ChimpDocumentUi, switch: ChimpPaneSwitch) {
+    let unchanged = match switch {
+        ChimpPaneSwitch::View(view) => view == pane.view,
+        ChimpPaneSwitch::Export(index) => index == pane.selected_export,
+    };
+    if unchanged {
+        return;
+    }
+    let focused = ui.ctx().memory(|memory| memory.focused());
+    let Some(focused) = focused else {
+        match switch {
+            ChimpPaneSwitch::View(view) => pane.view = view,
+            ChimpPaneSwitch::Export(index) => pane.selected_export = index,
+        }
+        return;
+    };
+    ui.ctx().memory_mut(|memory| memory.surrender_focus(focused));
+    pane.pending_switch = Some(switch);
+    ui.ctx().request_repaint();
+}
+
 /// Draw one open package's pane: its header line, its views, and whichever
 /// view is chosen. Every frame it sends [`ChimpCommand::PaneDrawn`] with the
 /// edit it made, if any.
@@ -327,28 +353,36 @@ fn draw_chimp_document_pane(
             .color(Color32::from_rgb(170, 130, 60)),
         );
     }
+    match pane.pending_switch.take() {
+        Some(ChimpPaneSwitch::View(view)) => pane.view = view,
+        Some(ChimpPaneSwitch::Export(index)) => pane.selected_export = index,
+        None => {}
+    }
+    let mut view = pane.view;
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Document, "Document")
+        let pane_view = &mut view;
+        ui.selectable_value(pane_view, ChimpDocumentView::Document, "Document")
             .on_hover_text("Readable JSON representation of the complete decoded package");
         if !pane.texture_previews.is_empty() {
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Texture, "Texture")
+            ui.selectable_value(pane_view, ChimpDocumentView::Texture, "Texture")
                 .on_hover_text("Decoded Texture2D image preview");
         }
         if document.mesh_kind.is_some() {
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Mesh, "Mesh")
+            ui.selectable_value(pane_view, ChimpDocumentView::Mesh, "Mesh")
                 .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
         }
         ui.selectable_value(
-            &mut pane.view,
+            pane_view,
             ChimpDocumentView::Properties,
             "Properties",
         )
         .on_hover_text("Inspect exports and edit supported reflected scalar properties");
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Header, "Header")
+        ui.selectable_value(pane_view, ChimpDocumentView::Header, "Header")
             .on_hover_text("The package's name map, imports and exports, and what uses each");
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Metadata, "Metadata")
+        ui.selectable_value(pane_view, ChimpDocumentView::Metadata, "Metadata")
             .on_hover_text("Package dependencies and physical archive providers");
     });
+    switch_chimp_pane(ui, pane, ChimpPaneSwitch::View(view));
     ui.separator();
 
     let edit = match pane.view {
@@ -401,20 +435,34 @@ fn draw_chimp_document_pane(
             .default_size(220.0)
             .show(ui, |ui| {
                 ui.label(RichText::new("Exports").strong());
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, export) in document.exports.iter().enumerate() {
-                        let supported = export.decoded.is_ok();
-                        let label =
-                            format!("{}  {}", if supported { "●" } else { "○" }, export.object);
-                        if ui
-                            .selectable_label(pane.selected_export == index, label)
-                            .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
-                            .clicked()
-                        {
-                            pane.selected_export = index;
+                // Only the rows in view are laid out: a level package has
+                // thousands of exports, and building every row each frame
+                // was several milliseconds of it.
+                let row_height = ui.spacing().interact_size.y;
+                egui::ScrollArea::vertical().show_rows(
+                    ui,
+                    row_height,
+                    document.exports.len(),
+                    |ui, rows| {
+                        for index in rows {
+                            let export = &document.exports[index];
+                            let supported = export.decoded.is_ok();
+                            let label = format!(
+                                "{}  {}",
+                                if supported { "●" } else { "○" },
+                                export.object
+                            );
+                            if ui
+                                .selectable_label(pane.selected_export == index, label)
+                                .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
+                                .clicked()
+                                && index != pane.selected_export
+                            {
+                                switch_chimp_pane(ui, pane, ChimpPaneSwitch::Export(index));
+                            }
                         }
-                    }
-                });
+                    },
+                );
             });
             egui::CentralPanel::default()
                 .show(ui, |ui| {
@@ -946,6 +994,27 @@ mod tests {
         assert!(app.has_chimp_save_dialog());
     }
 
+    /// A name typed into a property and left by switching to another view
+    /// is committed. The view switched on that click, so the box was never
+    /// drawn again to see itself lose focus, and the name was dropped.
+    #[test]
+    fn a_name_typed_then_left_by_switching_view_is_kept() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let mut frames = Frames::new();
+        frames.click_exact("Properties", 0, &mut draw_pane(&mut app, THING));
+        frames.click_exact("Rocket", 0, &mut draw_pane(&mut app, THING));
+        frames.replace_text("Comet", &mut draw_pane(&mut app, THING));
+        frames.click_exact("Header", 0, &mut draw_pane(&mut app, THING));
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
+        assert_eq!(app.chimp_pane(0, THING).view, ChimpDocumentView::Header);
+        let document = &app.model.kits[0].chimp.documents[THING];
+        assert!(
+            matches!(first_value(document, "Tag"), PropValue::Name(name) if name.as_str() == "Comet"),
+            "the typed name was kept"
+        );
+    }
+
     /// The Header view through the pane: a rename counts as an edit, and the
     /// referrer button starts the sweep on a worker.
     #[test]
@@ -1308,5 +1377,38 @@ mod tests {
         overlay.recover_entries(&bases, Some("Meteorite/Content/"));
         assert_eq!(overlay.read(&document.provider.entry_path).unwrap(), bytes);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// An open package that nobody touches does not keep the window drawing.
+    /// The pane and the tile tree send a command every frame; applying one
+    /// that changed nothing used to ask for the next frame, which sent them
+    /// again, for as long as any package was open.
+    #[test]
+    fn an_open_package_left_alone_lets_the_window_sleep() {
+        use crate::app::loose_fixture::repaint_delay_after;
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let draw = |app: &mut Baboon, ui: &mut egui::Ui| {
+            let ctx = ui.ctx().clone();
+            let kit = app.model.kits[0].id;
+            let writing = app.chimp.chimp_writes.contains_key(&kit);
+            egui::CentralPanel::default().show(ui, |ui| {
+                draw_chimp_tiles(ui, &cx!(app, &ctx), &mut app.views[kit].chimp, 0, writing);
+            });
+            app.apply_commands(&ctx);
+        };
+
+        let idle = repaint_delay_after(&mut app, draw, |_| {});
+        assert!(
+            idle > std::time::Duration::from_millis(100),
+            "an idle open package repaints every {idle:?}"
+        );
+
+        // The same measurement sees a frame that did change something.
+        let changed = repaint_delay_after(&mut app, draw, |app| {
+            app.commands
+                .send(crate::app::context::Command::Status("Changed".to_owned()));
+        });
+        assert_eq!(changed, std::time::Duration::ZERO, "a change applied after drawing is drawn");
     }
 }

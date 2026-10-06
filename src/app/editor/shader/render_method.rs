@@ -248,20 +248,19 @@ pub(in crate::app) fn push_shader_context_action(
     edit: &mut FieldEditContext<'_>,
     action: &ShaderContextAction,
 ) {
+    edit.push_ops(shader_context_action_ops(action));
+}
+
+/// The edits `action` makes.
+pub(in crate::app) fn shader_context_action_ops(action: &ShaderContextAction) -> DeferredOps {
+    let mut ops = DeferredOps::default();
     match action {
-        ShaderContextAction::AnimatedParameter(op) => {
-            edit.shader_ops.push(op.clone());
-        }
-        ShaderContextAction::FieldEdits(edits) => {
-            edit.pending.extend(edits.iter().cloned());
-        }
-        ShaderContextAction::ParameterOp(op) => {
-            edit.shader_param_ops.push(op.clone());
-        }
-        ShaderContextAction::H2ParameterOp(op) => {
-            edit.h2_shader_param_ops.push(op.clone());
-        }
+        ShaderContextAction::AnimatedParameter(op) => ops.shader_ops.push(op.clone()),
+        ShaderContextAction::FieldEdits(edits) => ops.pending.extend(edits.iter().cloned()),
+        ShaderContextAction::ParameterOp(op) => ops.shader_param_ops.push(op.clone()),
+        ShaderContextAction::H2ParameterOp(op) => ops.h2_shader_param_ops.push(op.clone()),
     }
+    ops
 }
 
 #[cfg(test)]

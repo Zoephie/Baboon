@@ -92,6 +92,19 @@ impl Baboon {
         tag_key: &str,
         field_path: &str,
     ) {
+        let kit = self.model.active_kit_id();
+        self.navigate_to_field_in(ctx, kit, tag_key, field_path);
+    }
+
+    /// [`Self::navigate_to_field`] in `kit`'s copy of the tag, for a jump
+    /// started from a pane of a workspace that need not be the active one.
+    pub(in crate::app) fn navigate_to_field_in(
+        &mut self,
+        ctx: &egui::Context,
+        kit: KitId,
+        tag_key: &str,
+        field_path: &str,
+    ) {
         // Scroll the exact leaf field into view next frame, plus the enclosing
         // block header as a fallback for non-value leaves.
         ctx.data_mut(|data| data.insert_temp(field_jump_target_id(), field_path.to_owned()));
@@ -99,7 +112,7 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
         }
         self.references.field_nav = Some(FieldNav {
-            kit: self.model.active_kit_id(),
+            kit,
             tag_key: tag_key.to_owned(),
             field_path: field_path.to_owned(),
             block_indices: ancestor_block_indices(field_path),

@@ -112,24 +112,59 @@ pub fn upsert_entry_with_dependencies(
     Ok(true)
 }
 
-/// Remove one tag's index row and its references in one transaction; see
-/// [`upsert_entry_with_dependencies`].
-pub fn delete_entry_with_dependencies(game: &str, root: &Path, key: &str) -> Result<bool> {
-    let mut conn = open_index_db()?;
-    let Some(source_id) = source_id(&conn, game, root)? else {
-        return Ok(false);
-    };
-    let tx = conn
-        .transaction()
-        .context("begin entry and dependency removal")?;
-    tx.execute(
-        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
-        params![source_id, key],
-    )
-    .context("delete entry index row")?;
-    replace_tag_dependencies(&tx, source_id, key, None)?;
-    tx.commit().context("commit entry and dependency removal")?;
-    Ok(true)
+/// Writes many tags' rows and references through one connection: what a
+/// refresh that found many changed tags uses. Each tag still goes in its own
+/// transaction, as [`upsert_entry_with_dependencies`] does. Opening the index
+/// for every tag reran its pragmas and schema each time, half of what a
+/// refresh after a checkout spent.
+pub struct EntryIndexWriter {
+    conn: Connection,
+    source_id: i64,
+}
+
+impl EntryIndexWriter {
+    /// The writer for `root`'s index, or `None` when it has no index yet (see
+    /// [`upsert_entry_index_row`]).
+    pub fn open(game: &str, root: &Path) -> Result<Option<Self>> {
+        let conn = open_index_db()?;
+        let Some(source_id) = source_id(&conn, game, root)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self { conn, source_id }))
+    }
+
+    /// [`upsert_entry_with_dependencies`], through this writer.
+    pub fn upsert_with_dependencies(
+        &mut self,
+        root: &Path,
+        entry: &TagEntry,
+        references: Option<&[DependencyRef]>,
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction()
+            .context("begin entry and dependency transaction")?;
+        upsert_entry_row(&tx, self.source_id, root, entry)?;
+        if let Some(references) = references {
+            replace_tag_dependencies(&tx, self.source_id, &entry.key, Some(references))?;
+        }
+        tx.commit().context("commit entry and dependencies")
+    }
+
+    /// Remove one tag's index row and its references in one transaction.
+    pub fn delete_with_dependencies(&mut self, key: &str) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction()
+            .context("begin entry and dependency removal")?;
+        tx.execute(
+            "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+            params![self.source_id, key],
+        )
+        .context("delete entry index row")?;
+        replace_tag_dependencies(&tx, self.source_id, key, None)?;
+        tx.commit().context("commit entry and dependency removal")
+    }
 }
 
 fn upsert_entry_row(

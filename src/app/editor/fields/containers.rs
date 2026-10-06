@@ -196,6 +196,19 @@ pub(in crate::app) fn draw_fields_with_docs(
                 cursor = match_idx + 1;
             }
         }
+        let field_path = append_field_path_for(path_prefix, &field);
+        // A row wholly out of view stands in as the space it took last time.
+        if let Some(height) = edit
+            .row_heights
+            .as_deref()
+            .and_then(|heights| heights.skip(ui, &field_path))
+        {
+            // Allocated like a row, so the spacing after it lies outside what
+            // the enclosing section measures, just as after a drawn row.
+            ui.allocate_space(egui::vec2(0.0, height - ui.spacing().item_spacing.y));
+            continue;
+        }
+        let top = ui.cursor().min.y;
         // Resolve a block-index field's target block (sibling or ancestor) for
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
@@ -203,6 +216,7 @@ pub(in crate::app) fn draw_fields_with_docs(
         draw_field(
             ui,
             field,
+            field_path.clone(),
             parent_raw,
             names,
             depth,
@@ -213,6 +227,10 @@ pub(in crate::app) fn draw_fields_with_docs(
             block_index,
             reference_value_width,
         );
+        let height = ui.cursor().min.y - top;
+        if let Some(heights) = edit.row_heights.as_deref_mut() {
+            heights.record(&field_path, height);
+        }
     }
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
@@ -233,6 +251,7 @@ pub(in crate::app) fn draw_fields_with_docs(
 pub(in crate::app) fn draw_field(
     ui: &mut Ui,
     field: TagField<'_>,
+    field_path: String,
     parent_raw: &[u8],
     names: &TagNameIndex,
     depth: usize,
@@ -243,16 +262,9 @@ pub(in crate::app) fn draw_field(
     block_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
-    let field_path = append_field_path_for(path_prefix, &field);
-    ui.data_mut(|data| {
-        data.insert_temp(
-            find_render_cell_id(),
-            FindRenderCell {
-                tag_key: edit.tag_key.to_owned(),
-                field_path: field_path.clone(),
-            },
-        )
-    });
+    #[cfg(test)]
+    FIELD_ROWS_BUILT.with(|built| built.set(built.get() + 1));
+    mark_find_render_cell(ui, edit.tag_key, &field_path);
     // Active (filter) field-search: hide everything that isn't a match, an
     // ancestor container of one, or inside a name-matched container.
     if !edit.field_visible(&field_path) {
@@ -592,15 +604,7 @@ fn draw_injected_explanation_row(
         });
         ui.ctx().request_repaint();
     }
-    ui.data_mut(|data| {
-        data.insert_temp(
-            find_render_cell_id(),
-            FindRenderCell {
-                tag_key: edit.tag_key.to_owned(),
-                field_path: path.clone(),
-            },
-        )
-    });
+    mark_find_render_cell(ui, edit.tag_key, &path);
     draw_foundation_explanation_row(
         ui,
         title,
@@ -660,10 +664,29 @@ fn is_internal_placeholder_name(name: &str) -> bool {
 }
 
 pub(super) fn is_internal_schema_marker_name(name: &str) -> bool {
+    // Asked of every field row on every frame. The exact test parses the name
+    // as a field path, which was a fifth of a frame's allocations; a name
+    // that doesn't contain a marker's words at all can't be one.
+    if !contains_marker_words(name) {
+        return false;
+    }
     matches!(
         internal_marker_key(name).as_str(),
         "hide group id" | "end hide group id" | "whore function"
     )
+}
+
+/// Whether `name` contains "hide group id" or "whore function", in any case
+/// and with `_` for a space, without allocating.
+fn contains_marker_words(name: &str) -> bool {
+    let name = name.as_bytes();
+    [b"hide group id".as_slice(), b"whore function".as_slice()].iter().any(|words| {
+        name.windows(words.len()).any(|window| {
+            window.iter().zip(words.iter()).all(|(&have, &want)| {
+                have.eq_ignore_ascii_case(&want) || (have == b'_' && want == b' ')
+            })
+        })
+    })
 }
 
 fn internal_marker_key(name: &str) -> String {
@@ -1094,6 +1117,7 @@ pub(in crate::app) fn draw_foundation_block(
                 // Stamped by the pane once this render returns; the field
                 // renderers are shared and have no kit of their own.
                 kit: None,
+                opened_at: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path_prefix.to_owned(),
                 kind: BlockOpKind::ReplaceBlock { elements },
@@ -1178,6 +1202,7 @@ pub(in crate::app) fn handle_block_actions(
                 // Stamped by the pane once this render returns; the field
                 // renderers are shared and have no kit of their own.
                 kit: None,
+                opened_at: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path.to_owned(),
                 kind: BlockOpKind::Delete(sel),
@@ -1191,6 +1216,7 @@ pub(in crate::app) fn handle_block_actions(
             // Stamped by the pane once this render returns; the field
             // renderers are shared and have no kit of their own.
             kit: None,
+            opened_at: None,
             tag_key: edit.tag_key.to_owned(),
 
             path: path.to_owned(),

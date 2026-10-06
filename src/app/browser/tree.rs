@@ -509,7 +509,7 @@ fn tag_extract_menu_button(
     let contents = |ui: &mut Ui| {
         let mut action = None;
         ui.set_min_width(280.0);
-        if supports_tag_geometry_extraction(entry.group_tag)
+        if supports_tag_geometry_extraction(entry)
             && context_menu_button(ui, "Extract model geometry").clicked()
         {
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
@@ -534,13 +534,13 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
             close_menu(ui);
         }
-        if supports_animation_extraction(entry.group_tag)
+        if supports_animation_extraction(entry)
             && context_menu_button(ui, "Extract animations").clicked()
         {
             action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
             close_menu(ui);
         }
-        if supports_tag_import_info_extraction(entry.group_tag)
+        if supports_tag_import_info_extraction(entry)
             && context_menu_button(ui, "Extract import-info").clicked()
         {
             action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
@@ -770,6 +770,7 @@ pub(in crate::app) fn draw_tree(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
@@ -785,6 +786,7 @@ pub(in crate::app) fn draw_tree(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -810,6 +812,7 @@ pub(in crate::app) fn draw_tree(
             folders_before_tags,
             favorite_keys,
             is_container,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -825,6 +828,7 @@ pub(in crate::app) fn draw_tree(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -855,6 +859,7 @@ pub(in crate::app) fn draw_tree_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
@@ -870,6 +875,7 @@ pub(in crate::app) fn draw_tree_lazy(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -888,6 +894,7 @@ pub(in crate::app) fn draw_tree_lazy(
             sort,
             folders_before_tags,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -903,6 +910,7 @@ pub(in crate::app) fn draw_tree_lazy(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -1024,6 +1032,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !lazy_node_matches(node, entries, filter) {
         return None;
@@ -1054,6 +1063,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
             sort,
             folders_before_tags,
             favorite_keys,
+            game,
         )
     })
 }
@@ -1073,6 +1083,7 @@ fn draw_tree_node_lazy_block(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
@@ -1107,6 +1118,7 @@ fn draw_tree_node_lazy_block(
                     leaf_key,
                     sort,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1127,6 +1139,7 @@ fn draw_tree_node_lazy_block(
                     sort,
                     folders_before_tags,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1144,6 +1157,7 @@ fn draw_tree_node_lazy_block(
                     leaf_key,
                     sort,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1221,6 +1235,7 @@ pub(in crate::app) fn draw_tree_node(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !node_matches(node, entries, filter) {
         return None;
@@ -1252,6 +1267,7 @@ pub(in crate::app) fn draw_tree_node(
             folders_before_tags,
             favorite_keys,
             is_container,
+            game,
         )
     })
 }
@@ -1273,6 +1289,7 @@ fn draw_tree_node_block(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
@@ -1290,6 +1307,7 @@ fn draw_tree_node_block(
                 leaf_key,
                 sort,
                 favorite_keys,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -1312,6 +1330,7 @@ fn draw_tree_node_block(
                 folders_before_tags,
                 favorite_keys,
                 is_container,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -1329,6 +1348,7 @@ fn draw_tree_node_block(
                 leaf_key,
                 sort,
                 favorite_keys,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -2549,6 +2569,7 @@ pub(in crate::app) fn draw_entry_list(
     reveal_key: Option<&str>,
     sort: BrowserSort,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let ordered = ordered_indices(ui, entry_indices, entries, sort);
     let matching: std::borrow::Cow<'_, [usize]> = if filter.is_empty() {
@@ -2606,6 +2627,7 @@ pub(in crate::app) fn draw_entry_list(
             reveal_key,
             favorite_keys,
             true,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -2632,6 +2654,7 @@ pub(in crate::app) fn draw_entry(
     reveal_key: Option<&str>,
     favorite_keys: Option<&HashSet<String>>,
     reserve_disclosure: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let leaf_label = entry
         .display_path
@@ -2701,7 +2724,7 @@ pub(in crate::app) fn draw_entry(
             ),
             Vec2::splat(icon_size),
         );
-        paint_tag_icon_at(ui, entry.group_tag, icon_rect);
+        paint_tag_icon_at(ui, Some(entry.group_tag), game, icon_rect);
         let label = if show_prefixes {
             format!("[tag] {leaf_label}")
         } else {
@@ -2777,7 +2800,7 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
     let duplicate_enabled = supports_duplicate_menu(entry);
     let deletable = browser_deletable_keys(ui);
     let delete_enabled = supports_delete_menu(entry, deletable.as_deref());
-    let extract_enabled = supports_tag_extract_menu(entry.group_tag);
+    let extract_enabled = supports_tag_extract_menu(entry);
     const PRIMARY_BUTTON_GAP: f32 = 4.0;
     let primary_button_width = (ui.available_width() - PRIMARY_BUTTON_GAP * 3.0) / 4.0;
     ui.horizontal(|ui| {
@@ -2951,6 +2974,7 @@ pub(in crate::app) fn draw_favorites(
     favorite_keys: &HashSet<String>,
     search_scope: BrowserSearchScope,
     keywords: &std::collections::BTreeMap<String, Vec<String>>,
+    game: Option<GameId>,
 ) -> (Option<BrowserAction>, bool) {
     let favorite_folders = browser_favorite_folders(ui).unwrap_or_default();
     let folder_matches = |path: &Path| {
@@ -3064,6 +3088,7 @@ pub(in crate::app) fn draw_favorites(
                 None,
                 Some(favorite_keys),
                 true,
+                game,
             );
             if action.is_none() {
                 action = row_action;
@@ -3112,14 +3137,6 @@ pub(in crate::app) fn show_browser_navigation_section<R>(
     }
     show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, add_body);
     response
-}
-
-fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
-    let group = format_group_tag(group_tag);
-    let uri = tag_icon_uri(ui.ctx(), &group);
-    egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
-        .fit_to_exact_size(rect.size())
-        .paint_at(ui, rect);
 }
 
 /// True when the tag lives *inside* a container source (a monolithic cache or a
@@ -3283,24 +3300,63 @@ pub(in crate::app) fn is_bitmap_tag(entry: &TagEntry) -> bool {
         || entry.display_path.to_ascii_lowercase().ends_with(".bitmap")
 }
 
-/// The groups that *are* render geometry: `mode` (H2+ render_model, and H1's
-/// legacy `model`, which previews through the same dispatch) and `mod2`
-/// (H1 gbxmodel). Deliberately not `hlmt` — a model tag has no geometry of its
-/// own, only a reference to one of these.
-pub(in crate::app) fn is_render_model_group(group_tag: u32) -> bool {
-    matches!(&group_tag.to_be_bytes(), b"mode" | b"mod2")
+/// A group as its FOURCC and the name its game gives it. Games reuse FOURCCs
+/// and names for other groups (Halo CE's `mode` is named `model`, the name
+/// every later game gives `hlmt`), so a check names both, and a tag matches
+/// only when its own game agrees: an entry's `group_name` is its kit's game's
+/// name for its group.
+pub(in crate::app) type GameGroup = (&'static [u8; 4], &'static str);
+
+/// Whether `group_tag`, which its game calls `name`, is one of `groups`.
+/// Without a name nothing says which group a FOURCC is, so it is none of them.
+pub(in crate::app) fn group_in(group_tag: u32, name: Option<&str>, groups: &[GameGroup]) -> bool {
+    let Some(name) = name else {
+        return false;
+    };
+    let fourcc = group_tag.to_be_bytes();
+    groups
+        .iter()
+        .any(|(tag, member)| **tag == fourcc && *member == name)
+}
+
+/// Whether `entry`'s group, as its game names it, is one of `groups`.
+pub(in crate::app) fn entry_group_in(entry: &TagEntry, groups: &[GameGroup]) -> bool {
+    group_in(entry.group_tag, entry.group_name.as_deref(), groups)
+}
+
+/// The groups that *are* render geometry: H2+ `render_model`, Halo CE's
+/// legacy `model` (`mode` there, which previews through the same path) and
+/// its `gbxmodel`. Deliberately not `hlmt` — a model tag has no geometry of
+/// its own, only a reference to one of these.
+pub(in crate::app) const RENDER_GEOMETRY_GROUPS: &[GameGroup] = &[
+    (b"mode", "render_model"),
+    (b"mode", "model"),
+    (b"mod2", "gbxmodel"),
+];
+
+/// Collision geometry: `collision_model`, Halo CE's `model_collision_geometry`.
+pub(in crate::app) const COLLISION_GROUPS: &[GameGroup] = &[
+    (b"coll", "collision_model"),
+    (b"coll", "model_collision_geometry"),
+];
+
+const MODEL_GROUP: GameGroup = (b"hlmt", "model");
+const PHYSICS_MODEL_GROUP: GameGroup = (b"phmo", "physics_model");
+
+/// An entry of `group` with no name, for tests of checks that go by FOURCC.
+#[cfg(test)]
+pub(in crate::app) fn unnamed_entry_of(group: &[u8; 4]) -> TagEntry {
+    TagEntry {
+        key: String::new(),
+        display_path: String::new(),
+        group_tag: u32::from_be_bytes(*group),
+        group_name: None,
+        location: crate::core::source::TagEntryLocation::LooseFile(std::path::PathBuf::new()),
+    }
 }
 
 pub(in crate::app) fn is_render_model_tag(entry: &TagEntry) -> bool {
-    is_render_model_group(entry.group_tag)
-        || matches!(
-            entry.group_name.as_deref(),
-            Some("render_model") | Some("gbxmodel")
-        )
-        || {
-            let path = entry.display_path.to_ascii_lowercase();
-            path.ends_with(".render_model") || path.ends_with(".gbxmodel")
-        }
+    entry_group_in(entry, RENDER_GEOMETRY_GROUPS)
 }
 
 pub(in crate::app) fn is_material_shader_group(group_tag: u32) -> bool {
@@ -3329,31 +3385,43 @@ pub(in crate::app) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
             .ends_with(".hlsl_include")
 }
 
-pub(in crate::app) fn supports_animation_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"jmad" | b"hlmt" | b"antr" | b"mode"
+pub(in crate::app) fn supports_animation_extraction(entry: &TagEntry) -> bool {
+    entry_group_in(
+        entry,
+        &[
+            (b"jmad", "model_animation_graph"),
+            MODEL_GROUP,
+            (b"antr", "model_animations"),
+            (b"mode", "render_model"),
+            (b"mode", "model"),
+        ],
     )
 }
 
-pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
-    supports_tag_geometry_extraction(group_tag)
+/// Model geometry an entry exports: a model, its render, collision or
+/// physics geometry, or Halo CE's gbxmodel.
+fn is_model_geometry_entry(entry: &TagEntry) -> bool {
+    entry_group_in(entry, &[MODEL_GROUP, PHYSICS_MODEL_GROUP])
+        || entry_group_in(entry, RENDER_GEOMETRY_GROUPS)
+        || entry_group_in(entry, COLLISION_GROUPS)
+}
+
+pub(in crate::app) fn supports_tag_extract_menu(entry: &TagEntry) -> bool {
+    let group_tag = entry.group_tag;
+    supports_tag_geometry_extraction(entry)
         || supports_bsp_geometry_extraction(group_tag)
         || supports_scenario_geometry_extraction(group_tag)
         || supports_particle_geometry_extraction(group_tag)
-        || supports_animation_extraction(group_tag)
-        || supports_tag_import_info_extraction(group_tag)
+        || supports_animation_extraction(entry)
+        || supports_tag_import_info_extraction(entry)
         || is_bitmap_group(group_tag)
         || crate::app::editor::is_sound_group(group_tag)
         || is_material_shader_group(group_tag)
         || is_hlsl_include_group(group_tag)
 }
 
-pub(in crate::app) fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
-    )
+pub(in crate::app) fn supports_tag_geometry_extraction(entry: &TagEntry) -> bool {
+    is_model_geometry_entry(entry)
 }
 
 /// A single structure BSP exports to one ASS. Kept apart from
@@ -3376,11 +3444,8 @@ pub(in crate::app) fn supports_particle_geometry_extraction(group_tag: u32) -> b
     blam_tags::is_particle_model_group(group_tag)
 }
 
-pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
-    )
+pub(in crate::app) fn supports_tag_import_info_extraction(entry: &TagEntry) -> bool {
+    is_model_geometry_entry(entry)
 }
 
 /// Load the folders at `paths` in a lazy `tree`, adding their tags to
@@ -3761,6 +3826,7 @@ mod tests {
                         BrowserSort::default(),
                         true,
                         None,
+                        None,
                     );
                 });
             });
@@ -3892,6 +3958,7 @@ mod tests {
                             false,
                             None,
                             false,
+                            None,
                         );
                         requested = requests.lock().unwrap().len();
                     });
@@ -3982,6 +4049,7 @@ mod tests {
                         false,
                         None,
                         is_container,
+                        None,
                     );
                     left = ui.available_size_before_wrap().y;
                 });
@@ -4045,6 +4113,7 @@ mod tests {
                         false,
                         None,
                         false,
+                        None,
                     );
                     height = ui.cursor().top() - top;
                 });
@@ -4254,7 +4323,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let row_top = ui.cursor().min;
-                        draw_entry(ui, &bitm, None, false, false, None, None, true);
+                        draw_entry(ui, &bitm, None, false, false, None, None, true, None);
                         *row_rect = egui::Rect::from_min_size(
                             row_top,
                             Vec2::new(240.0, ui.spacing().interact_size.y),
@@ -4616,7 +4685,9 @@ mod tests {
         let mut root = node("sound", vec![0, 1]);
         root.children.push(node("sound/sub", vec![2]));
 
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"snd!")));
+        assert!(supports_tag_extract_menu(
+            &crate::app::browser::unnamed_entry_of(b"snd!")
+        ));
         assert_eq!(
             collect_sound_keys(&root, &entries),
             vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
@@ -4814,6 +4885,7 @@ mod tests {
                                 BrowserSort::Natural,
                                 true,
                                 None,
+                                None,
                             );
                             return;
                         }
@@ -4832,6 +4904,7 @@ mod tests {
                             true,
                             None,
                             false,
+                            None,
                         );
                     });
                     viewport = output.inner_rect;

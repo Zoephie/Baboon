@@ -742,6 +742,7 @@ fn restore_path_row(
     available: bool,
     path: &str,
     group_tag: Option<u32>,
+    game: Option<GameId>,
     folder: bool,
 ) {
     ui.add_enabled_ui(available, |ui| {
@@ -757,7 +758,7 @@ fn restore_path_row(
                     if folder {
                         paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
                     } else {
-                        paint_tag_icon_at(ui, group_tag, icon_rect);
+                        paint_tag_icon_at(ui, group_tag, game, icon_rect);
                     }
                     let (text_rect, response) = ui
                         .allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
@@ -886,24 +887,25 @@ pub(in crate::app) fn render_last_opened_windows_prompt(
                     for (index, kit) in prompt.kits.iter_mut().enumerate() {
                         ui.push_id(index, |ui| {
                             restore_workspace_row(ui, kit);
+                            let game = kit.game.as_deref().and_then(GameId::from_id);
                             if kit.entries.is_empty() && kit.has_project {
                                 ui.label(RichText::new("Unsaved changes stashed in this workspace").color(subtle_dark()).small());
                             }
                             ui.add_enabled_ui(kit.checked, |ui| {
                             for entry in &mut kit.folder_entries {
                                 restore_path_row(ui, &mut entry.checked, entry.available,
-                                    &entry.folder.rel_path.display().to_string(), None, true);
+                                    &entry.folder.rel_path.display().to_string(), None, None, true);
                             }
                             for entry in &mut kit.entries {
                                 // Session labels include " - group name" for the old
                                 // plain-text list; the icon now communicates the group.
                                 let path = entry.tag.label.rsplit_once(" - ").map_or(entry.tag.label.as_str(), |(path, _)| path);
                                 restore_path_row(ui, &mut entry.checked, entry.available,
-                                    path, Some(entry.tag.group_tag), false);
+                                    path, Some(entry.tag.group_tag), game, false);
                             }
                             for entry in &mut kit.chimp_entries {
                                 restore_path_row(ui, &mut entry.checked, entry.available,
-                                    &entry.package, None, false);
+                                    &entry.package, None, None, false);
                             }
                             });
                         });

@@ -15,7 +15,7 @@ use crate::app::compare::GitReviewState;
 use crate::app::chimp::{ChimpState, ChimpView, KitSurface};
 use crate::core::document::value::is_saveable_tag;
 use crate::app::editor::{
-    AppliedFindFilter, ColorPopupWindow, EditDrafts, EditorCaches, FunctionPopupWindow,
+    AppliedFindFilter, EditDrafts, EditorCaches,
     ToolImportRequest, bitmap_reimport_data_path, combo_box_with_scroll, combo_scroll_next_index,
     geometry_import_verb, model_source_dir,
 };

@@ -8,12 +8,13 @@ use crate::app::documents::PendingCloseAction;
 use crate::app::kits::{KitId, KitStamp, KitView, KitsCommand};
 use crate::app::references::ReferencesCommand;
 use crate::app::search::{
-    FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind,
+    FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind, mark_find_render_cell,
     FindWithin, SearchCommand, find_render_cell_id, find_render_snapshot_id, find_text_ranges,
     map_tsv_header_to_fields,
 };
 use crate::app::help::{
-    DefDocs, DefEntry, GroupHierarchy, build_def_docs, documentation_path, group_hierarchy,
+    DefDocs, DefEntry, GroupHierarchy, build_def_docs, bundled_group_hierarchy, documentation_path,
+    group_hierarchy,
 };
 use crate::app::export::{ExportCommand, load_referenced_tag_from_source};
 use crate::app::browser::{
@@ -61,8 +62,7 @@ pub(super) fn draw_tag(
     edit: &mut FieldEditContext<'_>,
 ) {
     let is_object_family = is_object_family_group(entry.group_tag);
-    let is_shaderish =
-        is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry);
+    let is_shaderish = !supports_field_search(entry, &bundled_group_hierarchy(source_game));
     let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
 
     if expert_mode {
@@ -268,6 +268,7 @@ fn draw_tag_fields_scroll(
             .max_height(scroll_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                scroll_during_drag(ui);
                 ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
                 draw_material_tag(
                     ui,
@@ -293,6 +294,7 @@ fn draw_tag_fields_scroll(
         .max_height(scroll_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            scroll_during_drag(ui);
             ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
             if is_object_family {
                 draw_inherited_object_fields(ui, tag.root(), names, expert_mode, edit);
@@ -382,5 +384,39 @@ impl EditorCaches {
         self.rmdf_cache.clear();
         self.rmop_cache.clear();
         self.render_method_epoch = self.render_method_epoch.wrapping_add(1);
+    }
+}
+
+/// Scroll the enclosing scroll area while something is dragged over it.
+///
+/// egui 0.36 stops a scroll area taking the mouse wheel while any drag is in
+/// progress, so a tag dragged from the browser could no longer be carried to
+/// a reference field below the fold. This takes the wheel itself, and scrolls
+/// while the pointer is held near the area's top or bottom edge. Called first
+/// inside the scroll area's contents.
+pub(in crate::app) fn scroll_during_drag(ui: &mut Ui) {
+    const EDGE: f32 = 32.0;
+    const EDGE_SPEED: f32 = 14.0;
+    let ctx = ui.ctx().clone();
+    if ctx.dragged_id().is_none() {
+        return;
+    }
+    let clip = ui.clip_rect();
+    let Some(pointer) = ctx.input(|input| input.pointer.latest_pos()) else {
+        return;
+    };
+    if !clip.contains(pointer) {
+        return;
+    }
+    let mut delta = ctx.input(|input| input.smooth_scroll_delta);
+    if pointer.y < clip.top() + EDGE {
+        delta.y += EDGE_SPEED;
+    } else if pointer.y > clip.bottom() - EDGE {
+        delta.y -= EDGE_SPEED;
+    }
+    if delta != Vec2::ZERO {
+        ui.scroll_with_delta(delta);
+        // Held still at an edge, nothing else would ask for the next step.
+        ctx.request_repaint();
     }
 }
