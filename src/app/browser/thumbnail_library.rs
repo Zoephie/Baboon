@@ -523,6 +523,10 @@ pub(in crate::app) fn draw_folder_asset_grid(
 ) {
     let order = asset_grid_order(ui, pane_key, pane, entries, entries_signature);
     let visible: Vec<&TagEntry> = order.iter().map(|&index| &entries[index]).collect();
+    let game = cx.model.kits[kit_index]
+        .source
+        .as_ref()
+        .and_then(|source| source.game);
     if visible.is_empty() {
         ui.label(RichText::new("No matching assets in this folder").color(subtle_dark()));
         return;
@@ -546,11 +550,11 @@ pub(in crate::app) fn draw_folder_asset_grid(
                     for entry in visible.iter().skip(row * columns).take(columns) {
                         let cell_action = if Bitmaps::lists(entry) {
                             let wanted = &mut wanted_bitmaps;
-                            draw_thumbnail_entry(ui, bitmaps, entry, cell, wanted, true)
+                            draw_thumbnail_entry(ui, bitmaps, entry, cell, wanted, Some(game))
                                 .map(|action| (Bitmaps::LIBRARY, action))
                         } else {
                             let wanted = &mut wanted_models;
-                            draw_thumbnail_entry(ui, models, entry, cell, wanted, true)
+                            draw_thumbnail_entry(ui, models, entry, cell, wanted, Some(game))
                                 .map(|action| (Models::LIBRARY, action))
                         };
                         if cell_action.is_some() {
@@ -591,18 +595,19 @@ fn draw_thumbnail_cell<S: ThumbnailSource>(
 ) -> Option<CellAction> {
     let entry_index = *library.matches.get(index)?;
     let entry = library.entries.get(entry_index)?.clone();
-    draw_thumbnail_entry(ui, library, &entry, cell, wanted, false)
+    draw_thumbnail_entry(ui, library, &entry, cell, wanted, None)
 }
 
 /// One cell for `entry`, from `library`'s caches. `type_badge` marks it with
-/// its group's icon, for a grid that mixes bitmaps and models.
+/// its group's icon in the kit's game, for a grid that mixes bitmaps and
+/// models.
 fn draw_thumbnail_entry<S: ThumbnailSource>(
     ui: &mut Ui,
     library: &mut ThumbnailLibrary<S>,
     entry: &TagEntry,
     cell: f32,
     wanted: &mut Vec<String>,
-    type_badge: bool,
+    type_badge: Option<Option<GameId>>,
 ) -> Option<CellAction> {
     let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
 
@@ -682,13 +687,13 @@ fn draw_thumbnail_entry<S: ThumbnailSource>(
         }
     }
 
-    if type_badge {
+    if let Some(game) = type_badge {
         let badge = egui::Rect::from_min_size(
             image_rect.right_bottom() - Vec2::splat(22.0),
             Vec2::splat(20.0),
         );
         ui.painter().rect_filled(badge, 2.0, foundation_input());
-        paint_tag_icon_at(ui, Some(entry.group_tag), badge.shrink(2.0));
+        paint_tag_icon_at(ui, Some(entry.group_tag), game, badge.shrink(2.0));
     }
     let name = tag_leaf_name(&display_path);
     ui.painter().text(

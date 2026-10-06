@@ -596,7 +596,15 @@ fn draw_responsive_tag_header(
                             Vec2::splat(PANE_HEADER_ICON_SIZE),
                             Sense::hover(),
                         );
-                        paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
+                        paint_tag_icon_at(
+                            ui,
+                            Some(entry.group_tag),
+                            cx.model.kits[kit_index]
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.game),
+                            icon_rect,
+                        );
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;

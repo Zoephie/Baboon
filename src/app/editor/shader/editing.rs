@@ -2496,7 +2496,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let top = ui.cursor().min;
-                        draw_entry(ui, entry, None, false, false, None, None, true);
+                        draw_entry(ui, entry, None, false, false, None, None, true, None);
                         row_rect.set(egui::Rect::from_min_size(
                             top,
                             Vec2::new(240.0, ui.spacing().interact_size.y),

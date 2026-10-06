@@ -353,7 +353,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
                     egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
                     Vec2::splat(ICON),
                 );
-                paint_tag_icon_at(ui, group_tag, icon_rect);
+                let game = self.cx.model.kits[self.kit_index]
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.game);
+                paint_tag_icon_at(ui, group_tag, game, icon_rect);
             } else if folder_icon {
                 let icon_rect = egui::Rect::from_center_size(
                     egui::pos2(inner.left() + ICON / 2.0, inner.center().y),

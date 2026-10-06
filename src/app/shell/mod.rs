@@ -30,7 +30,6 @@ use crate::app::chimp::{
     ChimpTypeIndex, ChimpWritten, KitSurface, draw_chimp_workspace, format_remaining,
 };
 use crate::app::runtime_poke::{LastPoke, PokePlan, PokeReport};
-use crate::core::document::value::extension_to_group_tag;
 use crate::app::editor::{
     DeferredFileAction, EditorCommand, EditorFeature, PaneInputs, apply_scroll_speed,
     begin_wheel_gesture, draw_tag_pane, end_wheel_gesture, lost_focus_once,

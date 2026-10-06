@@ -245,13 +245,14 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 reference_target_missing_cached(ui, edit.names, edit.tags_root, *group, rel)
             });
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
+            let icon = tag_icon(icon_group, edit.game);
             let value_response = if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
                     &mut draft.text,
                     value_width,
                     id,
-                    icon_group,
+                    icon,
                 );
 
                 draft.note_response(&response);
@@ -280,7 +281,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     subtle_dark(),
                     Some("This reference is empty"),
-                    icon_group,
+                    icon,
                     true,
                 )
             } else if missing {
@@ -290,7 +291,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     REFERENCE_MISSING_COLOR,
                     Some("Referenced tag not found on disk"),
-                    icon_group,
+                    icon,
                     true,
                 )
             } else {
@@ -300,7 +301,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     value_width,
                     text_dark(),
                     None,
-                    icon_group,
+                    icon,
                     !is_bitmap_reference,
                 )
             };

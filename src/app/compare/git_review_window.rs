@@ -501,7 +501,12 @@ fn commit_row(ui: &mut Ui, commit: &GitReviewCommit, selected: bool) -> egui::Re
     }
 }
 
-fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Response {
+fn tag_change_row(
+    ui: &mut Ui,
+    file: &GitReviewFile,
+    game: Option<GameId>,
+    selected: bool,
+) -> egui::Response {
     let display_path = native_git_display_path(&file.path);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
@@ -525,7 +530,7 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
         egui::pos2(rect.left() + 14.0, rect.center().y),
         Vec2::splat(BUTTON_ICON_SIZE),
     );
-    paint_tag_icon_at(ui, Some(file.group_tag), icon_rect);
+    paint_tag_icon_at(ui, Some(file.group_tag), game, icon_rect);
     let change_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 12.0, rect.center().y),
         Vec2::splat(BUTTON_ICON_SIZE),
@@ -545,6 +550,11 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
 
 /// The Git Review pane of `kit`, drawn from its view's review state.
 pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: &mut GitReviewState) {
+    let game = cx
+        .model
+        .kit_index(kit)
+        .and_then(|index| cx.model.kits[index].source.as_ref())
+        .and_then(|source| source.game);
     // Read for the draw, which writes only locals until the end: the commit
     // list, the change list and a diff of up to 5,000 rows used to be
     // copied out every frame.
@@ -771,7 +781,7 @@ pub(in crate::app) fn draw_git_review(cx: &Ctx, ui: &mut Ui, kit: KitId, state: 
                                     for file in visible_files {
                                         let selected = selected_path.as_deref()
                                             == Some(file.path.as_str());
-                                        let response = tag_change_row(ui, file, selected);
+                                        let response = tag_change_row(ui, file, game, selected);
                                         if response.double_clicked() {
                                             action = Some(GitReviewAction::OpenFile(
                                                 file.path.clone(),

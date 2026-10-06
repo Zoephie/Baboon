@@ -1124,6 +1124,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_render,
                     ModelViewCheckboxIcon::Tag(*b"mode"),
                     "Render Model",
+                    source_game,
                 );
                 let has_collision =
                     overlay_layer_available(data, state, ModelPreviewLayer::Collision);
@@ -1133,6 +1134,7 @@ fn draw_model_view_settings_menu(
                         &mut state.show_collision,
                         ModelViewCheckboxIcon::Tag(*b"coll"),
                         "Collision Model",
+                        source_game,
                     )
                     .on_disabled_hover_text("This model has no collision model, or it has no drawable geometry.");
                 });
@@ -1142,6 +1144,7 @@ fn draw_model_view_settings_menu(
                         &mut state.show_physics,
                         ModelViewCheckboxIcon::Tag(*b"phmo"),
                         "Physics Model",
+                        source_game,
                     );
                 }
                 if state.overlays_pending && (state.show_collision || state.show_physics) {
@@ -1154,6 +1157,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_armature,
                     ModelViewCheckboxIcon::Tag(*b"jmad"),
                     "Armature",
+                    source_game,
                 )
                 .on_hover_text("Draw the model skeleton; hover a joint to see its name.");
             });
@@ -1164,6 +1168,7 @@ fn draw_model_view_settings_menu(
                 &mut state.show_markers,
                 ModelViewCheckboxIcon::Markers,
                 "Show Markers",
+                source_game,
             );
             draw_marker_filter_field(ui, &mut state.marker_filter);
 
@@ -1174,6 +1179,7 @@ fn draw_model_view_settings_menu(
                     &mut state.show_errors,
                     ModelViewCheckboxIcon::Errors,
                     "Show Errors",
+                    source_game,
                 )
                 .on_hover_text(format!(
                     "Highlight {error_count} error/warning report primitive(s); hover one to see its report."
@@ -1267,6 +1273,7 @@ fn model_view_icon_checkbox(
     checked: &mut bool,
     icon: ModelViewCheckboxIcon,
     label: &str,
+    game: Option<GameId>,
 ) -> egui::Response {
     let row = ui.horizontal(|ui| {
         let checkbox_response = ui.checkbox(checked, "");
@@ -1286,7 +1293,7 @@ fn model_view_icon_checkbox(
         );
         match icon {
             ModelViewCheckboxIcon::Tag(group) => {
-                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), icon_rect);
+                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect);
             }
             ModelViewCheckboxIcon::Markers => {
                 paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());

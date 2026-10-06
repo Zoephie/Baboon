@@ -323,7 +323,7 @@ fn tag_reference_icon_footprint() -> f32 {
     3.0 + 16.0 + 3.0
 }
 
-fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
+fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon: TagIcon) {
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
         .rect_stroke(
@@ -332,15 +332,17 @@ fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<
             Stroke::new(1.0_f32, foundation_input_edge()),
             egui::StrokeKind::Middle,
         );
-    paint_tag_reference_icon(ui, rect, icon_group);
+    paint_tag_reference_icon(ui, rect, icon);
 }
 
-fn paint_tag_reference_icon(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
+fn paint_tag_reference_icon(ui: &Ui, rect: egui::Rect, icon: TagIcon) {
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 3.0 + 8.0, rect.center().y),
         Vec2::splat(16.0),
     );
-    paint_tag_icon_at(ui, icon_group, icon_rect);
+    tag_icon_image(ui.ctx(), icon, icon_rect.width())
+        .fit_to_exact_size(icon_rect.size())
+        .paint_at(ui, icon_rect);
 }
 
 pub(super) fn foundation_tag_reference_input_cell_colored(
@@ -349,12 +351,12 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     width: f32,
     color: Color32,
     hover: Option<&str>,
-    icon_group: Option<u32>,
+    icon: TagIcon,
     show_hover_text: bool,
 ) -> egui::Response {
     let height = 24.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    paint_tag_reference_value_cell(ui, rect, icon_group);
+    paint_tag_reference_value_cell(ui, rect, icon);
     let response =
         foundation_read_only_text_cell(ui, rect, text, color, tag_reference_icon_footprint());
     if response.hovered() && show_hover_text {
@@ -368,7 +370,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     text: &mut String,
     width: f32,
     id: egui::Id,
-    icon_group: Option<u32>,
+    icon: TagIcon,
 ) -> egui::Response {
     let size = Vec2::new(width, 24.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -414,7 +416,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
             }
         })
         .inner;
-    paint_tag_reference_icon(ui, response.rect + margin, icon_group);
+    paint_tag_reference_icon(ui, response.rect + margin, icon);
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response
 }

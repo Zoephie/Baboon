@@ -770,6 +770,7 @@ pub(in crate::app) fn draw_tree(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
@@ -785,6 +786,7 @@ pub(in crate::app) fn draw_tree(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -810,6 +812,7 @@ pub(in crate::app) fn draw_tree(
             folders_before_tags,
             favorite_keys,
             is_container,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -825,6 +828,7 @@ pub(in crate::app) fn draw_tree(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -855,6 +859,7 @@ pub(in crate::app) fn draw_tree_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     begin_folder_chevron_collection(ui);
     let mut clicked = None;
@@ -870,6 +875,7 @@ pub(in crate::app) fn draw_tree_lazy(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -888,6 +894,7 @@ pub(in crate::app) fn draw_tree_lazy(
             sort,
             folders_before_tags,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -903,6 +910,7 @@ pub(in crate::app) fn draw_tree_lazy(
             reveal.and_then(Reveal::leaf_key),
             sort,
             favorite_keys,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -1024,6 +1032,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !lazy_node_matches(node, entries, filter) {
         return None;
@@ -1054,6 +1063,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
             sort,
             folders_before_tags,
             favorite_keys,
+            game,
         )
     })
 }
@@ -1073,6 +1083,7 @@ fn draw_tree_node_lazy_block(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
@@ -1107,6 +1118,7 @@ fn draw_tree_node_lazy_block(
                     leaf_key,
                     sort,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1127,6 +1139,7 @@ fn draw_tree_node_lazy_block(
                     sort,
                     folders_before_tags,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1144,6 +1157,7 @@ fn draw_tree_node_lazy_block(
                     leaf_key,
                     sort,
                     favorite_keys,
+                    game,
                 );
                 if clicked.is_none() {
                     clicked = action;
@@ -1221,6 +1235,7 @@ pub(in crate::app) fn draw_tree_node(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !node_matches(node, entries, filter) {
         return None;
@@ -1252,6 +1267,7 @@ pub(in crate::app) fn draw_tree_node(
             folders_before_tags,
             favorite_keys,
             is_container,
+            game,
         )
     })
 }
@@ -1273,6 +1289,7 @@ fn draw_tree_node_block(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
@@ -1290,6 +1307,7 @@ fn draw_tree_node_block(
                 leaf_key,
                 sort,
                 favorite_keys,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -1312,6 +1330,7 @@ fn draw_tree_node_block(
                 folders_before_tags,
                 favorite_keys,
                 is_container,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -1329,6 +1348,7 @@ fn draw_tree_node_block(
                 leaf_key,
                 sort,
                 favorite_keys,
+                game,
             );
             if clicked.is_none() {
                 clicked = action;
@@ -2549,6 +2569,7 @@ pub(in crate::app) fn draw_entry_list(
     reveal_key: Option<&str>,
     sort: BrowserSort,
     favorite_keys: Option<&HashSet<String>>,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let ordered = ordered_indices(ui, entry_indices, entries, sort);
     let matching: std::borrow::Cow<'_, [usize]> = if filter.is_empty() {
@@ -2606,6 +2627,7 @@ pub(in crate::app) fn draw_entry_list(
             reveal_key,
             favorite_keys,
             true,
+            game,
         );
         clicked = clicked.or(action);
     }
@@ -2632,6 +2654,7 @@ pub(in crate::app) fn draw_entry(
     reveal_key: Option<&str>,
     favorite_keys: Option<&HashSet<String>>,
     reserve_disclosure: bool,
+    game: Option<GameId>,
 ) -> Option<BrowserAction> {
     let leaf_label = entry
         .display_path
@@ -2701,7 +2724,7 @@ pub(in crate::app) fn draw_entry(
             ),
             Vec2::splat(icon_size),
         );
-        paint_tag_icon_at(ui, entry.group_tag, icon_rect);
+        paint_tag_icon_at(ui, Some(entry.group_tag), game, icon_rect);
         let label = if show_prefixes {
             format!("[tag] {leaf_label}")
         } else {
@@ -2951,6 +2974,7 @@ pub(in crate::app) fn draw_favorites(
     favorite_keys: &HashSet<String>,
     search_scope: BrowserSearchScope,
     keywords: &std::collections::BTreeMap<String, Vec<String>>,
+    game: Option<GameId>,
 ) -> (Option<BrowserAction>, bool) {
     let favorite_folders = browser_favorite_folders(ui).unwrap_or_default();
     let folder_matches = |path: &Path| {
@@ -3064,6 +3088,7 @@ pub(in crate::app) fn draw_favorites(
                 None,
                 Some(favorite_keys),
                 true,
+                game,
             );
             if action.is_none() {
                 action = row_action;
@@ -3112,14 +3137,6 @@ pub(in crate::app) fn show_browser_navigation_section<R>(
     }
     show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, add_body);
     response
-}
-
-fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
-    let group = format_group_tag(group_tag);
-    let uri = tag_icon_uri(ui.ctx(), &group);
-    egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
-        .fit_to_exact_size(rect.size())
-        .paint_at(ui, rect);
 }
 
 /// True when the tag lives *inside* a container source (a monolithic cache or a
@@ -3761,6 +3778,7 @@ mod tests {
                         BrowserSort::default(),
                         true,
                         None,
+                        None,
                     );
                 });
             });
@@ -3892,6 +3910,7 @@ mod tests {
                             false,
                             None,
                             false,
+                            None,
                         );
                         requested = requests.lock().unwrap().len();
                     });
@@ -3982,6 +4001,7 @@ mod tests {
                         false,
                         None,
                         is_container,
+                        None,
                     );
                     left = ui.available_size_before_wrap().y;
                 });
@@ -4045,6 +4065,7 @@ mod tests {
                         false,
                         None,
                         false,
+                        None,
                     );
                     height = ui.cursor().top() - top;
                 });
@@ -4254,7 +4275,7 @@ mod tests {
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let row_top = ui.cursor().min;
-                        draw_entry(ui, &bitm, None, false, false, None, None, true);
+                        draw_entry(ui, &bitm, None, false, false, None, None, true, None);
                         *row_rect = egui::Rect::from_min_size(
                             row_top,
                             Vec2::new(240.0, ui.spacing().interact_size.y),
@@ -4814,6 +4835,7 @@ mod tests {
                                 BrowserSort::Natural,
                                 true,
                                 None,
+                                None,
                             );
                             return;
                         }
@@ -4832,6 +4854,7 @@ mod tests {
                             true,
                             None,
                             false,
+                            None,
                         );
                     });
                     viewport = output.inner_rect;
