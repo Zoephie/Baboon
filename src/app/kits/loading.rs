@@ -1184,8 +1184,23 @@ pub(in crate::app) fn persist_entry_index_changes(
     tag_source: &TagSource,
     mut refresh: EntryIndexRefresh,
 ) -> EntryIndexRefresh {
+    // One connection for the whole refresh. `None` when the folder has no
+    // index yet, which writes nothing, as the per-tag calls did.
+    let mut writer = if refresh.removed_keys.is_empty() && refresh.touched.is_empty() {
+        None
+    } else {
+        match crate::core::source::EntryIndexWriter::open(game, root) {
+            Ok(writer) => writer,
+            Err(error) => {
+                refresh.errors.push(format!("could not open the index: {error:#}"));
+                None
+            }
+        }
+    };
     for key in &refresh.removed_keys {
-        if let Err(error) = crate::core::source::delete_entry_with_dependencies(game, root, key) {
+        if let Some(writer) = writer.as_mut()
+            && let Err(error) = writer.delete_with_dependencies(key)
+        {
             refresh.errors.push(format!("{key}: {error:#}"));
         }
     }
@@ -1195,12 +1210,10 @@ pub(in crate::app) fn persist_entry_index_changes(
     // refresh would look at that tag again.
     for entry in &refresh.touched {
         let references = read_entry_dependencies(tag_source, entry);
-        let written = crate::core::source::upsert_entry_with_dependencies(
-            game,
-            root,
-            entry,
-            references.as_deref().ok(),
-        );
+        let written = match writer.as_mut() {
+            Some(writer) => writer.upsert_with_dependencies(root, entry, references.as_deref().ok()),
+            None => Ok(()),
+        };
         if let Err(error) = written {
             refresh
                 .errors
