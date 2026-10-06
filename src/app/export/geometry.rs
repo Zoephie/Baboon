@@ -2026,7 +2026,7 @@ mod tests {
     #[test]
     fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
         assert!(
-            supports_tag_extract_menu(u32::from_be_bytes(*b"pmdf")),
+            supports_tag_extract_menu(&crate::app::browser::unnamed_entry_of(b"pmdf")),
             "the menu item that reaches this action is not drawn",
         );
         let rel = "fx/particles/models/debris/generic_shards/generic_shards.particle_model";
@@ -2094,7 +2094,7 @@ mod tests {
     #[test]
     fn extracting_a_halo2_particle_model_keeps_its_object_names() {
         assert!(
-            supports_tag_extract_menu(u32::from_be_bytes(*b"PRTM")),
+            supports_tag_extract_menu(&crate::app::browser::unnamed_entry_of(b"PRTM")),
             "the menu item that reaches this action is not drawn",
         );
         let rel = "effects/particle_models/urban_debris/urban_debris.particle_model";

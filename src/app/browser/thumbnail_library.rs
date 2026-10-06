@@ -926,7 +926,10 @@ mod tests {
             key: format!("file:{display_path}"),
             display_path: display_path.to_owned(),
             group_tag: u32::from_be_bytes(*group),
-            group_name: None,
+            // Named as a scan names it: by its game, which is its extension.
+            group_name: display_path
+                .rsplit_once('.')
+                .map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(PathBuf::from(display_path)),
         }
     }
@@ -1142,7 +1145,7 @@ mod tests {
             key: path.into(),
             display_path: path.into(),
             group_tag: u32::from_be_bytes(*group),
-            group_name: None,
+            group_name: path.rsplit_once('.').map(|(_, name)| name.to_owned()),
             location: TagEntryLocation::LooseFile(path.into()),
         }
     }

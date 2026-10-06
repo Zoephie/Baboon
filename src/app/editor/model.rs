@@ -140,14 +140,19 @@ pub(in crate::app) fn find_model_reference(
 }
 
 pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bool {
-    group_tag == u32::from_be_bytes(*b"hlmt")
-        || names.name_for(group_tag) == Some("model")
-        || group_tag_to_extension(group_tag) == Some("model")
-        // Halo CE has no `.model` (hlmt) wrapper — objects reference a
-        // `.gbxmodel` (mod2) directly, which IS the render geometry, so
-        // treat it as previewable in its own right.
-        || group_tag == u32::from_be_bytes(*b"mod2")
-        || names.name_for(group_tag) == Some("gbxmodel")
+    // By FOURCC and the kit's game's name for it: Halo CE names its legacy
+    // render geometry `mode` "model" too, and that is not a model wrapper.
+    crate::app::browser::group_in(
+        group_tag,
+        names.name_for(group_tag),
+        &[
+            (b"hlmt", "model"),
+            // Halo CE has no `.model` (hlmt) wrapper — objects reference a
+            // `.gbxmodel` (mod2) directly, which IS the render geometry, so
+            // treat it as previewable in its own right.
+            (b"mod2", "gbxmodel"),
+        ],
+    )
 }
 
 /// Tags that get the Fields / Model Preview tab pair and a geometry
@@ -160,6 +165,11 @@ pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bo
 /// would be misread as one, putting a bogus model summary on every
 /// particle tag.
 pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagNameIndex) -> bool {
+    use crate::app::browser::{COLLISION_GROUPS, RENDER_GEOMETRY_GROUPS, group_in};
+    // The group as the kit's game names it: Halo CE's `mode` is its legacy
+    // `model`, which previews as render geometry, and its `coll` is
+    // `model_collision_geometry`.
+    let name = names.name_for(group_tag);
     is_model_group(group_tag, names)
         || blam_tags::is_particle_model_group(group_tag)
         // A bare `render_model` (mode) IS the render geometry — the preview
@@ -167,15 +177,20 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
         // Not part of `is_model_group` for the same reason particle models are
         // not: an hlmt's own `render model` field must not read as an object's
         // model link.
-        || group_tag == u32::from_be_bytes(*b"mode")
-        || names.name_for(group_tag) == Some("render_model")
+        || group_in(group_tag, name, RENDER_GEOMETRY_GROUPS)
         // Derived previews: collision BSPs walked into triangles, physics
         // primitives tessellated, structure BSPs and scenario composites
         // through the ASS/JMS scene builders. Same tab pair, different
         // geometry source (`model_preview::derived`).
-        || matches!(
-            &group_tag.to_be_bytes(),
-            b"coll" | b"phmo" | b"sbsp" | b"scnr"
+        || group_in(group_tag, name, COLLISION_GROUPS)
+        || group_in(
+            group_tag,
+            name,
+            &[
+                (b"phmo", "physics_model"),
+                (b"sbsp", "scenario_structure_bsp"),
+                (b"scnr", "scenario"),
+            ],
         )
 }
 
