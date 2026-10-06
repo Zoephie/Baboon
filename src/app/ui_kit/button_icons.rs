@@ -178,12 +178,64 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 }
 
 pub(in crate::app) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
-    let svg = colorized_icon_bytes(icon, color);
-    let uri = button_icon_uri(ui.ctx(), icon, color, rect.width());
-    egui::Image::from_bytes(uri, svg)
+    paint_icon_tinted(ui, icon, rect, color, Color32::WHITE);
+}
+
+/// Paint `icon` recolored to `color` into `rect`, multiplied by `tint`, as
+/// `egui::Image::paint_at` would: the rect rounded to pixels and the SVG
+/// rasterized at exactly that pixel size.
+fn paint_icon_tinted(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32, tint: Color32) {
+    use egui::emath::GuiRounding as _;
+    let pixels_per_point = ui.pixels_per_point();
+    let rect = rect.round_to_pixels(pixels_per_point);
+    let pixels = (pixels_per_point * rect.size()).round();
+    if let Some(texture) = icon_texture(ui.ctx(), icon, color, rect.width(), pixels) {
+        let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+        ui.painter().image(texture, rect, uv, tint);
+        return;
+    }
+    egui::Image::from_bytes(button_icon_uri(ui.ctx(), icon, color, rect.width()), colorized_icon_bytes(icon, color))
         .fit_to_exact_size(rect.size())
-        .tint(Color32::WHITE)
+        .tint(tint)
         .paint_at(ui, rect);
+}
+
+/// The textures of recolored icons, by icon, color and pixel size. Kept in
+/// the egui context whose textures they are.
+#[derive(Clone, Default)]
+struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32), egui::TextureId>);
+
+/// The texture of `icon` recolored to `color` at `pixels`, once egui has
+/// loaded it. Icons are painted on every frame, a dozen to a block header,
+/// and each used to format its URI and have egui's loaders hash it to find
+/// the texture; this is a lookup of a small key instead.
+fn icon_texture(
+    ctx: &egui::Context,
+    icon: ButtonIcon,
+    color: Color32,
+    size: f32,
+    pixels: Vec2,
+) -> Option<egui::TextureId> {
+    let key = (icon, color, pixels.x as u32, pixels.y as u32);
+    let id = egui::Id::new("baboon_icon_textures");
+    let cached = ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.get(&key).copied());
+    if cached.is_some() {
+        return cached;
+    }
+    let uri = button_icon_uri(ctx, icon, color, size);
+    ctx.include_bytes(uri.clone(), colorized_icon_bytes(icon, color));
+    let size_hint = egui::load::SizeHint::Size {
+        width: key.2,
+        height: key.3,
+        maintain_aspect_ratio: false,
+    };
+    let Ok(egui::load::TexturePoll::Ready { texture }) =
+        ctx.try_load_texture(&uri, egui::TextureOptions::default(), size_hint)
+    else {
+        return None;
+    };
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.insert(key, texture.id));
+    Some(texture.id)
 }
 
 pub(in crate::app) fn button_icon_image(
@@ -220,16 +272,20 @@ pub(in crate::app) fn icon_button(
     enabled: bool,
     color: Color32,
 ) -> egui::Response {
-    // Paint in the button's enabled scope so egui fades the whole SVG,
-    // including accent colors embedded in the asset itself.
-    ui.add_enabled_ui(enabled, |ui| {
-        let response = ui.add(egui::Button::new("").min_size(ICON_BUTTON_SIZE));
-        let icon_rect =
-            egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
-        paint_button_icon_at(ui, icon, icon_rect, icon_color(icon, color));
-        response.on_hover_text(tooltip)
-    })
-    .inner
+    let response = ui.add_enabled(enabled, egui::Button::new("").min_size(ICON_BUTTON_SIZE));
+    let icon_rect =
+        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+    // A disabled button fades the whole SVG, accent colors embedded in the
+    // asset included, as egui fades a disabled widget. It used to do that by
+    // drawing the button in a child `Ui` of its own, which with a dozen of
+    // these on every block header was a real share of each frame.
+    let tint = if enabled {
+        Color32::WHITE
+    } else {
+        Color32::WHITE.gamma_multiply(ui.visuals().disabled_alpha())
+    };
+    paint_icon_tinted(ui, icon, icon_rect, icon_color(icon, color), tint);
+    response.on_hover_text(tooltip)
 }
 
 /// Repaint a native checkbox with its hovered visuals when an adjacent icon
