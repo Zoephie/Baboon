@@ -262,6 +262,18 @@ pub(in crate::app) struct ChimpDocumentUi {
     /// The selected export as the property editor edits it. See
     /// [`ChimpPropertyDraft`].
     pub(super) property_draft: Option<ChimpPropertyDraft>,
+    /// A view or export chosen while a text box had focus, taken up on the
+    /// next frame. The box is still drawn on the frame of the click, so it
+    /// sees itself lose focus and commits; switched at once, it was never
+    /// drawn again and the typed name was lost.
+    pub(super) pending_switch: Option<ChimpPaneSwitch>,
+}
+
+/// What a deferred switch in a package pane goes to.
+#[derive(Clone, Copy)]
+pub(super) enum ChimpPaneSwitch {
+    View(ChimpDocumentView),
+    Export(usize),
 }
 
 /// One export's values and the name map they intern into, edited in place by

@@ -287,6 +287,7 @@ impl ChimpDocumentUi {
             header_error: None,
             referrers: ChimpReferrerState::Idle,
             property_draft: None,
+            pending_switch: None,
         };
         refresh_chimp_document_text(document, &mut ui);
         refresh_chimp_metadata_text(document, &mut ui, world);

@@ -252,6 +252,30 @@ pub(super) fn draw_chimp_tiles(
     send_chimp_extractions(cx, kit, extract_texture, extract_mesh, export_level);
 }
 
+/// Go to another view or export of a package pane. With a text box holding
+/// focus, its focus is given up now and the switch waits a frame, so the box
+/// is drawn once more, sees the loss and commits what was typed.
+fn switch_chimp_pane(ui: &Ui, pane: &mut ChimpDocumentUi, switch: ChimpPaneSwitch) {
+    let unchanged = match switch {
+        ChimpPaneSwitch::View(view) => view == pane.view,
+        ChimpPaneSwitch::Export(index) => index == pane.selected_export,
+    };
+    if unchanged {
+        return;
+    }
+    let focused = ui.ctx().memory(|memory| memory.focused());
+    let Some(focused) = focused else {
+        match switch {
+            ChimpPaneSwitch::View(view) => pane.view = view,
+            ChimpPaneSwitch::Export(index) => pane.selected_export = index,
+        }
+        return;
+    };
+    ui.ctx().memory_mut(|memory| memory.surrender_focus(focused));
+    pane.pending_switch = Some(switch);
+    ui.ctx().request_repaint();
+}
+
 /// Draw one open package's pane: its header line, its views, and whichever
 /// view is chosen. Every frame it sends [`ChimpCommand::PaneDrawn`] with the
 /// edit it made, if any.
@@ -329,28 +353,36 @@ fn draw_chimp_document_pane(
             .color(Color32::from_rgb(170, 130, 60)),
         );
     }
+    match pane.pending_switch.take() {
+        Some(ChimpPaneSwitch::View(view)) => pane.view = view,
+        Some(ChimpPaneSwitch::Export(index)) => pane.selected_export = index,
+        None => {}
+    }
+    let mut view = pane.view;
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Document, "Document")
+        let pane_view = &mut view;
+        ui.selectable_value(pane_view, ChimpDocumentView::Document, "Document")
             .on_hover_text("Readable JSON representation of the complete decoded package");
         if !pane.texture_previews.is_empty() {
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Texture, "Texture")
+            ui.selectable_value(pane_view, ChimpDocumentView::Texture, "Texture")
                 .on_hover_text("Decoded Texture2D image preview");
         }
         if document.mesh_kind.is_some() {
-            ui.selectable_value(&mut pane.view, ChimpDocumentView::Mesh, "Mesh")
+            ui.selectable_value(pane_view, ChimpDocumentView::Mesh, "Mesh")
                 .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
         }
         ui.selectable_value(
-            &mut pane.view,
+            pane_view,
             ChimpDocumentView::Properties,
             "Properties",
         )
         .on_hover_text("Inspect exports and edit supported reflected scalar properties");
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Header, "Header")
+        ui.selectable_value(pane_view, ChimpDocumentView::Header, "Header")
             .on_hover_text("The package's name map, imports and exports, and what uses each");
-        ui.selectable_value(&mut pane.view, ChimpDocumentView::Metadata, "Metadata")
+        ui.selectable_value(pane_view, ChimpDocumentView::Metadata, "Metadata")
             .on_hover_text("Package dependencies and physical archive providers");
     });
+    switch_chimp_pane(ui, pane, ChimpPaneSwitch::View(view));
     ui.separator();
 
     let edit = match pane.view {
@@ -412,8 +444,9 @@ fn draw_chimp_document_pane(
                             .selectable_label(pane.selected_export == index, label)
                             .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
                             .clicked()
+                            && index != pane.selected_export
                         {
-                            pane.selected_export = index;
+                            switch_chimp_pane(ui, pane, ChimpPaneSwitch::Export(index));
                         }
                     }
                 });
@@ -946,6 +979,27 @@ mod tests {
 
         frames.click("Save Chimp changes…", &mut draw_pane(&mut app, THING));
         assert!(app.has_chimp_save_dialog());
+    }
+
+    /// A name typed into a property and left by switching to another view
+    /// is committed. The view switched on that click, so the box was never
+    /// drawn again to see itself lose focus, and the name was dropped.
+    #[test]
+    fn a_name_typed_then_left_by_switching_view_is_kept() {
+        let install = SyntheticInstall::new();
+        let mut app = install.app_with_open(&[THING]);
+        let mut frames = Frames::new();
+        frames.click_exact("Properties", 0, &mut draw_pane(&mut app, THING));
+        frames.click_exact("Rocket", 0, &mut draw_pane(&mut app, THING));
+        frames.replace_text("Comet", &mut draw_pane(&mut app, THING));
+        frames.click_exact("Header", 0, &mut draw_pane(&mut app, THING));
+        frames.frame(Vec::new(), &mut draw_pane(&mut app, THING));
+        assert_eq!(app.chimp_pane(0, THING).view, ChimpDocumentView::Header);
+        let document = &app.model.kits[0].chimp.documents[THING];
+        assert!(
+            matches!(first_value(document, "Tag"), PropValue::Name(name) if name.as_str() == "Comet"),
+            "the typed name was kept"
+        );
     }
 
     /// The Header view through the pane: a rename counts as an edit, and the
