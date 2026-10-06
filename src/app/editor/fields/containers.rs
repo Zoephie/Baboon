@@ -181,16 +181,22 @@ pub(in crate::app) fn draw_fields_with_docs(
                     unit,
                     range,
                     tag_reference_allowed,
+                    read_only,
+                    hidden,
                     ..
                 } = &entries[match_idx]
                 {
-                    // The engine strips everything after `:` from the field name,
-                    // so unit/range/help are recovered from the definition here.
+                    // The engine strips everything after `:` and the trailing
+                    // `*`/`!` markers from the field name, so unit/range/help and
+                    // the read-only and hidden flags are recovered from the
+                    // definition here.
                     let mut meta = field_display_meta(name);
                     meta.help = help.clone();
                     meta.unit = unit.clone();
                     meta.range = range.clone();
                     meta.tag_reference_allowed = tag_reference_allowed.clone();
+                    meta.read_only |= *read_only;
+                    meta.advanced |= *hidden;
                     meta_override = Some(meta);
                 }
                 cursor = match_idx + 1;
@@ -3970,6 +3976,79 @@ mod tests {
             small, large,
             "a frame built {small} labels over 8 target elements and {large} over 40"
         );
+    }
+
+    /// A tag's field names have lost their trailing `*` and `!` (shipped
+    /// tags store them stripped, and so do layouts built from the
+    /// definitions), so read-only and hidden come from the definition. A `!`
+    /// field shows only in expert mode, and a `*` field is marked read-only.
+    #[test]
+    fn read_only_and_hidden_come_from_the_definition() {
+        let root = crate::core::test_kits::unique_temp_path("marker-definitions");
+        let game = root.join("haloreach_mcc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(
+            game.join("marker_test.json"),
+            r#"{"name":"marker_test","tag":"mrkt","version":1,"flags":0,"block":"marker_test_block",
+                "blocks":{"marker_test_block":{"max_count":1,"struct":"marker_test_struct"}},
+                "structs":{"marker_test_struct":{"guid":"0123456789abcdef0123456789abcdef","size":12,
+                  "fields":[{"type":"long_integer","name":"visible"},{"type":"long_integer","name":"locked*"},
+                            {"type":"long_integer","name":"secret!"},{"type":"terminator","name":null}]}}}"#,
+        )
+        .unwrap();
+        let tag = TagFile::new(game.join("marker_test.json")).unwrap();
+        assert!(
+            tag.root().fields().all(|field| !field.name().contains(['*', '!'])),
+            "the tag's own names should be stripped, as a shipped tag's are"
+        );
+        // The edit context's lifetime is the helper's own; test code may leak.
+        let docs: &'static _ =
+            Box::leak(Box::new(crate::app::help::build_def_docs(&root, GameId::HaloReach, "marker_test")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let texts = |expert_mode: bool| -> Vec<String> {
+            let mut texts = Vec::new();
+            with_test_edit_context(|edit| {
+                edit.docs = Some(docs);
+                for _ in 0..2 {
+                    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            draw_fields_with_docs(
+                                ui,
+                                &tag.root(),
+                                &TagNameIndex::default(),
+                                0,
+                                expert_mode,
+                                "",
+                                edit,
+                                None,
+                            );
+                        });
+                    });
+                    texts = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                            _ => None,
+                        })
+                        .collect();
+                }
+            });
+            texts
+        };
+        let normal = texts(false);
+        assert!(normal.iter().any(|t| t == "visible"), "{normal:?}");
+        assert!(normal.iter().any(|t| t == "locked"), "{normal:?}");
+        assert!(!normal.iter().any(|t| t == "secret"), "a `!` field shows outside expert mode: {normal:?}");
+        assert_eq!(
+            normal.iter().filter(|t| *t == "read-only").count(),
+            1,
+            "only the `*` field is read-only: {normal:?}"
+        );
+        let expert = texts(true);
+        assert!(expert.iter().any(|t| t == "secret"), "expert mode hides a `!` field: {expert:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A field navigation (reference jump, Find) selects the element holding

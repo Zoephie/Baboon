@@ -20,6 +20,11 @@ pub(in crate::app) enum DefEntry {
         unit: Option<String>,
         range: Option<String>,
         tag_reference_allowed: Vec<u32>,
+        /// `*` in the schema name. The tag's own name has lost it.
+        read_only: bool,
+        /// `!` in the schema name: shown only in expert mode. The tag's own
+        /// name has lost it.
+        hidden: bool,
     },
     /// An explanation block (stripped from shipped tags). `title` is the schema
     /// name (often a section header), `body` the `definition` text.
@@ -184,6 +189,8 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
                     unit: meta.unit,
                     range: meta.range,
                     tag_reference_allowed,
+                    read_only: meta.read_only,
+                    hidden: meta.advanced,
                 });
             }
         }
