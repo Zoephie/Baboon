@@ -435,21 +435,34 @@ fn draw_chimp_document_pane(
             .default_size(220.0)
             .show(ui, |ui| {
                 ui.label(RichText::new("Exports").strong());
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, export) in document.exports.iter().enumerate() {
-                        let supported = export.decoded.is_ok();
-                        let label =
-                            format!("{}  {}", if supported { "●" } else { "○" }, export.object);
-                        if ui
-                            .selectable_label(pane.selected_export == index, label)
-                            .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
-                            .clicked()
-                            && index != pane.selected_export
-                        {
-                            switch_chimp_pane(ui, pane, ChimpPaneSwitch::Export(index));
+                // Only the rows in view are laid out: a level package has
+                // thousands of exports, and building every row each frame
+                // was several milliseconds of it.
+                let row_height = ui.spacing().interact_size.y;
+                egui::ScrollArea::vertical().show_rows(
+                    ui,
+                    row_height,
+                    document.exports.len(),
+                    |ui, rows| {
+                        for index in rows {
+                            let export = &document.exports[index];
+                            let supported = export.decoded.is_ok();
+                            let label = format!(
+                                "{}  {}",
+                                if supported { "●" } else { "○" },
+                                export.object
+                            );
+                            if ui
+                                .selectable_label(pane.selected_export == index, label)
+                                .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
+                                .clicked()
+                                && index != pane.selected_export
+                            {
+                                switch_chimp_pane(ui, pane, ChimpPaneSwitch::Export(index));
+                            }
                         }
-                    }
-                });
+                    },
+                );
             });
             egui::CentralPanel::default()
                 .show(ui, |ui| {
