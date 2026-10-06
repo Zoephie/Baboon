@@ -131,6 +131,13 @@ impl Baboon {
         let Some((group_tag, rel_path)) = window.results.ref_target.clone() else {
             return;
         };
+        // The results belong to the kit they were found in. The window stays
+        // open across a switch to another game, whose source cannot answer
+        // for these keys.
+        let kit = window.results.kit;
+        let Some(kit_index) = self.model.kit_index(kit) else {
+            return;
+        };
         let pending: Vec<(usize, String)> = window
             .expanded
             .iter()
@@ -149,7 +156,7 @@ impl Baboon {
             let Some(window) = self.dialogs.get_mut::<QueryResultsWindow>() else {
                 return;
             };
-            if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get(&key) {
+            if let Some(doc) = self.model.kits[kit_index].parsed_tags.get(&key) {
                 let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
                 window.occurrences.insert(index, occurrences);
                 continue;
@@ -160,16 +167,15 @@ impl Baboon {
             if !window.loading.insert(index) {
                 continue;
             }
-            let Some(entry) = self.model.entry_for_key(&key).cloned() else {
+            let Some(entry) = self.model.entry_for_key_in(kit_index, &key).cloned() else {
                 window.loading.remove(&index);
                 window.occurrences.insert(index, Vec::new());
                 continue;
             };
-            let Some(source_kind) = self.model.source().map(|source| source.source.clone()) else {
+            let Some(source_kind) = self.model.kits[kit_index].source.as_ref().map(|source| source.source.clone()) else {
                 window.loading.remove(&index);
                 continue;
             };
-            let kit = self.model.active_kit_id();
             // The results' own target, as `handle_ref_jump_occurrences`
             // compares it; the walk matches against the normalized form.
             let query_target = (group_tag, rel_path.clone());
@@ -216,7 +222,7 @@ impl Baboon {
             return true;
         };
         window.loading.remove(&index);
-        let current = kit == self.model.active_kit_id()
+        let current = kit == window.results.kit
             && window.results.ref_target.as_ref() == Some(&target)
             && window
                 .results
@@ -377,13 +383,10 @@ mod tests {
         std::fs::write(path, bytes).unwrap();
     }
 
-    /// An expanded row for a referrer that is not open must be read once. It used
-    /// to go through the tab loader, which drops results for tags without a tab,
-    /// so the row asked again as soon as each load finished — for as long as the
-    /// popup stayed open.
-    #[test]
-    fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
-        let root = scratch_root("ref-jump");
+    /// An app with one loose kit holding a referrer tag, and the "References
+    /// to" window open on it with its row expanded.
+    fn referrer_in_open_results(name: &str) -> (Baboon, PathBuf) {
+        let root = scratch_root(name);
         let path = root.join("objects/referrer.model");
         write_header_only_tag(&path, b"hlmt");
         let names = TagNameIndex::default();
@@ -422,12 +425,15 @@ mod tests {
             .unwrap()
             .expanded
             .insert(0);
-        let ctx = egui::Context::default();
+        (app, root)
+    }
 
-        // Three frames of the popup. Each one delivers whatever the last one
-        // started through the app's own message pump. Installing the source
-        // starts unrelated background work too, so only reads of the referrer —
-        // through either path — are counted.
+    /// Three frames of the popup, each delivering whatever the last one started
+    /// through the app's own message pump. Installing the source starts
+    /// unrelated background work too, so only reads of the referrer — through
+    /// either path — are counted.
+    fn reads_over_three_frames(app: &mut Baboon) -> usize {
+        let ctx = egui::Context::default();
         let mut loads = 0;
         for frame in 0..3 {
             app.refresh_ref_jump_occurrences(&ctx);
@@ -452,14 +458,43 @@ mod tests {
             }
             app.process_worker_messages(&ctx);
         }
+        loads
+    }
 
+    fn row_settled(app: &Baboon) -> bool {
+        app.dialogs
+            .get::<QueryResultsWindow>()
+            .is_some_and(|window| window.occurrences.contains_key(&0))
+    }
+
+    /// An expanded row for a referrer that is not open must be read once. It used
+    /// to go through the tab loader, which drops results for tags without a tab,
+    /// so the row asked again as soon as each load finished — for as long as the
+    /// popup stayed open.
+    #[test]
+    fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
+        let (mut app, root) = referrer_in_open_results("ref-jump");
+        let loads = reads_over_three_frames(&mut app);
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(loads, 1, "the referrer must be read exactly once");
         assert!(
-            app.dialogs
-                .get::<QueryResultsWindow>()
-                .is_some_and(|window| window.occurrences.contains_key(&0)),
+            row_settled(&app),
             "the row must settle (here with no occurrences: the tag has no body)"
         );
+    }
+
+    /// The window stays open when the user moves to another game. Its rows
+    /// are still read from the kit the results came from; they used to be
+    /// looked up in the focused kit, which has no such tag, and settled empty
+    /// without being read.
+    #[test]
+    fn a_row_expanded_from_another_game_reads_the_results_own_kit() {
+        let (mut app, root) = referrer_in_open_results("ref-jump-other-kit");
+        app.add_kit();
+        assert_eq!(app.model.active, 1, "another game has focus");
+        let loads = reads_over_three_frames(&mut app);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(loads, 1, "the referrer is read from its own kit");
+        assert!(row_settled(&app));
     }
 }

@@ -95,25 +95,33 @@ impl Baboon {
     /// Starts source-scoped indexing or search work without blocking the UI thread.
     /// Generation-tagged completion is ignored if the active source changes first.
     pub(in crate::app) fn begin_build_reverse_dependencies(&mut self, ctx: egui::Context, force: bool) {
-        self.begin_build_reverse_dependencies_inner(ctx, force, false);
+        self.begin_build_reverse_dependencies_in(self.model.active, ctx, force, false);
     }
 
-    pub(in crate::app) fn begin_build_reverse_dependencies_for_entry_index(&mut self, ctx: egui::Context) {
-        self.begin_build_reverse_dependencies_inner(ctx, false, true);
-    }
-
-    pub(in crate::app) fn begin_build_reverse_dependencies_inner(
+    /// The index build that follows `kit_index`'s completed scan. Named by
+    /// kit rather than read off the focus: the scan finishes whenever it
+    /// finishes, and the user may be in another game by then.
+    pub(in crate::app) fn begin_build_reverse_dependencies_for_entry_index(
         &mut self,
+        kit_index: usize,
+        ctx: egui::Context,
+    ) {
+        self.begin_build_reverse_dependencies_in(kit_index, ctx, false, true);
+    }
+
+    pub(in crate::app) fn begin_build_reverse_dependencies_in(
+        &mut self,
+        kit_index: usize,
         ctx: egui::Context,
         force: bool,
         paired_entry_index_build: bool,
     ) {
-        if self.model.kits[self.model.active].index_jobs.building_references
-            || self.model.kits[self.model.active].scanning_entries
+        if self.model.kits[kit_index].index_jobs.building_references
+            || self.model.kits[kit_index].scanning_entries
         {
             return;
         }
-        let Some(source) = self.model.source() else {
+        let Some(source) = self.model.kits[kit_index].source.as_ref() else {
             return;
         };
         // Loose folders index automatically after their scan. Containers are
@@ -140,7 +148,7 @@ impl Baboon {
         if entries.is_empty() && is_loose && source.complete_scan {
             // Scanned, and there is nothing in it: an empty graph, not a
             // reason to scan again (which is what an empty folder did, forever).
-            if let Some(source) = self.source_mut() {
+            if let Some(source) = self.model.kits[kit_index].source.as_mut() {
                 source.reverse_dependencies = Some(ReverseDependencyIndex::default());
             }
             return;
@@ -152,10 +160,11 @@ impl Baboon {
             // index once the scan lands. Containers have nothing to scan — an
             // empty mount simply has nothing to index.
             if is_loose {
-                if !self.model.kits[self.model.active].scanning_entries {
+                if !self.model.kits[kit_index].scanning_entries {
                     self.model.status = "Indexing tags, then building reference index…".to_owned();
                 }
-                self.begin_scan_all_entries_with_label(
+                self.begin_scan_all_entries_in(
+                    kit_index,
                     ctx,
                     "Indexing tags, then building reference index...",
                 );
@@ -163,15 +172,19 @@ impl Baboon {
             return;
         }
         let tag_source = source.source.clone();
-        let stamp = self.model.kit_stamp();
+        let kit = &self.model.kits[kit_index];
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
         let tx = self.tx.clone();
-        self.model.kits[self.model.active].index_jobs.building_references = true;
-        self.model.kits[self.model.active]
+        self.model.kits[kit_index].index_jobs.building_references = true;
+        self.model.kits[kit_index]
             .index_jobs
             .references_changed_during_build
             .clear();
-        self.model.kits[self.model.active].index_jobs.references_for_entry_index = paired_entry_index_build;
-        self.model.kits[self.model.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
+        self.model.kits[kit_index].index_jobs.references_for_entry_index = paired_entry_index_build;
+        self.model.kits[kit_index].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
             label: "Building reference index...".to_owned(),
             processed: 0,
             total: entries.len(),

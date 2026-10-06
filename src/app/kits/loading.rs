@@ -216,7 +216,7 @@ impl Baboon {
                 }
                 self.schedule_next_entry_index_refresh(kit_index, ctx);
                 if build_reference_index {
-                    self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
+                    self.begin_build_reverse_dependencies_for_entry_index(kit_index, ctx.clone());
                 } else {
                     self.dialogs.close::<IndexingNotice>();
                 }
@@ -1592,6 +1592,58 @@ mod tests {
             index.is_some(),
             "an empty folder has an empty reference graph"
         );
+    }
+
+    /// The scan that lands for one game builds that game's reference index,
+    /// even with another game focused. The build used to read the focus: the
+    /// scanned game's index was cleared and never rebuilt, and the focused one
+    /// started a scan nobody asked for.
+    #[test]
+    fn a_scan_builds_its_own_kits_reference_index_not_the_focused_ones() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-scan-kit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let loose = |root: &Path| LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.to_path_buf(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(loose(&root));
+        let scanned = app.model.kit_stamp();
+        app.add_kit();
+        app.install_loaded_source(loose(&root));
+        assert_eq!(app.model.active, 1, "the other game has focus when the scan lands");
+
+        app.handle_all_entries_scanned(scanned, Ok(Vec::new()), &egui::Context::default());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        let index = |app: &Baboon, kit: usize| {
+            app.model.kits[kit].source.as_ref().unwrap().reverse_dependencies.is_some()
+        };
+        assert!(index(&app, 0), "the scanned game has its reference index");
+        assert!(!index(&app, 1), "the focused game's is untouched");
+        assert!(!app.model.kits[1].scanning_entries, "and it was not sent scanning");
     }
 
     fn sound(path: &str) -> TagEntry {
