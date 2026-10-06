@@ -295,7 +295,13 @@ impl Baboon {
             });
         }
         for action in shortcuts {
-            self.commands.send(action);
+            // Opened now, before Find refreshes and draws below; applied with
+            // the frame's commands, it opened a frame late.
+            if matches!(action, AppAction::OpenFind) {
+                self.open_find();
+            } else {
+                self.commands.send(action);
+            }
         }
         self.refresh_find(ctx);
         let dropped_paths = ctx.input(|input| {
@@ -1231,5 +1237,24 @@ pub(in crate::app) mod tests {
         let written = std::fs::read_to_string(&sidecar).expect("the sidecar was written");
         assert!(written.contains("rocket"), "{written}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ctrl+F opens Find on the frame the key is pressed, before Find draws.
+    #[test]
+    fn ctrl_f_opens_find_before_it_draws() {
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        let _ = crate::app::run_ui_test(
+            &ctx,
+            input(vec![egui::Event::Key {
+                key: egui::Key::F,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND),
+            }]),
+            |_| app.prepare_root_frame(&ctx),
+        );
+        assert!(app.search.find.open, "open before the frame's commands are applied");
     }
 }
