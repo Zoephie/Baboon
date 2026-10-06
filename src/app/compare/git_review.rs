@@ -600,7 +600,7 @@ impl Baboon {
             }
             self.model.kits[kit].generation = self.model.kits[kit].generation.wrapping_add(1);
         }
-        self.model.active = kit;
+        self.focus_kit(kit);
         self.select_entry(key, ctx.clone());
     }
 }

@@ -107,7 +107,7 @@ impl Baboon {
                 let Some(index) = self.model.kit_index(kit) else {
                     return;
                 };
-                self.model.active = index;
+                self.focus_kit(index);
                 match tool {
                     ScenarioTool::TagTest => self.launch_scenario_in_tag_test(&key),
                     ScenarioTool::Sapien => self.launch_scenario_in_sapien(&key),

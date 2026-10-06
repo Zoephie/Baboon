@@ -15,7 +15,7 @@ impl Baboon {
     pub(in crate::app) fn discard_tag_changes(&mut self, kit: usize, key: &str, ctx: &egui::Context) {
         // Reloading below goes through the active-kit path, and discarding is a
         // user action on this kit either way.
-        self.model.active = kit;
+        self.focus_kit(kit);
         let was_dirty = self.model.kits[kit]
             .parsed_tags
             .get(key)
@@ -160,12 +160,12 @@ impl Baboon {
         match &action {
             PendingCloseAction::CloseKit(id) => {
                 if let Some(index) = self.model.kit_index(*id) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                 }
             }
             PendingCloseAction::CloseApp => {
                 if let Some(index) = self.model.first_dirty_kit() {
-                    self.model.active = index;
+                    self.focus_kit(index);
                 }
             }
             _ => {}

@@ -241,7 +241,7 @@ impl Baboon {
             }
             EditorCommand::ReimportBitmap { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.begin_reimport_bitmap(key, ctx.clone());
                 }
             }

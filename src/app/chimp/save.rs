@@ -120,7 +120,7 @@ impl Baboon {
         };
         match self.discard_chimp_packages(index, &prompt.packages) {
             Ok(count) => {
-                self.model.active = index;
+                self.focus_kit(index);
                 self.model.status = format!("Discarded {count} modified Chimp package(s)");
                 if let Some(action) = prompt.pending_action {
                     self.request_close_action(action, ctx);

@@ -597,7 +597,7 @@ impl Baboon {
             return;
         };
         if let Some(index) = self.model.kit_index(active) {
-            self.model.active = index;
+            self.focus_kit(index);
         }
     }
 

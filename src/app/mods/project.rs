@@ -1647,7 +1647,7 @@ impl Baboon {
     /// every stashed overlay and every unsaved document. The tags then reload
     /// exactly as the game ships them.
     pub(in crate::app) fn clear_campaign_stash(&mut self, kit: usize, ctx: &egui::Context) {
-        self.model.active = kit;
+        self.focus_kit(kit);
         let stashed = self.forget_all_campaign_overlays(kit);
         let open = self.model.kits[kit].open_tabs.clone();
         // Every parsed document goes, not just the dirty ones: a document

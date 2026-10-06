@@ -232,21 +232,26 @@ impl Baboon {
     pub(in crate::app) fn focus_navigation_kit(&mut self, kit: KitId) -> bool {
         match self.model.kit_index(kit) {
             Some(index) => {
-                self.model.active = index;
-                // Bring its workspace tab to the front too. `active` alone only
-                // decides where the action lands; if that workspace is a
-                // background tab the user is still looking at another game, and
-                // a jump or a confirmed dialog reads as having done nothing.
-                // A split needs no help here — both panes are already visible,
-                // and `make_active` leaves a pane that is not in a tab group
-                // alone.
-                self.kit_tree.make_active(
-                    |_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit),
-                );
+                self.focus_kit(index);
                 true
             }
             None => false,
         }
+    }
+
+    /// Make the kit at `index` the one actions land on, and bring its
+    /// workspace tab to the front.
+    ///
+    /// `active` decides where the File menu, Ctrl+S and the save prompt act;
+    /// the kit tab bar decides which game the user is looking at. Setting one
+    /// without the other sends an import or a save into a game in a background
+    /// tab. A split needs no help — both panes are already visible, and
+    /// `make_active` leaves a pane that is not in a tab group alone.
+    pub(in crate::app) fn focus_kit(&mut self, index: usize) {
+        self.model.active = index;
+        let kit = self.model.kits[index].id;
+        self.kit_tree
+            .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
     }
 
     pub(in crate::app) fn source_mut(&mut self) -> Option<&mut LoadedSourceData> {
@@ -316,7 +321,9 @@ impl Baboon {
         if self.model.kits.is_empty() {
             self.push_empty_kit();
         }
-        self.model.active = active_after_removal(self.model.active, index, self.model.kits.len());
+        // The tab bar would otherwise fall back to its first tab while the
+        // actions went to the kit that slid into the closed one's place.
+        self.focus_kit(active_after_removal(self.model.active, index, self.model.kits.len()));
     }
 
     /// Route an open request for `path` to a kit.
@@ -336,7 +343,7 @@ impl Baboon {
             .iter()
             .position(|kit| requested_path_matches(kit, &path))
         {
-            self.model.active = index;
+            self.focus_kit(index);
             return true;
         }
         if !self.model.kits[self.model.active].can_accept_source_load() {

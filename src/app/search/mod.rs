@@ -92,7 +92,7 @@ impl Baboon {
             SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx.clone()),
             SearchCommand::FindInTag { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.model.kits[index].selected_key = Some(key);
                     self.search.find.within = FindWithin::CurrentTag;
                     self.open_find();

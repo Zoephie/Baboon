@@ -130,7 +130,7 @@ impl Baboon {
         match action {
             AppAction::FocusKit(kit) => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                 }
             }
             AppAction::Defer(action) => self.defer_file_action(action, ctx),
@@ -158,7 +158,7 @@ impl Baboon {
             AppAction::Redo => self.redo_current_tag(),
             AppAction::RevealInBrowser { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.reveal_in_browser(&key);
                 }
             }

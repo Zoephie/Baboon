@@ -23,7 +23,7 @@ impl Baboon {
             self.settle_restored_kit(kit);
             return true;
         };
-        self.model.active = index;
+        self.focus_kit(index);
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {

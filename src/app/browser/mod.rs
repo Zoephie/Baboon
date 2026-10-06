@@ -439,7 +439,7 @@ impl Baboon {
         match command {
             BrowserCommand::Action { kit, action } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.handle_browser_action(action, ctx.clone());
                 }
             }
@@ -452,7 +452,7 @@ impl Baboon {
             BrowserCommand::LoadFolders { kit, tree, paths } => self.load_browser_folders(kit, tree, &paths),
             BrowserCommand::ScanAllEntries { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.begin_scan_all_entries(ctx.clone());
                 }
             }
@@ -461,7 +461,7 @@ impl Baboon {
                     return;
                 };
                 // Each acts on the active kit, so this one first.
-                self.model.active = index;
+                self.focus_kit(index);
                 match (library, action) {
                     (Library::Bitmaps, CellAction::Open(key)) => self.select_entry(key, ctx.clone()),
                     // Opens a native folder picker, which blocks until it is
