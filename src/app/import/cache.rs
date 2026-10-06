@@ -340,13 +340,21 @@ impl Baboon {
     /// after the user has seen what the folder reached for and ticked which of
     /// it to bring.
     pub(in crate::app) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
-        if let Some(index) = self
+        // The kit the tags are written into is the one that has to be
+        // writable. This used to check the cache they are read from, so a
+        // read-only destination was written to anyway.
+        let destination = self
             .dialogs
             .get::<CacheImportDialog>()
-            .and_then(|dialog| self.model.kit_index(dialog.kit))
-            && self.refuse_read_only_edit(index)
-        {
-            return;
+            .and_then(|dialog| dialog.target())
+            .map(|target| self.model.kit_index(target.kit));
+        match destination {
+            Some(None) => {
+                self.model.status = "The kit this import was going into has closed".to_owned();
+                return;
+            }
+            Some(Some(index)) if self.refuse_read_only_edit(index) => return,
+            _ => {}
         }
         let Some(dialog) = self.dialogs.get::<CacheImportDialog>() else {
             return;
@@ -674,6 +682,98 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cache workspace, and a loose Halo 3 kit at `/ek/H3EK/tags` to import
+    /// into, with the window open on the pair.
+    fn importing_into_a_loose_kit() -> Baboon {
+        let mut app = Baboon::for_test();
+        let cache = app.model.kits[0].id;
+        let target = app.add_kit();
+        let game = GameId::from_id("halo3_mcc");
+        app.install_loaded_source(LoadedSourceData {
+            label: "H3EK".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("/ek/H3EK/tags"),
+                game,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        app.dialogs.open(CacheImportDialog {
+            kit: cache,
+            prefix: String::new(),
+            selected: 0,
+            targets: vec![CacheImportTarget {
+                kit: target,
+                label: "H3EK".to_owned(),
+                game: game.unwrap(),
+                tags_root: PathBuf::from("/ek/H3EK/tags"),
+            }],
+            target_index: 0,
+            outside_tree: OutsideTree::default(),
+            outside_picked: BTreeMap::new(),
+            single: None,
+            destination: None,
+            replace: ReplaceChoice::Always,
+            conflicts: OutsideTree::default(),
+            conflict_picked: BTreeMap::new(),
+            conflicts_stale: true,
+            scanning: false,
+            running: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
+            report: None,
+            error: None,
+        });
+        app
+    }
+
+    /// The destination is what has to be writable. The check used to look at
+    /// the cache the tags come from, so a kit set read-only was written to.
+    #[test]
+    fn a_read_only_destination_refuses_the_import() {
+        let mut app = importing_into_a_loose_kit();
+        app.model.prefs.custom_editing_kit_profiles = vec![crate::app::prefs::CustomEditingKitProfile {
+            read_only: true,
+            git_tracked: false,
+            id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            name: "H3EK".to_owned(),
+            game: "halo3_mcc".to_owned(),
+            root: PathBuf::from("/ek/H3EK"),
+            icon: None,
+            tags_folder: None,
+            data_folder: None,
+        }];
+        assert!(app.model.editing_kit_is_read_only(1));
+
+        app.start_cache_import(egui::Context::default(), None);
+
+        assert!(app.model.status.contains("read-only"), "{}", app.model.status);
+        assert!(!app.dialogs.get::<CacheImportDialog>().unwrap().running);
+    }
+
+    /// A destination closed while the window was up is not written to.
+    #[test]
+    fn a_closed_destination_refuses_the_import() {
+        let mut app = importing_into_a_loose_kit();
+        let target = app.model.kits[1].id;
+        app.remove_kit(target);
+
+        app.start_cache_import(egui::Context::default(), None);
+
+        assert_eq!(app.model.status, "The kit this import was going into has closed");
+        assert!(!app.dialogs.get::<CacheImportDialog>().unwrap().running);
+    }
 
     fn reference(path: &str) -> OutsideReference {
         OutsideReference {
