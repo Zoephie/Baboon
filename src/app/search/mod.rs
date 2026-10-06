@@ -35,8 +35,9 @@ pub(in crate::app) struct SearchFeature {
     /// Modeless find-in-tag dialog and its exact occurrence list.
     pub(in crate::app) find: FindDialogState,
     pub(in crate::app) field_value_searching: bool,
-    /// Find result waiting for its target open tab to finish parsing.
-    pub(in crate::app) pending_find_jump: Option<FindOccurrence>,
+    /// Find result waiting for its target open tab to finish parsing, with
+    /// the kit it was found in: a key only means something in its own kit.
+    pub(in crate::app) pending_find_jump: Option<(KitId, FindOccurrence)>,
 }
 
 /// What search can be asked to do.

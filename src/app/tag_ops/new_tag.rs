@@ -787,6 +787,20 @@ pub(in crate::app) fn register_created_tag_in_source(
 }
 
 impl NewTagDialog {
+    /// Whether the kit the dialog was opened for is a Campaign Evolved
+    /// container set, where a new tag is made in memory.
+    pub(in crate::app) fn kit_is_container(&self, model: &Model) -> bool {
+        model
+            .kit_index(self.kit)
+            .and_then(|index| model.kits[index].source.as_ref())
+            .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
+    }
+
+    /// The loose tags folder of the kit the dialog was opened for.
+    pub(in crate::app) fn tags_root(&self, model: &Model) -> Option<PathBuf> {
+        model.loaded_tags_root_for(model.kit_index(self.kit)?)
+    }
+
     /// Reload the groups for the selected game, and what the selected one
     /// allows.
     pub(in crate::app) fn refresh_groups(&mut self, model: &Model) {
@@ -848,7 +862,8 @@ impl NewTagDialog {
             return;
         };
         let shipped = model
-            .source()
+            .kit_index(self.kit)
+            .and_then(|index| model.kits[index].source.as_ref())
             .map(shipped_counts_by_group)
             .and_then(|counts| counts.get(&group.group_tag).copied())
             .unwrap_or(0);
@@ -858,7 +873,7 @@ impl NewTagDialog {
 
     /// Ask where to write the new tag, under the loaded tags folder.
     pub(in crate::app) fn choose_output_path(&mut self, model: &Model) {
-        let Some(root) = model.loaded_tags_root() else {
+        let Some(root) = self.tags_root(model) else {
             self.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
             return;

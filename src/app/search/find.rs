@@ -584,8 +584,12 @@ impl Baboon {
             } else {
                 &source.all_entries
             };
+            // The kit's id as well as its generation: generations count per
+            // kit, so two kits of matching shape could otherwise share a
+            // signature and one would show the other's closed-tag hits.
             let signature = format!(
-                "{}|{:?}|{}|{}|{}|{}|{}|{}",
+                "{:?}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+                kit.id,
                 kit.generation,
                 self.search.find.look_in,
                 self.search.find.match_case,
@@ -784,7 +788,7 @@ impl Baboon {
             .parsed_tags
             .contains_key(&hit.tag_key)
         {
-            self.search.pending_find_jump = Some(hit);
+            self.search.pending_find_jump = Some((self.model.active_kit_id(), hit));
             return;
         }
         if let Some(entry) = self.model.entry_for_key(&hit.tag_key) {
@@ -823,6 +827,51 @@ fn order_find_occurrences(
 mod tests {
     use super::*;
     use crate::core::document::value::append_field_path_for;
+
+    /// Two kits of the same shape are still two kits. Find's "All Tags"
+    /// signature used to leave the kit out, so switching to a kit with the same
+    /// generation, entry count, first entry and open tags kept the other kit's
+    /// closed-tag hits instead of searching again.
+    #[test]
+    fn find_all_tags_searches_again_in_another_kit_of_the_same_shape() {
+        let container = || LoadedSourceData {
+            label: "Campaign Evolved".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/find-signature-test/Paks"),
+                containers: Vec::new(),
+                index: Arc::new(crate::core::source::ContainerTagIndex::default()),
+                packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(container());
+        app.add_kit();
+        app.install_loaded_source(container());
+        assert_eq!(app.model.kits[0].generation, app.model.kits[1].generation);
+        app.search.find.query = "marine".to_owned();
+        let ctx = egui::Context::default();
+
+        app.model.active = 0;
+        app.refresh_all_tag_find(&ctx);
+        let first = app.search.find.all_signature.clone();
+        app.model.active = 1;
+        app.refresh_all_tag_find(&ctx);
+
+        assert!(first.is_some());
+        assert_ne!(app.search.find.all_signature, first, "the other kit is searched");
+    }
 
     fn field_names_only() -> FindLookIn {
         FindLookIn {

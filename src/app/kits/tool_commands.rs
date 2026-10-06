@@ -38,6 +38,10 @@ pub(in crate::app) struct ToolCommandsUiState {
     pub(in crate::app) error: Option<String>,
     pub(in crate::app) selected: Option<String>,
     pub(in crate::app) values: HashMap<String, String>,
+    /// The kit `values` were entered for. The window follows the focused kit,
+    /// and two kits of one game share a catalog, so the game alone does not
+    /// say when paths picked under one kit's folders stop meaning anything.
+    pub(in crate::app) values_kit: Option<KitId>,
     pub(in crate::app) optional_open: bool,
 }
 
@@ -188,6 +192,18 @@ pub(in crate::app) fn path_arg_from_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Values entered for one kit are not carried to another of the same game.
+    #[test]
+    fn values_entered_for_one_kit_are_dropped_for_another() {
+        let mut state = ToolCommandsUiState::default();
+        state.follow_kit(KitId(0));
+        state.values.insert("source".to_owned(), "D:/H3EK/data/a".to_owned());
+        state.follow_kit(KitId(0));
+        assert_eq!(state.values.len(), 1, "kept while the kit stays");
+        state.follow_kit(KitId(1));
+        assert!(state.values.is_empty());
+    }
 
     #[test]
     fn tool_command_preview_leaves_path_arguments_unquoted() {

@@ -13,6 +13,7 @@ impl Dialog for ToolCommandsUiState {
         if let Some(game) = game {
             self.ensure_loaded(game);
         }
+        self.follow_kit(cx.model.active_kit_id());
         let prefs = &cx.model.prefs;
         let mut left_width = prefs.tool_commands_left_width;
         let mut collapsed = prefs.tool_commands_collapsed_categories.clone();
@@ -488,6 +489,16 @@ impl ToolCommandsUiState {
                 self.values.clear();
                 self.error = Some(error);
             }
+        }
+    }
+
+    /// Forget the entered values when the window starts showing another kit:
+    /// they were picked under that kit's folders, and running them here would
+    /// point the tool at the other kit's files.
+    pub(in crate::app) fn follow_kit(&mut self, kit: KitId) {
+        if self.values_kit != Some(kit) {
+            self.values.clear();
+            self.values_kit = Some(kit);
         }
     }
 

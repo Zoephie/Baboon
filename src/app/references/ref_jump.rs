@@ -39,13 +39,19 @@ impl Baboon {
         {
             self.references.field_nav = None;
         }
-        if let Some(hit) = self.search.pending_find_jump.clone() {
-            if self.model.kits[self.model.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
-                && self.model.kits[self.model.active]
-                    .parsed_tags
-                    .contains_key(&hit.tag_key)
-            {
-                self.activate_find_occurrence(ctx, hit);
+        if let Some((kit, hit)) = self.search.pending_find_jump.clone() {
+            // Fires in the kit it was found in, once that tag has loaded there.
+            // Another kit with a tag under the same key is a different tag.
+            match self.model.kit_index(kit) {
+                None => self.search.pending_find_jump = None,
+                Some(index)
+                    if index == self.model.active
+                        && self.model.kits[index].selected_key.as_deref() == Some(hit.tag_key.as_str())
+                        && self.model.kits[index].parsed_tags.contains_key(&hit.tag_key) =>
+                {
+                    self.activate_find_occurrence(ctx, hit);
+                }
+                Some(_) => {}
             }
         }
         let Some(jump) = self.references.pending_ref_jump.clone() else {
@@ -381,6 +387,39 @@ mod tests {
         bytes[48..52].copy_from_slice(&u32::from_be_bytes(*group).to_le_bytes());
         bytes[60..64].copy_from_slice(b"MALB");
         std::fs::write(path, bytes).unwrap();
+    }
+
+    /// A Find hit waiting for its tag to load belongs to the kit it was found
+    /// in. It used to fire in whichever kit next selected and loaded a tag
+    /// under the same key, which is a different tag.
+    #[test]
+    fn a_waiting_find_jump_does_not_fire_in_another_kit() {
+        let key = "file:/tags/objects/marine.biped".to_owned();
+        let mut app = Baboon::for_test();
+        let found_in = app.model.kits[0].id;
+        app.add_kit();
+        let definition = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions/haloce_evolved/biped.json");
+        app.model.kits[1]
+            .parsed_tags
+            .insert(key.clone(), TagDocument::clean(TagFile::new(definition).unwrap()));
+        app.kit_and_view(1).open_tag_pane(&key);
+        let hit = crate::app::search::FindOccurrence {
+            tag_key: key.clone(),
+            field_path: "model".to_owned(),
+            kind: crate::app::search::FindTargetKind::Label,
+            text: "model".to_owned(),
+            range: 0..5,
+        };
+        app.search.pending_find_jump = Some((found_in, hit));
+        let ctx = egui::Context::default();
+
+        app.apply_field_nav(&ctx);
+        assert!(app.search.pending_find_jump.is_some(), "still waiting for its own kit");
+        assert!(app.references.field_nav.is_none(), "nothing navigated in the other kit");
+
+        app.remove_kit(found_in);
+        app.apply_field_nav(&ctx);
+        assert!(app.search.pending_find_jump.is_none(), "dropped with its kit");
     }
 
     /// An app with one loose kit holding a referrer tag, and the "References

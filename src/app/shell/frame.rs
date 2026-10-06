@@ -5045,6 +5045,61 @@ mod tests {
         assert_eq!(steps(&mut h, &key), 1);
     }
 
+    // The New Tag window is for the workspace it was opened in, and Create goes
+    // there. It used to draw from whichever workspace had focus, so moving to
+    // another game while it was open said no tags folder was loaded and
+    // pointed Choose... at the other game's folder.
+
+    #[test]
+    fn the_new_tag_window_reads_the_kit_it_was_opened_for() {
+        let kit = LooseKit::new("new-tag-kit", "halo3_mcc");
+        kit.write_mcc("objects/weapons/rifle/assault_rifle", "biped", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.app.open_new_tag_dialog();
+        h.app.add_kit();
+        h.idle(3);
+        assert!(h.painted_contains("New Tag"), "{:?}", h.painted);
+        assert!(
+            !h.painted_contains("Load a loose editing-kit tags folder"),
+            "the window still sees its own kit's tags folder: {:?}",
+            h.painted
+        );
+    }
+
+    // Compare Tags is about one kit's tag. With that kit closed it used to fall
+    // back to the focused kit and compare whatever that kit had under the key.
+
+    #[test]
+    fn closing_its_kit_closes_compare_tags() {
+        let kit = LooseKit::new("compare-closed-kit", "halo3_mcc");
+        kit.write_mcc("objects/weapons/rifle/assault_rifle", "biped", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let compared = h.app.model.kits[0].id;
+        h.app.dialogs.open(TagDiffState {
+            kit: compared,
+            a_key: kit.key("objects/weapons/rifle/assault_rifle.biped"),
+            source: TagCompareSource::OpenTag,
+            b_kit: None,
+            b_key: None,
+            b_path: None,
+            comparison_kit_root: None,
+            git_history: Default::default(),
+            error: None,
+            filters: Default::default(),
+            swapped: false,
+            results: None,
+            git_pending: None,
+        });
+        h.idle(2);
+        assert!(h.app.dialogs.get::<TagDiffState>().is_some(), "open while its kit is");
+        h.app.add_kit();
+        h.app.remove_kit(compared);
+        h.idle(2);
+        assert!(h.app.dialogs.get::<TagDiffState>().is_none());
+    }
+
     // Revealing a tag inside folders the loose browser has not loaded yet. Each
     // folder loads once the frame that drew it open is over, so a reveal can only
     // open the next folder down a frame later; it has to stay armed until it
