@@ -690,7 +690,7 @@ mod tests {
         let mut both = KitMut::new(&mut kit, &mut view);
         both.open_tag_pane("file:/tags/objects/a.weapon");
         both.open_tag_pane("file:/tags/objects/b.weapon");
-        both.kit.selected_key = Some("file:/tags/objects/a.weapon".to_owned());
+        both.open_tag_pane("file:/tags/objects/a.weapon");
 
         let mut map = HashMap::new();
         map.insert(

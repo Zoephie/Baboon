@@ -52,10 +52,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         // not. `selected_key` is what "Save Current Tag" acts on, so passing
         // the cursor over another pane must not change the target. Sent before
         // the pane draws, so it lands before anything the pane sends.
-        if ui.input(|input| input.pointer.any_pressed())
-            && ui.rect_contains_pointer(ui.max_rect())
-            && !is_folder_pane_key(&key)
-        {
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) {
             self.cx.send(EditorCommand::FocusTab {
                 kit: self.kit,
                 key: key.clone(),
@@ -225,7 +222,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         // its pane: `selected_key` is what Save and Save As act on, and a tab
         // brought forward by its title used to leave them on the tag before,
         // so Save As offered that tag's type and saved that tag.
-        if button_response.clicked() && !is_folder_pane_key(&key) {
+        if button_response.clicked() {
             self.cx.send(EditorCommand::FocusTab {
                 kit: self.kit,
                 key: key.clone(),

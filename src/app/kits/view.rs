@@ -142,15 +142,83 @@ impl KitView {
 
     /// Tag keys currently laid out, in tab order. Derived from the tree, which
     /// owns the layout; the kit's `open_tabs` is this, re-derived.
+    ///
+    /// Walked from the root rather than read off the tile store, which is a
+    /// hash map: its order is arbitrary, and the selection used to fall back
+    /// to whichever tag came first in it.
     pub(in crate::app) fn tabs_from_tree(&self) -> Vec<String> {
-        self.tag_tree
-            .tiles
-            .tiles()
-            .filter_map(|tile| match tile {
-                egui_tiles::Tile::Pane(key) => Some(key.clone()),
-                egui_tiles::Tile::Container(_) => None,
-            })
-            .collect()
+        let tiles = &self.tag_tree.tiles;
+        let mut keys = Vec::new();
+        let mut stack: Vec<egui_tiles::TileId> = self.tag_tree.root().into_iter().collect();
+        while let Some(id) = stack.pop() {
+            match tiles.get(id) {
+                Some(egui_tiles::Tile::Pane(key)) => keys.push(key.clone()),
+                Some(egui_tiles::Tile::Container(container)) => {
+                    stack.extend(container.children_vec().into_iter().rev());
+                }
+                None => {}
+            }
+        }
+        // A pane the root no longer reaches is still laid out until the tree
+        // is simplified; keep it listed rather than dropping its document.
+        for tile in tiles.tiles() {
+            if let egui_tiles::Tile::Pane(key) = tile
+                && !keys.contains(key)
+            {
+                keys.push(key.clone());
+            }
+        }
+        keys
+    }
+
+    /// The panes on screen under `from`, in layout order: every pane of a
+    /// split, and the tab in front of each tab group.
+    fn shown_panes_under(&self, from: egui_tiles::TileId) -> Vec<String> {
+        let tiles = &self.tag_tree.tiles;
+        let mut keys = Vec::new();
+        let mut stack = vec![from];
+        while let Some(id) = stack.pop() {
+            match tiles.get(id) {
+                Some(egui_tiles::Tile::Pane(key)) => keys.push(key.clone()),
+                Some(egui_tiles::Tile::Container(container)) => {
+                    let children: Vec<_> = container.active_children(tiles).collect();
+                    stack.extend(children.into_iter().rev());
+                }
+                None => {}
+            }
+        }
+        keys
+    }
+
+    /// Whether `tile` is drawn: every container above it shows it.
+    fn is_shown(&self, tile: egui_tiles::TileId) -> bool {
+        self.tag_tree.active_tiles().contains(&tile)
+    }
+
+    /// What is selected when the user is looking at `front`: a tag, or nothing
+    /// for a folder pane, which no tag action applies to.
+    fn selection_for_front(front: Option<&String>) -> Option<String> {
+        front.filter(|key| !is_folder_pane_key(key)).cloned()
+    }
+
+    /// The selection once `tile` is no longer in front: whatever is now shown
+    /// in the nearest group above it that is on screen.
+    fn selection_covering(&self, tile: egui_tiles::TileId) -> Option<String> {
+        let mut node = tile;
+        while let Some(parent) = self.tag_tree.tiles.parent_of(node) {
+            if self.is_shown(parent) {
+                return Self::selection_for_front(self.shown_panes_under(parent).first());
+            }
+            node = parent;
+        }
+        self.first_shown_selection()
+    }
+
+    /// The selection when there is no better place for it: the first tab on
+    /// screen.
+    fn first_shown_selection(&self) -> Option<String> {
+        let shown = self.tag_tree.root().map(|root| self.shown_panes_under(root)).unwrap_or_default();
+        shown.into_iter().find(|key| !is_folder_pane_key(key))
     }
 
     fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
@@ -260,22 +328,37 @@ impl<'a> KitMut<'a> {
     /// Re-derive `open_tabs` from the tree. Called after anything that can
     /// change the layout: a frame of `tree.ui`, an open, or a close.
     /// Returns whether the open tabs or the selection changed.
+    ///
+    /// The selection is what Save, Undo, Ctrl+W and Find's "Current tag" act
+    /// on, so it is kept on a tab the user can see. A selected tab that is
+    /// covered — by a click on another tab, a drag, or a tab opened in front
+    /// of it — hands the selection to whatever covers it.
     pub(in crate::app) fn sync_open_tabs(&mut self) -> bool {
+        self.sync_open_tabs_after_close(None)
+    }
+
+    /// [`Self::sync_open_tabs`], after closing a pane that was in `closed_from`:
+    /// a closed selection moves to the tab that group now shows, which is the
+    /// one the user is looking at.
+    fn sync_open_tabs_after_close(&mut self, closed_from: Option<egui_tiles::TileId>) -> bool {
         let open_tabs = self.view.tabs_from_tree();
         let mut changed = open_tabs != self.kit.open_tabs;
         self.kit.open_tabs = open_tabs;
-        if self
-            .kit
-            .selected_key
-            .as_ref()
-            .is_some_and(|key| !self.kit.open_tabs.contains(key))
-        {
-            self.kit.selected_key = self
-                .kit
-                .open_tabs
-                .iter()
-                .find(|key| !is_folder_pane_key(key))
-                .cloned();
+        let Some(selected) = self.kit.selected_key.as_deref() else {
+            return changed;
+        };
+        let next = match self.view.tile_for_key(selected) {
+            Some(tile) if self.view.is_shown(tile) => return changed,
+            Some(tile) => self.view.selection_covering(tile),
+            None => match closed_from {
+                Some(group) if self.view.is_shown(group) => {
+                    KitView::selection_for_front(self.view.shown_panes_under(group).first())
+                }
+                _ => self.view.first_shown_selection(),
+            },
+        };
+        if next != self.kit.selected_key {
+            self.kit.selected_key = next;
             changed = true;
         }
         changed
@@ -302,7 +385,8 @@ impl<'a> KitMut<'a> {
             }
             tree.make_active(|id, _| id == tile_id);
         }
-        self.kit.selected_key = Some(key.to_owned());
+        // A folder pane in front selects no tag, the same as clicking it.
+        self.kit.selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.sync_open_tabs();
     }
 
@@ -323,24 +407,26 @@ impl<'a> KitMut<'a> {
             }
             None => tree.root = Some(tile_id),
         }
-        self.kit.selected_key = Some(key.to_owned());
+        self.kit.selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.sync_open_tabs();
     }
 
     /// Remove `key`'s pane from the layout.
     pub(in crate::app) fn close_tag_pane(&mut self, key: &str) {
+        let mut closed_from = None;
         if let Some(tile_id) = self.view.tile_for_key(key) {
+            closed_from = self.view.tag_tree.tiles.parent_of(tile_id);
             self.view.tag_tree.remove_recursively(tile_id);
         }
         self.view.browser.folder_browsers.remove(key);
-        self.sync_open_tabs();
+        self.sync_open_tabs_after_close(closed_from);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::browser::{BrowserMode, BrowserSort};
+    use crate::app::browser::{BrowserMode, BrowserSort, folder_pane_key};
 
     fn empty_source() -> LoadedSourceData {
         LoadedSourceData {
@@ -413,5 +499,87 @@ mod tests {
         assert_eq!(app.views[id].browser.mode, BrowserMode::Groups);
         assert!(app.views[id].browser.filter.is_empty());
         assert!(app.views[id].pending_expand.is_empty());
+    }
+
+    // The selection is what Save, Undo and Ctrl+W act on. It has to stay on a
+    // tab the user can see, whatever changed the layout under it.
+
+    fn tag(n: usize) -> String {
+        format!("file:/tags/objects/t{n:02}.weapon")
+    }
+
+    /// The tags on screen, read off the tree the way it draws.
+    fn shown(view: &KitView) -> Vec<String> {
+        view.tag_tree.root().map(|root| view.shown_panes_under(root)).unwrap_or_default()
+    }
+
+    #[test]
+    fn open_tabs_follow_tab_order() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        for n in 0..12 {
+            both.open_tag_pane(&tag(n));
+        }
+        assert_eq!(kit.open_tabs, (0..12).map(tag).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn closing_the_selected_tab_selects_the_tab_shown_in_its_place() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        for n in 0..12 {
+            both.open_tag_pane(&tag(n));
+        }
+        both.open_tag_pane(&tag(7));
+        both.close_tag_pane(&tag(7));
+        assert_eq!(shown(both.view), vec![tag(0)], "the group falls back to its first tab");
+        assert_eq!(both.kit.selected_key, Some(tag(0)), "and the selection with it");
+    }
+
+    #[test]
+    fn a_covered_tab_hands_the_selection_to_the_one_in_front() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&tag(1));
+        // What a drag or a hover over the tab bar does: the tree brings another
+        // tab forward with no click to focus it.
+        let front = both.view.tile_for_key(&tag(0)).unwrap();
+        both.view.tag_tree.make_active(|id, _| id == front);
+        both.sync_open_tabs();
+        assert_eq!(both.kit.selected_key, Some(tag(0)));
+    }
+
+    #[test]
+    fn a_folder_pane_in_front_selects_no_tag() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&folder_pane_key(Path::new("objects")));
+        assert_eq!(both.kit.selected_key, None, "not the tag behind it");
+        both.open_tag_pane(&tag(0));
+        assert_eq!(both.kit.selected_key, Some(tag(0)));
+    }
+
+    #[test]
+    fn a_selection_in_one_half_of_a_split_survives_the_other_half_changing() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&tag(1));
+        both.open_tag_pane_beside(&tag(2));
+        both.open_tag_pane(&tag(1));
+        assert_eq!(shown(both.view), vec![tag(1), tag(2)]);
+        assert_eq!(both.kit.selected_key, Some(tag(1)));
+        // The other half's tab group changes; the selected tag is still shown.
+        let other = both.view.tile_for_key(&tag(2)).unwrap();
+        both.view.tag_tree.make_active(|id, _| id == other);
+        both.sync_open_tabs();
+        assert_eq!(both.kit.selected_key, Some(tag(1)));
     }
 }

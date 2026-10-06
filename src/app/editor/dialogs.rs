@@ -236,7 +236,9 @@ impl Baboon {
             }
             EditorCommand::FocusTab { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.kits[index].selected_key = Some(key);
+                    // A folder pane is not a tag: focusing one leaves no tag for
+                    // Save, Undo or Ctrl+W to act on, rather than a hidden one.
+                    self.model.kits[index].selected_key = (!crate::app::browser::is_folder_pane_key(&key)).then_some(key);
                 }
             }
             EditorCommand::ReimportBitmap { kit, key } => {
