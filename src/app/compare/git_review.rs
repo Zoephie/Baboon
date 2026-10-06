@@ -1,6 +1,7 @@
 //! Read-only Git repository discovery and semantic tag comparison state.
 
 use super::*;
+use crate::app::help::{GroupHierarchy, group_hierarchy};
 
 pub(in crate::app) const GIT_REVIEW_KEY: &str = "tool:git_review";
 pub(in crate::app) const GIT_REVIEW_TITLE: &str = "Git Review";
@@ -105,11 +106,14 @@ fn git_text_untrimmed(root: &Path, args: &[&str]) -> Result<String, String> {
     git_output(root, args).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn tag_group_for_path(path: &str) -> Option<u32> {
+/// The group a changed file is a tag of, by what the kit's game names its
+/// extension: `.shader` is a different group in Halo CE, Halo 2 and Halo 3.
+/// `None` for a file that isn't a tag of this game.
+fn tag_group_for_path(path: &str, groups: &GroupHierarchy) -> Option<u32> {
     Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
-        .and_then(extension_to_group_tag)
+        .and_then(|extension| groups.group_named(extension))
 }
 
 fn parse_commits(text: &str) -> Vec<GitReviewCommit> {
@@ -127,7 +131,7 @@ fn parse_commits(text: &str) -> Vec<GitReviewCommit> {
         .collect()
 }
 
-fn parse_name_status(text: &str) -> Vec<GitReviewFile> {
+fn parse_name_status(text: &str, groups: &GroupHierarchy) -> Vec<GitReviewFile> {
     text.lines()
         .filter_map(|line| {
             let mut fields = line.split('\t');
@@ -137,13 +141,13 @@ fn parse_name_status(text: &str) -> Vec<GitReviewFile> {
             Some(GitReviewFile {
                 status: status.chars().next().unwrap_or('?').to_string(),
                 path: path.to_owned(),
-                group_tag: tag_group_for_path(path)?,
+                group_tag: tag_group_for_path(path, groups)?,
             })
         })
         .collect()
 }
 
-fn parse_local_status(text: &str) -> Vec<GitReviewFile> {
+fn parse_local_status(text: &str, groups: &GroupHierarchy) -> Vec<GitReviewFile> {
     text.lines()
         .filter_map(|line| {
             if line.len() < 4 {
@@ -158,7 +162,7 @@ fn parse_local_status(text: &str) -> Vec<GitReviewFile> {
             Some(GitReviewFile {
                 status: if status == "??" { "?" } else { status }.to_owned(),
                 path: path.to_owned(),
-                group_tag: tag_group_for_path(path)?,
+                group_tag: tag_group_for_path(path, groups)?,
             })
         })
         .collect()
@@ -200,6 +204,13 @@ pub(in crate::app) struct GitReviewKit {
     source_root: PathBuf,
     definitions_root: PathBuf,
     game: Option<GameId>,
+}
+
+impl GitReviewKit {
+    /// The kit's game's groups, which say what each changed file is.
+    fn groups(&self) -> std::sync::Arc<GroupHierarchy> {
+        group_hierarchy(Some(&self.definitions_root), self.game)
+    }
 }
 
 /// The part of [`GitReviewState`] that Git decides. A job takes a copy to a
@@ -252,10 +263,10 @@ impl GitReviewView {
                 &repo,
                 &["log", "-n", "100", "--format=%H%x09%h%x09%cs%x09%an%x09%s"],
             )?;
-            let mut files = parse_local_status(&git_text_untrimmed(
-                &repo,
-                &["status", "--short", "--untracked-files=all"],
-            )?);
+            let mut files = parse_local_status(
+                &git_text_untrimmed(&repo, &["status", "--short", "--untracked-files=all"])?,
+                &kit.groups(),
+            );
             retain_source_tags(&mut files, &repo, source_root);
             sort_files_by_full_path(&mut files);
             Ok::<_, String>((repo, branch, parse_commits(&log), files))
@@ -310,10 +321,11 @@ impl GitReviewView {
         let Some(repo) = self.repo_root.clone() else {
             return;
         };
+        let groups = kit.groups();
         let mut files = match &selection {
             GitReviewSelection::Local => {
                 git_text_untrimmed(&repo, &["status", "--short", "--untracked-files=all"])
-                    .map(|text| parse_local_status(&text))
+                    .map(|text| parse_local_status(&text, &groups))
             }
             GitReviewSelection::Commit(hash) => git_text(
                 &repo,
@@ -326,7 +338,7 @@ impl GitReviewView {
                     hash,
                 ],
             )
-            .map(|text| parse_name_status(&text)),
+            .map(|text| parse_name_status(&text, &groups)),
         };
         if let Ok(files) = &mut files {
             retain_source_tags(files, &repo, &kit.source_root);
@@ -596,6 +608,7 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::help::bundled_group_hierarchy;
 
     fn profile(id: &str, git_tracked: bool) -> CustomEditingKitProfile {
         CustomEditingKitProfile {
@@ -630,8 +643,10 @@ mod tests {
 
     #[test]
     fn status_parsers_hide_non_tags_and_keep_tag_types() {
-        let files =
-            parse_local_status(" M tags/a.weapon\nR  old/path -> tags/b.weapon\n?? notes.txt\n");
+        let files = parse_local_status(
+            " M tags/a.weapon\nR  old/path -> tags/b.weapon\n?? notes.txt\n",
+            &bundled_group_hierarchy(Some(GameId::HaloReach)),
+        );
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].status, "M");
         assert_eq!(files[0].path, "tags/a.weapon");
@@ -639,10 +654,48 @@ mod tests {
         assert_eq!(files[1].path, "tags/b.weapon");
     }
 
+    /// A changed file's group is what its kit's game calls the extension:
+    /// `.shader` is `shdr` in Halo CE, `shad` in Halo 2 and `rmsh` from Halo 3
+    /// on, and a file the game has no group for is not a tag.
+    #[test]
+    fn a_changed_files_group_comes_from_its_kits_game() {
+        let status = " M tags/a.shader\n M tags/b.model\n M tags/c.shader_screen\n";
+        let groups_of = |game| {
+            parse_local_status(status, &bundled_group_hierarchy(Some(game)))
+                .into_iter()
+                .map(|file| (file.path, format_group_tag(file.group_tag)))
+                .collect::<Vec<_>>()
+        };
+        let owned = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(path, group)| ((*path).to_owned(), (*group).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            groups_of(GameId::HaloCe),
+            owned(&[("tags/a.shader", "shdr"), ("tags/b.model", "mode")])
+        );
+        assert_eq!(
+            groups_of(GameId::Halo2),
+            owned(&[("tags/a.shader", "shad"), ("tags/b.model", "hlmt")])
+        );
+        assert_eq!(
+            groups_of(GameId::HaloReach),
+            owned(&[
+                ("tags/a.shader", "rmsh"),
+                ("tags/b.model", "hlmt"),
+                ("tags/c.shader_screen", "rmss"),
+            ])
+        );
+    }
+
     #[test]
     fn parses_commit_name_status() {
-        let files =
-            parse_name_status("M\ttags/a.weapon\nR100\told.weapon\tnew.weapon\nD\tREADME.md\n");
+        let files = parse_name_status(
+            "M\ttags/a.weapon\nR100\told.weapon\tnew.weapon\nD\tREADME.md\n",
+            &bundled_group_hierarchy(Some(GameId::HaloReach)),
+        );
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].status, "M");
         assert_eq!(files[1].path, "new.weapon");
@@ -678,6 +731,7 @@ mod tests {
     fn local_changes_sort_by_full_path_not_status() {
         let mut files = parse_local_status(
             "?? tags/z.weapon\n M tags/b.weapon\n?? tags/a.weapon\n D tags/c.weapon\n",
+            &bundled_group_hierarchy(Some(GameId::HaloReach)),
         );
         sort_files_by_full_path(&mut files);
         assert_eq!(

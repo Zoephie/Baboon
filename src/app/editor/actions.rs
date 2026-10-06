@@ -318,6 +318,13 @@ impl Baboon {
         let block_path = paste.block_path.clone();
         let text = paste.text.clone();
 
+        // Pasted references are written `path.extension`, and which group an
+        // extension names depends on the game, so each is spelled out with
+        // this kit's group before it is parsed.
+        let game = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .and_then(|source| source.game);
         let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(&tag_key) else {
             self.set_tsv_paste_status("Tag is no longer open.");
             return;
@@ -360,9 +367,18 @@ impl Baboon {
             }
             for (col_index, cell) in line.split('\t').enumerate() {
                 if let Some(Some(full)) = header_to_full.get(col_index) {
+                    let is_reference = block
+                        .element(row_index)
+                        .and_then(|element| element.field_path(full))
+                        .is_some_and(|field| field.field_type() == TagFieldType::TagReference);
+                    let input = if is_reference {
+                        tag_reference_input_in_game(cell.trim(), game).into_owned()
+                    } else {
+                        cell.trim().to_owned()
+                    };
                     edits.push(PendingFieldEdit {
                         path: format!("{block_path}[{row_index}]/{full}"),
-                        input: cell.trim().to_owned(),
+                        input,
                     });
                 }
             }

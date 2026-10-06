@@ -4,7 +4,7 @@
 use super::*;
 use crate::app::shell::{WorkerMessage, spawn_worker};
 use crate::app::kits::{EditingKitValidationCache, Kit, KitId};
-use crate::core::document::value::{append_field_path, extension_to_group_tag};
+use crate::core::document::value::append_field_path;
 use crate::app::browser::native_display_path;
 
 pub(in crate::app) mod git_review;

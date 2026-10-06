@@ -2,6 +2,7 @@
 //! It owns generic schema-driven field presentation; tag-specific panels and application workflow coordination belong elsewhere.
 
 use super::*;
+use std::borrow::Cow;
 
 pub(in crate::app) fn tag_reference_catalog_for_source(
     source: &LoadedSourceData,
@@ -239,7 +240,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
-            let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
+            let icon_group =
+                tag_reference_value_icon_group(meta, target.as_ref(), &draft.text, edit.game);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
                 reference_target_missing_cached(ui, edit.names, edit.tags_root, *group, rel)
@@ -265,12 +267,13 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         input,
                         accepted.as_deref(),
                         edit.names,
+                        edit.game,
                     );
                 }
                 draft.keep_commit(|| {
-                    let (path, accepted) = (path.to_owned(), accepted.clone());
+                    let (path, accepted, game) = (path.to_owned(), accepted.clone(), edit.game);
                     DraftCommit::new(edit.tag_key, vec![buffer_key.clone()], move |texts| {
-                        tag_reference_input_ops(&path, texts[0], accepted.as_deref(), None)
+                        tag_reference_input_ops(&path, texts[0], accepted.as_deref(), None, game)
                     })
                 });
                 response
@@ -507,8 +510,9 @@ pub(super) fn commit_tag_reference_input(
     input: String,
     accepted: Option<&[u32]>,
     names: Option<&TagNameIndex>,
+    game: Option<GameId>,
 ) {
-    match tag_reference_input_ops(path, &input, accepted, names) {
+    match tag_reference_input_ops(path, &input, accepted, names, game) {
         Ok(ops) => pending.extend(ops.pending),
         Err(error) => {
             if let Some(status) = status {
@@ -525,7 +529,10 @@ pub(super) fn tag_reference_input_ops(
     input: &str,
     accepted: Option<&[u32]>,
     names: Option<&TagNameIndex>,
+    game: Option<GameId>,
 ) -> Result<DeferredOps, String> {
+    let input = tag_reference_input_in_game(input, game);
+    let input = input.as_ref();
     if let Some(accepted) = accepted {
         match parse_tag_reference(input) {
             Ok(parsed) if tag_reference_group_allowed(&parsed, accepted) => {}
@@ -541,12 +548,36 @@ pub(super) fn tag_reference_input_ops(
     Ok(field_edit_ops(path, input))
 }
 
+/// A typed `path.extension` reference spelled out as `GROUP:path`, with the
+/// group the tag's game gives that extension. An extension is a group's name,
+/// and games name different groups alike: `.shader` is Halo CE's `shdr`,
+/// Halo 2's `shad` and Halo 3's `rmsh`, `.model` Halo CE's `mode` and
+/// everyone else's `hlmt`. Left as typed when it already names its group, is
+/// empty or `none`, or the game has no group by that name.
+pub(in crate::app) fn tag_reference_input_in_game(
+    input: &str,
+    game: Option<GameId>,
+) -> Cow<'_, str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.contains(':') {
+        return Cow::Borrowed(input);
+    }
+    let Some((path, extension)) = trimmed.rsplit_once('.') else {
+        return Cow::Borrowed(input);
+    };
+    match crate::app::help::bundled_group_hierarchy(game).group_named(extension) {
+        Some(group_tag) => Cow::Owned(format_tag_reference_input(group_tag, path)),
+        None => Cow::Borrowed(input),
+    }
+}
+
 pub(super) fn tag_reference_value_icon_group(
     meta: &FieldDisplayMeta,
     target: Option<&(u32, String)>,
     input: &str,
+    game: Option<GameId>,
 ) -> Option<u32> {
-    if let Ok(parsed) = parse_tag_reference(input)
+    if let Ok(parsed) = parse_tag_reference(&tag_reference_input_in_game(input, game))
         && let Some((group, _)) = parsed.group_tag_and_name
     {
         return Some(group);
@@ -1341,6 +1372,7 @@ mod tests {
             "weap:objects\\weapons\\rifle\\assault_rifle\\assault_rifle".to_owned(),
             Some(&accepted),
             Some(&names),
+            Some(GameId::HaloReach),
         );
         assert_eq!(pending.len(), 1, "a typed weapon reference was refused");
     }
@@ -1485,7 +1517,8 @@ mod tests {
             tag_reference_value_icon_group(
                 &meta(vec![render_model]),
                 Some(&target),
-                r"objects\foo\foo.bitmap"
+                r"objects\foo\foo.bitmap",
+                Some(GameId::Halo3)
             ),
             Some(bitmap)
         );
@@ -1493,18 +1526,61 @@ mod tests {
             tag_reference_value_icon_group(
                 &meta(vec![render_model]),
                 Some(&target),
-                r"objects\foo\foo"
+                r"objects\foo\foo",
+                Some(GameId::Halo3)
             ),
             Some(collision_model)
         );
         assert_eq!(
-            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE"),
+            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE", None),
             Some(render_model)
         );
         assert_eq!(
-            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE"),
+            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE", None),
             None
         );
+    }
+
+    /// A typed `path.extension` reference names the group the tag's game
+    /// gives that extension, not whichever game's was loaded first: `.shader`
+    /// is Halo CE's `shdr`, Halo 2's `shad` and Reach's `rmsh`.
+    #[test]
+    fn a_typed_reference_takes_its_group_from_the_tags_game() {
+        let typed = r"levels\a\shaders\floor.shader";
+        for (game, group) in [
+            (GameId::HaloCe, "shdr"),
+            (GameId::Halo2, "shad"),
+            (GameId::HaloReach, "rmsh"),
+        ] {
+            assert_eq!(
+                tag_reference_input_in_game(typed, Some(game)),
+                format!(r"{group}:levels\a\shaders\floor"),
+                "{game:?}"
+            );
+        }
+        assert_eq!(
+            tag_reference_input_in_game(r"a\b.model", Some(GameId::HaloCe)),
+            r"mode:a\b"
+        );
+        assert_eq!(
+            tag_reference_input_in_game(r"a\b.model", Some(GameId::HaloReach)),
+            r"hlmt:a\b"
+        );
+        // Already naming its group, empty, none, or no such group: as typed.
+        for input in [r"weap:a\b", "", "NONE", r"a\b.not_a_group"] {
+            assert_eq!(
+                tag_reference_input_in_game(input, Some(GameId::HaloCe)),
+                input
+            );
+        }
+
+        // A Halo CE field that takes shaders takes a typed `.shader`.
+        let shader = u32::from_be_bytes(*b"shdr");
+        let ops =
+            tag_reference_input_ops("shader", typed, Some(&[shader]), None, Some(GameId::HaloCe))
+                .expect("a typed Halo CE shader reference is a shader");
+        assert_eq!(ops.pending.len(), 1);
+        assert_eq!(ops.pending[0].input, r"shdr:levels\a\shaders\floor");
     }
 
     #[test]

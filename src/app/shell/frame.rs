@@ -5230,6 +5230,52 @@ mod tests {
         }
     }
 
+    /// A pasted reference is written `path.extension`, and in a Halo CE kit
+    /// `.shader` is `shdr`: the paste must not take another game's `shader`.
+    #[test]
+    fn a_pasted_reference_takes_its_group_from_the_kits_game() {
+        let kit = LooseKit::new("tsv-reference", "haloce_mcc");
+        kit.write_classic_ce("weapons/b", "weapon");
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let key = kit.open(&mut h.app, "weapons/b.weapon");
+        settle(&mut h, 2);
+        let active = h.app.model.active;
+        let block = "item/object/attachments";
+        crate::core::document::apply::add_block_element(
+            &mut h.app.model.kits[active]
+                .parsed_tags
+                .get_mut(&key)
+                .unwrap()
+                .tag,
+            block,
+        )
+        .unwrap();
+        h.app.dialogs.open(TsvPasteState {
+            kit: h.app.model.kits[active].id,
+            tag_key: key.clone(),
+            block_path: block.to_owned(),
+            block_label: "attachments".to_owned(),
+            element_count: 1,
+            text: "type\neffects\\glow.shader\n".to_owned(),
+            status: None,
+        });
+        h.app.apply_tsv_paste();
+        let doc = &h.app.model.kits[active].parsed_tags[&key];
+        let value = doc
+            .tag
+            .root()
+            .field_path(&format!("{block}[0]/type"))
+            .and_then(|field| field.value());
+        let Some(TagFieldData::TagReference(reference)) = value else {
+            panic!("no reference at {block}[0]/type: {value:?}");
+        };
+        assert_eq!(
+            reference.group_tag_and_name,
+            Some((u32::from_be_bytes(*b"shdr"), r"effects\glow".to_owned()))
+        );
+    }
+
     /// A Halo CE kit with two weapons open, "b" the tab shown, settled.
     struct TypedEdit {
         h: Harness,
