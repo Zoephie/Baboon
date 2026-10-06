@@ -640,67 +640,72 @@ pub(crate) fn extension_to_group_tag(extension: &str) -> Option<u32> {
     fallback_extension_to_group_tag(extension)
 }
 
+/// Extension and group, for [`fallback_extension_to_group_tag`]. Each is the
+/// group some game gives that name; the games' own definitions decide once
+/// they are loaded.
+const FALLBACK_GROUPS: &[(&str, &str)] = &[
+    ("material", "mat"),
+    ("material_shader", "mats"),
+    ("material_effects", "foot"),
+    ("object", "obje"),
+    ("model", "hlmt"),
+    ("character", "char"),
+    ("style", "styl"),
+    ("unit", "unit"),
+    ("render_model", "mode"),
+    ("collision_model", "coll"),
+    ("physics_model", "phmo"),
+    ("model_animation_graph", "jmad"),
+    ("biped", "bipd"),
+    ("vehicle", "vehi"),
+    ("weapon", "weap"),
+    ("equipment", "eqip"),
+    ("item", "item"),
+    ("giant", "gint"),
+    ("creature", "crea"),
+    ("scenery", "scen"),
+    ("crate", "bloc"),
+    ("bitmap", "bitm"),
+    ("scenario_structure_bsp", "sbsp"),
+    ("structure_design", "sddt"),
+    ("scenario", "scnr"),
+    ("projectile", "proj"),
+    ("effect", "effe"),
+    ("effect_scenery", "efsc"),
+    ("damage_effect", "jpt!"),
+    ("sound", "snd!"),
+    ("sound_looping", "lsnd"),
+    ("sound_scenery", "ssce"),
+    ("dialogue", "udlg"),
+    ("light", "ligh"),
+    ("lens_flare", "lens"),
+    ("camera_track", "trak"),
+    ("device", "devi"),
+    ("device_control", "ctrl"),
+    ("device_machine", "mach"),
+    ("device_terminal", "term"),
+    ("globals", "matg"),
+    ("shader", "rmsh"),
+    ("shader_terrain", "rmtr"),
+    ("shader_water", "rmw "),
+    ("shader_foliage", "rmfl"),
+    ("shader_decal", "rmd "),
+    ("shader_halogram", "rmhg"),
+    ("shader_skin", "rmsk"),
+    ("shader_cortana", "rmct"),
+    ("shader_custom", "rmcs"),
+    ("shader_particle", "?rmp"),
+    ("shader_beam", "rmb "),
+    ("shader_contrail", "?rmc"),
+    ("shader_light_volume", "rmlv"),
+];
+
 /// [`extension_to_group_tag`] before any definitions are loaded.
 fn fallback_extension_to_group_tag(extension: &str) -> Option<u32> {
-    let fourcc = match extension {
-        "material" => "mat",
-        "material_shader" => "mats",
-        "material_effects" => "foot",
-        "object" => "obje",
-        "model" => "hlmt",
-        "character" => "char",
-
-        "style" => "styl",
-        "unit" => "unit",
-        "render_model" => "mode",
-        "collision_model" => "coll",
-        "physics_model" => "phmo",
-        "model_animation_graph" => "jmad",
-        "biped" => "bipd",
-        "vehicle" => "vehi",
-        "weapon" => "weap",
-        "equipment" => "eqip",
-        "item" => "item",
-        "giant" => "gint",
-        "creature" => "crea",
-        "scenery" => "scen",
-        "crate" => "bloc",
-        "bitmap" => "bitm",
-        "scenario_structure_bsp" => "sbsp",
-        "structure_design" => "sddt",
-        "scenario" => "scnr",
-        "projectile" => "proj",
-        "effect" => "effe",
-        "effect_scenery" => "efsc",
-        "damage_effect" => "jpt!",
-        "sound" => "snd!",
-        "sound_looping" => "lsnd",
-        "sound_scenery" => "ssce",
-        "dialogue" => "udlg",
-        "light" => "ligh",
-        "lens_flare" => "lens",
-        "camera_track" => "trak",
-        "device" => "devi",
-        "device_control" => "ctrl",
-        "device_machine" => "mach",
-        "device_terminal" => "term",
-        "globals" => "matg",
-        "shader" => "rmsh",
-        "shader_terrain" => "rmtr",
-        "shader_water" => "rmw ",
-        "shader_foliage" => "rmfl",
-        "shader_decal" => "rmd ",
-        "shader_halogram" => "rmhg",
-        "shader_skin" => "rmsk",
-        "shader_cortana" => "rmct",
-        "shader_custom" => "rmcs",
-        "shader_particle" => "rmp ",
-        "shader_beam" => "rmb ",
-        "shader_contrail" => "rmco",
-        "shader_light_volume" => "rmlv",
-        _ => return None,
-    };
-    parse_group_tag(fourcc)
+    FALLBACK_GROUPS
+        .iter()
+        .find(|(name, _)| *name == extension)
+        .and_then(|(_, fourcc)| parse_group_tag(fourcc))
 }
 
 #[cfg(test)]
@@ -713,6 +718,29 @@ mod tests {
     use crate::core::document::apply::apply_field_edit;
     use crate::core::source::NewContainerTemplate;
     use crate::core::test_kits::test_definition_path;
+
+    /// Every fallback entry is a group some game really has by that name.
+    /// `shader_particle` and `shader_contrail` were filed under `rmp ` and
+    /// `rmco`, which no game has: theirs are the nominal `?rmp` and `?rmc`.
+    #[test]
+    fn every_fallback_group_is_one_a_game_has() {
+        let games: Vec<_> = crate::core::game::GameId::ALL
+            .into_iter()
+            .filter_map(|game| {
+                crate::core::format::TagNameIndex::load_game(&locate_definitions_root(), game).ok()
+            })
+            .collect();
+        assert!(games.len() >= 6, "loaded {} games' names", games.len());
+        for (name, fourcc) in FALLBACK_GROUPS {
+            let group = parse_group_tag(fourcc).unwrap();
+            assert!(
+                games
+                    .iter()
+                    .any(|names| names.group_tag_for(name) == Some(group)),
+                "no game has a {name} group {fourcc:?}"
+            );
+        }
+    }
 
     /// `crate` is `bloc` in every game that has it; there is no `crat` group.
     #[test]
