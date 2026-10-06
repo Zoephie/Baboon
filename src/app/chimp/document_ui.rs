@@ -73,11 +73,6 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
         tiles: &mut egui_tiles::Tiles<String>,
         tile_id: egui_tiles::TileId,
     ) -> bool {
-        // egui_tiles also asks on a middle-click on the tab; tabs close only
-        // from their close button or menu.
-        if crate::app::shell::middle_clicked(self.cx.egui) {
-            return false;
-        }
         if let Some(egui_tiles::Tile::Pane(package)) = tiles.get(tile_id) {
             self.close_requests.push(package.clone());
         }
@@ -97,6 +92,9 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_, '_> {
         if button_response.clicked() {
             self.focused = Some(package.clone());
         }
+        // A middle-click closes the tab through egui_tiles, which asks
+        // `on_tab_close` as the close button does; queuing it here as well
+        // closed it twice.
         let has_texture = self
             .view
             .documents

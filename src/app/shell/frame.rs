@@ -5124,8 +5124,8 @@ mod tests {
         assert_eq!(draft.error.as_deref(), Some("Enter an editing kit name"));
     }
 
-    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click
-    // leaves a tab alone, and the tab menu's closes reach the right tabs. Each goes through a
+    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click closes
+    // a tab, and the tab menu's closes reach the right tabs. Each goes through a
     // command sent while the tiles draw, so these drive whole frames.
 
     const PATHS: [&str; 3] = [
@@ -5209,14 +5209,13 @@ mod tests {
         );
     }
 
-    /// A middle-click on a tab leaves it open: tabs close only from their
-    /// close button or menu.
+    /// A middle-click on a tab closes it, and only it.
     #[test]
-    fn a_middle_click_leaves_a_tab_open() {
+    fn a_middle_click_closes_a_tab() {
         let (mut h, keys) = three_tabs();
         assert_eq!(open_tabs(&h), keys);
         press(&mut h, "tag_000.biped", egui::PointerButton::Middle);
-        assert_eq!(open_tabs(&h), keys);
+        assert_eq!(open_tabs(&h), keys[1..]);
     }
 
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
