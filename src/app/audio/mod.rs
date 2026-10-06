@@ -746,9 +746,10 @@ pub(super) struct AudioState {
     /// decode as well as the sound.
     decode_owner: Option<SoundOwner>,
     engine: Option<Engine>,
-    /// Never open an output device, so tests play to nothing.
+    /// Open an output device. Tests play to nothing unless they ask for
+    /// one, and those that do run on `tests::on_the_audio_thread`.
     #[cfg(test)]
-    no_output: bool,
+    output: bool,
     banks: Option<Arc<SoundBanks>>,
     /// Why the current FMOD bank set could not be opened. This is retained
     /// with the negative cache so the player can report the actual path or
@@ -1398,7 +1399,7 @@ impl AudioState {
     /// finds no stream open yet, so a device plugged in later is used.
     fn ensure_engine(&mut self) -> Option<&Engine> {
         #[cfg(test)]
-        if self.no_output {
+        if !self.output {
             return None;
         }
         let default = rodio::cpal::default_host().default_output_device();
