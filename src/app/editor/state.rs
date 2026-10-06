@@ -595,6 +595,93 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) expand_all: Option<bool>,
     /// How nested containers start out, from preferences.
     pub(in crate::app) nested_default: NestedDefault,
+    /// The pane's row heights, for skipping rows out of view; `None` draws
+    /// every row.
+    pub(in crate::app) row_heights: Option<&'a mut RowHeights>,
+}
+
+/// What a tag pane's field rows measured when last drawn, so the rows outside
+/// the view can be skipped: one of these per pane and tag.
+///
+/// The editor used to lay out every row of the tag on every frame, though
+/// all but a screenful are off screen; a Reach scenario spent several
+/// milliseconds a frame that way. A row whose last height puts it wholly
+/// above or below the view now stands in as empty space of that height. A
+/// block is one row of its parent, so a block wholly off screen is skipped
+/// with everything in it, while one partly in view is drawn and skips its
+/// own rows the same way.
+#[derive(Default)]
+pub(in crate::app) struct RowHeights {
+    /// What the heights were measured under: the tag's layout, the pane's
+    /// width, the UI scale, expert mode and whether Find was filtering. Any
+    /// change can move rows, so it starts the measuring over.
+    measured_under: Option<RowHeightsBasis>,
+    heights: HashMap<String, f32>,
+    /// Whether rows may be skipped on this pass.
+    cull: bool,
+}
+
+/// See [`RowHeights::measured_under`].
+#[derive(Clone, Copy, PartialEq)]
+pub(in crate::app) struct RowHeightsBasis {
+    pub(in crate::app) layout: (u64, u64),
+    pub(in crate::app) width: f32,
+    pub(in crate::app) pixels_per_point: f32,
+    pub(in crate::app) expert_mode: bool,
+    pub(in crate::app) filtering: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Field rows actually built, for tests: egui already skips painting text
+    /// that is off screen, so what is painted can't show what was laid out.
+    pub(in crate::app) static FIELD_ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Draw every row, for tests comparing what culling shows against
+    /// what drawing everything shows.
+    pub(in crate::app) static ROW_CULLING_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+impl RowHeights {
+    /// Start a pass: forget the heights if they were measured under anything
+    /// else, and say whether rows may be skipped.
+    pub(in crate::app) fn begin(&mut self, basis: RowHeightsBasis, cull: bool) {
+        if self.measured_under != Some(basis) {
+            self.heights.clear();
+            self.measured_under = Some(basis);
+        }
+        self.cull = cull;
+        #[cfg(test)]
+        if ROW_CULLING_OFF.with(std::cell::Cell::get) {
+            self.cull = false;
+        }
+    }
+
+    /// The height to stand in for the row at `path` when it is wholly outside
+    /// what `ui` shows, or `None` to draw it.
+    pub(in crate::app) fn skip(&self, ui: &Ui, path: &str) -> Option<f32> {
+        if !self.cull {
+            return None;
+        }
+        let height = *self.heights.get(path)?;
+        // A row that took no more than the spacing after it drew nothing
+        // worth skipping, and can't be stood in for by an allocation.
+        if height < ui.spacing().item_spacing.y {
+            return None;
+        }
+        let top = ui.cursor().min.y;
+        let view = ui.clip_rect();
+        (top + height < view.top() || top > view.bottom()).then_some(height)
+    }
+
+    /// Record the height the row at `path` took when drawn.
+    pub(in crate::app) fn record(&mut self, path: &str, height: f32) {
+        match self.heights.get_mut(path) {
+            Some(known) => *known = height,
+            None => {
+                self.heights.insert(path.to_owned(), height);
+            }
+        }
+    }
 }
 
 /// Owned storage for every request and op a [`FieldEditContext`] can raise,
@@ -686,6 +773,7 @@ impl<'a> FieldEditContext<'a> {
             field_nav: None,
             expand_all: None,
             nested_default: NestedDefault::default(),
+            row_heights: None,
         }
     }
 }

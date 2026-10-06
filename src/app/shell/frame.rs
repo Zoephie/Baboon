@@ -5184,6 +5184,52 @@ mod tests {
         assert_eq!(changed, Duration::ZERO, "a change applied after drawing is drawn");
     }
 
+    /// Rows out of view are not built, and what shows is what drawing every
+    /// row shows, scrolled anywhere. Painted text alone can't tell: egui
+    /// skips painting text out of view by itself, so rows built are counted.
+    #[test]
+    fn rows_out_of_view_are_skipped_and_nothing_in_view_changes() {
+        use crate::app::editor::{FIELD_ROWS_BUILT, ROW_CULLING_OFF};
+        let kit = LooseKit::new("row-culling", "haloce_mcc");
+        kit.write_classic_ce("weapons/b", "weapon");
+        let run = |culling: bool| {
+            ROW_CULLING_OFF.with(|off| off.set(!culling));
+            let mut h = Harness::new();
+            kit.install(&mut h.app);
+            kit.open(&mut h.app, "weapons/b.weapon");
+            settle(&mut h, 8);
+            let mut views = Vec::new();
+            let mut built = Vec::new();
+            for _ in 0..6 {
+                FIELD_ROWS_BUILT.with(|rows| rows.set(0));
+                h.frame(vec![pointer_at(PANE_POINT), wheel(-600.0)]);
+                settle(&mut h, 2);
+                FIELD_ROWS_BUILT.with(|rows| rows.set(0));
+                h.frame(Vec::new());
+                built.push(FIELD_ROWS_BUILT.with(std::cell::Cell::get));
+                // What the field area shows: below the pane's tabs and header,
+                // above its bottom edge. Rows scrolled above or below it are
+                // laid out without culling but clipped, so not seen.
+                let mut shown: Vec<String> = h
+                    .painted_rects
+                    .iter()
+                    .filter(|(_, rect)| rect.top() > 200.0 && rect.bottom() < SCREEN.y * 0.8)
+                    .map(|(text, rect)| format!("{text}@{:.0},{:.0}", rect.left(), rect.top()))
+                    .collect();
+                shown.sort();
+                views.push(shown);
+            }
+            ROW_CULLING_OFF.with(|off| off.set(false));
+            (views, built)
+        };
+        let (culled, culled_built) = run(true);
+        let (all, all_built) = run(false);
+        assert_eq!(culled, all, "the same rows show at every scroll position");
+        for (culled, all) in culled_built.iter().zip(&all_built) {
+            assert!(culled * 2 < *all, "built {culled} rows of {all}");
+        }
+    }
+
     /// A Halo CE kit with two weapons open, "b" the tab shown, settled.
     struct TypedEdit {
         h: Harness,

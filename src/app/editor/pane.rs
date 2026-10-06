@@ -284,6 +284,24 @@ pub(in crate::app) fn draw_tag_pane(
     // Drafts the rows below touch are stamped as drawn this pass; the sweep
     // after the UI commits the changed ones that weren't.
     view.edit_buffers.begin_pass(ui.ctx().cumulative_pass_nr());
+    // Rows out of view are skipped, except while a text box has focus (a row
+    // scrolled away mid-edit would end the edit), while a jump is heading
+    // for a field (it has to be drawn to be scrolled to), on the frame that
+    // expands or collapses everything, and while Find filters the fields.
+    let filtering = matches!(field_filter, Some(FieldFilterAction::Apply(_)));
+    let navigating = field_nav.is_some_and(|nav| nav.kit == kit_id && nav.tag_key == key);
+    let editing = ui.ctx().memory(|memory| memory.focused().is_some());
+    let row_heights = view.row_heights.entry(format!("{scope}\u{1f}{key}")).or_default();
+    row_heights.begin(
+        RowHeightsBasis {
+            layout: layout_stamp,
+            width: ui.available_width(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            expert_mode,
+            filtering,
+        },
+        !(editing || navigating || filtering || expand_all.is_some()),
+    );
     let mut edit_context = FieldEditContext {
         view_scope: scope,
         tag_key: &key,
@@ -351,6 +369,7 @@ pub(in crate::app) fn draw_tag_pane(
         field_nav: field_nav.filter(|nav| nav.kit == kit_id && nav.tag_key == key),
         expand_all,
         nested_default: cx.model.prefs.nested_default,
+        row_heights: Some(row_heights),
     };
 
     if is_bitmap_tag(entry) {

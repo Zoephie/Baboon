@@ -257,6 +257,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, view: &mut KitView, old: &
     // re-applying one over a document that has just changed identity is a
     // silent edit nobody asked for.
     view.edit_buffers.forget_tag(old);
+    view.forget_row_heights(old);
 
     kit.keywords.rekey_tag(old, new);
     kit.keywords.save_if_dirty();
@@ -1050,6 +1051,8 @@ mod tests {
 
             // Dropped by it, deliberately.
             edit_buffers: _,
+            // Measured again under the new key on its first draw.
+            row_heights: _,
 
             // The Bitmap and Model Libraries' snapshots and thumbnail caches. Keyed
             // on the kit generation, which a rename bumps, so both are rebuilt

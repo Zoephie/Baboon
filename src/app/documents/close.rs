@@ -34,6 +34,7 @@ impl Baboon {
         view.caches.model_previews.remove(key);
         view.find_filter_applied.remove(key);
         view.edit_buffers.forget_tag(key);
+        view.forget_row_heights(key);
         // Persist the removal. The document is gone by now, so the capture
         // below cannot put the overlay straight back.
         if had_overlay {
@@ -83,6 +84,7 @@ impl Baboon {
         view.caches.model_previews.remove(key);
         view.find_filter_applied.remove(key);
         view.edit_buffers.forget_tag(key);
+        view.forget_row_heights(key);
         if kit_state.selected_key.as_deref() == Some(key) {
             kit_state.selected_key = None;
         }

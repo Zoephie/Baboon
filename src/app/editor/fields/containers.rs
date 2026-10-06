@@ -196,6 +196,19 @@ pub(in crate::app) fn draw_fields_with_docs(
                 cursor = match_idx + 1;
             }
         }
+        let field_path = append_field_path_for(path_prefix, &field);
+        // A row wholly out of view stands in as the space it took last time.
+        if let Some(height) = edit
+            .row_heights
+            .as_deref()
+            .and_then(|heights| heights.skip(ui, &field_path))
+        {
+            // Allocated like a row, so the spacing after it lies outside what
+            // the enclosing section measures, just as after a drawn row.
+            ui.allocate_space(egui::vec2(0.0, height - ui.spacing().item_spacing.y));
+            continue;
+        }
+        let top = ui.cursor().min.y;
         // Resolve a block-index field's target block (sibling or ancestor) for
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
@@ -203,6 +216,7 @@ pub(in crate::app) fn draw_fields_with_docs(
         draw_field(
             ui,
             field,
+            field_path.clone(),
             parent_raw,
             names,
             depth,
@@ -213,6 +227,10 @@ pub(in crate::app) fn draw_fields_with_docs(
             block_index,
             reference_value_width,
         );
+        let height = ui.cursor().min.y - top;
+        if let Some(heights) = edit.row_heights.as_deref_mut() {
+            heights.record(&field_path, height);
+        }
     }
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
@@ -233,6 +251,7 @@ pub(in crate::app) fn draw_fields_with_docs(
 pub(in crate::app) fn draw_field(
     ui: &mut Ui,
     field: TagField<'_>,
+    field_path: String,
     parent_raw: &[u8],
     names: &TagNameIndex,
     depth: usize,
@@ -243,7 +262,8 @@ pub(in crate::app) fn draw_field(
     block_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
-    let field_path = append_field_path_for(path_prefix, &field);
+    #[cfg(test)]
+    FIELD_ROWS_BUILT.with(|built| built.set(built.get() + 1));
     mark_find_render_cell(ui, edit.tag_key, &field_path);
     // Active (filter) field-search: hide everything that isn't a match, an
     // ancestor container of one, or inside a name-matched container.

@@ -56,9 +56,17 @@ pub(in crate::app) struct KitView {
     pub(in crate::app) blam: BlamUiState,
     /// How the kit's Chimp surface is browsed and laid out.
     pub(in crate::app) chimp: ChimpView,
+    /// Each tag pane's field row heights, by pane scope and tag key.
+    pub(in crate::app) row_heights: HashMap<String, crate::app::editor::RowHeights>,
 }
 
 impl KitView {
+    /// Forget the field row heights measured for `key`, in every pane scope.
+    pub(in crate::app) fn forget_row_heights(&mut self, key: &str) {
+        let suffix = format!("\u{1f}{key}");
+        self.row_heights.retain(|pane, _| !pane.ends_with(&suffix));
+    }
+
     /// The view a kit opens with: nothing laid out, drafted or cached, and
     /// its browser showing as `browser` says.
     pub(in crate::app) fn new(kit: KitId, browser: KitBrowser) -> Self {
@@ -76,6 +84,7 @@ impl KitView {
             surface: KitSurface::Tags,
             blam: BlamUiState::default(),
             chimp: ChimpView::default(),
+            row_heights: HashMap::new(),
         }
     }
 }
@@ -192,6 +201,7 @@ impl<'a> KitMut<'a> {
         self.view.caches.model_previews.remove(key);
         self.view.find_filter_applied.remove(key);
         self.view.edit_buffers.forget_tag(key);
+        self.view.forget_row_heights(key);
         self.view.browser.folder_browsers.remove(key);
     }
 
