@@ -679,13 +679,23 @@ fn nested_menu_button<R>(
             widget.fg_stroke.color = Color32::TRANSPARENT;
         }
     }
-    let menu = ui.menu_button(
-        egui::RichText::new(label).color(Color32::TRANSPARENT),
-        |ui| {
-            ui.set_min_width(popup_width);
-            add_contents(ui)
-        },
-    );
+    let text = egui::RichText::new(label).color(Color32::TRANSPARENT);
+    let contents = |ui: &mut Ui| {
+        ui.set_min_width(popup_width);
+        add_contents(ui)
+    };
+    // Inside a menu this is a submenu, which takes that menu's config. On its
+    // own it is a menu of its own and needs Baboon's: with egui 0.36's
+    // default it closed on any click inside, its scrollbar included, so only
+    // one item could be picked per opening.
+    let menu = if egui::containers::menu::is_in_menu(ui) {
+        ui.menu_button(text, contents)
+    } else {
+        let (response, inner) = egui::containers::menu::MenuButton::new(text)
+            .config(menu_config())
+            .ui(ui, contents);
+        egui::InnerResponse::new(inner.map(|inner| inner.inner), response)
+    };
     *ui.visuals_mut() = original_visuals;
     ui.spacing_mut().menu_spacing = original_menu_spacing;
     let color = if ui.is_enabled() {
@@ -883,5 +893,72 @@ mod tests {
         );
         assert_ne!(small, large);
         assert!(large.contains("32px"));
+    }
+
+    /// A menu opened from a button of its own stays open when an item in it
+    /// is clicked, as every Baboon menu does, so several can be picked in one
+    /// opening. With egui 0.36's default it closed on any click inside.
+    #[test]
+    fn a_standalone_menu_stays_open_after_a_pick() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut picks = 0;
+        let mut time = 0.0;
+        let mut frame = |events: Vec<egui::Event>, picks: &mut i32| -> Vec<(String, egui::Rect)> {
+            time += 0.1;
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        right_opening_menu_button(ui, "Add", 200.0, |ui| {
+                            for item in ["first item", "second item"] {
+                                if ui.button(item).clicked() {
+                                    *picks += 1;
+                                }
+                            }
+                        });
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2()))),
+                    _ => None,
+                })
+                .collect()
+        };
+        fn click(
+            frame: &mut impl FnMut(Vec<egui::Event>, &mut i32) -> Vec<(String, egui::Rect)>,
+            at: egui::Pos2,
+            picks: &mut i32,
+        ) -> Vec<(String, egui::Rect)> {
+            for step in 1..=3 {
+                frame(vec![egui::Event::PointerMoved(at - egui::vec2(0.0, 3.0 - step as f32))], picks);
+            }
+            for pressed in [true, false] {
+                frame(
+                    vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }],
+                    picks,
+                );
+            }
+            frame(Vec::new(), picks)
+        }
+        let find = |shown: &[(String, egui::Rect)], text: &str| shown.iter().find(|(shown, _)| shown == text).map(|(_, rect)| rect.center());
+        frame(Vec::new(), &mut picks);
+        let shown = frame(Vec::new(), &mut picks);
+        let button = find(&shown, "Add").expect("the menu button");
+        let shown = click(&mut frame, button, &mut picks);
+        let first = find(&shown, "first item").expect("the menu opened");
+        let shown = click(&mut frame, first, &mut picks);
+        assert_eq!(picks, 1);
+        assert!(find(&shown, "second item").is_some(), "the menu is still open");
     }
 }
