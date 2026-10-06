@@ -48,7 +48,7 @@ fn decoded(request: u64, cache: Option<PcmKey>) -> AudioDone {
 fn a_superseded_decode_is_cached_but_not_played() {
     let mut audio = AudioState {
         // No output device, so playing says so instead of opening one.
-        engine_tried: true,
+        no_output: true,
         play_request: 2,
         ..Default::default()
     };
@@ -73,7 +73,7 @@ fn a_superseded_decode_is_cached_but_not_played() {
 #[test]
 fn a_decode_for_reopened_wwise_banks_is_not_cached() {
     let mut audio = AudioState {
-        engine_tried: true,
+        no_output: true,
         wwise_generation: 3,
         ..Default::default()
     };
@@ -449,6 +449,44 @@ fn another_tab_taking_focus_pauses_the_sound() {
     });
     audio.process(None, &egui::Context::default());
     assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
+}
+
+/// A play that finds the system default output device changed reopens the
+/// stream on it, and a paused sound resumes there from where it stood.
+/// Needs an output device, so it skips without one.
+#[test]
+fn play_follows_a_change_of_output_device() {
+    let a = owner(1, "file:a.sound");
+    let mut audio = AudioState::default();
+    if audio.ensure_engine().is_none() {
+        eprintln!("skipping: no audio output device");
+        return;
+    }
+    audio.volume = Volume(0.0);
+    audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
+    let voice = audio.voice.as_mut().unwrap();
+    voice.pause();
+    voice.seek(12_000);
+
+    // As if the default changed since the stream was opened.
+    audio.engine.as_mut().unwrap().default_device = Some("unplugged".to_owned());
+    audio.pending.push_back(SoundRequest {
+        owner: Some(a.clone()),
+        clip: None,
+        preview: false,
+        action: SoundAction::TogglePause,
+    });
+    audio.process(None, &egui::Context::default());
+
+    let engine = audio.engine.as_ref().unwrap();
+    assert_ne!(
+        engine.default_device.as_deref(),
+        Some("unplugged"),
+        "reopened"
+    );
+    let playback = audio.playback(Some(&a)).unwrap();
+    assert!(playback.playing, "resumed on the new stream");
+    assert!(playback.position >= 12.0, "from where it stood");
 }
 
 /// A status line belongs to the tab whose sound caused it: a failure in

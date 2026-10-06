@@ -25,7 +25,8 @@ use std::time::Duration;
 
 use blam_tags::audio::{DecodedPcm, SoundBanks, WwiseBanks, decode_subsound, downmix_to_stereo};
 use eframe::egui;
-use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::cpal::traits::HostTrait;
+use rodio::{DeviceTrait, OutputStream, OutputStreamHandle, Sink, Source};
 
 use crate::app::kits::kit::KitId;
 
@@ -364,17 +365,25 @@ impl Default for Speed {
 struct Engine {
     handle: OutputStreamHandle,
     _stream: OutputStream,
+    /// The name of the system default output device when this was opened,
+    /// so a change of default is seen and the stream reopened on it.
+    default_device: Option<String>,
 }
 
 impl Engine {
-    fn new() -> Option<Self> {
-        match OutputStream::try_default() {
-            Ok((stream, handle)) => Some(Self {
-                handle,
-                _stream: stream,
-            }),
-            Err(_) => None,
-        }
+    /// Open the system default output device — any other that works, if it
+    /// does not.
+    fn open(default: Option<rodio::Device>, default_device: Option<String>) -> Option<Self> {
+        let opened = default
+            .map(|device| OutputStream::try_from_device(&device))
+            .filter(Result::is_ok)
+            .unwrap_or_else(OutputStream::try_default);
+        let (stream, handle) = opened.ok()?;
+        Some(Self {
+            handle,
+            _stream: stream,
+            default_device,
+        })
     }
 }
 
@@ -648,6 +657,13 @@ impl Voice {
         }
     }
 
+    /// Let go of the sink, keeping the playhead, so the output stream it
+    /// plays on can close. The next play starts a sink where it stood.
+    fn detach(&mut self) {
+        self.sink = None;
+        self.shared.seek.store(NO_SEEK, Ordering::Relaxed);
+    }
+
     /// Stop and rewind.
     fn stop(&mut self) {
         if let Some(sink) = self.sink.take() {
@@ -730,7 +746,9 @@ pub(super) struct AudioState {
     /// decode as well as the sound.
     decode_owner: Option<SoundOwner>,
     engine: Option<Engine>,
-    engine_tried: bool,
+    /// Never open an output device, so tests play to nothing.
+    #[cfg(test)]
+    no_output: bool,
     banks: Option<Arc<SoundBanks>>,
     /// Why the current FMOD bank set could not be opened. This is retained
     /// with the negative cache so the player can report the actual path or
@@ -1375,10 +1393,27 @@ impl AudioState {
         self.volume.0
     }
 
+    /// The output stream on the system default device, opened on the first
+    /// play and reopened whenever a play finds the default has changed — or
+    /// finds no stream open yet, so a device plugged in later is used.
     fn ensure_engine(&mut self) -> Option<&Engine> {
-        if !self.engine_tried {
-            self.engine = Engine::new();
-            self.engine_tried = true;
+        #[cfg(test)]
+        if self.no_output {
+            return None;
+        }
+        let default = rodio::cpal::default_host().default_output_device();
+        let default_device = default.as_ref().and_then(|device| device.name().ok());
+        let current = self
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.default_device == default_device);
+        if !current {
+            // A paused sound resumes where it is, on the new stream.
+            if let Some(voice) = &mut self.voice {
+                voice.detach();
+            }
+            self.engine = None;
+            self.engine = Engine::open(default, default_device);
         }
         self.engine.as_ref()
     }
