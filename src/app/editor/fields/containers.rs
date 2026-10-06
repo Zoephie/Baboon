@@ -244,15 +244,7 @@ pub(in crate::app) fn draw_field(
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path_for(path_prefix, &field);
-    ui.data_mut(|data| {
-        data.insert_temp(
-            find_render_cell_id(),
-            FindRenderCell {
-                tag_key: edit.tag_key.to_owned(),
-                field_path: field_path.clone(),
-            },
-        )
-    });
+    mark_find_render_cell(ui, edit.tag_key, &field_path);
     // Active (filter) field-search: hide everything that isn't a match, an
     // ancestor container of one, or inside a name-matched container.
     if !edit.field_visible(&field_path) {
@@ -592,15 +584,7 @@ fn draw_injected_explanation_row(
         });
         ui.ctx().request_repaint();
     }
-    ui.data_mut(|data| {
-        data.insert_temp(
-            find_render_cell_id(),
-            FindRenderCell {
-                tag_key: edit.tag_key.to_owned(),
-                field_path: path.clone(),
-            },
-        )
-    });
+    mark_find_render_cell(ui, edit.tag_key, &path);
     draw_foundation_explanation_row(
         ui,
         title,

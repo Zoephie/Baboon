@@ -13,6 +13,27 @@ pub(in crate::app) fn find_render_cell_id() -> egui::Id {
     egui::Id::new("find_render_cell")
 }
 
+/// Record the field a row is about to draw, for its text to look up Find's
+/// matches against. Only while Find has matches to show: the record is read
+/// nowhere else, and writing it cost two string copies per row per frame.
+pub(in crate::app) fn mark_find_render_cell(ui: &egui::Ui, tag_key: &str, field_path: &str) {
+    let finding = ui.data(|data| {
+        data.get_temp::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
+            .is_some()
+    });
+    if finding {
+        ui.data_mut(|data| {
+            data.insert_temp(
+                find_render_cell_id(),
+                FindRenderCell {
+                    tag_key: tag_key.to_owned(),
+                    field_path: field_path.to_owned(),
+                },
+            )
+        });
+    }
+}
+
 /// Return non-overlapping byte ranges matching `query` in `text`.
 pub(in crate::app) fn find_text_ranges(
     text: &str,

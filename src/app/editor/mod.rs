@@ -8,7 +8,7 @@ use crate::app::documents::PendingCloseAction;
 use crate::app::kits::{KitId, KitStamp, KitView, KitsCommand};
 use crate::app::references::ReferencesCommand;
 use crate::app::search::{
-    FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind,
+    FindDialogState, FindLookIn, FindPlans, FindRenderCell, FindRenderSnapshot, FindTargetKind, mark_find_render_cell,
     FindWithin, SearchCommand, find_render_cell_id, find_render_snapshot_id, find_text_ranges,
     map_tsv_header_to_fields,
 };
