@@ -28,13 +28,14 @@ pub(in crate::app) fn draw_material_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
     Frame::NONE
         .fill(material_panel())
         .stroke(Stroke::new(1.0_f32, material_panel_edge()))
         // A 2-point inset: egui counts the stroke as padding.
         .inner_margin(egui::Margin::same(1))
         .show(ui, |ui| {
-            if is_shader_tag(entry) {
+            if is_shader {
                 // Built once per revision of the document, not every frame:
                 // building it parses the tag's render method and walks its
                 // definition and options into rows. A failed build is kept
@@ -711,57 +712,21 @@ pub(in crate::app) fn is_material_shader_tag(entry: &TagEntry) -> bool {
             .ends_with(".material_shader")
 }
 
-/// Whether a tag is drawn as a shader grid: Halo 2's `shad`, or a render-method
-/// shader from Halo 3 on (`rmsh`, `rmtr`, `rmgl`, …). Decided by group tag, not
-/// by name: Halo CE's `shader_*` groups and Halo 2's `shader_template`,
-/// `shader_pass` and `shader_light_response` share the prefix but have no grid,
-/// and routing them here showed "Shader editor unavailable" over their fields
-/// and turned off Find's field filter for them.
-pub(in crate::app) fn is_shader_tag(entry: &TagEntry) -> bool {
-    let fourcc = entry.group_tag.to_be_bytes();
-    if &fourcc == b"shad" {
-        return true;
-    }
-    if !fourcc.starts_with(b"rm") {
-        return false;
-    }
-    let group_name = entry.group_name.as_deref().unwrap_or_default();
-    group_name == "render_method"
-        || group_name.starts_with("shader")
-        || matches!(
-            &fourcc,
-            b"rmsh"
-                | b"rmtr"
-                | b"rmw "
-                | b"rmfl"
-                | b"rmd "
-                | b"rmhg"
-                | b"rmsk"
-                | b"rmct"
-                | b"rmcs"
-                | b"rmp "
-                | b"rmb "
-                | b"rmco"
-                | b"rmlv"
-        )
+/// Whether a tag is drawn as a shader grid: Halo 2's `shad`, or from Halo 3
+/// on any group that inherits `render_method` (`rm  `) in its game's
+/// definitions, as `shader`, `shader_terrain`, ODST's and Reach's
+/// `shader_screen` and Reach's `shader_glass` all do. Decided by ancestry,
+/// not by name: a list of groups missed each subclass a game added, and
+/// Halo CE's `shader_*` groups, Halo 2's `shader_template` and Reach's
+/// `rumble` (`rmbl`) share a name or FOURCC prefix but have no grid.
+pub(in crate::app) fn is_shader_tag(entry: &TagEntry, groups: &GroupHierarchy) -> bool {
+    entry.group_tag == u32::from_be_bytes(*b"shad")
+        || groups.is_a(entry.group_tag, u32::from_be_bytes(*b"rm  "))
 }
 
+/// Halo 2's shader group, the one its classic shader editor reads.
 pub(in crate::app) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
-    matches!(
-        &group_tag.to_be_bytes(),
-        b"rmsh"
-            | b"shad"
-            | b"rmtr"
-            | b"rmcs"
-            | b"rmhg"
-            | b"rmfl"
-            | b"rmsk"
-            | b"rmct"
-            | b"rmp "
-            | b"rmb "
-            | b"rmd "
-            | b"rmw "
-    )
+    group_tag == u32::from_be_bytes(*b"shad")
 }
 
 pub(in crate::app) fn material_row_tint(value: &TagFieldData) -> Color32 {
@@ -832,33 +797,141 @@ mod tests {
         }
     }
 
-    /// Only groups a shader grid can be built for are routed to it. Halo CE's
-    /// shaders and Halo 2's template and pass groups are field trees, and Find
-    /// filters them like any other tag.
+    /// Only groups a shader grid can be built for are routed to it, decided by
+    /// each game's own group tree: Halo 2's `shad`, and from Halo 3 on every
+    /// group that inherits `render_method`, the ones added after Halo 3
+    /// included. Halo CE's shader family inherits `shader` but has no grid,
+    /// Halo 2's template, pass and light response groups are not shaders, and
+    /// Reach's `rumble` only shares the `rm` prefix; Find filters them all
+    /// like any other tag.
     #[test]
     fn only_grid_shaders_are_routed_to_the_shader_grid() {
-        for (fourcc, name) in [
-            (b"shad", "shader"),
-            (b"rmsh", "shader"),
-            (b"rmgl", "shader_glass"),
-            (b"rm  ", "render_method"),
+        for (game, fourcc, name) in [
+            (GameId::Halo2, b"shad", "shader"),
+            (GameId::Halo3, b"rmsh", "shader"),
+            (GameId::Halo3, b"rm  ", "render_method"),
+            (GameId::Halo3Odst, b"rmss", "shader_screen"),
+            (GameId::Halo3Odst, b"rmbk", "shader_black"),
+            (GameId::HaloReach, b"rmss", "shader_screen"),
+            (GameId::HaloReach, b"rmgl", "shader_glass"),
+            (GameId::HaloReach, b"rmmx", "shader_mux"),
+            (GameId::Halo4, b"rmwf", "shader_waterfall"),
+            (GameId::CampaignEvolved, b"rmsh", "shader"),
         ] {
-            assert!(is_shader_tag(&entry(fourcc, name)), "{name}");
+            let groups = bundled_group_hierarchy(Some(game));
+            assert!(
+                is_shader_tag(&entry(fourcc, name), &groups),
+                "{game:?} {name}"
+            );
         }
-        for (fourcc, name) in [
-            (b"shdr", "shader"),
-            (b"soso", "shader_model"),
-            (b"senv", "shader_environment"),
-            (b"swat", "shader_transparent_water"),
-            (b"stem", "shader_template"),
-            (b"spas", "shader_pass"),
-            (b"slit", "shader_light_response"),
-            (b"rmbl", "rumble"),
+        for (game, fourcc, name) in [
+            (GameId::HaloCe, b"shdr", "shader"),
+            (GameId::HaloCe, b"soso", "shader_model"),
+            (GameId::HaloCe, b"senv", "shader_environment"),
+            (GameId::HaloCe, b"swat", "shader_transparent_water"),
+            (GameId::Halo2, b"stem", "shader_template"),
+            (GameId::Halo2, b"spas", "shader_pass"),
+            (GameId::Halo2, b"slit", "shader_light_response"),
+            (GameId::HaloReach, b"rmbl", "rumble"),
+            (GameId::HaloReach, b"rmdf", "render_method_definition"),
+            (GameId::HaloReach, b"rmop", "render_method_option"),
+            (GameId::HaloReach, b"rmt2", "render_method_template"),
         ] {
+            let groups = bundled_group_hierarchy(Some(game));
             let entry = entry(fourcc, name);
-            assert!(!is_shader_tag(&entry), "{name}");
-            assert!(supports_field_search(&entry), "{name}");
+            assert!(!is_shader_tag(&entry, &groups), "{game:?} {name}");
+            assert!(supports_field_search(&entry, &groups), "{game:?} {name}");
         }
+    }
+
+    /// Reach's shader groups that Halo 3 doesn't have (screen, glass, fur,
+    /// mux) open in the shader grid, not the raw-field fallback: the engine
+    /// used to refuse them as render methods, so every one of them showed
+    /// "Shader editor unavailable".
+    #[test]
+    fn reachs_newer_shader_groups_build_the_grid() {
+        let root = crate::core::test_kits::hrek_tags();
+        if !root.is_dir() {
+            eprintln!("skipping: {} not present", root.display());
+            return;
+        }
+        let definitions_root = crate::core::bundled::locate_definitions_root();
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some(GameId::HaloReach),
+            definitions_root: definitions_root.clone(),
+        };
+        let groups = bundled_group_hierarchy(Some(GameId::HaloReach));
+        let names = TagNameIndex::default();
+        let mut rmdf_cache = HashMap::new();
+        let mut rmop_cache = HashMap::new();
+        let extensions = [
+            "shader_screen",
+            "shader_glass",
+            "shader_fur",
+            "shader_fur_stencil",
+            "shader_mux",
+        ];
+        let mut built = 0;
+        let mut failures = Vec::new();
+        for item in walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !item
+                .path()
+                .extension()
+                .is_some_and(|ext| extensions.iter().any(|known| ext == *known))
+            {
+                continue;
+            }
+            let shown = item
+                .path()
+                .strip_prefix(&root)
+                .unwrap_or(item.path())
+                .display()
+                .to_string();
+            let Some(entry) = crate::core::source::loose_file_entry(&root, item.path(), &names)
+                .ok()
+                .flatten()
+            else {
+                failures.push(format!("{shown}: not indexed"));
+                continue;
+            };
+            if !is_shader_tag(&entry, &groups) {
+                failures.push(format!("{shown}: not routed to the shader grid"));
+                continue;
+            }
+            let tag = match crate::core::source::read_tag_at_path(
+                item.path(),
+                Some(GameId::HaloReach),
+                Some(&definitions_root),
+                entry.group_tag,
+            ) {
+                Ok(tag) => tag,
+                Err(error) => {
+                    failures.push(format!("{shown}: {error}"));
+                    continue;
+                }
+            };
+            match build_shader_editor_model(
+                &tag,
+                entry.group_tag,
+                Some(&source),
+                &mut rmdf_cache,
+                &mut rmop_cache,
+            ) {
+                Some(_) => built += 1,
+                None => failures.push(format!("{shown}: no grid")),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(
+            built > 0,
+            "no tags of {extensions:?} under {}",
+            root.display()
+        );
+        eprintln!("built the grid for {built} tags");
     }
 
     /// The shader grid's model is built once for a revision of the document,

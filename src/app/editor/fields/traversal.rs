@@ -45,8 +45,8 @@ pub(in crate::app) fn strip_element_indices(path: &str) -> String {
 /// tags are excluded because they use the dedicated grid surface rather than
 /// the block tree; every other tag (including sound tags, which have a full
 /// field tree below their audition surface) supports it.
-pub(in crate::app) fn supports_field_search(entry: &TagEntry) -> bool {
-    !(is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry))
+pub(in crate::app) fn supports_field_search(entry: &TagEntry, groups: &GroupHierarchy) -> bool {
+    !(is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry, groups))
 }
 
 /// Build the visible field set for Find's optional filter mode using the same

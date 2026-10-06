@@ -1,6 +1,7 @@
 //! Exact field matching and Find-dialog navigation.
 
 use super::*;
+use crate::app::help::{GroupHierarchy, bundled_group_hierarchy};
 use std::fmt::Write as _;
 
 /// Temporary egui-memory key for the Find data shared with field widgets.
@@ -489,12 +490,13 @@ impl Baboon {
             FindWithin::OpenTags => self.model.kits[self.model.active].open_tabs.clone(),
             FindWithin::AllTags => unreachable!(),
         };
+        let groups = self.active_group_hierarchy();
         let mut occurrences = Vec::new();
         for key in keys {
             let Some(entry) = self.model.entry_for_key(&key).cloned() else {
                 continue;
             };
-            if !supports_field_search(&entry) {
+            if !supports_field_search(&entry, &groups) {
                 continue;
             }
             let docs = self.def_docs_for_entry(self.model.active, &entry);
@@ -626,11 +628,12 @@ impl Baboon {
                     .push(hit.clone());
             }
         }
+        let groups = self.active_group_hierarchy();
         for key in open_keys {
             let Some(entry) = self.model.entry_for_key(&key).cloned() else {
                 continue;
             };
-            if !supports_field_search(&entry) {
+            if !supports_field_search(&entry, &groups) {
                 continue;
             }
             let docs = self.def_docs_for_entry(self.model.active, &entry);
@@ -654,6 +657,16 @@ impl Baboon {
         self.search.find.occurrences = order_find_occurrences(&self.search.find.all_order, by_key);
     }
 
+    /// The active kit's group hierarchy, for telling which tags Find can
+    /// filter.
+    fn active_group_hierarchy(&self) -> std::sync::Arc<GroupHierarchy> {
+        let game = self.model.kits[self.model.active]
+            .source
+            .as_ref()
+            .and_then(|source| source.game);
+        bundled_group_hierarchy(game)
+    }
+
     fn begin_all_tag_find(&mut self, ctx: egui::Context, entries: Vec<TagEntry>) {
         let Some(source) = self.model.kits[self.model.active].source.as_ref() else {
             return;
@@ -662,6 +675,7 @@ impl Baboon {
         let request_id = self.search.find.all_request_id;
         let stamp = self.model.kit_stamp();
         let tag_source = source.source.clone();
+        let groups = bundled_group_hierarchy(source.game);
         let documentation_source = match (&source.source, source.game) {
             (
                 TagSource::LooseFolder {
@@ -693,7 +707,7 @@ impl Baboon {
                 let mut unreadable = 0;
                 let mut docs_by_group = HashMap::new();
                 for (index, entry) in entries.into_iter().enumerate() {
-                    if supports_field_search(&entry) {
+                    if supports_field_search(&entry, &groups) {
                         let docs = documentation_source.as_ref().and_then(|(root, game)| {
                             let group = names
                                 .name_for(entry.group_tag)

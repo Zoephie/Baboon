@@ -13,7 +13,8 @@ use crate::app::search::{
     map_tsv_header_to_fields,
 };
 use crate::app::help::{
-    DefDocs, DefEntry, GroupHierarchy, build_def_docs, documentation_path, group_hierarchy,
+    DefDocs, DefEntry, GroupHierarchy, build_def_docs, bundled_group_hierarchy, documentation_path,
+    group_hierarchy,
 };
 use crate::app::export::{ExportCommand, load_referenced_tag_from_source};
 use crate::app::browser::{
@@ -61,8 +62,7 @@ pub(super) fn draw_tag(
     edit: &mut FieldEditContext<'_>,
 ) {
     let is_object_family = is_object_family_group(entry.group_tag);
-    let is_shaderish =
-        is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry);
+    let is_shaderish = !supports_field_search(entry, &bundled_group_hierarchy(source_game));
     let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
 
     if expert_mode {

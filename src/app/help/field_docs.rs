@@ -355,6 +355,19 @@ pub(in crate::app) fn group_hierarchy(
         .clone()
 }
 
+/// The game's group hierarchy from the definitions Baboon ships with, for
+/// deciding what a tag is by its group's ancestry whatever kind of source
+/// it came from.
+pub(in crate::app) fn bundled_group_hierarchy(
+    game: Option<GameId>,
+) -> std::sync::Arc<GroupHierarchy> {
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    group_hierarchy(
+        Some(ROOT.get_or_init(crate::core::bundled::locate_definitions_root)),
+        game,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

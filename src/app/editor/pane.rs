@@ -146,7 +146,15 @@ pub(in crate::app) fn draw_tag_pane(
         );
     }
 
-    let supports_field_search = supports_field_search(entry);
+    let supports_field_search = supports_field_search(
+        entry,
+        &bundled_group_hierarchy(
+            cx.model.kits[kit_index]
+                .source
+                .as_ref()
+                .and_then(|source| source.game),
+        ),
+    );
 
     // Filled by the field renderers, which open these by assigning them.
     let mut tag_reference_picker = None;
