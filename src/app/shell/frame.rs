@@ -1824,6 +1824,10 @@ mod tests {
     // - `BABOON_PERF_PPP`     pixels per point (default 1.0; 2.0 for Retina)
     // - `BABOON_PERF_CSV`     append one CSV row per scenario to this file
     // - `BABOON_PERF_LABEL`   the CSV's label column, e.g. `before` / `after`
+    // - `BABOON_PERF_REAL_TAG` `game|path/in/tags`, e.g.
+    //   `haloreach_mcc|levels/solo/m10/m10.scenario`: also time that tag from
+    //   the kit its game's `BLAM_TEST_*` variable names (tags folder),
+    //   collapsed, expanded and scrolling; skipped when unset
     //
     // Surviving a restructure: scenarios only describe *what is on screen*
     // through the [`fixture`] module below, which is the one place that knows
@@ -2465,6 +2469,89 @@ mod tests {
         h.idle(3);
     }
 
+    /// The real tag `BABOON_PERF_REAL_TAG` names, as `game|path/in/tags`
+    /// (`haloreach_mcc|levels/solo/m10/m10.scenario`), from the kit its game's
+    /// `BLAM_TEST_*` variable points at.
+    const REAL_TAG: &str = "BABOON_PERF_REAL_TAG";
+
+    /// Load the [`REAL_TAG`] kit and open the tag in it, settled, its
+    /// sections collapsed.
+    fn setup_real_tag(h: &mut Harness) {
+        let spec = std::env::var(REAL_TAG).unwrap_or_else(|_| panic!("{REAL_TAG} is not set"));
+        let (game_id, rel) = spec
+            .split_once('|')
+            .unwrap_or_else(|| panic!("{REAL_TAG} should be game|path, not {spec:?}"));
+        let game = GameId::from_id(game_id).unwrap_or_else(|| panic!("no game {game_id:?}"));
+        let root = PathBuf::from(crate::core::test_kits::tag_path(game_id, ""));
+        let names = TagNameIndex::load_game(&locate_definitions_root(), game).unwrap();
+        let entries = crate::core::source::scan_folder_subtree_entries(
+            &root,
+            std::path::Path::new(""),
+            &names,
+        )
+        .unwrap();
+        let key = entries
+            .iter()
+            .find(|entry| entry.display_path.replace('\\', "/") == rel)
+            .unwrap_or_else(|| panic!("{rel} is not in {}", root.display()))
+            .key
+            .clone();
+        h.app.install_loaded_source(LoadedSourceData {
+            label: "perf".to_owned(),
+            source: TagSource::LooseFolder {
+                root,
+                game: Some(game),
+                definitions_root: locate_definitions_root(),
+            },
+            names,
+            game: Some(game),
+            tree: crate::core::source::build_tree(&entries),
+            group_tree: crate::core::source::build_group_tree(&entries),
+            all_entries: entries.clone(),
+            entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: true,
+            chosen_kit_layout: None,
+        });
+        // The periodic index refresh would rescan the kit mid-measurement.
+        let active = h.app.model.active;
+        h.app.model.kits[active].index_jobs.next_refresh_at = f64::INFINITY;
+        h.idle(3);
+        let ctx = h.ctx.clone();
+        h.app.select_entry(key.clone(), ctx);
+        let started = Instant::now();
+        while !h.app.model.kits[h.app.model.active]
+            .parsed_tags
+            .contains_key(&key)
+        {
+            h.frame(Vec::new());
+            std::thread::sleep(Duration::from_millis(5));
+            assert!(
+                started.elapsed().as_secs() < 120,
+                "{rel} took over 2 minutes to open"
+            );
+        }
+        h.idle(5);
+    }
+
+    /// [`setup_real_tag`] with every section expanded.
+    fn setup_real_tag_expanded(h: &mut Harness) {
+        setup_real_tag(h);
+        let key = h.app.model.kits[h.app.model.active].open_tabs[0].clone();
+        fixture::expand_all(&mut h.app, &key);
+        h.idle(5);
+    }
+
+    /// The real tag's pane drew its fields.
+    fn real_tag_shown(h: &Harness, _: &Measured) -> Result<(), String> {
+        let open = h.app.model.kits[h.app.model.active].open_tabs.len();
+        (open == 1 && h.painted.len() > 20)
+            .then_some(())
+            .ok_or_else(|| format!("{open} tabs open, {} texts painted", h.painted.len()))
+    }
+
     /// Every one of the 400 subfolders opened (by revealing a tag in each, the
     /// way "Reveal in browser" does), then the middle tag revealed: 60,440 rows
     /// expanded, the viewport in the middle of them.
@@ -2507,6 +2594,27 @@ mod tests {
 
     fn scenarios() -> Vec<Scenario> {
         vec![
+            Scenario {
+                name: "real_tag_collapsed",
+                what: "the BABOON_PERF_REAL_TAG tag open, sections collapsed, no input",
+                setup: setup_real_tag,
+                step: no_events,
+                check: real_tag_shown,
+            },
+            Scenario {
+                name: "real_tag_expanded",
+                what: "the BABOON_PERF_REAL_TAG tag open, every section expanded, no input",
+                setup: setup_real_tag_expanded,
+                step: no_events,
+                check: real_tag_shown,
+            },
+            Scenario {
+                name: "real_tag_expanded_wheel",
+                what: "the BABOON_PERF_REAL_TAG tag expanded, mouse wheel over the fields every frame",
+                setup: setup_real_tag_expanded,
+                step: |_, index| vec![pointer_at(PANE_POINT), wheel(ping_pong_wheel(index))],
+                check: real_tag_shown,
+            },
             Scenario {
                 name: "idle_welcome",
                 what: "no kit loaded; the welcome screen",
@@ -2811,6 +2919,10 @@ mod tests {
                     .iter()
                     .any(|part| scenario.name.contains(part.as_str()))
             {
+                continue;
+            }
+            if scenario.name.starts_with("real_tag") && std::env::var_os(REAL_TAG).is_none() {
+                eprintln!("[perf] {} skipped: {REAL_TAG} is not set", scenario.name);
                 continue;
             }
             eprintln!("[perf] {} — {}", scenario.name, scenario.what);
