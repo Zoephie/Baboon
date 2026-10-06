@@ -520,13 +520,8 @@ impl Baboon {
         let kit = &mut self.model.kits[kit_index];
         kit.chimp = ChimpState::default();
         self.views[kit.id].chimp = ChimpView::default();
-        if self
-            .dialogs
-            .get::<ChimpSaveDialog>()
-            .is_some_and(|dialog| dialog.kit == kit.id)
-        {
-            self.dialogs.close::<ChimpSaveDialog>();
-        }
+        let id = kit.id;
+        self.dialogs.close_where::<ChimpSaveDialog>(|dialog| dialog.kit == id);
     }
 
     /// Close `package`'s document pane in a kit's Chimp layout.

@@ -770,6 +770,13 @@ impl Dialog for ChimpDiscardPrompt {
 }
 
 impl Dialog for ChimpSaveDialog {
+    /// One per workspace. With one for the whole app, a second workspace's
+    /// Ctrl+S replaced the first's dialog, and with it the close the first
+    /// was waiting on.
+    fn instance(&self) -> u64 {
+        self.kit.0
+    }
+
     fn show(&mut self, cx: &Ctx, _: &AppReads) -> bool {
         let ctx = cx.egui;
         let model = cx.model;
@@ -1529,6 +1536,22 @@ mod tests {
         app.reset_chimp(0);
         assert!(!app.has_chimp_save_dialog());
     }
+
+    /// Each workspace keeps its own save dialog: a second workspace's used to
+    /// replace the first's, and the close the first was waiting on with it.
+    #[test]
+    fn each_workspace_keeps_its_own_save_dialog() {
+        let mut app = Baboon::for_test();
+        app.add_kit();
+        app.open_chimp_save_dialog_for_test(0);
+        app.open_chimp_save_dialog_for_test(1);
+        let (first, second) = (app.model.kits[0].id, app.model.kits[1].id);
+        assert!(app.dialogs.any::<ChimpSaveDialog>(|dialog| dialog.kit == first));
+        assert!(app.dialogs.any::<ChimpSaveDialog>(|dialog| dialog.kit == second));
+        app.reset_chimp(1);
+        assert!(app.dialogs.any::<ChimpSaveDialog>(|dialog| dialog.kit == first), "the other is untouched");
+        assert!(!app.dialogs.any::<ChimpSaveDialog>(|dialog| dialog.kit == second));
+    }
 }
 
 impl Model {
@@ -1578,8 +1601,7 @@ impl Baboon {
     pub(in crate::app) fn has_chimp_save_dialog(&self) -> bool {
         self.model.kits.iter().any(|kit| {
             self.dialogs
-                .get::<ChimpSaveDialog>()
-                .is_some_and(|dialog| dialog.kit == kit.id)
+                .any::<ChimpSaveDialog>(|dialog| dialog.kit == kit.id)
         })
     }
 }

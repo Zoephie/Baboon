@@ -87,6 +87,25 @@ impl DialogHost {
             .find_map(|dialog| (&mut **dialog as &mut dyn Any).downcast_mut::<T>())
     }
 
+    /// Whether a dialog of type `T` that `which` picks out is open, among
+    /// several instances of the type.
+    pub(in crate::app) fn any<T: Dialog>(&self, which: impl Fn(&T) -> bool) -> bool {
+        self.open
+            .iter()
+            .filter_map(|dialog| (&**dialog as &dyn Any).downcast_ref::<T>())
+            .any(which)
+    }
+
+    /// Close the open dialog of type `T` that `which` picks out, handing it
+    /// back.
+    pub(in crate::app) fn close_where<T: Dialog>(&mut self, which: impl Fn(&T) -> bool) -> Option<T> {
+        let index = self.open.iter().position(|dialog| {
+            (&**dialog as &dyn Any).downcast_ref::<T>().is_some_and(&which)
+        })?;
+        let dialog: Box<dyn Any> = self.open.remove(index);
+        dialog.downcast::<T>().ok().map(|dialog| *dialog)
+    }
+
     /// Close the first open dialog of type `T`, handing it back.
     pub(in crate::app) fn close<T: Dialog>(&mut self) -> Option<T> {
         let index = self
