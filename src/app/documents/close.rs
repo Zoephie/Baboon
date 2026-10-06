@@ -190,6 +190,7 @@ impl Baboon {
                 .as_ref()
                 .map(|project| project.recovery_path.clone());
             self.dialogs.open(SaveChangesPrompt {
+                kit: self.model.kits[self.model.active].id,
                 can_stash,
                 dirty_tags,
                 pending_action: action,
@@ -302,6 +303,19 @@ impl Baboon {
         let Some(mut prompt) = self.dialogs.close::<SaveChangesPrompt>() else {
             return;
         };
+        // Its tags are addressed by key in the active kit below, and two
+        // workspaces of one game share keys: a choice made after switching
+        // workspaces saved, or discarded, the other one's tags.
+        let acts = !matches!(
+            action,
+            SaveChangesPromptAction::None
+                | SaveChangesPromptAction::Cancel
+                | SaveChangesPromptAction::ConfirmDiscard
+        );
+        if acts && !self.focus_navigation_kit(prompt.kit) {
+            self.model.status = "The workspace these changes were in is closed.".to_owned();
+            return;
+        }
         match action {
             SaveChangesPromptAction::None => self.dialogs.open(prompt),
             SaveChangesPromptAction::Cancel => {}
@@ -1701,5 +1715,30 @@ mod tests {
         app.undo_current_tag();
         assert_eq!(friction(&app), Some(0.0));
         assert!(doc(&app, &key).dirty.is_set(), "before the save is unsaved");
+    }
+
+    /// A save prompt answered after switching workspaces acts on the
+    /// workspace it was raised in. Its tags are found by key in the active
+    /// workspace, so it used to act on the other one.
+    #[test]
+    fn a_save_prompt_acts_on_its_own_workspace() {
+        let kit = LooseKit::new("prompt-kit", "haloce_mcc");
+        kit.write_classic_ce("physics/pebble", "point_physics");
+        let mut app = app();
+        kit.install(&mut app);
+        let key = kit.open(&mut app, "physics/pebble.point_physics");
+        edit_field(&mut app, &key, "air friction", "0.5");
+        let ctx = egui::Context::default();
+        app.request_close_action(PendingCloseAction::CloseTab(key.clone()), &ctx);
+        assert!(app.dialogs.get::<SaveChangesPrompt>().is_some());
+
+        app.add_kit();
+        app.model.active = 1;
+        app.apply_save_changes_prompt_action(SaveChangesPromptAction::DontSave, &ctx);
+        assert_eq!(app.model.active, 0, "back to the prompt's workspace");
+        assert!(
+            !app.model.kits[0].parsed_tags.contains_key(&key),
+            "and its tab closed there"
+        );
     }
 }

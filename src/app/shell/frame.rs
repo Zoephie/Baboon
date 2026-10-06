@@ -3732,6 +3732,7 @@ mod tests {
                 memory_kit,
                 |h| {
                     h.app.dialogs.open(SaveChangesPrompt {
+                        kit: h.app.model.kits[0].id,
                         can_stash: false,
                         dirty_tags: vec![DirtyTagEntry {
                             path: "objects/smoke.biped".to_owned(),
@@ -4242,6 +4243,7 @@ mod tests {
                 memory_kit,
                 |h| {
                     h.app.dialogs.open(ExtractTargetPrompt {
+                        kit: h.app.model.kits[0].id,
                         key: biped_key(),
                         display_path: "objects/smoke.render_model".to_owned(),
                         kind: ExtractKind::Geometry,

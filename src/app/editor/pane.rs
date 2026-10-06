@@ -87,7 +87,8 @@ impl Baboon {
         // one.
         changed |= mutated;
         if let Some(block_path) = find_filter_block_jump {
-            self.navigate_to_field(ctx, &key, &block_path);
+            // The pane's own workspace: side by side, it need not be active.
+            self.navigate_to_field_in(ctx, kit, &key, &block_path);
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
             changed = true;
         }

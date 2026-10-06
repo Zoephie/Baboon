@@ -36,6 +36,9 @@ pub(in crate::app) struct ChimpDiscardPrompt {
 /// app exit; the next native close request is then allowed through instead of
 /// being vetoed and prompting again.
 pub(in crate::app) struct SaveChangesPrompt {
+    /// The workspace whose tags it lists. Saving, stashing and discarding act
+    /// there, whichever workspace is active when the choice is made.
+    pub(in crate::app) kit: KitId,
     /// Whether this workspace can hold edits in a Baboon project rather than
     /// writing them into the game. Container sources can; a loose kit has
     /// nowhere to stash to, so it is offered Save or nothing.

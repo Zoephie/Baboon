@@ -405,6 +405,9 @@ pub(in crate::app) enum ExtractKind {
 /// The window that asks which game's tools an extraction is for, before the
 /// folder is picked: the JMS, ASS and JMA versions follow it.
 pub(in crate::app) struct ExtractTargetPrompt {
+    /// The workspace the tag is in; the extraction runs there, whichever is
+    /// active when the window is confirmed.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
     pub(in crate::app) display_path: String,
     pub(in crate::app) kind: ExtractKind,

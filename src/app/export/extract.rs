@@ -558,6 +558,7 @@ impl Baboon {
         let display_path = entry.display_path.clone();
         let source = self.model.source_game().map_or(blam_tags::game::Game::Halo3, GameId::generation);
         self.dialogs.open(ExtractTargetPrompt {
+            kit: self.model.kits[self.model.active].id,
             key,
             display_path,
             kind,
