@@ -48,18 +48,6 @@ impl Baboon {
                 self.draw_workspace_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
-        // Every kit, not just the active one: a background kit's sidecar can be
-        // dirty from edits made before the user switched away.
-        let mut keyword_notice = None;
-        for kit in &mut self.model.kits {
-            kit.keywords.save_if_dirty();
-            if let Some(notice) = kit.keywords.take_notice() {
-                keyword_notice = Some(notice);
-            }
-        }
-        if let Some(notice) = keyword_notice {
-            self.model.status = notice;
-        }
         // The draws' commands land first: some of them queue the very requests
         // processed next (the tag pane sends its sound player's plays this way),
         // and the next frame's draws have to see those requests settled, or
@@ -229,6 +217,25 @@ impl Baboon {
                 }
             }
             None => {}
+        }
+    }
+
+    /// Write every kit's keyword sidecar that has unsaved changes. Every kit,
+    /// not just the active one: a background kit's sidecar can be dirty from
+    /// edits made before the user switched away. Run with a frame's logic, so
+    /// it also happens while the window is minimized, and on exit; it used to
+    /// run only in a UI pass, and keywords edited just before minimizing or
+    /// quitting were never written.
+    pub(in crate::app) fn save_keyword_sidecars(&mut self) {
+        let mut keyword_notice = None;
+        for kit in &mut self.model.kits {
+            kit.keywords.save_if_dirty();
+            if let Some(notice) = kit.keywords.take_notice() {
+                keyword_notice = Some(notice);
+            }
+        }
+        if let Some(notice) = keyword_notice {
+            self.model.status = notice;
         }
     }
 
@@ -1208,5 +1215,21 @@ pub(in crate::app) mod tests {
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| app.draw_root_ui(ui));
 
         assert!(app.audio.pending.is_empty(), "the request is still waiting for another frame");
+    }
+
+    /// A keyword added just before the window is minimized is written by the
+    /// logic that still runs then; it used to be written only in a UI pass.
+    #[test]
+    fn keywords_are_written_without_a_ui_pass() {
+        let dir = crate::core::test_kits::unique_temp_dir("keywords-logic");
+        let sidecar = dir.join("keywords.json");
+        let mut app = Baboon::for_test();
+        let ctx = egui::Context::default();
+        app.model.kits[0].keywords.load_at(Some(sidecar.clone()));
+        app.model.kits[0].keywords.add("file:a.weapon", "rocket");
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| app.run_logic(ctx));
+        let written = std::fs::read_to_string(&sidecar).expect("the sidecar was written");
+        assert!(written.contains("rocket"), "{written}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

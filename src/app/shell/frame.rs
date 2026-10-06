@@ -760,6 +760,7 @@ impl eframe::App for Baboon {
         // second would otherwise be lost.
         self.persist_prefs_if_changed();
         self.window_state.persist_now();
+        self.save_keyword_sidecars();
         self.persist_session_on_exit();
     }
 }
@@ -793,6 +794,7 @@ impl Baboon {
         // Raised by the previous frame, whose UI has since committed any edit
         // that was still focused, so the action sees it.
         self.run_deferred_file_action(ctx);
+        self.save_keyword_sidecars();
         if self.dialogs.get::<FirstRunWizardState>().is_none() {
             // Defers the close, so the UI commits a focused edit before the
             // next frame decides whether there is anything to save.
