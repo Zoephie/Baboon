@@ -1551,4 +1551,72 @@ mod tests {
         elsewhere.extend([Vec::new(), Vec::new(), Vec::new()]);
         assert_eq!(losses_of_a(["a", "b"], &elsewhere), 1);
     }
+
+    /// How far a scroll area scrolled under a mouse wheel turned while a drag
+    /// from outside it is held over it.
+    fn wheel_while_dragging(take_wheel: bool) -> f32 {
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        let mut time = 0.0;
+        let mut offset = 0.0;
+        let mut frame = |events: Vec<egui::Event>, offset: &mut f32| {
+            time += 1.0 / 60.0;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let _ = crate::app::run_ui_test(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    // The drag starts above the scroll area, as one from the
+                    // browser starts outside the editor.
+                    let (_, source) = ui.allocate_exact_size(egui::vec2(100.0, 60.0), egui::Sense::drag());
+                    source.dnd_set_drag_payload(7_u32);
+                    let output = egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        if take_wheel {
+                            scroll_during_drag(ui);
+                        }
+                        for row in 0..200 {
+                            ui.label(format!("row {row}"));
+                        }
+                    });
+                    *offset = output.state.offset.y;
+                });
+            });
+        };
+        let source = egui::pos2(50.0, 30.0);
+        let over = egui::pos2(300.0, 200.0);
+        for _ in 0..3 {
+            frame(vec![egui::Event::PointerMoved(source)], &mut offset);
+        }
+        frame(
+            vec![egui::Event::PointerButton { pos: source, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+            &mut offset,
+        );
+        for step in 1..=6 {
+            frame(vec![egui::Event::PointerMoved(source + (over - source) * step as f32 / 6.0)], &mut offset);
+        }
+        for _ in 0..10 {
+            frame(
+                vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -40.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                &mut offset,
+            );
+        }
+        offset
+    }
+
+    /// The wheel scrolls the tag editor while a tag is dragged over it. egui
+    /// 0.36 stopped scroll areas taking the wheel during any drag, so a field
+    /// below the fold couldn't be reached to drop on.
+    #[test]
+    fn the_wheel_scrolls_while_a_tag_is_dragged() {
+        assert_eq!(wheel_while_dragging(false), 0.0, "control: egui ignores the wheel mid-drag");
+        assert!(wheel_while_dragging(true) > 0.0, "the editor takes it");
+    }
 }
