@@ -12,6 +12,13 @@ use std::collections::BTreeMap;
 pub(in crate::app) const CAMPAIGN_PROJECT_VERSION: i64 = 1;
 pub(in crate::app) const CAMPAIGN_PROJECT_AUTOSAVE_SECS: f64 = 0.75;
 
+/// How long after starting a write the next autosave may start, given how
+/// many writes have failed in a row: the usual interval, doubled for each
+/// failure, up to a minute.
+fn autosave_delay(failed_writes: u32) -> f64 {
+    (CAMPAIGN_PROJECT_AUTOSAVE_SECS * f64::from(1_u32 << failed_writes.min(7))).min(60.0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum CampaignProjectTagKind {
     Existing,
@@ -341,6 +348,10 @@ pub(in crate::app) struct ActiveCampaignProject {
     pub(in crate::app) pending_digests: Option<SavedProjectState>,
     pub(in crate::app) last_saved_fingerprint: Vec<u8>,
     pub(in crate::app) next_autosave_at: f64,
+    /// Writes that have failed in a row. Each doubles the wait before the
+    /// next attempt: a recovery file that cannot be written was captured and
+    /// written again every 0.75 s for as long as it stayed that way.
+    pub(in crate::app) failed_writes: u32,
     pub(in crate::app) revision: u64,
     pub(in crate::app) save_in_flight: Option<u64>,
     pub(in crate::app) write_lock: Arc<Mutex<()>>,
@@ -372,6 +383,7 @@ impl ActiveCampaignProject {
             pending_digests: None,
             last_saved_fingerprint: Vec::new(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
+            failed_writes: 0,
             revision: 0,
             save_in_flight: None,
             write_lock: Arc::new(Mutex::new(())),
@@ -427,6 +439,7 @@ impl ActiveCampaignProject {
             pending_digests: None,
             last_saved_fingerprint: Vec::new(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
+            failed_writes: 0,
             revision: 0,
             save_in_flight: None,
             write_lock: Arc::new(Mutex::new(())),
@@ -1768,7 +1781,7 @@ impl Baboon {
                 let latest_write_revision = project.latest_write_revision.clone();
                 latest_write_revision.store(revision, Ordering::SeqCst);
                 project.save_in_flight = Some(revision);
-                project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
+                project.next_autosave_at = now + autosave_delay(project.failed_writes);
                 // What this write will leave on disk, held until it succeeds.
                 let on_disk = project.saved_digests.clone();
                 project.pending_digests = Some(snapshot.digests());
@@ -1819,6 +1832,7 @@ impl Baboon {
         let pending = project.pending_digests.take();
         match result {
             Ok(()) => {
+                project.failed_writes = 0;
                 project.last_saved_fingerprint = fingerprint;
                 // Only now is this what the file holds; a failed write leaves
                 // the previous belief in place, so the next save reconciles
@@ -1831,6 +1845,7 @@ impl Baboon {
                 }
             }
             Err(error) => {
+                project.failed_writes = project.failed_writes.saturating_add(1);
                 self.model.status = format!("Campaign project autosave failed: {error}");
             }
         }
@@ -3781,6 +3796,41 @@ mod tests {
         loose.install(&mut app);
         autosave_at(&mut app, &ctx, 20.0);
         assert!(app.model.kits[0].project.active.is_none());
+    }
+
+    /// A recovery file that cannot be written is tried again less and less
+    /// often, not captured and rewritten every 0.75 s; a write that succeeds
+    /// brings back the usual interval.
+    #[test]
+    fn a_failing_autosave_backs_off() {
+        let _session = session_file_lock();
+        let kit = CeKit::new("project-autosave-backoff");
+        let mut app = kit.app(&["objects/rock"]);
+        let ctx = egui::Context::default();
+        autosave_at(&mut app, &ctx, 10.0);
+        // A folder where the recovery file should be: every write fails.
+        let blocked = kit.recovery().with_extension("blocked");
+        std::fs::create_dir_all(blocked.join("inside")).unwrap();
+        app.model.kits[0].project.active.as_mut().unwrap().recovery_path = blocked.clone();
+
+        autosave_at(&mut app, &ctx, 11.0);
+        pump_until(&mut app, "the first write", |app| project(app).save_in_flight.is_none());
+        assert_eq!(project(&app).failed_writes, 1);
+        autosave_at(&mut app, &ctx, 12.0);
+        assert_eq!(project(&app).next_autosave_at, 12.0 + 2.0 * CAMPAIGN_PROJECT_AUTOSAVE_SECS);
+        pump_until(&mut app, "the second write", |app| project(app).save_in_flight.is_none());
+        assert_eq!(project(&app).failed_writes, 2);
+        autosave_at(&mut app, &ctx, 13.0);
+        assert_eq!(project(&app).revision, 2, "not due yet");
+        autosave_at(&mut app, &ctx, 14.0);
+        assert_eq!(project(&app).next_autosave_at, 14.0 + 4.0 * CAMPAIGN_PROJECT_AUTOSAVE_SECS);
+        pump_until(&mut app, "the third write", |app| project(app).save_in_flight.is_none());
+
+        let _ = std::fs::remove_dir_all(&blocked);
+        app.model.kits[0].project.active.as_mut().unwrap().recovery_path = kit.recovery();
+        autosave_at(&mut app, &ctx, 20.0);
+        pump_until(&mut app, "a write that succeeds", |app| project(app).save_in_flight.is_none());
+        assert_eq!(project(&app).failed_writes, 0);
     }
 
     /// A recovery file left by an earlier session is adopted, not overwritten:
