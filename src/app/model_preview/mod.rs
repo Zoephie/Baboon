@@ -674,7 +674,6 @@ pub(super) fn draw_model_preview_panel(
                             ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
                                 ui,
                                 tag,
-                                entry,
                                 data,
                                 state,
                                 model_preview_size,
@@ -743,7 +742,6 @@ pub(super) fn draw_model_preview_panel(
                 ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
                     ui,
                     tag,
-                    entry,
                     data,
                     state,
                     model_preview_size,
@@ -1083,7 +1081,6 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
 fn draw_model_view_settings_menu(
     ui: &mut Ui,
     tag: &TagFile,
-    entry: &TagEntry,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
@@ -1099,25 +1096,17 @@ fn draw_model_view_settings_menu(
         |ui| {
             const VIEW_SETTINGS_WIDTH: f32 = 280.0;
             // Fix both bounds: a menu's sizing pass can otherwise let the
-            // full-width marker filter grow wider than the shading combo.
+            // full-width marker filter grow wider than the shading choices.
             ui.set_width(VIEW_SETTINGS_WIDTH);
-            ui.scope(|ui| {
-                // Menu styling uses a compact 2 px inset; match the variant
-                // selector's normal button padding for this combo box.
-                ui.spacing_mut().button_padding.x = BUTTON_TEXT_PADDING_X;
-                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                    foundation_visuals().widgets.inactive.weak_bg_fill;
-                egui::ComboBox::from_id_salt(("model_render_mode", &entry.key))
-                    .selected_text(state.render_mode.label())
-                    .width(VIEW_SETTINGS_WIDTH)
-                    .show_ui(ui, |ui| {
-                        for mode in ModelRenderMode::ALL {
-                            if supports_textures || !mode.uses_textures() {
-                                ui.selectable_value(&mut state.render_mode, mode, mode.label());
-                            }
-                        }
-                    });
-            });
+            // Shading is picked right here. It was a combo box, whose list is
+            // a popup of its own; egui 0.36 keeps one popup open at a time, so
+            // opening it closed this menu and nothing could be picked.
+            ui.label(RichText::new("Shading").color(subtle_dark()).small());
+            for mode in ModelRenderMode::ALL {
+                if supports_textures || !mode.uses_textures() {
+                    ui.radio_value(&mut state.render_mode, mode, mode.label());
+                }
+            }
             if is_campaign_evolved {
                 ui.checkbox(&mut state.high_detail, "High Detail")
                     .on_hover_text(
