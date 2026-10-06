@@ -202,9 +202,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
         false
     }
 
-    /// Restores the tab context menu the hand-rolled tab rack used to carry.
-    /// It hangs off the tab's own response, which is why it lives here rather
-    /// than in `tab_ui`.
+    /// Restores the tab context menu and middle-click-to-close the hand-rolled
+    /// tab rack used to carry. Both hang off the tab's own response, which is
+    /// why they live here rather than in `tab_ui`.
     fn on_tab_button(
         &mut self,
         tiles: &mut egui_tiles::Tiles<String>,
@@ -215,6 +215,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_, '_, '_> {
             return button_response;
         };
         let key = key.clone();
+        // Queued exactly as the close button queues it, so a middle-click on a
+        // tab with unsaved edits still raises the prompt instead of discarding
+        // them. `tiles` is shared here, so the removal happens after the walk.
+        if button_response.middle_clicked() {
+            self.close_requests.push(key.clone());
+        }
         // Clicking a tab focuses its tag, by the same rule as a press inside
         // its pane: `selected_key` is what Save and Save As act on, and a tab
         // brought forward by its title used to leave them on the tag before,

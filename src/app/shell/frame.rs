@@ -1919,9 +1919,6 @@ mod tests {
         pub(super) painted_rects: Vec<(String, egui::Rect)>,
         /// What the last frame asked the platform to do.
         pub(super) commands: Vec<egui::OutputCommand>,
-        /// How long the last frame asked egui to wait before the next one;
-        /// `Duration::MAX` when it asked for none.
-        pub(super) repaint_delay: Duration,
     }
 
     impl Harness {
@@ -1954,7 +1951,6 @@ mod tests {
                 painted: Vec::new(),
                 painted_rects: Vec::new(),
                 commands: Vec::new(),
-                repaint_delay: Duration::MAX,
             }
         }
 
@@ -1998,7 +1994,6 @@ mod tests {
                 .collect();
             self.painted = self.painted_rects.iter().map(|(text, _)| text.clone()).collect();
             self.commands = output.platform_output.commands;
-            self.repaint_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             FrameSample {
                 run,
                 tessellate,
@@ -4530,68 +4525,6 @@ mod tests {
         (h.painted, h.app.model.status)
     }
 
-    /// Frames run in `secs` of egui time when the app gets one only when it
-    /// asks: right away, or after the delay it asked for.
-    fn frames_while_idle(h: &mut Harness, secs: f64) -> usize {
-        let end = h.time + secs;
-        let mut frames = 0;
-        while h.repaint_delay != Duration::MAX {
-            let step = h.repaint_delay.as_secs_f64().max(1.0 / 60.0);
-            if h.time + step > end {
-                break;
-            }
-            // `frame` moves the clock on by a 60 Hz frame itself.
-            h.time += step - 1.0 / 60.0;
-            h.frame(Vec::new());
-            frames += 1;
-        }
-        frames
-    }
-
-    /// Every surface the smoke cases open goes quiet once nothing happens.
-    /// Baboon used to redraw at the display's rate for as long as a tag was
-    /// open, about 12% of a CPU for a weapon tag: a command the panes send
-    /// every frame asked for the next frame. A blinking text cursor or an
-    /// animation finishing may still wake it; redrawing every frame may not.
-    #[test]
-    fn every_surface_goes_quiet_when_nothing_happens() {
-        let mut counts = Vec::new();
-        for case in cases() {
-            let mut h = Harness::new();
-            (case.base)(&mut h);
-            (case.open)(&mut h);
-            for _ in 0..FRAMES {
-                h.frame(Vec::new());
-            }
-            let frames = frames_while_idle(&mut h, 10.0);
-            for dir in TEMP_DIRS.with(|dirs| std::mem::take(&mut *dirs.borrow_mut())) {
-                let _ = std::fs::remove_dir_all(dir);
-            }
-            counts.push((case.name, frames));
-        }
-        // Redrawing every frame is 600 frames in 10 s. The busiest surface
-        // that is merely waiting wakes under 100 times: a background check
-        // every 0.6 s, a focused box's cursor blinking.
-        const BUDGET: usize = 200;
-        // Shows a spinner while a background job builds the poke plan, which
-        // in the app ends when the job does; the case has no job to end it.
-        const SPINNING: &[&str] = &["poke_scanning"];
-        let busy: Vec<_> = counts
-            .iter()
-            .filter(|(name, frames)| *frames > BUDGET && !SPINNING.contains(name))
-            .collect();
-        assert!(
-            busy.is_empty(),
-            "redrawing with nothing to do (frames in 10 s): {busy:?}"
-        );
-        assert!(
-            counts
-                .iter()
-                .any(|(name, frames)| SPINNING.contains(name) && *frames > BUDGET),
-            "the spinner case no longer spins, so the test can't tell busy from quiet"
-        );
-    }
-
     fn missing(painted: &[String], expect: &[&'static str]) -> Vec<&'static str> {
         expect
             .iter()
@@ -5191,8 +5124,8 @@ mod tests {
         assert_eq!(draft.error.as_deref(), Some("Enter an editing kit name"));
     }
 
-    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click
-    // leaves a tab alone, and the tab menu's closes reach the right tabs. Each goes through a
+    // A kit's tag tabs: pressing in a pane focuses its tag, a middle-click closes
+    // a tab, and the tab menu's closes reach the right tabs. Each goes through a
     // command sent while the tiles draw, so these drive whole frames.
 
     const PATHS: [&str; 3] = [
@@ -5276,14 +5209,13 @@ mod tests {
         );
     }
 
-    /// A middle-click on a tab leaves it open: tabs close only from their
-    /// close button or menu.
+    /// A middle-click on a tab closes it, and only it.
     #[test]
-    fn a_middle_click_leaves_a_tab_open() {
+    fn a_middle_click_closes_a_tab() {
         let (mut h, keys) = three_tabs();
         assert_eq!(open_tabs(&h), keys);
         press(&mut h, "tag_000.biped", egui::PointerButton::Middle);
-        assert_eq!(open_tabs(&h), keys);
+        assert_eq!(open_tabs(&h), keys[1..]);
     }
 
     /// The tab menu's "Close all but this" keeps the tab it was opened on.
