@@ -139,6 +139,9 @@ pub(in crate::app) struct FindFieldPlan {
     pub(in crate::app) inherited_parent: bool,
     pub(in crate::app) is_block: bool,
     pub(in crate::app) is_documentation: bool,
+    /// A `!` field: the editor draws it, and everything under it, only in
+    /// expert mode. The marker comes from the definition, as the editor's does.
+    pub(in crate::app) hidden: bool,
 }
 
 /// Plans for one walk, keyed by struct definition index within the tag's layout.
@@ -203,11 +206,15 @@ impl<'a> FindPlans<'a> {
             .fields()
             .map(|field| {
                 let mut docs_before = 0..0;
+                let mut hidden = crate::app::editor::field_display_meta(field.name()).advanced;
                 if let Some(match_idx) = (doc_cursor..entries.len()).find(|&index| {
                     matches!(&entries[index], DefEntry::Field { clean_name, .. } if clean_name == field.name())
                 }) {
                     docs_before = doc_cursor..match_idx;
                     doc_cursor = match_idx + 1;
+                    if let DefEntry::Field { hidden: true, .. } = &entries[match_idx] {
+                        hidden = true;
+                    }
                 }
                 let clean = field.clean_name().into_owned();
                 let is_block = field.as_block().is_some() || field.as_array().is_some();
@@ -228,6 +235,7 @@ impl<'a> FindPlans<'a> {
                         && is_inherited_parent_name(field.name()),
                     is_block,
                     is_documentation,
+                    hidden,
                     label: label.into(),
                     clean: clean.into(),
                 }
@@ -253,6 +261,7 @@ pub(in crate::app) fn collect_find_occurrences(
     look_in: FindLookIn,
     match_case: bool,
     whole_word: bool,
+    expert_mode: bool,
 ) -> Vec<FindOccurrence> {
     let mut out = Vec::new();
     let mut walk = FindWalk {
@@ -263,6 +272,7 @@ pub(in crate::app) fn collect_find_occurrences(
         look_in,
         match_case,
         whole_word,
+        expert_mode,
         path: String::new(),
         out: &mut out,
     };
@@ -281,6 +291,9 @@ struct FindWalk<'a> {
     look_in: FindLookIn,
     match_case: bool,
     whole_word: bool,
+    /// Outside expert mode the editor doesn't draw `!` fields, so Find skips
+    /// them rather than count matches nothing on screen shows.
+    expert_mode: bool,
     path: String,
     out: &'a mut Vec<FindOccurrence>,
 }
@@ -290,6 +303,9 @@ impl FindWalk<'_> {
         let plan = self.plans.plan(&tag_struct);
         for (field, field_plan) in tag_struct.fields().zip(&plan.fields) {
             self.documentation(&plan, field_plan.docs_before.clone());
+            if field_plan.hidden && !self.expert_mode {
+                continue;
+            }
             let inherited_wrapper = following_inherited_chain && field_plan.inherited_parent;
             let parent_len = self.path.len();
             if parent_len > 0 {
@@ -439,13 +455,15 @@ impl Baboon {
         use std::fmt::Write as _;
         let kit = &self.model.kits[self.model.active];
         let mut key = format!(
-            "{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}",
+            "{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}",
             kit.id,
             kit.generation,
             self.search.find.within,
             self.search.find.look_in,
             self.search.find.match_case,
             self.search.find.whole_word,
+            // Hidden (`!`) fields are searched only in expert mode.
+            self.model.prefs.expert_mode,
             self.search.find.all_request_id,
             self.search.find.searching,
             self.search.find.query,
@@ -512,6 +530,7 @@ impl Baboon {
                 self.search.find.look_in,
                 self.search.find.match_case,
                 self.search.find.whole_word,
+                self.model.prefs.expert_mode,
             ));
         }
         self.search.find.occurrences = occurrences;
@@ -655,6 +674,7 @@ impl Baboon {
                     self.search.find.look_in,
                     self.search.find.match_case,
                     self.search.find.whole_word,
+                    self.model.prefs.expert_mode,
                 ),
             );
         }
@@ -694,6 +714,7 @@ impl Baboon {
         let look_in = self.search.find.look_in;
         let match_case = self.search.find.match_case;
         let whole_word = self.search.find.whole_word;
+        let expert_mode = self.model.prefs.expert_mode;
         let total = entries.len();
         let tx = self.tx.clone();
         self.search.find.all_closed_occurrences.clear();
@@ -732,6 +753,7 @@ impl Baboon {
                                 look_in,
                                 match_case,
                                 whole_word,
+                                expert_mode,
                             )),
                             Err(_) => unreadable += 1,
                         }
@@ -873,6 +895,61 @@ mod tests {
         assert_ne!(app.search.find.all_signature, first, "the other kit is searched");
     }
 
+    /// Toggling expert mode changes which fields Find searches, so the
+    /// cached results must not survive it.
+    #[test]
+    fn expert_mode_is_part_of_the_find_results_key() {
+        let mut app = Baboon::for_test();
+        app.search.find.open = true;
+        app.search.find.query = "needle".to_owned();
+        app.model.prefs.expert_mode = false;
+        let normal = app.find_results_key();
+        app.model.prefs.expert_mode = true;
+        let expert = app.find_results_key();
+        assert!(normal.is_some() && expert.is_some());
+        assert_ne!(normal, expert);
+    }
+
+    /// The editor draws a `!` field only in expert mode, so outside it Find
+    /// doesn't count a match there. The marker comes from the definition: the
+    /// tag's own field name has lost it.
+    #[test]
+    fn find_skips_hidden_fields_outside_expert_mode() {
+        let root = crate::core::test_kits::unique_temp_path("find-hidden-definitions");
+        let game = root.join("haloreach_mcc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(
+            game.join("marker_test.json"),
+            r#"{"name":"marker_test","tag":"mrkt","version":1,"flags":0,"block":"marker_test_block",
+                "blocks":{"marker_test_block":{"max_count":1,"struct":"marker_test_struct"}},
+                "structs":{"marker_test_struct":{"guid":"0123456789abcdef0123456789abcdef","size":8,
+                  "fields":[{"type":"long_integer","name":"shown needle"},
+                            {"type":"long_integer","name":"hidden needle!"},{"type":"terminator","name":null}]}}}"#,
+        )
+        .unwrap();
+        let tag = TagFile::new(game.join("marker_test.json")).unwrap();
+        let docs = build_def_docs(&root, GameId::HaloReach, "marker_test");
+        let hits = |expert_mode: bool| -> Vec<String> {
+            collect_find_occurrences(
+                &tag,
+                "test.marker_test",
+                &TagNameIndex::default(),
+                Some(&docs),
+                "needle",
+                field_names_only(),
+                false,
+                false,
+                expert_mode,
+            )
+            .into_iter()
+            .map(|hit| hit.text)
+            .collect()
+        };
+        assert_eq!(hits(false), ["shown needle"]);
+        assert_eq!(hits(true), ["shown needle", "hidden needle"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn field_names_only() -> FindLookIn {
         FindLookIn {
             field_names: true,
@@ -971,6 +1048,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let hit = occurrences
             .iter()
@@ -992,6 +1070,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let matching_cells = occurrences
             .iter()
@@ -1021,6 +1100,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             block_hits
@@ -1037,6 +1117,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         assert!(
             field_hits
@@ -1065,6 +1146,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             title_hits
@@ -1081,6 +1163,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             body_hits
@@ -1104,6 +1187,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let hit = occurrences
             .iter()
@@ -1150,6 +1234,7 @@ mod tests {
             look_in: FindLookIn::default(),
             match_case: false,
             whole_word: false,
+            expert_mode: true,
             path: "field".to_owned(),
             out: &mut out,
         };
