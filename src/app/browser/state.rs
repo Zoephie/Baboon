@@ -452,7 +452,7 @@ pub(in crate::app) enum BrowserMode {
 }
 
 /// Ordering of tags within a browser folder/group node.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub(in crate::app) enum BrowserSort {
     /// Filesystem / natural order (as built).
     #[default]
@@ -511,6 +511,12 @@ impl Drop for FilterCache {
     }
 }
 impl FilterCache {
+    /// Names the result set `entries` holds once a search has answered: it
+    /// changes with the scope, the query and the source.
+    pub(in crate::app) fn signature(&self) -> Option<u64> {
+        self.scoped_signature
+    }
+
     pub(in crate::app) fn is_searching(&self) -> bool {
         self.pending_since.is_some() || self.receiver.is_some()
     }

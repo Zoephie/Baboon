@@ -368,6 +368,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
                     pane_key,
                     &pane,
                     &pane.filter_cache.entries,
+                    pane.filter_cache.signature(),
                     bitmap_library,
                     model_library,
                 );
