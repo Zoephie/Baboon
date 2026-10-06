@@ -76,6 +76,7 @@ impl Baboon {
                             doc.tag = tag;
                             doc.dirty.touch();
                             doc.note_layout_change();
+                            doc.settle_after_step();
                         }
                         let active = self.model.active;
                         self.invalidate_tag_caches_in(active, key);

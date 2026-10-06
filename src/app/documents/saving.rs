@@ -504,7 +504,7 @@ impl Baboon {
             refs
         };
         if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
-            doc.dirty.clear();
+            doc.mark_saved();
         }
         // The save also writes the index row, so the periodic refresh will
         // not see this file change; the shader grid has to hear it here.
@@ -658,7 +658,7 @@ impl Baboon {
         }
         let kit = &mut self.model.kits[active];
         if let Some(doc) = kit.parsed_tags.get_mut(&new) {
-            doc.dirty.clear();
+            doc.mark_saved();
         }
         kit.selected_key = Some(new);
         self.record_saved_tag_in_indexes(&saved, dependencies);

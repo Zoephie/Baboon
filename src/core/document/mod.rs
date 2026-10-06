@@ -62,6 +62,11 @@ pub(crate) struct TagDocument {
     /// field path with element indices in it, which point somewhere else
     /// once this moves.
     layout_revision: u64,
+    /// The journal's top step when the document last matched its file:
+    /// `Some(None)` for an empty stack, `None` when no state is known to
+    /// match. An undo or redo landing back on it means the document is as
+    /// saved again.
+    saved_at: Option<Option<u64>>,
 }
 
 fn next_document_id() -> u64 {
@@ -77,6 +82,7 @@ impl TagDocument {
             dirty: Dirty::default(),
             journal: EditJournal::default(),
             layout_revision: 0,
+            saved_at: Some(None),
         }
     }
 
@@ -93,6 +99,7 @@ impl TagDocument {
             dirty,
             journal: EditJournal::default(),
             layout_revision: 0,
+            saved_at: None,
         }
     }
 
@@ -112,5 +119,29 @@ impl TagDocument {
     /// Record that blocks may have changed shape.
     pub(crate) fn note_layout_change(&mut self) {
         self.layout_revision += 1;
+    }
+
+    /// Record that the document was just written to its file. The edit run
+    /// ends here, so the next edit takes a step of its own rather than
+    /// joining the saved one.
+    pub(crate) fn mark_saved(&mut self) {
+        self.dirty.clear();
+        self.journal.end_edit_window();
+        self.saved_at = Some(self.journal.top_id());
+    }
+
+    /// After an undo or redo restored the document: if it is back at the
+    /// step it was saved at, it holds nothing unsaved. Undoing back to the
+    /// saved state used to leave the tag marked modified.
+    pub(crate) fn settle_after_step(&mut self) {
+        if self.saved_at == Some(self.journal.top_id()) {
+            self.dirty.clear();
+        }
+    }
+
+    /// After the journal's history was replaced (a recovered session): a
+    /// clean document matches its file where the history now stands.
+    pub(crate) fn note_history_replaced(&mut self) {
+        self.saved_at = (!self.dirty.is_set()).then(|| self.journal.top_id());
     }
 }

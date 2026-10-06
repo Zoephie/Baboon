@@ -300,7 +300,7 @@ impl Baboon {
         if let Some(doc) = self.model.kits[kit].parsed_tags.get_mut(&job.key)
             && doc.dirty.revision() == job.dirty_revision
         {
-            doc.dirty.clear();
+            doc.mark_saved();
         }
         self.model.status = match reload_error {
             Some(e) => format!(
@@ -392,7 +392,7 @@ impl Baboon {
         ) {
             Ok(()) => {
                 if let Some(doc) = self.model.kits[self.model.active].parsed_tags.get_mut(key) {
-                    doc.dirty.clear();
+                    doc.mark_saved();
                 }
                 let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
                 self.model.status = format!(

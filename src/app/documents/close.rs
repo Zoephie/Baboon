@@ -1665,4 +1665,41 @@ mod tests {
         app.close_tab(&a);
         assert!(app.dialogs.get::<ColorPopupWindow>().is_none(), "and goes with a's");
     }
+
+    /// Re-entering the value a field already holds changes nothing: no
+    /// modified mark, no undo step. And undoing back to the state a tag was
+    /// saved in leaves it unmodified; a redo away from it marks it again.
+    #[test]
+    fn undo_back_to_the_saved_state_is_unmodified() {
+        let kit = LooseKit::new("undo-saved", "haloce_mcc");
+        kit.write_classic_ce("physics/pebble", "point_physics");
+        let mut app = app();
+        kit.install(&mut app);
+        let key = kit.open(&mut app, "physics/pebble.point_physics");
+        fn doc<'a>(app: &'a Baboon, key: &str) -> &'a crate::core::document::TagDocument {
+            &app.model.kits[0].parsed_tags[key]
+        }
+        let friction = |app: &Baboon| real_of(&doc(app, &key).tag, "air friction");
+
+        edit_field(&mut app, &key, "air friction", "0");
+        assert!(!doc(&app, &key).dirty.is_set(), "the same value is no edit");
+        assert!(!doc(&app, &key).journal.can_undo(), "and takes no undo step");
+
+        edit_field(&mut app, &key, "air friction", "0.25");
+        app.model.kits[0].parsed_tags.get_mut(&key).unwrap().mark_saved();
+        edit_field(&mut app, &key, "air friction", "0.5");
+        assert!(doc(&app, &key).dirty.is_set());
+
+        app.undo_current_tag();
+        assert_eq!(friction(&app), Some(0.25));
+        assert!(!doc(&app, &key).dirty.is_set(), "back to the saved state");
+        app.redo_current_tag();
+        assert_eq!(friction(&app), Some(0.5));
+        assert!(doc(&app, &key).dirty.is_set(), "away from it again");
+        app.undo_current_tag();
+        assert!(!doc(&app, &key).dirty.is_set());
+        app.undo_current_tag();
+        assert_eq!(friction(&app), Some(0.0));
+        assert!(doc(&app, &key).dirty.is_set(), "before the save is unsaved");
+    }
 }

@@ -1219,6 +1219,7 @@ impl Baboon {
         document
             .journal
             .restore(steps(history.undo), steps(history.redo));
+        document.note_history_replaced();
     }
 
     /// Stash a tag Baboon just wrote into a container as new content.
