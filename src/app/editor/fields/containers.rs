@@ -660,10 +660,29 @@ fn is_internal_placeholder_name(name: &str) -> bool {
 }
 
 pub(super) fn is_internal_schema_marker_name(name: &str) -> bool {
+    // Asked of every field row on every frame. The exact test parses the name
+    // as a field path, which was a fifth of a frame's allocations; a name
+    // that doesn't contain a marker's words at all can't be one.
+    if !contains_marker_words(name) {
+        return false;
+    }
     matches!(
         internal_marker_key(name).as_str(),
         "hide group id" | "end hide group id" | "whore function"
     )
+}
+
+/// Whether `name` contains "hide group id" or "whore function", in any case
+/// and with `_` for a space, without allocating.
+fn contains_marker_words(name: &str) -> bool {
+    let name = name.as_bytes();
+    [b"hide group id".as_slice(), b"whore function".as_slice()].iter().any(|words| {
+        name.windows(words.len()).any(|window| {
+            window.iter().zip(words.iter()).all(|(&have, &want)| {
+                have.eq_ignore_ascii_case(&want) || (have == b'_' && want == b' ')
+            })
+        })
+    })
 }
 
 fn internal_marker_key(name: &str) -> String {
