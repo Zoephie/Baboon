@@ -742,6 +742,13 @@ fn slider_value_text(value: f32, step: Option<f32>) -> String {
     if text == "-0" { "0".to_owned() } else { text }
 }
 
+/// The widest a slider row's slider gets and the narrowest it shrinks to in
+/// a narrow pane, and the same for the value box beside it.
+const SLIDER_WIDTH: f32 = 180.0;
+const SLIDER_MIN_WIDTH: f32 = 40.0;
+const SLIDER_VALUE_WIDTH: f32 = 92.0;
+const SLIDER_VALUE_MIN_WIDTH: f32 = 50.0;
+
 /// A value edited with a slider over its recommended range and a box for
 /// typing any value, outside the range too. A drag changes the box as it
 /// goes and commits once, when it ends.
@@ -762,9 +769,29 @@ fn draw_foundation_slider_row(
     let draft = edit.buffers.draft_mut(&buffer_key, value);
     draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, _| {
         let limit = |value: f32| RichText::new(fmt_real(value)).color(subtle_dark()).small();
-        ui.label(limit(range.min));
+        // The slider takes what the rest of the row leaves, up to 180: in a
+        // narrow pane a fixed width pushed the value box and unit past the
+        // row's edge, where they were cut off.
+        let small = ui.style().text_styles[&TextStyle::Small].clone();
+        let text_width = |text: String| ui.painter().layout_no_wrap(text, small.clone(), subtle_dark()).size().x;
+        let unit = if suffix.is_empty() { 0.0 } else { text_width(suffix.to_owned()) };
+        // What the slider and the value box share.
+        let room = ui.available_width() - unit - 3.0 * ui.spacing().item_spacing.x;
+        let value_width = (room - SLIDER_MIN_WIDTH).clamp(SLIDER_VALUE_MIN_WIDTH, SLIDER_VALUE_WIDTH);
+        let limits = text_width(fmt_real(range.min))
+            + text_width(fmt_real(range.max))
+            + 2.0 * ui.spacing().item_spacing.x;
+        // Too tight even for the smallest slider, the limits give their room
+        // to it and say themselves when it's hovered; tighter still, the
+        // value box narrows.
+        let show_limits = room - value_width - limits >= SLIDER_MIN_WIDTH;
+        let slider_room = room - value_width - if show_limits { limits } else { 0.0 };
+        let slider_width = slider_room.clamp(SLIDER_MIN_WIDTH, SLIDER_WIDTH);
+        if show_limits {
+            ui.label(limit(range.min));
+        }
         let mut position = draft.text.trim().parse::<f32>().unwrap_or(range.min);
-        ui.spacing_mut().slider_width = 180.0;
+        ui.spacing_mut().slider_width = slider_width;
         let slider = egui::Slider::new(&mut position, range.min..=range.max)
             .show_value(false)
             .clamping(egui::SliderClamping::Never);
@@ -772,13 +799,17 @@ fn draw_foundation_slider_row(
             Some(step) => slider.step_by(step as f64),
             None => slider,
         };
-        let slid = ui.add_enabled(editable, slider);
-        ui.label(limit(range.max));
+        let mut slid = ui.add_enabled(editable, slider);
+        if show_limits {
+            ui.label(limit(range.max));
+        } else {
+            slid = slid.on_hover_text(format!("{} to {}", fmt_real(range.min), fmt_real(range.max)));
+        }
         if slid.changed() {
             draft.text = slider_value_text(position, range.step);
         }
         draft.note_response(&slid);
-        let typed = foundation_value_cell(ui, &mut draft.text, 92.0, id, editable);
+        let typed = foundation_value_cell(ui, &mut draft.text, value_width, id, editable);
         if !editable {
             return;
         }
@@ -1133,6 +1164,62 @@ mod tests {
         let step = slider_range(&meta, &TagFieldData::ShortInteger(0)).unwrap().step;
         assert_eq!(step, Some(1.0));
         assert_eq!(slider_value_text(12.34, step), "12", "a slider between whole numbers");
+    }
+
+    /// In a narrow pane the slider gives up width, so the value box and the
+    /// unit after it stay inside the row instead of running past its edge.
+    #[test]
+    fn a_slider_row_fits_a_narrow_pane() {
+        let tag = TagFile::new(crate::app::test_definition_path(RADIUS.definition)).unwrap();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        // Wide enough for the row with a shorter slider, too narrow for the
+        // full one; and narrower than the row can be with its limits.
+        for width in [620.0, 480.0] {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 300.0));
+        let mut panel = egui::Rect::NOTHING;
+        let mut output = None;
+        with_test_edit_context(|edit| {
+            for _ in 0..2 {
+                let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+                output = Some(crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        panel = ui.max_rect();
+                        let field = tag.root().field_path(RADIUS.path).unwrap();
+                        let value = field.value().unwrap();
+                        let mut meta = field_display_meta(field.name());
+                        meta.unit = Some("world units".to_owned());
+                        meta.slider = Some(RADIUS.range);
+                        draw_foundation_value_row(
+                            ui, field, &meta, field.type_name(), &value,
+                            &TagNameIndex::default(), 0, RADIUS.path, edit, None, 300.0,
+                        );
+                    });
+                }));
+            }
+        });
+        let output = output.unwrap();
+        let value_box = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) if rect.fill == crate::app::ui_kit::foundation_input() => Some(rect.rect),
+                _ => None,
+            })
+            .expect("the value box is painted");
+        let unit = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == "world units" => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => None,
+            })
+            .expect("the unit is painted");
+        assert!(value_box.right() <= panel.right() + 0.5, "{width}: the value box {value_box:?} runs past {panel:?}");
+        assert!(unit.right() <= panel.right() + 0.5, "{width}: the unit {unit:?} runs past {panel:?}");
+        }
     }
 
     /// A read-only slider row takes no clicks.
