@@ -4464,6 +4464,46 @@ mod tests {
         }
     }
 
+    /// A data field gets the function editor when its definition says it
+    /// holds a function, not when its bytes happen to parse as one: a Halo 3
+    /// bitmap's processed pixels did, and showed a function editor.
+    #[test]
+    fn only_function_data_gets_the_function_editor() {
+        let function = blam_tags::default_function_definition_bytes(blam_tags::io::Endian::Le);
+        let painted = |group: &str, path: &str| {
+            let mut tag = TagFile::new(crate::app::test_definition_path(&format!("halo3_mcc/{group}.json"))).unwrap();
+            tag.root_mut().field_path_mut(path).unwrap().set(TagFieldData::Data(function.clone())).unwrap();
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            let mut texts = Vec::new();
+            with_test_edit_context(|edit| {
+                for _ in 0..2 {
+                    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                            });
+                        });
+                    });
+                    texts = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                }
+            });
+            texts
+        };
+        let bitmap = painted("bitmap", "processed pixel data");
+        assert!(!bitmap.iter().any(|text| text == "Function type:"), "a bitmap's pixels drew a function editor");
+        assert!(bitmap.iter().any(|text| text.starts_with("Data size:")), "{bitmap:?}");
+        let widget = painted("gui_widget_color_animation_definition", "default function/data");
+        assert!(widget.iter().any(|text| text == "Function type:"), "a function field drew no function editor");
+    }
+
     #[test]
     fn read_only_and_hidden_come_from_the_definition() {
         let root = crate::core::test_kits::unique_temp_path("marker-definitions");
