@@ -60,6 +60,10 @@ pub(in crate::app) struct Kit {
     /// Active document key. Selection may temporarily precede parsing while a
     /// matching key is present in `loading_tags`.
     pub(in crate::app) selected_key: Option<String>,
+    /// The tab the user is on, folder panes included: what the browser
+    /// highlights. `selected_key` is this when it is a tag, and `None` when
+    /// it is a folder pane, which no tag action applies to.
+    pub(in crate::app) current_pane: Option<String>,
     /// The open document keys in tab order: re-derived from the view's
     /// `tag_tree`, which owns the layout, by [`Baboon::sync_open_tabs`].
     pub(in crate::app) open_tabs: Vec<String>,
@@ -124,6 +128,7 @@ impl Kit {
             parsed_tags: HashMap::new(),
             loading_tags: HashSet::new(),
             selected_key: None,
+            current_pane: None,
             open_tabs: Vec::new(),
             index_jobs: IndexJobs::default(),
             generation: 0,

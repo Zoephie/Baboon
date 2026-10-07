@@ -1007,6 +1007,8 @@ mod tests {
             parsed_tags: _,
             loading_tags: _,
             selected_key: _,
+            // Follows `selected_key` at the next sync.
+            current_pane: _,
             open_tabs: _,
             keywords: _,
 
@@ -1097,6 +1099,8 @@ mod tests {
             deletable_keys: _,
             deletable_keys_generation: _,
             folder_browsers: _,
+            // A renamed current tag is followed to its new row.
+            followed_item: _,
             // Not addressed by a tag key at all.
             mode: _,
             sort: _,

@@ -552,6 +552,8 @@ impl Baboon {
             kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),
+            folder: false,
+            align: Some(egui::Align::Center),
         });
     }
 }

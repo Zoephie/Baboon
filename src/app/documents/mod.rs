@@ -15,7 +15,6 @@ use crate::app::chimp::ChimpLevelPhase;
 use crate::core::document::value::unsaveable_reason;
 use crate::app::editor::{ColorPopupWindow, DeferredFileAction, FunctionPopupWindow, format_byte_count};
 use crate::app::export::ContainerDumpReport;
-use crate::app::browser::is_folder_pane_key;
 
 pub(in crate::app) mod selection;
 pub(in crate::app) mod saving;

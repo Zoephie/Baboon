@@ -195,30 +195,28 @@ impl KitView {
         self.tag_tree.active_tiles().contains(&tile)
     }
 
-    /// What is selected when the user is looking at `front`: a tag, or nothing
-    /// for a folder pane, which no tag action applies to.
-    fn selection_for_front(front: Option<&String>) -> Option<String> {
-        front.filter(|key| !is_folder_pane_key(key)).cloned()
+    /// The pane in front of `group`.
+    fn front_of(&self, group: egui_tiles::TileId) -> Option<String> {
+        self.shown_panes_under(group).into_iter().next()
     }
 
-    /// The selection once `tile` is no longer in front: whatever is now shown
-    /// in the nearest group above it that is on screen.
-    fn selection_covering(&self, tile: egui_tiles::TileId) -> Option<String> {
+    /// The current pane once `tile` is no longer in front: whatever is now
+    /// shown in the nearest group above it that is on screen.
+    fn pane_covering(&self, tile: egui_tiles::TileId) -> Option<String> {
         let mut node = tile;
         while let Some(parent) = self.tag_tree.tiles.parent_of(node) {
             if self.is_shown(parent) {
-                return Self::selection_for_front(self.shown_panes_under(parent).first());
+                return self.front_of(parent);
             }
             node = parent;
         }
-        self.first_shown_selection()
+        self.first_shown_pane()
     }
 
-    /// The selection when there is no better place for it: the first tab on
-    /// screen.
-    fn first_shown_selection(&self) -> Option<String> {
-        let shown = self.tag_tree.root().map(|root| self.shown_panes_under(root)).unwrap_or_default();
-        shown.into_iter().find(|key| !is_folder_pane_key(key))
+    /// The current pane when there is no better place for it: the first tab
+    /// on screen.
+    fn first_shown_pane(&self) -> Option<String> {
+        self.tag_tree.root().and_then(|root| self.front_of(root))
     }
 
     fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
@@ -340,28 +338,48 @@ impl<'a> KitMut<'a> {
     /// [`Self::sync_open_tabs`], after closing a pane that was in `closed_from`:
     /// a closed selection moves to the tab that group now shows, which is the
     /// one the user is looking at.
+    ///
+    /// The rule follows the current pane, folder panes included, so closing
+    /// a folder pane hands on to the tab shown in its place as closing a tag
+    /// does. A selection set directly (a rename, a new tag) becomes the
+    /// current pane; one cleared directly clears it.
     fn sync_open_tabs_after_close(&mut self, closed_from: Option<egui_tiles::TileId>) -> bool {
         let open_tabs = self.view.tabs_from_tree();
         let mut changed = open_tabs != self.kit.open_tabs;
         self.kit.open_tabs = open_tabs;
-        let Some(selected) = self.kit.selected_key.as_deref() else {
-            return changed;
-        };
-        let next = match self.view.tile_for_key(selected) {
-            Some(tile) if self.view.is_shown(tile) => return changed,
-            Some(tile) => self.view.selection_covering(tile),
-            None => match closed_from {
-                Some(group) if self.view.is_shown(group) => {
-                    KitView::selection_for_front(self.view.shown_panes_under(group).first())
-                }
-                _ => self.view.first_shown_selection(),
-            },
-        };
-        if next != self.kit.selected_key {
-            self.kit.selected_key = next;
+        match (&self.kit.selected_key, &self.kit.current_pane) {
+            (Some(selected), current) if current.as_ref() != Some(selected) => {
+                self.kit.current_pane = Some(selected.clone());
+            }
+            (None, Some(current)) if !is_folder_pane_key(current) => self.kit.current_pane = None,
+            _ => {}
+        }
+        if let Some(current) = self.kit.current_pane.as_deref() {
+            let next = match self.view.tile_for_key(current) {
+                Some(tile) if self.view.is_shown(tile) => Some(current.to_owned()),
+                Some(tile) => self.view.pane_covering(tile),
+                None => match closed_from {
+                    Some(group) if self.view.is_shown(group) => self.view.front_of(group),
+                    _ => self.view.first_shown_pane(),
+                },
+            };
+            if next != self.kit.current_pane {
+                self.kit.current_pane = next;
+                changed = true;
+            }
+        }
+        let selected = self.kit.current_pane.clone().filter(|key| !is_folder_pane_key(key));
+        if selected != self.kit.selected_key {
+            self.kit.selected_key = selected;
             changed = true;
         }
         changed
+    }
+
+    /// Make `key`'s pane the current one, as a tab click does.
+    pub(in crate::app) fn focus_pane(&mut self, key: String) {
+        self.kit.selected_key = (!is_folder_pane_key(&key)).then(|| key.clone());
+        self.kit.current_pane = Some(key);
     }
 
     /// Add `key` as a pane if it is not already laid out, and select it.
@@ -386,7 +404,7 @@ impl<'a> KitMut<'a> {
             tree.make_active(|id, _| id == tile_id);
         }
         // A folder pane in front selects no tag, the same as clicking it.
-        self.kit.selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
+        self.focus_pane(key.to_owned());
         self.sync_open_tabs();
     }
 
@@ -407,7 +425,7 @@ impl<'a> KitMut<'a> {
             }
             None => tree.root = Some(tile_id),
         }
-        self.kit.selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
+        self.focus_pane(key.to_owned());
         self.sync_open_tabs();
     }
 
@@ -563,6 +581,41 @@ mod tests {
         assert_eq!(both.kit.selected_key, None, "not the tag behind it");
         both.open_tag_pane(&tag(0));
         assert_eq!(both.kit.selected_key, Some(tag(0)));
+    }
+
+    /// The current pane follows a folder pane as it does a tag: the browser
+    /// highlights the folder in front, and closing it hands on to the tab
+    /// shown in its place. It used to leave nothing selected, the folder
+    /// pane having cleared the selection that the hand-on followed.
+    #[test]
+    fn closing_a_folder_pane_in_front_hands_on_to_the_tab_behind_it() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        let folder = folder_pane_key(Path::new("objects"));
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane(&folder);
+        assert_eq!(both.kit.current_pane, Some(folder.clone()));
+        both.close_tag_pane(&folder);
+        assert_eq!(both.kit.current_pane, Some(tag(0)));
+        assert_eq!(both.kit.selected_key, Some(tag(0)));
+        both.close_tag_pane(&tag(0));
+        assert_eq!((both.kit.current_pane.clone(), both.kit.selected_key.clone()), (None, None));
+    }
+
+    /// A selection set directly on a shown tab, as a rename or a new tag sets
+    /// it, becomes the current pane rather than being overruled by the old one.
+    #[test]
+    fn a_selection_set_directly_becomes_the_current_pane() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        let mut view = KitView::for_test(&kit);
+        let mut both = KitMut::new(&mut kit, &mut view);
+        both.open_tag_pane(&tag(0));
+        both.open_tag_pane_beside(&tag(1));
+        assert_eq!(both.kit.current_pane, Some(tag(1)));
+        both.kit.selected_key = Some(tag(0));
+        both.sync_open_tabs();
+        assert_eq!(both.kit.current_pane, Some(tag(0)));
     }
 
     #[test]

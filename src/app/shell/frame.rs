@@ -5210,6 +5210,31 @@ mod tests {
             .find(|(painted, _)| painted == text)
             .map(|(_, rect)| rect.center())
             .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", h.painted));
+        press_at(h, target, button);
+    }
+
+    /// [`press`] on the tab titled `text`. The browser tree, which opens down
+    /// to the current tag, paints the same file names; the tab bar is the
+    /// topmost painting to the right of the tree's.
+    fn press_tab(h: &mut Harness, text: &str, button: egui::PointerButton) {
+        let rects: Vec<egui::Rect> = h
+            .painted_rects
+            .iter()
+            .filter(|(painted, _)| painted == text)
+            .map(|(_, rect)| *rect)
+            .collect();
+        let tree_right = rects.iter().map(|rect| rect.left()).fold(f32::INFINITY, f32::min);
+        let target = rects
+            .iter()
+            .filter(|rect| rect.left() > tree_right)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .or(rects.first())
+            .map(|rect| rect.center())
+            .unwrap_or_else(|| panic!("no tab {text:?} is painted: {:?}", h.painted));
+        press_at(h, target, button);
+    }
+
+    fn press_at(h: &mut Harness, target: egui::Pos2, button: egui::PointerButton) {
         let from = target - egui::vec2(30.0, 30.0);
         for step in 1..=3 {
             h.frame(vec![egui::Event::PointerMoved(
@@ -5257,7 +5282,7 @@ mod tests {
         let (mut h, keys) = three_tabs();
         let active = h.app.model.active;
         h.app.model.kits[active].selected_key = Some(keys[2].clone());
-        press(&mut h, "tag_000.biped", egui::PointerButton::Primary);
+        press_tab(&mut h, "tag_000.biped", egui::PointerButton::Primary);
         assert_eq!(
             h.app.model.kits[active].selected_key.as_ref(),
             Some(&keys[0])
@@ -5269,7 +5294,7 @@ mod tests {
     fn a_middle_click_closes_a_tab() {
         let (mut h, keys) = three_tabs();
         assert_eq!(open_tabs(&h), keys);
-        press(&mut h, "tag_000.biped", egui::PointerButton::Middle);
+        press_tab(&mut h, "tag_000.biped", egui::PointerButton::Middle);
         assert_eq!(open_tabs(&h), keys[1..]);
     }
 
@@ -5277,10 +5302,46 @@ mod tests {
     #[test]
     fn close_all_but_this_keeps_that_tab() {
         let (mut h, keys) = three_tabs();
-        press(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
+        press_tab(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
         h.click("Close all but this", 0);
         idle(&mut h);
         assert_eq!(open_tabs(&h), [keys[1].clone()]);
+    }
+
+    /// Closing the current tab moves the browser to the tab shown in its
+    /// place, opening the folder that holds it, as an editor's explorer
+    /// follows the active file.
+    #[test]
+    fn closing_the_current_tab_reveals_the_next_one_in_the_browser() {
+        let mut h = Harness::new();
+        fixture::install_kit(&mut h.app, fixture::synthetic_entries(2, 1, 1));
+        let first = fixture::open_document(&mut h.app, "folder_00/sub_00/tag_000.biped", fixture::new_tag("biped"));
+        idle(&mut h);
+        fixture::open_document(&mut h.app, "folder_01/sub_00/tag_000.biped", fixture::new_tag("biped"));
+        idle(&mut h);
+        // The tree's `sub_00` rows, not the breadcrumb's, which sits in the
+        // tag pane to the right of the tree.
+        let tree_subfolders = |h: &Harness| {
+            let tree_left = h
+                .painted_rects
+                .iter()
+                .filter(|(text, _)| text == "folder_00")
+                .map(|(_, rect)| rect.left())
+                .fold(f32::INFINITY, f32::min);
+            h.painted_rects
+                .iter()
+                .filter(|(text, rect)| text == "sub_00" && rect.left() < tree_left + 100.0)
+                .count()
+        };
+        assert_eq!(tree_subfolders(&h), 2, "each folder opened as its tab became current");
+        h.click("folder_00", 0);
+        idle(&mut h);
+        assert_eq!(tree_subfolders(&h), 1, "folder_00 collapsed by hand");
+        press_key(&mut h, egui::Key::W, CTRL);
+        idle(&mut h);
+        let active = h.app.model.active;
+        assert_eq!(h.app.model.kits[active].selected_key, Some(first));
+        assert_eq!(tree_subfolders(&h), 2, "the browser did not open folder_00 to the tab now in front");
     }
 
     /// Two panes showing the same tag keep their own keyword drafts. The draft

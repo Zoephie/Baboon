@@ -425,6 +425,10 @@ pub(in crate::app) struct RevealRequest {
     pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
     pub(in crate::app) ancestors: Vec<String>,
+    /// `key` is a folder's label, under `ancestors`, rather than a tag key.
+    pub(in crate::app) folder: bool,
+    /// How the target is scrolled into view; see [`set_reveal_align`].
+    pub(in crate::app) align: Option<egui::Align>,
 }
 
 /// Reference-graph navigator centered on one tag: who references it (parents)

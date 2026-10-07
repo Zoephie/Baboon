@@ -352,6 +352,9 @@ pub(in crate::app) struct KitBrowser {
     pub(in crate::app) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
     pub(in crate::app) folder_browsers: HashMap<String, FolderBrowserState>,
+    /// The current tag or folder the tree last followed, as
+    /// [`current_browser_item`] names it: a change reveals the new one.
+    pub(in crate::app) followed_item: Option<String>,
     /// Which tags the browser should mark as modified, and the signature the
     /// set was built from. Rebuilt only when that signature changes: resolving
     /// a tag key to its entry is a linear scan of the source, so doing it for

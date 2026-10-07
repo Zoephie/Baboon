@@ -7,12 +7,14 @@ pub(in crate::app) const CONTEXT_MENU_WIDTH: f32 = 340.0;
 
 /// A pending "reveal in tree" request threaded through the tree draw: it force-
 /// opens the folder nodes along `remaining` (ancestor labels not yet descended)
-/// and scrolls the matching leaf (`key`) into view. One-shot — cleared by the
-/// caller after the frame.
+/// and scrolls the matching leaf into view: the tag keyed `key`, or, for a
+/// `folder` reveal, the folder labelled `key`, which is shown but not opened.
+/// One-shot — cleared by the caller after the frame.
 #[derive(Clone, Copy)]
 pub(in crate::app) struct Reveal<'a> {
     pub(in crate::app) key: &'a str,
     pub(in crate::app) remaining: &'a [String],
+    pub(in crate::app) folder: bool,
 }
 
 impl<'a> Reveal<'a> {
@@ -26,14 +28,36 @@ impl<'a> Reveal<'a> {
         Reveal {
             key: self.key,
             remaining: self.remaining.get(1..).unwrap_or(&[]),
+            folder: self.folder,
         }
     }
 
     /// The leaf key to scroll, but only once all ancestors have been descended
     /// (i.e. this node directly contains the target entry).
     fn leaf_key(self) -> Option<&'a str> {
-        self.remaining.is_empty().then_some(self.key)
+        (self.remaining.is_empty() && !self.folder).then_some(self.key)
     }
+
+    /// True when this node is the folder being revealed.
+    fn is_target_folder(self, label: &str) -> bool {
+        self.folder && self.remaining.is_empty() && self.key == label
+    }
+}
+
+fn reveal_align_id() -> egui::Id {
+    egui::Id::new("browser_reveal_align")
+}
+
+/// How this frame's reveal scrolls its target into view: centred for an
+/// explicit "Reveal in browser", or only as far as it takes for the reveal
+/// that follows the current tab, so a click on a row already in view does
+/// not move the tree.
+pub(in crate::app) fn set_reveal_align(ctx: &egui::Context, align: Option<egui::Align>) {
+    ctx.data_mut(|data| data.insert_temp(reveal_align_id(), align));
+}
+
+fn reveal_align(ui: &Ui) -> Option<egui::Align> {
+    ui.data(|data| data.get_temp(reveal_align_id())).unwrap_or(Some(egui::Align::Center))
 }
 
 /// Build the reference-input string for a tag entry — `"fourcc:back\\slash"`
@@ -1038,6 +1062,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
         return None;
     }
     let on_path = reveal.is_some_and(|reveal| reveal.matches_node(&node.label));
+    let is_target = reveal.is_some_and(|reveal| reveal.is_target_folder(&node.label));
     let layout_key = FolderLayoutKey {
         node,
         entries,
@@ -1048,7 +1073,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
     }
     .hash(ui);
     let label = node.label.clone();
-    with_folder_block_skipping(ui, &label, layout_key, on_path, |ui| {
+    with_folder_block_skipping(ui, &label, layout_key, on_path || is_target, |ui| {
         draw_tree_node_lazy_block(
             ui,
             node,
@@ -1100,6 +1125,7 @@ fn draw_tree_node_lazy_block(
         folder_label_color(ui, node),
         !filter.is_empty(),
         on_path,
+        is_current_folder(selected, &node.rel_path),
         |ui| {
             if !node.entries_loaded {
                 load_requests.push(node.rel_path.clone());
@@ -1165,6 +1191,9 @@ fn draw_tree_node_lazy_block(
             }
         },
     );
+    if reveal.is_some_and(|reveal| reveal.is_target_folder(&node.label)) {
+        response.scroll_to_me(reveal_align(ui));
+    }
     paint_folder_columns(ui, response.rect, None, Some(&node.rel_path));
     hover_tooltip_beside_pointer(
         ui,
@@ -1241,6 +1270,7 @@ pub(in crate::app) fn draw_tree_node(
         return None;
     }
     let on_path = reveal.is_some_and(|reveal| reveal.matches_node(&node.label));
+    let is_target = reveal.is_some_and(|reveal| reveal.is_target_folder(&node.label));
     let layout_key = FolderLayoutKey {
         node,
         entries,
@@ -1250,7 +1280,7 @@ pub(in crate::app) fn draw_tree_node(
         groups_mode,
     };
     let layout_key = layout_key.hash(ui);
-    with_folder_block_skipping(ui, &node.label, layout_key, on_path, |ui| {
+    with_folder_block_skipping(ui, &node.label, layout_key, on_path || is_target, |ui| {
         draw_tree_node_block(
             ui,
             node,
@@ -1378,9 +1408,13 @@ fn draw_tree_node_block(
             folder_label_color(ui, node),
             expand_folders || !filter.is_empty(),
             on_path,
+            is_current_folder(selected, &node.rel_path),
             body,
         )
     };
+    if reveal.is_some_and(|reveal| reveal.is_target_folder(&node.label)) {
+        header_response.scroll_to_me(reveal_align(ui));
+    }
     if !groups_mode {
         paint_folder_columns(ui, header_response.rect, None, Some(&node.rel_path));
         hover_tooltip_beside_pointer(
@@ -2130,7 +2164,7 @@ fn show_group_tree_header<R>(
 
     let (name, fourcc) = group_tree_label_parts(label);
     let (response, toggle_clicked) =
-        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), false, |ui| {
             let toggle = state.show_toggle_button(ui, folder_chevron_icon);
             let toggle_clicked = toggle.clicked();
             let mut content = toggle.clone();
@@ -2242,6 +2276,7 @@ fn show_relocated_browser_tree_body<R>(
 /// `id_source` is the folder's name, never its displayed label: the label
 /// gains a `[folder]` prefix when prefixes are shown, and keying the open
 /// state on it made toggling "Show prefixes" forget every expanded folder.
+#[allow(clippy::too_many_arguments)]
 fn show_folder_tree_header<R>(
     ui: &mut Ui,
     id_source: &str,
@@ -2249,6 +2284,7 @@ fn show_folder_tree_header<R>(
     label_color: Color32,
     default_open: bool,
     force_open: bool,
+    current: bool,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
     #[cfg(test)]
@@ -2265,7 +2301,7 @@ fn show_folder_tree_header<R>(
     note_folder_animation(ui, &state);
 
     let (response, (toggle_clicked, guide_x)) =
-        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), current, |ui| {
             let toggle = state.show_toggle_button(ui, folder_chevron_icon);
             let toggle_clicked = toggle.clicked();
             let (icon_rect, icon_response) =
@@ -2300,23 +2336,37 @@ fn show_folder_tree_header<R>(
     response
 }
 
-/// Tags and folders share one transient, borderless row highlight. Selection
-/// is deliberately absent: opening a tag should not leave a blue marker behind
-/// in a browser whose primary job is navigation.
+/// Tags and folders share one borderless row highlight: transient while a
+/// row is hovered or focused, and lasting on the `current` row, the tag or
+/// folder whose tab the user is on, as an editor's explorer marks the active
+/// file.
 fn browser_row_hover_shape(
     ui: &Ui,
     response: &egui::Response,
     row_rect: egui::Rect,
+    current: bool,
 ) -> Option<egui::Shape> {
-    if !(response.hovered() || response.highlighted() || response.has_focus()) {
-        return None;
-    }
     let visuals = ui.style().interact_selectable(response, false);
+    let fill = if current {
+        ui.visuals().selection.bg_fill
+    } else if response.hovered() || response.highlighted() || response.has_focus() {
+        visuals.weak_bg_fill
+    } else {
+        return None;
+    };
     Some(egui::Shape::rect_filled(
         row_rect.expand(visuals.expansion),
         visuals.corner_radius,
-        visuals.weak_bg_fill,
+        fill,
     ))
+}
+
+/// Whether `selected` names the folder at `rel_path`: the current tab is a
+/// folder pane showing it.
+fn is_current_folder(selected: Option<&str>, rel_path: &std::path::Path) -> bool {
+    selected
+        .and_then(|key| key.strip_prefix(FOLDER_PANE_PREFIX))
+        .is_some_and(|path| path.eq_ignore_ascii_case(&rel_path.to_string_lossy().replace('\\', "/")))
 }
 
 /// Allocate one browser row whose interaction and hover fill span all
@@ -2326,6 +2376,7 @@ fn show_full_width_browser_row<R>(
     ui: &mut Ui,
     id: egui::Id,
     sense: Sense,
+    current: bool,
     add_content: impl FnOnce(&mut Ui) -> (egui::Response, R),
 ) -> (egui::Response, R) {
     let available_row = ui.available_rect_before_wrap();
@@ -2349,7 +2400,7 @@ fn show_full_width_browser_row<R>(
         egui::pos2(available_row.right(), row.response.rect.bottom()),
     );
     let response = ui.interact(row_rect, id, sense).union(content);
-    if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect) {
+    if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect, current) {
         ui.painter().set(background, shape);
     }
     (response, inner)
@@ -2610,7 +2661,7 @@ pub(in crate::app) fn draw_entry_list(
                 egui::pos2(ui.cursor().left(), row_top),
                 Vec2::new(ui.available_width(), stride - spacing),
             ),
-            Some(egui::Align::Center),
+            reveal_align(ui),
         );
     }
     if first > 0 {
@@ -2648,7 +2699,7 @@ fn browser_disclosure_reservation(ui: &Ui) -> f32 {
 pub(in crate::app) fn draw_entry(
     ui: &mut Ui,
     entry: &TagEntry,
-    _selected: Option<&str>,
+    selected: Option<&str>,
     show_prefixes: bool,
     double_click_to_open: bool,
     reveal_key: Option<&str>,
@@ -2702,10 +2753,10 @@ pub(in crate::app) fn draw_entry(
         });
     }
     if reveal_key == Some(entry.key.as_str()) {
-        response.scroll_to_me(Some(egui::Align::Center));
+        response.scroll_to_me(reveal_align(ui));
     }
     if ui.is_rect_visible(row_rect) {
-        if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect) {
+        if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect, selected == Some(entry.key.as_str())) {
             ui.painter().add(shape);
         }
         let icon_size = 16.0;
@@ -3009,6 +3060,7 @@ pub(in crate::app) fn draw_favorites(
                 ui,
                 ui.make_persistent_id(("favorite_folder", folder)),
                 Sense::click(),
+                false,
                 |ui| {
                     ui.add_space(browser_disclosure_reservation(ui));
                     let (rect, _) =
@@ -3115,7 +3167,7 @@ pub(in crate::app) fn show_browser_navigation_section<R>(
     let mut state =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
     let (response, (toggle_clicked, guide_x)) =
-        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), false, |ui| {
             let toggle = state.show_toggle_button(ui, folder_chevron_icon);
             let toggle_clicked = toggle.clicked();
             let (icon_rect, icon_response) =
@@ -3683,6 +3735,7 @@ mod tests {
                         text_dark(),
                         false,
                         false,
+                        false,
                         |_| {},
                     )
                     .rect;
@@ -3727,9 +3780,9 @@ mod tests {
         let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 begin_folder_chevron_collection(ui);
-                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, |ui| {
+                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, false, |ui| {
                     nested_guide_enabled = ui.visuals().indent_has_left_vline;
-                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, |_| {});
+                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, false, |_| {});
                 });
             });
         });
@@ -3822,6 +3875,7 @@ mod tests {
                         Some(Reveal {
                             key: "unused",
                             remaining: &ancestors,
+                            folder: false,
                         }),
                         BrowserSort::default(),
                         true,
@@ -3996,6 +4050,7 @@ mod tests {
                         "objects",
                         label,
                         text_dark(),
+                        false,
                         false,
                         false,
                         |_| {
@@ -4793,6 +4848,8 @@ mod tests {
         /// Every row laid out, visible or not.
         laid_out: usize,
         content_height: f32,
+        /// The tops of the rows filled as the current tag or folder.
+        current_rows: Vec<f32>,
     }
 
     /// One browser, drawn frame by frame, with skipping on or off.
@@ -4812,6 +4869,8 @@ mod tests {
         /// holds it, rather than leaving the scroll area free to move while a
         /// click is aimed at where a row was.
         offset: f32,
+        /// The current tag or folder, as the panel names it.
+        selected: Option<String>,
     }
 
     impl Browser {
@@ -4829,6 +4888,7 @@ mod tests {
                 last: Vec::new(),
                 content_height: 0.0,
                 offset: 0.0,
+                selected: None,
             }
         }
 
@@ -4862,9 +4922,10 @@ mod tests {
             let mut content_height = 0.0;
             let mut shown_offset = 0.0;
             let (tree, entries, lazy_root) = (&mut self.tree, &mut self.entries, &self.lazy_root);
+            let selected = self.selected.as_deref();
             let names = crate::core::format::TagNameIndex::default();
             let mut load_requests = Vec::new();
-            let _ = crate::app::run_ui_test(&self.ctx, input, |ui| {
+            let output = crate::app::run_ui_test(&self.ctx, input, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     let mut area = egui::ScrollArea::vertical();
                     if let Some(offset) = offset {
@@ -4876,7 +4937,7 @@ mod tests {
                                 ui,
                                 tree,
                                 entries,
-                                None,
+                                selected,
                                 filter,
                                 false,
                                 false,
@@ -4893,7 +4954,7 @@ mod tests {
                             ui,
                             tree,
                             entries,
-                            None,
+                            selected,
                             filter,
                             true,
                             false,
@@ -4928,10 +4989,20 @@ mod tests {
             self.last = tops;
             self.content_height = content_height;
             self.offset = offset.unwrap_or(shown_offset);
+            let current_fill = self.ctx.global_style().visuals.selection.bg_fill;
+            let current_rows = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) if rect.fill == current_fill => Some(rect.rect.top()),
+                    _ => None,
+                })
+                .collect();
             Frame {
                 visible,
                 laid_out: TREE_ROWS_LAID_OUT.with(|count| count.get()),
                 content_height,
+                current_rows,
             }
         }
 
@@ -5119,6 +5190,7 @@ mod tests {
         let reveal = Reveal {
             key,
             remaining: &ancestors,
+            folder: false,
         };
         let mut shown = false;
         for _ in 0..4 {
@@ -5126,6 +5198,80 @@ mod tests {
             shown = frame.visible.iter().any(|(name, _)| name == key);
         }
         assert!(shown, "the revealed tag never came into view");
+    }
+
+    /// The row of the current tag, or of the folder a folder tab shows, is
+    /// filled as selected; with no tab open, no row is.
+    #[test]
+    fn the_current_tag_or_folder_is_highlighted() {
+        let mut browser = Browser::new(true);
+        let mut current = |selected: Option<String>, row: &str| {
+            browser.selected = selected;
+            let frame = browser.scrolled(0.0);
+            let top = browser.last.iter().find(|(name, _)| name == row).map(|(_, top)| *top);
+            (frame.current_rows, top)
+        };
+        let tag = "file:folder_00/sub_00/tag_003.biped";
+        let (rows, top) = current(Some(tag.to_owned()), tag);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!((rows[0] - top.unwrap()).abs() < 2.0, "{rows:?} is not the tag's row at {top:?}");
+
+        let folder = folder_pane_key(std::path::Path::new("folder_00/sub_00"));
+        let (rows, top) = current(Some(folder), "sub_00");
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!((rows[0] - top.unwrap()).abs() < 2.0, "{rows:?} is not the folder's row at {top:?}");
+
+        let (rows, _) = current(None, tag);
+        assert!(rows.is_empty(), "a row is highlighted with no tab open: {rows:?}");
+    }
+
+    /// A folder tab's reveal opens the folders above it and scrolls its row
+    /// into view.
+    #[test]
+    fn revealing_a_folder_brings_its_row_into_view() {
+        let mut browser = Browser::new(true);
+        browser.scrolled(0.0);
+        set_reveal_align(&browser.ctx, Some(egui::Align::Center));
+        let ancestors = vec!["folder_30".to_owned()];
+        let reveal = Reveal {
+            key: "sub_05",
+            remaining: &ancestors,
+            folder: true,
+        };
+        let mut shown = false;
+        for _ in 0..4 {
+            let frame = browser.frame(None, "", Vec::new(), Some(reveal));
+            // Folder rows are named by label alone; the first tag under it
+            // says which `sub_05` came into view.
+            shown = frame.visible.iter().any(|(name, _)| name == "file:folder_30/sub_05/tag_000.biped");
+        }
+        assert!(shown, "the revealed folder never came into view");
+    }
+
+    /// The reveal that follows the current tab scrolls no further than it
+    /// must, so a click on a row already in view leaves the tree where it is;
+    /// an explicit "Reveal in browser" centres its row.
+    #[test]
+    fn following_the_current_tab_leaves_a_row_in_view_where_it_is() {
+        let key = "file:folder_00/sub_00/tag_020.biped";
+        let ancestors = vec!["folder_00".to_owned(), "sub_00".to_owned()];
+        let reveal = Reveal {
+            key,
+            remaining: &ancestors,
+            folder: false,
+        };
+        let offset_after = |align| {
+            let mut browser = Browser::new(true);
+            let frame = browser.scrolled(0.0);
+            assert!(frame.visible.iter().any(|(name, _)| name == key), "{key} starts in view");
+            set_reveal_align(&browser.ctx, align);
+            for _ in 0..4 {
+                browser.frame(None, "", Vec::new(), Some(reveal));
+            }
+            browser.offset
+        };
+        assert_eq!(offset_after(None), 0.0, "following the tab moved a row that was in view");
+        assert!(offset_after(Some(egui::Align::Center)) > 0.0, "an explicit reveal centres its row");
     }
 
     /// Revealing a tag in a folder the user collapsed, while that folder is off
@@ -5158,6 +5304,7 @@ mod tests {
         let reveal = Reveal {
             key,
             remaining: &ancestors,
+            folder: false,
         };
         let mut shown = false;
         for _ in 0..4 {
