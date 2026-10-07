@@ -4285,6 +4285,32 @@ mod tests {
                 &["Keywords"],
             ),
             case(
+                "layout_diff",
+                &[],
+                &["editor/layout_diff.rs"],
+                // A Reach `sound_mix` in a Halo 3 kit: its layout isn't the
+                // one the Halo 3 definitions give the group, so its header
+                // carries the notice the window opens from.
+                |h| {
+                    let tag = fixture::new_tag_for("haloreach_mcc", "sound_mix");
+                    pane_kit(h, fixture::GAME, "sound/smoke.sound_mix", &tag);
+                    fixture::open_document(&mut h.app, "sound/smoke.sound_mix", tag);
+                },
+                |h| {
+                    // The steps run before anything is drawn; the notice is
+                    // found where the header paints it.
+                    idle(h);
+                    let notice = h
+                        .painted
+                        .iter()
+                        .find(|text| text.contains(" layout: "))
+                        .cloned()
+                        .unwrap_or_else(|| panic!("no layout notice: {:?}", h.painted));
+                    h.click(&notice, 0);
+                },
+                &["Layout differences: smoke.sound_mix"],
+            ),
+            case(
                 "tsv_paste",
                 &["dialog:TsvPasteState"],
                 &["editor/tsv_paste_window.rs"],
@@ -5342,6 +5368,43 @@ mod tests {
         let active = h.app.model.active;
         assert_eq!(h.app.model.kits[active].selected_key, Some(first));
         assert_eq!(tree_subfolders(&h), 2, "the browser did not open folder_00 to the tab now in front");
+    }
+
+    /// A tag saved with an older layout says so beside its name, and the
+    /// notice opens a window listing what changed. The shipped Reach
+    /// `sound_mix` predates its "default transmission settings".
+    #[test]
+    fn an_older_layout_is_noted_in_the_header_and_explained_on_click() {
+        let path = crate::core::test_kits::hrek_tags().join("sound/sound_mix.sound_mix");
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let mut h = Harness::new();
+        let display = "sound/sound_mix.sound_mix";
+        let entry = TagEntry {
+            key: fixture::entry_key(display),
+            display_path: display.to_owned(),
+            group_tag: u32::from_be_bytes(*b"snmx"),
+            group_name: Some("sound_mix".to_owned()),
+            location: TagEntryLocation::LooseFile(display.into()),
+        };
+        fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+        fixture::open_document(&mut h.app, display, blam_tags::TagFile::read(&path).unwrap());
+        idle(&mut h);
+        assert!(
+            h.painted.iter().any(|text| text == "Older layout: 1 struct differs"),
+            "no notice beside the name: {:?}",
+            h.painted
+        );
+        assert!(!h.painted.iter().any(|text| text.contains("default transmission settings")));
+        h.click("Older layout: 1 struct differs", 0);
+        idle(&mut h);
+        assert!(
+            h.painted.iter().any(|text| text.contains("+ default transmission settings")),
+            "the window doesn't list the added struct: {:?}",
+            h.painted
+        );
     }
 
     /// Two panes showing the same tag keep their own keyword drafts. The draft

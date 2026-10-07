@@ -36,6 +36,8 @@ mod bitmap;
 pub(super) use bitmap::*;
 mod model;
 pub(super) use model::*;
+mod layout_diff;
+pub(in crate::app) use layout_diff::*;
 
 use crate::app::export::sound_extract::{
     ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,

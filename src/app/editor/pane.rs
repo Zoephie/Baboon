@@ -538,6 +538,26 @@ pub(in crate::app) fn draw_tag_pane(
     })));
 }
 
+/// How the open tag's layout differs from its game's definitions, if it does.
+fn tag_layout_diff(
+    cx: &Ctx,
+    kit_index: usize,
+    entry: &TagEntry,
+) -> Option<(std::sync::Arc<blam_tags::schema_compare::LayoutDiff>, GameId)> {
+    static BUNDLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let kit = &cx.model.kits[kit_index];
+    let doc = kit.parsed_tags.get(&entry.key)?;
+    let source = kit.source.as_ref()?;
+    let game = source.game?;
+    let definitions_root = match &source.source {
+        TagSource::LooseFolder { definitions_root, .. } => definitions_root.as_path(),
+        _ => BUNDLED.get_or_init(crate::core::bundled::locate_definitions_root).as_path(),
+    };
+    let group_name = kit.names.name_for(entry.group_tag)?;
+    document_layout_diff(doc.layout_stamp().0, &doc.tag, definitions_root, game, group_name)
+        .map(|diff| (diff, game))
+}
+
 fn draw_responsive_tag_header(
     cx: &Ctx,
     ui: &mut Ui,
@@ -580,6 +600,7 @@ fn draw_responsive_tag_header(
     let key = entry.key.clone();
     let (breadcrumbs, title) = pane_header_path_parts(&entry.display_path);
     let mut breadcrumb_navigation = None;
+    let layout_diff = tag_layout_diff(cx, kit_index, entry);
 
     ui.add_space(10.0);
     ui.horizontal(|ui| {
@@ -610,9 +631,14 @@ fn draw_responsive_tag_header(
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
-                            ui.label(
-                                RichText::new(title).size(15.0).strong().color(text_dark()),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(title.as_str()).size(15.0).strong().color(text_dark()),
+                                );
+                                if let Some((diff, game)) = &layout_diff {
+                                    draw_layout_notice(ui, &key, diff, *game);
+                                }
+                            });
                             if cx.model.prefs.expert_mode {
                                 ui.label(
                                     RichText::new(group_label(
@@ -696,6 +722,9 @@ fn draw_responsive_tag_header(
     }
     ui.add_space(PANE_HEADER_BOTTOM_SPACE);
     ui.separator();
+    if let Some((diff, game)) = &layout_diff {
+        draw_layout_diff_window(ui.ctx(), &key, &title, diff, *game);
+    }
     if let Some((rel_path, label)) = breadcrumb_navigation {
         cx.send(BrowserCommand::Action {
             kit: cx.model.kits[kit_index].id,
