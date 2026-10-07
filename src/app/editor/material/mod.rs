@@ -980,6 +980,7 @@ mod tests {
             .expect("a Halo 3 shader whose grid builds");
 
         let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
         let mut draw = |revision: (u64, u64, u64, u64)| {
             let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
