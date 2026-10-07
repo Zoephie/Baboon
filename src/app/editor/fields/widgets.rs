@@ -734,8 +734,11 @@ pub(in crate::app) fn fmt_angle(radians: f32) -> String {
     if text == "-0" { "0".to_owned() } else { text }
 }
 
-pub(in crate::app) fn is_hidden_non_expert_value(value: &TagFieldData, expert_mode: bool) -> bool {
-    !expert_mode && matches!(value, TagFieldData::Custom(bytes) if bytes.is_empty())
+/// Whether a field's value is never shown. Custom fields are markers for the
+/// games' own editors (hide groups, filters, Sapien hooks) that nothing here
+/// draws, so they would only ever show as an empty `custom [0 bytes]` box.
+pub(in crate::app) fn is_hidden_value(value: &TagFieldData) -> bool {
+    matches!(value, TagFieldData::Custom(_))
 }
 
 pub(in crate::app) fn draw_resource(

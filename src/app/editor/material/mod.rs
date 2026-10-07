@@ -151,7 +151,7 @@ pub(in crate::app) fn draw_material_field(
         return;
     }
     if let Some(value) = field.value() {
-        if is_hidden_non_expert_value(&value, expert_mode) {
+        if is_hidden_value(&value) {
             return;
         }
         let formatted = format_value(names, &value, false);

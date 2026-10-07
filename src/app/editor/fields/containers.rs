@@ -349,7 +349,7 @@ pub(in crate::app) fn draw_field(
         return;
     }
     if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
-        if is_hidden_non_expert_value(&value, expert_mode) {
+        if is_hidden_value(&value) {
             return;
         }
         if glow || scroll_here {
@@ -4116,7 +4116,8 @@ mod tests {
                 "blocks":{"marker_test_block":{"max_count":1,"struct":"marker_test_struct"}},
                 "structs":{"marker_test_struct":{"guid":"0123456789abcdef0123456789abcdef","size":12,
                   "fields":[{"type":"long_integer","name":"visible"},{"type":"long_integer","name":"locked*"},
-                            {"type":"long_integer","name":"secret!"},{"type":"terminator","name":null}]}}}"#,
+                            {"type":"long_integer","name":"secret!"},{"type":"custom","name":"editor hook"},
+                            {"type":"terminator","name":null}]}}}"#,
         )
         .unwrap();
         let tag = TagFile::new(game.join("marker_test.json")).unwrap();
@@ -4171,6 +4172,12 @@ mod tests {
         );
         let expert = texts(true);
         assert!(expert.iter().any(|t| t == "secret"), "expert mode hides a `!` field: {expert:?}");
+        for texts in [&normal, &expert] {
+            assert!(
+                !texts.iter().any(|t| t == "editor hook" || t.starts_with("custom [")),
+                "a custom field, which nothing here draws, is shown: {texts:?}"
+            );
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
