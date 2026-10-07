@@ -1299,6 +1299,21 @@ impl<'a> BlockLabeler<'a> {
     /// is left off a label that already starts with it: the editors' fallback
     /// is `"N. <struct name>"`, and some callbacks print the index themselves.
     /// Without the game's rules, Baboon's own content label.
+    /// The editor's label alone, for a view that shows the index itself (the
+    /// block table). Without the game's rules, Baboon's own content label.
+    pub(in crate::app) fn bare_label(&self, block_path: &str, block: TagBlock<'_>, index: usize) -> String {
+        let Some(rules) = &self.rules else {
+            let element = block.element(index);
+            return element
+                .and_then(|element| block_element_content_label(element, self.names))
+                .unwrap_or_else(|| element.map(|element| element.name().to_owned()).unwrap_or_default());
+        };
+        let ctx = blam_tags::element_label::Context { group: Some(self.group) };
+        self.root
+            .and_then(|root| rules.label_at_in(&ctx, root, block_path, index as i64))
+            .unwrap_or_else(|| rules.label_in(&ctx, &[], block, index as i64))
+    }
+
     pub(in crate::app) fn label(&self, block_path: &str, block: TagBlock<'_>, index: usize) -> String {
         let Some(rules) = &self.rules else {
             return block_element_dropdown_label(block.element(index), self.names, index);
