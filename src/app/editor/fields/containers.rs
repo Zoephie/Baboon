@@ -548,31 +548,25 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                         .inner_margin(egui::Margin::same(20))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
-                            // border is Width=Auto in a stretch StackPanel); only the
-                            // text itself is capped (~650px) and left-aligned.
+                            // border is Width=Auto in a stretch StackPanel).
                             ui.set_min_width(ui.available_width());
-                            let text_width = ui.available_width().min(650.0);
-                            ui.scope(|ui| {
-                                ui.set_max_width(text_width);
-                                let body = body.trim_end();
-                                if let Some(text) = highlighted_italic_widget_text(
-                                    ui,
-                                    body,
-                                    TextStyle::Monospace,
-                                    text_dark(),
-                                    FindTargetKind::Documentation,
-                                ) {
-                                    ui.label(text);
-                                } else {
-                                    ui.label(
-                                        RichText::new(body)
-                                            .color(text_dark())
-                                            .monospace()
-                                            .italics()
-                                            .size(12.0),
-                                    );
-                                }
-                            });
+                            // Explanations are laid out by hand for a fixed-pitch
+                            // face (rows of asterisks, aligned columns), so they're
+                            // drawn in one, upright as Foundation draws them, and
+                            // never wrapped: a line wider than the box scrolls.
+                            let galley = findable_galley(
+                                ui,
+                                body.trim_end(),
+                                FontId::monospace(12.0),
+                                text_dark(),
+                                FindTargetKind::Documentation,
+                            );
+                            egui::ScrollArea::horizontal()
+                                .id_salt("explanation_text")
+                                .auto_shrink([false, true])
+                                .show(ui, |ui| {
+                                    ui.add(egui::Label::new(galley).wrap_mode(egui::TextWrapMode::Extend));
+                                });
                         });
                 }
             },
@@ -4502,6 +4496,46 @@ mod tests {
         assert!(bitmap.iter().any(|text| text.starts_with("Data size:")), "{bitmap:?}");
         let widget = painted("gui_widget_color_animation_definition", "default function/data");
         assert!(widget.iter().any(|text| text == "Function type:"), "a function field drew no function editor");
+    }
+
+    /// An explanation is drawn as it was written: in a fixed-pitch face,
+    /// upright, a row per line however narrow the pane, with its blank lines.
+    /// The bitmap's "IMPORT DATA" rows of asterisks used to wrap.
+    #[test]
+    fn explanations_keep_their_lines_as_written() {
+        let docs = crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo3, "bitmap");
+        let body = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Explanation { title, body } if title == "IMPORT DATA" => Some(body.clone()),
+                _ => None,
+            })
+            .expect("the bitmap's IMPORT DATA explanation");
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut galley = None;
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 900.0))),
+                ..Default::default()
+            };
+            let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_foundation_explanation_row(ui, "IMPORT DATA", Some(&body), 0, "import data", None);
+                });
+            });
+            galley = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text().contains("Everything below") => Some(text.galley.clone()),
+                _ => None,
+            });
+        }
+        let galley = galley.expect("the explanation's text is painted");
+        let format = &galley.job.sections[0].format;
+        assert_eq!(format.font_id.family, egui::FontFamily::Monospace);
+        assert!(!format.italics);
+        let written = body.trim_end();
+        assert!(written.starts_with("\n\n\n"), "the blank lines it was written with are kept");
+        assert_eq!(galley.rows.len(), written.split('\n').count(), "a line wrapped in a 400 pixel pane");
     }
 
     #[test]

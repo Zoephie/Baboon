@@ -85,24 +85,6 @@ pub(in crate::app) fn highlighted_widget_text(
     })
 }
 
-/// Build highlighted italic widget text while preserving Find match styling.
-pub(in crate::app) fn highlighted_italic_widget_text(
-    ui: &Ui,
-    text: &str,
-    text_style: TextStyle,
-    color: Color32,
-    kind: FindTargetKind,
-) -> Option<egui::WidgetText> {
-    findable_text_has_match(ui, text, kind).then(|| {
-        let font_id = ui.style().text_styles[&text_style].clone();
-        let mut job = findable_layout_job(ui, text, font_id, color, kind);
-        for section in &mut job.sections {
-            section.format.italics = true;
-        }
-        job.into()
-    })
-}
-
 fn findable_highlight_data(
     ui: &Ui,
     text: &str,
