@@ -70,7 +70,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                         value_kind: "value",
                         color: None,
                     },
-                    fill: material_data_row(),
                     parameter_type: Some("string id".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -97,7 +96,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -124,7 +122,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -173,7 +170,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                                 value_kind: "value",
                                 color: None,
                             },
-                            fill: material_data_row(),
                             parameter_type: Some("option".to_owned()),
                             is_overridden: true,
                             function: None,
@@ -422,7 +418,6 @@ pub(in crate::app) fn draw_material_template_summary(
             label,
             default_cell: None,
             value_cell: cell,
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -589,25 +584,17 @@ pub(in crate::app) fn shader_grid_row_from_parameter(
             color: None,
         });
 
-    let mut fill = second
-        .as_ref()
-        .or(first.as_ref())
-        .map(|value| value.fill)
-        .unwrap_or(material_data_row());
-
     if function.is_some() {
         if let Some(function) = function.as_ref() {
             value_cell.text = shader_function_grid_text(&function.function);
         }
         value_cell.value_kind = "value";
-        fill = material_function_row();
     }
 
     ShaderGridRow {
         label: label.to_owned(),
         default_cell: default_cell.or_else(|| shader_default_cell(parameter_type.as_deref())),
         value_cell,
-        fill,
         parameter_type,
         is_overridden: true,
         function,
@@ -970,7 +957,6 @@ pub(in crate::app) fn material_parameter_values(
         values.push(MaterialParameterValue {
             label: field.name().to_owned(),
             value: formatted,
-            fill: material_row_tint(&value),
             value_kind: material_value_kind(&value),
             color,
             priority: material_parameter_value_priority(&key),

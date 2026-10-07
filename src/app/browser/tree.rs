@@ -3005,7 +3005,7 @@ pub(in crate::app) fn draw_favorites(
                 .and_then(|name| name.to_str())
                 .map(str::to_owned)
                 .unwrap_or_else(|| folder.to_string_lossy().into_owned());
-            let (response, ()) = show_full_width_browser_row(
+            let (response, icon_rect) = show_full_width_browser_row(
                 ui,
                 ui.make_persistent_id(("favorite_folder", folder)),
                 Sense::click(),
@@ -3013,10 +3013,17 @@ pub(in crate::app) fn draw_favorites(
                     ui.add_space(browser_disclosure_reservation(ui));
                     let (rect, _) =
                         ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
-                    paint_button_icon_at(ui, ButtonIcon::FolderOpen, rect, text_dark());
-                    (ui.label(RichText::new(&label).color(text_dark())), ())
+                    (ui.label(RichText::new(&label).color(text_dark())), rect)
                 },
             );
+            // Paint after the row has its final geometry, as tag leaves do,
+            // rather than through the nested content UI's sizing/clip state.
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(icon_rect.center().x, response.rect.center().y),
+                Vec2::splat(BROWSER_TREE_ICON_SIZE),
+            );
+            button_icon_image(ui, ButtonIcon::FolderOpen, text_dark(), BROWSER_TREE_ICON_SIZE)
+                .paint_at(ui, icon_rect);
             let tooltip = native_display_path(&folder.to_string_lossy());
             hover_tooltip_beside_pointer(ui, &response, &tooltip);
             if response.clicked() && action.is_none() {
@@ -3692,6 +3699,102 @@ mod tests {
 
         assert_eq!(actual.left(), expected.left());
         assert_eq!(actual.right(), expected.right());
+    }
+
+    #[test]
+    fn favorited_folders_paint_their_icons() {
+        for scale in [1.0, 1.5, 2.0] {
+            let ctx = egui::Context::default();
+            ctx.set_pixels_per_point(scale);
+            let mut textures = std::collections::HashMap::new();
+            egui_extras::install_image_loaders(&ctx);
+            let mut output = None;
+            for _ in 0..3 {
+                let mut frame = ctx.run_ui(
+                    egui::RawInput::default(),
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            set_browser_favorite_folders(
+                                ui,
+                                Some(std::sync::Arc::new(vec![
+                                    PathBuf::from("objects/brute"),
+                                    PathBuf::from("objects/floodcombat_brute"),
+                                ])),
+                            );
+                            draw_favorites(
+                                ui,
+                                &[],
+                                &[],
+                                None,
+                                None,
+                                "",
+                                false,
+                                true,
+                                &HashSet::new(),
+                                BrowserSearchScope::default(),
+                                &std::collections::BTreeMap::new(),
+                                Some(GameId::Halo3),
+                            );
+                        });
+                    },
+                );
+                for (id, deltas) in &frame.textures_delta.set {
+                    for delta in deltas {
+                        textures.insert(*id, delta.image.clone());
+                    }
+                }
+                frame.textures_delta.clear();
+                output = Some(frame);
+            }
+            let output = output.unwrap();
+            let icons: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                        Some(mesh.calc_bounds())
+                    }
+                    egui::Shape::Rect(rect)
+                        if rect.fill_texture_id() != egui::TextureId::default() =>
+                    {
+                        let egui::ImageData::Color(image) = &textures[&rect.fill_texture_id()];
+                        assert!(
+                            image.pixels.iter().any(|pixel| pixel.a() > 0),
+                            "folder SVG has visible pixels at scale {scale}"
+                        );
+                        assert!(shape.clip_rect.contains_rect(rect.rect));
+                        assert!((rect.rect.width() - BROWSER_TREE_ICON_SIZE).abs() < 0.01);
+                        assert!((rect.rect.height() - BROWSER_TREE_ICON_SIZE).abs() < 0.01);
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                icons.len(),
+                3,
+                "favorites star and two folder icons: {icons:?}"
+            );
+            assert_eq!(
+                output.shapes.iter().filter(|shape| {
+                    matches!(
+                        &shape.shape,
+                        egui::Shape::Rect(rect)
+                            if rect.fill_texture_id() != egui::TextureId::default()
+                    )
+                }).count(),
+                2,
+                "folder icons use the same image widget as the Folder view button"
+            );
+            for shape in &output.shapes {
+                if let egui::Shape::Mesh(mesh) = &shape.shape {
+                    if mesh.texture_id != egui::TextureId::default() {
+                        assert!(shape.clip_rect.contains_rect(mesh.calc_bounds()));
+                        assert!(mesh.vertices.iter().all(|vertex| vertex.color.a() > 0));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

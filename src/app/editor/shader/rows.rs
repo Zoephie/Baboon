@@ -559,7 +559,6 @@ pub(in crate::app) fn shader_bitmap_row(
             value_kind: if value.is_empty() { "default" } else { "value" },
             color: None,
         },
-        fill: material_ref_row(),
         parameter_type: Some("bitmap".to_owned()),
         is_overridden: instance.is_some(),
         function: None,
@@ -728,7 +727,6 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
                         "value: {}",
                         format_shader_float(const_val)
                     )),
-                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -810,7 +808,6 @@ pub(in crate::app) fn shader_scalar_row(
                         format_shader_float(parameter.default_real_value)
                     ))),
                     value_cell: shader_value_cell(format!("value: {current}")),
-                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -857,7 +854,6 @@ pub(in crate::app) fn shader_scalar_row(
             label: parameter.parameter_name.clone(),
             default_cell: Some(shader_default_value_cell(default_val)),
             value_cell: shader_value_cell(format!("value: {current}")),
-            fill: material_numeric_row(),
             parameter_type: Some("real".to_owned()),
             is_overridden: true,
             function: None,
@@ -891,7 +887,6 @@ pub(in crate::app) fn shader_scalar_row(
         label: parameter.parameter_name.clone(),
         default_cell: Some(shader_default_value_cell(default_val.clone())),
         value_cell: shader_value_cell(format!("value: {current}")),
-        fill: material_numeric_row(),
         parameter_type: Some("real".to_owned()),
         is_overridden: false,
         function: None,
@@ -915,7 +910,6 @@ pub(in crate::app) fn shader_int_row(
         parameter.parameter_name.clone(),
         parameter.default_int_bool_value.to_string(),
         value.to_string(),
-        material_data_row(),
         Some("enum".to_owned()),
     );
     row.is_overridden = instance.is_some();
@@ -941,7 +935,6 @@ pub(in crate::app) fn shader_bool_row(
         parameter.parameter_name.clone(),
         (parameter.default_int_bool_value != 0).to_string(),
         (raw != 0).to_string(),
-        material_data_row(),
         Some("bool".to_owned()),
     );
     row.is_overridden = instance.is_some();
@@ -1071,7 +1064,6 @@ pub(in crate::app) fn shader_color_row(
                         value_kind: "value",
                         color: Some(color_val),
                     },
-                    fill: material_numeric_row(),
                     parameter_type: Some("color".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -1121,7 +1113,6 @@ pub(in crate::app) fn shader_color_row(
                 value_kind: "value",
                 color: Some(value_color),
             },
-            fill: material_numeric_row(),
             parameter_type: Some("color".to_owned()),
             is_overridden: true,
             function: None,
@@ -1156,7 +1147,6 @@ pub(in crate::app) fn shader_color_row(
             value_kind: "value",
             color: Some(value_color),
         },
-        fill: material_numeric_row(),
         parameter_type: Some("color".to_owned()),
         is_overridden: false,
         function: None,
@@ -1252,7 +1242,6 @@ pub(in crate::app) fn shader_alpha_row(
                         format_shader_float(default_alpha)
                     ))),
                     value_cell: shader_value_cell(format!("value: {current}")),
-                    fill: material_numeric_row(),
                     parameter_type: Some("alpha".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -1308,7 +1297,6 @@ pub(in crate::app) fn shader_alpha_row(
             format_shader_float(default_alpha)
         ))),
         value_cell: shader_value_cell(format!("value: {current}")),
-        fill: material_numeric_row(),
         parameter_type: Some("alpha".to_owned()),
         is_overridden: instance.is_some(),
         function: None,
@@ -1334,7 +1322,6 @@ pub(in crate::app) fn shader_option_value_row(
         label,
         default,
         value,
-        material_data_row(),
         Some("option".to_owned()),
     )
 }
@@ -1349,7 +1336,6 @@ pub(in crate::app) fn shader_int_value_row(
         label,
         default,
         value.clone(),
-        material_data_row(),
         Some("integer".to_owned()),
     );
     if !path.is_empty() {
@@ -1513,7 +1499,6 @@ pub(in crate::app) fn shader_plain_value_row(
     label: String,
     default: String,
     value: String,
-    fill: Color32,
     parameter_type: Option<String>,
 ) -> ShaderGridRow {
     ShaderGridRow {
@@ -1528,7 +1513,6 @@ pub(in crate::app) fn shader_plain_value_row(
             value_kind: "value",
             color: None,
         },
-        fill,
         parameter_type,
         is_overridden: false,
         function: None,
@@ -1555,7 +1539,6 @@ pub(in crate::app) fn shader_function_grid_row(
             value_kind: "value",
             color: None,
         },
-        fill: material_function_row(),
         parameter_type: Some("function".to_owned()),
         is_overridden: true,
         function: Some(function),

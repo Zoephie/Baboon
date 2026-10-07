@@ -19,7 +19,6 @@ pub(in crate::app) use widgets::*;
 pub(in crate::app) struct MaterialParameterValue {
     label: String,
     value: String,
-    fill: Color32,
     value_kind: &'static str,
     color: Option<MaterialColorPopup>,
     priority: u8,
@@ -41,7 +40,6 @@ pub(in crate::app) struct ShaderGridRow {
     label: String,
     default_cell: Option<ShaderGridCell>,
     value_cell: ShaderGridCell,
-    fill: Color32,
     parameter_type: Option<String>,
     /// True when this row is backed by an explicit shader parameter/template
     /// instance. False means the visible value is inherited from the

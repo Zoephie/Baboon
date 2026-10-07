@@ -880,26 +880,11 @@ fn h2_template_base_parameter_row(
 ) -> Option<ShaderGridRow> {
     let label = h2_template_parameter_name(template_param);
     let parameter_type = h2_template_parameter_type_index(template_param);
-    let (field_name, default_field, parameter_type_label, fill) = match parameter_type {
-        0 => ("bitmap", "default bitmap", "bitmap", material_ref_row()),
-        2 => (
-            "const color",
-            "default const color",
-            "color",
-            material_numeric_row(),
-        ),
-        1 | 3 => (
-            "const value",
-            "default const value",
-            "value",
-            material_numeric_row(),
-        ),
-        _ => (
-            "const value",
-            "default const value",
-            "value",
-            material_numeric_row(),
-        ),
+    let (field_name, default_field, parameter_type_label) = match parameter_type {
+        0 => ("bitmap", "default bitmap", "bitmap"),
+        2 => ("const color", "default const color", "color"),
+        1 | 3 => ("const value", "default const value", "value"),
+        _ => ("const value", "default const value", "value"),
     };
     if parameter_type == 0 && h2_template_flags(template_param) & 2 != 0 {
         return None;
@@ -1024,7 +1009,6 @@ fn h2_template_base_parameter_row(
             value_kind,
             color,
         },
-        fill,
         parameter_type: Some(parameter_type_label.to_owned()),
         is_overridden: instance.is_some(),
         function: None,
@@ -1266,7 +1250,6 @@ fn h2_function_template_row(
                     value_kind: "value",
                     color: Some(color),
                 },
-                fill: material_numeric_row(),
                 parameter_type: Some("color".to_owned()),
                 is_overridden: true,
                 function: None,
@@ -1319,7 +1302,6 @@ fn h2_function_template_row(
                 color: None,
             }),
             value_cell: shader_value_cell(format!("value: {current}")),
-            fill: material_numeric_row(),
             parameter_type: Some("animated scalar".to_owned()),
             is_overridden: true,
             function: None,
@@ -1349,7 +1331,6 @@ fn h2_function_template_row(
                 value_kind: "value",
                 color: None,
             },
-            fill: material_function_row(),
             parameter_type: Some("function".to_owned()),
             is_overridden: true,
             function: None,
@@ -1381,19 +1362,9 @@ fn h2_postprocess_constant_animation_row(
     template_index: usize,
     animation_type: i32,
 ) -> Option<ShaderGridRow> {
-    let (live, field_name, parameter_type, fill) = match animation_type {
-        11 => (
-            postprocess.value(template_index)?,
-            "value",
-            "value",
-            material_numeric_row(),
-        ),
-        12 => (
-            postprocess.color(template_index)?,
-            "color",
-            "color",
-            material_numeric_row(),
-        ),
+    let (live, field_name, parameter_type) = match animation_type {
+        11 => (postprocess.value(template_index)?, "value", "value"),
+        12 => (postprocess.color(template_index)?, "color", "color"),
         _ => (
             postprocess
                 .bitmap_transform(template_index, animation_type)
@@ -1404,7 +1375,6 @@ fn h2_postprocess_constant_animation_row(
                 })?,
             "value",
             "value",
-            material_numeric_row(),
         ),
     };
     let field = live.element.field(field_name)?;
@@ -1425,7 +1395,6 @@ fn h2_postprocess_constant_animation_row(
             value_kind: "value",
             color,
         },
-        fill,
         parameter_type: Some(parameter_type.to_owned()),
         is_overridden: false,
         function: None,
@@ -1458,7 +1427,6 @@ fn h2_missing_function_row(
                     "", rgba[0], rgba[1], rgba[2], rgba[3],
                 )),
             },
-            fill: material_numeric_row(),
             parameter_type: Some("function".to_owned()),
             is_overridden: false,
             function: None,
@@ -1482,7 +1450,6 @@ fn h2_missing_function_row(
             value_kind: "default",
             color: None,
         },
-        fill: material_numeric_row(),
         parameter_type: Some("function".to_owned()),
         is_overridden: false,
         function: None,
@@ -1642,15 +1609,11 @@ fn h2_compact_parameter_row(
 ) -> Option<ShaderGridRow> {
     let label = h2_parameter_name(element, index);
     let parameter_type = h2_parameter_type_index(element);
-    let (field_name, parameter_type_label, fill) = match parameter_type {
-        0 => ("bitmap", "bitmap", material_ref_row()),
-        2 => (
-            "const color",
-            "color",
-            material_row_tint(&element.field("const color")?.value()?),
-        ),
-        1 | 3 => ("const value", "value", material_numeric_row()),
-        _ => ("const value", "value", material_numeric_row()),
+    let (field_name, parameter_type_label) = match parameter_type {
+        0 => ("bitmap", "bitmap"),
+        2 => ("const color", "color"),
+        1 | 3 => ("const value", "value"),
+        _ => ("const value", "value"),
     };
     let field = element.field(field_name)?;
     let path = format!(
@@ -1677,7 +1640,6 @@ fn h2_compact_parameter_row(
             value_kind: "value",
             color,
         },
-        fill,
         parameter_type: Some(parameter_type_label.to_owned()),
         is_overridden: true,
         function: None,
@@ -1721,7 +1683,6 @@ fn h2_raw_parameter_rows(root: TagStruct<'_>) -> Vec<ShaderGridRow> {
             value_kind: "value",
             color: None,
         },
-        fill: material_data_row(),
         parameter_type: Some("count".to_owned()),
         is_overridden: false,
         function: None,
@@ -1856,7 +1817,6 @@ fn h2_shader_row_from_field(
             value_kind,
             color,
         },
-        fill: material_row_tint(&value),
         parameter_type: Some(classic_shader_value_kind(&value).to_owned()),
         is_overridden: false,
         function: None,
@@ -2451,7 +2411,6 @@ pub(super) fn empty_shader_grid_row() -> ShaderGridRow {
             value_kind: "value",
             color: None,
         },
-        fill: material_data_row(),
         parameter_type: None,
         is_overridden: false,
         function: None,

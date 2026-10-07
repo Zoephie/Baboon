@@ -718,7 +718,9 @@ fn draw_shader_grid_row_inner(
         )
     });
     let fill = if nonconstant_function {
-        row.fill
+        // Rows are cached across theme changes. Resolve semantic colors when
+        // painting instead of keeping the color from model construction.
+        material_function_row()
     } else if bitmap {
         material_ref_row()
     } else {
@@ -3031,6 +3033,29 @@ mod tests {
     use super::*;
     use crate::app::browser::draw_entry;
     use crate::app::editor::fields::with_test_edit_context;
+
+    #[test]
+    fn cached_function_row_uses_the_current_theme_background() {
+        let ctx = egui::Context::default();
+        let mut row = empty_shader_grid_row();
+        // The model holds function data, while the renderer resolves its
+        // background from the current theme on every draw.
+        let mut editor = TagFunctionEditor::from_function(
+            h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap(),
+        );
+        editor.set_function_type(FunctionType::Linear).unwrap();
+        row.function = Some(FunctionView::from_function(editor.function().clone()));
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_shader_grid_row(ui, &row, 0, &mut None, &mut None, edit);
+            });
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Rect(rect)
+                if rect.fill == material_function_row() && rect.rect.width() > 300.0
+        )));
+    }
 
     fn pending_h2_scalar_row() -> ShaderGridRow {
         let mut row = empty_shader_grid_row();
