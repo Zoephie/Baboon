@@ -300,10 +300,10 @@ pub(in crate::app) fn draw_foundation_bounds_row(
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
+        let lower_response = foundation_value_cell(ui, &mut lower.text, 92.0, lower_id, editable);
+        ui.label(RichText::new("to").color(subtle_dark()).small());
+        let upper_response = foundation_value_cell(ui, &mut upper.text, 92.0, upper_id, editable);
         if editable {
-            let lower_response = foundation_text_edit_cell(ui, &mut lower.text, 92.0, lower_id);
-            ui.label(RichText::new("to").color(subtle_dark()).small());
-            let upper_response = foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
             lower.note_response(&lower_response);
             upper.note_response(&upper_response);
             // Both asked, so a commit in one box is seen even when the other
@@ -325,10 +325,6 @@ pub(in crate::app) fn draw_foundation_bounds_row(
                 lower.keep_commit(|| commit.clone());
                 upper.keep_commit(|| commit);
             }
-        } else {
-            foundation_input_cell(ui, lower_value, 92.0);
-            ui.label(RichText::new("to").color(subtle_dark()).small());
-            foundation_input_cell(ui, upper_value, 92.0);
         }
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -391,13 +387,11 @@ fn draw_foundation_component_cells(
         if !label.is_empty() {
             ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
         }
+        let response = foundation_value_cell(ui, &mut draft.text, width, ids[index], editable);
         if editable {
-            let response = foundation_text_edit_cell(ui, &mut draft.text, width, ids[index]);
             draft.note_response(&response);
-            responses.push(response);
-        } else {
-            foundation_input_cell(ui, &draft.text, width);
         }
+        responses.push(response);
     }
     if editable {
         // Every box asked, not just until one says yes, so each sees its own
@@ -449,23 +443,8 @@ pub(in crate::app) fn draw_foundation_meta_text_row(
     suffix: &str,
     depth: usize,
 ) {
-    let indent = depth as f32 * 12.0;
-    let suffix_reserve = if suffix.is_empty() { 0.0 } else { 96.0 };
-    let available_value_width =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0)
-            .clamp(180.0, 920.0);
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        foundation_input_cell(
-            ui,
-            value,
-            foundation_value_width(value, available_value_width),
-        );
-        if !suffix.is_empty() {
-            ui.label(RichText::new(suffix).color(subtle_dark()).small());
-        }
-        draw_field_help(ui, meta);
+    draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, available_width| {
+        foundation_input_cell(ui, value, foundation_value_width(value, available_width));
     });
 }
 
@@ -478,26 +457,38 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let indent = depth as f32 * 12.0;
-    let suffix_reserve = if suffix.is_empty() { 0.0 } else { 96.0 };
-    let available_value_width =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0)
-            .clamp(180.0, 920.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("text", &buffer_key));
     let draft = edit.buffers.draft_mut(&buffer_key, value);
-
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-
-        let width = foundation_value_width(&draft.text, available_value_width);
-        let response = foundation_text_edit_cell(ui, &mut draft.text, width, id);
+    draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, available_width| {
+        let width = foundation_value_width(&draft.text, available_width);
+        let response = foundation_value_cell(ui, &mut draft.text, width, id, true);
         draft.note_response(&response);
         if draft.should_commit(ui, &response) {
             edit.pending.extend(field_edit_ops(path, &draft.text).pending);
         }
         draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
+    });
+}
+
+/// A labelled row holding one value box, read-only or editable: `cell`
+/// draws the box, given the width there is for it.
+fn draw_foundation_labelled_cell_row(
+    ui: &mut Ui,
+    meta: &FieldDisplayMeta,
+    suffix: &str,
+    depth: usize,
+    cell: impl FnOnce(&mut Ui, f32),
+) {
+    let indent = depth as f32 * 12.0;
+    let suffix_reserve = if suffix.is_empty() { 0.0 } else { 96.0 };
+    let available_value_width =
+        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - suffix_reserve - 28.0)
+            .clamp(180.0, 920.0);
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+        cell(ui, available_value_width);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
