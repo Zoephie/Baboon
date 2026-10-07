@@ -648,18 +648,16 @@ fn draw_responsive_tag_header(
                                 .and_then(|source| source.game),
                             icon_rect,
                         );
+                        if let Some((report, game)) = &layout_diff {
+                            draw_layout_badge(ui, icon_rect, &key, &report.diff, *game);
+                        }
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(title.as_str()).size(15.0).strong().color(text_dark()),
-                                );
-                                if let Some((report, game)) = &layout_diff {
-                                    draw_layout_notice(ui, &key, &report.diff, *game);
-                                }
-                            });
+                            ui.label(
+                                RichText::new(title.as_str()).size(15.0).strong().color(text_dark()),
+                            );
                             if cx.model.prefs.expert_mode {
                                 ui.label(
                                     RichText::new(group_label(

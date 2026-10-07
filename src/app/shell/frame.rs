@@ -4297,16 +4297,10 @@ mod tests {
                     fixture::open_document(&mut h.app, "sound/smoke.sound_mix", tag);
                 },
                 |h| {
-                    // The steps run before anything is drawn; the notice is
+                    // The steps run before anything is drawn; the badge is
                     // found where the header paints it.
                     idle(h);
-                    let notice = h
-                        .painted
-                        .iter()
-                        .find(|text| text.contains(" layout: "))
-                        .cloned()
-                        .unwrap_or_else(|| panic!("no layout notice: {:?}", h.painted));
-                    h.click(&notice, 0);
+                    click_layout_badge(h);
                 },
                 &["Layout differences: smoke.sound_mix"],
             ),
@@ -5370,8 +5364,19 @@ mod tests {
         assert_eq!(tree_subfolders(&h), 2, "the browser did not open folder_00 to the tab now in front");
     }
 
-    /// A tag saved with an older layout says so beside its name, and the
-    /// notice opens a window listing what changed. The shipped Reach
+    /// Click the warning badge a tag on another layout carries on its header
+    /// icon: its "!" is the only one painted, and the header holds no notice
+    /// text, which would push the keyword bar along.
+    fn click_layout_badge(h: &mut Harness) {
+        let marks = h.painted.iter().filter(|text| *text == "!").count();
+        assert_eq!(marks, 1, "the layout badge isn't painted once: {:?}", h.painted);
+        assert!(!h.painted.iter().any(|text| text.contains(" layout: ")), "{:?}", h.painted);
+        h.click("!", 0);
+        idle(h);
+    }
+
+    /// A tag saved with an older layout carries a badge on its header icon,
+    /// and the badge opens a window listing what changed. The shipped Reach
     /// `sound_mix` predates its "default transmission settings".
     #[test]
     fn an_older_layout_is_noted_in_the_header_and_explained_on_click() {
@@ -5392,14 +5397,8 @@ mod tests {
         fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
         fixture::open_document(&mut h.app, display, blam_tags::TagFile::read(&path).unwrap());
         idle(&mut h);
-        assert!(
-            h.painted.iter().any(|text| text == "Older layout: 1 struct differs"),
-            "no notice beside the name: {:?}",
-            h.painted
-        );
         assert!(!h.painted.iter().any(|text| text.contains("default transmission settings")));
-        h.click("Older layout: 1 struct differs", 0);
-        idle(&mut h);
+        click_layout_badge(&mut h);
         assert!(
             h.painted.iter().any(|text| text.contains("+ default transmission settings")),
             "the window doesn't list the added struct: {:?}",
@@ -5412,6 +5411,43 @@ mod tests {
             "the added struct isn't drawn as the editor draws it: {:?}",
             h.painted
         );
+    }
+
+    /// The badge moves nothing in the header: the keyword bar sits where it
+    /// does for the same tag on the current layout.
+    #[test]
+    fn the_layout_badge_leaves_the_header_where_it_was() {
+        let path = crate::core::test_kits::hrek_tags().join("sound/sound_mix.sound_mix");
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let keywords_at = |tag: blam_tags::TagFile| {
+            let mut h = Harness::new();
+            let display = "sound/sound_mix.sound_mix";
+            let entry = TagEntry {
+                key: fixture::entry_key(display),
+                display_path: display.to_owned(),
+                group_tag: u32::from_be_bytes(*b"snmx"),
+                group_name: Some("sound_mix".to_owned()),
+                location: TagEntryLocation::LooseFile(display.into()),
+            };
+            fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+            fixture::open_document(&mut h.app, display, tag);
+            idle(&mut h);
+            let badged = h.painted.iter().any(|text| text == "!");
+            let at = h
+                .painted_rects
+                .iter()
+                .find(|(text, _)| text == "Keywords:")
+                .map(|(_, rect)| rect.min)
+                .expect("the keyword bar is painted");
+            (badged, at)
+        };
+        let (current_badged, current) = keywords_at(fixture::new_tag_for("haloreach_mcc", "sound_mix"));
+        let (shipped_badged, shipped) = keywords_at(blam_tags::TagFile::read(&path).unwrap());
+        assert!(!current_badged && shipped_badged, "only the shipped tag carries the badge");
+        assert_eq!(current, shipped, "the badge moved the keyword bar");
     }
 
     /// A field only the tag has is drawn in the window with the tag's own
@@ -5446,14 +5482,7 @@ mod tests {
         // The tag's own editor may draw the field too; the window adds one.
         let labels = |h: &Harness| h.painted.iter().filter(|text| *text == "hud text message index").count();
         let before = labels(&h);
-        let notice = h
-            .painted
-            .iter()
-            .find(|text| text.contains(" layout: "))
-            .cloned()
-            .unwrap_or_else(|| panic!("no layout notice: {:?}", h.painted));
-        h.click(&notice, 0);
-        idle(&mut h);
+        click_layout_badge(&mut h);
         assert!(
             h.painted.iter().any(|text| text.starts_with("− hud text message index")),
             "{:?}",

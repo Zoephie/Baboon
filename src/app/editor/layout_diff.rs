@@ -262,17 +262,49 @@ fn open_id(tag_key: &str) -> egui::Id {
     egui::Id::new(("layout_diff_window", tag_key))
 }
 
-/// Draw the notice; a click opens the window for `tag_key`.
-pub(in crate::app) fn draw_layout_notice(ui: &mut Ui, tag_key: &str, diff: &LayoutDiff, game: GameId) {
-    let response = ui
-        .add(
-            egui::Label::new(RichText::new(layout_notice_text(diff)).color(READ_ONLY_BADGE_COLOR).strong())
-                .sense(Sense::click()),
-        )
-        .on_hover_text(format!(
-            "This tag was saved with a different layout than the {} definitions. Click to see what changed.",
-            game.display_name()
-        ));
+/// Draw the notice as a warning badge over the bottom right of the header's
+/// tag icon, `icon_rect`: an overlay, so nothing beside the icon (the title,
+/// the keyword bar) moves. Hovering says what it means; a click opens the
+/// window for `tag_key`.
+pub(in crate::app) fn draw_layout_badge(
+    ui: &mut Ui,
+    icon_rect: egui::Rect,
+    tag_key: &str,
+    diff: &LayoutDiff,
+    game: GameId,
+) {
+    let size = 16.0;
+    let rect = egui::Rect::from_min_size(icon_rect.right_bottom() - Vec2::splat(size - 2.0), Vec2::splat(size));
+    let response = ui.interact(rect, open_id(tag_key).with("badge"), Sense::click());
+    let fill = if response.hovered() {
+        READ_ONLY_BADGE_COLOR.gamma_multiply(1.25)
+    } else {
+        READ_ONLY_BADGE_COLOR
+    };
+    let painter = ui.painter();
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(rect.center().x, rect.top() + 1.0),
+            egui::pos2(rect.right() - 0.5, rect.bottom() - 1.0),
+            egui::pos2(rect.left() + 0.5, rect.bottom() - 1.0),
+        ],
+        fill,
+        // An outline in the editor's background keeps it clear of whatever
+        // the tag icon has beneath it.
+        Stroke::new(1.0_f32, editor_bg()),
+    ));
+    painter.text(
+        rect.center() + Vec2::new(0.0, 2.0),
+        Align2::CENTER_CENTER,
+        "!",
+        bold_font(11.0),
+        Color32::from_rgb(30, 30, 30),
+    );
+    let response = response.on_hover_text(format!(
+        "{}\n\nThis tag was saved with a different layout than the {} definitions. Click to see what changed.",
+        layout_notice_text(diff),
+        game.display_name()
+    ));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
