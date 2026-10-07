@@ -19,7 +19,6 @@ pub(in crate::app) use widgets::*;
 pub(in crate::app) struct MaterialParameterValue {
     label: String,
     value: String,
-    fill: Color32,
     value_kind: &'static str,
     color: Option<MaterialColorPopup>,
     priority: u8,
@@ -41,7 +40,6 @@ pub(in crate::app) struct ShaderGridRow {
     label: String,
     default_cell: Option<ShaderGridCell>,
     value_cell: ShaderGridCell,
-    fill: Color32,
     parameter_type: Option<String>,
     /// True when this row is backed by an explicit shader parameter/template
     /// instance. False means the visible value is inherited from the
@@ -135,8 +133,8 @@ pub(in crate::app) enum ShaderRowEditKind {
     /// Animated parameter that is currently a constant function: shows as an
     /// editable float text box. The `ShaderRowEdit.path` is the `function/data`
     /// hex path; `current` is the scalar value as a string. On commit a new
-    /// 32-byte Constant function blob is written. The `×` button removes the
-    /// animated parameter element from its parent block.
+    /// 32-byte Constant function blob is written. Clear restores its default
+    /// in place, preserving the animated parameter element.
     FunctionScalar {
         block_path: String,
         block_index: usize,
@@ -245,6 +243,8 @@ pub(in crate::app) struct ShaderEditorModel {
     shader_template_path: Option<String>,
     shader_template_edit_path: String,
     categories: Vec<ShaderEditorCategory>,
+    unused_parameters: Vec<UnusedShaderParameter>,
+    top_rows: Vec<ShaderGridRow>,
     sections: Vec<ShaderEditorSection>,
     atmosphere_flags: ShaderFlagsRow,
     custom_fog_setting_index: ShaderGridRow,
@@ -273,6 +273,20 @@ pub(in crate::app) struct ShaderEditorSection {
     title: String,
     option_name: String,
     rows: Vec<ShaderGridRow>,
+}
+
+pub(in crate::app) struct UnusedShaderParameter {
+    name: String,
+    category: Option<String>,
+    rows: Vec<ShaderGridRow>,
+    delete: BlockOp,
+}
+
+fn mark_unused_shader_rows(rows: &mut [ShaderGridRow]) {
+    for row in rows {
+        row.default_cell = Some(ShaderGridCell { text: "Unused".to_owned(), value_kind: "default", color: None });
+        row.is_overridden = true;
+    }
 }
 
 pub(in crate::app) struct ShaderFlagsRow {
@@ -309,6 +323,15 @@ pub(in crate::app) fn build_shader_editor_model(
         cached_render_method_definition(source, &render_method.definition_path, rmdf_cache)?;
     let edit_prefix = render_method_edit_prefix(tag);
 
+    let mut active_names = std::collections::HashSet::new();
+    let mut options_loaded = true;
+    if !definition.global_options_path.is_empty() {
+        if let Some(option) = cached_render_method_option(source, &definition.global_options_path, rmop_cache) {
+            active_names.extend(option.parameters.iter().map(|parameter| parameter.parameter_name.clone()));
+        } else {
+            options_loaded = false;
+        }
+    }
     let mut categories = Vec::new();
     let mut sections = Vec::new();
     for (index, category) in definition.categories.iter().enumerate() {
@@ -330,6 +353,7 @@ pub(in crate::app) fn build_shader_editor_model(
         });
 
         let Some(selected_option) = selected_option else {
+            options_loaded = false;
             continue;
         };
         if selected_option.option_path.is_empty() {
@@ -338,8 +362,10 @@ pub(in crate::app) fn build_shader_editor_model(
         let Some(option) =
             cached_render_method_option(source, &selected_option.option_path, rmop_cache)
         else {
+            options_loaded = false;
             continue;
         };
+        active_names.extend(option.parameters.iter().map(|parameter| parameter.parameter_name.clone()));
         let rows = shader_rows_from_option(tag, &render_method, &option, &edit_prefix);
         if rows.is_empty() {
             continue;
@@ -418,6 +444,16 @@ pub(in crate::app) fn build_shader_editor_model(
         sort_layer_path,
     );
 
+    let mut unused_parameters = if options_loaded { unused_render_method_parameters(tag, &render_method, &edit_prefix, &active_names) } else { Vec::new() };
+    place_unused_parameters_in_categories(source, &definition, rmop_cache, &mut unused_parameters);
+    for (index, category) in definition.categories.iter().enumerate() {
+        let title = category.category_name.to_ascii_uppercase();
+        if unused_parameters.iter().any(|parameter| parameter.category.as_ref() == Some(&title)) && !sections.iter().any(|section| section.title == title) {
+            let selected = render_method.options.get(index).copied().unwrap_or(0).max(0) as usize;
+            sections.push(ShaderEditorSection { title, option_name: category.options.get(selected).map(|option| option.option_name.clone()).unwrap_or_default(), rows: Vec::new() });
+        }
+    }
+    sections.sort_by_key(|section| definition.categories.iter().position(|category| category.category_name.to_ascii_uppercase() == section.title).unwrap_or(usize::MAX));
     Some(ShaderEditorModel {
         has_material_row: shader_type_has_material_row(group_tag),
         materials,
@@ -431,12 +467,64 @@ pub(in crate::app) fn build_shader_editor_model(
             .filter(|path| !path.is_empty()),
         categories,
         sections,
+        unused_parameters,
+        top_rows: Vec::new(),
         atmosphere_flags,
         custom_fog_setting_index,
         sort_layer,
     })
 }
 
+fn place_unused_parameters_in_categories(
+    source: &TagSource,
+    definition: &RenderMethodDefinition,
+    cache: &mut HashMap<String, Option<Arc<RenderMethodOption>>>,
+    unused: &mut [UnusedShaderParameter],
+) {
+    if unused.is_empty() {
+        return;
+    }
+    let mut owners: HashMap<String, std::collections::HashSet<usize>> = HashMap::new();
+    let mut complete = true;
+    for (index, category) in definition.categories.iter().enumerate() {
+        for option in &category.options {
+            if option.option_path.is_empty() {
+                continue;
+            }
+            let Some(option) = cached_render_method_option(source, &option.option_path, cache)
+            else {
+                complete = false;
+                continue;
+            };
+            for parameter in &option.parameters {
+                if unused
+                    .iter()
+                    .any(|unused| unused.name == parameter.parameter_name)
+                {
+                    owners
+                        .entry(parameter.parameter_name.clone())
+                        .or_default()
+                        .insert(index);
+                }
+            }
+        }
+    }
+    if !complete {
+        return;
+    }
+    for parameter in unused {
+        if let Some(categories) = owners
+            .get(&parameter.name)
+            .filter(|owners| owners.len() == 1)
+        {
+            parameter.category = Some(
+                definition.categories[*categories.iter().next().unwrap()]
+                    .category_name
+                    .to_ascii_uppercase(),
+            );
+        }
+    }
+}
 
 
 #[cfg(test)]
@@ -603,8 +691,11 @@ mod tests {
         fn new(categories: usize) -> Self {
             let (rmdf, rmop) = render_method_caches(categories);
             let shader = synthetic_shader(categories);
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            egui_extras::install_image_loaders(&ctx);
             Self {
-                ctx: egui::Context::default(),
+                ctx,
                 time: 0.0,
                 entry: TagEntry {
                     key: TAG_KEY.to_owned(),
@@ -632,6 +723,7 @@ mod tests {
 
         /// Draw one frame of the grid with `events`, collecting what it raised.
         fn frame(&mut self, events: Vec<egui::Event>) -> &Painted {
+            self.ctx.data_mut(|d| d.remove::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects")));
             self.time += 1.0 / 60.0;
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -705,6 +797,8 @@ mod tests {
                     _ => None,
                 })
                 .collect();
+            let clear_rects = self.ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(egui::Id::new("shader_clear_test_rects"))).unwrap_or_default();
+            self.painted.extend(clear_rects.into_iter().map(|rect| ("×".to_owned(), rect)));
             &self.painted
         }
 
@@ -864,7 +958,7 @@ mod tests {
         // both colors and their alpha rows, real and bool — seven a section.
         // The colors also offer "f()+" to create function data.
         assert_eq!(grid.count("Override Default"), 7 * 2, "{:?}", grid.texts());
-        assert_eq!(grid.count("f()+"), 2 * 2);
+        assert_eq!(grid.count("Add Function"), 0, "function actions use icons");
         assert_eq!(grid.count("value: 2.0"), 2, "the real default, per section");
         for alpha in ["p0_1_alpha", "p0_5_alpha", "p1_1_alpha", "p1_5_alpha"] {
             assert_eq!(grid.count(alpha), 1, "{alpha}");
@@ -877,7 +971,11 @@ mod tests {
         for section in ["MATERIAL", "ATMOSPHERE PROPERTIES", "SORTING PROPERTIES"] {
             assert_eq!(grid.count(section), 1, "{section}");
         }
-        assert_eq!(grid.count("shaders\\grid.render_method_definition"), 1);
+        assert_eq!(grid.count("grid.render_method_definition"), 1);
+        for (previous, next) in [("p0_2", "p0_3"), ("p0_3", "p0_4")] {
+            assert!((grid.find(next, 0).center().y - grid.find(previous, 0).center().y - 32.0).abs() < 0.1,
+                "field rows must retain their allocated height");
+        }
         assert!(grid.ops.is_empty(), "drawing alone raised an edit");
     }
 
@@ -887,9 +985,9 @@ mod tests {
     fn choosing_a_category_option_writes_its_index() {
         let mut grid = Grid::new(2);
         grid.idle(2);
-        // The second "option_0" in top-to-bottom order is category 0's combo
-        // (the first is its default cell).
-        let combo = grid.find("option_0", 1);
+        // Target the value column; text heights differ between the painted
+        // default cell and native combo, so their vertical sort order can vary.
+        let combo = rightmost_on_row(&grid, "grid_category_0", "option_0");
         grid.click_at(combo.center());
         grid.click("option_1", 0);
         assert_eq!(grid.ops.pending.len(), 1);
@@ -952,6 +1050,39 @@ mod tests {
 
     /// A shader value typed and not yet committed leaves behind the edit its
     /// box would commit, for a save or a close to commit without the row.
+    #[test]
+    fn typed_shader_range_fields_flush_on_save_without_enter() {
+        for numeric in [false, true] {
+            let mut grid = Grid::new(1);
+            grid.idle(2);
+            grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+            grid.apply();
+            grid.click_at(rightmost_on_row(&grid, "p0_2", "range:").center());
+            grid.apply();
+            if numeric {
+                let end = grid.find("end:", 0);
+                grid.click_at(egui::pos2(end.right() + 40.0, end.center().y));
+            } else {
+                grid.click_at(rightmost_on_row(&grid, "p0_2", "Range input").center());
+            }
+            grid.frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+            grid.frame(vec![egui::Event::Text(if numeric { "9.0" } else { "primary_charged" }.to_owned())]);
+            assert!(grid.ops.is_empty());
+            let mut commits = grid.buffers.take_uncommitted(DraftFlush::All);
+            assert_eq!(commits.len(), 1, "save should commit a range row once");
+            grid.ops = commits.remove(0).1.unwrap();
+            grid.apply();
+            let method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+            let animation = &method.parameters[0].animated_parameters[0];
+            if numeric {
+                assert_eq!(TagFunctionEditor::from_function(animation.function.clone().unwrap()).clamp_range(), Some((2.0, 9.0)));
+            } else {
+                assert_eq!(animation.range_name, "primary_charged");
+            }
+            assert!(grid.buffers.take_uncommitted(DraftFlush::All).is_empty());
+        }
+    }
+
     #[test]
     fn a_typed_shader_value_commits_without_its_row() {
         let mut grid = Grid::new(1);
@@ -1173,13 +1304,226 @@ mod tests {
     /// parameter. Retyping the function there and pressing OK writes the new
     /// function data, and leaves the parameter's wrapper fields alone.
     #[test]
+    fn clearing_a_color_function_restores_default_without_deleting_backing() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 1);
+        grid.apply();
+        let path = "render_method/parameters[0]/animated parameters[0]";
+        grid.click_at(rightmost_on_row(&grid, "p0_1", "Range input").center());
+        grid.type_text("primary_charged");
+        grid.apply();
+        assert_eq!(grid.doc.tag.root().descend(path).unwrap().read_string_id("range name").as_deref(), Some("primary_charged"));
+        let before = constant_color(&grid.doc.tag, 0, 0).unwrap();
+        grid.click_at(rightmost_on_row(&grid, "p0_1", "range:").center());
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert!(render_method.parameters[0].animated_parameters[0].function.as_ref().unwrap().is_ranged());
+        assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap(), before);
+        assert_eq!(render_method.parameters[0].animated_parameters[0].range_name, "primary_charged");
+        assert_eq!(grid.count("start:"), 0);
+        assert_eq!(grid.count("end:"), 0);
+        grid.ops.pending.extend([
+            PendingFieldEdit { path: format!("{path}/function/data"), input: constant_color_function_hex(0.0, 1.0, 0.0, 1.0) },
+            PendingFieldEdit { path: format!("{path}/input name"), input: "time".to_owned() },
+        ]);
+        grid.apply();
+        let row_y = grid.find("p0_1", 0).center().y;
+        assert_eq!(grid.painted.iter().filter(|(label, rect)| label == "×" && (rect.center().y - row_y).abs() < 4.0).count(), 1);
+        grid.click_at(rightmost_on_row(&grid, "p0_1", "×").center());
+        assert!(grid.ops.block_ops.is_empty());
+        assert_eq!(grid.ops.pending.len(), 1);
+        grid.apply();
+        assert_eq!(grid.parameters().len(), 1);
+        assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap().map(float_channel_to_u8), [0x80, 0x40, 0x20, 0xff]);
+        assert_eq!(grid.doc.tag.root().descend(path).unwrap().read_string_id("input name").as_deref(), Some("time"));
+        assert_eq!(grid.count("p0_1"), 1);
+    }
+
+    #[test]
+    fn clearing_an_optional_bitmap_transform_keeps_its_row() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click("Override Default", 0);
+        grid.apply();
+        grid.right_click_at(grid.find("p0_0", 0).center());
+        grid.click("scale uniform", 0);
+        grid.apply();
+        grid.ops.pending.push(PendingFieldEdit {
+            path: "render_method/parameters[0]/animated parameters[0]/function/data".to_owned(),
+            input: constant_function_hex(7.0),
+        });
+        grid.apply();
+        grid.click_at(rightmost_on_row(&grid, "p0_0_scale_uniform", "×").center());
+        assert!(grid.ops.block_ops.is_empty());
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters[0].animated_parameters.len(), 1);
+        assert_eq!(render_method.parameters[0].animated_parameters[0].function.as_ref().unwrap().as_constant(), Some(1.0));
+        assert_eq!(grid.count("p0_0_scale_uniform"), 1);
+        let bitmap_clear = rightmost_on_row(&grid, "p0_0", "×");
+        let transform_clear = rightmost_on_row(&grid, "p0_0_scale_uniform", "×");
+        assert_eq!(bitmap_clear.right(), transform_clear.right(), "last buttons share right padding");
+    }
+
+    #[test]
+    fn option_switch_keeps_unused_function_values_until_clear_removes_the_parameter() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+        grid.apply();
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "range:").center());
+        grid.apply();
+        let saved = RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters[0].function.as_ref().unwrap().to_bytes();
+        let option = grid.rmop.get_mut("rmop:shaders\\grid_options\\cat0_opt1").unwrap().as_mut().unwrap();
+        Arc::make_mut(option).parameters.retain(|parameter| parameter.parameter_name != "p0_2");
+        grid.ops.pending.push(PendingFieldEdit { path: "render_method/options[0]/short".to_owned(), input: "1".to_owned() });
+        grid.apply();
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 0);
+        assert_eq!(grid.count("GRID_CATEGORY_0"), 1);
+        assert_eq!(grid.count("p0_2"), 1);
+        assert_eq!(grid.count("Unused"), 1);
+        assert_eq!(RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters[0].function.as_ref().unwrap().to_bytes(), saved);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "×").center());
+        assert_eq!(grid.ops.block_ops.len(), 1);
+        assert!(grid.ops.pending.is_empty(), "unused Clear deletes, rather than resetting function data");
+        grid.apply();
+        assert!(grid.parameters().is_empty());
+        assert_eq!(grid.count("p0_2"), 0);
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 0);
+    }
+
+    #[test]
+    fn known_unused_fields_resolve_to_categories_in_h3_and_reach_kits() {
+        for (root, game, relative, name, category) in [
+            (crate::core::test_kits::h3ek_tags(), GameId::Halo3, "objects/characters/ambient_life/bird_quadwing/shaders/bird_quadwing.shader", "roughness", "MATERIAL_MODEL"),
+            (crate::core::test_kits::hrek_tags(), GameId::HaloReach, "objects/bitmaps/decals/shaders/covenant_decals01.shader", "env_tint_color", "ENVIRONMENT_MAPPING"),
+        ] {
+            let path = root.join(relative);
+            if !path.exists() { continue; }
+            let tag = TagFile::read(&path).unwrap();
+            let source = TagSource::LooseFolder { root, game: Some(game), definitions_root: locate_definitions_root() };
+            let model = build_shader_editor_model(&tag, tag.header.group_tag, Some(&source), &mut HashMap::new(), &mut HashMap::new()).unwrap();
+            let unused = model.unused_parameters.iter().find(|parameter| parameter.name == name).unwrap();
+            assert_eq!(unused.category.as_deref(), Some(category), "{relative}: {name}");
+            assert!(model.sections.iter().any(|section| section.title == category));
+        }
+    }
+
+    #[test]
+    fn ambiguous_unused_parameter_keeps_the_fallback_section() {
+        let mut grid = Grid::new(2);
+        grid.idle(2);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+        grid.apply();
+        let copied = grid.rmop.get("rmop:shaders\\grid_options\\cat0_opt0").unwrap().as_ref().unwrap().parameters.iter().find(|parameter| parameter.parameter_name == "p0_2").unwrap().clone();
+        let other_category = grid.rmop.get_mut("rmop:shaders\\grid_options\\cat1_opt1").unwrap().as_mut().unwrap();
+        Arc::make_mut(other_category).parameters.push(copied);
+        let selected = grid.rmop.get_mut("rmop:shaders\\grid_options\\cat0_opt1").unwrap().as_mut().unwrap();
+        Arc::make_mut(selected).parameters.retain(|parameter| parameter.parameter_name != "p0_2");
+        grid.ops.pending.push(PendingFieldEdit { path: "render_method/options[0]/short".to_owned(), input: "1".to_owned() });
+        grid.apply();
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 1);
+        assert_eq!(grid.count("p0_2"), 1);
+        assert_eq!(grid.count("Unused"), 1);
+    }
+
+    #[test]
+    fn missing_option_definitions_do_not_mark_parameters_unused() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+        grid.apply();
+        grid.rmop.insert("rmop:shaders\\grid_options\\cat0_opt0".to_owned(), None);
+        grid.revision += 1;
+        grid.idle(2);
+        assert_eq!(grid.count("UNUSED PARAMETERS"), 0);
+        assert_eq!(grid.parameters().len(), 1);
+    }
+
+    #[test]
+    fn overridden_alpha_offers_function_and_clear_before_range_is_enabled() {
+        for clear in [false, true] {
+            let mut grid = Grid::new(1);
+            grid.idle(2);
+            let inherited_y = grid.find("p0_5_alpha", 0).center().y;
+            assert!(!grid.painted.iter().any(|(text, rect)| text == "×" && (rect.center().y - inherited_y).abs() < 4.0));
+            grid.click_at(rightmost_on_row(&grid, "p0_5", "Override Default").center());
+            grid.apply();
+            let before = constant_color(&grid.doc.tag, 0, 0).unwrap();
+            let clear_button = rightmost_on_row(&grid, "p0_5_alpha", "×");
+            grid.click_at(if clear { clear_button.center() } else { clear_button.center() - egui::vec2(30.0, 0.0) });
+            assert!(grid.ops.block_ops.is_empty());
+            grid.apply();
+            let method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+            let alpha = method.parameters[0].animated_parameters.iter().find(|parameter| parameter.parameter_type.as_ref().is_some_and(|kind| kind.get() == RenderMethodAnimatedParameterType::Alpha)).unwrap();
+            assert_eq!(alpha.function.as_ref().unwrap().as_constant(), Some(1.0));
+            assert!(!alpha.function.as_ref().unwrap().is_ranged());
+            assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap(), before);
+            assert_eq!(grid.count("p0_5_alpha"), 1);
+        }
+    }
+
+    #[test]
+    fn color_and_alpha_range_controls_align_before_and_after_alpha_function_creation() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        grid.click_at(rightmost_on_row(&grid, "p0_5", "Override Default").center());
+        grid.apply();
+        let color_range = rightmost_on_row(&grid, "p0_5", "range:");
+        let alpha_range = rightmost_on_row(&grid, "p0_5_alpha", "range:");
+        assert_eq!(color_range.left(), alpha_range.left());
+        grid.click_at(egui::pos2(alpha_range.left() - 40.0, alpha_range.center().y));
+        grid.type_text("0.5");
+        grid.apply();
+        assert_eq!(rightmost_on_row(&grid, "p0_5_alpha", "range:").left(), color_range.left());
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert!(render_method.parameters[0].animated_parameters.iter().any(|parameter| parameter.parameter_type.as_ref().is_some_and(|kind| kind.get() == RenderMethodAnimatedParameterType::Alpha)));
+    }
+
+    #[test]
+    fn range_creates_a_function_and_expands_into_editable_start_and_end() {
+        let mut grid = Grid::new(1);
+        grid.idle(2);
+        let inherited_row = grid.find("p0_2", 0);
+        assert!(!grid.painted.iter().any(|(text, rect)| text == "range:" && (rect.center().y - inherited_row.center().y).abs() < 12.0));
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Override Default").center());
+        grid.apply();
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "range:").center());
+        grid.apply();
+        let function = RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters[0]
+            .function.clone().unwrap();
+        assert!(TagFunctionEditor::from_function(function).is_ranged());
+        assert_eq!(grid.count("start:"), 1);
+        assert_eq!(grid.count("end:"), 1);
+        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 64.0).abs() < 0.1);
+        let end = grid.find("end:", 0);
+        grid.click_at(egui::pos2(end.right() + 40.0, end.center().y));
+        grid.type_text("8.0");
+        assert_eq!(grid.ops.pending.len(), 1);
+        grid.apply();
+        let function = RenderMethod::from_tag(&grid.doc.tag).unwrap().parameters[0].animated_parameters[0]
+            .function.clone().unwrap();
+        assert_eq!(TagFunctionEditor::from_function(function).clamp_range(), Some((2.0, 8.0)));
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "Range input").center());
+        grid.type_text("random");
+        grid.apply();
+        let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
+        assert_eq!(render_method.parameters[0].animated_parameters[0].range_name, "random");
+        grid.click_at(rightmost_on_row(&grid, "p0_2", "range:").center());
+        grid.apply();
+        assert_eq!(grid.count("end:"), 0);
+        assert!((grid.find("p0_3", 0).center().y - grid.find("p0_2", 0).center().y - 32.0).abs() < 0.1);
+    }
+
+    #[test]
     fn the_function_editor_retypes_an_animated_parameter() {
         let mut grid = Grid::new(1);
         grid.idle(2);
         grid.click("Override Default", 1);
         grid.apply();
 
-        // The row's controls, right to left: the "×" that removes the animated
+        // The row's controls, right to left: the Clear button that resets the animated
         // parameter, and "f()" just before it.
         let delete = rightmost_on_row(&grid, "p0_1", "×");
         grid.click_at(egui::pos2(delete.center().x - 24.0, delete.center().y));
@@ -1225,6 +1569,12 @@ mod tests {
             TagFunctionEditor::from_function(function).master_type(),
             EngineMasterType::Periodic
         );
+        grid.click_at(rightmost_on_row(&grid, "p0_1", "×").center());
+        assert!(grid.ops.block_ops.is_empty());
+        grid.apply();
+        assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap().map(float_channel_to_u8),
+            [0x80, 0x40, 0x20, 0xff], "a curve clears to the actual option default");
+        assert_eq!(grid.count("p0_1"), 1);
     }
 
     /// An inherited bool overrides to its default, then toggles through its
@@ -1335,8 +1685,8 @@ mod tests {
         assert_eq!(grid.parameters()[0].0, "p0_0");
         assert_eq!(grid.count("Override Default"), 6);
         // The row is a reference cell now: the path box (still "NONE"), a
-        // missing-target marker, browse and clear.
-        for control in ["\u{26A0}", "...", "\u{d7}"] {
+        // browse and clear. An empty reference isn't a missing target.
+        for control in ["Browse", "\u{d7}"] {
             assert_eq!(grid.count(control), 1, "{control}: {:?}", grid.texts());
         }
 
@@ -1351,9 +1701,8 @@ mod tests {
         assert_eq!(applied.outcomes[0].result, Ok(()), "{input}");
         let render_method = RenderMethod::from_tag(&grid.doc.tag).unwrap();
         assert_eq!(render_method.parameters[0].bitmap_path, "shaders\\textures\\rock");
-        // The box shows the reference as the tag holds it now, not the text
-        // typed: a committed box goes back to the tag's value.
-        assert_eq!(grid.count("shaders/textures/rock.bitmap"), 1, "{:?}", grid.texts());
+// Committed references display their shortened names at rest.
+        assert_eq!(grid.count("rock.bitmap"), 1, "{:?}", grid.texts());
 
         // Its context menu adds optional sampler and transform arguments;
         // "filter mode" sets the flag and the mode, which then gets a row.

@@ -1019,6 +1019,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn editable_tag_reference_icons_stay_inside_the_input() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        egui_extras::install_image_loaders(&ctx);
+        let icon = tag_icon(Some(u32::from_be_bytes(*b"mode")), Some(GameId::Halo3));
+        let mut rect = egui::Rect::NOTHING;
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput::default(),
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut value = "objects\\characters\\brute\\brute.render_model".to_owned();
+                        rect = foundation_tag_reference_text_edit_cell(
+                            ui,
+                            &mut value,
+                            320.0,
+                            egui::Id::new("reference"),
+                            icon,
+                        )
+                        .rect;
+                    });
+                },
+            ));
+        }
+        let output = output.unwrap();
+        let image = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                    Some(mesh.calc_bounds())
+                }
+                egui::Shape::Rect(image)
+                    if image.fill_texture_id() != egui::TextureId::default() =>
+                {
+                    Some(image.rect)
+                }
+                _ => None,
+            })
+            .expect("tag icon is painted");
+        assert!(
+            rect.contains_rect(image),
+            "icon {image:?} must be inside input {rect:?}"
+        );
+        assert_eq!(image.size(), Vec2::splat(16.0));
+        assert!((image.left() - rect.left() - 3.0).abs() < 0.1);
+        assert!((image.center().y - rect.center().y).abs() < 0.1);
+    }
+
+    #[test]
     fn read_only_inputs_allow_selection_and_copy_but_reject_mutations() {
         let ctx = egui::Context::default();
         ctx.set_global_style(foundation_style());

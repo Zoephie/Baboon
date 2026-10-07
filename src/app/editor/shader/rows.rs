@@ -3,6 +3,73 @@
 
 use super::*;
 
+pub(super) fn unused_render_method_parameters(
+    tag: &TagFile,
+    render_method: &RenderMethod,
+    edit_prefix: &str,
+    active: &std::collections::HashSet<String>,
+) -> Vec<UnusedShaderParameter> {
+    use blam_tags::render_method::{BitmapAddressMode, BitmapComparisonFunction, BitmapFilterMode};
+    let option = RenderMethodOption {
+        parameters: Vec::new(),
+        filter_mode_names: Vec::new(),
+        address_mode_names: Vec::new(),
+    };
+    render_method
+        .parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, instance)| {
+            if active.contains(&instance.parameter_name) {
+                return None;
+            }
+            // No template default exists for an unused parameter. These neutral
+            // values only satisfy the existing row builders; the default column
+            // is replaced by an explicit unused warning below.
+            let parameter = RenderMethodOptionParameter {
+                parameter_name: instance.parameter_name.clone(),
+                parameter_type: instance.parameter_type,
+                source_extern: None,
+                default_bitmap_path: String::new(),
+                default_real_value: 0.0,
+                default_int_bool_value: 0,
+                flags: 0,
+                default_filter_mode: blam_tags::Enum::from_variant(BitmapFilterMode::Trilinear),
+                default_comparison_function: blam_tags::Enum::from_variant(
+                    BitmapComparisonFunction::Never,
+                ),
+                default_address_mode: blam_tags::Enum::from_variant(BitmapAddressMode::Wrap),
+                default_filter_mode_index: 0,
+                default_address_mode_index: 0,
+                anisotropy_amount: 0,
+                default_color: blam_tags::math::ArgbColor(0),
+                default_bitmap_scale: 1.0,
+                help_text: String::new(),
+            };
+            let mut rows = Vec::new();
+            push_shader_parameter_rows(
+                &mut rows,
+                &option,
+                &parameter,
+                Some(instance),
+                edit_prefix,
+                Some(index),
+                tag,
+            );
+            mark_unused_shader_rows(&mut rows);
+            Some(UnusedShaderParameter {
+                name: instance.parameter_name.clone(),
+                category: None,
+                rows,
+                delete: BlockOp {
+                    path: append_field_path(edit_prefix, "parameters"),
+                    kind: BlockOpKind::Delete(index),
+                },
+            })
+        })
+        .collect()
+}
+
 pub(in crate::app) fn shader_rows_from_option(
     tag: &TagFile,
     render_method: &RenderMethod,
@@ -492,7 +559,6 @@ pub(in crate::app) fn shader_bitmap_row(
             value_kind: if value.is_empty() { "default" } else { "value" },
             color: None,
         },
-        fill: material_ref_row(),
         parameter_type: Some("bitmap".to_owned()),
         is_overridden: instance.is_some(),
         function: None,
@@ -546,7 +612,11 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
     // The option's own game's names: the lists differ by game, and a Reach
     // shader's filter 9 is a texture-array mode, not Halo 3's comparison one.
     let own_or = |names: &[String], fallback: fn() -> Vec<String>| {
-        if names.is_empty() { fallback() } else { names.to_vec() }
+        if names.is_empty() {
+            fallback()
+        } else {
+            names.to_vec()
+        }
     };
     let filter_opts = own_or(&option.filter_mode_names, bitmap_filter_option_labels);
     let addr_opts = own_or(&option.address_mode_names, bitmap_address_option_labels);
@@ -657,7 +727,6 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
                         "value: {}",
                         format_shader_float(const_val)
                     )),
-                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -684,7 +753,14 @@ pub(in crate::app) fn shader_bitmap_expansion_rows(
                     row.constant_function_view = Some(view);
                 }
             } else {
-                rows.push(shader_function_grid_row(format!("{name}_{suffix}"), view));
+                let mut row = shader_function_grid_row(format!("{name}_{suffix}"), view);
+                row.default_cell =
+                    Some(shader_default_value_cell(if suffix.starts_with("scale") {
+                        "value: 1.0".to_owned()
+                    } else {
+                        "value: 0.0".to_owned()
+                    }));
+                rows.push(row);
             }
         }
     }
@@ -732,7 +808,6 @@ pub(in crate::app) fn shader_scalar_row(
                         format_shader_float(parameter.default_real_value)
                     ))),
                     value_cell: shader_value_cell(format!("value: {current}")),
-                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -756,7 +831,12 @@ pub(in crate::app) fn shader_scalar_row(
                 return row;
             } else {
                 // Non-constant animated scalar → orange graph row.
-                return shader_function_grid_row(parameter.parameter_name.clone(), view);
+                let mut row = shader_function_grid_row(parameter.parameter_name.clone(), view);
+                row.default_cell = Some(shader_default_value_cell(format!(
+                    "value: {}",
+                    format_shader_float(parameter.default_real_value)
+                )));
+                return row;
             }
         }
     }
@@ -774,7 +854,6 @@ pub(in crate::app) fn shader_scalar_row(
             label: parameter.parameter_name.clone(),
             default_cell: Some(shader_default_value_cell(default_val)),
             value_cell: shader_value_cell(format!("value: {current}")),
-            fill: material_numeric_row(),
             parameter_type: Some("real".to_owned()),
             is_overridden: true,
             function: None,
@@ -808,7 +887,6 @@ pub(in crate::app) fn shader_scalar_row(
         label: parameter.parameter_name.clone(),
         default_cell: Some(shader_default_value_cell(default_val.clone())),
         value_cell: shader_value_cell(format!("value: {current}")),
-        fill: material_numeric_row(),
         parameter_type: Some("real".to_owned()),
         is_overridden: false,
         function: None,
@@ -832,7 +910,6 @@ pub(in crate::app) fn shader_int_row(
         parameter.parameter_name.clone(),
         parameter.default_int_bool_value.to_string(),
         value.to_string(),
-        material_data_row(),
         Some("enum".to_owned()),
     );
     row.is_overridden = instance.is_some();
@@ -858,7 +935,6 @@ pub(in crate::app) fn shader_bool_row(
         parameter.parameter_name.clone(),
         (parameter.default_int_bool_value != 0).to_string(),
         (raw != 0).to_string(),
-        material_data_row(),
         Some("bool".to_owned()),
     );
     row.is_overridden = instance.is_some();
@@ -988,7 +1064,6 @@ pub(in crate::app) fn shader_color_row(
                         value_kind: "value",
                         color: Some(color_val),
                     },
-                    fill: material_numeric_row(),
                     parameter_type: Some("color".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -1012,7 +1087,13 @@ pub(in crate::app) fn shader_color_row(
                 return row;
             } else {
                 // Non-constant color animated param → orange graph row.
-                return shader_function_grid_row(parameter.parameter_name.clone(), view);
+                let mut row = shader_function_grid_row(parameter.parameter_name.clone(), view);
+                row.default_cell = Some(ShaderGridCell {
+                    text: "color: RGB".to_owned(),
+                    value_kind: "default",
+                    color: Some(default_color),
+                });
+                return row;
             }
         }
     }
@@ -1032,7 +1113,6 @@ pub(in crate::app) fn shader_color_row(
                 value_kind: "value",
                 color: Some(value_color),
             },
-            fill: material_numeric_row(),
             parameter_type: Some("color".to_owned()),
             is_overridden: true,
             function: None,
@@ -1067,7 +1147,6 @@ pub(in crate::app) fn shader_color_row(
             value_kind: "value",
             color: Some(value_color),
         },
-        fill: material_numeric_row(),
         parameter_type: Some("color".to_owned()),
         is_overridden: false,
         function: None,
@@ -1163,7 +1242,6 @@ pub(in crate::app) fn shader_alpha_row(
                         format_shader_float(default_alpha)
                     ))),
                     value_cell: shader_value_cell(format!("value: {current}")),
-                    fill: material_numeric_row(),
                     parameter_type: Some("alpha".to_owned()),
                     is_overridden: true,
                     function: None,
@@ -1186,7 +1264,13 @@ pub(in crate::app) fn shader_alpha_row(
                 row.constant_function_view = Some(view);
                 return row;
             }
-            return shader_function_grid_row(format!("{}_alpha", parameter.parameter_name), view);
+            let mut row =
+                shader_function_grid_row(format!("{}_alpha", parameter.parameter_name), view);
+            row.default_cell = Some(shader_default_value_cell(format!(
+                "value: {}",
+                format_shader_float(default_alpha)
+            )));
+            return row;
         }
     }
     let create_target = param_index
@@ -1213,7 +1297,6 @@ pub(in crate::app) fn shader_alpha_row(
             format_shader_float(default_alpha)
         ))),
         value_cell: shader_value_cell(format!("value: {current}")),
-        fill: material_numeric_row(),
         parameter_type: Some("alpha".to_owned()),
         is_overridden: instance.is_some(),
         function: None,
@@ -1239,7 +1322,6 @@ pub(in crate::app) fn shader_option_value_row(
         label,
         default,
         value,
-        material_data_row(),
         Some("option".to_owned()),
     )
 }
@@ -1254,7 +1336,6 @@ pub(in crate::app) fn shader_int_value_row(
         label,
         default,
         value.clone(),
-        material_data_row(),
         Some("integer".to_owned()),
     );
     if !path.is_empty() {
@@ -1418,7 +1499,6 @@ pub(in crate::app) fn shader_plain_value_row(
     label: String,
     default: String,
     value: String,
-    fill: Color32,
     parameter_type: Option<String>,
 ) -> ShaderGridRow {
     ShaderGridRow {
@@ -1433,7 +1513,6 @@ pub(in crate::app) fn shader_plain_value_row(
             value_kind: "value",
             color: None,
         },
-        fill,
         parameter_type,
         is_overridden: false,
         function: None,
@@ -1460,7 +1539,6 @@ pub(in crate::app) fn shader_function_grid_row(
             value_kind: "value",
             color: None,
         },
-        fill: material_function_row(),
         parameter_type: Some("function".to_owned()),
         is_overridden: true,
         function: Some(function),
@@ -1647,7 +1725,9 @@ pub(in crate::app) fn function_points_summary(points: &[(f32, f32); 4]) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::editor::{constant_color_function_hex, extract_constant_color, shader_function_grid_text};
+    use crate::app::editor::{
+        constant_color_function_hex, extract_constant_color, shader_function_grid_text,
+    };
     use crate::core::document::apply::{add_block_element, apply_field_edit};
     use crate::core::document::value::decode_hex;
 
@@ -1668,8 +1748,16 @@ mod tests {
         add_block_element(&mut rmop, "parameters").unwrap();
         set(&mut rmop, "parameters[0]/parameter name", "base_map");
         set(&mut rmop, "parameters[0]/parameter type", "bitmap");
-        set(&mut rmop, "parameters[0]/default filter mode", "texture array quadlinear");
-        set(&mut rmop, "parameters[0]/default address mode", "mirroronce");
+        set(
+            &mut rmop,
+            "parameters[0]/default filter mode",
+            "texture array quadlinear",
+        );
+        set(
+            &mut rmop,
+            "parameters[0]/default address mode",
+            "mirroronce",
+        );
         let option = RenderMethodOption::from_tag(&rmop).unwrap();
 
         let mut shader = TagFile::new(defs.join("haloreach_mcc/shader.json")).unwrap();
@@ -1695,7 +1783,10 @@ mod tests {
         };
         let filter = row("base_map_filter_mode");
         assert_eq!(filter.value_cell.text, "texture array quadanisotropic (2)");
-        assert_eq!(filter.default_cell.as_ref().unwrap().text, "texture array quadlinear");
+        assert_eq!(
+            filter.default_cell.as_ref().unwrap().text,
+            "texture array quadlinear"
+        );
         let wrap = row("base_map_wrap_mode");
         assert_eq!(wrap.value_cell.text, "mirroronce");
 
@@ -1711,7 +1802,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(inputs, ["4"], "the x override starts at the default's index");
+        assert_eq!(
+            inputs,
+            ["4"],
+            "the x override starts at the default's index"
+        );
     }
 
     // Shader model, editing, and thumbnail unit tests.

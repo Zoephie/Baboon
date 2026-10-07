@@ -263,12 +263,10 @@ fn draw_tag_fields_scroll(
         // separate field tab. The grid's bitmap/scalar/int/function/category
         // cells are editable inline; when the grid can't be built it falls
         // back to the standard editable field tree (inside draw_material_tag).
-        ScrollArea::both()
-            .id_salt(("tag_scroll", edit.view_scope, edit.tag_key))
-            .max_height(scroll_height)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                scroll_during_drag(ui);
+        let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
+        let scope = (edit.view_scope, edit.tag_key);
+        let mut contents = |ui: &mut Ui| {
+            scroll_during_drag(ui);
                 ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
                 draw_material_tag(
                     ui,
@@ -285,7 +283,13 @@ fn draw_tag_fields_scroll(
                     expert_mode,
                     edit,
                 );
-            });
+        };
+        if is_shader {
+            draw_shader_scroll_area(ui, scope, &mut contents);
+        } else {
+            ScrollArea::both().id_salt(("tag_scroll", scope)).max_height(scroll_height)
+                .auto_shrink([false, false]).show(ui, &mut contents);
+        }
         return;
     }
 

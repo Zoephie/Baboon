@@ -510,7 +510,6 @@ pub(in crate::app) fn draw_color_popup(
                                         Some(initial_function_data.as_slice()),
                                     );
                                 }
-                                H2ShaderParamOp::SwitchTemplate { .. } => {}
                             }
                             result = Some(ColorPopupResult::H2ShaderParamOp {
                                 tag_key: color.tag_key.clone(),

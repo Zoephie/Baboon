@@ -559,7 +559,6 @@ pub(in crate::app) const MATERIAL_DEFAULT_BOX: Color32 = Color32::from_rgb(224, 
 pub(in crate::app) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
 pub(in crate::app) const MATERIAL_MUTED_TEXT: Color32 = Color32::from_rgb(96, 96, 96);
 pub(in crate::app) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 137);
-pub(in crate::app) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
 
 pub(in crate::app) fn disclosure_triangle_green() -> Color32 {
     Color32::from_rgb(34, 205, 84)
@@ -649,14 +648,6 @@ pub(in crate::app) fn material_input_edge() -> Color32 {
     }
 }
 
-pub(in crate::app) fn material_default_box() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(38, 39, 37)
-    } else {
-        MATERIAL_DEFAULT_BOX
-    }
-}
-
 pub(in crate::app) fn material_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(231, 232, 226)
@@ -665,6 +656,7 @@ pub(in crate::app) fn material_text() -> Color32 {
     }
 }
 
+#[cfg(test)]
 pub(in crate::app) fn material_text_for_bg(bg: Color32) -> Color32 {
     let luminance = 0.2126 * bg.r() as f32 + 0.7152 * bg.g() as f32 + 0.0722 * bg.b() as f32;
     if luminance < 128.0 {
@@ -690,59 +682,11 @@ pub(in crate::app) fn material_function_row() -> Color32 {
     }
 }
 
-pub(in crate::app) fn material_section_header() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(42, 58, 48)
-    } else {
-        MATERIAL_SECTION_HEADER
-    }
-}
-
 pub(in crate::app) fn material_input() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(27, 28, 27)
     } else {
         Color32::WHITE
-    }
-}
-
-pub(in crate::app) fn material_disabled_input() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(36, 37, 35)
-    } else {
-        Color32::from_gray(210)
-    }
-}
-
-pub(in crate::app) fn material_default_input() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(39, 40, 38)
-    } else {
-        Color32::from_gray(232)
-    }
-}
-
-pub(in crate::app) fn material_checkbox_disabled() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(34, 35, 33)
-    } else {
-        Color32::from_gray(220)
-    }
-}
-
-pub(in crate::app) fn material_hover() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(46, 58, 62)
-    } else {
-        Color32::from_rgb(238, 244, 255)
-    }
-}
-
-pub(in crate::app) fn material_pending_input() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(43, 37, 31)
-    } else {
-        Color32::from_rgb(255, 252, 235)
     }
 }
 
