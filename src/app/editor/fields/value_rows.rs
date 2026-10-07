@@ -484,11 +484,23 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
     });
 }
 
-/// The range a value row's slider covers, if it has one: a `sled` real's
-/// from its definition, a `real_slider`'s from the `[min...max]` in its name.
+/// The range a value row's slider covers, if it has one: a `sled` real's or
+/// integer's from its definition, a `real_slider`'s from the `[min...max]`
+/// in its name. An integer's slider steps by whole numbers.
 fn slider_range(meta: &FieldDisplayMeta, value: &TagFieldData) -> Option<SliderRange> {
     match value {
         TagFieldData::Real(_) => meta.slider,
+        TagFieldData::CharInteger(_)
+        | TagFieldData::ShortInteger(_)
+        | TagFieldData::LongInteger(_)
+        | TagFieldData::Int64Integer(_)
+        | TagFieldData::ByteInteger(_)
+        | TagFieldData::WordInteger(_)
+        | TagFieldData::DwordInteger(_)
+        | TagFieldData::QwordInteger(_) => meta.slider.map(|range| SliderRange {
+            step: Some(range.step.unwrap_or(1.0).round().max(1.0)),
+            ..range
+        }),
         TagFieldData::RealSlider(_) => meta
             .slider
             .or_else(|| meta.range.as_deref().and_then(slider_range_from_hint)),
@@ -767,8 +779,21 @@ mod tests {
     /// The edits a light's radius row, drawn as a 0..1 slider stepped by 0.01,
     /// queues on each of `frames`.
     fn slider_row_edits(frames: &[Vec<egui::Event>], editable: bool) -> Vec<Vec<PendingFieldEdit>> {
-        slider_row_frames(frames, editable, false).0
+        slider_row_frames(frames, editable, false, &RADIUS).0
     }
+
+    /// A field drawn as a slider: its definition, path and range.
+    struct SliderCase {
+        definition: &'static str,
+        path: &'static str,
+        range: SliderRange,
+    }
+
+    const RADIUS: SliderCase = SliderCase {
+        definition: "haloce_mcc/light.json",
+        path: "radius",
+        range: SliderRange { min: 0.0, max: 1.0, step: Some(0.01) },
+    };
 
     /// Like [`slider_row_edits`], also returning the last frame's texts; with
     /// `focus_box`, the value box has keyboard focus on every frame.
@@ -776,14 +801,15 @@ mod tests {
         frames: &[Vec<egui::Event>],
         editable: bool,
         focus_box: bool,
+        case: &SliderCase,
     ) -> (Vec<Vec<PendingFieldEdit>>, Vec<String>) {
         let mut texts = Vec::new();
-        let tag = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
+        let tag = TagFile::new(crate::app::test_definition_path(case.definition)).unwrap();
         let ctx = egui::Context::default();
         let mut edits = Vec::new();
         with_test_edit_context(|edit| {
             edit.editable = editable;
-            let box_id = edit.widget_id(("text", &format!("{}|radius", edit.tag_key)));
+            let box_id = edit.widget_id(("text", &format!("{}|{}", edit.tag_key, case.path)));
             for events in frames {
                 if focus_box {
                     ctx.memory_mut(|memory| memory.request_focus(box_id));
@@ -795,13 +821,13 @@ mod tests {
                 };
                 let output = crate::app::run_ui_test(&ctx, input, |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
-                        let field = tag.root().field_path("radius").expect("radius");
-                        let value = field.value().expect("radius value");
+                        let field = tag.root().field_path(case.path).expect("the slider's field");
+                        let value = field.value().expect("the slider's value");
                         let mut meta = field_display_meta(field.name());
-                        meta.slider = Some(SliderRange { min: 0.0, max: 1.0, step: Some(0.01) });
+                        meta.slider = Some(case.range);
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
-                            &TagNameIndex::default(), 0, "radius", edit, None, 300.0,
+                            &TagNameIndex::default(), 0, case.path, edit, None, 300.0,
                         );
                     });
                 });
@@ -864,6 +890,41 @@ mod tests {
         assert!(dragged > value, "dragging right moved the value from {value} to {dragged}");
     }
 
+    /// An integer's slider moves in whole numbers, whatever step its
+    /// definition gives, and commits them as integers.
+    #[test]
+    fn an_integer_slider_commits_whole_numbers() {
+        let case = SliderCase {
+            definition: "haloce_mcc/actor_variant.json",
+            path: "forced shader permutation",
+            range: SliderRange { min: 0.0, max: 256.0, step: Some(0.005) },
+        };
+        let committed = (0..300).map(|step| step as f32 * 3.0).find_map(|x| {
+            let start = x + 10.0;
+            let mut frames = vec![vec![moved(x)], vec![press(x, true)], vec![press(x, false)]];
+            frames.extend([vec![moved(start)], vec![press(start, true)], vec![moved(start + 47.0)]]);
+            frames.push(vec![press(start + 47.0, false)]);
+            let edits = slider_row_frames(&frames, true, false, &case).0;
+            let edits = edits.into_iter().flatten().collect::<Vec<_>>();
+            (edits.len() == 2).then_some(edits)
+        });
+        let committed = committed.expect("no click and drag along the row set the value twice");
+        for edit in &committed {
+            let value: i64 = edit.input.parse().unwrap_or_else(|_| panic!("{:?} is not a whole number", edit.input));
+            assert!((0..=256).contains(&value), "{value}");
+        }
+        assert!(
+            committed[1].input.parse::<i64>().unwrap() > committed[0].input.parse::<i64>().unwrap(),
+            "dragging right moved {} to {}",
+            committed[0].input,
+            committed[1].input
+        );
+        let meta = FieldDisplayMeta { slider: Some(case.range), ..field_display_meta("count") };
+        let step = slider_range(&meta, &TagFieldData::ShortInteger(0)).unwrap().step;
+        assert_eq!(step, Some(1.0));
+        assert_eq!(slider_value_text(12.34, step), "12", "a slider between whole numbers");
+    }
+
     /// A read-only slider row takes no clicks.
     #[test]
     fn a_read_only_slider_sets_nothing() {
@@ -886,7 +947,7 @@ mod tests {
             vec![key(egui::Key::Backspace), key(egui::Key::Backspace), egui::Event::Text("5".to_owned())],
             vec![key(egui::Key::Enter)],
         ];
-        let (edits, texts) = slider_row_frames(&frames, true, true);
+        let (edits, texts) = slider_row_frames(&frames, true, true, &RADIUS);
         let edits = edits.into_iter().flatten().collect::<Vec<_>>();
         assert_eq!(edits.len(), 1, "{:?}", edits.iter().map(|edit| &edit.input).collect::<Vec<_>>());
         assert_eq!(edits[0].input, "5");
