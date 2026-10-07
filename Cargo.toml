@@ -36,7 +36,7 @@ atomic-write-file = "0.3"
 # `GameId`, sampler modes by each game's own lists, Halo 2 block headers kept
 # for any block gaining elements, structure BSP limits from the schema, and
 # a warning-free build.
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "6a4263f", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "442effb", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 # Named because eframe 0.36's `glow` no longer brings them, as 0.29's did:
