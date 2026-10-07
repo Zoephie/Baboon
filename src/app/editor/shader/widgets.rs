@@ -3,6 +3,43 @@
 
 use super::*;
 
+fn draw_shader_section(
+    ui: &mut Ui,
+    title: &str,
+    key: impl std::hash::Hash + std::fmt::Debug,
+    edit: &mut FieldEditContext<'_>,
+    contents: impl FnOnce(&mut Ui, &mut FieldEditContext<'_>),
+) {
+    draw_foundation_clipped_shader_header(
+        ui,
+        title.to_owned(),
+        ("shader_section", edit.view_scope, edit.tag_key, key),
+        |ui| contents(ui, edit),
+    );
+}
+
+/// Horizontal scrolling covers both the column header and vertically scrolling body.
+pub(in crate::app) fn draw_shader_scroll_area(
+    ui: &mut Ui,
+    scope: impl std::hash::Hash + std::fmt::Debug,
+    contents: impl FnOnce(&mut Ui),
+) {
+    let height = ui.available_height().max(0.0);
+    ScrollArea::horizontal()
+        .id_salt(("shader_horizontal", &scope))
+        .max_height(height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
+            draw_shader_columns_header(ui);
+            ScrollArea::vertical()
+                .id_salt(("shader_vertical", &scope))
+                .max_height(ui.available_height().max(0.0))
+                .auto_shrink([false, false])
+                .show(ui, contents);
+        });
+}
+
 pub(in crate::app) fn draw_shader_editor_model(
     ui: &mut Ui,
     model: &ShaderEditorModel,
@@ -11,38 +48,43 @@ pub(in crate::app) fn draw_shader_editor_model(
     edit: &mut FieldEditContext<'_>,
     expert_mode: bool,
 ) {
+    ui.spacing_mut().item_spacing.y = 0.0;
+    ui.set_width(shader_grid_width(ui));
+    for row in &model.top_rows {
+        draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
+    }
     // MATERIAL section only for material-bearing shader types (Guerilla
     // vtable+0x70 gate). Effect-style shaders have no global material type.
     if model.has_material_row && !model.materials.is_empty() {
-        draw_shader_grid_section_header(ui, "MATERIAL");
-        for material in &model.materials {
-            let material_row = ShaderGridRow {
-                label: material.label.clone(),
-                default_cell: Some(ShaderGridCell {
-                    text: "default_material".to_owned(),
-                    value_kind: "default",
-                    color: None,
-                }),
-                value_cell: ShaderGridCell {
-                    text: material.value.clone(),
-                    value_kind: "value",
-                    color: None,
-                },
-                fill: material_data_row(),
-                parameter_type: Some("string id".to_owned()),
-                is_overridden: true,
-                function: None,
-                edit: Some(ShaderRowEdit {
-                    path: material.edit_path.clone(),
-                    current: material.value.clone(),
-                    kind: ShaderRowEditKind::StringId,
-                }),
-                context_menu: None,
-                create_anim_op: None,
-                constant_function_view: None,
-            };
-            draw_shader_grid_row(ui, &material_row, 0, color_popup, function_popup, edit);
-        }
+        draw_shader_section(ui, "MATERIAL", "material", edit, |ui, edit| {
+            for material in &model.materials {
+                let material_row = ShaderGridRow {
+                    label: material.label.clone(),
+                    default_cell: Some(ShaderGridCell {
+                        text: "default_material".to_owned(),
+                        value_kind: "default",
+                        color: None,
+                    }),
+                    value_cell: ShaderGridCell {
+                        text: material.value.clone(),
+                        value_kind: "value",
+                        color: None,
+                    },
+                    parameter_type: Some("string id".to_owned()),
+                    is_overridden: true,
+                    function: None,
+                    edit: Some(ShaderRowEdit {
+                        path: material.edit_path.clone(),
+                        current: material.value.clone(),
+                        kind: ShaderRowEditKind::StringId,
+                    }),
+                    context_menu: None,
+                    create_anim_op: None,
+                    constant_function_view: None,
+                };
+                draw_shader_grid_row(ui, &material_row, 0, color_popup, function_popup, edit);
+            }
+        });
     }
 
     if !model.definition_path.is_empty() {
@@ -54,7 +96,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -81,7 +122,6 @@ pub(in crate::app) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -100,69 +140,139 @@ pub(in crate::app) fn draw_shader_editor_model(
     }
 
     if !model.categories.is_empty() {
-        draw_shader_grid_section_header(ui, "CATEGORIES");
-        for category in &model.categories {
-            draw_shader_category_row(ui, category, edit);
-        }
+        draw_shader_section(ui, "CATEGORIES", "categories", edit, |ui, edit| {
+            for category in &model.categories {
+                draw_shader_category_row(ui, category, edit);
+            }
+        });
     }
 
     for (section_index, section) in model.sections.iter().enumerate() {
-        draw_shader_grid_section_header(ui, &section.title);
-        // Scoped per section: every row's widget ids key off its label, and
-        // labels repeat across sections — every section has a
-        // "selected option" row, and two rmops are free to declare the same
-        // parameter name. Without this scope those rows share egui ids and
-        // their hover/drag state cross-wires (the debug build paints the
-        // "first use of widget ID" clash warning right on the grid).
-        ui.push_id(("shader_section", section_index), |ui| {
-            if !section.option_name.is_empty() {
-                let option_row = ShaderGridRow {
-                    label: "selected option".to_owned(),
-                    default_cell: None,
-                    value_cell: ShaderGridCell {
-                        text: section.option_name.clone(),
-                        value_kind: "value",
-                        color: None,
-                    },
-                    fill: material_data_row(),
-                    parameter_type: Some("option".to_owned()),
-                    is_overridden: true,
-                    function: None,
-                    edit: None,
-                    context_menu: None,
-                    create_anim_op: None,
-                    constant_function_view: None,
-                };
-                draw_shader_grid_row(ui, &option_row, 0, color_popup, function_popup, edit);
-            }
-            for row in &section.rows {
-                draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
-            }
-        });
+        draw_shader_section(
+            ui,
+            &section.title,
+            ("parameters", section_index),
+            edit,
+            |ui, edit| {
+                // Scoped per section: every row's widget ids key off its label, and
+                // labels repeat across sections — every section has a
+                // "selected option" row, and two rmops are free to declare the same
+                // parameter name. Without this scope those rows share egui ids and
+                // their hover/drag state cross-wires (the debug build paints the
+                // "first use of widget ID" clash warning right on the grid).
+                ui.push_id(("shader_section", section_index), |ui| {
+                    if !section.option_name.is_empty() {
+                        let option_row = ShaderGridRow {
+                            label: "selected option".to_owned(),
+                            default_cell: None,
+                            value_cell: ShaderGridCell {
+                                text: section.option_name.clone(),
+                                value_kind: "value",
+                                color: None,
+                            },
+                            parameter_type: Some("option".to_owned()),
+                            is_overridden: true,
+                            function: None,
+                            edit: None,
+                            context_menu: None,
+                            create_anim_op: None,
+                            constant_function_view: None,
+                        };
+                        draw_shader_grid_row(ui, &option_row, 0, color_popup, function_popup, edit);
+                    }
+                    for row in &section.rows {
+                        draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
+                    }
+                    for (parameter_index, parameter) in model
+                        .unused_parameters
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, parameter)| {
+                            parameter.category.as_ref() == Some(&section.title)
+                        })
+                    {
+                        for (row_index, row) in parameter.rows.iter().enumerate() {
+                            ui.push_id(("unused_parameter", parameter_index, row_index), |ui| {
+                                draw_unused_shader_grid_row(
+                                    ui,
+                                    row,
+                                    color_popup,
+                                    function_popup,
+                                    edit,
+                                    &parameter.delete,
+                                );
+                            });
+                        }
+                    }
+                });
+            },
+        );
+    }
+
+    if model
+        .unused_parameters
+        .iter()
+        .any(|parameter| parameter.category.is_none())
+    {
+        draw_shader_section(
+            ui,
+            "UNUSED PARAMETERS",
+            "unused_parameters",
+            edit,
+            |ui, edit| {
+                for (parameter_index, parameter) in model
+                    .unused_parameters
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, parameter)| parameter.category.is_none())
+                {
+                    for (row_index, row) in parameter.rows.iter().enumerate() {
+                        ui.push_id(("unused_parameter", parameter_index, row_index), |ui| {
+                            draw_unused_shader_grid_row(
+                                ui,
+                                row,
+                                color_popup,
+                                function_popup,
+                                edit,
+                                &parameter.delete,
+                            );
+                        });
+                    }
+                }
+            },
+        );
     }
 
     if !model.atmosphere_flags.options.is_empty()
         || !model.custom_fog_setting_index.label.is_empty()
     {
-        draw_shader_grid_section_header(ui, "ATMOSPHERE PROPERTIES");
-        if !model.atmosphere_flags.options.is_empty() {
-            draw_shader_flags_row(ui, &model.atmosphere_flags, edit);
-        }
-        if !model.custom_fog_setting_index.label.is_empty() {
-            draw_shader_grid_row(
-                ui,
-                &model.custom_fog_setting_index,
-                0,
-                color_popup,
-                function_popup,
-                edit,
-            );
-        }
+        draw_shader_section(
+            ui,
+            "ATMOSPHERE PROPERTIES",
+            "atmosphere",
+            edit,
+            |ui, edit| {
+                if !model.atmosphere_flags.options.is_empty() {
+                    draw_shader_flags_row(ui, &model.atmosphere_flags, edit);
+                }
+                if !model.custom_fog_setting_index.label.is_empty() {
+                    draw_shader_grid_row(
+                        ui,
+                        &model.custom_fog_setting_index,
+                        0,
+                        color_popup,
+                        function_popup,
+                        edit,
+                    );
+                }
+            },
+        );
     }
 
     if !model.sort_layer.label.is_empty() {
-        draw_shader_grid_section_header(ui, "SORTING PROPERTIES");
-        draw_shader_grid_row(ui, &model.sort_layer, 0, color_popup, function_popup, edit);
+        draw_shader_section(ui, "SORTING PROPERTIES", "sorting", edit, |ui, edit| {
+            draw_shader_grid_row(ui, &model.sort_layer, 0, color_popup, function_popup, edit);
+        });
     }
 }
 
@@ -171,18 +281,15 @@ pub(in crate::app) fn draw_shader_category_row(
     category: &ShaderEditorCategory,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let available = ui.available_width().max(780.0);
+    let available = shader_grid_width(ui);
     let label_width = shader_label_width(ui);
-    let default_width = 110.0;
-    let value_width = (available - label_width - default_width - 32.0).max(240.0);
-    let height = 25.0;
+    let default_width = shader_default_width(ui);
+    let value_width = (available - label_width - default_width - 26.0).max(240.0);
+    let height = BUTTON_HEIGHT + 8.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    let row_fill = material_data_row();
+    let row_fill = Color32::TRANSPARENT;
     ui.painter().rect_filled(rect, 0.0, row_fill);
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, material_grid_light()),
-    );
+    shader_row_separator(ui, rect);
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0, 0.0),
         Vec2::new(label_width, height),
@@ -192,12 +299,12 @@ pub(in crate::app) fn draw_shader_category_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&category.name, label_width - 12.0),
         FontId::proportional(12.5),
-        material_text_for_bg(row_fill),
+        material_text(),
     );
 
     let default_rect = egui::Rect::from_min_size(
-        label_rect.right_top() + Vec2::new(2.0, 2.0),
-        Vec2::new(default_width, height - 4.0),
+        label_rect.right_top() + Vec2::new(2.0, 4.0),
+        Vec2::new(default_width, height - 8.0),
     );
     let default_text = category
         .options
@@ -220,7 +327,7 @@ pub(in crate::app) fn draw_shader_category_row(
 
     let combo_rect = egui::Rect::from_min_size(
         default_rect.right_top() + Vec2::new(6.0, 0.0),
-        Vec2::new(value_width, height - 4.0),
+        Vec2::new(value_width, height - 8.0),
     );
     let selected_index = category.selected.max(0) as usize;
     let selected_text = category
@@ -229,7 +336,7 @@ pub(in crate::app) fn draw_shader_category_row(
         .cloned()
         .unwrap_or_else(|| "NONE".to_owned());
     let editable = edit.editable && category.edit_path.is_some();
-    ui.scope_builder(egui::UiBuilder::new().max_rect(combo_rect), |ui| {
+    shader_cell_scope(ui, combo_rect, |ui| {
         ui.add_enabled_ui(editable, |ui| {
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
@@ -311,7 +418,6 @@ pub(in crate::app) fn draw_material_template_summary(
             label,
             default_cell: None,
             value_cell: cell,
-            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
@@ -478,25 +584,17 @@ pub(in crate::app) fn shader_grid_row_from_parameter(
             color: None,
         });
 
-    let mut fill = second
-        .as_ref()
-        .or(first.as_ref())
-        .map(|value| value.fill)
-        .unwrap_or(material_data_row());
-
     if function.is_some() {
         if let Some(function) = function.as_ref() {
             value_cell.text = shader_function_grid_text(&function.function);
         }
         value_cell.value_kind = "value";
-        fill = material_function_row();
     }
 
     ShaderGridRow {
         label: label.to_owned(),
         default_cell: default_cell.or_else(|| shader_default_cell(parameter_type.as_deref())),
         value_cell,
-        fill,
         parameter_type,
         is_overridden: true,
         function,
@@ -559,21 +657,18 @@ pub(in crate::app) fn shader_default_cell(parameter_type: Option<&str>) -> Optio
 }
 
 pub(in crate::app) fn draw_shader_grid_section_header(ui: &mut Ui, title: &str) {
-    let available = ui.available_width().max(640.0);
-    let height = 22.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    let header_fill = material_section_header();
-    ui.painter().rect_filled(rect, 0.0, header_fill);
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, material_grid_light()),
-    );
-    ui.painter().text(
-        rect.left_center() + Vec2::new(4.0, 0.0),
-        Align2::LEFT_CENTER,
-        title,
-        FontId::proportional(13.0),
-        material_text_for_bg(header_fill),
+    draw_foundation_collapsing_header(
+        ui,
+        title.to_owned(),
+        ("shader_static_section", title),
+        0,
+        false,
+        None,
+        foundation_block_bar(),
+        FindTargetKind::Block,
+        false,
+        None,
+        |_| {},
     );
 }
 
@@ -582,145 +677,80 @@ pub(in crate::app) fn draw_shader_flags_row(
     row: &ShaderFlagsRow,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let available = ui.available_width().max(780.0);
-    let label_width = 230.0;
-    let default_width = 110.0;
-    let value_width = (available - label_width - default_width - 30.0).max(240.0);
-    let line_height = 17.0;
-    let height = (8.0 + line_height * row.options.len() as f32 + 5.0).max(25.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    let row_fill = material_data_row();
-    let row_text = material_text_for_bg(row_fill);
-    ui.painter().rect_filled(rect, 0.0, row_fill);
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, material_grid_light()),
+    let available = shader_grid_width(ui);
+    let label_width = shader_label_width(ui);
+    let default_width = shader_default_width(ui);
+    let value_width =
+        (available - label_width - default_width - 12.0 - SHADER_ROW_RIGHT_PADDING).max(40.0);
+    let mut measure = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("shader_flags_measure", &row.path))
+            .max_rect(egui::Rect::from_min_size(
+                ui.cursor().min,
+                Vec2::new(value_width - 8.0, 0.0),
+            ))
+            .layout(egui::Layout::top_down(egui::Align::Min))
+            .invisible(),
     );
-
+    measure.spacing_mut().item_spacing.y = 0.0;
+    for option in &row.options {
+        measure.checkbox(&mut false, option.label);
+    }
+    let height = (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0, 0.0),
         Vec2::new(label_width, height),
     );
     ui.painter().text(
-        label_rect.right_center() - Vec2::new(6.0, 0.0),
-        Align2::RIGHT_CENTER,
+        label_rect.right_top() + Vec2::new(-6.0, shader_label_top_padding(ui)),
+        Align2::RIGHT_TOP,
         truncate_for_cell(&row.label, label_width - 12.0),
         FontId::proportional(12.5),
-        row_text,
+        material_text(),
     );
-
     let default_rect = egui::Rect::from_min_size(
-        label_rect.right_top() + Vec2::new(2.0, 2.0),
-        Vec2::new(default_width, height - 4.0),
+        label_rect.right_top() + Vec2::new(2.0, 4.0),
+        Vec2::new(default_width, height - 8.0),
     );
-    ui.painter()
-        .rect_filled(default_rect, 0.0, material_default_input());
-    ui.painter()
-        .rect_stroke(
-            default_rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-
-    let value_rect = egui::Rect::from_min_size(
+    draw_shader_grid_cell(ui, default_rect, None, "default:flags", &mut None);
+    let value_rect = egui::Rect::from_min_max(
         default_rect.right_top() + Vec2::new(6.0, 0.0),
-        Vec2::new(value_width, height - 4.0),
+        egui::pos2(
+            rect.right() - SHADER_ROW_RIGHT_PADDING,
+            default_rect.bottom(),
+        ),
     );
-    ui.painter().rect_filled(value_rect, 0.0, material_input());
-    ui.painter()
-        .rect_stroke(
-            value_rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-
+    shader_input_box(ui, value_rect);
     let enabled = edit.editable && !row.path.is_empty();
-    for (index, option) in row.options.iter().enumerate() {
-        let row_rect = egui::Rect::from_min_size(
-            value_rect.left_top() + Vec2::new(8.0, 4.0 + index as f32 * line_height),
-            Vec2::new(value_rect.width() - 16.0, line_height),
-        );
-        let checkbox_rect =
-            egui::Rect::from_min_size(row_rect.left_top() + Vec2::new(0.0, 2.0), Vec2::splat(13.0));
-        let id = ui.make_persistent_id((
-            edit.view_scope,
-            edit.tag_key,
-            &row.path,
-            "shader_flag",
-            option.bit,
-        ));
-        let response = ui
-            .interact(
-                row_rect,
-                id,
-                if enabled {
-                    Sense::click()
-                } else {
-                    Sense::hover()
-                },
-            )
-            .on_hover_text(option.label);
-        if response.hovered() {
-            ui.painter().rect_filled(row_rect, 0.0, material_hover());
-        }
-
-        let is_set = row.raw & (1u64 << option.bit) != 0;
-        ui.painter().rect_filled(
-            checkbox_rect,
-            0.0,
-            if enabled {
-                material_input()
-            } else {
-                material_checkbox_disabled()
-            },
-        );
-        ui.painter()
-            .rect_stroke(
-                checkbox_rect,
-                0.0,
-                Stroke::new(1.0_f32, material_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-        if is_set {
-            let stroke = Stroke::new(1.6_f32, material_text());
-            ui.painter().line_segment(
-                [
-                    checkbox_rect.left_center() + Vec2::new(3.0, 0.0),
-                    checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                ],
-                stroke,
-            );
-            ui.painter().line_segment(
-                [
-                    checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                    checkbox_rect.right_center() + Vec2::new(-2.0, -4.0),
-                ],
-                stroke,
-            );
-        }
-        ui.painter().text(
-            row_rect.left_center() + Vec2::new(20.0, 0.0),
-            Align2::LEFT_CENTER,
-            option.label,
-            FontId::proportional(12.0),
-            row_text,
-        );
-
-        if response.clicked() {
-            let mut next_mask = row.raw;
-            if is_set {
-                next_mask &= !(1u64 << option.bit);
-            } else {
-                next_mask |= 1u64 << option.bit;
+    shader_cell_scope(ui, value_rect.shrink(4.0), |ui| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for option in &row.options {
+                let mut checked = row.raw & (1u64 << option.bit) != 0;
+                let response = ui
+                    .push_id(
+                        (edit.view_scope, edit.tag_key, &row.path, option.bit),
+                        |ui| {
+                            ui.add_enabled(enabled, egui::Checkbox::new(&mut checked, option.label))
+                        },
+                    )
+                    .inner;
+                if response.changed() {
+                    let next_mask = if checked {
+                        row.raw | (1u64 << option.bit)
+                    } else {
+                        row.raw & !(1u64 << option.bit)
+                    };
+                    edit.pending.push(PendingFieldEdit {
+                        path: row.path.clone(),
+                        input: next_mask.to_string(),
+                    });
+                }
             }
-            edit.pending.push(PendingFieldEdit {
-                path: row.path.clone(),
-                input: next_mask.to_string(),
-            });
-        }
-    }
+        });
+    });
+    shader_row_separator(ui, rect);
 }
 
 /// Accent painted on the left edge of a shader row whose value differs from the
@@ -732,37 +762,58 @@ pub(in crate::app) fn draw_shader_grid_cell(
     id_source: &str,
     color_popup: &mut Option<MaterialColorPopup>,
 ) {
-    let (fill, text_color) = match cell.map(|cell| cell.value_kind) {
-        Some("default") | None => {
-            let fill = material_default_box();
-            (fill, material_text_for_bg(fill))
-        }
-        _ => {
-            let fill = material_input();
-            (fill, material_text_for_bg(fill))
-        }
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
+    draw_shader_grid_cell_with_icon(ui, rect, cell, id_source, color_popup, None, None);
+}
+
+pub(super) fn shader_tag_icon_rect(rect: egui::Rect) -> egui::Rect {
+    egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 11.0, rect.top() + BUTTON_HEIGHT / 2.0),
+        Vec2::splat(16.0),
+    )
+}
+
+pub(super) fn draw_shader_grid_cell_with_icon(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    cell: Option<&ShaderGridCell>,
+    id_source: &str,
+    color_popup: &mut Option<MaterialColorPopup>,
+    icon_group: Option<u32>,
+    game: Option<GameId>,
+) {
+    let mut cell_ui = ui.new_child(egui::UiBuilder::new().id_salt(id_source).max_rect(rect));
+    if id_source.starts_with("default:") || id_source.starts_with("category_default:") {
+        cell_ui.multiply_opacity(0.5);
+    }
+    let ui = &mut cell_ui;
+    let fill = material_input();
+    let text_color = material_text();
+    let visuals = &ui.visuals().widgets.inactive;
+    ui.painter().rect_filled(rect, visuals.corner_radius, fill);
+    ui.painter().rect_stroke(
+        rect,
+        visuals.corner_radius,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    if icon_group.is_some() {
+        paint_tag_icon_at(ui, icon_group, game, shader_tag_icon_rect(rect));
+    }
 
     let Some(cell) = cell else {
         return;
     };
 
-    let text_left = rect.left_center() + Vec2::new(5.0, 0.0);
+    let mut text_left =
+        rect.left_center() + Vec2::new(if icon_group.is_some() { 23.0 } else { 5.0 }, 0.0);
+    if rect.height() > BUTTON_HEIGHT {
+        text_left.y = rect.top() + BUTTON_HEIGHT / 2.0;
+    }
     if let Some(color) = cell.color.as_ref() {
-        let swatch_size = (rect.height() - 5.0).max(12.0);
-        let swatch_rect = egui::Rect::from_min_size(
-            rect.right_top() - Vec2::new(swatch_size + 4.0, -2.5),
-            Vec2::splat(swatch_size),
-        );
-        draw_shader_color_swatch(ui, swatch_rect, color.color32());
+        let swatch_rect = shader_color_swatch_rect(rect);
+        text_left.x = swatch_rect.right() + 5.0;
+        draw_shader_color_swatch(ui, rect, color.color32());
         let swatch_response = ui
             .interact(
                 swatch_rect,
@@ -775,11 +826,23 @@ pub(in crate::app) fn draw_shader_grid_cell(
         }
     }
 
+    let shown = truncate_for_cell(
+        shader_reference_name(&cell.text),
+        rect.right() - text_left.x - 5.0,
+    );
+    if shown != cell.text {
+        ui.interact(
+            rect,
+            ui.make_persistent_id(("shader_cell_tooltip", id_source)),
+            Sense::hover(),
+        )
+        .on_hover_text(&cell.text);
+    }
     ui.painter().text(
         text_left,
         Align2::LEFT_CENTER,
-        truncate_for_cell(&cell.text, rect.width() - 12.0),
-        FontId::monospace(12.0),
+        shown,
+        egui::TextStyle::Body.resolve(ui.style()),
         text_color,
     );
 }
@@ -894,7 +957,6 @@ pub(in crate::app) fn material_parameter_values(
         values.push(MaterialParameterValue {
             label: field.name().to_owned(),
             value: formatted,
-            fill: material_row_tint(&value),
             value_kind: material_value_kind(&value),
             color,
             priority: material_parameter_value_priority(&key),
@@ -930,4 +992,168 @@ pub(in crate::app) fn find_first_function(tag_struct: TagStruct<'_>) -> Option<F
         }
     }
     None
+}
+
+#[cfg(test)]
+mod shader_section_tests {
+    use super::*;
+    use crate::app::editor::fields::with_test_edit_context;
+
+    #[test]
+    fn shader_section_clips_the_last_row_accent_and_suppresses_duplicate_bottom_border() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        egui_extras::install_image_loaders(&ctx);
+        let body = std::cell::Cell::new(egui::Rect::NOTHING);
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_shader_section(ui, "TEXTURE", "clip_test", edit, |ui, _| {
+                    let (rect, _) = ui
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
+                    body.set(rect);
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(rect.min, Vec2::new(3.0, 32.0)),
+                        0.0,
+                        Color32::from_rgb(224, 158, 62),
+                    );
+                    shader_row_separator(ui, rect);
+                });
+            });
+        });
+        let accent = output
+            .shapes
+            .iter()
+            .find_map(|paint| match &paint.shape {
+                egui::Shape::Path(path) if path.fill == Color32::from_rgb(224, 158, 62) => {
+                    Some((paint, path))
+                }
+                _ => None,
+            })
+            .expect("the accent is clipped to a polygon at the rounded corner");
+        let center = body.get().left_bottom() + Vec2::new(5.0, -5.0);
+        for point in &accent.1.points {
+            assert!(accent.0.clip_rect.contains(*point));
+            if point.x < center.x && point.y > center.y {
+                assert!(
+                    point.distance_sq(center) <= 16.01,
+                    "accent must stay inside the rounded corner"
+                );
+            }
+        }
+        assert!(!output.shapes.iter().any(|paint| matches!(&paint.shape,
+            egui::Shape::LineSegment { points, .. } if points.iter().all(|point| (point.y - body.get().bottom() + 0.5).abs() < 0.1))),
+            "the container footer replaces the last row separator");
+    }
+
+    #[test]
+    fn shader_column_header_stays_fixed_while_the_body_scrolls() {
+        let ctx = egui::Context::default();
+        let body_y = std::cell::Cell::new(0.0);
+        let frame = |events: Vec<egui::Event>| {
+            let output = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200.0, 260.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_shader_scroll_area(ui, "sticky_test", |ui| {
+                            body_y.set(ui.cursor().min.y);
+                            for index in 0..40 {
+                                ui.label(format!("row {index}"));
+                            }
+                        });
+                    });
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "field" => Some(text.pos.y),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let header_y = frame(Vec::new());
+        let initial_body_y = body_y.get();
+        frame(vec![egui::Event::PointerMoved(egui::pos2(300.0, 120.0))]);
+        frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, -160.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+        for _ in 0..8 {
+            assert_eq!(frame(Vec::new()), header_y);
+        }
+        assert!(
+            body_y.get() < initial_body_y - 1.0,
+            "only the body should move vertically"
+        );
+    }
+
+    #[test]
+    fn shader_section_toggle_keeps_other_tags_open() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        egui_extras::install_image_loaders(&ctx);
+        let point = std::cell::Cell::new(egui::Pos2::ZERO);
+        let visible = std::cell::Cell::new(false);
+        let frame = |events: Vec<egui::Event>, tag: &'static str| {
+            visible.set(false);
+            let _ = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    point.set(ui.cursor().min + Vec2::new(20.0, 28.0));
+                    with_test_edit_context(|edit| {
+                        edit.tag_key = tag;
+                        draw_shader_section(ui, "TEXTURE", "texture", edit, |ui, _| {
+                            visible.set(true);
+                            ui.label("base_map");
+                        });
+                    });
+                },
+            );
+        };
+        frame(Vec::new(), "shader-a");
+        assert!(visible.get());
+        let pos = point.get();
+        frame(
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            "shader-a",
+        );
+        frame(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            "shader-a",
+        );
+        frame(Vec::new(), "shader-a");
+        assert!(!visible.get());
+        frame(Vec::new(), "shader-b");
+        assert!(visible.get());
+        frame(Vec::new(), "shader-a");
+        assert!(!visible.get());
+    }
 }

@@ -32,7 +32,9 @@ fn shader_draft_commit(
     buffer_key: &str,
     ops: impl Fn(&str) -> Result<DeferredOps, String> + 'static,
 ) -> DraftCommit {
-    DraftCommit::new(tag_key, vec![buffer_key.to_owned()], move |texts| ops(texts[0]))
+    DraftCommit::new(tag_key, vec![buffer_key.to_owned()], move |texts| {
+        ops(texts[0])
+    })
 }
 
 /// Whether an explicitly overridden row's value differs from its default.
@@ -44,6 +46,14 @@ pub(in crate::app) fn row_differs_from_default(row: &ShaderGridRow) -> bool {
     };
     if !row.is_overridden {
         return false;
+    }
+    if row
+        .function
+        .as_ref()
+        .or(row.constant_function_view.as_ref())
+        .is_some_and(|view| TagFunctionEditor::from_function(view.function.clone()).is_ranged())
+    {
+        return true;
     }
     match (row.value_cell.color.as_ref(), default.color.as_ref()) {
         (Some(value), Some(default)) => value.sc_hex != default.sc_hex,
@@ -73,6 +83,133 @@ pub(super) fn reset_op_for_row(row: &ShaderGridRow) -> Option<BlockOp> {
         return None;
     }
     shader_parameter_delete_op_from_field_path(&row_edit.path)
+}
+
+pub(in crate::app) enum ShaderFunctionReset {
+    Field(PendingFieldEdit),
+    Halo2(H2ShaderParamOp),
+    Create(ShaderContextAction),
+}
+
+/// Reset function backing in place with the encoding required by its engine.
+pub(in crate::app) fn shader_function_default_edit(
+    row: &ShaderGridRow,
+) -> Option<ShaderFunctionReset> {
+    if let Some(ShaderRowEdit {
+        kind: ShaderRowEditKind::CreateFunctionScalar { target },
+        ..
+    }) = row.edit.as_ref()
+    {
+        let value = row
+            .default_cell
+            .as_ref()?
+            .text
+            .rsplit(": ")
+            .next()?
+            .trim()
+            .parse::<f32>()
+            .ok()?;
+        return Some(ShaderFunctionReset::Create(shader_function_action(
+            target,
+            constant_function_hex(value),
+        )));
+    }
+    let storage = match row.edit.as_ref().map(|edit| &edit.kind) {
+        Some(
+            ShaderRowEditKind::FunctionScalar {
+                block_path,
+                block_index,
+            }
+            | ShaderRowEditKind::FunctionColor {
+                block_path,
+                block_index,
+            },
+        ) => FunctionDataStorage::DataField(format!("{block_path}[{block_index}]/function/data")),
+        Some(
+            ShaderRowEditKind::H2FunctionScalar { block_path, .. }
+            | ShaderRowEditKind::H2FunctionColor { block_path, .. },
+        ) => FunctionDataStorage::Halo2ByteBlock(block_path.clone()),
+        _ => row
+            .function
+            .as_ref()
+            .or(row.constant_function_view.as_ref())?
+            .edit
+            .as_ref()?
+            .data
+            .clone(),
+    };
+    let default = row.default_cell.as_ref()?;
+    let color = default.color.as_ref().map(|color| {
+        let rgba = color.color32();
+        [
+            byte_to_float(rgba.r()),
+            byte_to_float(rgba.g()),
+            byte_to_float(rgba.b()),
+            byte_to_float(rgba.a()),
+        ]
+    });
+    let value = if color.is_none() {
+        Some(
+            default
+                .text
+                .rsplit(": ")
+                .next()?
+                .trim()
+                .parse::<f32>()
+                .ok()?,
+        )
+    } else {
+        None
+    };
+    match storage {
+        FunctionDataStorage::DataField(path) => {
+            let input = if let Some([r, g, b, a]) = color {
+                constant_color_function_hex(r, g, b, a)
+            } else {
+                constant_function_hex(value?)
+            };
+            Some(ShaderFunctionReset::Field(PendingFieldEdit { path, input }))
+        }
+        FunctionDataStorage::Halo2ByteBlock(block_path) => {
+            let data = if let Some([r, g, b, a]) = color {
+                h2_constant_color_function_data(r, g, b, a, None)
+            } else {
+                h2_constant_scalar_function_data(value?, None)
+            };
+            Some(ShaderFunctionReset::Halo2(
+                H2ShaderParamOp::EditFunctionData { block_path, data },
+            ))
+        }
+    }
+}
+
+pub(super) const SHADER_ROW_RIGHT_PADDING: f32 = 14.0;
+
+pub(super) fn shader_label_top_padding(ui: &Ui) -> f32 {
+    let font = FontId::proportional(12.5);
+    let height = ui
+        .painter()
+        .layout_no_wrap("flags".to_owned(), font, material_text())
+        .size()
+        .y;
+    (BUTTON_HEIGHT + 8.0 - height) / 2.0
+}
+
+fn shader_reference_group(row: &ShaderGridRow) -> Option<u32> {
+    match row.edit.as_ref().map(|edit| &edit.kind) {
+        Some(
+            ShaderRowEditKind::BitmapRef { group_tag, .. }
+            | ShaderRowEditKind::StructuralRef { group_tag, .. },
+        ) => Some(*group_tag),
+        Some(ShaderRowEditKind::ShaderTemplateRef) => Some(u32::from_be_bytes(*b"stem")),
+        _ => match row.value_cell.text.rsplit('.').next()? {
+            "bitmap" => Some(u32::from_be_bytes(*b"bitm")),
+            "render_method_template" => Some(u32::from_be_bytes(*b"rmt2")),
+            "render_method_definition" => Some(u32::from_be_bytes(*b"rmdf")),
+            "shader_template" => Some(u32::from_be_bytes(*b"stem")),
+            _ => None,
+        },
+    }
 }
 
 fn shader_parameter_delete_op_from_field_path(path: &str) -> Option<BlockOp> {
@@ -230,7 +367,198 @@ fn shader_label_width_id() -> egui::Id {
 pub(super) fn shader_label_width(ui: &Ui) -> f32 {
     ui.data(|d| d.get_temp::<f32>(shader_label_width_id()))
         .unwrap_or(230.0)
-        .clamp(120.0, 460.0)
+        .clamp(120.0, 600.0)
+}
+
+pub(super) fn shader_default_width(ui: &Ui) -> f32 {
+    ui.data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_default_width")))
+        .unwrap_or(150.0)
+        .clamp(60.0, 600.0)
+}
+
+pub(super) fn shader_grid_width(ui: &Ui) -> f32 {
+    ui.data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_value_width")))
+        .map(|value| shader_label_width(ui) + shader_default_width(ui) + value + 16.0)
+        .unwrap_or_else(|| ui.available_width().max(780.0))
+}
+
+pub(super) fn draw_shader_columns_header(ui: &mut Ui) {
+    let label = shader_label_width(ui);
+    let default = shader_default_width(ui);
+    let width = shader_grid_width(ui);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::hover());
+    ui.painter().rect_filled(rect, 4.0, foundation_block_bar());
+    ui.painter().rect_stroke(
+        rect,
+        4.0,
+        Stroke::new(1.0, foundation_block_edge()),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.left_center() + Vec2::new(label - 2.0, 0.0),
+        Align2::RIGHT_CENTER,
+        "field",
+        FontId::proportional(12.0),
+        material_muted_text(),
+    );
+    for (x, text) in [
+        (label + 12.0, "default value"),
+        (label + default + 16.0, "override value"),
+    ] {
+        ui.painter().text(
+            rect.left_center() + Vec2::new(x, 0.0),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(12.0),
+            material_muted_text(),
+        );
+    }
+    for (name, x, current, min, max) in [
+        ("shader_grid_label_width", label + 5.0, label, 120.0, 600.0),
+        (
+            "shader_grid_default_width",
+            label + default + 9.0,
+            default,
+            60.0,
+            600.0,
+        ),
+        (
+            "shader_grid_value_width",
+            width - 1.0,
+            width - label - default - 16.0,
+            240.0,
+            2400.0,
+        ),
+    ] {
+        let x = rect.left() + x;
+        let handle = egui::Rect::from_center_size(
+            egui::pos2(x, rect.center().y),
+            Vec2::new(8.0, rect.height()),
+        );
+        let response = ui
+            .interact(
+                handle,
+                ui.make_persistent_id(("shader_column_resize", name)),
+                Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        ui.painter()
+            .vline(x, rect.y_range(), Stroke::new(1.0, foundation_block_edge()));
+        let start_id = egui::Id::new(("shader_column_drag_start", name));
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(start_id, current));
+        }
+        if response.dragged() {
+            let start = ui.data(|d| d.get_temp::<f32>(start_id)).unwrap_or(current);
+            let next = (start + response.total_drag_delta().unwrap_or_default().x).clamp(min, max);
+            ui.data_mut(|d| d.insert_temp(egui::Id::new(name), next));
+        }
+        if response.double_clicked() {
+            ui.data_mut(|d| d.remove::<f32>(egui::Id::new(name)));
+        }
+    }
+}
+
+pub(super) fn shader_input_box(ui: &mut Ui, rect: egui::Rect) {
+    let visuals = &ui.visuals().widgets.inactive;
+    ui.painter()
+        .rect_filled(rect, visuals.corner_radius, material_input());
+    ui.painter().rect_stroke(
+        rect,
+        visuals.corner_radius,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+}
+
+pub(super) fn shader_cell_scope<R>(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let inner = contents(&mut child);
+    egui::InnerResponse {
+        inner,
+        response: child.response(),
+    }
+}
+
+pub(super) fn shader_row_separator(ui: &Ui, rect: egui::Rect) {
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, foundation_block_edge()),
+    );
+}
+
+pub(super) fn shader_reference_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// Native buttons in shader cells share the app's theme, hover, and focus styles.
+fn shader_action_button(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    icon: ButtonIcon,
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
+    let mut child = ui.new_child(egui::UiBuilder::new().id_salt(id).max_rect(rect));
+    child.spacing_mut().interact_size.y = BUTTON_HEIGHT;
+    let color = if icon == ButtonIcon::Clear {
+        material_delete_text()
+    } else {
+        text_dark()
+    };
+    let response = child
+        .add_enabled_ui(enabled, |ui| {
+            let size = if label.is_empty() {
+                ICON_BUTTON_SIZE
+            } else {
+                rect.size()
+            };
+            let response = ui.add(egui::Button::new("").min_size(size));
+            let icon_center = if label.is_empty() {
+                response.rect.center()
+            } else {
+                egui::pos2(
+                    response.rect.left() + BUTTON_TEXT_PADDING_X + BUTTON_ICON_SIZE / 2.0,
+                    response.rect.center().y,
+                )
+            };
+            let icon_rect =
+                egui::Rect::from_center_size(icon_center, Vec2::splat(BUTTON_ICON_SIZE));
+            paint_button_icon_at(ui, icon, icon_rect, color);
+            if !label.is_empty() {
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+                });
+                ui.painter().text(
+                    egui::pos2(
+                        icon_rect.right() + BUTTON_ICON_TEXT_GAP,
+                        response.rect.center().y,
+                    ),
+                    Align2::LEFT_CENTER,
+                    label,
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    color,
+                );
+            }
+            response
+        })
+        .inner;
+    #[cfg(test)]
+    if icon == ButtonIcon::Clear {
+        ui.data_mut(|d| {
+            let rects = d.get_temp_mut_or_default::<Vec<egui::Rect>>(egui::Id::new(
+                "shader_clear_test_rects",
+            ));
+            rects.push(response.rect);
+        });
+    }
+    response
 }
 
 /// Select the whole value when a numeric text field is double-clicked.
@@ -264,29 +592,152 @@ pub(in crate::app) fn draw_shader_grid_row(
     function_popup: &mut Option<FunctionPopup>,
     edit: &mut FieldEditContext<'_>,
 ) {
+    draw_shader_grid_row_inner(ui, row, depth, color_popup, function_popup, edit, None);
+}
+
+pub(super) fn draw_unused_shader_grid_row(
+    ui: &mut Ui,
+    row: &ShaderGridRow,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    edit: &mut FieldEditContext<'_>,
+    delete: &BlockOp,
+) {
+    draw_shader_grid_row_inner(ui, row, 0, color_popup, function_popup, edit, Some(delete));
+}
+
+fn draw_shader_grid_row_inner(
+    ui: &mut Ui,
+    row: &ShaderGridRow,
+    depth: usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    function_popup: &mut Option<FunctionPopup>,
+    edit: &mut FieldEditContext<'_>,
+    unused_delete: Option<&BlockOp>,
+) {
     let tag_key = edit.tag_key;
     let editable = edit.editable;
-    let available = ui.available_width().max(780.0);
+    let available = shader_grid_width(ui);
     let indent = depth as f32 * 10.0;
     let base_label_width = shader_label_width(ui);
     let label_width = (base_label_width - indent).max(110.0);
-    let default_width = 110.0;
-    let has_h2_range = h2_range_control_for_row(row).is_some();
-    let right_controls_width = shader_right_controls_width(row, has_h2_range);
-    let height = shader_grid_row_height(row);
+    let default_width = shader_default_width(ui);
+    let show_override = editable
+        && !row.is_overridden
+        && row.edit.as_ref().is_some_and(|row_edit| {
+            matches!(
+                row_edit.kind,
+                ShaderRowEditKind::BitmapRef {
+                    create: Some(_),
+                    ..
+                } | ShaderRowEditKind::Bool { create: Some(_) }
+                    | ShaderRowEditKind::CreateScalarParam { .. }
+                    | ShaderRowEditKind::CreateFunctionColor { .. }
+                    | ShaderRowEditKind::CreateFunctionScalar { .. }
+                    | ShaderRowEditKind::H2CreateFunctionScalar { .. }
+                    | ShaderRowEditKind::H2CreateFunctionColor { .. }
+                    | ShaderRowEditKind::H2CreateTemplateValue { .. }
+                    | ShaderRowEditKind::H2CreateTemplateColor { .. }
+            )
+        });
+    let range_control = shader_range_control(row);
+    let create_function = row.create_anim_op.clone().or_else(|| {
+        let row_edit = row.edit.as_ref()?;
+        match &row_edit.kind {
+            ShaderRowEditKind::CreateFunctionScalar { target } => Some(shader_function_action(
+                target,
+                constant_function_hex(row_edit.current.parse::<f32>().ok()?),
+            )),
+            ShaderRowEditKind::CreateFunctionColor { target } => {
+                let [r, g, b, a] = parse_shader_rgba(&row_edit.current)?;
+                Some(shader_function_action(
+                    target,
+                    constant_color_function_hex(r, g, b, a),
+                ))
+            }
+            _ => None,
+        }
+    });
+    let function_capable = row.function.is_some()
+        || row.constant_function_view.is_some()
+        || range_control.is_some()
+        || row.create_anim_op.is_some()
+        || row.edit.as_ref().is_some_and(|edit| {
+            matches!(
+                edit.kind,
+                ShaderRowEditKind::CreateFunctionScalar { .. }
+                    | ShaderRowEditKind::CreateFunctionColor { .. }
+                    | ShaderRowEditKind::H2CreateFunctionScalar { .. }
+                    | ShaderRowEditKind::H2CreateFunctionColor { .. }
+            )
+        });
+    let has_range_input = !show_override && function_capable;
+    let ranged = !show_override
+        && range_control.as_ref().is_some_and(|control| {
+            control.function.color_graph_type() == ColorGraphType::Scalar
+                && TagFunctionEditor::from_function(control.function.clone()).is_ranged()
+        });
+    let function_reset = (editable && unused_delete.is_none())
+        .then(|| shader_function_default_edit(row))
+        .flatten();
+    let reset = (editable && function_reset.is_none())
+        .then(|| unused_delete.cloned().or_else(|| reset_op_for_row(row)))
+        .flatten();
+    let has_clear = !show_override && (function_reset.is_some() || reset.is_some());
+    let right_controls_width = if show_override {
+        SHADER_ROW_RIGHT_PADDING
+    } else if function_capable {
+        // Keep value and range columns aligned even before function backing
+        // exists, or when this row has no Clear action yet.
+        SHADER_ROW_RIGHT_PADDING + BUTTON_HEIGHT * 2.0 + 4.0
+    } else {
+        shader_right_controls_width(row, false, has_clear)
+    };
+    let value_width =
+        (available - label_width - indent - default_width - 16.0 - right_controls_width).max(40.0);
+    let height = if ranged {
+        64.0
+    } else {
+        shader_grid_row_height(ui, row, value_width)
+    };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available, height), Sense::click());
-    let row_text = material_text_for_bg(row.fill);
-    ui.painter().rect_filled(rect, 0.0, row.fill);
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, material_grid_light()),
-    );
+    let nonconstant_function = row
+        .function
+        .as_ref()
+        .or(row.constant_function_view.as_ref())
+        .is_some_and(|view| view.function.function_type() != FunctionType::Constant);
+    let bitmap = matches!(
+        row.parameter_type.as_deref(),
+        Some("bitmap" | "tag reference")
+    ) || row.edit.as_ref().is_some_and(|edit| {
+        matches!(
+            edit.kind,
+            ShaderRowEditKind::BitmapRef { .. }
+                | ShaderRowEditKind::ShaderTemplateRef
+                | ShaderRowEditKind::StructuralRef { .. }
+        )
+    });
+    let fill = if nonconstant_function {
+        // Rows are cached across theme changes. Resolve semantic colors when
+        // painting instead of keeping the color from model construction.
+        material_function_row()
+    } else if bitmap {
+        material_ref_row()
+    } else {
+        Color32::TRANSPARENT
+    };
+    let row_text = material_text();
+    ui.painter().rect_filled(rect, 0.0, fill);
     let modified = row_differs_from_default(row);
-    if modified {
+    if modified || unused_delete.is_some() {
         ui.painter().rect_filled(
             egui::Rect::from_min_size(rect.left_top(), Vec2::new(3.0, height)),
             0.0,
-            SHADER_MODIFIED_ACCENT,
+            if unused_delete.is_some() {
+                material_delete_text()
+            } else {
+                SHADER_MODIFIED_ACCENT
+            },
         );
     }
 
@@ -294,19 +745,60 @@ pub(in crate::app) fn draw_shader_grid_row(
         rect.left_top() + Vec2::new(4.0 + indent, 0.0),
         Vec2::new(label_width, height),
     );
+    if function_capable && !nonconstant_function {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top() + Vec2::new(3.0, 0.0),
+                label_rect.right_bottom(),
+            ),
+            0.0,
+            material_function_row(),
+        );
+    }
+    let flags_row = row
+        .edit
+        .as_ref()
+        .is_some_and(|edit| matches!(edit.kind, ShaderRowEditKind::Flags(_)));
+    let (label_position, label_alignment) = if ranged {
+        (
+            label_rect.right_top() + Vec2::new(-6.0, 16.0),
+            Align2::RIGHT_CENTER,
+        )
+    } else if flags_row {
+        (
+            label_rect.right_top() + Vec2::new(-6.0, shader_label_top_padding(ui)),
+            Align2::RIGHT_TOP,
+        )
+    } else {
+        (
+            label_rect.right_center() - Vec2::new(6.0, 0.0),
+            Align2::RIGHT_CENTER,
+        )
+    };
     ui.painter().text(
-        label_rect.right_center() - Vec2::new(6.0, 0.0),
-        Align2::RIGHT_CENTER,
+        label_position,
+        label_alignment,
         truncate_for_cell(&row.label, label_width - 12.0),
         FontId::proportional(12.5),
-        row_text,
+        if unused_delete.is_some() {
+            material_delete_text()
+        } else {
+            row_text
+        },
     );
     // Per-parameter "help": hovering the label shows the full (untruncated) name
     // plus its parameter type — rmop parameters carry no description text.
-    if !row.label.is_empty() {
-        let hover = match row.parameter_type.as_deref() {
-            Some(parameter_type) => format!("{}\n{}", row.label, parameter_type),
-            None => row.label.clone(),
+    if unused_delete.is_some() || truncate_for_cell(&row.label, label_width - 12.0) != row.label {
+        let hover = if unused_delete.is_some() {
+            format!(
+                "{}\nUnused in the current shader template. Clear removes this saved parameter and its functions.",
+                row.label
+            )
+        } else {
+            match row.parameter_type.as_deref() {
+                Some(parameter_type) => format!("{}\n{}", row.label, parameter_type),
+                None => row.label.clone(),
+            }
         };
         ui.interact(
             label_rect,
@@ -334,67 +826,83 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
     }
     if split_resp.dragged() {
-        let new_width = (base_label_width + split_resp.drag_delta().x).clamp(120.0, 460.0);
+        let new_width = (base_label_width + split_resp.drag_delta().x).clamp(120.0, 600.0);
         ui.data_mut(|d| d.insert_temp(shader_label_width_id(), new_width));
     }
 
     let default_rect = egui::Rect::from_min_size(
-        label_rect.right_top() + Vec2::new(2.0, 2.0),
-        Vec2::new(default_width, height - 4.0),
+        label_rect.right_top() + Vec2::new(2.0, 4.0),
+        Vec2::new(default_width, height - 8.0),
     );
-    draw_shader_grid_cell(
-        ui,
-        default_rect,
-        row.default_cell.as_ref(),
-        &format!("default:{}", row.label),
-        color_popup,
-    );
+    if let Some(ShaderRowEdit {
+        kind: ShaderRowEditKind::Flags(options),
+        ..
+    }) = row.edit.as_ref()
+    {
+        let mask = row
+            .default_cell
+            .as_ref()
+            .and_then(|cell| cell.text.parse::<u64>().ok())
+            .unwrap_or(0);
+        let mut defaults = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("shader_default_flags", &row.label))
+                .max_rect(default_rect),
+        );
+        defaults.multiply_opacity(0.5);
+        defaults.visuals_mut().disabled_alpha = 1.0;
+        shader_input_box(&mut defaults, default_rect);
+        shader_cell_scope(&mut defaults, default_rect.shrink(4.0), |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (bit, option) in options.iter().enumerate() {
+                let mut checked = mask & (1 << bit) != 0;
+                ui.add_enabled(false, egui::Checkbox::new(&mut checked, option));
+            }
+        });
+    } else {
+        draw_shader_grid_cell_with_icon(
+            ui,
+            default_rect,
+            row.default_cell.as_ref(),
+            &format!("default:{}", row.label),
+            color_popup,
+            shader_reference_group(row),
+            edit.game,
+        );
+    }
 
     let value_left = default_rect.right() + 6.0;
     let controls_left = rect.right() - right_controls_width;
-    let value_right = (controls_left - 4.0).max(value_left + 40.0);
-    let mut value_rect = egui::Rect::from_min_max(
+    let value_right = (controls_left
+        - if right_controls_width > SHADER_ROW_RIGHT_PADDING {
+            4.0
+        } else {
+            0.0
+        })
+    .max(value_left + 40.0);
+    let full_value_rect = egui::Rect::from_min_max(
         egui::pos2(value_left, default_rect.top()),
         egui::pos2(value_right, default_rect.bottom()),
     );
-    let reset = (editable && row.is_overridden)
-        .then(|| reset_op_for_row(row))
-        .flatten();
-    let reset_rect = reset.as_ref().map(|_| {
-        let rect = egui::Rect::from_min_size(
-            value_rect.right_top() - Vec2::new(20.0, 0.0),
-            Vec2::new(18.0, value_rect.height()),
-        );
-        value_rect.max.x = (rect.left() - 3.0).max(value_rect.left() + 40.0);
-        rect
-    });
-
+    let mut value_rect = full_value_rect;
+    let range_input_rect = if has_range_input {
+        let field_width = (full_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
+        value_rect.max.x = value_rect.left() + field_width;
+        Some(egui::Rect::from_min_max(
+            egui::pos2(value_rect.right() + 8.0, full_value_rect.top()),
+            full_value_rect.right_bottom(),
+        ))
+    } else {
+        None
+    };
     // Editable value cell when the row carries an edit path and the tag is
     // writable; otherwise the read-only painted cell.
-    if editable
-        && !row.is_overridden
-        && let Some(row_edit) = row.edit.as_ref()
-        && matches!(
-            row_edit.kind,
-            ShaderRowEditKind::BitmapRef {
-                create: Some(_),
-                ..
-            } | ShaderRowEditKind::Bool { create: Some(_) }
-                | ShaderRowEditKind::CreateScalarParam { .. }
-                | ShaderRowEditKind::CreateFunctionColor { .. }
-                | ShaderRowEditKind::CreateFunctionScalar { .. }
-                | ShaderRowEditKind::H2CreateFunctionScalar { .. }
-                | ShaderRowEditKind::H2CreateFunctionColor { .. }
-                | ShaderRowEditKind::H2CreateTemplateValue { .. }
-                | ShaderRowEditKind::H2CreateTemplateColor { .. }
-        )
-    {
-        ui.scope_builder(egui::UiBuilder::new().max_rect(value_rect), |ui| {
-            let response = ui.add_sized(
-                value_rect.size(),
-                egui::Button::new(RichText::new("Override Default").color(material_text()))
-                    .fill(material_pending_input()),
-            );
+    if ranged && let Some(control) = range_control.as_ref() {
+        draw_shader_range_values(ui, value_rect, row, control, edit);
+    } else if show_override && let Some(row_edit) = row.edit.as_ref() {
+        shader_cell_scope(ui, value_rect, |ui| {
+            let response = ui
+                .add(egui::Button::new("Override Default").min_size(Vec2::new(0.0, BUTTON_HEIGHT)));
             if response
                 .on_hover_text("Create an explicit override initialized from the default")
                 .clicked()
@@ -405,77 +913,55 @@ pub(in crate::app) fn draw_shader_grid_row(
     } else if let (true, Some(row_edit)) = (editable, row.edit.as_ref()) {
         draw_shader_editable_value(ui, value_rect, &row.label, row_edit, edit, color_popup);
     } else {
-        draw_shader_grid_cell(
+        draw_shader_grid_cell_with_icon(
             ui,
             value_rect,
             Some(&row.value_cell),
             &format!("value:{}", row.label),
             color_popup,
+            shader_reference_group(row),
+            edit.game,
         );
     }
-    if let (Some(reset), Some(reset_rect)) = (reset, reset_rect) {
-        ui.painter().rect_filled(reset_rect, 0.0, material_input());
-        ui.painter()
-            .rect_stroke(
-                reset_rect,
-                0.0,
-                Stroke::new(1.0_f32, material_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-        ui.painter().text(
-            reset_rect.center(),
-            Align2::CENTER_CENTER,
-            "×",
-            FontId::proportional(13.0),
-            material_delete_text(),
-        );
-        if ui
-            .interact(
-                reset_rect,
-                ui.make_persistent_id(format!("shader_override_clear:{}", row.label)),
-                Sense::click(),
-            )
-            .on_hover_text("Clear override and inherit the default")
-            .clicked()
-        {
-            edit.block_ops.push(reset);
-        }
-    }
-
-    let mut next_function_x = controls_left.max(value_rect.right() + 4.0);
-    if let Some(control) = h2_range_control_for_row(row) {
+    let next_function_x = controls_left.max(full_value_rect.right() + 4.0);
+    if let Some(range_input_rect) = range_input_rect {
         let range_rect = egui::Rect::from_min_size(
-            egui::pos2(next_function_x, value_rect.top() + 2.0),
-            Vec2::new(H2_RANGE_CONTROL_WIDTH, height - 4.0),
+            range_input_rect.min,
+            Vec2::new(H2_RANGE_CONTROL_WIDTH, BUTTON_HEIGHT),
         );
-        draw_h2_function_range_control(ui, range_rect, row, &control, edit);
-        next_function_x = range_rect.right() + 4.0;
+        if let Some(control) = range_control.as_ref() {
+            draw_shader_range_checkbox(ui, range_rect, control, edit);
+        } else {
+            ui.painter().text(
+                range_rect.left_center(),
+                Align2::LEFT_CENTER,
+                "range:",
+                egui::TextStyle::Body.resolve(ui.style()),
+                material_text(),
+            );
+        }
+        let input_rect = egui::Rect::from_min_max(
+            range_rect.right_top() + Vec2::new(4.0, 0.0),
+            egui::pos2(range_input_rect.right(), range_rect.bottom()),
+        );
+        draw_shader_range_name(ui, input_rect, row, edit);
     }
 
-    if let Some(function) = row.function.as_ref() {
-        // Orange function row: range: checkbox + f() button + × delete button.
+    if !show_override && let Some(function) = row.function.as_ref() {
+        // Function viewer; the shared Clear control is placed last below.
         let button_rect = egui::Rect::from_min_size(
-            egui::pos2(next_function_x, value_rect.top() + 1.0),
-            Vec2::new(28.0, height - 4.0),
+            egui::pos2(next_function_x, value_rect.top()),
+            ICON_BUTTON_SIZE,
         );
-        ui.painter().rect_filled(button_rect, 0.0, material_input());
-        ui.painter()
-            .rect_stroke(
-                button_rect,
-                0.0,
-                Stroke::new(1.0_f32, material_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-        let icon_rect = egui::Rect::from_center_size(button_rect.center(), Vec2::splat(16.0));
-        paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
-
-        let click_response = ui
-            .interact(
-                rect,
-                ui.make_persistent_id(format!("shader_function:{}", row.label)),
-                Sense::click(),
-            )
-            .on_hover_text("Click to open function viewer");
+        let click_response = shader_action_button(
+            ui,
+            button_rect,
+            format!("shader_function:{}", row.label),
+            ButtonIcon::Function,
+            "",
+            true,
+        )
+        .on_hover_text("Click to open function viewer");
         if response.clicked() || click_response.clicked() {
             *function_popup = Some(FunctionPopup::new(
                 tag_key.to_owned(),
@@ -484,75 +970,22 @@ pub(in crate::app) fn draw_shader_grid_row(
                 editable && function.edit.is_some(),
             ));
         }
-
-        // × delete button: removes the animated parameter from the block.
-        if editable && !is_h2_function_view(function) {
-            if let Some(edit_paths) = function.edit.as_ref() {
-                let del_rect = egui::Rect::from_min_size(
-                    button_rect.right_top() + Vec2::new(4.0, 0.0),
-                    Vec2::new(18.0, height - 4.0),
-                );
-                ui.painter().rect_filled(del_rect, 0.0, material_input());
-                ui.painter()
-                    .rect_stroke(
-                        del_rect,
-                        0.0,
-                        Stroke::new(1.0_f32, material_input_edge()),
-                        egui::StrokeKind::Middle,
-                    );
-                ui.painter().text(
-                    del_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "×",
-                    FontId::proportional(13.0),
-                    material_delete_text(),
-                );
-                if ui
-                    .interact(
-                        del_rect,
-                        ui.make_persistent_id(format!("shader_fn_del:{}", row.label)),
-                        Sense::click(),
-                    )
-                    .on_hover_text("Remove animated parameter")
-                    .clicked()
-                {
-                    edit.block_ops.push(BlockOp {
-                        path: edit_paths.block_path.clone(),
-                        kind: BlockOpKind::Delete(edit_paths.block_index),
-                    });
-                }
-            }
-        }
-    } else if let Some(func_view) = row.constant_function_view.as_ref() {
-        // Constant-function scalar row: small "f()" to open graph + "×" delete.
+    } else if !show_override && let Some(func_view) = row.constant_function_view.as_ref() {
+        // Constant-function row: open the graph without intercepting its input.
         let f_rect = egui::Rect::from_min_size(
-            egui::pos2(next_function_x, value_rect.top() + 2.0),
-            Vec2::new(26.0, height - 4.0),
+            egui::pos2(next_function_x, value_rect.top()),
+            ICON_BUTTON_SIZE,
         );
-        ui.painter().rect_filled(f_rect, 0.0, material_input());
-        ui.painter()
-            .rect_stroke(
-                f_rect,
-                0.0,
-                Stroke::new(1.0_f32, material_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-        let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
-        paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
-        // The f() button is the only way into the graph editor here, on
-        // purpose: these rows are plain numbers backed by a constant
-        // function, and the value cell hosts a text edit — a double-click
-        // interceptor over it stole the click that should select the text.
-        // Rows with real function data (the `row.function` branch above) have
-        // no text under the click and keep opening the viewer.
-        if ui
-            .interact(
-                f_rect,
-                ui.make_persistent_id(format!("shader_cfn_open:{}", row.label)),
-                Sense::click(),
-            )
-            .on_hover_text("Open function graph editor")
-            .clicked()
+        if shader_action_button(
+            ui,
+            f_rect,
+            format!("shader_cfn_open:{}", row.label),
+            ButtonIcon::Function,
+            "",
+            true,
+        )
+        .on_hover_text("Open function graph editor")
+        .clicked()
         {
             *function_popup = Some(FunctionPopup::new(
                 tag_key.to_owned(),
@@ -561,83 +994,28 @@ pub(in crate::app) fn draw_shader_grid_row(
                 editable && func_view.edit.is_some(),
             ));
         }
-
-        if editable && !is_h2_function_view(func_view) {
-            if let Some(edit_paths) = func_view.edit.as_ref() {
-                let del_rect = egui::Rect::from_min_size(
-                    f_rect.right_top() + Vec2::new(2.0, 0.0),
-                    Vec2::new(18.0, height - 4.0),
-                );
-                ui.painter().rect_filled(del_rect, 0.0, material_input());
-                ui.painter()
-                    .rect_stroke(
-                        del_rect,
-                        0.0,
-                        Stroke::new(1.0_f32, material_input_edge()),
-                        egui::StrokeKind::Middle,
-                    );
-                ui.painter().text(
-                    del_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "×",
-                    FontId::proportional(13.0),
-                    material_delete_text(),
-                );
-                if ui
-                    .interact(
-                        del_rect,
-                        ui.make_persistent_id(format!("shader_cfn_del:{}", row.label)),
-                        Sense::click(),
-                    )
-                    .on_hover_text("Remove animated parameter")
-                    .clicked()
-                {
-                    edit.block_ops.push(BlockOp {
-                        path: edit_paths.block_path.clone(),
-                        kind: BlockOpKind::Delete(edit_paths.block_index),
-                    });
-                }
-            }
-        }
-    } else if let (true, Some(action)) = (editable, row.create_anim_op.as_ref()) {
+    } else if let (true, Some(action)) = (editable && !show_override, create_function.as_ref()) {
         // No animated parameter yet — show an "f()+" button to create one.
         let button_rect = egui::Rect::from_min_size(
-            egui::pos2(next_function_x, value_rect.top() + 2.0),
-            Vec2::new(34.0, height - 4.0),
+            egui::pos2(next_function_x, value_rect.top()),
+            Vec2::new(24.0, BUTTON_HEIGHT),
         );
-        ui.painter().rect_filled(button_rect, 0.0, material_input());
-        ui.painter()
-            .rect_stroke(
-                button_rect,
-                0.0,
-                Stroke::new(1.0_f32, material_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-        ui.painter().text(
-            button_rect.center(),
-            Align2::CENTER_CENTER,
-            if matches!(action, ShaderContextAction::H2ParameterOp(_)) {
-                "f0"
-            } else {
-                "f()+"
-            },
-            FontId::proportional(11.0),
-            material_text(),
-        );
-        let add_response = ui
-            .interact(
-                button_rect,
-                ui.make_persistent_id(format!("shader_create_anim:{}", row.label)),
-                Sense::click(),
-            )
-            .on_hover_text("Create animated parameter");
+        let add_response = shader_action_button(
+            ui,
+            button_rect,
+            format!("shader_create_anim:{}", row.label),
+            ButtonIcon::Function,
+            "",
+            true,
+        )
+        .on_hover_text("Add function initialized to the default value");
         if add_response.clicked() {
             push_shader_context_action(edit, action);
         }
     } else {
         // context_menu takes &self so call it first; on_hover_text takes self.
         let reset = (editable && row.is_overridden)
-            .then(|| reset_op_for_row(row))
+            .then(|| unused_delete.cloned().or_else(|| reset_op_for_row(row)))
             .flatten();
         let menu_items = row
             .context_menu
@@ -648,7 +1026,14 @@ pub(in crate::app) fn draw_shader_grid_row(
         if reset.is_some() || menu_items.is_some() {
             context_menu(&response, |ui| {
                 if let Some(reset) = reset.clone() {
-                    if ui.button("Reset to default").clicked() {
+                    if ui
+                        .button(if unused_delete.is_some() {
+                            "Remove unused parameter"
+                        } else {
+                            "Reset to default"
+                        })
+                        .clicked()
+                    {
                         edit.block_ops.push(reset);
                         close_menu(ui);
                     }
@@ -672,6 +1057,44 @@ pub(in crate::app) fn draw_shader_grid_row(
             response.on_hover_text(parameter_type);
         }
     }
+    if has_clear {
+        let clear_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                rect.right() - SHADER_ROW_RIGHT_PADDING - 24.0,
+                value_rect.top(),
+            ),
+            Vec2::splat(24.0),
+        );
+        if shader_action_button(
+            ui,
+            clear_rect,
+            ("shader_clear_default", &row.label),
+            ButtonIcon::Clear,
+            "",
+            true,
+        )
+        .on_hover_text(if unused_delete.is_some() {
+            "Remove this unused parameter and its saved functions"
+        } else {
+            "Restore the default value"
+        })
+        .clicked()
+        {
+            if let Some(reset) = function_reset {
+                match reset {
+                    ShaderFunctionReset::Field(value) => edit.pending.push(value),
+                    ShaderFunctionReset::Halo2(op) => edit.h2_shader_param_ops.push(op),
+                    ShaderFunctionReset::Create(action) => {
+                        push_shader_context_action(edit, &action)
+                    }
+                }
+            } else if let Some(reset) = reset {
+                edit.block_ops.push(reset);
+            }
+        }
+    }
+    // Paint after fills and controls so the row border stays visible.
+    shader_row_separator(ui, rect);
 }
 
 fn is_h2_function_view(function: &FunctionView) -> bool {
@@ -681,37 +1104,52 @@ fn is_h2_function_view(function: &FunctionView) -> bool {
         .is_some_and(|edit| matches!(edit.data, FunctionDataStorage::Halo2ByteBlock(_)))
 }
 
-fn shader_grid_row_height(row: &ShaderGridRow) -> f32 {
-    if row
-        .edit
-        .as_ref()
-        .is_some_and(|edit| matches!(edit.kind, ShaderRowEditKind::Flags(_)))
+fn shader_grid_row_height(ui: &mut Ui, row: &ShaderGridRow, value_width: f32) -> f32 {
+    if let Some(ShaderRowEdit {
+        kind: ShaderRowEditKind::Flags(options),
+        ..
+    }) = row.edit.as_ref()
     {
-        58.0
+        // Measure the same checkbox layout used by the value cell. Its height
+        // depends on control styling, flag count, and wrapping at this width.
+        let mut measure = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("shader_flags_measure", &row.label))
+                .max_rect(egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    Vec2::new(value_width, 0.0),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min))
+                .invisible(),
+        );
+        measure.spacing_mut().item_spacing.y = 0.0;
+        for option in options {
+            measure.checkbox(&mut false, option);
+        }
+        (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0)
     } else {
-        25.0
+        BUTTON_HEIGHT + 8.0
     }
 }
 
-const H2_RANGE_CONTROL_WIDTH: f32 = 136.0;
+const H2_RANGE_CONTROL_WIDTH: f32 = 76.0;
 
-fn shader_right_controls_width(row: &ShaderGridRow, has_h2_range: bool) -> f32 {
-    let mut width = 8.0;
+fn shader_right_controls_width(row: &ShaderGridRow, has_h2_range: bool, has_clear: bool) -> f32 {
+    let mut width = SHADER_ROW_RIGHT_PADDING;
     if has_h2_range {
         width += H2_RANGE_CONTROL_WIDTH + 4.0;
     }
-    if let Some(function) = row.function.as_ref() {
-        width += 28.0;
-        if !is_h2_function_view(function) {
-            width += 22.0;
-        }
-    } else if let Some(function) = row.constant_function_view.as_ref() {
-        width += 26.0;
-        if !is_h2_function_view(function) {
-            width += 20.0;
-        }
-    } else if row.create_anim_op.is_some() {
-        width += 34.0;
+    let function_width = if row.function.is_some()
+        || row.constant_function_view.is_some()
+        || row.create_anim_op.is_some()
+    {
+        BUTTON_HEIGHT
+    } else {
+        0.0
+    };
+    width += function_width;
+    if has_clear {
+        width += 24.0 + if function_width > 0.0 { 4.0 } else { 0.0 };
     }
     width
 }
@@ -725,10 +1163,11 @@ enum H2RangeControl {
 /// The range control a row offers, for a scalar function only: a color
 /// function's bytes 4-19 hold its colors, not a range, so a range written there
 /// overwrote color slot 1 (the engine's `set_clamp_range` refuses the same).
+#[cfg(test)]
 fn h2_range_control_for_row(row: &ShaderGridRow) -> Option<H2RangeControl> {
-    h2_range_control_candidate(row).filter(|control| {
-        let (H2RangeControl::Existing { data, .. } | H2RangeControl::Create { data, .. }) = control;
-        !h2_is_color_function(data)
+    h2_range_control_candidate(row).filter(|control| match control {
+        H2RangeControl::Existing { data, .. } => !h2_is_color_function(data),
+        H2RangeControl::Create { data, .. } => !h2_is_color_function(data),
     })
 }
 
@@ -816,20 +1255,24 @@ fn h2_initial_function_data_from_op(op: &H2ShaderParamOp) -> Option<Vec<u8>> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn h2_function_range_enabled(data: &[u8]) -> bool {
     data.get(1)
         .copied()
         .is_some_and(|flags| flags & h2_flags::RANGE != 0)
 }
 
+#[cfg(test)]
 pub(super) fn h2_function_range_value(data: &[u8]) -> Option<f32> {
     Some(f32::from_le_bytes(data.get(8..12)?.try_into().ok()?))
 }
 
+#[cfg(test)]
 use blam_tags::tag_function::h2::flags as h2_flags;
 
 /// Whether H2 function bytes describe a color function: the flags' high nibble
 /// is its color count, zero for a scalar.
+#[cfg(test)]
 fn h2_is_color_function(data: &[u8]) -> bool {
     data.get(1)
         .is_some_and(|flags| flags >> h2_flags::COLOR_GRAPH_TYPE_SHIFT != 0)
@@ -837,6 +1280,7 @@ fn h2_is_color_function(data: &[u8]) -> bool {
 
 /// `data` with its range turned on or off and its range value set. A color
 /// function is returned unchanged: it has no range.
+#[cfg(test)]
 pub(super) fn h2_function_data_with_range(
     data: &[u8],
     enabled: bool,
@@ -858,14 +1302,6 @@ pub(super) fn h2_function_data_with_range(
         next[8..12].copy_from_slice(&value.to_le_bytes());
     }
     next
-}
-
-fn h2_push_range_data_edit(
-    edit: &mut FieldEditContext<'_>,
-    control: &H2RangeControl,
-    data: Vec<u8>,
-) {
-    edit.push_ops(h2_range_data_ops(control, data));
 }
 
 fn h2_range_data_ops(control: &H2RangeControl, data: Vec<u8>) -> DeferredOps {
@@ -893,95 +1329,266 @@ fn h2_range_data_ops(control: &H2RangeControl, data: Vec<u8>) -> DeferredOps {
     ops
 }
 
-/// The edit a range box commits: the range turned on at the typed value.
-fn h2_range_value_ops(
-    control: &H2RangeControl,
-    data: &[u8],
-    text: &str,
-) -> Result<DeferredOps, String> {
-    let value = parse_shader_number(text)?;
-    Ok(h2_range_data_ops(control, h2_function_data_with_range(data, true, Some(value))))
+#[derive(Clone)]
+enum ShaderRangeOwner {
+    Halo2(H2RangeControl),
+    Field(String),
+    Create(ShaderFunctionCreateTarget),
 }
 
-fn draw_h2_function_range_control(
+#[derive(Clone)]
+struct ShaderRangeControl {
+    owner: ShaderRangeOwner,
+    function: TagFunction,
+}
+
+fn shader_range_control(row: &ShaderGridRow) -> Option<ShaderRangeControl> {
+    if let Some(control) = h2_range_control_candidate(row) {
+        let (H2RangeControl::Existing { data, .. } | H2RangeControl::Create { data, .. }) =
+            &control;
+        let function = h2_tag_function(data)?;
+        return Some(ShaderRangeControl {
+            owner: ShaderRangeOwner::Halo2(control),
+            function,
+        });
+    }
+    if let Some(view) = row
+        .function
+        .as_ref()
+        .or(row.constant_function_view.as_ref())
+    {
+        return Some(ShaderRangeControl {
+            owner: ShaderRangeOwner::Field(view.edit.as_ref()?.data.data_field_path()?.to_owned()),
+            function: view.function.clone(),
+        });
+    }
+    if let Some(ShaderContextAction::AnimatedParameter(op)) = row.create_anim_op.as_ref() {
+        let function = TagFunction::parse(&decode_hex(&op.initial_function_hex).ok()?).ok()?;
+        return Some(ShaderRangeControl {
+            owner: ShaderRangeOwner::Create(ShaderFunctionCreateTarget::ExistingParameter {
+                animated_block_path: op.animated_block_path.clone(),
+                output_type_index: op.output_type_index,
+            }),
+            function,
+        });
+    }
+    let row_edit = row.edit.as_ref()?;
+    let target = match &row_edit.kind {
+        ShaderRowEditKind::CreateFunctionScalar { target }
+        | ShaderRowEditKind::CreateFunctionColor { target } => target.clone(),
+        ShaderRowEditKind::CreateScalarParam {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+        } => ShaderFunctionCreateTarget::NewParameter {
+            parameters_block_path: parameters_block_path.clone(),
+            parameter_name: parameter_name.clone(),
+            parameter_type_index: *parameter_type_index,
+            output_type_index: RenderMethodAnimatedParameterType::Value as i32,
+        },
+        ShaderRowEditKind::Scalar if row_edit.path.ends_with("/real") => {
+            ShaderFunctionCreateTarget::ExistingParameter {
+                animated_block_path: format!(
+                    "{}/animated parameters",
+                    row_edit.path.strip_suffix("/real")?
+                ),
+                output_type_index: RenderMethodAnimatedParameterType::Value as i32,
+            }
+        }
+        _ => return None,
+    };
+    let hex = if matches!(row_edit.kind, ShaderRowEditKind::CreateFunctionColor { .. }) {
+        let values: Vec<f32> = row_edit
+            .current
+            .split(',')
+            .map(str::trim)
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let [r, g, b, a] = values.as_slice() else {
+            return None;
+        };
+        constant_color_function_hex(*r, *g, *b, *a)
+    } else {
+        constant_function_hex(row_edit.current.parse::<f32>().ok()?)
+    };
+    let function = TagFunction::parse(&decode_hex(&hex).ok()?).ok()?;
+    Some(ShaderRangeControl {
+        owner: ShaderRangeOwner::Create(target),
+        function,
+    })
+}
+
+fn push_shader_range_edit(
+    edit: &mut FieldEditContext<'_>,
+    control: &ShaderRangeControl,
+    editor: TagFunctionEditor,
+) {
+    edit.push_ops(shader_range_ops(control, editor));
+}
+
+fn shader_range_ops(control: &ShaderRangeControl, editor: TagFunctionEditor) -> DeferredOps {
+    let data = editor.to_bytes();
+    match &control.owner {
+        ShaderRangeOwner::Halo2(owner) => h2_range_data_ops(owner, data),
+        ShaderRangeOwner::Field(path) => field_edit_ops(path, &encode_hex(&data)),
+        ShaderRangeOwner::Create(target) => {
+            shader_context_action_ops(&shader_function_action(target, encode_hex(&data)))
+        }
+    }
+}
+
+fn shader_range_values_ops(
+    control: &ShaderRangeControl,
+    start: &str,
+    end: &str,
+) -> Result<DeferredOps, String> {
+    let mut editor = TagFunctionEditor::from_function(control.function.clone());
+    editor
+        .set_clamp_range(parse_shader_number(start)?, parse_shader_number(end)?)
+        .map_err(|error| error.to_string())?;
+    Ok(shader_range_ops(control, editor))
+}
+
+fn draw_shader_range_checkbox(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    control: &ShaderRangeControl,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let mut editor = TagFunctionEditor::from_function(control.function.clone());
+    let mut ranged = editor.is_ranged();
+    let response = shader_cell_scope(ui, rect, |ui| {
+        ui.add_enabled(edit.editable, egui::Checkbox::new(&mut ranged, "range:"))
+    })
+    .inner;
+    if response.changed() && editor.set_ranged(ranged).is_ok() {
+        push_shader_range_edit(edit, control, editor);
+    }
+}
+
+fn draw_shader_range_name(
     ui: &mut Ui,
     rect: egui::Rect,
     row: &ShaderGridRow,
-    control: &H2RangeControl,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let data = match control {
-        H2RangeControl::Existing { data, .. } | H2RangeControl::Create { data, .. } => data,
-    };
-    if data.len() < 12 {
-        return;
-    }
-    let enabled = h2_function_range_enabled(data);
-    let mut checked = enabled;
-    let check_rect =
-        egui::Rect::from_min_size(rect.left_top() + Vec2::new(0.0, 2.0), Vec2::splat(14.0));
-    let response = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(check_rect), |ui| {
-            ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
-        })
-        .inner;
-    ui.painter().text(
-        check_rect.right_center() + Vec2::new(4.0, 0.0),
-        Align2::LEFT_CENTER,
-        "range:",
-        FontId::proportional(12.0),
-        material_text_for_bg(row.fill),
-    );
-    if response.changed() {
-        h2_push_range_data_edit(
-            edit,
-            control,
-            h2_function_data_with_range(data, checked, h2_function_range_value(data)),
-        );
-    }
-
-    let value_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(66.0, 0.0),
-        Vec2::new((rect.width() - 66.0).max(42.0), rect.height()),
-    );
-    let current = if enabled {
-        h2_function_range_value(data)
-            .map(format_shader_float)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let id = edit.widget_id(("h2_range", row.label.as_str()));
-    let buffer_key = format!("{}|h2_range:{}", edit.tag_key, row.label);
-    let draft = edit.buffers.draft_mut(&buffer_key, &current);
-    let mut commit = None;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(value_rect), |ui| {
+    let view = row
+        .function
+        .as_ref()
+        .or(row.constant_function_view.as_ref());
+    let path = view
+        .and_then(|view| view.edit.as_ref())
+        .map(|paths| paths.range_name.as_str())
+        .filter(|path| !path.is_empty());
+    let current = view.map(|view| view.range_name.as_str()).unwrap_or("");
+    let key = format!("{}|shader_range_name:{}", edit.tag_key, row.label);
+    let id = edit.widget_id(("shader_range_name", &row.label));
+    let draft = edit.buffers.draft_mut(&key, current);
+    shader_cell_scope(ui, rect, |ui| {
         ui.visuals_mut().extreme_bg_color = material_input();
-        let resp = ui.add_enabled(
-            edit.editable && enabled,
+        let response = ui.add_enabled(
+            edit.editable && path.is_some(),
             egui::TextEdit::singleline(&mut draft.text)
                 .id(id)
-                .desired_width(value_rect.width())
-                .text_color(material_text())
-                .font(egui::TextStyle::Monospace),
+                .desired_width(rect.width())
+                .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                .font(egui::TextStyle::Body)
+                .vertical_align(egui::Align::Center)
+                .hint_text("Range input"),
         );
-        text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-        select_all_on_double_click(ui, &resp, &draft.text);
-        draft.note_response(&resp);
-        if draft.should_commit(ui, &resp) && enabled {
-            commit = Some(h2_range_value_ops(control, data, &draft.text));
+        if path.is_none() {
+            response
+                .clone()
+                .on_hover_text("Enable range or add a function to edit its range input");
         }
-        if enabled {
-            draft.keep_commit(|| {
-                let (control, data) = (control.clone(), data.to_vec());
-                shader_draft_commit(edit.tag_key, &buffer_key, move |text| {
-                    h2_range_value_ops(&control, &data, text)
-                })
+        draft.note_response(&response);
+        if draft.should_commit(ui, &response)
+            && let Some(path) = path
+        {
+            edit.pending.push(PendingFieldEdit {
+                path: path.to_owned(),
+                input: draft.text.trim().to_owned(),
             });
         }
+        if let Some(path) = path {
+            draft.keep_commit(|| single_field_commit(edit.tag_key, &key, path));
+        }
     });
-    if let Some(commit) = commit {
-        push_shader_commit(edit, commit);
+}
+
+fn draw_shader_range_values(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    row: &ShaderGridRow,
+    control: &ShaderRangeControl,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let mut editor = TagFunctionEditor::from_function(control.function.clone());
+    let Some((mut start, mut end)) = editor.clamp_range() else {
+        return;
+    };
+    let mut changed = false;
+    let keys = [
+        format!("{}|range:{}:0", edit.tag_key, row.label),
+        format!("{}|range:{}:1", edit.tag_key, row.label),
+    ];
+    let commit_control = control.clone();
+    let range_commit = DraftCommit::new(edit.tag_key, keys.to_vec(), move |texts| {
+        shader_range_values_ops(&commit_control, texts[0], texts[1])
+    });
+    for (index, (label, value)) in [("start:", &mut start), ("end:", &mut end)]
+        .into_iter()
+        .enumerate()
+    {
+        let line = egui::Rect::from_min_size(
+            rect.min + Vec2::new(0.0, index as f32 * 32.0),
+            Vec2::new(rect.width(), BUTTON_HEIGHT),
+        );
+        ui.painter().text(
+            line.left_center(),
+            Align2::LEFT_CENTER,
+            label,
+            egui::TextStyle::Body.resolve(ui.style()),
+            material_text(),
+        );
+        let input =
+            egui::Rect::from_min_max(line.left_top() + Vec2::new(46.0, 0.0), line.right_bottom());
+        let key = format!("{}|range:{}:{index}", edit.tag_key, row.label);
+        let id = edit.widget_id(("shader_range_value", &key));
+        let current = format_shader_float(*value);
+        let draft = edit.buffers.draft_mut(&key, &current);
+        shader_cell_scope(ui, input, |ui| {
+            ui.visuals_mut().extreme_bg_color = material_input();
+            let response = ui.add_enabled(
+                edit.editable,
+                egui::TextEdit::singleline(&mut draft.text)
+                    .id(id)
+                    .desired_width(input.width())
+                    .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                    .font(egui::TextStyle::Body)
+                    .vertical_align(egui::Align::Center),
+            );
+            select_all_on_double_click(ui, &response, &draft.text);
+            draft.note_response(&response);
+            if draft.should_commit(ui, &response) {
+                match parse_shader_number(&draft.text) {
+                    Ok(next) => {
+                        *value = next;
+                        changed = true;
+                    }
+                    Err(error) => {
+                        if let Some(status) = edit.status.as_deref_mut() {
+                            *status = error;
+                        }
+                    }
+                }
+            }
+            draft.keep_commit(|| range_commit.clone());
+        });
+    }
+    if changed && editor.set_clamp_range(start, end).is_ok() {
+        push_shader_range_edit(edit, control, editor);
     }
 }
 
@@ -999,7 +1606,9 @@ fn draw_h2_value_prefixed_text_edit(
                 .id(id)
                 .desired_width((width - 42.0).max(40.0))
                 .text_color(material_text())
-                .font(egui::TextStyle::Monospace),
+                .font(egui::TextStyle::Body)
+                .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                .vertical_align(egui::Align::Center),
         )
     })
     .inner
@@ -1042,13 +1651,8 @@ fn decode_shader_bitmap_thumbnail(
     // Use the source-aware loader so classic (Halo CE / Halo 2) bitmaps decode
     // too — they need a JSON layout, not the plain `TagFile::read`.
     let tag =
-        crate::core::source::read_tag_at_path(
-            &path,
-            edit.game,
-            edit.definitions_root,
-            group_tag,
-        )
-        .ok()?;
+        crate::core::source::read_tag_at_path(&path, edit.game, edit.definitions_root, group_tag)
+            .ok()?;
     let data = build_bitmap_preview(&tag, 0, 0).ok()?;
     // Cap at 256px: drawn small inline (GPU downscales) and at native size in the
     // hover preview popup, matching Foundation's 256px help-popup image.
@@ -1108,7 +1712,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 .cloned()
                 .unwrap_or_else(|| row_edit.current.clone());
             let mut chosen = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            shader_cell_scope(ui, rect, |ui| {
                 let (_, wheel_delta) = combo_box_with_scroll(
                     ui,
                     egui::ComboBox::from_id_salt((
@@ -1143,7 +1747,8 @@ pub(in crate::app) fn draw_shader_editable_value(
 
         ShaderRowEditKind::Flags(options) => {
             let current_mask = row_edit.current.trim().parse::<u64>().unwrap_or(0);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            shader_input_box(ui, rect);
+            shader_cell_scope(ui, rect.shrink(4.0), |ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for (bit, option) in options.iter().enumerate() {
@@ -1169,34 +1774,25 @@ pub(in crate::app) fn draw_shader_editable_value(
             });
         }
 
-        // Constant animated-parameter scalar: text box + × delete button.
+        // Constant animated-parameter scalar input.
         // The f() button to open the graph editor is rendered in draw_shader_grid_row
         // via constant_function_view, not here.
-        ShaderRowEditKind::FunctionScalar {
-            block_path,
-            block_index,
-        } => {
+        ShaderRowEditKind::FunctionScalar { .. } => {
             let current = row_edit.current.clone();
-            // Reserve 20px on the right for the × delete button.
-            let del_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(20.0, 0.0),
-                Vec2::new(18.0, rect.height()),
-            );
-            let text_rect = egui::Rect::from_min_size(
-                rect.left_top(),
-                Vec2::new((rect.width() - 22.0).max(40.0), rect.height()),
-            );
+            let text_rect = rect;
             let id = edit.widget_id(("shader_fn_scalar", &buffer_key));
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+            shader_cell_scope(ui, text_rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(text_rect.width())
                         .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
+                        .font(egui::TextStyle::Body)
+                        .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                        .vertical_align(egui::Align::Center),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1213,36 +1809,6 @@ pub(in crate::app) fn draw_shader_editable_value(
             });
             if let Some(commit) = commit {
                 push_shader_commit(edit, commit);
-            }
-            // × delete button
-            ui.painter().rect_filled(del_rect, 0.0, material_input());
-            ui.painter()
-                .rect_stroke(
-                    del_rect,
-                    0.0,
-                    Stroke::new(1.0_f32, material_input_edge()),
-                    egui::StrokeKind::Middle,
-                );
-            ui.painter().text(
-                del_rect.center(),
-                Align2::CENTER_CENTER,
-                "×",
-                FontId::proportional(13.0),
-                material_delete_text(),
-            );
-            if ui
-                .interact(
-                    del_rect,
-                    ui.make_persistent_id(format!("shader_scalar_del:{}", buffer_key)),
-                    Sense::click(),
-                )
-                .on_hover_text("Remove animated parameter")
-                .clicked()
-            {
-                edit.block_ops.push(BlockOp {
-                    path: block_path.clone(),
-                    kind: BlockOpKind::Delete(*block_index),
-                });
             }
         }
 
@@ -1262,11 +1828,23 @@ pub(in crate::app) fn draw_shader_editable_value(
             };
             let commit_ops = |_: &FieldEditContext<'_>| -> ReferenceCommitOps {
                 let (path, create) = (row_edit.path.clone(), create.clone());
-                Box::new(move |text| Ok(shader_value_edit_ops(&path, create.as_ref(), text.trim().to_owned())))
+                Box::new(move |text| {
+                    Ok(shader_value_edit_ops(
+                        &path,
+                        create.as_ref(),
+                        text.trim().to_owned(),
+                    ))
+                })
             };
-            if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
-            {
+            if let Some(input) = draw_shader_reference_cell(
+                ui,
+                edit,
+                rect,
+                &buffer_key,
+                row_edit,
+                &cell,
+                &commit_ops,
+            ) {
                 push_shader_value_edit(edit, row_edit, create.as_ref(), input);
             }
         }
@@ -1296,9 +1874,15 @@ pub(in crate::app) fn draw_shader_editable_value(
                     ))
                 })
             };
-            if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
-            {
+            if let Some(input) = draw_shader_reference_cell(
+                ui,
+                edit,
+                rect,
+                &buffer_key,
+                row_edit,
+                &cell,
+                &commit_ops,
+            ) {
                 push_h2_template_reference_edit(edit, row_edit, input);
             }
         }
@@ -1328,9 +1912,15 @@ pub(in crate::app) fn draw_shader_editable_value(
                 let path = row_edit.path.clone();
                 Box::new(move |text| Ok(field_edit_ops(&path, text)))
             };
-            if let Some(input) =
-                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell, &commit_ops)
-            {
+            if let Some(input) = draw_shader_reference_cell(
+                ui,
+                edit,
+                rect,
+                &buffer_key,
+                row_edit,
+                &cell,
+                &commit_ops,
+            ) {
                 edit.push_ops(field_edit_ops(&row_edit.path, &input));
             }
         }
@@ -1338,11 +1928,10 @@ pub(in crate::app) fn draw_shader_editable_value(
         ShaderRowEditKind::Bool { create } => {
             let current_raw = row_edit.current.trim().parse::<i32>().unwrap_or(0);
             let mut checked = current_raw != 0;
-            let response = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                    ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
-                })
-                .inner;
+            let response = shader_cell_scope(ui, rect, |ui| {
+                ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
+            })
+            .inner;
             if response.changed() {
                 push_shader_value_edit(
                     edit,
@@ -1353,19 +1942,9 @@ pub(in crate::app) fn draw_shader_editable_value(
             }
         }
 
-        // Constant color animated parameter: clickable swatch → editable color popup + × delete.
-        ShaderRowEditKind::FunctionColor {
-            block_path,
-            block_index,
-        } => {
-            let del_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(20.0, 0.0),
-                Vec2::new(18.0, rect.height()),
-            );
-            let swatch_rect = egui::Rect::from_min_size(
-                rect.left_top(),
-                Vec2::new((rect.width() - 22.0).max(30.0), rect.height()),
-            );
+        // Constant color animated parameter: clickable swatch and color popup.
+        ShaderRowEditKind::FunctionColor { .. } => {
+            let swatch_rect = rect;
             // Parse current "r,g,b,a" into a color.
             let parts: Vec<f32> = row_edit
                 .current
@@ -1384,12 +1963,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(a),
             );
             draw_shader_color_swatch(ui, swatch_rect, color32);
-            let inner = swatch_rect.shrink(3.0);
+            let inner = shader_color_swatch_rect(swatch_rect);
             ui.painter().text(
-                swatch_rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                swatch_rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
-                FontId::monospace(12.0),
+                egui::TextStyle::Body.resolve(ui.style()),
                 material_text(),
             );
             if ui
@@ -1405,36 +1984,6 @@ pub(in crate::app) fn draw_shader_editable_value(
                     MaterialColorPopup::new(label, r, g, b, a)
                         .with_write(edit.tag_key, row_edit.path.clone()),
                 );
-            }
-            // × delete button
-            ui.painter().rect_filled(del_rect, 0.0, material_input());
-            ui.painter()
-                .rect_stroke(
-                    del_rect,
-                    0.0,
-                    Stroke::new(1.0_f32, material_input_edge()),
-                    egui::StrokeKind::Middle,
-                );
-            ui.painter().text(
-                del_rect.center(),
-                Align2::CENTER_CENTER,
-                "×",
-                FontId::proportional(13.0),
-                material_delete_text(),
-            );
-            if ui
-                .interact(
-                    del_rect,
-                    ui.make_persistent_id(format!("shader_color_del:{label}")),
-                    Sense::click(),
-                )
-                .on_hover_text("Remove color animated parameter")
-                .clicked()
-            {
-                edit.block_ops.push(BlockOp {
-                    path: block_path.clone(),
-                    kind: BlockOpKind::Delete(*block_index),
-                });
             }
         }
 
@@ -1456,12 +2005,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(a),
             );
             draw_shader_color_swatch(ui, rect, color32);
-            let inner = rect.shrink(3.0);
+            let inner = shader_color_swatch_rect(rect);
             ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
-                FontId::monospace(12.0),
+                egui::TextStyle::Body.resolve(ui.style()),
                 material_text(),
             );
             if ui
@@ -1499,12 +2048,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(a),
             );
             draw_shader_color_swatch(ui, rect, color32);
-            let inner = rect.shrink(3.0);
+            let inner = shader_color_swatch_rect(rect);
             ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
-                FontId::monospace(12.0),
+                egui::TextStyle::Body.resolve(ui.style()),
                 material_text(),
             );
             if ui
@@ -1534,14 +2083,16 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("shader_create_fn_scalar", label));
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_pending_input();
+            shader_cell_scope(ui, rect, |ui| {
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
+                        .font(egui::TextStyle::Body)
+                        .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                        .vertical_align(egui::Align::Center),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1582,12 +2133,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(a),
             );
             draw_shader_color_swatch(ui, rect, color32);
-            let inner = rect.shrink(3.0);
+            let inner = shader_color_swatch_rect(rect);
             ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
-                FontId::monospace(12.0),
+                egui::TextStyle::Body.resolve(ui.style()),
                 material_text(),
             );
             if ui
@@ -1635,12 +2186,12 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(a),
             );
             draw_shader_color_swatch(ui, rect, color32);
-            let inner = rect.shrink(3.0);
+            let inner = shader_color_swatch_rect(rect);
             ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
-                FontId::monospace(12.0),
+                egui::TextStyle::Body.resolve(ui.style()),
                 material_text(),
             );
             if ui
@@ -1667,14 +2218,18 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("h2_shader_fn_scalar", &buffer_key));
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            shader_cell_scope(ui, rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
-                    commit = Some(h2_function_scalar_ops(block_path, legacy_data.as_deref(), &draft.text));
+                    commit = Some(h2_function_scalar_ops(
+                        block_path,
+                        legacy_data.as_deref(),
+                        &draft.text,
+                    ));
                 }
                 draft.keep_commit(|| {
                     let (block_path, legacy_data) = (block_path.clone(), legacy_data.clone());
@@ -1694,8 +2249,8 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("h2_shader_create_fn_scalar", label));
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_pending_input();
+            shader_cell_scope(ui, rect, |ui| {
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1726,14 +2281,16 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("shader_create_scalar", label));
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_pending_input();
+            shader_cell_scope(ui, rect, |ui| {
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
+                        .font(egui::TextStyle::Body)
+                        .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                        .vertical_align(egui::Align::Center),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1747,8 +2304,11 @@ pub(in crate::app) fn draw_shader_editable_value(
                     ));
                 }
                 draft.keep_commit(|| {
-                    let (block, name, type_index) =
-                        (parameters_block_path.clone(), parameter_name.clone(), *parameter_type_index);
+                    let (block, name, type_index) = (
+                        parameters_block_path.clone(),
+                        parameter_name.clone(),
+                        *parameter_type_index,
+                    );
                     shader_draft_commit(edit.tag_key, &create_buf_key, move |text| {
                         create_scalar_param_ops(&block, &name, type_index, text)
                     })
@@ -1770,8 +2330,8 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("h2_shader_create_value", label));
             let draft = edit.buffers.draft_mut(&create_buf_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_pending_input();
+            shader_cell_scope(ui, rect, |ui| {
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1855,14 +2415,16 @@ pub(in crate::app) fn draw_shader_editable_value(
             let id = edit.widget_id(("shader_text", &buffer_key));
             let draft = edit.buffers.draft_mut(&buffer_key, &current);
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            shader_cell_scope(ui, rect, |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
+                        .font(egui::TextStyle::Body)
+                        .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                        .vertical_align(egui::Align::Center),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
@@ -1870,7 +2432,8 @@ pub(in crate::app) fn draw_shader_editable_value(
                 if draft.should_commit(ui, &resp) {
                     commit = Some(field_edit_ops(&row_edit.path, &draft.text));
                 }
-                draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, &row_edit.path));
+                draft
+                    .keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, &row_edit.path));
             });
             if let Some(ops) = commit {
                 edit.push_ops(ops);
@@ -1920,14 +2483,27 @@ fn draw_shader_reference_cell(
 ) -> Option<String> {
     let current = row_edit.current.clone();
     let extension = cell.extension;
-    // Reserve the right edge: "..." browse (24px) then Open (40px).
-    let browse_rect = egui::Rect::from_min_size(
-        rect.right_top() - Vec2::new(26.0, 0.0),
-        Vec2::new(24.0, rect.height()),
-    );
+    // Browse fits its label and shared icon/text padding; every gap is 4px.
+    let browse_width = ui
+        .painter()
+        .layout_no_wrap(
+            "Browse".to_owned(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            text_dark(),
+        )
+        .size()
+        .x
+        .ceil()
+        + BUTTON_ICON_SIZE
+        + BUTTON_ICON_TEXT_GAP
+        + BUTTON_TEXT_PADDING_X * 2.0;
     let open_rect = egui::Rect::from_min_size(
-        rect.right_top() - Vec2::new(70.0, 0.0),
-        Vec2::new(40.0, rect.height()),
+        rect.right_top() - Vec2::new(BUTTON_HEIGHT, 0.0),
+        ICON_BUTTON_SIZE,
+    );
+    let browse_rect = egui::Rect::from_min_size(
+        open_rect.left_top() - Vec2::new(browse_width + 4.0, 0.0),
+        Vec2::new(browse_width, BUTTON_HEIGHT),
     );
     // The grid stores the path with its extension and forward slashes; strip
     // both so it resolves like a normal tag reference.
@@ -1940,76 +2516,27 @@ fn draw_shader_reference_cell(
     let thumb = (cell.thumbnail && open_enabled)
         .then(|| shader_bitmap_thumbnail(ui, edit, cell.group_tag, &open_ref))
         .flatten();
-    let (thumb_w, thumb_gap) = if thumb.is_some() {
-        (rect.height() - 2.0, 4.0)
-    } else {
-        (0.0, 0.0)
-    };
-    if let Some(texture) = &thumb {
-        let thumb_rect = egui::Rect::from_min_size(
-            rect.left_top() + Vec2::new(0.0, 1.0),
-            Vec2::splat(rect.height() - 2.0),
-        );
-        ui.painter().image(
-            texture.id(),
-            thumb_rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
-        // Hover → enlarged preview popup (up to native, ≤256px) + path,
-        // mirroring Foundation's help-popup image.
-        ui.interact(
-            thumb_rect,
-            ui.make_persistent_id(("shader_thumb_hover", &open_ref)),
-            Sense::hover(),
-        )
-        .on_hover_ui(|ui| {
-            bitmap_hover_preview_ui(ui, texture, &open_ref, material_muted_text());
-        });
-    }
     let text_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(thumb_w + thumb_gap, 0.0),
+        rect.left_top(),
         Vec2::new(
-            (rect.width() - 72.0 - thumb_w - thumb_gap).max(40.0),
+            (browse_rect.left() - rect.left() - 4.0).max(40.0),
             rect.height(),
         ),
     );
+    let icon_inset = if thumb.is_some() { 28 } else { 23 };
 
-    // Open the referenced tag in a new tab (when the reference is set).
-    ui.painter().rect_filled(
+    if shader_action_button(
+        ui,
         open_rect,
-        0.0,
-        if open_enabled {
-            material_input()
-        } else {
-            material_disabled_input()
-        },
-    );
-    ui.painter()
-        .rect_stroke(
-            open_rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-    let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
-    let icon_color = if open_enabled {
-        material_text()
-    } else {
-        material_muted_text()
-    };
-    paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
-    if open_enabled
-        && ui
-            .interact(
-                open_rect,
-                ui.make_persistent_id(format!("{}_open:{buffer_key}", cell.id)),
-                Sense::click(),
-            )
-            .on_hover_text(format!(
-                "Open the referenced {extension} tag (Alt: floating window)"
-            ))
-            .clicked()
+        (cell.id, "open", buffer_key),
+        ButtonIcon::Open,
+        "",
+        open_enabled,
+    )
+    .on_hover_text(format!(
+        "Open the referenced {extension} tag (Alt: floating window)"
+    ))
+    .clicked()
     {
         *edit.open_request = Some(OpenTagRequest {
             group_tag: cell.group_tag,
@@ -2035,16 +2562,52 @@ fn draw_shader_reference_cell(
         material_text()
     };
     let mut commit = None;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+    shader_cell_scope(ui, text_rect, |ui| {
         ui.visuals_mut().extreme_bg_color = material_input();
+        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _width: f32| {
+            let display = if ui.memory(|m| m.has_focus(id)) {
+                text.as_str()
+            } else {
+                shader_reference_name(text.as_str())
+            };
+            ui.painter().layout_no_wrap(
+                display.to_owned(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                text_color,
+            )
+        };
         let resp = ui.add(
             egui::TextEdit::singleline(&mut draft.text)
                 .id(id)
+                .margin(egui::Margin {
+                    left: icon_inset,
+                    right: 4,
+                    top: 2,
+                    bottom: 2,
+                })
                 .desired_width(text_rect.width())
+                .layouter(&mut layouter)
                 .hint_text(placeholder_text("(no reference)"))
                 .text_color(text_color)
-                .font(egui::TextStyle::Monospace),
+                .font(egui::TextStyle::Body)
+                .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
+                .vertical_align(egui::Align::Center),
         );
+        let shown = shader_reference_name(&draft.text);
+        if shown != draft.text
+            || ui
+                .painter()
+                .layout_no_wrap(
+                    shown.to_owned(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    text_color,
+                )
+                .size()
+                .x
+                > text_rect.width() - icon_inset as f32 - 4.0
+        {
+            resp.clone().on_hover_text(draft.text.clone());
+        }
         if missing {
             resp.clone()
                 .on_hover_text(format!("Referenced {extension} not found on disk"));
@@ -2057,8 +2620,41 @@ fn draw_shader_reference_cell(
     });
     draft.keep_commit(|| {
         let ops = commit_ops(edit);
-        DraftCommit::new(edit.tag_key, vec![buffer_key.to_owned()], move |texts| ops(texts[0]))
+        DraftCommit::new(edit.tag_key, vec![buffer_key.to_owned()], move |texts| {
+            ops(texts[0])
+        })
     });
+
+    if let Some(texture) = &thumb {
+        let thumb_rect = egui::Rect::from_min_size(
+            text_rect.left_top() + Vec2::new(1.0, 1.0),
+            Vec2::splat(text_rect.height() - 2.0),
+        );
+        ui.painter().image(
+            texture.id(),
+            thumb_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        // Hover → enlarged preview popup (up to native, ≤256px) + path,
+        // mirroring Foundation's help-popup image.
+        ui.interact(
+            thumb_rect,
+            ui.make_persistent_id(("shader_thumb_hover", &open_ref)),
+            Sense::hover(),
+        )
+        .on_hover_ui(|ui| {
+            bitmap_hover_preview_ui(ui, texture, &open_ref, material_muted_text());
+        });
+    }
+    if thumb.is_none() {
+        paint_tag_icon_at(
+            ui,
+            Some(cell.group_tag),
+            edit.game,
+            shader_tag_icon_rect(text_rect),
+        );
+    }
 
     // Drop a tag of the right group from the browser onto the cell, received
     // by a hover interaction laid over the text box — the structure the
@@ -2076,8 +2672,12 @@ fn draw_shader_reference_cell(
             } else {
                 REFERENCE_MISSING_COLOR
             };
-            ui.painter()
-                .rect_stroke(text_rect, 2.0, Stroke::new(1.5_f32, color), egui::StrokeKind::Middle);
+            ui.painter().rect_stroke(
+                text_rect,
+                2.0,
+                Stroke::new(1.5_f32, color),
+                egui::StrokeKind::Middle,
+            );
         }
         if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
             && accepts(&payload)
@@ -2088,30 +2688,16 @@ fn draw_shader_reference_cell(
         }
     }
 
-    // "..." browse button
-    ui.painter().rect_filled(browse_rect, 0.0, material_input());
-    ui.painter()
-        .rect_stroke(
-            browse_rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-    ui.painter().text(
-        browse_rect.center(),
-        Align2::CENTER_CENTER,
-        "...",
-        FontId::proportional(11.0),
-        material_text(),
-    );
-    if ui
-        .interact(
-            browse_rect,
-            ui.make_persistent_id(format!("{}_browse:{buffer_key}", cell.id)),
-            Sense::click(),
-        )
-        .on_hover_text(format!("Browse for a .{extension} tag file"))
-        .clicked()
+    if shader_action_button(
+        ui,
+        browse_rect,
+        (cell.id, "browse", buffer_key),
+        ButtonIcon::Browse,
+        "Browse",
+        edit.editable,
+    )
+    .on_hover_text(format!("Browse for a .{extension} tag file"))
+    .clicked()
     {
         let mut dialog = rfd::FileDialog::new()
             .add_filter(format!("{extension} tag"), cell.browse_extensions)
@@ -2140,7 +2726,10 @@ fn draw_shader_reference_cell(
 /// The edit a function-scalar box commits: a constant function of the
 /// typed value.
 fn function_scalar_ops(path: &str, text: &str) -> Result<DeferredOps, String> {
-    Ok(field_edit_ops(path, &constant_function_hex(parse_shader_number(text)?)))
+    Ok(field_edit_ops(
+        path,
+        &constant_function_hex(parse_shader_number(text)?),
+    ))
 }
 
 /// The edit a not-yet-created function-scalar box commits.
@@ -2149,7 +2738,10 @@ fn create_function_scalar_ops(
     text: &str,
 ) -> Result<DeferredOps, String> {
     let value = parse_shader_number(text)?;
-    Ok(shader_context_action_ops(&shader_function_action(target, constant_function_hex(value))))
+    Ok(shader_context_action_ops(&shader_function_action(
+        target,
+        constant_function_hex(value),
+    )))
 }
 
 /// The edit a Halo 2 function-scalar box commits.
@@ -2233,17 +2825,24 @@ fn h2_create_template_value_ops(
     })
 }
 
+pub(super) fn shader_color_swatch_rect(rect: egui::Rect) -> egui::Rect {
+    let size = (rect.height() - 2.0).min(22.0).max(1.0);
+    egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 1.0, rect.center().y - size / 2.0),
+        Vec2::splat(size),
+    )
+}
+
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, material_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-    let inner = rect.shrink(3.0);
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, material_input_edge()),
+        egui::StrokeKind::Middle,
+    );
+    let inner = shader_color_swatch_rect(rect);
     ui.painter().rect_filled(inner, 0.0, display_color);
     ui.painter().rect_stroke(
         inner,
@@ -2308,13 +2907,13 @@ fn push_h2_template_reference_edit(
 }
 
 /// The edits switching a Halo 2 shader to the template `input` names: the
-/// reference, and pruning the parameters the new template lacks.
+/// reference, retaining authored parameters for recovery and explicit cleanup.
 fn h2_template_reference_ops(
     path: &str,
     input: &str,
-    tags_root: Option<&std::path::Path>,
-    game: Option<GameId>,
-    definitions_root: Option<&std::path::Path>,
+    _tags_root: Option<&std::path::Path>,
+    _game: Option<GameId>,
+    _definitions_root: Option<&std::path::Path>,
 ) -> DeferredOps {
     let normalized = h2_normalize_shader_template_reference(&sanitize_ref_path(input));
     let pending_input = if normalized.is_empty() || normalized.eq_ignore_ascii_case("none") {
@@ -2322,51 +2921,16 @@ fn h2_template_reference_ops(
     } else {
         format!("stem:{}", normalized.replace('/', "\\"))
     };
-    let mut ops = DeferredOps {
+    DeferredOps {
         pending: vec![PendingFieldEdit {
             path: path.to_owned(),
             input: pending_input,
         }],
         ..DeferredOps::default()
-    };
-    if let Some(tags_root) = tags_root
-        && let Some(allowed_parameter_names) =
-            h2_template_parameter_names_from_reference(tags_root, game, definitions_root, &normalized)
-    {
-        ops.h2_shader_param_ops.push(H2ShaderParamOp::SwitchTemplate {
-            parameters_block_path: "parameters".to_owned(),
-            allowed_parameter_names,
-        });
     }
-    ops
 }
 
-/// The parameter names the template `reference` declares, read with the
-/// loader the H2 shader grid uses.
-///
-/// This used to read the file itself: it joined a backslash-separated path
-/// onto the tags root, which names no file on macOS or Linux, and assumed the
-/// Halo 2 definitions and a classic header. Switching a template there never
-/// pruned the parameters the new one lacks.
-fn h2_template_parameter_names_from_reference(
-    tags_root: &std::path::Path,
-    game: Option<GameId>,
-    definitions_root: Option<&std::path::Path>,
-    reference: &str,
-) -> Option<Vec<String>> {
-    let source = TagSource::LooseFolder {
-        root: tags_root.to_path_buf(),
-        game: Some(game.unwrap_or(GameId::Halo2)),
-        definitions_root: definitions_root
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(locate_definitions_root),
-    };
-    let template =
-        load_referenced_tag_from_source(&source, reference, "shader_template", b"stem").ok()?;
-    Some(h2_template_parameter_names(template.root()))
-}
-
-fn h2_template_parameter_names(root: TagStruct<'_>) -> Vec<String> {
+pub(super) fn h2_template_parameter_names(root: TagStruct<'_>) -> Vec<String> {
     let mut names = Vec::new();
     if let Some(categories) = root.field("categories").and_then(|field| field.as_block()) {
         for category in categories.iter() {
@@ -2469,6 +3033,288 @@ mod tests {
     use super::*;
     use crate::app::browser::draw_entry;
     use crate::app::editor::fields::with_test_edit_context;
+
+    #[test]
+    fn cached_function_row_uses_the_current_theme_background() {
+        let ctx = egui::Context::default();
+        let mut row = empty_shader_grid_row();
+        // The model holds function data, while the renderer resolves its
+        // background from the current theme on every draw.
+        let mut editor = TagFunctionEditor::from_function(
+            h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap(),
+        );
+        editor.set_function_type(FunctionType::Linear).unwrap();
+        row.function = Some(FunctionView::from_function(editor.function().clone()));
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_shader_grid_row(ui, &row, 0, &mut None, &mut None, edit);
+            });
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Rect(rect)
+                if rect.fill == material_function_row() && rect.rect.width() > 300.0
+        )));
+    }
+
+    fn pending_h2_scalar_row() -> ShaderGridRow {
+        let mut row = empty_shader_grid_row();
+        row.label = "scale".to_owned();
+        row.edit = Some(ShaderRowEdit {
+            path: String::new(),
+            current: "1".to_owned(),
+            kind: ShaderRowEditKind::H2CreateFunctionScalar {
+                create_op: H2ShaderParamOp::EnsureAnimationProperty {
+                    parameters_block_path: "parameters".to_owned(),
+                    parameter_name: "bitmap".to_owned(),
+                    parameter_type_index: 0,
+                    animation_type_index: 0,
+                    initial_function_data: h2_constant_scalar_function_data(1.0, None),
+                },
+            },
+        });
+        row
+    }
+
+    #[test]
+    fn h2_range_controls_support_missing_and_existing_scalar_functions() {
+        let mut row = pending_h2_scalar_row();
+        assert!(h2_range_control_for_row(&row).is_some());
+        row.edit.as_mut().unwrap().kind = ShaderRowEditKind::H2FunctionScalar {
+            block_path: "parameters[0]/animation properties[0]/function/data".to_owned(),
+            legacy_data: Some(h2_constant_scalar_function_data(1.0, None)),
+        };
+        assert!(h2_range_control_for_row(&row).is_some());
+        row.edit.as_mut().unwrap().kind = ShaderRowEditKind::H2FunctionColor {
+            block_path: "parameters[0]/animation properties[0]/function/data".to_owned(),
+            legacy_data: Some(h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None)),
+        };
+        assert!(h2_range_control_for_row(&row).is_none());
+    }
+
+    #[test]
+    fn enabling_a_missing_h2_range_uses_h2_function_encoding() {
+        let row = pending_h2_scalar_row();
+        let control = shader_range_control(&row).unwrap();
+        let mut editor = TagFunctionEditor::from_function(control.function.clone());
+        editor.set_ranged(true).unwrap();
+        editor.set_clamp_range(1.0, 3.5).unwrap();
+        with_test_edit_context(|edit| {
+            push_shader_range_edit(edit, &control, editor);
+            let H2ShaderParamOp::EnsureAnimationProperty {
+                initial_function_data,
+                ..
+            } = &edit.h2_shader_param_ops[0]
+            else {
+                panic!("an empty H2 range must create its animation property");
+            };
+            let function = h2_tag_function(initial_function_data).unwrap();
+            let editor = TagFunctionEditor::from_function(function);
+            assert!(editor.is_ranged());
+            assert_eq!(editor.clamp_range(), Some((1.0, 3.5)));
+            assert!(
+                edit.pending.is_empty(),
+                "H2 must not receive H3 hex field edits"
+            );
+        });
+    }
+
+    #[test]
+    fn toggling_h2_color_range_preserves_color_payload() {
+        let mut row = pending_h2_scalar_row();
+        let original = h2_constant_color_function_data(0.25, 0.5, 0.75, 1.0, None);
+        row.edit.as_mut().unwrap().kind = ShaderRowEditKind::H2FunctionColor {
+            block_path: "parameters[0]/animation properties[0]/function/data".to_owned(),
+            legacy_data: Some(original.clone()),
+        };
+        let control = shader_range_control(&row).unwrap();
+        let mut editor = TagFunctionEditor::from_function(control.function.clone());
+        for enabled in [true, false] {
+            editor.set_ranged(enabled).unwrap();
+            with_test_edit_context(|edit| {
+                push_shader_range_edit(edit, &control, editor.clone());
+                let H2ShaderParamOp::EditFunctionData { data, .. } = &edit.h2_shader_param_ops[0]
+                else {
+                    panic!("expected H2 function data edit");
+                };
+                assert_eq!(&data[4..], &original[4..]);
+                assert_eq!(h2_tag_function(data).unwrap().is_ranged(), enabled);
+            });
+        }
+    }
+
+    #[test]
+    fn shader_icon_buttons_are_exactly_24px_with_a_4px_gap() {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            let first = egui::Rect::from_min_size(ui.cursor().min, ICON_BUTTON_SIZE);
+            let second = first.translate(Vec2::new(28.0, 0.0));
+            let function =
+                shader_action_button(ui, first, "function", ButtonIcon::Function, "", true);
+            let clear = shader_action_button(ui, second, "clear", ButtonIcon::Clear, "", true);
+            assert_eq!(function.rect.size(), ICON_BUTTON_SIZE);
+            assert_eq!(clear.rect.size(), ICON_BUTTON_SIZE);
+            assert_eq!(clear.rect.left() - function.rect.right(), 4.0);
+        });
+    }
+
+    #[test]
+    fn unused_shader_parameter_label_is_red() {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        let mut row = empty_shader_grid_row();
+        row.label = "unused_value".to_owned();
+        row.is_overridden = true;
+        let delete = BlockOp {
+            path: "parameters".to_owned(),
+            kind: BlockOpKind::Delete(0),
+        };
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_unused_shader_grid_row(ui, &row, &mut None, &mut None, edit, &delete);
+            });
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "unused_value" && text.fallback_color == material_delete_text())));
+    }
+
+    #[test]
+    fn shader_row_border_is_painted_after_the_function_label_fill() {
+        let ctx = egui::Context::default();
+        let row = pending_h2_scalar_row();
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            with_test_edit_context(|edit| {
+                draw_shader_grid_row(ui, &row, 0, &mut None, &mut None, edit);
+            });
+        });
+        let fill = output
+            .shapes
+            .iter()
+            .position(|shape| {
+                matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == material_function_row())
+            })
+            .unwrap();
+        let border = output.shapes.iter().rposition(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { stroke, .. } if stroke.width == 1.0 && stroke.color == foundation_block_edge())).unwrap();
+        assert!(
+            border > fill,
+            "the border must paint above the colored label"
+        );
+    }
+
+    #[test]
+    fn shader_column_header_resizes_each_column_by_dragging() {
+        let ctx = egui::Context::default();
+        let point = std::cell::Cell::new(egui::Pos2::ZERO);
+        let frame = |events: Vec<egui::Event>, column: usize| {
+            let _ = crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let label = shader_label_width(ui);
+                    let default = shader_default_width(ui);
+                    let x = [
+                        label + 5.0,
+                        label + default + 9.0,
+                        shader_grid_width(ui) - 1.0,
+                    ][column];
+                    point.set(ui.cursor().min + Vec2::new(x, 14.0));
+                    draw_shader_columns_header(ui);
+                },
+            );
+        };
+        for (column, key, initial) in [
+            (0, "shader_grid_label_width", 230.0),
+            (1, "shader_grid_default_width", 150.0),
+            (2, "shader_grid_value_width", 0.0),
+        ] {
+            frame(Vec::new(), column);
+            let start = point.get();
+            let initial = if column == 2 {
+                start.x
+                    - ctx
+                        .data(|d| d.get_temp::<f32>(shader_label_width_id()))
+                        .unwrap()
+                    - ctx
+                        .data(|d| d.get_temp::<f32>(egui::Id::new("shader_grid_default_width")))
+                        .unwrap()
+                    - 15.0
+            } else {
+                initial
+            };
+            frame(
+                vec![
+                    egui::Event::PointerMoved(start),
+                    egui::Event::PointerButton {
+                        pos: start,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                column,
+            );
+            let end = start + Vec2::new(40.0, 0.0);
+            frame(vec![egui::Event::PointerMoved(end)], column);
+            frame(
+                vec![egui::Event::PointerButton {
+                    pos: end,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                column,
+            );
+            let width = ctx.data(|d| d.get_temp::<f32>(egui::Id::new(key))).unwrap();
+            assert!((width - initial - 40.0).abs() < 0.1, "{key}: {width}");
+        }
+    }
+
+    #[test]
+    fn shader_flags_row_contains_all_checkboxes_at_larger_control_sizes() {
+        let ctx = egui::Context::default();
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            ui.spacing_mut().interact_size.y = 32.0;
+            for count in [1, 3, 8] {
+                let mut row = empty_shader_grid_row();
+                row.label = "flags".to_owned();
+                row.edit = Some(ShaderRowEdit {
+                    path: "flags".to_owned(),
+                    current: "0".to_owned(),
+                    kind: ShaderRowEditKind::Flags(
+                        (0..count).map(|index| format!("flag {index}")).collect(),
+                    ),
+                });
+                let height = shader_grid_row_height(ui, &row, 300.0);
+                assert!(height >= count as f32 * 32.0 + 8.0);
+                let rect = egui::Rect::from_min_size(
+                    ui.cursor().min + Vec2::new(0.0, 4.0),
+                    Vec2::new(300.0, height - 8.0),
+                );
+                let mut value_ui =
+                    ui.new_child(egui::UiBuilder::new().id_salt(count).max_rect(rect));
+                with_test_edit_context(|edit| {
+                    draw_shader_editable_value(
+                        &mut value_ui,
+                        rect,
+                        &row.label,
+                        row.edit.as_ref().unwrap(),
+                        edit,
+                        &mut None,
+                    );
+                });
+                assert!(value_ui.min_rect().bottom() <= rect.bottom() + 0.1);
+            }
+        });
+    }
 
     /// Drag `entry` from a real browser row onto a real shader reference cell
     /// of `kind`, and return the field edits the cell committed.
@@ -2589,36 +3435,23 @@ mod tests {
         assert!(drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, false).is_empty());
     }
 
-    /// Switching an H2 shader's template queues the new template's parameter
-    /// names, so parameters it lacks are pruned. This read the template off a
-    /// backslash-joined path, which found nothing outside Windows.
+    /// Switching templates must retain authored parameters for recovery and explicit cleanup.
     #[test]
-    fn switching_a_template_reads_its_parameters() {
-        let root = crate::core::test_kits::h2ek_tags();
-        let reference = "shaders/shader_templates/water/water_static";
-        if !root.join(format!("{reference}.shader_template")).is_file() {
-            eprintln!("skipping: {reference} not present under {}", root.display());
-            return;
-        }
+    fn switching_a_template_preserves_saved_parameters() {
         let row_edit = ShaderRowEdit {
             path: "template".to_owned(),
             current: String::new(),
             kind: ShaderRowEditKind::ShaderTemplateRef,
         };
-        let root: &'static std::path::Path = std::path::Path::new(crate::core::test_kits::leak(root));
         with_test_edit_context(|edit| {
-            edit.tags_root = Some(root);
-            edit.game = Some(GameId::Halo2);
-            push_h2_template_reference_edit(edit, &row_edit, reference.to_owned());
-            let names = edit.h2_shader_param_ops.iter().find_map(|op| match op {
-                H2ShaderParamOp::SwitchTemplate {
-                    allowed_parameter_names,
-                    ..
-                } => Some(allowed_parameter_names.clone()),
-                _ => None,
-            });
-            let names = names.expect("the template's parameters were read");
-            assert!(!names.is_empty());
+            push_h2_template_reference_edit(
+                edit,
+                &row_edit,
+                "shaders/other.shader_template".to_owned(),
+            );
+            assert_eq!(edit.pending.len(), 1);
+            assert!(edit.h2_shader_param_ops.is_empty());
+            assert!(edit.block_ops.is_empty());
         });
     }
 

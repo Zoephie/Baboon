@@ -30,10 +30,10 @@ pub(in crate::app) fn draw_material_tag(
 ) {
     let is_shader = is_shader_tag(entry, &bundled_group_hierarchy(edit.game));
     Frame::NONE
-        .fill(material_panel())
-        .stroke(Stroke::new(1.0_f32, material_panel_edge()))
+        .fill(if is_shader { Color32::TRANSPARENT } else { material_panel() })
+        .stroke(if is_shader { Stroke::NONE } else { Stroke::new(1.0_f32, material_panel_edge()) })
         // A 2-point inset: egui counts the stroke as padding.
-        .inner_margin(egui::Margin::same(1))
+        .inner_margin(egui::Margin::same(if is_shader { 0 } else { 1 }))
         .show(ui, |ui| {
             if is_shader {
                 // Built once per revision of the document, not every frame:
@@ -732,7 +732,7 @@ pub(in crate::app) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
 pub(in crate::app) fn material_row_tint(value: &TagFieldData) -> Color32 {
     match value {
         TagFieldData::Data(_) | TagFieldData::ApiInterop(_) | TagFieldData::Custom(_) => {
-            MATERIAL_DATA_ROW
+            material_data_row()
         }
         TagFieldData::RealRgbColor(_)
         | TagFieldData::RealArgbColor(_)
@@ -766,8 +766,8 @@ pub(in crate::app) fn material_row_tint(value: &TagFieldData) -> Color32 {
         | TagFieldData::ShortIntegerBounds(_)
         | TagFieldData::AngleBounds(_)
         | TagFieldData::RealBounds(_)
-        | TagFieldData::FractionBounds(_) => MATERIAL_NUMERIC_ROW,
-        _ => MATERIAL_REF_ROW,
+        | TagFieldData::FractionBounds(_) => material_numeric_row(),
+        _ => material_ref_row(),
     }
 }
 
