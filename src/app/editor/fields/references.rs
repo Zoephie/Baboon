@@ -924,13 +924,14 @@ pub(in crate::app) fn draw_foundation_flags_row(
     }
 
     if meta.help.is_some() || meta.read_only {
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-                flags_rect.right_top() + Vec2::new(8.0, 0.0),
-                Vec2::new(120.0, 24.0),
-            )),
-            |ui| draw_field_help(ui, meta),
-        );
+        // A child, not a scope: a scope advances this layout's cursor to the
+        // end of its rect, which sits at the panel's top, and pulled the next
+        // field up over the flags (`read-only` flags overlapped the row below).
+        let mut hint = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+            flags_rect.right_top() + Vec2::new(8.0, 0.0),
+            Vec2::new(120.0, 24.0),
+        )));
+        draw_field_help(&mut hint, meta);
     }
     ui.add_space(4.0);
 }
@@ -942,6 +943,34 @@ mod tests {
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// A read-only flags row leaves the cursor below its panel, so the next
+    /// field starts under it. Its `read-only` hint was drawn in a scope at the
+    /// panel's top, which pulled the cursor back up and laid the next field
+    /// over the flags.
+    #[test]
+    fn read_only_flags_row_keeps_the_next_field_below_it() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let field = root
+            .fields_all()
+            .find(|field| field.value().as_ref().and_then(flag_value_parts).is_some_and(|(_, names)| names.len() >= 2)
+                || matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2))
+            .expect("a flags field with several options");
+        let (raw, names) = field.value().as_ref().and_then(flag_value_parts).unwrap_or_default();
+        let mut meta = field_display_meta(field.name());
+        meta.read_only = true;
+        let ctx = egui::Context::default();
+        let mut moved = 0.0;
+        crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            super::with_test_edit_context(|edit| {
+                let before = ui.cursor().top();
+                draw_foundation_flags_row(ui, &meta, raw, &names, field, 0, "flags", edit);
+                moved = ui.cursor().top() - before;
+            });
+        });
+        assert!(moved > 50.0, "the cursor moved {moved}px past a flags panel of several rows");
+    }
 
     #[test]
     fn ce_collision_geometry_reference_uses_loaded_game_extension() {
