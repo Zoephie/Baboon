@@ -799,22 +799,20 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
     let painter = ui.painter().clone();
 
-    let label_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + 4.0, 4.0),
-        Vec2::new(FOUNDATION_LABEL_WIDTH - 8.0, 24.0),
+    // The label cell every other row uses (help cue, gutter, hover docs), level
+    // with the first flag; the panel starts where other rows' values do.
+    let mut label_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_size(
+                rect.left_top() + Vec2::new(indent, 4.0),
+                Vec2::new(FOUNDATION_LABEL_WIDTH, 24.0),
+            ))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    paint_findable_text(
-        ui,
-        label_rect.left_center(),
-        Align2::LEFT_CENTER,
-        &truncate_for_cell(&meta.label, label_rect.width()),
-        FontId::proportional(12.5),
-        text_dark(),
-        FindTargetKind::Label,
-    );
+    foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
 
     let flags_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH, 0.0),
+        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x, 0.0),
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
@@ -970,6 +968,47 @@ mod tests {
             });
         });
         assert!(moved > 50.0, "the cursor moved {moved}px past a flags panel of several rows");
+    }
+
+    /// A flags row lines up with every other row: its label where theirs are
+    /// painted, its panel where their values start.
+    #[test]
+    fn flags_row_lines_up_with_other_rows() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let field = root
+            .fields_all()
+            .find(|field| matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2))
+            .expect("a flags field with several options");
+        let mut meta = field_display_meta(field.name());
+        meta.label = "flagsrow".to_owned();
+        meta.read_only = true;
+        let ctx = egui::Context::default();
+        let mut value_left = 0.0;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                foundation_label_cell(ui, "otherrow", None);
+                value_left = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.left();
+            });
+            super::with_test_edit_context(|edit| {
+                draw_foundation_flags_row(ui, &meta, 0, &[], field, 1, "flags", edit);
+            });
+        });
+        let mut text_x = std::collections::HashMap::new();
+        let mut panels = Vec::new();
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    text_x.insert(text.galley.text().to_owned(), text.pos.x);
+                }
+                egui::Shape::Rect(rect) if rect.rect.height() > 40.0 && rect.fill == foundation_input() => panels.push(rect.rect.left()),
+                _ => {}
+            }
+        }
+        assert_eq!(text_x.get("flagsrow"), text_x.get("otherrow"), "labels: {text_x:?}");
+        assert!(text_x.contains_key("flagsrow"));
+        assert_eq!(panels.first().copied(), Some(value_left), "panel left vs value left");
     }
 
     #[test]
