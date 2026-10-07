@@ -4203,6 +4203,144 @@ mod tests {
     /// tags store them stripped, and so do layouts built from the
     /// definitions), so read-only and hidden come from the definition. A `!`
     /// field shows only in expert mode, and a `*` field is marked read-only.
+    /// A text data field's box resized by its grip changes its row's height,
+    /// and rows out of view are stood in for by the height they had when last
+    /// drawn. Resizing only happens with the row on screen, so the height kept
+    /// for it follows; scrolled away and back, every row shows where it would
+    /// with nothing skipped.
+    #[test]
+    fn a_resized_text_box_keeps_hidden_rows_in_place() {
+        let root = crate::core::test_kits::unique_temp_path("data-rows");
+        let game = root.join("haloreach_mcc");
+        std::fs::create_dir_all(&game).unwrap();
+        let mut fields: Vec<String> = (0..3).map(|n| format!(r#"{{"type":"long_integer","name":"before_{n}"}}"#)).collect();
+        fields.push(r#"{"type":"data","name":"notes","definition":"notes_text"}"#.to_owned());
+        fields.extend((0..40).map(|n| format!(r#"{{"type":"long_integer","name":"after_{n:02}"}}"#)));
+        fields.push(r#"{"type":"terminator","name":null}"#.to_owned());
+        std::fs::write(
+            game.join("data_rows.json"),
+            format!(
+                r#"{{"name":"data_rows","tag":"drow","version":1,"flags":0,"block":"data_rows_block",
+                    "blocks":{{"data_rows_block":{{"max_count":1,"struct":"data_rows_struct"}}}},
+                    "structs":{{"data_rows_struct":{{"guid":"00112233445566778899aabbccddeeff","size":192,"fields":[{}]}}}},
+                    "datas":{{"notes_text":{{"flags":2,"alignment_bits":0,"max_size":4096}}}}}}"#,
+                fields.join(",")
+            ),
+        )
+        .unwrap();
+        let mut tag = TagFile::new(game.join("data_rows.json")).unwrap();
+        tag.root_mut().field_path_mut("notes").unwrap().set(TagFieldData::Data(b"hello\0".to_vec())).unwrap();
+
+        // Each step: where the view is scrolled to, and the pointer events.
+        type Step = (f32, Vec<egui::Event>);
+        let run = |culling: bool, steps: &[Step]| -> (Vec<Vec<String>>, Option<egui::Rect>) {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            // The edit context's lifetime is the helper's own; test code may leak.
+            let heights: &'static mut RowHeights = Box::leak(Box::default());
+            let root: &'static std::path::Path = Box::leak(root.clone().into_boxed_path());
+            let (mut views, mut corner) = (Vec::new(), None);
+            with_test_edit_context(|edit| {
+                edit.definitions_root = Some(root);
+                edit.game = Some(GameId::HaloReach);
+                let corner_id = edit
+                    // Rows are keyed by positional field path: `notes` is field 3.
+                    .widget_id(("data_text", &format!("{}|notes#3", edit.tag_key)))
+                    .with("resize")
+                    .with("__resize_corner");
+                edit.row_heights = Some(heights);
+                for (index, (offset, events)) in steps.iter().enumerate() {
+                    edit.row_heights.as_deref_mut().unwrap().begin(
+                        RowHeightsBasis { layout: (0, 0), width: 900.0, pixels_per_point: 1.0, expert_mode: false, filtering: false },
+                        culling,
+                    );
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 500.0))),
+                        time: Some(index as f64 / 30.0),
+                        events: events.clone(),
+                        ..Default::default()
+                    };
+                    let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            // As the tag pane's: full width, so its floating scroll
+                            // bar runs down the right edge.
+                            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                            // Set only when a step moves it, as a user's scroll does.
+                            if index == 0 || steps[index - 1].0 != *offset {
+                                area = area.vertical_scroll_offset(*offset);
+                            }
+                            area.show(ui, |ui| {
+                                draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                            });
+                            // Read in the pass: egui forgets widgets once it ends.
+                            corner = corner.or_else(|| ui.ctx().read_response(corner_id).map(|response| response.rect));
+                        });
+                    });
+                    let mut shown: Vec<String> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => {
+                                Some(format!("{}@{:.0}", text.galley.text(), text.pos.y))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    shown.sort();
+                    views.push(shown);
+
+                }
+            });
+            (views, corner)
+        };
+
+        let settle: Vec<Step> = (0..3).map(|_| (0.0, Vec::new())).collect();
+        let (_, corner) = run(false, &settle);
+        let grip = corner.expect("the text box has a resize grip").center();
+        let at = |pos: egui::Pos2| egui::Event::PointerMoved(pos);
+        let press = |pos: egui::Pos2, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut steps = settle.clone();
+        for step in 1..=3 {
+            steps.push((0.0, vec![at(grip - egui::vec2(30.0, 30.0) * (1.0 - step as f32 / 3.0))]));
+        }
+        steps.push((0.0, vec![press(grip, true)]));
+        for step in 1..=6 {
+            steps.push((0.0, vec![at(grip + egui::vec2(0.0, 25.0 * step as f32))]));
+        }
+        let released = grip + egui::vec2(0.0, 150.0);
+        steps.push((0.0, vec![press(released, false)]));
+        steps.push((0.0, Vec::new()));
+        let resized = steps.len() - 1;
+        // Scrolled until the data row is above the view, then back.
+        for _ in 0..2 {
+            steps.push((900.0, Vec::new()));
+        }
+        let scrolled = steps.len() - 1;
+        for _ in 0..2 {
+            steps.push((0.0, Vec::new()));
+        }
+        let back = steps.len() - 1;
+
+        let (culled, _) = run(true, &steps);
+        let (all, _) = run(false, &steps);
+        let top_of = |view: &[String], label: &str| -> f32 {
+            view.iter()
+                .find_map(|shown| shown.strip_prefix(&format!("{label}@")).map(|y| y.parse().unwrap()))
+                .unwrap_or_else(|| panic!("{label} is not in view: {view:?}"))
+        };
+        let grown = top_of(&culled[resized], "after_00") - top_of(&culled[settle.len() - 1], "after_00");
+        assert!(grown > 100.0, "the grip drag grew the box by {grown}");
+        for (step, name) in [(resized, "resized"), (scrolled, "scrolled away"), (back, "scrolled back")] {
+            assert_eq!(culled[step], all[step], "{name}: rows show where drawing every row puts them");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn read_only_and_hidden_come_from_the_definition() {
         let root = crate::core::test_kits::unique_temp_path("marker-definitions");

@@ -505,10 +505,15 @@ fn data_definitions(
         .clone()
 }
 
-/// The narrowest a text data field's box gets while there is room, and the
-/// tallest it grows before it scrolls: Foundation's sizes.
-const DATA_TEXT_MIN_WIDTH: f32 = 600.0;
+/// The tallest a text data field's box starts, as Foundation's grows to
+/// before it scrolls.
 const DATA_TEXT_MAX_HEIGHT: f32 = 200.0;
+/// The smallest the corner grip makes a text data field's box.
+const DATA_TEXT_MIN_WIDTH: f32 = 200.0;
+const DATA_TEXT_MIN_HEIGHT: f32 = 40.0;
+/// Room left between a text data field's box and the pane's right edge, where
+/// the pane's floating scroll bar would take a press meant for the grip.
+const DATA_TEXT_EDGE_GAP: f32 = 24.0;
 
 /// A data field's size as Foundation writes it: bytes up to 1 KB, then KB,
 /// MB or GB to two places with the exact count after.
@@ -576,39 +581,50 @@ fn draw_foundation_data_row(
         ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
         // Foundation's box is at least 600 wide and grows to 200 tall; Halo 2
         // Guerilla's is a fixed 540 by 128 in an 11-pixel fixed-pitch font.
-        // Neither wraps.
-        let width = DATA_TEXT_MIN_WIDTH.min(ui.available_width()).max(ui.available_width() - 8.0);
-        egui::ScrollArea::both()
-            .id_salt(id.with("scroll"))
-            .auto_shrink([false, true])
-            .max_width(width)
-            .max_height(DATA_TEXT_MAX_HEIGHT)
+        // Neither wraps. This one starts as wide as there is room for and as
+        // tall as its text up to 200, and its corner grip makes it any size
+        // that fits; the size it is dragged to is kept.
+        let available = ui.available_width() - DATA_TEXT_EDGE_GAP;
+        let font = FontId::monospace(12.0);
+        let lines = draft.text.lines().count().max(1) as f32;
+        let text_height = lines * ui.fonts_mut(|fonts| fonts.row_height(&font)) + 12.0;
+        egui::Resize::default()
+            .id(id.with("resize"))
+            .default_size([available, text_height.clamp(DATA_TEXT_MIN_HEIGHT, DATA_TEXT_MAX_HEIGHT)])
+            .min_size([DATA_TEXT_MIN_WIDTH.min(available), DATA_TEXT_MIN_HEIGHT])
+            .max_width(available)
             .show(ui, |ui| {
-                let font = FontId::monospace(12.0);
-                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-                    findable_galley(ui, text.as_str(), font.clone(), text_dark(), FindTargetKind::Value)
-                };
-                let mut read_only = draft.text.as_str();
-                let buffer: &mut dyn egui::TextBuffer = if editable { &mut draft.text } else { &mut read_only };
-                let response = ui.add(
-                    egui::TextEdit::multiline(buffer)
-                        .id(id)
-                        .font(FontId::monospace(12.0))
-                        .desired_width(width - ui.spacing().scroll.bar_width - 8.0)
-                        .desired_rows(1)
-                        .layouter(&mut layouter),
-                );
-                if !editable {
-                    return;
-                }
-                draft.note_response(&response);
-                if draft.changed
-                    && lost_focus_once(&response)
-                    && let Ok(bytes) = stored_bytes(&draft.text)
-                {
-                    edit.pending.extend(data_edit(path, bytes).pending);
-                    draft.mark_committed();
-                }
+                let box_width = ui.available_width();
+                egui::ScrollArea::both()
+                    .id_salt(id.with("scroll"))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+                            findable_galley(ui, text.as_str(), font.clone(), text_dark(), FindTargetKind::Value)
+                        };
+                        let mut read_only = draft.text.as_str();
+                        let buffer: &mut dyn egui::TextBuffer =
+                            if editable { &mut draft.text } else { &mut read_only };
+                        let response = ui.add(
+                            egui::TextEdit::multiline(buffer)
+                                .id(id)
+                                .font(font.clone())
+                                .desired_width(box_width - ui.spacing().scroll.bar_width - 8.0)
+                                .desired_rows(1)
+                                .layouter(&mut layouter),
+                        );
+                        if !editable {
+                            return;
+                        }
+                        draft.note_response(&response);
+                        if draft.changed
+                            && lost_focus_once(&response)
+                            && let Ok(bytes) = stored_bytes(&draft.text)
+                        {
+                            edit.pending.extend(data_edit(path, bytes).pending);
+                            draft.mark_committed();
+                        }
+                    });
             });
     });
     if !draft.changed {
