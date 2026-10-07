@@ -962,10 +962,11 @@ pub(in crate::app) fn draw_foundation_block(
 ) {
     let count = block.len();
     let sel = block_selected_index(ui, edit, path_prefix, count);
+    let labeler = BlockLabeler::new(edit, names);
     let selected_label = if count == 0 {
         "NONE".to_owned()
     } else {
-        block_element_dropdown_label(block.element(sel), names, sel)
+        labeler.label(path_prefix, block, sel)
     };
 
     let block_default_open = edit.default_open(depth == 0 || is_priority_section(name));
@@ -1013,7 +1014,7 @@ pub(in crate::app) fn draw_foundation_block(
         edit.is_active_filter(),
         paste_gate,
         block_size_label.as_deref(),
-        |i| block_element_dropdown_label(block.element(i), names, i),
+        |i| labeler.label(path_prefix, block, i),
         |ui| {
             if count == 0 {
                 ui.label(
@@ -1238,6 +1239,80 @@ thread_local! {
     /// How many dropdown labels this thread has built, for tests that bound it.
     pub(in crate::app) static DROPDOWN_LABELS_BUILT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+}
+
+/// The game's block-element label rules, read once per definitions folder and
+/// game. `None` when the definitions can't be read, and the editor falls back
+/// to its own content label.
+pub(in crate::app) fn element_labels(
+    definitions_root: Option<&std::path::Path>,
+    game: Option<GameId>,
+) -> Option<std::sync::Arc<blam_tags::element_label::ElementLabels>> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Rules = Option<Arc<blam_tags::element_label::ElementLabels>>;
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<(std::path::PathBuf, GameId), Rules>>> =
+        OnceLock::new();
+    let (root, game) = (definitions_root?, game?);
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry((root.to_path_buf(), game))
+        .or_insert_with(|| {
+            blam_tags::element_label::ElementLabels::load(root.join(game.as_str()))
+                .map(Arc::new)
+                .ok()
+        })
+        .clone()
+}
+
+/// Labels block elements as the game's own editor writes them (blam-tags
+/// `element_label`), with Baboon's `N. ` prefix. Built from a
+/// [`FieldEditContext`] up front, so a dropdown can label rows while the
+/// context is borrowed elsewhere.
+#[derive(Clone)]
+pub(in crate::app) struct BlockLabeler<'a> {
+    rules: Option<std::sync::Arc<blam_tags::element_label::ElementLabels>>,
+    group: u32,
+    root: Option<TagStruct<'a>>,
+    names: &'a TagNameIndex,
+}
+
+impl<'a> BlockLabeler<'a> {
+    pub(in crate::app) fn new(edit: &FieldEditContext<'a>, names: &'a TagNameIndex) -> Self {
+        Self::for_tag(edit.definitions_root, edit.game, edit.group_tag, edit.root, names)
+    }
+
+    /// The labeller for a tag of `group` in `game`, whose root is `root`.
+    pub(in crate::app) fn for_tag(
+        definitions_root: Option<&std::path::Path>,
+        game: Option<GameId>,
+        group: u32,
+        root: Option<TagStruct<'a>>,
+        names: &'a TagNameIndex,
+    ) -> Self {
+        BlockLabeler { rules: element_labels(definitions_root, game), group, root, names }
+    }
+
+    /// The label of element `index` of the block at `block_path`. The prefix
+    /// is left off a label that already starts with it: the editors' fallback
+    /// is `"N. <struct name>"`, and some callbacks print the index themselves.
+    /// Without the game's rules, Baboon's own content label.
+    pub(in crate::app) fn label(&self, block_path: &str, block: TagBlock<'_>, index: usize) -> String {
+        let Some(rules) = &self.rules else {
+            return block_element_dropdown_label(block.element(index), self.names, index);
+        };
+        #[cfg(test)]
+        DROPDOWN_LABELS_BUILT.with(|count| count.set(count.get() + 1));
+        let ctx = blam_tags::element_label::Context { group: Some(self.group) };
+        let label = self
+            .root
+            .and_then(|root| rules.label_at_in(&ctx, root, block_path, index as i64))
+            .unwrap_or_else(|| rules.label_in(&ctx, &[], block, index as i64));
+        let prefix = format!("{index}. ");
+        if label.starts_with(&prefix) { label } else { prefix + &label }
+    }
 }
 
 pub(in crate::app) fn block_element_dropdown_label(
@@ -2809,17 +2884,16 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     let root = edit.root;
     let default_names = TagNameIndex::default();
     let names = edit.names.unwrap_or(&default_names);
+    let labeler = BlockLabeler::new(edit, names);
+    let target_label = |block: Option<TagBlock<'_>>, index: usize| match block {
+        Some(block) => labeler.label(target_block_path, block, index),
+        None => format!("{index}."),
+    };
     let selected_text = if in_range {
         let block = root
             .and_then(|root| root.field_path(target_block_path))
             .and_then(|field| field.as_block());
-        block_element_dropdown_label(
-            block
-                .as_ref()
-                .and_then(|block| block.element(current as usize)),
-            names,
-            current as usize,
-        )
+        target_label(block, current as usize)
     } else {
         "<none>".to_owned()
     };
@@ -2854,11 +2928,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                         root.and_then(|root| root.field_path(target_block_path))
                             .and_then(|field| field.as_block())
                     });
-                    block_element_dropdown_label(
-                        block.as_ref().and_then(|block| block.element(index)),
-                        names,
-                        index,
-                    )
+                    target_label(*block, index)
                 },
                 Some("<none>"),
             );
@@ -2912,6 +2982,44 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Block headers and block-index dropdowns show the game's own editor
+    /// label (blam-tags `element_label`) with Baboon's `N. ` prefix, not
+    /// Baboon's content guess. The prefix isn't doubled on the editor's own
+    /// `"N. <struct>"` fallback, and a Halo 2 entry is found because the
+    /// labeller passes the tag's group.
+    #[test]
+    fn block_labels_come_from_the_games_editor() {
+        let defs = crate::core::bundled::locate_definitions_root();
+        let names = TagNameIndex::default();
+        let h3 = crate::core::test_kits::h3ek_tags();
+        let chud = h3.join("ui/chud/globals.chud_globals_definition");
+        if chud.exists() {
+            let game = GameId::from_id("halo3_mcc");
+            let tag = crate::core::source::read_tag_at_path(&chud, game, Some(&defs), u32::from_be_bytes(*b"chgd")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, tag.group().tag, Some(tag.root()), &names);
+            let skins = tag.root().field_path("skins").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("skins", skins, 1), "1. dervish");
+            let jungle = crate::core::source::read_tag_at_path(
+                &h3.join("levels/solo/010_jungle/010_jungle.scenario"), game, Some(&defs), u32::from_be_bytes(*b"scnr")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, jungle.group().tag, Some(jungle.root()), &names);
+            let pvs = jungle.root().field_path("zone set pvs").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("zone set pvs", pvs, 0), "0. scenario_zone_set_pvs_block");
+        } else {
+            eprintln!("skipped the H3 half: set BLAM_TEST_H3EK");
+        }
+        let h2 = crate::core::test_kits::h2ek_tags();
+        let delta = h2.join("scenarios/solo/08b_deltacontrol/08b_deltacontrol.scenario");
+        if delta.exists() {
+            let game = GameId::from_id("halo2_mcc");
+            let tag = crate::core::source::read_tag_at_path(&delta, game, Some(&defs), u32::from_be_bytes(*b"scnr")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, tag.group().tag, Some(tag.root()), &names);
+            let controls = tag.root().field_path("controls").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("controls", controls, 0), "0. s8_hunter_door_switch dcr_holo_switch");
+        } else {
+            eprintln!("skipped the H2 half: set BLAM_TEST_H2EK");
+        }
+    }
     use crate::core::source::{load_iostore_container_set, read_entry};
     use std::path::{Path, PathBuf};
 
