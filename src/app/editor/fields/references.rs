@@ -418,7 +418,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 }
             }
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
-            draw_field_help(ui, meta);
         })
         .response;
 
@@ -921,16 +920,6 @@ pub(in crate::app) fn draw_foundation_flags_row(
         );
     }
 
-    if meta.help.is_some() || meta.read_only {
-        // A child, not a scope: a scope advances this layout's cursor to the
-        // end of its rect, which sits at the panel's top, and pulled the next
-        // field up over the flags (`read-only` flags overlapped the row below).
-        let mut hint = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-            flags_rect.right_top() + Vec2::new(8.0, 0.0),
-            Vec2::new(120.0, 24.0),
-        )));
-        draw_field_help(&mut hint, meta);
-    }
     ui.add_space(4.0);
 }
 

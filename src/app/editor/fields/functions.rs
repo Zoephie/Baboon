@@ -80,7 +80,6 @@ fn draw_foundation_function_row_contents(
                     });
                 });
             });
-        draw_field_help(ui, meta);
     });
 }
 
@@ -333,7 +332,6 @@ pub(in crate::app) fn draw_foundation_enum_row(
                 input: selected.to_string(),
             });
         }
-        draw_field_help(ui, meta);
     });
 }
 

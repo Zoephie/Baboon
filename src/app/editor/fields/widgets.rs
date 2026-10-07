@@ -268,9 +268,9 @@ pub(in crate::app) fn foundation_value_cell(
 const VALUE_PADDING: f32 = 4.0;
 
 /// The one value box every editable and read-only value cell draws: the same
-/// fill, border, font, padding and find highlighting either way. Only the
-/// buffer differs: a read-only box is given an immutable `&str`, which keeps
-/// selection, focus and copying but drops typing, paste, cut and deletion.
+/// border, font, padding and find highlighting either way. A read-only box is
+/// given an immutable `&str`, which keeps selection, focus and copying but
+/// drops typing, paste, cut and deletion, and is greyed.
 fn foundation_value_text(
     ui: &mut Ui,
     rect: egui::Rect,
@@ -279,7 +279,13 @@ fn foundation_value_text(
     color: Color32,
     left_padding: f32,
 ) -> egui::Response {
-    ui.painter().rect_filled(rect, 0.0, foundation_input());
+    // A box whose text can't change is greyed, as Foundation greys a
+    // read-only field's: a dimmer fill and dimmer text (a missing reference
+    // keeps its red). It still takes focus, so its text can be copied.
+    let read_only = !text.is_mutable();
+    let fill = if read_only { foundation_input_read_only() } else { foundation_input() };
+    let color = if read_only && color == text_dark() { subtle_dark() } else { color };
+    ui.painter().rect_filled(rect, 0.0, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
         findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)

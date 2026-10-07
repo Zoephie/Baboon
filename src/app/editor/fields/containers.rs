@@ -4582,11 +4582,16 @@ mod tests {
                             );
                         });
                     });
+                    // Each value box greyed as read-only stands in as a text,
+                    // so the counts below can see it.
                     texts = output
                         .shapes
                         .iter()
                         .filter_map(|clipped| match &clipped.shape {
                             egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                            egui::Shape::Rect(rect) if rect.fill == crate::app::ui_kit::foundation_input_read_only() => {
+                                Some("<greyed box>".to_owned())
+                            }
                             _ => None,
                         })
                         .collect();
@@ -4598,11 +4603,14 @@ mod tests {
         assert!(normal.iter().any(|t| t == "visible"), "{normal:?}");
         assert!(normal.iter().any(|t| t == "locked"), "{normal:?}");
         assert!(!normal.iter().any(|t| t == "secret"), "a `!` field shows outside expert mode: {normal:?}");
+        // A read-only field is shown as Foundation shows one: its box greyed,
+        // with no note beside it.
         assert_eq!(
-            normal.iter().filter(|t| *t == "read-only").count(),
+            normal.iter().filter(|t| *t == "<greyed box>").count(),
             1,
-            "only the `*` field is read-only: {normal:?}"
+            "only the `*` field is greyed: {normal:?}"
         );
+        assert!(!normal.iter().any(|t| t == "read-only"), "a read-only note: {normal:?}");
         let expert = texts(true);
         assert!(expert.iter().any(|t| t == "secret"), "expert mode hides a `!` field: {expert:?}");
         for texts in [&normal, &expert] {

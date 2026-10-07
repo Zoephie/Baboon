@@ -236,7 +236,6 @@ pub(in crate::app) fn draw_foundation_color_row(
             }
             *edit.color_request = Some(popup);
         }
-        draw_field_help(ui, meta);
     });
 }
 
@@ -259,7 +258,6 @@ pub(in crate::app) fn draw_foundation_multi_value_row(
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
-        draw_field_help(ui, meta);
     });
 }
 
@@ -346,7 +344,6 @@ pub(in crate::app) fn draw_foundation_bounds_row(
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
-        draw_field_help(ui, meta);
     });
 
     edit.buffers.put(lower_key, lower);
@@ -371,7 +368,6 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
-        draw_field_help(ui, meta);
     });
 }
 
@@ -556,7 +552,6 @@ fn draw_foundation_data_row(
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         ui.label(RichText::new(data_size_text(bytes.len())).color(text_dark()));
-        draw_field_help(ui, meta);
     });
     let Some(definition) = data_definitions(edit.definitions_root, edit.game)
         .and_then(|definitions| definitions.of_field(&field))
@@ -611,12 +606,14 @@ fn draw_foundation_data_row(
                 // text, the border once focus is known.
                 let frame_rect = ui.max_rect();
                 let background = ui.painter().add(egui::Shape::Noop);
+                // Greyed when it can't be edited, as the value boxes are.
+                let text_color = if editable { text_dark() } else { subtle_dark() };
                 let scroll = egui::ScrollArea::both()
                     .id_salt(id.with("scroll"))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-                            findable_galley(ui, text.as_str(), font.clone(), text_dark(), FindTargetKind::Value)
+                            findable_galley(ui, text.as_str(), font.clone(), text_color, FindTargetKind::Value)
                         };
                         let mut read_only = draft.text.as_str();
                         let buffer: &mut dyn egui::TextBuffer =
@@ -656,7 +653,11 @@ fn draw_foundation_data_row(
                 ui.painter().set(
                     background,
                     egui::Shape::Vec(vec![
-                        egui::Shape::rect_filled(frame_rect, 0.0, visuals.text_edit_bg_color()),
+                        egui::Shape::rect_filled(
+                            frame_rect,
+                            0.0,
+                            if editable { visuals.text_edit_bg_color() } else { foundation_input_read_only() },
+                        ),
                         egui::Shape::rect_stroke(frame_rect, 0.0, stroke, egui::StrokeKind::Inside),
                     ]),
                 );
@@ -818,7 +819,6 @@ fn draw_foundation_labelled_cell_row(
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
-        draw_field_help(ui, meta);
     });
 }
 

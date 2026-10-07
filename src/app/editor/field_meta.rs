@@ -41,14 +41,6 @@ pub(in crate::app) fn field_suffix(meta: &FieldDisplayMeta, type_name: &str) -> 
     }
 }
 
-pub(in crate::app) fn draw_field_help(ui: &mut Ui, meta: &FieldDisplayMeta) {
-    // Field documentation is shown on hover over the name label (see
-    // `foundation_label_cell`); this only surfaces the read-only marker.
-    if meta.read_only {
-        ui.label(RichText::new("read-only").color(subtle_dark()).small());
-    }
-}
-
 pub(in crate::app) fn enum_option_label(options: &[&str], selected: i64) -> String {
     if selected < 0 {
         return "NONE".to_owned();
