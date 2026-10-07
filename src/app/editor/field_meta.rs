@@ -11,9 +11,9 @@ pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
     // `blam_tags::field_name`.
     let info = blam_tags::parse_field_name(name);
     FieldDisplayMeta {
-        label: info.clean_name.into_owned(),
+        label: info.display().into_owned(),
         unit: info.units.map(str::to_owned),
-        range: info.range.map(str::to_owned),
+        range: info.range_text().map(|range| range.into_owned()),
         help: info.description.map(str::to_owned),
         tag_reference_allowed: Vec::new(),
         read_only: info.read_only,

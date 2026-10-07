@@ -514,6 +514,13 @@ pub(in crate::app) fn clean_field_name(name: &str) -> String {
     blam_tags::clean_field_name(name).into_owned()
 }
 
+/// A field's name as it is shown: markup stripped and written as it was
+/// authored, with `/` where its addressable name has `\` (Foundation shows
+/// `left/right bleed`).
+pub(in crate::app) fn display_field_name(name: &str) -> String {
+    blam_tags::parse_field_name(name).display().into_owned()
+}
+
 pub(in crate::app) fn clean_field_name_basic(name: &str) -> String {
     name.replace(['*', '!'], "")
         .replace(['#', ':'], " ")

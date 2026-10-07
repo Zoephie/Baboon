@@ -219,10 +219,11 @@ impl<'a> FindPlans<'a> {
                 let clean = field.clean_name().into_owned();
                 let is_block = field.as_block().is_some() || field.as_array().is_some();
                 let is_documentation = field.field_type() == TagFieldType::Explanation;
+                // What the editor shows, so a match is where it's painted.
                 let label = if is_block {
                     foundation_block_title(field.name())
                 } else {
-                    clean.clone()
+                    crate::app::editor::display_field_name(field.name())
                 };
                 FindFieldPlan {
                     docs_before,

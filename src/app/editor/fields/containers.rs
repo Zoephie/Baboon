@@ -526,6 +526,9 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     } else {
         title
     };
+    // Each explanation scrolls on its own: one id for all of them clashed,
+    // and they shared one scroll position.
+    let scroll_id = ui.make_persistent_id(("explanation_text", &id_salt));
 
     ui.scope(|ui| {
         // Full-width header bar (see draw_foundation_group), matching Foundation.
@@ -562,7 +565,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                                 FindTargetKind::Documentation,
                             );
                             egui::ScrollArea::horizontal()
-                                .id_salt("explanation_text")
+                                .id_salt(scroll_id)
                                 .auto_shrink([false, true])
                                 .show(ui, |ui| {
                                     ui.add(egui::Label::new(galley).wrap_mode(egui::TextWrapMode::Extend));
@@ -638,7 +641,7 @@ pub(super) fn visible_container_title(name: &str, path_prefix: &str) -> String {
 }
 
 pub(in crate::app) fn foundation_block_title(name: &str) -> String {
-    clean_field_name(name)
+    display_field_name(name)
         .split_whitespace()
         .map(|word| {
             let mut chars = word.chars();
@@ -4536,6 +4539,54 @@ mod tests {
         let written = body.trim_end();
         assert!(written.starts_with("\n\n\n"), "the blank lines it was written with are kept");
         assert_eq!(galley.rows.len(), written.split('\n').count(), "a line wrapped in a 400 pixel pane");
+    }
+
+    /// Halo 3's `left/right bleed` shows its name as written (with `/`, as
+    /// Foundation does, not the `\` of its addressable name) and its range
+    /// closed, though the definition leaves the `[` open.
+    #[test]
+    fn a_field_name_shows_as_written_with_its_range_closed() {
+        let tag = TagFile::new(crate::app::test_definition_path("halo3_mcc/sound_mix.json")).unwrap();
+        let docs: &'static _ = Box::leak(Box::new(crate::app::help::build_def_docs(
+            &locate_definitions_root(),
+            GameId::Halo3,
+            "sound_mix",
+        )));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut texts = Vec::new();
+        with_test_edit_context(|edit| {
+            edit.docs = Some(docs);
+            edit.expand_all = Some(true);
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 6000.0))),
+                    ..Default::default()
+                };
+                let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                    });
+                });
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+        });
+        assert!(texts.iter().any(|t| t == "left/right bleed"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.contains("left\\right")), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t == "real [0 = no bleed, 1 = swap left/right, 0.5 = mono]"),
+            "{texts:?}"
+        );
+        // Every explanation's scroll area has an id of its own: egui paints
+        // a warning over any it sees twice.
+        assert!(!texts.iter().any(|t| t.contains("use of ScrollArea ID")), "{texts:?}");
     }
 
     #[test]
