@@ -55,7 +55,7 @@ pub(in crate::app) fn paint_findable_text(
     ui.painter().galley(rect.min, galley, color);
 }
 
-fn findable_galley(
+pub(super) fn findable_galley(
     ui: &Ui,
     text: &str,
     font_id: FontId,

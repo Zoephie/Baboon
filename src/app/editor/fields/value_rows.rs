@@ -505,6 +505,11 @@ fn data_definitions(
         .clone()
 }
 
+/// The narrowest a text data field's box gets while there is room, and the
+/// tallest it grows before it scrolls: Foundation's sizes.
+const DATA_TEXT_MIN_WIDTH: f32 = 600.0;
+const DATA_TEXT_MAX_HEIGHT: f32 = 200.0;
+
 /// A data field's size as Foundation writes it: bytes up to 1 KB, then KB,
 /// MB or GB to two places with the exact count after.
 fn data_size_text(len: usize) -> String {
@@ -567,22 +572,31 @@ fn draw_foundation_data_row(
         let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
         field_edit_ops(path, &hex)
     };
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
-        let width = (ui.available_width() - 8.0).clamp(240.0, 900.0);
-        egui::ScrollArea::vertical()
+        // Foundation's box is at least 600 wide and grows to 200 tall; Halo 2
+        // Guerilla's is a fixed 540 by 128 in an 11-pixel fixed-pitch font.
+        // Neither wraps.
+        let width = DATA_TEXT_MIN_WIDTH.min(ui.available_width()).max(ui.available_width() - 8.0);
+        egui::ScrollArea::both()
             .id_salt(id.with("scroll"))
-            .max_height(200.0)
+            .auto_shrink([false, true])
             .max_width(width)
+            .max_height(DATA_TEXT_MAX_HEIGHT)
             .show(ui, |ui| {
+                let font = FontId::monospace(12.0);
+                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+                    findable_galley(ui, text.as_str(), font.clone(), text_dark(), FindTargetKind::Value)
+                };
                 let mut read_only = draft.text.as_str();
                 let buffer: &mut dyn egui::TextBuffer = if editable { &mut draft.text } else { &mut read_only };
                 let response = ui.add(
                     egui::TextEdit::multiline(buffer)
                         .id(id)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(width)
-                        .desired_rows(1),
+                        .font(FontId::monospace(12.0))
+                        .desired_width(width - ui.spacing().scroll.bar_width - 8.0)
+                        .desired_rows(1)
+                        .layouter(&mut layouter),
                 );
                 if !editable {
                     return;
@@ -1100,6 +1114,23 @@ mod tests {
         editable: bool,
         frames: &[(bool, Vec<egui::Event>)],
     ) -> (Vec<Vec<PendingFieldEdit>>, Vec<String>) {
+        let (edits, shapes) = data_row_shapes(stored, editable, frames);
+        let texts = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        (edits, texts)
+    }
+
+    /// [`data_row_frames`], returning the last frame's shapes.
+    fn data_row_shapes(
+        stored: &[u8],
+        editable: bool,
+        frames: &[(bool, Vec<egui::Event>)],
+    ) -> (Vec<Vec<PendingFieldEdit>>, Vec<egui::epaint::ClippedShape>) {
         let mut tag = TagFile::new(crate::app::test_definition_path("halo3_mcc/hlsl_include.json")).unwrap();
         tag.root_mut()
             .field_path_mut("include file")
@@ -1107,7 +1138,7 @@ mod tests {
             .set(TagFieldData::Data(stored.to_vec()))
             .unwrap();
         let ctx = egui::Context::default();
-        let (mut edits, mut texts) = (Vec::new(), Vec::new());
+        let (mut edits, mut shapes) = (Vec::new(), Vec::new());
         with_test_edit_context(|edit| {
             edit.editable = editable;
             let box_id = edit.widget_id(("data_text", &format!("{}|include file", edit.tag_key)));
@@ -1119,7 +1150,11 @@ mod tests {
                         memory.surrender_focus(box_id);
                     }
                 });
-                let input = egui::RawInput { events: events.clone(), ..Default::default() };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+                    events: events.clone(),
+                    ..Default::default()
+                };
                 let output = crate::app::run_ui_test(&ctx, input, |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let field = tag.root().field_path("include file").unwrap();
@@ -1132,17 +1167,10 @@ mod tests {
                     });
                 });
                 edits.push(std::mem::take(edit.pending));
-                texts = output
-                    .shapes
-                    .iter()
-                    .filter_map(|clipped| match &clipped.shape {
-                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
-                        _ => None,
-                    })
-                    .collect();
+                shapes = output.shapes;
             }
         });
-        (edits, texts)
+        (edits, shapes)
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {
@@ -1171,6 +1199,29 @@ mod tests {
 
         let (_, texts) = data_row_frames(b"a\r\nb\0", true, &[(false, vec![])]);
         assert!(texts.iter().any(|t| t == "a\nb"), "the text, with plain line breaks: {texts:?}");
+    }
+
+    /// Text data is laid out as the editors lay it out: a fixed-pitch face,
+    /// one row per line however long, in a box that stops growing at
+    /// Foundation's 200 and scrolls.
+    #[test]
+    fn text_data_is_monospaced_unwrapped_and_scrolls_past_its_height() {
+        let line = "x".repeat(400);
+        let text = vec![line.as_str(); 60].join("\r\n") + "\0";
+        let (_, shapes) = data_row_shapes(text.as_bytes(), true, &[(false, vec![])]);
+        let (galley, clip) = shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shape) if shape.galley.text().starts_with("xxx") => {
+                    Some((shape.galley.clone(), clipped.clip_rect))
+                }
+                _ => None,
+            })
+            .expect("the text is painted");
+        assert_eq!(galley.job.sections[0].format.font_id.family, egui::FontFamily::Monospace);
+        assert_eq!(galley.rows.len(), 60, "a long line wrapped");
+        // The text is clipped a pixel inside the box's edge.
+        assert!((clip.height() - DATA_TEXT_MAX_HEIGHT).abs() < 4.0, "the box is {} tall", clip.height());
     }
 
     #[test]
