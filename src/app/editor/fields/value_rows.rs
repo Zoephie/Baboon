@@ -23,6 +23,10 @@ pub(in crate::app) fn draw_foundation_value_row(
         draw_foundation_block_index_row(ui, meta, index, target, depth, path, edit);
         return;
     }
+    if let TagFieldData::Data(bytes) = value {
+        draw_foundation_data_row(ui, field, meta, bytes, depth, path, edit);
+        return;
+    }
     if let TagFieldData::TagReference(reference) = value {
         let formatted = format_foundation_scalar_value(names, value);
         // The on-disk tag-ref path is null-terminated; strip the trailing NUL
@@ -482,6 +486,133 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
         }
         draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
     });
+}
+
+/// The game's data definitions, read once per definitions folder and game.
+fn data_definitions(
+    definitions_root: Option<&std::path::Path>,
+    game: Option<GameId>,
+) -> Option<std::sync::Arc<blam_tags::data_text::DataDefinitions>> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Definitions = Option<Arc<blam_tags::data_text::DataDefinitions>>;
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<(std::path::PathBuf, GameId), Definitions>>> =
+        OnceLock::new();
+    let (root, game) = (definitions_root?, game?);
+    let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry((root.to_path_buf(), game))
+        .or_insert_with(|| blam_tags::data_text::DataDefinitions::load(root.join(game.as_str())).map(Arc::new).ok())
+        .clone()
+}
+
+/// A data field's size as Foundation writes it: bytes up to 1 KB, then KB,
+/// MB or GB to two places with the exact count after.
+fn data_size_text(len: usize) -> String {
+    const UNITS: [&str; 6] = ["bytes", "KB", "MB", "GB", "TB", "PB"];
+    let mut size = len as f64;
+    let mut unit = 0;
+    while size > 1024.0 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("Data size:  {len} bytes")
+    } else {
+        format!("Data size:  {size:.2} {}    ({len} bytes)", UNITS[unit])
+    }
+}
+
+/// A data field as Foundation shows one: its size, and, when its definition
+/// marks it as text (HaloScript source, a shader include, an import log),
+/// the text in a box, editable when the field is. Text stored with CRLF line
+/// ends is shown with plain ones and written back with CRLF. Enter types a
+/// line break, so an edit commits when the box loses focus.
+fn draw_foundation_data_row(
+    ui: &mut Ui,
+    field: TagField<'_>,
+    meta: &FieldDisplayMeta,
+    bytes: &[u8],
+    depth: usize,
+    path: &str,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let indent = depth as f32 * 12.0;
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+        ui.label(RichText::new(data_size_text(bytes.len())).color(text_dark()));
+        draw_field_help(ui, meta);
+    });
+    let Some(definition) = data_definitions(edit.definitions_root, edit.game)
+        .and_then(|definitions| definitions.of_field(&field))
+        .filter(|definition| definition.is_text())
+    else {
+        return;
+    };
+    let stored = blam_tags::data_text::text_from_data(bytes, definition);
+    let crlf = stored.contains("\r\n");
+    let shown = if crlf { stored.replace("\r\n", "\n") } else { stored };
+    let editable = edit.can_edit(meta);
+    let tag_key = edit.tag_key;
+    let buffer_key = format!("{tag_key}|{path}");
+    let id = edit.widget_id(("data_text", &buffer_key));
+    let draft = edit.buffers.draft_mut(&buffer_key, &shown);
+    // The bytes the box's text is stored as, with the line ends it was read
+    // with.
+    let stored_bytes = move |text: &str| {
+        let text = if crlf { text.replace('\n', "\r\n") } else { text.to_owned() };
+        blam_tags::data_text::data_from_text(&text, definition)
+    };
+    let data_edit = |path: &str, bytes: Vec<u8>| {
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        field_edit_ops(path, &hex)
+    };
+    ui.horizontal(|ui| {
+        ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+        let width = (ui.available_width() - 8.0).clamp(240.0, 900.0);
+        egui::ScrollArea::vertical()
+            .id_salt(id.with("scroll"))
+            .max_height(200.0)
+            .max_width(width)
+            .show(ui, |ui| {
+                let mut read_only = draft.text.as_str();
+                let buffer: &mut dyn egui::TextBuffer = if editable { &mut draft.text } else { &mut read_only };
+                let response = ui.add(
+                    egui::TextEdit::multiline(buffer)
+                        .id(id)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(width)
+                        .desired_rows(1),
+                );
+                if !editable {
+                    return;
+                }
+                draft.note_response(&response);
+                if draft.changed
+                    && lost_focus_once(&response)
+                    && let Ok(bytes) = stored_bytes(&draft.text)
+                {
+                    edit.pending.extend(data_edit(path, bytes).pending);
+                    draft.mark_committed();
+                }
+            });
+    });
+    if !draft.changed {
+        return;
+    }
+    let owned_path = path.to_owned();
+    draft.keep_commit(|| {
+        DraftCommit::new(tag_key, vec![buffer_key.clone()], move |texts| {
+            let bytes = stored_bytes(texts[0]).map_err(|too_long| too_long.to_string())?;
+            Ok(data_edit(&owned_path, bytes))
+        })
+    });
+    if let Err(too_long) = stored_bytes(&draft.text) {
+        ui.horizontal(|ui| {
+            ui.add_space(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x);
+            ui.label(RichText::new(too_long.to_string()).color(REFERENCE_MISSING_COLOR).small());
+        });
+    }
 }
 
 /// The range a value row's slider covers, if it has one: a `sled` real's or
@@ -952,6 +1083,115 @@ mod tests {
         assert_eq!(edits.len(), 1, "{:?}", edits.iter().map(|edit| &edit.input).collect::<Vec<_>>());
         assert_eq!(edits[0].input, "5");
         assert!(texts.iter().any(|t| t == "outside recommended range"), "{texts:?}");
+    }
+
+    #[test]
+    fn data_sizes_read_as_foundation_writes_them() {
+        assert_eq!(data_size_text(512), "Data size:  512 bytes");
+        assert_eq!(data_size_text(1024), "Data size:  1024 bytes");
+        assert_eq!(data_size_text(2444), "Data size:  2.39 KB    (2444 bytes)");
+    }
+
+    /// Frames of a Halo 3 shader include whose text is `stored`, drawn with
+    /// `events` and, with `typing`, the text box focused. Returns each frame's
+    /// committed edits and the last frame's painted texts.
+    fn data_row_frames(
+        stored: &[u8],
+        editable: bool,
+        frames: &[(bool, Vec<egui::Event>)],
+    ) -> (Vec<Vec<PendingFieldEdit>>, Vec<String>) {
+        let mut tag = TagFile::new(crate::app::test_definition_path("halo3_mcc/hlsl_include.json")).unwrap();
+        tag.root_mut()
+            .field_path_mut("include file")
+            .unwrap()
+            .set(TagFieldData::Data(stored.to_vec()))
+            .unwrap();
+        let ctx = egui::Context::default();
+        let (mut edits, mut texts) = (Vec::new(), Vec::new());
+        with_test_edit_context(|edit| {
+            edit.editable = editable;
+            let box_id = edit.widget_id(("data_text", &format!("{}|include file", edit.tag_key)));
+            for (typing, events) in frames {
+                ctx.memory_mut(|memory| {
+                    if *typing {
+                        memory.request_focus(box_id);
+                    } else {
+                        memory.surrender_focus(box_id);
+                    }
+                });
+                let input = egui::RawInput { events: events.clone(), ..Default::default() };
+                let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let field = tag.root().field_path("include file").unwrap();
+                        let value = field.value().unwrap();
+                        let meta = field_display_meta(field.name());
+                        draw_foundation_value_row(
+                            ui, field, &meta, field.type_name(), &value,
+                            &TagNameIndex::default(), 0, "include file", edit, None, 300.0,
+                        );
+                    });
+                });
+                edits.push(std::mem::take(edit.pending));
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect();
+            }
+        });
+        (edits, texts)
+    }
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        crate::core::document::value::decode_hex(hex).unwrap()
+    }
+
+    /// A shader include's text is shown under its size, with plain line
+    /// breaks, and an edit is written back with the CRLF line ends and the NUL
+    /// it was read with, once the box loses focus.
+    #[test]
+    fn text_data_is_shown_and_edited_as_text() {
+        let frames = [
+            (true, vec![]),
+            (true, vec![egui::Event::Text("x".to_owned())]),
+            (false, vec![]),
+        ];
+        let (edits, texts) = data_row_frames(b"a\r\nb\0", true, &frames);
+        assert!(texts.iter().any(|t| t == "Data size:  5 bytes"), "{texts:?}");
+        assert!(edits[..2].iter().all(Vec::is_empty), "an edit committed while the box had focus");
+        let committed: Vec<_> = edits.into_iter().flatten().collect();
+        assert_eq!(committed.len(), 1);
+        let bytes = hex_bytes(&committed[0].input);
+        assert!(bytes.ends_with(b"\0") && bytes.windows(2).any(|pair| pair == b"\r\n"), "{bytes:?}");
+        assert_eq!(bytes.iter().filter(|&&byte| byte == b'x').count(), 1, "{bytes:?}");
+        assert!(!bytes.windows(2).any(|pair| pair[1] == b'\n' && pair[0] != b'\r'), "a bare LF in {bytes:?}");
+
+        let (_, texts) = data_row_frames(b"a\r\nb\0", true, &[(false, vec![])]);
+        assert!(texts.iter().any(|t| t == "a\nb"), "the text, with plain line breaks: {texts:?}");
+    }
+
+    #[test]
+    fn read_only_text_data_takes_no_typing() {
+        let frames = [(true, vec![]), (true, vec![egui::Event::Text("x".to_owned())]), (false, vec![])];
+        let (edits, texts) = data_row_frames(b"a\0", false, &frames);
+        assert!(edits.iter().all(Vec::is_empty));
+        assert!(texts.iter().any(|t| t == "a"), "{texts:?}");
+    }
+
+    /// Text past the field's maximum size is refused, and the row says why.
+    #[test]
+    fn text_data_past_its_maximum_size_is_refused() {
+        let frames = [
+            (true, vec![]),
+            (true, vec![egui::Event::Paste("x".repeat(262_140))]),
+            (false, vec![]),
+        ];
+        let (edits, texts) = data_row_frames(b"\0", true, &frames);
+        assert!(edits.iter().all(Vec::is_empty), "an oversized edit committed");
+        assert!(texts.iter().any(|t| t.contains("at most 262140")), "{texts:?}");
     }
 
     /// How the field typed into is marked, and whether expert mode is on.
