@@ -4203,48 +4203,68 @@ mod tests {
     /// tags store them stripped, and so do layouts built from the
     /// definitions), so read-only and hidden come from the definition. A `!`
     /// field shows only in expert mode, and a `*` field is marked read-only.
-    /// A text data field's box resized by its grip changes its row's height,
-    /// and rows out of view are stood in for by the height they had when last
-    /// drawn. Resizing only happens with the row on screen, so the height kept
-    /// for it follows; scrolled away and back, every row shows where it would
-    /// with nothing skipped.
-    #[test]
-    fn a_resized_text_box_keeps_hidden_rows_in_place() {
-        let root = crate::core::test_kits::unique_temp_path("data-rows");
-        let game = root.join("haloreach_mcc");
-        std::fs::create_dir_all(&game).unwrap();
-        let mut fields: Vec<String> = (0..3).map(|n| format!(r#"{{"type":"long_integer","name":"before_{n}"}}"#)).collect();
-        fields.push(r#"{"type":"data","name":"notes","definition":"notes_text"}"#.to_owned());
-        fields.extend((0..40).map(|n| format!(r#"{{"type":"long_integer","name":"after_{n:02}"}}"#)));
-        fields.push(r#"{"type":"terminator","name":null}"#.to_owned());
-        std::fs::write(
-            game.join("data_rows.json"),
-            format!(
-                r#"{{"name":"data_rows","tag":"drow","version":1,"flags":0,"block":"data_rows_block",
-                    "blocks":{{"data_rows_block":{{"max_count":1,"struct":"data_rows_struct"}}}},
-                    "structs":{{"data_rows_struct":{{"guid":"00112233445566778899aabbccddeeff","size":192,"fields":[{}]}}}},
-                    "datas":{{"notes_text":{{"flags":2,"alignment_bits":0,"max_size":4096}}}}}}"#,
-                fields.join(",")
-            ),
-        )
-        .unwrap();
-        let mut tag = TagFile::new(game.join("data_rows.json")).unwrap();
-        tag.root_mut().field_path_mut("notes").unwrap().set(TagFieldData::Data(b"hello\0".to_vec())).unwrap();
+    /// What one frame of [`TextBoxRows`] showed.
+    struct TextBoxFrame {
+        /// Texts in view, as `text@y`, sorted.
+        shown: Vec<String>,
+        /// How far the field list is scrolled.
+        offset: f32,
+        /// The text data field's box, and its resize grip.
+        text_box: Option<egui::Rect>,
+        grip: Option<egui::Rect>,
+        /// Where the box's first line is painted.
+        first_line: Option<f32>,
+    }
 
-        // Each step: where the view is scrolled to, and the pointer events.
-        type Step = (f32, Vec<egui::Event>);
-        let run = |culling: bool, steps: &[Step]| -> (Vec<Vec<String>>, Option<egui::Rect>) {
+    /// A tag of rows with a text data field `notes` holding `text` between
+    /// them, drawn in a scroll area as the tag pane draws them, step by step:
+    /// each step is the scroll offset to set (when it changes) and the events
+    /// of that frame.
+    struct TextBoxRows {
+        root: std::path::PathBuf,
+        tag: TagFile,
+    }
+
+    impl TextBoxRows {
+        fn new(text: &str) -> Self {
+            let root = crate::core::test_kits::unique_temp_path("data-rows");
+            let game = root.join("haloreach_mcc");
+            std::fs::create_dir_all(&game).unwrap();
+            let mut fields: Vec<String> =
+                (0..3).map(|n| format!(r#"{{"type":"long_integer","name":"before_{n}"}}"#)).collect();
+            fields.push(r#"{"type":"data","name":"notes","definition":"notes_text"}"#.to_owned());
+            fields.extend((0..40).map(|n| format!(r#"{{"type":"long_integer","name":"after_{n:02}"}}"#)));
+            fields.push(r#"{"type":"terminator","name":null}"#.to_owned());
+            std::fs::write(
+                game.join("data_rows.json"),
+                format!(
+                    r#"{{"name":"data_rows","tag":"drow","version":1,"flags":0,"block":"data_rows_block",
+                        "blocks":{{"data_rows_block":{{"max_count":1,"struct":"data_rows_struct"}}}},
+                        "structs":{{"data_rows_struct":{{"guid":"00112233445566778899aabbccddeeff","size":192,"fields":[{}]}}}},
+                        "datas":{{"notes_text":{{"flags":2,"alignment_bits":0,"max_size":65536}}}}}}"#,
+                    fields.join(",")
+                ),
+            )
+            .unwrap();
+            let mut tag = TagFile::new(game.join("data_rows.json")).unwrap();
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            tag.root_mut().field_path_mut("notes").unwrap().set(TagFieldData::Data(bytes)).unwrap();
+            Self { root, tag }
+        }
+
+        fn run(&self, culling: bool, steps: &[(f32, Vec<egui::Event>)]) -> Vec<TextBoxFrame> {
             let ctx = egui::Context::default();
             ctx.set_fonts(crate::app::foundation_fonts());
             // The edit context's lifetime is the helper's own; test code may leak.
             let heights: &'static mut RowHeights = Box::leak(Box::default());
-            let root: &'static std::path::Path = Box::leak(root.clone().into_boxed_path());
-            let (mut views, mut corner) = (Vec::new(), None);
+            let root: &'static std::path::Path = Box::leak(self.root.clone().into_boxed_path());
+            let mut frames = Vec::new();
             with_test_edit_context(|edit| {
                 edit.definitions_root = Some(root);
                 edit.game = Some(GameId::HaloReach);
-                let corner_id = edit
-                    // Rows are keyed by positional field path: `notes` is field 3.
+                // Rows are keyed by positional field path: `notes` is field 3.
+                let grip_id = edit
                     .widget_id(("data_text", &format!("{}|notes#3", edit.tag_key)))
                     .with("resize")
                     .with("__resize_corner");
@@ -4260,6 +4280,7 @@ mod tests {
                         events: events.clone(),
                         ..Default::default()
                     };
+                    let (mut shown_offset, mut grip) = (0.0, None);
                     let output = crate::app::run_ui_test(&ctx, input, |ui| {
                         egui::CentralPanel::default().show(ui, |ui| {
                             // As the tag pane's: full width, so its floating scroll
@@ -4269,76 +4290,178 @@ mod tests {
                             if index == 0 || steps[index - 1].0 != *offset {
                                 area = area.vertical_scroll_offset(*offset);
                             }
-                            area.show(ui, |ui| {
-                                draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
-                            });
+                            shown_offset = area
+                                .show(ui, |ui| {
+                                    draw_fields_with_docs(ui, &self.tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                                })
+                                .state
+                                .offset
+                                .y;
                             // Read in the pass: egui forgets widgets once it ends.
-                            corner = corner.or_else(|| ui.ctx().read_response(corner_id).map(|response| response.rect));
+                            grip = ui.ctx().read_response(grip_id).map(|response| response.rect);
                         });
                     });
-                    let mut shown: Vec<String> = output
-                        .shapes
-                        .iter()
-                        .filter_map(|clipped| match &clipped.shape {
-                            egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => {
-                                Some(format!("{}@{:.0}", text.galley.text(), text.pos.y))
-                            }
+                    let texts = output.shapes.iter().filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => Some((text.galley.text().to_owned(), text.pos.y)),
+                        _ => None,
+                    });
+                    // The box is the rectangle painted in the text-edit fill;
+                    // the text editor inside it is as tall as all its text.
+                    let box_fill = ctx.global_style().visuals.text_edit_bg_color();
+                    fn filled(shape: &egui::Shape, fill: egui::Color32) -> Option<egui::Rect> {
+                        match shape {
+                            egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| filled(shape, fill)),
                             _ => None,
-                        })
-                        .collect();
+                        }
+                    }
+                    let text_box = output.shapes.iter().find_map(|clipped| filled(&clipped.shape, box_fill));
+                    let mut shown = Vec::new();
+                    let mut first_line = None;
+                    for (text, y) in texts {
+                        if text.starts_with("line 00") {
+                            first_line = Some(y);
+                        }
+                        shown.push(format!("{text}@{y:.0}"));
+                    }
                     shown.sort();
-                    views.push(shown);
-
+                    frames.push(TextBoxFrame { shown, offset: shown_offset, text_box, grip, first_line });
                 }
             });
-            (views, corner)
-        };
+            frames
+        }
 
-        let settle: Vec<Step> = (0..3).map(|_| (0.0, Vec::new())).collect();
-        let (_, corner) = run(false, &settle);
-        let grip = corner.expect("the text box has a resize grip").center();
-        let at = |pos: egui::Pos2| egui::Event::PointerMoved(pos);
-        let press = |pos: egui::Pos2, pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
-        let mut steps = settle.clone();
-        for step in 1..=3 {
-            steps.push((0.0, vec![at(grip - egui::vec2(30.0, 30.0) * (1.0 - step as f32 / 3.0))]));
+        /// Steps that settle, then drag the box's grip down by `by`.
+        fn drag_grip(&self, by: f32) -> Vec<(f32, Vec<egui::Event>)> {
+            let mut steps: Vec<(f32, Vec<egui::Event>)> = (0..3).map(|_| (0.0, Vec::new())).collect();
+            let grip = self.run(false, &steps).last().unwrap().grip.expect("the text box has a resize grip").center();
+            let press = |pos: egui::Pos2, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for step in 1..=3 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(grip - egui::vec2(30.0, 30.0) * (1.0 - step as f32 / 3.0))]));
+            }
+            steps.push((0.0, vec![press(grip, true)]));
+            for step in 1..=6 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(grip + egui::vec2(0.0, by * step as f32 / 6.0))]));
+            }
+            steps.push((0.0, vec![press(grip + egui::vec2(0.0, by), false)]));
+            steps.push((0.0, Vec::new()));
+            steps
         }
-        steps.push((0.0, vec![press(grip, true)]));
-        for step in 1..=6 {
-            steps.push((0.0, vec![at(grip + egui::vec2(0.0, 25.0 * step as f32))]));
+    }
+
+    impl Drop for TextBoxRows {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
         }
-        let released = grip + egui::vec2(0.0, 150.0);
-        steps.push((0.0, vec![press(released, false)]));
-        steps.push((0.0, Vec::new()));
+    }
+
+    fn numbered_lines(count: usize) -> String {
+        (0..count).map(|n| format!("line {n:02}")).collect::<Vec<_>>().join("\r\n")
+    }
+
+    fn top_of(frame: &TextBoxFrame, label: &str) -> f32 {
+        frame
+            .shown
+            .iter()
+            .find_map(|shown| shown.strip_prefix(&format!("{label}@")).map(|y| y.parse().unwrap()))
+            .unwrap_or_else(|| panic!("{label} is not in view: {:?}", frame.shown))
+    }
+
+    /// A text data field's box resized by its grip changes its row's height,
+    /// and rows out of view are stood in for by the height they had when last
+    /// drawn. Resizing only happens with the row on screen, so the height kept
+    /// for it follows; scrolled away and back, every row shows where it would
+    /// with nothing skipped.
+    #[test]
+    fn a_resized_text_box_keeps_hidden_rows_in_place() {
+        let rows = TextBoxRows::new(&numbered_lines(30));
+        let mut steps = rows.drag_grip(150.0);
         let resized = steps.len() - 1;
         // Scrolled until the data row is above the view, then back.
-        for _ in 0..2 {
-            steps.push((900.0, Vec::new()));
-        }
+        steps.extend([(900.0, Vec::new()), (900.0, Vec::new())]);
         let scrolled = steps.len() - 1;
-        for _ in 0..2 {
-            steps.push((0.0, Vec::new()));
-        }
+        steps.extend([(0.0, Vec::new()), (0.0, Vec::new())]);
         let back = steps.len() - 1;
 
-        let (culled, _) = run(true, &steps);
-        let (all, _) = run(false, &steps);
-        let top_of = |view: &[String], label: &str| -> f32 {
-            view.iter()
-                .find_map(|shown| shown.strip_prefix(&format!("{label}@")).map(|y| y.parse().unwrap()))
-                .unwrap_or_else(|| panic!("{label} is not in view: {view:?}"))
-        };
-        let grown = top_of(&culled[resized], "after_00") - top_of(&culled[settle.len() - 1], "after_00");
+        let culled = rows.run(true, &steps);
+        let all = rows.run(false, &steps);
+        let grown = top_of(&culled[resized], "after_00") - top_of(&culled[2], "after_00");
         assert!(grown > 100.0, "the grip drag grew the box by {grown}");
         for (step, name) in [(resized, "resized"), (scrolled, "scrolled away"), (back, "scrolled back")] {
-            assert_eq!(culled[step], all[step], "{name}: rows show where drawing every row puts them");
+            assert_eq!(culled[step].shown, all[step].shown, "{name}: rows show where drawing every row puts them");
         }
-        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The grip is the box's own corner, and the box grows no bigger than its
+    /// text: dragged far past it, it stops where the text ends.
+    #[test]
+    fn a_text_box_grows_no_bigger_than_its_text() {
+        let rows = TextBoxRows::new(&numbered_lines(30));
+        let frames = rows.run(false, &rows.drag_grip(2000.0));
+        let settled = &frames[2];
+        let (text_box, grip) = (settled.text_box.unwrap(), settled.grip.unwrap());
+        assert!(
+            (grip.max - text_box.max).length() < 1.0,
+            "the grip {grip:?} is not at the box's corner {text_box:?}"
+        );
+        assert!(text_box.width() <= 900.0 - DATA_TEXT_EDGE_GAP, "{text_box:?}");
+        let grown = frames.last().unwrap().text_box.unwrap();
+        assert!(grown.height() > settled.text_box.unwrap().height() + 100.0, "the box didn't grow: {grown:?}");
+        // As tall as its 30 lines and their padding, and no taller.
+        let ctx = egui::Context::default();
+        let mut row_height = 0.0;
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            row_height = ui.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(12.0)));
+        });
+        let text_height = 30.0 * row_height + 2.0 * DATA_TEXT_PADDING.y;
+        assert!(
+            (grown.height() - text_height).abs() < 2.0,
+            "dragged far past its text, the box is {} tall, its text {text_height}",
+            grown.height()
+        );
+    }
+
+    /// The wheel over a box whose text can still scroll moves only the box;
+    /// over a box that shows all its text, it moves the pane.
+    #[test]
+    fn the_wheel_scrolls_a_text_box_or_the_pane_never_both() {
+        let wheel = |dy: f32| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        for (lines, box_scrolls) in [(60, true), (3, false)] {
+            let rows = TextBoxRows::new(&numbered_lines(lines));
+            let mut steps: Vec<(f32, Vec<egui::Event>)> = (0..3).map(|_| (0.0, Vec::new())).collect();
+            let text_box = rows.run(false, &steps).last().unwrap().text_box.unwrap();
+            let over = text_box.center();
+            steps.push((0.0, vec![egui::Event::PointerMoved(over)]));
+            // Well past the end of the box's 60 lines: what it can't use
+            // used to scroll the pane on.
+            for _ in 0..40 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(over), wheel(-40.0)]));
+            }
+            steps.extend((0..20).map(|_| (0.0, Vec::new())));
+            let frames = rows.run(false, &steps);
+            let (before, after) = (&frames[3], frames.last().unwrap());
+            // How far the text sits into its box: the box's own scroll.
+            let into_box = |frame: &TextBoxFrame| {
+                frame.first_line.unwrap_or(f32::NEG_INFINITY) - frame.text_box.unwrap().top()
+            };
+            let box_moved = into_box(before) - into_box(after) > 1.0;
+            if box_scrolls {
+                assert!(box_moved, "{lines} lines: the box didn't scroll");
+                assert_eq!(after.offset, 0.0, "{lines} lines: the pane scrolled along with the box");
+            } else {
+                assert!(after.offset > 1.0, "{lines} lines: the wheel didn't scroll the pane");
+            }
+        }
     }
 
     #[test]

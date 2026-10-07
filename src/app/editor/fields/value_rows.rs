@@ -508,12 +508,17 @@ fn data_definitions(
 /// The tallest a text data field's box starts, as Foundation's grows to
 /// before it scrolls.
 const DATA_TEXT_MAX_HEIGHT: f32 = 200.0;
+/// How wide a text data field's box is at least when there is room,
+/// whatever its text: Foundation's.
+const DATA_TEXT_WIDTH: f32 = 600.0;
+/// The space between a text data field's box and its text.
+pub(super) const DATA_TEXT_PADDING: egui::Vec2 = egui::vec2(4.0, 2.0);
 /// The smallest the corner grip makes a text data field's box.
 const DATA_TEXT_MIN_WIDTH: f32 = 200.0;
 const DATA_TEXT_MIN_HEIGHT: f32 = 40.0;
 /// Room left between a text data field's box and the pane's right edge, where
 /// the pane's floating scroll bar would take a press meant for the grip.
-const DATA_TEXT_EDGE_GAP: f32 = 24.0;
+pub(super) const DATA_TEXT_EDGE_GAP: f32 = 24.0;
 
 /// A data field's size as Foundation writes it: bytes up to 1 KB, then KB,
 /// MB or GB to two places with the exact count after.
@@ -586,16 +591,27 @@ fn draw_foundation_data_row(
         // that fits; the size it is dragged to is kept.
         let available = ui.available_width() - DATA_TEXT_EDGE_GAP;
         let font = FontId::monospace(12.0);
-        let lines = draft.text.lines().count().max(1) as f32;
-        let text_height = lines * ui.fonts_mut(|fonts| fonts.row_height(&font)) + 12.0;
+        // The text's own extent, padded as the box pads it. The box is never
+        // dragged past it: a box bigger than its text is only empty space.
+        let extent = findable_galley(ui, &draft.text, font.clone(), text_dark(), FindTargetKind::Value).size()
+            + 2.0 * DATA_TEXT_PADDING;
+        let largest = egui::vec2(
+            extent.x.max(DATA_TEXT_WIDTH).min(available),
+            extent.y.max(DATA_TEXT_MIN_HEIGHT),
+        );
         egui::Resize::default()
             .id(id.with("resize"))
-            .default_size([available, text_height.clamp(DATA_TEXT_MIN_HEIGHT, DATA_TEXT_MAX_HEIGHT)])
-            .min_size([DATA_TEXT_MIN_WIDTH.min(available), DATA_TEXT_MIN_HEIGHT])
-            .max_width(available)
+            .with_stroke(false)
+            .default_size([largest.x, largest.y.min(DATA_TEXT_MAX_HEIGHT)])
+            .min_size([DATA_TEXT_MIN_WIDTH.min(largest.x), DATA_TEXT_MIN_HEIGHT])
+            .max_size(largest)
             .show(ui, |ui| {
-                let box_width = ui.available_width();
-                egui::ScrollArea::both()
+                // The box is the whole resizable area, so its grip is the
+                // box's own corner. Its fill and border are painted under the
+                // text, the border once focus is known.
+                let frame_rect = ui.max_rect();
+                let background = ui.painter().add(egui::Shape::Noop);
+                let scroll = egui::ScrollArea::both()
                     .id_salt(id.with("scroll"))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -605,12 +621,18 @@ fn draw_foundation_data_row(
                         let mut read_only = draft.text.as_str();
                         let buffer: &mut dyn egui::TextBuffer =
                             if editable { &mut draft.text } else { &mut read_only };
+                        // As big as the box, so a press anywhere in it puts the
+                        // caret in the text.
                         let response = ui.add(
                             egui::TextEdit::multiline(buffer)
                                 .id(id)
                                 .font(font.clone())
-                                .desired_width(box_width - ui.spacing().scroll.bar_width - 8.0)
-                                .desired_rows(1)
+                                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(
+                                    DATA_TEXT_PADDING.x as i8,
+                                    DATA_TEXT_PADDING.y as i8,
+                                )))
+                                .min_size(frame_rect.size())
+                                .desired_width(frame_rect.width() - 2.0 * DATA_TEXT_PADDING.x)
                                 .layouter(&mut layouter),
                         );
                         if !editable {
@@ -625,6 +647,33 @@ fn draw_foundation_data_row(
                             draft.mark_committed();
                         }
                     });
+                let visuals = ui.visuals();
+                let stroke = if ui.memory(|memory| memory.has_focus(id)) {
+                    visuals.selection.stroke
+                } else {
+                    visuals.widgets.inactive.bg_stroke
+                };
+                ui.painter().set(
+                    background,
+                    egui::Shape::Vec(vec![
+                        egui::Shape::rect_filled(frame_rect, 0.0, visuals.text_edit_bg_color()),
+                        egui::Shape::rect_stroke(frame_rect, 0.0, stroke, egui::StrokeKind::Inside),
+                    ]),
+                );
+                // While its text can still scroll, the box keeps the wheel:
+                // otherwise what it doesn't use scrolls the pane as well, and
+                // the two move at once.
+                let can_scroll = scroll.content_size - scroll.inner_rect.size();
+                if ui.rect_contains_pointer(frame_rect) {
+                    ui.input_mut(|input| {
+                        if can_scroll.x > 0.5 {
+                            input.smooth_scroll_delta.x = 0.0;
+                        }
+                        if can_scroll.y > 0.5 {
+                            input.smooth_scroll_delta.y = 0.0;
+                        }
+                    });
+                }
             });
     });
     if !draft.changed {
