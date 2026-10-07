@@ -20,17 +20,15 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
     let root = tag.root();
     let template_tag = h2_load_shader_template(source, root, templates);
     let template_root = template_tag.as_ref().map(|template| template.root());
+    let mut top_rows = Vec::new();
+    h2_push_direct_field_row(root, "template", "", names, &mut top_rows);
     let mut sections = Vec::new();
     h2_push_section(
         &mut sections,
         "STANDARD_PARAMETERS",
-        h2_standard_parameter_rows(root, names),
+        h2_standard_parameter_rows(root, template_root, names),
     );
-    h2_push_section(
-        &mut sections,
-        &h2_template_parameter_section_title(root, template_root, names),
-        h2_compact_parameter_rows(root, template_root, names),
-    );
+    sections.extend(h2_parameter_sections(root, template_root, names));
     h2_push_section(&mut sections, "RAW PARAMETERS", h2_raw_parameter_rows(root));
 
     if sections.is_empty() {
@@ -47,6 +45,10 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
         shader_template_edit_path: String::new(),
         shader_template_path: None,
         categories: Vec::new(),
+        unused_parameters: template_root
+            .map(|template| h2_unused_parameters(root, template, names))
+            .unwrap_or_default(),
+        top_rows,
         sections,
         atmosphere_flags: ShaderFlagsRow {
             label: String::new(),
@@ -164,10 +166,14 @@ fn h2_push_section(sections: &mut Vec<ShaderEditorSection>, title: &str, rows: V
     });
 }
 
-fn h2_standard_parameter_rows(root: TagStruct<'_>, names: &TagNameIndex) -> Vec<ShaderGridRow> {
+fn h2_standard_parameter_rows(
+    root: TagStruct<'_>,
+    template: Option<TagStruct<'_>>,
+    names: &TagNameIndex,
+) -> Vec<ShaderGridRow> {
     let mut rows = Vec::new();
+    let baseline = TagFile::new(locate_definitions_root().join("halo2_mcc/shader.json")).ok();
     for field_name in [
-        "template",
         "material name",
         "flags",
         "Added depth bias offset",
@@ -179,6 +185,49 @@ fn h2_standard_parameter_rows(root: TagStruct<'_>, names: &TagNameIndex) -> Vec<
         "shader LOD bias",
     ] {
         h2_push_direct_field_row(root, field_name, "", names, &mut rows);
+        if let Some(row) = rows.last_mut().filter(|row| {
+            row.edit
+                .as_ref()
+                .is_some_and(|edit| edit.path == escape_field_path_segment(field_name))
+        }) {
+            let default = if field_name == "material name" {
+                template
+                    .and_then(|template| template.field("default material name"))
+                    .and_then(|field| field.value())
+                    .or_else(|| {
+                        baseline
+                            .as_ref()
+                            .and_then(|tag| tag.root().field(field_name))
+                            .and_then(|field| field.value())
+                    })
+            } else {
+                baseline
+                    .as_ref()
+                    .and_then(|tag| tag.root().field(field_name))
+                    .and_then(|field| field.value())
+            };
+            if let Some(value) = default {
+                let current = trim_formatted_value(&format_value(names, &value, false));
+                let text = match row.edit.as_ref().map(|edit| &edit.kind) {
+                    Some(ShaderRowEditKind::Enum(options)) => baseline
+                        .as_ref()
+                        .and_then(|tag| tag.root().read_int_any(field_name))
+                        .and_then(|index| usize::try_from(index).ok())
+                        .and_then(|index| options.get(index))
+                        .cloned()
+                        .unwrap_or(current),
+                    Some(ShaderRowEditKind::Scalar | ShaderRowEditKind::Int) => {
+                        format!("value: {current}")
+                    }
+                    _ => current,
+                };
+                row.default_cell = Some(ShaderGridCell {
+                    text,
+                    value_kind: "default",
+                    color: None,
+                });
+            }
+        }
     }
     if let Some(runtime) = root
         .field("runtime properties")
@@ -316,20 +365,7 @@ fn h2_standard_field_label(field_name: &str) -> &str {
     }
 }
 
-fn h2_template_parameter_section_title(
-    root: TagStruct<'_>,
-    template: Option<TagStruct<'_>>,
-    names: &TagNameIndex,
-) -> String {
-    let category = template
-        .and_then(|template| template.field("categories"))
-        .and_then(|field| field.as_block())
-        .and_then(|block| block.element(0))
-        .and_then(|category| category.read_string_id("name"))
-        .filter(|name| !name.is_empty());
-    if let Some(category) = category {
-        return category.replace('_', " ").to_ascii_uppercase();
-    }
+fn h2_fallback_parameter_section_title(root: TagStruct<'_>, names: &TagNameIndex) -> String {
     let Some(value) = root.field("template").and_then(|field| field.value()) else {
         return "PARAMETERS".to_owned();
     };
@@ -349,17 +385,31 @@ fn h2_template_parameter_section_title(
     }
 }
 
-fn h2_compact_parameter_rows(
+fn h2_parameter_sections(
     root: TagStruct<'_>,
     template: Option<TagStruct<'_>>,
     names: &TagNameIndex,
-) -> Vec<ShaderGridRow> {
+) -> Vec<ShaderEditorSection> {
     if let Some(template) = template {
-        let rows = h2_template_parameter_rows(root, template, names);
-        if !rows.is_empty() {
-            return rows;
+        let sections = h2_template_parameter_sections(root, template, names);
+        if template
+            .field("categories")
+            .and_then(|field| field.as_block())
+            .is_some()
+        {
+            return sections;
         }
     }
+    let mut sections = Vec::new();
+    h2_push_section(
+        &mut sections,
+        &h2_fallback_parameter_section_title(root, names),
+        h2_compact_parameter_rows(root, names),
+    );
+    sections
+}
+
+fn h2_compact_parameter_rows(root: TagStruct<'_>, names: &TagNameIndex) -> Vec<ShaderGridRow> {
     let mut rows = Vec::new();
     let Some(block) = root.field("parameters").and_then(|field| field.as_block()) else {
         return rows;
@@ -383,20 +433,78 @@ fn h2_compact_parameter_rows(
     rows
 }
 
-fn h2_template_parameter_rows(
+fn h2_unused_parameters(
+    root: TagStruct<'_>,
+    template: TagStruct<'_>,
+    names: &TagNameIndex,
+) -> Vec<UnusedShaderParameter> {
+    if template
+        .field("categories")
+        .and_then(|field| field.as_block())
+        .is_none()
+    {
+        return Vec::new();
+    }
+    let active = h2_template_parameter_names(template);
+    let Some(parameters) = root.field("parameters").and_then(|field| field.as_block()) else {
+        return Vec::new();
+    };
+    parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, parameter)| {
+            let name = h2_parameter_name(parameter, index);
+            if active.contains(&name) {
+                return None;
+            }
+            let mut rows = Vec::new();
+            if let Some(row) = h2_compact_parameter_row(parameter, index, names) {
+                rows.push(row);
+            }
+            if let Some(animations) = parameter
+                .field("animation properties")
+                .and_then(|field| field.as_block())
+            {
+                for (animation_index, animation) in animations.iter().enumerate() {
+                    if let Some(row) = h2_animation_parameter_row(
+                        parameter,
+                        animation,
+                        &format!("parameters[{index}]/animation properties[{animation_index}]"),
+                    ) {
+                        rows.push(row);
+                    }
+                }
+            }
+            mark_unused_shader_rows(&mut rows);
+            Some(UnusedShaderParameter {
+                name,
+                category: None,
+                rows,
+                delete: BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Delete(index),
+                },
+            })
+        })
+        .collect()
+}
+
+fn h2_template_parameter_sections(
     shader_root: TagStruct<'_>,
     template_root: TagStruct<'_>,
     names: &TagNameIndex,
-) -> Vec<ShaderGridRow> {
-    let mut rows = Vec::new();
+) -> Vec<ShaderEditorSection> {
+    let mut sections = Vec::new();
     let instances = h2_shader_parameter_instances(shader_root);
     let postprocess = H2PostprocessBindings::from_root(shader_root);
     let Some(categories) = template_root
         .field("categories")
         .and_then(|field| field.as_block())
     else {
-        return rows;
+        return sections;
     };
+    // Postprocess slots use the flattened template order, even though the UI
+    // now keeps each category separate. Never restart this index per section.
     let mut template_index = 0usize;
     for category in categories.iter() {
         let Some(parameters) = category
@@ -405,6 +513,13 @@ fn h2_template_parameter_rows(
         else {
             continue;
         };
+        let title = category
+            .read_string_id("name")
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "PARAMETERS".to_owned())
+            .replace('_', " ")
+            .to_ascii_uppercase();
+        let mut rows = Vec::new();
         for template_param in parameters.iter() {
             let name = h2_template_parameter_name(template_param);
             if name.is_empty() {
@@ -420,8 +535,21 @@ fn h2_template_parameter_rows(
             ));
             template_index += 1;
         }
+        h2_push_section(&mut sections, &title, rows);
     }
-    rows
+    sections
+}
+
+#[cfg(test)]
+fn h2_template_parameter_rows(
+    shader_root: TagStruct<'_>,
+    template_root: TagStruct<'_>,
+    names: &TagNameIndex,
+) -> Vec<ShaderGridRow> {
+    h2_template_parameter_sections(shader_root, template_root, names)
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .collect()
 }
 
 struct H2ParameterInstance<'a> {
@@ -1076,10 +1204,22 @@ fn h2_template_animation_row(
             },
         )
     };
+    let default_color = h2_template_animation_default_color(template_param, animation_type)
+        .map(|rgba| MaterialColorPopup::new(&row.label, rgba[0], rgba[1], rgba[2], rgba[3]));
     row.default_cell = Some(ShaderGridCell {
-        text: String::new(),
+        text: if default_color.is_some() {
+            "color: RGB".to_owned()
+        } else {
+            format!(
+                "value: {}",
+                format_shader_float(h2_template_animation_default_value(
+                    template_param,
+                    animation_type
+                ))
+            )
+        },
         value_kind: "default",
-        color: None,
+        color: default_color,
     });
     row
 }
@@ -1466,11 +1606,23 @@ fn h2_template_default_cell(
     field_name: &str,
     names: &TagNameIndex,
 ) -> Option<ShaderGridCell> {
-    let text = h2_template_default_text(template_param, field_name, names)?;
+    let value = template_param.field(field_name)?.value()?;
+    let formatted = trim_formatted_value(&format_value(names, &value, false));
+    let color = color_popup_for_value(
+        &h2_template_parameter_name(template_param),
+        &value,
+        &formatted,
+    );
     Some(ShaderGridCell {
-        text,
+        text: if color.is_some() {
+            "color: RGB".to_owned()
+        } else if field_name == "default const value" {
+            format!("value: {formatted}")
+        } else {
+            formatted
+        },
         value_kind: "default",
-        color: None,
+        color,
     })
 }
 
@@ -1909,6 +2061,7 @@ pub(in crate::app) fn first_halo2_byte_block_function_row(
         .sections
         .iter()
         .flat_map(|section| section.rows.iter())
+        .chain(model.top_rows.iter())
     {
         if let Some(view) = row.function.as_ref() {
             if let Some(edit) = view.edit.as_ref() {
@@ -1930,6 +2083,7 @@ pub(in crate::app) fn shader_row_edit_path_and_kind(
         .sections
         .iter()
         .flat_map(|section| section.rows.iter())
+        .chain(model.top_rows.iter())
         .find(|row| row.label == label)?
         .edit
         .as_ref()?;
@@ -1946,6 +2100,7 @@ pub(in crate::app) fn shader_row_value_text_for_test(
         .sections
         .iter()
         .flat_map(|section| section.rows.iter())
+        .chain(model.top_rows.iter())
         .find(|row| row.label == label)
         .map(|row| row.value_cell.text.clone())
 }
@@ -2090,6 +2245,7 @@ pub(in crate::app) fn first_h2_function_edit_summary(
         .sections
         .iter()
         .flat_map(|section| section.rows.iter())
+        .chain(model.top_rows.iter())
     {
         let Some(view) = row.function.as_ref() else {
             continue;
@@ -2309,8 +2465,74 @@ pub(super) fn empty_shader_grid_row() -> ShaderGridRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::editor::{H2TemplateCache, build_h2ek_shader_editor_model, extract_constant_color, first_h2_function_edit_summary, first_halo2_byte_block_function_row, h2_constant_color_function_data, h2_constant_scalar_function_data, h2_function_data_range_for_test, h2_function_data_with_range_for_test, h2_shader_template_reference_for_test, h2_tag_function, h2_template_row_edit_kind_for_test, h2_template_row_function_data_path_for_test, h2_template_row_labels_for_test, h2_template_row_value_color_for_test, h2_template_row_value_text_for_test, halo2_function_bytes_from_struct, shader_row_edit_path_and_kind, shader_row_value_text_for_test};
-    use crate::core::document::apply::{apply_field_edit, apply_one_block_op, apply_one_h2_shader_param_op, replace_halo2_function_byte_block};
+
+    #[test]
+    fn h2_shader_gauge_color_uses_primary_charged_as_range_input() {
+        let root = crate::core::test_kits::h2ek_tags();
+        let path =
+            root.join("objects/weapons/pistol/plasma_pistol/shaders/plasma_pistol_gauge.shader");
+        if !path.exists() {
+            return;
+        }
+        let definitions = locate_definitions_root();
+        let tag = crate::core::source::read_tag_at_path(
+            &path,
+            Some(GameId::Halo2),
+            Some(&definitions),
+            u32::from_be_bytes(*b"shad"),
+        )
+        .unwrap();
+        let source = TagSource::LooseFolder {
+            root,
+            game: Some(GameId::Halo2),
+            definitions_root: definitions,
+        };
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &h2_shader_entry(u32::from_be_bytes(*b"shad")),
+            &TagNameIndex::default(),
+            Some(&source),
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
+        let row = model
+            .sections
+            .iter()
+            .flat_map(|section| &section.rows)
+            .find(|row| row.label == "meter_on_color")
+            .unwrap();
+        let view = row
+            .function
+            .as_ref()
+            .or(row.constant_function_view.as_ref())
+            .unwrap();
+        assert_eq!(view.range_name, "primary_charged");
+        let range_path = &view.edit.as_ref().unwrap().range_name;
+        assert!(range_path.ends_with("/range name"));
+        assert_eq!(
+            tag.root()
+                .descend(range_path.rsplit_once('/').unwrap().0)
+                .unwrap()
+                .read_string_id("range name")
+                .as_deref(),
+            Some("primary_charged")
+        );
+    }
+    use crate::app::editor::{
+        H2TemplateCache, build_h2ek_shader_editor_model, extract_constant_color,
+        first_h2_function_edit_summary, first_halo2_byte_block_function_row,
+        h2_constant_color_function_data, h2_constant_scalar_function_data,
+        h2_function_data_range_for_test, h2_function_data_with_range_for_test,
+        h2_shader_template_reference_for_test, h2_tag_function, h2_template_row_edit_kind_for_test,
+        h2_template_row_function_data_path_for_test, h2_template_row_labels_for_test,
+        h2_template_row_value_color_for_test, h2_template_row_value_text_for_test,
+        halo2_function_bytes_from_struct, shader_row_edit_path_and_kind,
+        shader_row_value_text_for_test,
+    };
+    use crate::core::document::apply::{
+        apply_field_edit, apply_one_block_op, apply_one_h2_shader_param_op,
+        replace_halo2_function_byte_block,
+    };
 
     #[test]
     fn halo2_function_byte_block_replacement_roundtrips_bytes() {
@@ -2476,6 +2698,13 @@ mod tests {
 
         let template = shader_row_edit_path_and_kind(&model, "template").unwrap();
         assert_eq!(template, ("template".to_owned(), "shader_template_ref"));
+        assert_eq!(model.top_rows[0].label, "template");
+        assert!(
+            model
+                .sections
+                .iter()
+                .all(|section| section.rows.iter().all(|row| row.label != "template"))
+        );
 
         let const_value = shader_row_edit_path_and_kind(&model, "diffuse_map").unwrap();
         assert_eq!(
@@ -2521,6 +2750,23 @@ mod tests {
             shader_row_value_text_for_test(&model, "shader_lod_bias").as_deref(),
             Some("4x size")
         );
+        let standard = model
+            .sections
+            .iter()
+            .find(|section| section.title == "STANDARD_PARAMETERS")
+            .unwrap();
+        let specular = standard
+            .rows
+            .iter()
+            .find(|row| row.label == "dynamic_light_specular_type")
+            .unwrap();
+        assert_eq!(specular.default_cell.as_ref().unwrap().text, "none");
+        let lightmap = standard
+            .rows
+            .iter()
+            .find(|row| row.label == "lightmap_type")
+            .unwrap();
+        assert_eq!(lightmap.default_cell.as_ref().unwrap().text, "diffuse");
     }
 
     #[test]
@@ -2551,7 +2797,10 @@ mod tests {
         data[4..8].copy_from_slice(&0xFF11_2233u32.to_le_bytes());
         data[8..12].copy_from_slice(&0xFF44_5566u32.to_le_bytes());
 
-        assert_eq!(h2_function_data_with_range_for_test(&data, true, Some(2.5)), data);
+        assert_eq!(
+            h2_function_data_with_range_for_test(&data, true, Some(2.5)),
+            data
+        );
     }
 
     #[test]
@@ -2567,6 +2816,198 @@ mod tests {
         assert_eq!(
             h2_shader_template_reference_for_test(&tag).as_deref(),
             Some("shaders\\shader_templates\\transparent\\plasma_mask_offset")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_keeps_template_categories_and_global_postprocess_indices() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "postprocess definition".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        let categories = [
+            "bump_mapping",
+            "texture",
+            "self_illumination",
+            "environment_mapping",
+            "light_response",
+            "ambient_occlusion",
+        ];
+        for (index, category) in categories.iter().enumerate() {
+            for (tag, path) in [
+                (&mut template, "categories".to_owned()),
+                (
+                    &mut shader,
+                    "postprocess definition[0]/value properties".to_owned(),
+                ),
+            ] {
+                apply_one_block_op(
+                    tag,
+                    &BlockOp {
+                        path,
+                        kind: BlockOpKind::Add,
+                    },
+                )
+                .unwrap();
+            }
+            apply_field_edit(
+                &mut template,
+                &format!("categories[{index}]/name"),
+                category,
+            )
+            .unwrap();
+            let parameters = format!("categories[{index}]/parameters");
+            apply_one_block_op(
+                &mut template,
+                &BlockOp {
+                    path: parameters.clone(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            apply_field_edit(&mut template, &format!("{parameters}[0]/name"), category).unwrap();
+            apply_field_edit(&mut template, &format!("{parameters}[0]/type"), "1").unwrap();
+            apply_field_edit(
+                &mut shader,
+                &format!("postprocess definition[0]/value properties[{index}]/value"),
+                &(index + 1).to_string(),
+            )
+            .unwrap();
+        }
+        let sections = h2_parameter_sections(
+            shader.root(),
+            Some(template.root()),
+            &TagNameIndex::default(),
+        );
+        assert_eq!(sections.len(), categories.len());
+        for (index, (section, category)) in sections.iter().zip(categories).enumerate() {
+            assert_eq!(
+                section.title,
+                category.replace('_', " ").to_ascii_uppercase()
+            );
+            assert_eq!(section.rows.len(), 1);
+            assert_eq!(section.rows[0].label, category);
+            let edit = section.rows[0].edit.as_ref().unwrap();
+            assert_eq!(
+                edit.path,
+                format!("postprocess definition[0]/value properties[{index}]/value"),
+            );
+            assert_eq!(edit.current.parse::<f32>().unwrap(), (index + 1) as f32);
+        }
+    }
+
+    #[test]
+    fn h2_unused_parameter_preserves_its_value_until_explicitly_cleared() {
+        let mut shader = h2_classic_shader_tag();
+        let mut template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        for (index, name) in ["keep_me", "unused_value"].iter().enumerate() {
+            apply_one_block_op(
+                &mut shader,
+                &BlockOp {
+                    path: "parameters".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+            apply_field_edit(&mut shader, &format!("parameters[{index}]/name"), name).unwrap();
+            apply_field_edit(&mut shader, &format!("parameters[{index}]/type"), "1").unwrap();
+            apply_field_edit(
+                &mut shader,
+                &format!("parameters[{index}]/const value"),
+                "7.5",
+            )
+            .unwrap();
+        }
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut template,
+            &BlockOp {
+                path: "categories[0]/parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut template, "categories[0]/parameters[0]/name", "keep_me").unwrap();
+        let unused = h2_unused_parameters(shader.root(), template.root(), &TagNameIndex::default());
+        assert_eq!(unused.len(), 1);
+        assert_eq!(unused[0].rows[0].label, "unused_value");
+        assert_eq!(
+            unused[0].rows[0]
+                .edit
+                .as_ref()
+                .unwrap()
+                .current
+                .parse::<f32>()
+                .unwrap(),
+            7.5
+        );
+        assert_h2_write_atomic_verifies(&shader, "h2_unused_parameter");
+        apply_one_block_op(&mut shader, &unused[0].delete).unwrap();
+        assert!(
+            h2_unused_parameters(shader.root(), template.root(), &TagNameIndex::default())
+                .is_empty()
+        );
+        let parameters = shader
+            .root()
+            .field("parameters")
+            .unwrap()
+            .as_block()
+            .unwrap();
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(
+            parameters
+                .element(0)
+                .unwrap()
+                .read_string_id("name")
+                .as_deref(),
+            Some("keep_me")
+        );
+    }
+
+    #[test]
+    fn h2ek_shader_missing_template_falls_back_but_empty_template_marks_parameters_unused() {
+        let mut shader = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut shader,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_field_edit(&mut shader, "parameters[0]/name", "brightness").unwrap();
+        apply_field_edit(&mut shader, "parameters[0]/type", "1").unwrap();
+        let template =
+            TagFile::new(test_definition_path("halo2_mcc/shader_template.json")).unwrap();
+        let sections = h2_parameter_sections(shader.root(), None, &TagNameIndex::default());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].rows[0].label, "brightness");
+        assert!(
+            h2_parameter_sections(
+                shader.root(),
+                Some(template.root()),
+                &TagNameIndex::default()
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            h2_unused_parameters(shader.root(), template.root(), &TagNameIndex::default()).len(),
+            1
         );
     }
 
@@ -2797,6 +3238,29 @@ mod tests {
             h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
             Some("value: 7.5")
         );
+        apply_field_edit(
+            &mut template,
+            "categories[0]/parameters[0]/bitmap scale",
+            "2.25",
+        )
+        .unwrap();
+        let rows =
+            h2_template_parameter_rows(shader.root(), template.root(), &TagNameIndex::default());
+        let row = rows.iter().find(|row| row.label == "noyze0_scale").unwrap();
+        assert_eq!(row.default_cell.as_ref().unwrap().text, "value: 2.25");
+        let ShaderFunctionReset::Halo2(reset) = shader_function_default_edit(row).unwrap() else {
+            panic!("Halo 2 Clear must use the byte-block writer");
+        };
+        apply_one_h2_shader_param_op(&mut shader, &reset).unwrap();
+        assert_eq!(
+            h2_template_row_value_text_for_test(&shader, &template, "noyze0_scale").as_deref(),
+            Some("value: 2.25")
+        );
+        assert_eq!(
+            h2_template_row_edit_kind_for_test(&shader, &template, "noyze0_scale"),
+            Some("h2_function_scalar"),
+            "the cleared function remains editable"
+        );
     }
 
     #[test]
@@ -2844,6 +3308,19 @@ mod tests {
             h2_template_row_value_color_for_test(&shader, &template, "color_wide_tint"),
             Some((255, 255, 255, 255))
         );
+        let rows =
+            h2_template_parameter_rows(shader.root(), template.root(), &TagNameIndex::default());
+        for label in ["color_wide", "color_wide_tint"] {
+            let row = rows.iter().find(|row| row.label == label).unwrap();
+            let color = row
+                .default_cell
+                .as_ref()
+                .unwrap()
+                .color
+                .as_ref()
+                .expect("Halo 2 color defaults include a preview");
+            assert_eq!(color.color32(), Color32::WHITE);
+        }
     }
 
     #[test]
@@ -3161,45 +3638,6 @@ mod tests {
             ]),
         );
         assert_eq!(&color_edit[..8], &[1, 0x20, 0, 0, 0, 255, 0, 255]);
-    }
-
-    #[test]
-    fn h2_shader_template_switch_prunes_unmatched_parameters() {
-        let mut shader = h2_classic_shader_tag();
-        for (index, name) in ["keep_me", "drop_me"].into_iter().enumerate() {
-            apply_one_block_op(
-                &mut shader,
-                &BlockOp {
-                    path: "parameters".to_owned(),
-                    kind: BlockOpKind::Add,
-                },
-            )
-            .unwrap();
-            apply_field_edit(&mut shader, &format!("parameters[{index}]/name"), name).unwrap();
-            apply_field_edit(&mut shader, &format!("parameters[{index}]/type"), "0").unwrap();
-        }
-
-        apply_one_h2_shader_param_op(
-            &mut shader,
-            &H2ShaderParamOp::SwitchTemplate {
-                parameters_block_path: "parameters".to_owned(),
-                allowed_parameter_names: vec!["keep_me".to_owned()],
-            },
-        )
-        .unwrap();
-
-        let parameters = shader
-            .root()
-            .field("parameters")
-            .and_then(|field| field.as_block())
-            .unwrap();
-        assert_eq!(parameters.len(), 1);
-        assert_eq!(
-            parameters
-                .element(0)
-                .and_then(|parameter| parameter.read_string_id("name")),
-            Some("keep_me".to_owned())
-        );
     }
 
     #[test]

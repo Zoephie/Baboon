@@ -457,48 +457,7 @@ pub(crate) fn apply_one_h2_shader_param_op(
                 parameter_name, field
             ))
         }
-        H2ShaderParamOp::SwitchTemplate {
-            parameters_block_path,
-            allowed_parameter_names,
-        } => {
-            let allowed = allowed_parameter_names
-                .iter()
-                .map(|name| name.to_ascii_lowercase())
-                .collect::<std::collections::HashSet<_>>();
-            let Some(block) = tag
-                .root()
-                .field_path(parameters_block_path)
-                .and_then(|field| field.as_block())
-            else {
-                return Ok("Updated H2 shader template".to_owned());
-            };
-            let mut delete_indices = Vec::new();
-            for index in 0..block.len() {
-                let Some(parameter) = block.element(index) else {
-                    continue;
-                };
-                let name = parameter
-                    .read_string_id("name")
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                if name.is_empty() || !allowed.contains(&name) {
-                    delete_indices.push(index);
-                }
-            }
-            let removed = delete_indices.len();
-            for index in delete_indices.into_iter().rev() {
-                apply_one_block_op(
-                    tag,
-                    &BlockOp {
-                        path: parameters_block_path.clone(),
-                        kind: BlockOpKind::Delete(index),
-                    },
-                )?;
-            }
-            Ok(format!(
-                "Updated H2 shader template; pruned {removed} parameter(s)"
-            ))
-        }
+
     }
 }
 

@@ -827,7 +827,7 @@ fn foundation_body_rounding() -> egui::CornerRadius {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_foundation_collapsing_header(
+pub(in crate::app) fn draw_foundation_collapsing_header(
     ui: &mut Ui,
     title: String,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -838,6 +838,33 @@ fn draw_foundation_collapsing_header(
     find_kind: FindTargetKind,
     collapsible: bool,
     leading_icon: Option<ButtonIcon>,
+    add_contents: impl FnOnce(&mut Ui),
+) -> bool {
+    draw_foundation_collapsing_header_inner(ui, title, id_salt, depth, default_open, open_override,
+        bar_fill, find_kind, collapsible, leading_icon, false, add_contents)
+}
+
+pub(in crate::app) fn draw_foundation_clipped_shader_header(
+    ui: &mut Ui, title: String, id_salt: impl std::hash::Hash + std::fmt::Debug,
+    contents: impl FnOnce(&mut Ui),
+) -> bool {
+    draw_foundation_collapsing_header_inner(ui, title, id_salt, 0, true, None,
+        foundation_block_bar(), FindTargetKind::Block, true, None, true, contents)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_foundation_collapsing_header_inner(
+    ui: &mut Ui,
+    title: String,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    depth: usize,
+    default_open: bool,
+    open_override: Option<bool>,
+    bar_fill: Color32,
+    find_kind: FindTargetKind,
+    collapsible: bool,
+    leading_icon: Option<ButtonIcon>,
+    clip_body: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
     let id = ui.make_persistent_id(("foundation_collapsing_header", id_salt));
@@ -911,6 +938,8 @@ fn draw_foundation_collapsing_header(
     });
     state.store(ui.ctx());
     let open = collapsible && state.is_open();
+    let layer = ui.layer_id();
+    let body_start = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx());
     let body_response = if open {
         // Widget allocation leaves the normal inter-item gap after the header.
         // Retract it so the body begins flush against the header bar.
@@ -934,13 +963,80 @@ fn draw_foundation_collapsing_header(
             egui::pos2(row_rect.max.x, body.response.rect.max.y),
         )
     });
+    if clip_body && joined_to_body {
+        let body = egui::Rect::from_min_max(
+            egui::pos2(container_rect.left() + 1.0, row_rect.bottom()),
+            container_rect.right_bottom() - Vec2::new(1.0, 1.0),
+        );
+        let outline = rounded_shader_body_outline(body, 4.0);
+        ui.ctx().graphics_mut(|g| {
+            let paints = g.entry(layer);
+            let end = paints.next_idx();
+            for index in body_start.0..end.0 {
+                paints.mutate_shape(egui::layers::ShapeIdx(index), |paint| {
+                    paint.clip_rect = paint.clip_rect.intersect(body);
+                    match &paint.shape {
+                        egui::Shape::Rect(rect) if rect.stroke.width == 0.0
+                            && rect.rect.bottom() >= body.bottom() - 4.0
+                            && (rect.rect.left() < body.left() + 4.0 || rect.rect.right() > body.right() - 4.0) => {
+                                let polygon = clip_shader_polygon_to_outline(
+                                    vec![rect.rect.left_top(), rect.rect.right_top(), rect.rect.right_bottom(), rect.rect.left_bottom()], &outline,
+                                );
+                                paint.shape = if polygon.len() >= 3 { egui::Shape::convex_polygon(polygon, rect.fill, Stroke::NONE) }
+                                    else { egui::Shape::Noop };
+                            }
+                        egui::Shape::LineSegment { points, .. }
+                            if points.iter().all(|p| p.y > body.bottom() - 0.1) => paint.shape = egui::Shape::Noop,
+                        _ => {}
+                    }
+                });
+            }
+        });
+    }
     ui.painter().rect_stroke(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
         Stroke::new(1.0_f32, foundation_block_edge()),
-        egui::StrokeKind::Middle,
+        if clip_body { egui::StrokeKind::Inside } else { egui::StrokeKind::Middle },
     );
     open
+}
+
+fn rounded_shader_body_outline(rect: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
+    let radius = radius.min(rect.width() / 2.0).min(rect.height().max(0.0) / 2.0);
+    let mut points = vec![rect.left_top(), rect.right_top()];
+    for (center, start) in [
+        (rect.right_bottom() - Vec2::splat(radius), 0.0),
+        (rect.left_bottom() + Vec2::new(radius, -radius), std::f32::consts::FRAC_PI_2),
+    ] {
+        for step in 0..=8 {
+            let angle = start + step as f32 / 8.0 * std::f32::consts::FRAC_PI_2;
+            points.push(center + Vec2::new(angle.cos(), angle.sin()) * radius);
+        }
+    }
+    points
+}
+
+fn clip_shader_polygon_to_outline(mut polygon: Vec<egui::Pos2>, outline: &[egui::Pos2]) -> Vec<egui::Pos2> {
+    for index in 0..outline.len() {
+        let a = outline[index];
+        let edge = outline[(index + 1) % outline.len()] - a;
+        let distance = |point: egui::Pos2| { let d = point - a; edge.x * d.y - edge.y * d.x };
+        let input = std::mem::take(&mut polygon);
+        if input.is_empty() { break; }
+        let mut previous = *input.last().unwrap();
+        let mut previous_distance = distance(previous);
+        for point in input {
+            let current_distance = distance(point);
+            if (current_distance >= 0.0) != (previous_distance >= 0.0) {
+                let t = previous_distance / (previous_distance - current_distance);
+                polygon.push(previous + (point - previous) * t);
+            }
+            if current_distance >= 0.0 { polygon.push(point); }
+            previous = point; previous_distance = current_distance;
+        }
+    }
+    polygon
 }
 
 pub(in crate::app) fn draw_foundation_block(
