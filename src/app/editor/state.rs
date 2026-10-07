@@ -953,6 +953,19 @@ pub(in crate::app) struct FieldDisplayMeta {
     pub(in crate::app) tag_reference_allowed: Vec<u32>,
     pub(in crate::app) read_only: bool,
     pub(in crate::app) advanced: bool,
+    /// The range a slider edits the value over: a `sled` field's from its
+    /// definition, a `real_slider`'s from the `[min...max]` in its name.
+    pub(in crate::app) slider: Option<SliderRange>,
+}
+
+/// The range a slider row covers. Values outside it can still be typed;
+/// the editors only recommend it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::app) struct SliderRange {
+    pub(in crate::app) min: f32,
+    pub(in crate::app) max: f32,
+    /// What a drag snaps to; `None` when the definition gives none.
+    pub(in crate::app) step: Option<f32>,
 }
 
 #[cfg(test)]

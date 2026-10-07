@@ -102,6 +102,19 @@ pub(in crate::app) fn draw_foundation_value_row(
     }
 
     let formatted = format_foundation_scalar_value(names, value);
+    if let Some(range) = slider_range(meta, value) {
+        draw_foundation_slider_row(
+            ui,
+            meta,
+            &formatted,
+            range,
+            field_suffix(meta, type_name).as_str(),
+            depth,
+            path,
+            edit,
+        );
+        return;
+    }
     if edit.can_edit(meta) && is_text_editable_value(value) {
         draw_foundation_editable_text_row(
             ui,
@@ -471,6 +484,97 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
     });
 }
 
+/// The range a value row's slider covers, if it has one: a `sled` real's
+/// from its definition, a `real_slider`'s from the `[min...max]` in its name.
+fn slider_range(meta: &FieldDisplayMeta, value: &TagFieldData) -> Option<SliderRange> {
+    match value {
+        TagFieldData::Real(_) => meta.slider,
+        TagFieldData::RealSlider(_) => meta
+            .slider
+            .or_else(|| meta.range.as_deref().and_then(slider_range_from_hint)),
+        _ => None,
+    }
+}
+
+/// A `[min...max]` (or `[min,max]`) range hint as a slider range.
+fn slider_range_from_hint(hint: &str) -> Option<SliderRange> {
+    let inner = hint.trim().strip_prefix('[')?.strip_suffix(']')?;
+    let (min, max) = inner.split_once("...").or_else(|| inner.split_once(','))?;
+    let (min, max) = (min.trim().parse::<f32>().ok()?, max.trim().parse::<f32>().ok()?);
+    (min < max).then_some(SliderRange { min, max, step: None })
+}
+
+/// `value` as a slider sets it: snapped to the step and written with only as
+/// many decimals as the step has, the way Foundation's slider does.
+fn slider_value_text(value: f32, step: Option<f32>) -> String {
+    let Some(step) = step else {
+        return fmt_real(value);
+    };
+    let snapped = (value / step).round() * step;
+    let decimals = (1.0 / step).log10().ceil().max(0.0) as usize;
+    let mut text = format!("{snapped:.decimals$}");
+    if text.contains('.') {
+        text = text.trim_end_matches('0').trim_end_matches('.').to_owned();
+    }
+    if text == "-0" { "0".to_owned() } else { text }
+}
+
+/// A value edited with a slider over its recommended range and a box for
+/// typing any value, outside the range too. A drag changes the box as it
+/// goes and commits once, when it ends.
+#[allow(clippy::too_many_arguments)]
+fn draw_foundation_slider_row(
+    ui: &mut Ui,
+    meta: &FieldDisplayMeta,
+    value: &str,
+    range: SliderRange,
+    suffix: &str,
+    depth: usize,
+    path: &str,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let editable = edit.can_edit(meta);
+    let buffer_key = format!("{}|{}", edit.tag_key, path);
+    let id = edit.widget_id(("text", &buffer_key));
+    let draft = edit.buffers.draft_mut(&buffer_key, value);
+    draw_foundation_labelled_cell_row(ui, meta, suffix, depth, |ui, _| {
+        let limit = |value: f32| RichText::new(fmt_real(value)).color(subtle_dark()).small();
+        ui.label(limit(range.min));
+        let mut position = draft.text.trim().parse::<f32>().unwrap_or(range.min);
+        ui.spacing_mut().slider_width = 180.0;
+        let slider = egui::Slider::new(&mut position, range.min..=range.max)
+            .show_value(false)
+            .clamping(egui::SliderClamping::Never);
+        let slider = match range.step {
+            Some(step) => slider.step_by(step as f64),
+            None => slider,
+        };
+        let slid = ui.add_enabled(editable, slider);
+        ui.label(limit(range.max));
+        if slid.changed() {
+            draft.text = slider_value_text(position, range.step);
+        }
+        draft.note_response(&slid);
+        let typed = foundation_value_cell(ui, &mut draft.text, 92.0, id, editable);
+        if !editable {
+            return;
+        }
+        draft.note_response(&typed);
+        // A drag commits when it ends; a click or a key moves it at once.
+        let slider_commit = draft.changed && (slid.drag_stopped() || (slid.changed() && !slid.dragged()));
+        if slider_commit {
+            draft.mark_committed();
+        }
+        if slider_commit || draft.should_commit(ui, &typed) {
+            edit.pending.extend(field_edit_ops(path, &draft.text).pending);
+        }
+        draft.keep_commit(|| single_field_commit(edit.tag_key, &buffer_key, path));
+        if draft.text.trim().parse::<f32>().is_ok_and(|value| value < range.min || value > range.max) {
+            ui.label(RichText::new("outside recommended range").color(subtle_dark()).small());
+        }
+    });
+}
+
 /// A labelled row holding one value box, read-only or editable: `cell`
 /// draws the box, given the width there is for it.
 fn draw_foundation_labelled_cell_row(
@@ -627,6 +731,168 @@ mod tests {
 
     /// Click along a value row until a cell takes focus, replace its text with
     /// `text`, press Enter, and return the edits the row queued.
+    /// A `sled` field's range comes from its definition, in H3 (where only the
+    /// real carries it) and in Reach (where a `sled` custom field precedes it
+    /// too); a `real_slider`'s comes from the range in its name.
+    #[test]
+    fn slider_ranges_come_from_sled_definitions_and_real_slider_names() {
+        let root = locate_definitions_root();
+        let slider_named = |game, group, name: &str| {
+            let docs = crate::app::help::build_def_docs(&root, game, group);
+            docs.all_entries()
+                .find_map(|entry| match entry {
+                    DefEntry::Field { clean_name, slider: Some(slider), .. } if clean_name == name => {
+                        Some(*slider)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no slider for {name} in {group}"))
+        };
+        assert_eq!(
+            slider_named(GameId::Halo3, "cinematic", "environment darken"),
+            SliderRange { min: 0.0, max: 1.0, step: Some(0.01) }
+        );
+        assert_eq!(
+            slider_named(GameId::HaloReach, "sound_mix", "output gain"),
+            SliderRange { min: -64.0, max: 12.0, step: Some(0.005) }
+        );
+        let brightness = field_display_meta("brightness:[-1...1]");
+        assert_eq!(
+            slider_range(&brightness, &TagFieldData::RealSlider(0.0)),
+            Some(SliderRange { min: -1.0, max: 1.0, step: None })
+        );
+        assert_eq!(slider_range(&brightness, &TagFieldData::Real(0.0)), None, "a plain real with a range hint");
+    }
+
+    /// The edits a light's radius row, drawn as a 0..1 slider stepped by 0.01,
+    /// queues on each of `frames`.
+    fn slider_row_edits(frames: &[Vec<egui::Event>], editable: bool) -> Vec<Vec<PendingFieldEdit>> {
+        slider_row_frames(frames, editable, false).0
+    }
+
+    /// Like [`slider_row_edits`], also returning the last frame's texts; with
+    /// `focus_box`, the value box has keyboard focus on every frame.
+    fn slider_row_frames(
+        frames: &[Vec<egui::Event>],
+        editable: bool,
+        focus_box: bool,
+    ) -> (Vec<Vec<PendingFieldEdit>>, Vec<String>) {
+        let mut texts = Vec::new();
+        let tag = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
+        let ctx = egui::Context::default();
+        let mut edits = Vec::new();
+        with_test_edit_context(|edit| {
+            edit.editable = editable;
+            let box_id = edit.widget_id(("text", &format!("{}|radius", edit.tag_key)));
+            for events in frames {
+                if focus_box {
+                    ctx.memory_mut(|memory| memory.request_focus(box_id));
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
+                    events: events.clone(),
+                    ..Default::default()
+                };
+                let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let field = tag.root().field_path("radius").expect("radius");
+                        let value = field.value().expect("radius value");
+                        let mut meta = field_display_meta(field.name());
+                        meta.slider = Some(SliderRange { min: 0.0, max: 1.0, step: Some(0.01) });
+                        draw_foundation_value_row(
+                            ui, field, &meta, field.type_name(), &value,
+                            &TagNameIndex::default(), 0, "radius", edit, None, 300.0,
+                        );
+                    });
+                });
+                edits.push(std::mem::take(edit.pending));
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect();
+            }
+        });
+        (edits, texts)
+    }
+
+    fn press(x: f32, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: egui::Pos2::new(x, 12.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    fn moved(x: f32) -> egui::Event {
+        egui::Event::PointerMoved(egui::Pos2::new(x, 12.0))
+    }
+
+    /// Where along the row a click first sets the value: the slider's left end.
+    fn slider_left(editable: bool) -> Option<(f32, Vec<PendingFieldEdit>)> {
+        (0..300).map(|step| step as f32 * 3.0).find_map(|x| {
+            let frames = [vec![moved(x)], vec![press(x, true)], vec![press(x, false)]];
+            let edits = slider_row_edits(&frames, editable);
+            let edits = edits.into_iter().flatten().collect::<Vec<_>>();
+            (!edits.is_empty()).then_some((x, edits))
+        })
+    }
+
+    /// Clicking the slider sets the value at once, snapped to the step; a drag
+    /// changes nothing until it ends, then commits once.
+    #[test]
+    fn a_slider_commits_snapped_values_once_a_drag_ends() {
+        let (left, clicked) = slider_left(true).expect("no click along the row set a value");
+        assert_eq!(clicked.len(), 1);
+        let value: f32 = clicked[0].input.parse().unwrap();
+        assert!((0.0..=1.0).contains(&value), "{value}");
+        assert!(clicked[0].input.split('.').nth(1).is_none_or(|decimals| decimals.len() <= 2), "{:?}", clicked[0].input);
+
+        let start = left + 10.0;
+        let mut frames = vec![vec![moved(start)], vec![press(start, true)]];
+        frames.extend((1..=10).map(|step| vec![moved(start + step as f32 * 9.0)]));
+        frames.push(vec![press(start + 90.0, false)]);
+        let edits = slider_row_edits(&frames, true);
+        let (during, end) = edits.split_at(edits.len() - 1);
+        assert!(during.iter().all(Vec::is_empty), "a drag committed before it ended");
+        assert_eq!(end[0].len(), 1, "the drag's end committed {} edits", end[0].len());
+        let dragged: f32 = end[0][0].input.parse().unwrap();
+        assert!(dragged > value, "dragging right moved the value from {value} to {dragged}");
+    }
+
+    /// A read-only slider row takes no clicks.
+    #[test]
+    fn a_read_only_slider_sets_nothing() {
+        assert!(slider_left(false).is_none());
+    }
+
+    /// The box beside the slider takes any value, outside the range too,
+    /// and the row says it is outside.
+    #[test]
+    fn a_slider_rows_box_takes_values_outside_the_range() {
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frames = [
+            vec![],
+            vec![key(egui::Key::Backspace), key(egui::Key::Backspace), egui::Event::Text("5".to_owned())],
+            vec![key(egui::Key::Enter)],
+        ];
+        let (edits, texts) = slider_row_frames(&frames, true, true);
+        let edits = edits.into_iter().flatten().collect::<Vec<_>>();
+        assert_eq!(edits.len(), 1, "{:?}", edits.iter().map(|edit| &edit.input).collect::<Vec<_>>());
+        assert_eq!(edits[0].input, "5");
+        assert!(texts.iter().any(|t| t == "outside recommended range"), "{texts:?}");
+    }
+
     /// How the field typed into is marked, and whether expert mode is on.
     #[derive(Clone, Copy)]
     enum Marked {

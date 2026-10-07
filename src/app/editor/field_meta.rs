@@ -18,6 +18,7 @@ pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
         tag_reference_allowed: Vec::new(),
         read_only: info.read_only,
         advanced: info.hidden,
+        slider: None,
     }
 }
 

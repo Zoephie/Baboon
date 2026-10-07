@@ -183,6 +183,7 @@ pub(in crate::app) fn draw_fields_with_docs(
                     tag_reference_allowed,
                     read_only,
                     hidden,
+                    slider,
                     ..
                 } = &entries[match_idx]
                 {
@@ -197,6 +198,7 @@ pub(in crate::app) fn draw_fields_with_docs(
                     meta.tag_reference_allowed = tag_reference_allowed.clone();
                     meta.read_only |= *read_only;
                     meta.advanced |= *hidden;
+                    meta.slider = *slider;
                     meta_override = Some(meta);
                 }
                 cursor = match_idx + 1;

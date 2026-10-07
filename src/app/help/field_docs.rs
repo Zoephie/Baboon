@@ -6,6 +6,7 @@
 //! GUID, and overlay them onto the editor at render time without touching tags.
 
 use super::*;
+use crate::app::editor::SliderRange;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -25,6 +26,8 @@ pub(in crate::app) enum DefEntry {
         /// `!` in the schema name: shown only in expert mode. The tag's own
         /// name has lost it.
         hidden: bool,
+        /// A `sled` field's slider range.
+        slider: Option<SliderRange>,
     },
     /// An explanation block (stripped from shipped tags). `title` is the schema
     /// name (often a section header), `body` the `definition` text.
@@ -191,6 +194,7 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
                     tag_reference_allowed,
                     read_only: meta.read_only,
                     hidden: meta.advanced,
+                    slider: parse_slider_range(field),
                 });
             }
         }
@@ -198,6 +202,22 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
             .entry(StructKey::new(guid, struct_name))
             .or_insert(entries);
     }
+}
+
+/// The range of a field tagged `sled`: its definition's `min`, `max` and
+/// `step`. Both the `sled` custom field and the value after it carry it.
+fn parse_slider_range(field: &serde_json::Value) -> Option<SliderRange> {
+    if field.get("group_tag").and_then(|tag| tag.as_str()) != Some("sled") {
+        return None;
+    }
+    let definition = field.get("definition")?;
+    let number = |key| definition.get(key).and_then(|v| v.as_f64()).map(|v| v as f32);
+    let (min, max) = (number("min")?, number("max")?);
+    (min < max).then_some(SliderRange {
+        min,
+        max,
+        step: number("step").filter(|step| *step > 0.0),
+    })
 }
 
 fn parse_tag_reference_allowed_groups(field: &serde_json::Value) -> Vec<u32> {

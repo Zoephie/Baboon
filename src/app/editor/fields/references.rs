@@ -1288,6 +1288,7 @@ mod tests {
             tag_reference_allowed: vec![structure_design],
             read_only: false,
             advanced: false,
+            slider: None,
         };
 
         assert_eq!(
@@ -1312,6 +1313,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta(vec![object]), &hierarchy).unwrap();
         for group in ["scen", "weap"] {
@@ -1350,6 +1352,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
         for group in ["shdr", "soso", "senv", "schi", "swat"] {
@@ -1392,6 +1395,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
         for (extension, group) in [
@@ -1579,6 +1583,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
 
         assert_eq!(

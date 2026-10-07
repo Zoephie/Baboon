@@ -664,6 +664,7 @@ mod tests {
             tag_reference_allowed: Vec::new(),
             read_only: false,
             advanced: false,
+            slider: None,
         }
     }
 
