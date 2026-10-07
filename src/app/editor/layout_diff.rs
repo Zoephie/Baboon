@@ -26,6 +26,16 @@ fn current_layout(definitions_root: &Path, game: GameId, group_name: &str) -> Op
         .clone()
 }
 
+/// How a loaded document's layout differs from the definitions, and a tag of
+/// the current layout to draw the fields added since from.
+pub(in crate::app) struct LayoutReport {
+    pub(in crate::app) diff: LayoutDiff,
+    /// A new tag built from the definitions, with an element in every block
+    /// on the way to a struct that gained fields, so they can be drawn at
+    /// their defaults.
+    preview: Option<TagFile>,
+}
+
 /// How a loaded document's layout differs from the definitions, worked out
 /// once per load (`document`, the document's id, changes when it's reloaded;
 /// its layout doesn't change while it's open). `None` when it has the
@@ -36,8 +46,8 @@ pub(in crate::app) fn document_layout_diff(
     definitions_root: &Path,
     game: GameId,
     group_name: &str,
-) -> Option<Arc<LayoutDiff>> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Option<Arc<LayoutDiff>>>>> = OnceLock::new();
+) -> Option<Arc<LayoutReport>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Option<Arc<LayoutReport>>>>> = OnceLock::new();
     let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     // Documents closed long ago needn't be remembered; one is cheap to redo.
     if cache.len() > 512 {
@@ -48,9 +58,166 @@ pub(in crate::app) fn document_layout_diff(
         .or_insert_with(|| {
             let current = current_layout(definitions_root, game, group_name)?;
             let diff = diff_layouts(tag, &current);
-            (!diff.is_empty()).then(|| Arc::new(diff))
+            if diff.is_empty() {
+                return None;
+            }
+            let path = definitions_root.join(game.as_str()).join(format!("{group_name}.json"));
+            let preview = TagFile::new(path).ok().map(|mut preview| {
+                for struct_diff in &diff.structs {
+                    if struct_diff.fields.iter().any(|c| matches!(c.kind, FieldChangeKind::Added { .. })) {
+                        add_elements_along(&mut preview, &struct_diff.path);
+                    }
+                }
+                preview
+            });
+            Some(Arc::new(LayoutReport { diff, preview }))
         })
         .clone()
+}
+
+/// The editor path to the struct reached by `names` (a [`StructDiff`] path:
+/// field names joined with `/`), through element 0 of each block and array
+/// on the way; `None` if a block on the way is empty or a name isn't there.
+fn element_path(tag: &TagFile, names: &str) -> Option<String> {
+    let mut path = String::new();
+    let mut current = tag.root();
+    for name in names.split('/').filter(|name| !name.is_empty()) {
+        let field = current.fields_all().find(|field| field.name() == name)?;
+        let field_path = crate::core::document::value::append_field_path_for(&path, &field);
+        if let Some(inner) = field.as_struct() {
+            current = inner;
+            path = field_path;
+        } else if let Some(block) = field.as_block() {
+            current = block.element(0)?;
+            path = format!("{field_path}[0]");
+        } else if let Some(array) = field.as_array() {
+            current = array.element(0)?;
+            path = format!("{field_path}[0]");
+        } else {
+            return None;
+        }
+    }
+    Some(path)
+}
+
+/// Give every empty block on the way to the struct at `names` an element, so
+/// [`element_path`] reaches it.
+fn add_elements_along(tag: &mut TagFile, names: &str) {
+    let mut reached = String::new();
+    for name in names.split('/').filter(|name| !name.is_empty()) {
+        let walked = if reached.is_empty() { name.to_owned() } else { format!("{reached}/{name}") };
+        if element_path(tag, &walked).is_none() {
+            let Some(parent) = element_path(tag, &reached) else { return };
+            let root = tag.root();
+            let owner = if parent.is_empty() { Some(root) } else { root.descend(&parent) };
+            let Some(field) = owner.and_then(|owner| owner.fields_all().find(|field| field.name() == name)) else {
+                return;
+            };
+            let block_path = crate::core::document::value::append_field_path_for(&parent, &field);
+            if field.as_block().is_none()
+                || crate::core::document::apply::add_block_element(tag, &block_path).is_err()
+            {
+                return;
+            }
+        }
+        reached = walked;
+    }
+}
+
+/// What a field drawn in the window needs from the pane: the tag and how
+/// the editor reads it.
+pub(in crate::app) struct FieldPreview<'a> {
+    pub(in crate::app) tag: &'a TagFile,
+    pub(in crate::app) names: &'a TagNameIndex,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) definitions_root: &'a Path,
+    pub(in crate::app) docs: Option<&'a DefDocs>,
+    pub(in crate::app) expert_mode: bool,
+    pub(in crate::app) game: GameId,
+}
+
+/// Draw the field `name` of the struct at `names` in `tag` through the real
+/// field editor, read-only, inside a wash: green for a field added since
+/// (from the preview tag, at its default), red for one only this tag has
+/// (with its value).
+fn draw_field_pane(
+    ui: &mut Ui,
+    tag: Option<&TagFile>,
+    names: &str,
+    field_name: &str,
+    added: bool,
+    preview: &FieldPreview<'_>,
+    scope: &str,
+) {
+    let (wash, accent) = if added {
+        (crate::app::browser::added_wash(), crate::app::browser::added_text())
+    } else {
+        (crate::app::browser::removed_wash(), crate::app::browser::removed_text())
+    };
+    let target = tag.and_then(|tag| element_path(tag, names).map(|path| (tag, path)));
+    Frame::NONE
+        .fill(wash)
+        .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.5)))
+        .inner_margin(egui::Margin::symmetric(5, 5))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let Some((tag, path)) = target else {
+                ui.label(
+                    RichText::new("No element of this tag holds it, so there is no value to show.")
+                        .color(subtle_dark())
+                        .small(),
+                );
+                return;
+            };
+            let root = tag.root();
+            let Some(owner) = (if path.is_empty() { Some(root) } else { root.descend(&path) }) else {
+                return;
+            };
+            let Some(field) = owner.fields_all().find(|field| field.name() == field_name) else {
+                return;
+            };
+            // Only this field, and everything inside it.
+            let mut visible_paths = std::collections::HashSet::new();
+            collect_field_paths(&path, field, &mut visible_paths);
+            let filter = FieldFilterAction::Apply(std::sync::Arc::new(FieldFilter { visible_paths }));
+            let mut sinks = EditSinks::default();
+            let mut edit = FieldEditContext::read_only(&mut sinks, scope, scope);
+            edit.expand_all = Some(true);
+            edit.nested_default = NestedDefault::Expanded;
+            edit.group_tag = preview.group_tag;
+            edit.root = Some(root);
+            edit.game = Some(preview.game);
+            edit.definitions_root = Some(preview.definitions_root);
+            edit.names = Some(preview.names);
+            edit.docs = preview.docs;
+            edit.expert_mode = preview.expert_mode;
+            edit.field_filter = Some(&filter);
+            egui::ScrollArea::horizontal()
+                .id_salt((scope, names, field_name))
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    draw_struct_fields_inline(ui, owner, preview.names, 0, preview.expert_mode, &path, &mut edit);
+                });
+        });
+}
+
+/// The canonical (index-free) paths of `field` and everything inside it, as
+/// the editor's field filter names them.
+fn collect_field_paths(prefix: &str, field: blam_tags::TagField<'_>, out: &mut std::collections::HashSet<String>) {
+    let path = crate::core::document::value::append_field_path_for(prefix, &field);
+    out.insert(strip_node_indices(&path));
+    let mut inside = |inner: TagStruct<'_>, inner_path: &str| {
+        for child in inner.fields_all() {
+            collect_field_paths(inner_path, child, out);
+        }
+    };
+    if let Some(inner) = field.as_struct() {
+        inside(inner, &path);
+    } else if let Some(element) = field.as_block().and_then(|block| block.element(0)) {
+        inside(element, &format!("{path}[0]"));
+    } else if let Some(element) = field.as_array().and_then(|array| array.element(0)) {
+        inside(element, &format!("{path}[0]"));
+    }
 }
 
 /// Which way a tag's layout differs, by which side has fields the other
@@ -119,8 +286,9 @@ pub(in crate::app) fn draw_layout_diff_window(
     ctx: &egui::Context,
     tag_key: &str,
     title: &str,
-    diff: &LayoutDiff,
+    report: &LayoutReport,
     game: GameId,
+    preview: &FieldPreview<'_>,
 ) {
     let id = open_id(tag_key);
     let mut open = ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
@@ -130,16 +298,23 @@ pub(in crate::app) fn draw_layout_diff_window(
     egui::Window::new(format!("Layout differences: {title}"))
         .id(id.with("window"))
         .open(&mut open)
-        .default_size([560.0, 460.0])
+        .default_size([640.0, 520.0])
         .vscroll(true)
-        .show(ctx, |ui| draw_layout_diff(ui, diff, game));
+        .show(ctx, |ui| draw_layout_diff(ui, &report.diff, game, Some((report, preview, tag_key))));
     ctx.data_mut(|data| data.insert_temp(id, open));
 }
 
 /// What the window shows: what the difference means, then each struct that
 /// differs with its fields.
-pub(in crate::app) fn draw_layout_diff(ui: &mut Ui, diff: &LayoutDiff, game: GameId) {
-    let game = game.display_name();
+/// With `fields`, the fields added and removed are drawn as the editor draws
+/// them beneath their rows.
+pub(in crate::app) fn draw_layout_diff(
+    ui: &mut Ui,
+    diff: &LayoutDiff,
+    game_id: GameId,
+    fields: Option<(&LayoutReport, &FieldPreview<'_>, &str)>,
+) {
+    let game = game_id.display_name();
     let explanation = match layout_age(diff) {
         LayoutAge::Older => format!(
             "This tag was saved with an older layout than the {game} definitions. The editor shows the \
@@ -241,6 +416,30 @@ pub(in crate::app) fn draw_layout_diff(ui: &mut Ui, diff: &LayoutDiff, game: Gam
                     if !offsets.is_empty() {
                         row.on_hover_text(offsets);
                     }
+                    if let Some((report, preview, tag_key)) = fields {
+                        let scope = format!("layout_diff|{tag_key}|{index}|{}", change.name);
+                        match &change.kind {
+                            FieldChangeKind::Added { .. } => draw_field_pane(
+                                ui,
+                                report.preview.as_ref(),
+                                &struct_diff.path,
+                                &change.name,
+                                true,
+                                preview,
+                                &scope,
+                            ),
+                            FieldChangeKind::Removed { .. } => draw_field_pane(
+                                ui,
+                                Some(preview.tag),
+                                &struct_diff.path,
+                                &change.name,
+                                false,
+                                preview,
+                                &scope,
+                            ),
+                            _ => {}
+                        }
+                    }
                 }
             });
     }
@@ -313,7 +512,7 @@ mod tests {
     /// The window explains the difference and lists each struct's changes.
     #[test]
     fn the_window_lists_what_changed() {
-        let texts = painted(|ui| draw_layout_diff(ui, &sound_mix_like(), GameId::HaloReach));
+        let texts = painted(|ui| draw_layout_diff(ui, &sound_mix_like(), GameId::HaloReach, None));
         let all = texts.join("\n");
         assert!(all.contains("older layout than the Halo: Reach definitions"), "{all}");
         assert!(all.contains("1 struct differs: 1 field added since, 1 field moved"), "{all}");
@@ -341,7 +540,7 @@ mod tests {
         let shipped = TagFile::read(&path).unwrap();
         let diff = document_layout_diff(u64::MAX - 2, &shipped, &definitions, GameId::HaloReach, "sound_mix")
             .expect("the shipped sound_mix is on an older layout");
-        assert_eq!(layout_notice_text(&diff), "Older layout: 1 struct differs");
-        assert!(diff.structs[0].fields.iter().any(|c| c.name == "default transmission settings"));
+        assert_eq!(layout_notice_text(&diff.diff), "Older layout: 1 struct differs");
+        assert!(diff.diff.structs[0].fields.iter().any(|c| c.name == "default transmission settings"));
     }
 }

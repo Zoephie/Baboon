@@ -5405,6 +5405,66 @@ mod tests {
             "the window doesn't list the added struct: {:?}",
             h.painted
         );
+        // Drawn as the editor draws it, at its defaults: the struct's own
+        // fields, sliders among them.
+        assert!(
+            h.painted.iter().any(|text| text == "cutoff frequency"),
+            "the added struct isn't drawn as the editor draws it: {:?}",
+            h.painted
+        );
+    }
+
+    /// A field only the tag has is drawn in the window with the tag's own
+    /// value. Reach's object struct dropped "hud text message index", which
+    /// shipped crates still carry.
+    #[test]
+    fn a_field_the_definitions_dropped_is_drawn_with_the_tags_value() {
+        let display = "objects/cex/cex_ff_halo/crates/cov_man_cannon/ff_man_cannon_forge_heavy.crate";
+        let path = crate::core::test_kits::hrek_tags().join(display);
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&path).unwrap();
+        let value = tag
+            .root()
+            .field_path("object/hud text message index")
+            .and_then(|field| field.value())
+            .map(|value| format!("{value:?}"))
+            .expect("the crate carries its hud text message index");
+        let mut h = Harness::new();
+        let entry = TagEntry {
+            key: fixture::entry_key(display),
+            display_path: display.to_owned(),
+            group_tag: u32::from_be_bytes(*b"bloc"),
+            group_name: Some("crate".to_owned()),
+            location: TagEntryLocation::LooseFile(display.into()),
+        };
+        fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+        fixture::open_document(&mut h.app, display, tag);
+        idle(&mut h);
+        // The tag's own editor may draw the field too; the window adds one.
+        let labels = |h: &Harness| h.painted.iter().filter(|text| *text == "hud text message index").count();
+        let before = labels(&h);
+        let notice = h
+            .painted
+            .iter()
+            .find(|text| text.contains(" layout: "))
+            .cloned()
+            .unwrap_or_else(|| panic!("no layout notice: {:?}", h.painted));
+        h.click(&notice, 0);
+        idle(&mut h);
+        assert!(
+            h.painted.iter().any(|text| text.starts_with("− hud text message index")),
+            "{:?}",
+            h.painted
+        );
+        assert_eq!(
+            labels(&h),
+            before + 1,
+            "the dropped field ({value}) isn't drawn as the editor draws it: {:?}",
+            h.painted
+        );
     }
 
     /// Two panes showing the same tag keep their own keyword drafts. The draft

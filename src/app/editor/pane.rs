@@ -179,6 +179,22 @@ pub(in crate::app) fn draw_tag_pane(
     };
     // Recorded on any popup this draw opens; see `ColorPopupWindow::opened_at`.
     let layout_stamp = doc.layout_stamp();
+    if let Some((report, game)) = tag_layout_diff(cx, kit_index, entry) {
+        let (_, title) = pane_header_path_parts(&entry.display_path);
+        let kit = &cx.model.kits[kit_index];
+        if let Some(definitions_root) = layout_definitions_root(kit) {
+            let preview = FieldPreview {
+                tag: &doc.tag,
+                names: &kit.names,
+                group_tag: entry.group_tag,
+                definitions_root,
+                docs: def_docs.as_deref(),
+                expert_mode: cx.model.prefs.expert_mode,
+                game,
+            };
+            draw_layout_diff_window(ctx, &key, &title, &report, game, &preview);
+        }
+    }
 
     let filter_in_scope = match find.within {
         FindWithin::CurrentTag => {
@@ -538,21 +554,26 @@ pub(in crate::app) fn draw_tag_pane(
     })));
 }
 
+/// The definitions a kit's tags are compared with: a loose kit's own, else
+/// the bundled ones.
+fn layout_definitions_root(kit: &Kit) -> Option<&Path> {
+    static BUNDLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    Some(match &kit.source.as_ref()?.source {
+        TagSource::LooseFolder { definitions_root, .. } => definitions_root.as_path(),
+        _ => BUNDLED.get_or_init(crate::core::bundled::locate_definitions_root).as_path(),
+    })
+}
+
 /// How the open tag's layout differs from its game's definitions, if it does.
 fn tag_layout_diff(
     cx: &Ctx,
     kit_index: usize,
     entry: &TagEntry,
-) -> Option<(std::sync::Arc<blam_tags::schema_compare::LayoutDiff>, GameId)> {
-    static BUNDLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+) -> Option<(std::sync::Arc<LayoutReport>, GameId)> {
     let kit = &cx.model.kits[kit_index];
     let doc = kit.parsed_tags.get(&entry.key)?;
-    let source = kit.source.as_ref()?;
-    let game = source.game?;
-    let definitions_root = match &source.source {
-        TagSource::LooseFolder { definitions_root, .. } => definitions_root.as_path(),
-        _ => BUNDLED.get_or_init(crate::core::bundled::locate_definitions_root).as_path(),
-    };
+    let game = kit.source.as_ref()?.game?;
+    let definitions_root = layout_definitions_root(kit)?;
     let group_name = kit.names.name_for(entry.group_tag)?;
     document_layout_diff(doc.layout_stamp().0, &doc.tag, definitions_root, game, group_name)
         .map(|diff| (diff, game))
@@ -635,8 +656,8 @@ fn draw_responsive_tag_header(
                                 ui.label(
                                     RichText::new(title.as_str()).size(15.0).strong().color(text_dark()),
                                 );
-                                if let Some((diff, game)) = &layout_diff {
-                                    draw_layout_notice(ui, &key, diff, *game);
+                                if let Some((report, game)) = &layout_diff {
+                                    draw_layout_notice(ui, &key, &report.diff, *game);
                                 }
                             });
                             if cx.model.prefs.expert_mode {
@@ -722,9 +743,6 @@ fn draw_responsive_tag_header(
     }
     ui.add_space(PANE_HEADER_BOTTOM_SPACE);
     ui.separator();
-    if let Some((diff, game)) = &layout_diff {
-        draw_layout_diff_window(ui.ctx(), &key, &title, diff, *game);
-    }
     if let Some((rel_path, label)) = breadcrumb_navigation {
         cx.send(BrowserCommand::Action {
             kit: cx.model.kits[kit_index].id,
