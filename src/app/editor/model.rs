@@ -61,6 +61,7 @@ pub(in crate::app) fn draw_object_model_summary(
         tag_reference_allowed: Vec::new(),
         read_only: false,
         advanced: false,
+        slider: None,
     };
     ui.add_space(4.0);
     let import_verb = geometry_import_verb(names, model.group_tag);

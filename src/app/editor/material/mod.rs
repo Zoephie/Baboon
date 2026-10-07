@@ -151,7 +151,7 @@ pub(in crate::app) fn draw_material_field(
         return;
     }
     if let Some(value) = field.value() {
-        if is_hidden_non_expert_value(&value, expert_mode) {
+        if is_hidden_value(&value) {
             return;
         }
         let formatted = format_value(names, &value, false);
@@ -512,6 +512,13 @@ pub(in crate::app) fn material_section_text(text: String) -> RichText {
 
 pub(in crate::app) fn clean_field_name(name: &str) -> String {
     blam_tags::clean_field_name(name).into_owned()
+}
+
+/// A field's name as it is shown: markup stripped and written as it was
+/// authored, with `/` where its addressable name has `\` (Foundation shows
+/// `left/right bleed`).
+pub(in crate::app) fn display_field_name(name: &str) -> String {
+    blam_tags::parse_field_name(name).display().into_owned()
 }
 
 pub(in crate::app) fn clean_field_name_basic(name: &str) -> String {
@@ -980,6 +987,7 @@ mod tests {
             .expect("a Halo 3 shader whose grid builds");
 
         let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
         let mut draw = |revision: (u64, u64, u64, u64)| {
             let _ = crate::app::run_ui_test(&ctx, Default::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {

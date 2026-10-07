@@ -249,7 +249,7 @@ impl Baboon {
                 kit.profile.as_ref().map(|open| open.id.as_str())
                     == Some(profile_identity.id.as_str())
             }) {
-                self.model.active = index;
+                self.focus_kit(index);
                 self.model.status = format!("Switched to {}", label);
                 return;
             }
@@ -273,7 +273,7 @@ impl Baboon {
                             == Some(game)
                 })
             {
-                self.model.active = index;
+                self.focus_kit(index);
                 self.model.kits[index].profile = Some(profile_identity.clone());
                 self.model.status = format!("Switched to {}", label);
                 return;

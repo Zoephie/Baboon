@@ -24,6 +24,7 @@ fn entry_name_field(element: TagStruct<'_>, prefix: &str) -> Option<(String, Str
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn table_row(
     tag: &TagFile,
     path: &str,
@@ -31,6 +32,8 @@ fn table_row(
     id: u64,
     original: Option<usize>,
     names: &TagNameIndex,
+    game: Option<GameId>,
+    definitions_root: Option<&std::path::Path>,
 ) -> Result<BlockTableRow, String> {
     let field = tag
         .root()
@@ -40,10 +43,11 @@ fn table_row(
     let element = block.element(index).ok_or("Entry no longer resolves")?;
     let (name_field, name) = match entry_name_field(element, "") {
         Some((field, name)) => (Some(field), name),
+        // No name to edit: show the label the game's editor gives the entry.
         None => (
             None,
-            block_element_content_label(element, names)
-                .unwrap_or_else(|| element.name().to_owned()),
+            crate::app::editor::fields::BlockLabeler::for_tag(definitions_root, game, tag.group().tag, Some(tag.root()), names)
+                .bare_label(path, block, index),
         ),
     };
     Ok(BlockTableRow {
@@ -138,6 +142,8 @@ impl BlockTableState {
                         self.next_id,
                         None,
                         names,
+                        self.game,
+                        self.definitions_root.as_deref(),
                     )?,
                 );
                 self.next_id += 1;
@@ -150,6 +156,8 @@ impl BlockTableState {
                     self.next_id,
                     None,
                     names,
+                    self.game,
+                    self.definitions_root.as_deref(),
                 )?);
                 self.next_id += 1;
             }
@@ -208,7 +216,7 @@ pub(in crate::app) fn block_table_for(
         .ok_or("Field is not a block")?
         .len();
     let rows = (0..count)
-        .map(|index| table_row(&tag, &request.path, index, index as u64, Some(index), names))
+        .map(|index| table_row(&tag, &request.path, index, index as u64, Some(index), names, game, definitions_root.as_deref()))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(BlockTableState {
         kit,
@@ -356,6 +364,25 @@ mod tests {
         tag
     }
 
+    /// An entry with no name field to edit shows the label the game's editor
+    /// gives it, not Baboon's guess: H3 chud skins are named by Guerilla's
+    /// skin table.
+    #[test]
+    fn nameless_rows_show_the_editors_label() {
+        let chud = crate::core::test_kits::h3ek_tags().join("ui/chud/globals.chud_globals_definition");
+        if !chud.exists() {
+            eprintln!("skipped: set BLAM_TEST_H3EK");
+            return;
+        }
+        let defs = crate::core::bundled::locate_definitions_root();
+        let game = GameId::from_id("halo3_mcc");
+        let tag = crate::core::source::read_tag_at_path(&chud, game, Some(&defs), u32::from_be_bytes(*b"chgd")).unwrap();
+        let names = TagNameIndex::default();
+        let row = table_row(&tag, "skins", 1, 1, Some(1), &names, game, Some(&defs)).unwrap();
+        assert_eq!(row.name_field, None);
+        assert_eq!(row.name, "dervish");
+    }
+
     fn staged(tag: &TagFile) -> BlockTableState {
         let baseline_bytes = tag.write_to_bytes().unwrap();
         let game = matches!(tag.container, blam_tags::file::TagContainer::Classic { .. })
@@ -378,7 +405,7 @@ mod tests {
         let names = TagNameIndex::default();
         let rows = (0..3)
             .map(|index| {
-                table_row(&tag, "variants", index, index as u64, Some(index), &names).unwrap()
+                table_row(&tag, "variants", index, index as u64, Some(index), &names, None, None).unwrap()
             })
             .collect();
         BlockTableState {

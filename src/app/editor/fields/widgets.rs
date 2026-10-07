@@ -55,7 +55,7 @@ pub(in crate::app) fn paint_findable_text(
     ui.painter().galley(rect.min, galley, color);
 }
 
-fn findable_galley(
+pub(super) fn findable_galley(
     ui: &Ui,
     text: &str,
     font_id: FontId,
@@ -82,24 +82,6 @@ pub(in crate::app) fn highlighted_widget_text(
     findable_text_has_match(ui, text, kind).then(|| {
         let font_id = ui.style().text_styles[&text_style].clone();
         findable_layout_job(ui, text, font_id, color, kind).into()
-    })
-}
-
-/// Build highlighted italic widget text while preserving Find match styling.
-pub(in crate::app) fn highlighted_italic_widget_text(
-    ui: &Ui,
-    text: &str,
-    text_style: TextStyle,
-    color: Color32,
-    kind: FindTargetKind,
-) -> Option<egui::WidgetText> {
-    findable_text_has_match(ui, text, kind).then(|| {
-        let font_id = ui.style().text_styles[&text_style].clone();
-        let mut job = findable_layout_job(ui, text, font_id, color, kind);
-        for section in &mut job.sections {
-            section.format.italics = true;
-        }
-        job.into()
     })
 }
 
@@ -252,58 +234,86 @@ pub(in crate::app) fn foundation_input_cell(ui: &mut Ui, text: &str, width: f32)
 /// optional hover tooltip override (used to flag missing tag references in red).
 pub(in crate::app) fn foundation_input_cell_colored(
     ui: &mut Ui,
-    text: &str,
+    mut text: &str,
     width: f32,
     color: Color32,
     hover: Option<&str>,
 ) {
-    let height = 24.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, foundation_input());
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, foundation_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-    let response = foundation_read_only_text_cell(ui, rect, text, color, 5.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    let response =
+        foundation_value_text(ui, rect, &mut text, None, color, VALUE_PADDING);
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
     }
 }
 
-/// An immutable TextBuffer keeps selection, focus and copying enabled without
-/// permitting typing, paste, cut or deletion to alter the displayed value.
-fn foundation_read_only_text_cell(
+/// A value box, editable or not. Both draw the same box; a read-only one
+/// still takes focus so its text can be selected and copied.
+pub(in crate::app) fn foundation_value_cell(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    editable: bool,
+) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    if editable {
+        foundation_value_text(ui, rect, text, Some(id), text_dark(), VALUE_PADDING)
+    } else {
+        foundation_value_text(ui, rect, &mut text.as_str(), Some(id), text_dark(), VALUE_PADDING)
+    }
+}
+
+/// Space between a value box's left edge and its text.
+const VALUE_PADDING: f32 = 4.0;
+
+/// The one value box every editable and read-only value cell draws: the same
+/// border, font, padding and find highlighting either way. A read-only box is
+/// given an immutable `&str`, which keeps selection, focus and copying but
+/// drops typing, paste, cut and deletion, and is greyed.
+fn foundation_value_text(
     ui: &mut Ui,
     rect: egui::Rect,
-    text: &str,
+    text: &mut dyn egui::TextBuffer,
+    id: Option<egui::Id>,
     color: Color32,
     left_padding: f32,
 ) -> egui::Response {
-    let mut text = text;
-    let font_id = FontId::proportional(12.5);
+    // A box whose text can't change is greyed, as Foundation greys a
+    // read-only field's: a dimmer fill and dimmer text (a missing reference
+    // keeps its red). It still takes focus, so its text can be copied.
+    let read_only = !text.is_mutable();
+    let fill = if read_only { foundation_input_read_only() } else { foundation_input() };
+    let color = if read_only && color == text_dark() { subtle_dark() } else { color };
+    ui.painter().rect_filled(rect, 0.0, fill);
+    let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let text = text.as_str();
-        findable_galley(ui, text, font_id.clone(), color, FindTargetKind::Value)
+        findable_galley(ui, text.as_str(), font_id.clone(), color, FindTargetKind::Value)
     };
-    let response = ui.put(
-        rect,
-        egui::TextEdit::singleline(&mut text)
-            .frame(egui::Frame::NONE)
-            .font(FontId::proportional(12.5))
-            .text_color(color)
-            .vertical_align(egui::Align::Center)
-            .margin(egui::Margin {
-                left: (left_padding) as i8,
-                right: 5,
-                top: 2,
-                bottom: 2,
-            })
-            .clip_text(true)
-            .layouter(&mut layouter),
-    );
+    // A frame of our own, so egui doesn't draw a different one for a buffer
+    // it can't change; egui ignores `.margin()` once a frame is given.
+    let mut edit = egui::TextEdit::singleline(text)
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+            left: left_padding as i8,
+            right: 4,
+            top: 2,
+            bottom: 2,
+        }))
+        .font(font_id.clone())
+        .text_color(color)
+        .vertical_align(egui::Align::Center)
+        .clip_text(true)
+        .layouter(&mut layouter);
+    if let Some(id) = id {
+        edit = edit.id(id);
+    }
+    let response = ui.put(rect, edit);
+    let stroke = if response.has_focus() {
+        ui.visuals().selection.stroke
+    } else {
+        Stroke::new(1.0_f32, foundation_input_edge())
+    };
+    ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     response
 }
@@ -323,18 +333,6 @@ fn tag_reference_icon_footprint() -> f32 {
     3.0 + 16.0 + 3.0
 }
 
-fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon: TagIcon) {
-    ui.painter().rect_filled(rect, 0.0, foundation_input());
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, foundation_input_edge()),
-            egui::StrokeKind::Middle,
-        );
-    paint_tag_reference_icon(ui, rect, icon);
-}
-
 fn paint_tag_reference_icon(ui: &Ui, rect: egui::Rect, icon: TagIcon) {
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 3.0 + 8.0, rect.center().y),
@@ -347,18 +345,23 @@ fn paint_tag_reference_icon(ui: &Ui, rect: egui::Rect, icon: TagIcon) {
 
 pub(super) fn foundation_tag_reference_input_cell_colored(
     ui: &mut Ui,
-    text: &str,
+    mut text: &str,
     width: f32,
     color: Color32,
     hover: Option<&str>,
     icon: TagIcon,
     show_hover_text: bool,
 ) -> egui::Response {
-    let height = 24.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    paint_tag_reference_value_cell(ui, rect, icon);
-    let response =
-        foundation_read_only_text_cell(ui, rect, text, color, tag_reference_icon_footprint());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    let response = foundation_value_text(
+        ui,
+        rect,
+        &mut text,
+        None,
+        color,
+        tag_reference_icon_footprint(),
+    );
+    paint_tag_reference_icon(ui, rect, icon);
     if response.hovered() && show_hover_text {
         return response.on_hover_text(hover.unwrap_or(text));
     }
@@ -372,95 +375,16 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
     id: egui::Id,
     icon: TagIcon,
 ) -> egui::Response {
-    let size = Vec2::new(width, 24.0);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let margin = egui::Margin {
-        left: (tag_reference_icon_footprint()) as i8,
-        right: 4,
-        top: 2,
-        bottom: 2,
-    };
-    let has_highlight = findable_text_has_match(ui, text, FindTargetKind::Value);
-    let response = ui
-        .scope(|ui| {
-            ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.hovered.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.active.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0_f32, text_dark());
-
-            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0_f32, text_dark());
-            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0_f32, text_dark());
-            let edit = egui::TextEdit::singleline(text)
-                .id(id)
-                .font(TextStyle::Monospace)
-                .text_color(text_dark())
-                .vertical_align(egui::Align::Center)
-                .margin(margin)
-                .desired_width(width)
-                .clip_text(true);
-            if has_highlight {
-                let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let text = text.as_str();
-                    findable_galley(
-                        ui,
-                        text,
-                        font_id.clone(),
-                        text_dark(),
-                        FindTargetKind::Value,
-                    )
-                };
-                ui.put(rect, edit.layouter(&mut layouter))
-            } else {
-                ui.put(rect, edit)
-            }
-        })
-        .inner;
-    paint_tag_reference_icon(ui, response.rect, icon);
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
-    response
-}
-
-pub(in crate::app) fn foundation_text_edit_cell(
-    ui: &mut Ui,
-    text: &mut String,
-    width: f32,
-    id: egui::Id,
-) -> egui::Response {
-    let has_highlight = findable_text_has_match(ui, text, FindTargetKind::Value);
-    let response = ui
-        .scope(|ui| {
-            ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.hovered.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.active.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0_f32, text_dark());
-            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0_f32, text_dark());
-            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0_f32, text_dark());
-            let edit = egui::TextEdit::singleline(text)
-                .id(id)
-                .font(TextStyle::Monospace)
-                .text_color(text_dark())
-                .vertical_align(egui::Align::Center)
-                .margin(Vec2::new(4.0, 2.0));
-            if has_highlight {
-                let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
-                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let text = text.as_str();
-                    findable_galley(
-                        ui,
-                        text,
-                        font_id.clone(),
-                        text_dark(),
-                        FindTargetKind::Value,
-                    )
-                };
-                ui.add_sized([width, 24.0], edit.layouter(&mut layouter))
-            } else {
-                ui.add_sized([width, 24.0], edit)
-            }
-        })
-        .inner;
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    let response = foundation_value_text(
+        ui,
+        rect,
+        text,
+        Some(id),
+        text_dark(),
+        tag_reference_icon_footprint(),
+    );
+    paint_tag_reference_icon(ui, rect, icon);
     response
 }
 
@@ -798,8 +722,11 @@ pub(in crate::app) fn fmt_angle(radians: f32) -> String {
     if text == "-0" { "0".to_owned() } else { text }
 }
 
-pub(in crate::app) fn is_hidden_non_expert_value(value: &TagFieldData, expert_mode: bool) -> bool {
-    !expert_mode && matches!(value, TagFieldData::Custom(bytes) if bytes.is_empty())
+/// Whether a field's value is never shown. Custom fields are markers for the
+/// games' own editors (hide groups, filters, Sapien hooks) that nothing here
+/// draws, so they would only ever show as an empty `custom [0 bytes]` box.
+pub(in crate::app) fn is_hidden_value(value: &TagFieldData) -> bool {
+    matches!(value, TagFieldData::Custom(_))
 }
 
 pub(in crate::app) fn draw_resource(
@@ -1051,6 +978,32 @@ pub(in crate::app) fn search_clear_control_at(
 
 #[cfg(test)]
 mod tests {
+    /// A read-only value is laid out like an editable one: its text starts
+    /// as far into the box, in the same font.
+    #[test]
+    fn read_only_and_editable_values_draw_the_same_box() {
+        let ctx = egui::Context::default();
+        ctx.set_global_style(foundation_style());
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            for (value, editable) in [("readonlyvalue", false), ("editablevalue", true)] {
+                let mut text = value.to_owned();
+                foundation_value_cell(ui, &mut text, 120.0, egui::Id::new(value), editable);
+            }
+            foundation_input_cell(ui, "displayedvalue", 120.0);
+        });
+        let mut texts = std::collections::HashMap::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Text(text) = &clipped.shape {
+                let font = text.galley.job.sections[0].format.font_id.clone();
+                texts.insert(text.galley.text().to_owned(), (text.pos.x + text.galley.rect.left(), font));
+            }
+        }
+        let editable = &texts["editablevalue"];
+        for read_only in ["readonlyvalue", "displayedvalue"] {
+            assert_eq!(&texts[read_only], editable, "{read_only} is laid out unlike an editable value");
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -1120,10 +1073,15 @@ mod tests {
                 },
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
-                        let (rect, _) =
-                            ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
-                        let response =
-                            foundation_read_only_text_cell(ui, rect, value, text_dark(), 5.0);
+                        let mut text = value.to_owned();
+                        let response = foundation_value_cell(
+                            ui,
+                            &mut text,
+                            120.0,
+                            egui::Id::new("read-only value"),
+                            false,
+                        );
+                        assert_eq!(text, value);
                         id = response.id;
                         response.request_focus();
                         let mut state = egui::TextEdit::load_state(&ctx, id).unwrap();

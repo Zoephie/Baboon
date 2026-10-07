@@ -464,12 +464,20 @@ pub(in crate::app) fn import_sources_for(target_game: &str) -> Vec<&'static str>
 
 impl Baboon {
 
+    /// Whether the import has to stop before writing: its kit is read-only,
+    /// or has closed since the window opened. A closed kit's folder is not
+    /// written to just because the window still names it.
     fn refuse_read_only_tag_import(&mut self) -> bool {
-        let index = self
-            .dialogs
-            .get::<TagImportDialog>()
-            .and_then(|dialog| self.model.kit_index(dialog.kit));
-        index.is_some_and(|index| self.refuse_read_only_edit(index))
+        let Some(kit) = self.dialogs.get::<TagImportDialog>().map(|dialog| dialog.kit) else {
+            return false;
+        };
+        match self.model.kit_index(kit) {
+            Some(index) => self.refuse_read_only_edit(index),
+            None => {
+                self.model.status = "The kit this import was going into has closed".to_owned();
+                true
+            }
+        }
     }
 
     /// Open Import Tags for the active kit. `destination_rel` pre-fills the
@@ -1316,6 +1324,42 @@ impl Model {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// A kit closed while Import Tags was open on it is not written into:
+    /// the window still names its tags folder, but nothing owns that folder
+    /// in Baboon any more.
+    #[test]
+    fn an_import_into_a_closed_kit_is_refused() {
+        let mut app = Baboon::for_test();
+        let game = GameId::from_id("halo3_mcc");
+        app.install_loaded_source(LoadedSourceData {
+            label: "H3EK".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("/nonexistent-baboon-import/tags"),
+                game,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        app.open_tag_import_dialog(None);
+        assert!(app.dialogs.get::<TagImportDialog>().is_some(), "{}", app.model.status);
+        let kit = app.model.kits[0].id;
+        app.remove_kit(kit);
+
+        app.run_folder_tag_import(true, None);
+
+        assert_eq!(app.model.status, "The kit this import was going into has closed");
+    }
 
     // Where the wall-clock of one conversion actually goes.
     //

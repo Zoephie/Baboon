@@ -685,6 +685,17 @@ pub(in crate::app) fn apply_next_worker_message(app: &mut crate::app::Baboon) ->
     true
 }
 
+/// Wait for the next worker message and apply only it, for a test that
+/// checks what that one result did before the work it starts can answer.
+#[cfg(test)]
+pub(in crate::app) fn apply_one_worker_message(app: &mut crate::app::Baboon) -> bool {
+    let Ok(message) = app.rx.recv_timeout(std::time::Duration::from_secs(10)) else {
+        return false;
+    };
+    app.apply_worker_message(message, &egui::Context::default());
+    true
+}
+
 /// [`spawn_worker`] for the exports and extractions that report through
 /// `ExportFinished`. On bare threads, one that panicked sent nothing and
 /// left the status line on "Extracting ..." for good; a panic is now

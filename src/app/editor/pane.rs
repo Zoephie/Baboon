@@ -179,6 +179,22 @@ pub(in crate::app) fn draw_tag_pane(
     };
     // Recorded on any popup this draw opens; see `ColorPopupWindow::opened_at`.
     let layout_stamp = doc.layout_stamp();
+    if let Some((report, game)) = tag_layout_diff(cx, kit_index, entry) {
+        let (_, title) = pane_header_path_parts(&entry.display_path);
+        let kit = &cx.model.kits[kit_index];
+        if let Some(definitions_root) = layout_definitions_root(kit) {
+            let preview = FieldPreview {
+                tag: &doc.tag,
+                names: &kit.names,
+                group_tag: entry.group_tag,
+                definitions_root,
+                docs: def_docs.as_deref(),
+                expert_mode: cx.model.prefs.expert_mode,
+                game,
+            };
+            draw_layout_diff_window(ctx, &key, &title, &report, game, &preview);
+        }
+    }
 
     let filter_in_scope = match find.within {
         FindWithin::CurrentTag => {
@@ -334,6 +350,7 @@ pub(in crate::app) fn draw_tag_pane(
         tag_reference_picker: &mut tag_reference_picker,
         status: Some(&mut status),
         editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
+        expert_mode,
         show_block_sizes: cx.model.prefs.show_block_sizes,
         buffers: &mut view.edit_buffers,
         pending: &mut ops.pending,
@@ -537,6 +554,31 @@ pub(in crate::app) fn draw_tag_pane(
     })));
 }
 
+/// The definitions a kit's tags are compared with: a loose kit's own, else
+/// the bundled ones.
+fn layout_definitions_root(kit: &Kit) -> Option<&Path> {
+    static BUNDLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    Some(match &kit.source.as_ref()?.source {
+        TagSource::LooseFolder { definitions_root, .. } => definitions_root.as_path(),
+        _ => BUNDLED.get_or_init(crate::core::bundled::locate_definitions_root).as_path(),
+    })
+}
+
+/// How the open tag's layout differs from its game's definitions, if it does.
+fn tag_layout_diff(
+    cx: &Ctx,
+    kit_index: usize,
+    entry: &TagEntry,
+) -> Option<(std::sync::Arc<LayoutReport>, GameId)> {
+    let kit = &cx.model.kits[kit_index];
+    let doc = kit.parsed_tags.get(&entry.key)?;
+    let game = kit.source.as_ref()?.game?;
+    let definitions_root = layout_definitions_root(kit)?;
+    let group_name = kit.names.name_for(entry.group_tag)?;
+    document_layout_diff(doc.layout_stamp().0, &doc.tag, definitions_root, game, group_name)
+        .map(|diff| (diff, game))
+}
+
 fn draw_responsive_tag_header(
     cx: &Ctx,
     ui: &mut Ui,
@@ -579,6 +621,7 @@ fn draw_responsive_tag_header(
     let key = entry.key.clone();
     let (breadcrumbs, title) = pane_header_path_parts(&entry.display_path);
     let mut breadcrumb_navigation = None;
+    let layout_diff = tag_layout_diff(cx, kit_index, entry);
 
     ui.add_space(10.0);
     ui.horizontal(|ui| {
@@ -605,12 +648,15 @@ fn draw_responsive_tag_header(
                                 .and_then(|source| source.game),
                             icon_rect,
                         );
+                        if let Some((report, game)) = &layout_diff {
+                            draw_layout_badge(ui, icon_rect, &key, &report.diff, *game);
+                        }
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
                             ui.label(
-                                RichText::new(title).size(15.0).strong().color(text_dark()),
+                                RichText::new(title.as_str()).size(15.0).strong().color(text_dark()),
                             );
                             if cx.model.prefs.expert_mode {
                                 ui.label(

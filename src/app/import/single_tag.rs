@@ -402,6 +402,7 @@ impl Model {
     /// tag). Used by the Import dialog's overwrite-vs-new banner.
     pub(in crate::app) fn import_overwrite_target(
         &self,
+        kit: KitId,
         folder_rel: &str,
         name: &str,
         group_tag: u32,
@@ -416,7 +417,9 @@ impl Model {
         } else {
             format!("{folder}/{leaf}")
         };
-        match &self.source()?.source {
+        // The dialog's own kit, which is where the import lands; the focused
+        // one can be another game while the window is up.
+        match &self.kits[self.kit_index(kit)?].source.as_ref()?.source {
             TagSource::IoStoreContainerSet { index, .. } => {
                 index.lookup(group_tag, &logical).map(|_| logical)
             }
@@ -443,6 +446,49 @@ impl Model {
 mod tests {
     use super::*;
     use crate::app::documents::saving::load_new_tag_groups;
+
+    /// The "will overwrite" warning is about the kit the import lands in. It
+    /// used to look in the focused kit, so moving to another game while the
+    /// window was open hid the warning for an import that still overwrites.
+    #[test]
+    fn the_overwrite_warning_reads_the_dialogs_own_kit() {
+        let group = u32::from_be_bytes(*b"bipd");
+        let mut index = crate::core::source::ContainerTagIndex::default();
+        index.insert(
+            crate::core::source::container_ref_key(group, "objects/marine"),
+            0,
+            "Tags/objects/marine-biped.ubulk".to_owned(),
+        );
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "Campaign Evolved".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/overwrite-test/Paks"),
+                containers: Vec::new(),
+                index: Arc::new(index),
+                packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        });
+        let container_kit = app.model.kits[0].id;
+        app.add_kit();
+
+        assert_eq!(
+            app.model.import_overwrite_target(container_kit, "objects", "marine", group),
+            Some("objects/marine".to_owned())
+        );
+    }
 
     // What the Campaign Evolved import gate does with a tag from another game.
     //

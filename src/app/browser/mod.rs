@@ -352,6 +352,9 @@ pub(in crate::app) struct KitBrowser {
     pub(in crate::app) search_scope: BrowserSearchScope,
     /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
     pub(in crate::app) folder_browsers: HashMap<String, FolderBrowserState>,
+    /// The current tag or folder the tree last followed, as
+    /// [`current_browser_item`] names it: a change reveals the new one.
+    pub(in crate::app) followed_item: Option<String>,
     /// Which tags the browser should mark as modified, and the signature the
     /// set was built from. Rebuilt only when that signature changes: resolving
     /// a tag key to its entry is a linear scan of the source, so doing it for
@@ -439,7 +442,7 @@ impl Baboon {
         match command {
             BrowserCommand::Action { kit, action } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.handle_browser_action(action, ctx.clone());
                 }
             }
@@ -452,7 +455,7 @@ impl Baboon {
             BrowserCommand::LoadFolders { kit, tree, paths } => self.load_browser_folders(kit, tree, &paths),
             BrowserCommand::ScanAllEntries { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.begin_scan_all_entries(ctx.clone());
                 }
             }
@@ -461,7 +464,7 @@ impl Baboon {
                     return;
                 };
                 // Each acts on the active kit, so this one first.
-                self.model.active = index;
+                self.focus_kit(index);
                 match (library, action) {
                     (Library::Bitmaps, CellAction::Open(key)) => self.select_entry(key, ctx.clone()),
                     // Opens a native folder picker, which blocks until it is

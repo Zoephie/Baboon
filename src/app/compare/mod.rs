@@ -32,7 +32,7 @@ impl Baboon {
             CompareCommand::GitReview { kit, action } => self.apply_git_review_action(kit, action, ctx),
             CompareCommand::OpenGitReview { kit } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.open_git_review(ctx);
                 }
             }

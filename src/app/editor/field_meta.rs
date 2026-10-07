@@ -11,13 +11,14 @@ pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
     // `blam_tags::field_name`.
     let info = blam_tags::parse_field_name(name);
     FieldDisplayMeta {
-        label: info.clean_name.into_owned(),
+        label: info.display().into_owned(),
         unit: info.units.map(str::to_owned),
-        range: info.range.map(str::to_owned),
+        range: info.range_text().map(|range| range.into_owned()),
         help: info.description.map(str::to_owned),
         tag_reference_allowed: Vec::new(),
         read_only: info.read_only,
         advanced: info.hidden,
+        slider: None,
     }
 }
 
@@ -37,14 +38,6 @@ pub(in crate::app) fn field_suffix(meta: &FieldDisplayMeta, type_name: &str) -> 
             }
         }
         None => base,
-    }
-}
-
-pub(in crate::app) fn draw_field_help(ui: &mut Ui, meta: &FieldDisplayMeta) {
-    // Field documentation is shown on hover over the name label (see
-    // `foundation_label_cell`); this only surfaces the read-only marker.
-    if meta.read_only {
-        ui.label(RichText::new("read-only").color(subtle_dark()).small());
     }
 }
 

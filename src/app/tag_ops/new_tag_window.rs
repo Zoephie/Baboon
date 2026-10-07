@@ -16,7 +16,10 @@ impl Dialog for NewTagDialog {
         let mut close_requested = false;
         // Campaign Evolved container sources create the tag in memory (no loose
         // tags folder, no filesystem picker) at a container-relative path.
-        let is_container = cx.model.current_source_is_container();
+        // Both read off the kit the dialog was opened for: Create goes there,
+        // whichever game has focus while the window is up.
+        let is_container = self.kit_is_container(cx.model);
+        let tags_root = self.tags_root(cx.model);
         egui::Window::new("New Tag")
             .constrain_to(window_work_area(ctx))
             .id(egui::Id::new("new_tag_dialog"))
@@ -25,7 +28,7 @@ impl Dialog for NewTagDialog {
             .open(&mut open)
             .default_width(window_width(ctx, 560.0))
             .show(ctx, |ui| {
-                if !is_container && cx.model.loaded_tags_root().is_none() {
+                if !is_container && tags_root.is_none() {
                     ui.label(
                         RichText::new(
                             "Load a loose editing-kit tags folder before creating a tag.",
@@ -157,7 +160,7 @@ impl Dialog for NewTagDialog {
                         );
                         if ui
                             .add_enabled(
-                                cx.model.loaded_tags_root().is_some() && !self.groups.is_empty(),
+                                tags_root.is_some() && !self.groups.is_empty(),
                                 egui::Button::new("Choose..."),
                             )
                             .clicked()
@@ -197,7 +200,7 @@ impl Dialog for NewTagDialog {
                         && if is_container {
                             !self.rel_path.trim().is_empty()
                         } else {
-                            cx.model.loaded_tags_root().is_some() && self.output_path.is_some()
+                            tags_root.is_some() && self.output_path.is_some()
                         };
                     if ui
                         .add_enabled(can_create, egui::Button::new("Create"))
@@ -205,7 +208,7 @@ impl Dialog for NewTagDialog {
                             "No tag groups are available for this game"
                         } else if is_container {
                             "Enter a path for the new tag"
-                        } else if cx.model.loaded_tags_root().is_none() {
+                        } else if tags_root.is_none() {
                             "Load a loose editing-kit tags folder first"
                         } else {
                             "Choose where to save the new tag"

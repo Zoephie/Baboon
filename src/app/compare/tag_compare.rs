@@ -849,7 +849,11 @@ impl Dialog for TagDiffState {
     fn show(&mut self, cx: &Ctx, app: &AppReads) -> bool {
         let state = &mut *self;
         let ctx = cx.egui;
-        let diff_kit = cx.model.kit_index(state.kit).unwrap_or(cx.model.active);
+        // A closed kit closes the comparison: another kit's tag under the same
+        // key, or its git history, is not what was being compared.
+        let Some(diff_kit) = cx.model.kit_index(state.kit) else {
+            return false;
+        };
         let current = cx.model.kits[diff_kit].parsed_tags.get(&state.a_key);
         let group = current.map(|doc| doc.tag.group().tag);
         let source = cx.model.kits[diff_kit].source.as_ref();

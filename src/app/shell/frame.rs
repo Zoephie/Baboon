@@ -4285,6 +4285,26 @@ mod tests {
                 &["Keywords"],
             ),
             case(
+                "layout_diff",
+                &[],
+                &["editor/layout_diff.rs"],
+                // A Reach `sound_mix` in a Halo 3 kit: its layout isn't the
+                // one the Halo 3 definitions give the group, so its header
+                // carries the notice the window opens from.
+                |h| {
+                    let tag = fixture::new_tag_for("haloreach_mcc", "sound_mix");
+                    pane_kit(h, fixture::GAME, "sound/smoke.sound_mix", &tag);
+                    fixture::open_document(&mut h.app, "sound/smoke.sound_mix", tag);
+                },
+                |h| {
+                    // The steps run before anything is drawn; the badge is
+                    // found where the header paints it.
+                    idle(h);
+                    click_layout_badge(h);
+                },
+                &["Layout differences: smoke.sound_mix"],
+            ),
+            case(
                 "tsv_paste",
                 &["dialog:TsvPasteState"],
                 &["editor/tsv_paste_window.rs"],
@@ -5045,6 +5065,61 @@ mod tests {
         assert_eq!(steps(&mut h, &key), 1);
     }
 
+    // The New Tag window is for the workspace it was opened in, and Create goes
+    // there. It used to draw from whichever workspace had focus, so moving to
+    // another game while it was open said no tags folder was loaded and
+    // pointed Choose... at the other game's folder.
+
+    #[test]
+    fn the_new_tag_window_reads_the_kit_it_was_opened_for() {
+        let kit = LooseKit::new("new-tag-kit", "halo3_mcc");
+        kit.write_mcc("objects/weapons/rifle/assault_rifle", "biped", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        h.app.open_new_tag_dialog();
+        h.app.add_kit();
+        h.idle(3);
+        assert!(h.painted_contains("New Tag"), "{:?}", h.painted);
+        assert!(
+            !h.painted_contains("Load a loose editing-kit tags folder"),
+            "the window still sees its own kit's tags folder: {:?}",
+            h.painted
+        );
+    }
+
+    // Compare Tags is about one kit's tag. With that kit closed it used to fall
+    // back to the focused kit and compare whatever that kit had under the key.
+
+    #[test]
+    fn closing_its_kit_closes_compare_tags() {
+        let kit = LooseKit::new("compare-closed-kit", "halo3_mcc");
+        kit.write_mcc("objects/weapons/rifle/assault_rifle", "biped", |_| {});
+        let mut h = Harness::new();
+        kit.install(&mut h.app);
+        let compared = h.app.model.kits[0].id;
+        h.app.dialogs.open(TagDiffState {
+            kit: compared,
+            a_key: kit.key("objects/weapons/rifle/assault_rifle.biped"),
+            source: TagCompareSource::OpenTag,
+            b_kit: None,
+            b_key: None,
+            b_path: None,
+            comparison_kit_root: None,
+            git_history: Default::default(),
+            error: None,
+            filters: Default::default(),
+            swapped: false,
+            results: None,
+            git_pending: None,
+        });
+        h.idle(2);
+        assert!(h.app.dialogs.get::<TagDiffState>().is_some(), "open while its kit is");
+        h.app.add_kit();
+        h.app.remove_kit(compared);
+        h.idle(2);
+        assert!(h.app.dialogs.get::<TagDiffState>().is_none());
+    }
+
     // Revealing a tag inside folders the loose browser has not loaded yet. Each
     // folder loads once the frame that drew it open is over, so a reveal can only
     // open the next folder down a frame later; it has to stay armed until it
@@ -5155,6 +5230,31 @@ mod tests {
             .find(|(painted, _)| painted == text)
             .map(|(_, rect)| rect.center())
             .unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", h.painted));
+        press_at(h, target, button);
+    }
+
+    /// [`press`] on the tab titled `text`. The browser tree, which opens down
+    /// to the current tag, paints the same file names; the tab bar is the
+    /// topmost painting to the right of the tree's.
+    fn press_tab(h: &mut Harness, text: &str, button: egui::PointerButton) {
+        let rects: Vec<egui::Rect> = h
+            .painted_rects
+            .iter()
+            .filter(|(painted, _)| painted == text)
+            .map(|(_, rect)| *rect)
+            .collect();
+        let tree_right = rects.iter().map(|rect| rect.left()).fold(f32::INFINITY, f32::min);
+        let target = rects
+            .iter()
+            .filter(|rect| rect.left() > tree_right)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .or(rects.first())
+            .map(|rect| rect.center())
+            .unwrap_or_else(|| panic!("no tab {text:?} is painted: {:?}", h.painted));
+        press_at(h, target, button);
+    }
+
+    fn press_at(h: &mut Harness, target: egui::Pos2, button: egui::PointerButton) {
         let from = target - egui::vec2(30.0, 30.0);
         for step in 1..=3 {
             h.frame(vec![egui::Event::PointerMoved(
@@ -5202,7 +5302,7 @@ mod tests {
         let (mut h, keys) = three_tabs();
         let active = h.app.model.active;
         h.app.model.kits[active].selected_key = Some(keys[2].clone());
-        press(&mut h, "tag_000.biped", egui::PointerButton::Primary);
+        press_tab(&mut h, "tag_000.biped", egui::PointerButton::Primary);
         assert_eq!(
             h.app.model.kits[active].selected_key.as_ref(),
             Some(&keys[0])
@@ -5214,7 +5314,7 @@ mod tests {
     fn a_middle_click_closes_a_tab() {
         let (mut h, keys) = three_tabs();
         assert_eq!(open_tabs(&h), keys);
-        press(&mut h, "tag_000.biped", egui::PointerButton::Middle);
+        press_tab(&mut h, "tag_000.biped", egui::PointerButton::Middle);
         assert_eq!(open_tabs(&h), keys[1..]);
     }
 
@@ -5222,10 +5322,178 @@ mod tests {
     #[test]
     fn close_all_but_this_keeps_that_tab() {
         let (mut h, keys) = three_tabs();
-        press(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
+        press_tab(&mut h, "tag_001.biped", egui::PointerButton::Secondary);
         h.click("Close all but this", 0);
         idle(&mut h);
         assert_eq!(open_tabs(&h), [keys[1].clone()]);
+    }
+
+    /// Closing the current tab moves the browser to the tab shown in its
+    /// place, opening the folder that holds it, as an editor's explorer
+    /// follows the active file.
+    #[test]
+    fn closing_the_current_tab_reveals_the_next_one_in_the_browser() {
+        let mut h = Harness::new();
+        fixture::install_kit(&mut h.app, fixture::synthetic_entries(2, 1, 1));
+        let first = fixture::open_document(&mut h.app, "folder_00/sub_00/tag_000.biped", fixture::new_tag("biped"));
+        idle(&mut h);
+        fixture::open_document(&mut h.app, "folder_01/sub_00/tag_000.biped", fixture::new_tag("biped"));
+        idle(&mut h);
+        // The tree's `sub_00` rows, not the breadcrumb's, which sits in the
+        // tag pane to the right of the tree.
+        let tree_subfolders = |h: &Harness| {
+            let tree_left = h
+                .painted_rects
+                .iter()
+                .filter(|(text, _)| text == "folder_00")
+                .map(|(_, rect)| rect.left())
+                .fold(f32::INFINITY, f32::min);
+            h.painted_rects
+                .iter()
+                .filter(|(text, rect)| text == "sub_00" && rect.left() < tree_left + 100.0)
+                .count()
+        };
+        assert_eq!(tree_subfolders(&h), 2, "each folder opened as its tab became current");
+        h.click("folder_00", 0);
+        idle(&mut h);
+        assert_eq!(tree_subfolders(&h), 1, "folder_00 collapsed by hand");
+        press_key(&mut h, egui::Key::W, CTRL);
+        idle(&mut h);
+        let active = h.app.model.active;
+        assert_eq!(h.app.model.kits[active].selected_key, Some(first));
+        assert_eq!(tree_subfolders(&h), 2, "the browser did not open folder_00 to the tab now in front");
+    }
+
+    /// Click the warning badge a tag on another layout carries on its header
+    /// icon: its "!" is the only one painted, and the header holds no notice
+    /// text, which would push the keyword bar along.
+    fn click_layout_badge(h: &mut Harness) {
+        let marks = h.painted.iter().filter(|text| *text == "!").count();
+        assert_eq!(marks, 1, "the layout badge isn't painted once: {:?}", h.painted);
+        assert!(!h.painted.iter().any(|text| text.contains(" layout: ")), "{:?}", h.painted);
+        h.click("!", 0);
+        idle(h);
+    }
+
+    /// A tag saved with an older layout carries a badge on its header icon,
+    /// and the badge opens a window listing what changed. The shipped Reach
+    /// `sound_mix` predates its "default transmission settings".
+    #[test]
+    fn an_older_layout_is_noted_in_the_header_and_explained_on_click() {
+        let path = crate::core::test_kits::hrek_tags().join("sound/sound_mix.sound_mix");
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let mut h = Harness::new();
+        let display = "sound/sound_mix.sound_mix";
+        let entry = TagEntry {
+            key: fixture::entry_key(display),
+            display_path: display.to_owned(),
+            group_tag: u32::from_be_bytes(*b"snmx"),
+            group_name: Some("sound_mix".to_owned()),
+            location: TagEntryLocation::LooseFile(display.into()),
+        };
+        fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+        fixture::open_document(&mut h.app, display, blam_tags::TagFile::read(&path).unwrap());
+        idle(&mut h);
+        assert!(!h.painted.iter().any(|text| text.contains("default transmission settings")));
+        click_layout_badge(&mut h);
+        assert!(
+            h.painted.iter().any(|text| text.contains("+ default transmission settings")),
+            "the window doesn't list the added struct: {:?}",
+            h.painted
+        );
+        // Drawn as the editor draws it, at its defaults: the struct's own
+        // fields, sliders among them.
+        assert!(
+            h.painted.iter().any(|text| text == "cutoff frequency"),
+            "the added struct isn't drawn as the editor draws it: {:?}",
+            h.painted
+        );
+    }
+
+    /// The badge moves nothing in the header: the keyword bar sits where it
+    /// does for the same tag on the current layout.
+    #[test]
+    fn the_layout_badge_leaves_the_header_where_it_was() {
+        let path = crate::core::test_kits::hrek_tags().join("sound/sound_mix.sound_mix");
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let keywords_at = |tag: blam_tags::TagFile| {
+            let mut h = Harness::new();
+            let display = "sound/sound_mix.sound_mix";
+            let entry = TagEntry {
+                key: fixture::entry_key(display),
+                display_path: display.to_owned(),
+                group_tag: u32::from_be_bytes(*b"snmx"),
+                group_name: Some("sound_mix".to_owned()),
+                location: TagEntryLocation::LooseFile(display.into()),
+            };
+            fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+            fixture::open_document(&mut h.app, display, tag);
+            idle(&mut h);
+            let badged = h.painted.iter().any(|text| text == "!");
+            let at = h
+                .painted_rects
+                .iter()
+                .find(|(text, _)| text == "Keywords:")
+                .map(|(_, rect)| rect.min)
+                .expect("the keyword bar is painted");
+            (badged, at)
+        };
+        let (current_badged, current) = keywords_at(fixture::new_tag_for("haloreach_mcc", "sound_mix"));
+        let (shipped_badged, shipped) = keywords_at(blam_tags::TagFile::read(&path).unwrap());
+        assert!(!current_badged && shipped_badged, "only the shipped tag carries the badge");
+        assert_eq!(current, shipped, "the badge moved the keyword bar");
+    }
+
+    /// A field only the tag has is drawn in the window with the tag's own
+    /// value. Reach's object struct dropped "hud text message index", which
+    /// shipped crates still carry.
+    #[test]
+    fn a_field_the_definitions_dropped_is_drawn_with_the_tags_value() {
+        let display = "objects/cex/cex_ff_halo/crates/cov_man_cannon/ff_man_cannon_forge_heavy.crate";
+        let path = crate::core::test_kits::hrek_tags().join(display);
+        if !path.is_file() {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&path).unwrap();
+        let value = tag
+            .root()
+            .field_path("object/hud text message index")
+            .and_then(|field| field.value())
+            .map(|value| format!("{value:?}"))
+            .expect("the crate carries its hud text message index");
+        let mut h = Harness::new();
+        let entry = TagEntry {
+            key: fixture::entry_key(display),
+            display_path: display.to_owned(),
+            group_tag: u32::from_be_bytes(*b"bloc"),
+            group_name: Some("crate".to_owned()),
+            location: TagEntryLocation::LooseFile(display.into()),
+        };
+        fixture::install_kit_for_game(&mut h.app, vec![entry], "haloreach_mcc");
+        fixture::open_document(&mut h.app, display, tag);
+        idle(&mut h);
+        // The tag's own editor may draw the field too; the window adds one.
+        let labels = |h: &Harness| h.painted.iter().filter(|text| *text == "hud text message index").count();
+        let before = labels(&h);
+        click_layout_badge(&mut h);
+        assert!(
+            h.painted.iter().any(|text| text.starts_with("− hud text message index")),
+            "{:?}",
+            h.painted
+        );
+        assert_eq!(
+            labels(&h),
+            before + 1,
+            "the dropped field ({value}) isn't drawn as the editor draws it: {:?}",
+            h.painted
+        );
     }
 
     /// Two panes showing the same tag keep their own keyword drafts. The draft

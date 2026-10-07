@@ -53,7 +53,7 @@ impl Dialog for ImportTagDialog {
         };
         let overwrite_logical =
             cx.model
-                .import_overwrite_target(&folder_snapshot, &name_snapshot, group_tag);
+                .import_overwrite_target(self.kit, &folder_snapshot, &name_snapshot, group_tag);
 
         let mut open = true;
         let mut do_import = false;

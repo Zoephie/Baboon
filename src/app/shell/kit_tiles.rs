@@ -201,6 +201,23 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_, '_, '_> {
         false
     }
 
+    /// Clicking a game tab focuses its kit, by the same rule as a press inside
+    /// its pane. The tab bar sits outside every pane, so without this the
+    /// click shows one game while the File menu still acts on another.
+    fn on_tab_button(
+        &mut self,
+        tiles: &mut egui_tiles::Tiles<KitId>,
+        tile_id: egui_tiles::TileId,
+        button_response: egui::Response,
+    ) -> egui::Response {
+        if button_response.clicked()
+            && let Some(egui_tiles::Tile::Pane(kit_id)) = tiles.get(tile_id)
+        {
+            self.cx.send(AppAction::FocusKit(*kit_id));
+        }
+        button_response
+    }
+
     /// The "+" that opens another game, kept on the tab bar where the kit tabs
     /// themselves are.
     fn top_bar_right_ui(
@@ -496,5 +513,103 @@ mod tests {
         frame(&mut app, vec![press(over_right, true)]);
         frame(&mut app, vec![press(over_right, false)]);
         assert_eq!(app.model.active, 1);
+    }
+
+    /// The kits whose workspaces are on screen.
+    fn visible_kits(app: &Baboon) -> Vec<KitId> {
+        app.kit_tree
+            .active_tiles()
+            .into_iter()
+            .filter_map(|id| match app.kit_tree.tiles.get(id) {
+                Some(egui_tiles::Tile::Pane(kit)) => Some(*kit),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `count` kits as tabs in one group, laid out the way loading them does:
+    /// the last one added is in front and active.
+    fn tabbed_kits(count: usize) -> (Baboon, Vec<KitId>) {
+        let mut app = Baboon::for_test();
+        for _ in 1..count {
+            app.add_kit();
+        }
+        app.sync_kit_tree();
+        let kits: Vec<KitId> = app.model.kits.iter().map(|kit| kit.id).collect();
+        assert_eq!(visible_kits(&app), vec![kits[count - 1]]);
+        assert_eq!(app.model.active, count - 1);
+        (app, kits)
+    }
+
+    #[test]
+    fn clicking_a_workspace_tab_activates_its_kit() {
+        let (mut app, kits) = tabbed_kits(2);
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |app: &mut Baboon, events: Vec<egui::Event>| {
+            time += 0.1;
+            let _ = crate::app::run_ui_test(&ctx, input(time, events), |ui| {
+                let ctx = ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |ui| app.draw_workspace_tiles(ui, &ctx));
+                app.apply_commands(&ctx);
+            });
+        };
+        // On the first tab's label, in the tab bar above both panes.
+        let on_first_tab = egui::pos2(40.0, 20.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: on_first_tab,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        frame(&mut app, Vec::new());
+        for _ in 0..3 {
+            frame(&mut app, vec![egui::Event::PointerMoved(on_first_tab)]);
+        }
+        frame(&mut app, vec![press(true)]);
+        frame(&mut app, vec![press(false)]);
+        frame(&mut app, Vec::new());
+
+        assert_eq!(visible_kits(&app), vec![kits[0]], "the click shows the first workspace");
+        assert_eq!(app.model.active, 0, "and the menus act on the workspace being shown");
+    }
+
+    #[test]
+    fn a_restored_session_shows_the_kit_it_focuses() {
+        let (mut app, kits) = tabbed_kits(2);
+        app.shell.restoring_kits.insert(kits[0]);
+        app.shell.restored_active_kit = Some(kits[0]);
+
+        app.settle_restored_kit(kits[0]);
+
+        assert_eq!(app.model.active, 0);
+        assert_eq!(visible_kits(&app), vec![kits[0]]);
+    }
+
+    #[test]
+    fn reopening_an_open_source_shows_its_kit() {
+        let (mut app, kits) = tabbed_kits(2);
+        let path = PathBuf::from("/kits/halo3/tags");
+        app.model.kits[0].requested_path = Some(path.clone());
+
+        assert!(app.open_kit_for(&path), "the source is already open");
+
+        assert_eq!(app.model.active, 0);
+        assert_eq!(visible_kits(&app), vec![kits[0]]);
+    }
+
+    #[test]
+    fn closing_a_workspace_shows_the_kit_that_becomes_active() {
+        let (mut app, kits) = tabbed_kits(3);
+        app.focus_kit(1);
+        assert_eq!(visible_kits(&app), vec![kits[1]]);
+
+        app.remove_kit(kits[1]);
+        app.sync_kit_tree();
+
+        let active = app.model.kits[app.model.active].id;
+        assert_eq!(active, kits[2], "the kit that slid into the closed one's place");
+        assert_eq!(visible_kits(&app), vec![active]);
     }
 }

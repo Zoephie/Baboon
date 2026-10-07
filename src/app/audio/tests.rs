@@ -48,7 +48,6 @@ fn decoded(request: u64, cache: Option<PcmKey>) -> AudioDone {
 fn a_superseded_decode_is_cached_but_not_played() {
     let mut audio = AudioState {
         // No output device, so playing says so instead of opening one.
-        engine_tried: true,
         play_request: 2,
         ..Default::default()
     };
@@ -73,7 +72,6 @@ fn a_superseded_decode_is_cached_but_not_played() {
 #[test]
 fn a_decode_for_reopened_wwise_banks_is_not_cached() {
     let mut audio = AudioState {
-        engine_tried: true,
         wwise_generation: 3,
         ..Default::default()
     };
@@ -408,47 +406,124 @@ fn transport_from_another_tab_does_not_move_this_tab_s_sound() {
     assert_eq!(audio.playback(Some(&a)).unwrap().position, 0.5);
 }
 
+/// cpal's Windows backend keeps one device enumerator for the whole process,
+/// made in the COM apartment of the first thread to ask for a device; when
+/// that thread ends, the next use of it from another is an access violation.
+/// Test threads end, so every test that opens the output device runs on this
+/// one thread, which never does — as the app opens it on its UI thread.
+fn on_the_audio_thread(test: impl FnOnce() + Send + 'static) {
+    /// A test, and where to say how it went.
+    type Job = (Box<dyn FnOnce() + Send>, Sender<std::thread::Result<()>>);
+    static THREAD: std::sync::OnceLock<Mutex<Sender<Job>>> = std::sync::OnceLock::new();
+    let thread = THREAD.get_or_init(|| {
+        let (send, receive) = std::sync::mpsc::channel::<Job>();
+        std::thread::spawn(move || {
+            for (test, done) in receive {
+                let _ = done.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(test)));
+            }
+        });
+        Mutex::new(send)
+    });
+    let (done, result) = std::sync::mpsc::channel();
+    thread
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .send((Box::new(test), done))
+        .expect("the audio thread runs for the whole process");
+    if let Err(panic) = result.recv().expect("the audio thread answers") {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// Focus moving to another tab pauses the sound; coming back does not
 /// start it again. Needs an output device, so it skips without one.
 #[test]
 fn another_tab_taking_focus_pauses_the_sound() {
-    let a = owner(1, "file:a.sound");
-    let b = owner(1, "file:b.sound");
-    let mut audio = AudioState::default();
-    if audio.ensure_engine().is_none() {
-        eprintln!("skipping: no audio output device");
-        return;
-    }
-    audio.volume = Volume(0.0);
-    audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
-    assert!(audio.playback(Some(&a)).unwrap().playing);
+    on_the_audio_thread(|| {
+        let a = owner(1, "file:a.sound");
+        let b = owner(1, "file:b.sound");
+        let mut audio = AudioState {
+            output: true,
+            ..Default::default()
+        };
+        if audio.ensure_engine().is_none() {
+            eprintln!("skipping: no audio output device");
+            return;
+        }
+        audio.volume = Volume(0.0);
+        audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
+        assert!(audio.playback(Some(&a)).unwrap().playing);
 
-    audio.follow_tabs(Some(&a), |_| true);
-    assert!(
-        audio.playback(Some(&a)).unwrap().playing,
-        "its own tab keeps it playing"
-    );
+        audio.follow_tabs(Some(&a), |_| true);
+        assert!(
+            audio.playback(Some(&a)).unwrap().playing,
+            "its own tab keeps it playing"
+        );
 
-    audio.follow_tabs(Some(&b), |_| true);
-    assert!(
-        !audio.playback(Some(&a)).unwrap().playing,
-        "another tab's focus pauses it"
-    );
+        audio.follow_tabs(Some(&b), |_| true);
+        assert!(
+            !audio.playback(Some(&a)).unwrap().playing,
+            "another tab's focus pauses it"
+        );
 
-    audio.follow_tabs(Some(&a), |_| true);
-    assert!(
-        !audio.playback(Some(&a)).unwrap().playing,
-        "returning does not resume it"
-    );
+        audio.follow_tabs(Some(&a), |_| true);
+        assert!(
+            !audio.playback(Some(&a)).unwrap().playing,
+            "returning does not resume it"
+        );
 
-    audio.pending.push_back(SoundRequest {
-        owner: Some(a.clone()),
-        clip: None,
-        preview: false,
-        action: SoundAction::TogglePause,
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            clip: None,
+            preview: false,
+            action: SoundAction::TogglePause,
+        });
+        audio.process(None, &egui::Context::default());
+        assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
     });
-    audio.process(None, &egui::Context::default());
-    assert!(audio.playback(Some(&a)).unwrap().playing, "play resumes it");
+}
+
+/// A play that finds the system default output device changed reopens the
+/// stream on it, and a paused sound resumes there from where it stood.
+/// Needs an output device, so it skips without one.
+#[test]
+fn play_follows_a_change_of_output_device() {
+    on_the_audio_thread(|| {
+        let a = owner(1, "file:a.sound");
+        let mut audio = AudioState {
+            output: true,
+            ..Default::default()
+        };
+        if audio.ensure_engine().is_none() {
+            eprintln!("skipping: no audio output device");
+            return;
+        }
+        audio.volume = Volume(0.0);
+        audio.play_decoded(wave(30_000), "a", Some(a.clone()), None);
+        let voice = audio.voice.as_mut().unwrap();
+        voice.pause();
+        voice.seek(12_000);
+
+        // As if the default changed since the stream was opened.
+        audio.engine.as_mut().unwrap().default_device = Some("unplugged".to_owned());
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            clip: None,
+            preview: false,
+            action: SoundAction::TogglePause,
+        });
+        audio.process(None, &egui::Context::default());
+
+        let engine = audio.engine.as_ref().unwrap();
+        assert_ne!(
+            engine.default_device.as_deref(),
+            Some("unplugged"),
+            "reopened"
+        );
+        let playback = audio.playback(Some(&a)).unwrap();
+        assert!(playback.playing, "resumed on the new stream");
+        assert!(playback.position >= 12.0, "from where it stood");
+    });
 }
 
 /// A status line belongs to the tab whose sound caused it: a failure in
@@ -647,33 +722,38 @@ fn play_starts_at_the_playhead_inside_the_region_else_its_start() {
 /// set on another clip does not. Needs an output device.
 #[test]
 fn a_region_set_before_loading_holds_for_its_clip() {
-    let a = owner(1, "file:a.sound");
-    let mut audio = AudioState::default();
-    if audio.ensure_engine().is_none() {
-        eprintln!("skipping: no audio output device");
-        return;
-    }
-    audio.volume = Volume(0.0);
-    audio.pending.push_back(SoundRequest {
-        owner: Some(a.clone()),
-        clip: Some("c".to_owned()),
-        preview: false,
-        action: SoundAction::SetRegion(Some((0.25, 0.5))),
-    });
-    audio.process(None, &egui::Context::default());
-    audio.play_decoded(wave(1000), "c", Some(a.clone()), Some("c".to_owned()));
-    assert_eq!(audio.voice.as_ref().unwrap().region(), Some((0.25, 0.5)));
-    assert!(
-        audio.playback(Some(&a)).unwrap().position >= 0.25,
-        "play did not start at the region"
-    );
+    on_the_audio_thread(|| {
+        let a = owner(1, "file:a.sound");
+        let mut audio = AudioState {
+            output: true,
+            ..Default::default()
+        };
+        if audio.ensure_engine().is_none() {
+            eprintln!("skipping: no audio output device");
+            return;
+        }
+        audio.volume = Volume(0.0);
+        audio.pending.push_back(SoundRequest {
+            owner: Some(a.clone()),
+            clip: Some("c".to_owned()),
+            preview: false,
+            action: SoundAction::SetRegion(Some((0.25, 0.5))),
+        });
+        audio.process(None, &egui::Context::default());
+        audio.play_decoded(wave(1000), "c", Some(a.clone()), Some("c".to_owned()));
+        assert_eq!(audio.voice.as_ref().unwrap().region(), Some((0.25, 0.5)));
+        assert!(
+            audio.playback(Some(&a)).unwrap().position >= 0.25,
+            "play did not start at the region"
+        );
 
-    audio.play_decoded(wave(1000), "d", Some(a.clone()), Some("d".to_owned()));
-    assert_eq!(
-        audio.voice.as_ref().unwrap().region(),
-        None,
-        "another clip took the region"
-    );
+        audio.play_decoded(wave(1000), "d", Some(a.clone()), Some("d".to_owned()));
+        assert_eq!(
+            audio.voice.as_ref().unwrap().region(),
+            None,
+            "another clip took the region"
+        );
+    });
 }
 
 /// Speed steps through the sound: 2× every other frame, ½× halfway

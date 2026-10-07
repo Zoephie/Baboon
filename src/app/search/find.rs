@@ -139,6 +139,9 @@ pub(in crate::app) struct FindFieldPlan {
     pub(in crate::app) inherited_parent: bool,
     pub(in crate::app) is_block: bool,
     pub(in crate::app) is_documentation: bool,
+    /// A `!` field: the editor draws it, and everything under it, only in
+    /// expert mode. The marker comes from the definition, as the editor's does.
+    pub(in crate::app) hidden: bool,
 }
 
 /// Plans for one walk, keyed by struct definition index within the tag's layout.
@@ -203,19 +206,24 @@ impl<'a> FindPlans<'a> {
             .fields()
             .map(|field| {
                 let mut docs_before = 0..0;
+                let mut hidden = crate::app::editor::field_display_meta(field.name()).advanced;
                 if let Some(match_idx) = (doc_cursor..entries.len()).find(|&index| {
                     matches!(&entries[index], DefEntry::Field { clean_name, .. } if clean_name == field.name())
                 }) {
                     docs_before = doc_cursor..match_idx;
                     doc_cursor = match_idx + 1;
+                    if let DefEntry::Field { hidden: true, .. } = &entries[match_idx] {
+                        hidden = true;
+                    }
                 }
                 let clean = field.clean_name().into_owned();
                 let is_block = field.as_block().is_some() || field.as_array().is_some();
                 let is_documentation = field.field_type() == TagFieldType::Explanation;
+                // What the editor shows, so a match is where it's painted.
                 let label = if is_block {
                     foundation_block_title(field.name())
                 } else {
-                    clean.clone()
+                    crate::app::editor::display_field_name(field.name())
                 };
                 FindFieldPlan {
                     docs_before,
@@ -228,6 +236,7 @@ impl<'a> FindPlans<'a> {
                         && is_inherited_parent_name(field.name()),
                     is_block,
                     is_documentation,
+                    hidden,
                     label: label.into(),
                     clean: clean.into(),
                 }
@@ -253,6 +262,7 @@ pub(in crate::app) fn collect_find_occurrences(
     look_in: FindLookIn,
     match_case: bool,
     whole_word: bool,
+    expert_mode: bool,
 ) -> Vec<FindOccurrence> {
     let mut out = Vec::new();
     let mut walk = FindWalk {
@@ -263,6 +273,7 @@ pub(in crate::app) fn collect_find_occurrences(
         look_in,
         match_case,
         whole_word,
+        expert_mode,
         path: String::new(),
         out: &mut out,
     };
@@ -281,6 +292,9 @@ struct FindWalk<'a> {
     look_in: FindLookIn,
     match_case: bool,
     whole_word: bool,
+    /// Outside expert mode the editor doesn't draw `!` fields, so Find skips
+    /// them rather than count matches nothing on screen shows.
+    expert_mode: bool,
     path: String,
     out: &'a mut Vec<FindOccurrence>,
 }
@@ -290,6 +304,9 @@ impl FindWalk<'_> {
         let plan = self.plans.plan(&tag_struct);
         for (field, field_plan) in tag_struct.fields().zip(&plan.fields) {
             self.documentation(&plan, field_plan.docs_before.clone());
+            if field_plan.hidden && !self.expert_mode {
+                continue;
+            }
             let inherited_wrapper = following_inherited_chain && field_plan.inherited_parent;
             let parent_len = self.path.len();
             if parent_len > 0 {
@@ -439,13 +456,15 @@ impl Baboon {
         use std::fmt::Write as _;
         let kit = &self.model.kits[self.model.active];
         let mut key = format!(
-            "{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}",
+            "{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}",
             kit.id,
             kit.generation,
             self.search.find.within,
             self.search.find.look_in,
             self.search.find.match_case,
             self.search.find.whole_word,
+            // Hidden (`!`) fields are searched only in expert mode.
+            self.model.prefs.expert_mode,
             self.search.find.all_request_id,
             self.search.find.searching,
             self.search.find.query,
@@ -512,6 +531,7 @@ impl Baboon {
                 self.search.find.look_in,
                 self.search.find.match_case,
                 self.search.find.whole_word,
+                self.model.prefs.expert_mode,
             ));
         }
         self.search.find.occurrences = occurrences;
@@ -584,8 +604,12 @@ impl Baboon {
             } else {
                 &source.all_entries
             };
+            // The kit's id as well as its generation: generations count per
+            // kit, so two kits of matching shape could otherwise share a
+            // signature and one would show the other's closed-tag hits.
             let signature = format!(
-                "{}|{:?}|{}|{}|{}|{}|{}|{}",
+                "{:?}|{}|{:?}|{}|{}|{}|{}|{}|{}",
+                kit.id,
                 kit.generation,
                 self.search.find.look_in,
                 self.search.find.match_case,
@@ -651,6 +675,7 @@ impl Baboon {
                     self.search.find.look_in,
                     self.search.find.match_case,
                     self.search.find.whole_word,
+                    self.model.prefs.expert_mode,
                 ),
             );
         }
@@ -690,6 +715,7 @@ impl Baboon {
         let look_in = self.search.find.look_in;
         let match_case = self.search.find.match_case;
         let whole_word = self.search.find.whole_word;
+        let expert_mode = self.model.prefs.expert_mode;
         let total = entries.len();
         let tx = self.tx.clone();
         self.search.find.all_closed_occurrences.clear();
@@ -728,6 +754,7 @@ impl Baboon {
                                 look_in,
                                 match_case,
                                 whole_word,
+                                expert_mode,
                             )),
                             Err(_) => unreadable += 1,
                         }
@@ -784,7 +811,7 @@ impl Baboon {
             .parsed_tags
             .contains_key(&hit.tag_key)
         {
-            self.search.pending_find_jump = Some(hit);
+            self.search.pending_find_jump = Some((self.model.active_kit_id(), hit));
             return;
         }
         if let Some(entry) = self.model.entry_for_key(&hit.tag_key) {
@@ -823,6 +850,106 @@ fn order_find_occurrences(
 mod tests {
     use super::*;
     use crate::core::document::value::append_field_path_for;
+
+    /// Two kits of the same shape are still two kits. Find's "All Tags"
+    /// signature used to leave the kit out, so switching to a kit with the same
+    /// generation, entry count, first entry and open tags kept the other kit's
+    /// closed-tag hits instead of searching again.
+    #[test]
+    fn find_all_tags_searches_again_in_another_kit_of_the_same_shape() {
+        let container = || LoadedSourceData {
+            label: "Campaign Evolved".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/find-signature-test/Paks"),
+                containers: Vec::new(),
+                index: Arc::new(crate::core::source::ContainerTagIndex::default()),
+                packages: Arc::new(crate::core::source::ContainerPackageIndex::default()),
+                shipped: Arc::new(crate::core::source::ShippedTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+            chosen_kit_layout: None,
+        };
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(container());
+        app.add_kit();
+        app.install_loaded_source(container());
+        assert_eq!(app.model.kits[0].generation, app.model.kits[1].generation);
+        app.search.find.query = "marine".to_owned();
+        let ctx = egui::Context::default();
+
+        app.model.active = 0;
+        app.refresh_all_tag_find(&ctx);
+        let first = app.search.find.all_signature.clone();
+        app.model.active = 1;
+        app.refresh_all_tag_find(&ctx);
+
+        assert!(first.is_some());
+        assert_ne!(app.search.find.all_signature, first, "the other kit is searched");
+    }
+
+    /// Toggling expert mode changes which fields Find searches, so the
+    /// cached results must not survive it.
+    #[test]
+    fn expert_mode_is_part_of_the_find_results_key() {
+        let mut app = Baboon::for_test();
+        app.search.find.open = true;
+        app.search.find.query = "needle".to_owned();
+        app.model.prefs.expert_mode = false;
+        let normal = app.find_results_key();
+        app.model.prefs.expert_mode = true;
+        let expert = app.find_results_key();
+        assert!(normal.is_some() && expert.is_some());
+        assert_ne!(normal, expert);
+    }
+
+    /// The editor draws a `!` field only in expert mode, so outside it Find
+    /// doesn't count a match there. The marker comes from the definition: the
+    /// tag's own field name has lost it.
+    #[test]
+    fn find_skips_hidden_fields_outside_expert_mode() {
+        let root = crate::core::test_kits::unique_temp_path("find-hidden-definitions");
+        let game = root.join("haloreach_mcc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(
+            game.join("marker_test.json"),
+            r#"{"name":"marker_test","tag":"mrkt","version":1,"flags":0,"block":"marker_test_block",
+                "blocks":{"marker_test_block":{"max_count":1,"struct":"marker_test_struct"}},
+                "structs":{"marker_test_struct":{"guid":"0123456789abcdef0123456789abcdef","size":8,
+                  "fields":[{"type":"long_integer","name":"shown needle"},
+                            {"type":"long_integer","name":"hidden needle!"},{"type":"terminator","name":null}]}}}"#,
+        )
+        .unwrap();
+        let tag = TagFile::new(game.join("marker_test.json")).unwrap();
+        let docs = build_def_docs(&root, GameId::HaloReach, "marker_test");
+        let hits = |expert_mode: bool| -> Vec<String> {
+            collect_find_occurrences(
+                &tag,
+                "test.marker_test",
+                &TagNameIndex::default(),
+                Some(&docs),
+                "needle",
+                field_names_only(),
+                false,
+                false,
+                expert_mode,
+            )
+            .into_iter()
+            .map(|hit| hit.text)
+            .collect()
+        };
+        assert_eq!(hits(false), ["shown needle"]);
+        assert_eq!(hits(true), ["shown needle", "hidden needle"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn field_names_only() -> FindLookIn {
         FindLookIn {
@@ -922,6 +1049,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let hit = occurrences
             .iter()
@@ -943,6 +1071,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let matching_cells = occurrences
             .iter()
@@ -972,6 +1101,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             block_hits
@@ -988,6 +1118,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         assert!(
             field_hits
@@ -1016,6 +1147,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             title_hits
@@ -1032,6 +1164,7 @@ mod tests {
             blocks_only,
             false,
             false,
+            true,
         );
         assert!(
             body_hits
@@ -1055,6 +1188,7 @@ mod tests {
             field_names_only(),
             false,
             false,
+            true,
         );
         let hit = occurrences
             .iter()
@@ -1101,6 +1235,7 @@ mod tests {
             look_in: FindLookIn::default(),
             match_case: false,
             whole_word: false,
+            expert_mode: true,
             path: "field".to_owned(),
             out: &mut out,
         };

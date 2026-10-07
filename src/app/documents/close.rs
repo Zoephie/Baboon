@@ -15,7 +15,7 @@ impl Baboon {
     pub(in crate::app) fn discard_tag_changes(&mut self, kit: usize, key: &str, ctx: &egui::Context) {
         // Reloading below goes through the active-kit path, and discarding is a
         // user action on this kit either way.
-        self.model.active = kit;
+        self.focus_kit(kit);
         let was_dirty = self.model.kits[kit]
             .parsed_tags
             .get(key)
@@ -160,12 +160,12 @@ impl Baboon {
         match &action {
             PendingCloseAction::CloseKit(id) => {
                 if let Some(index) = self.model.kit_index(*id) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                 }
             }
             PendingCloseAction::CloseApp => {
                 if let Some(index) = self.model.first_dirty_kit() {
-                    self.model.active = index;
+                    self.focus_kit(index);
                 }
             }
             _ => {}
@@ -282,6 +282,7 @@ impl Baboon {
         self.model.kits[self.model.active].open_tabs.clear();
         self.kit_and_view(self.model.active).drop_documents_except(None);
         self.model.kits[self.model.active].selected_key = None;
+        self.model.kits[self.model.active].current_pane = None;
         self.close_tag_popups(id, |_| true);
     }
 
@@ -292,7 +293,7 @@ impl Baboon {
             }
         }
         self.kit_and_view(self.model.active).drop_documents_except(Some(key));
-        self.model.kits[self.model.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
+        self.kit_and_view(self.model.active).focus_pane(key.to_owned());
         let kit = self.model.kits[self.model.active].id;
         self.close_tag_popups(kit, |tag| tag != key);
     }
@@ -769,6 +770,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::browser::is_folder_pane_key;
     use crate::app::browser::{BrowserAction, BrowserMode, BrowserSort};
     use crate::app::loose_fixture::*;
     use crate::app::shell::FolderRefactorUiState;

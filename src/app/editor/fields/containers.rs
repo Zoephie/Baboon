@@ -181,16 +181,24 @@ pub(in crate::app) fn draw_fields_with_docs(
                     unit,
                     range,
                     tag_reference_allowed,
+                    read_only,
+                    hidden,
+                    slider,
                     ..
                 } = &entries[match_idx]
                 {
-                    // The engine strips everything after `:` from the field name,
-                    // so unit/range/help are recovered from the definition here.
+                    // The engine strips everything after `:` and the trailing
+                    // `*`/`!` markers from the field name, so unit/range/help and
+                    // the read-only and hidden flags are recovered from the
+                    // definition here.
                     let mut meta = field_display_meta(name);
                     meta.help = help.clone();
                     meta.unit = unit.clone();
                     meta.range = range.clone();
                     meta.tag_reference_allowed = tag_reference_allowed.clone();
+                    meta.read_only |= *read_only;
+                    meta.advanced |= *hidden;
+                    meta.slider = *slider;
                     meta_override = Some(meta);
                 }
                 cursor = match_idx + 1;
@@ -343,7 +351,7 @@ pub(in crate::app) fn draw_field(
         return;
     }
     if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
-        if is_hidden_non_expert_value(&value, expert_mode) {
+        if is_hidden_value(&value) {
             return;
         }
         if glow || scroll_here {
@@ -518,6 +526,9 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     } else {
         title
     };
+    // Each explanation scrolls on its own: one id for all of them clashed,
+    // and they shared one scroll position.
+    let scroll_id = ui.make_persistent_id(("explanation_text", &id_salt));
 
     ui.scope(|ui| {
         // Full-width header bar (see draw_foundation_group), matching Foundation.
@@ -540,31 +551,25 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                         .inner_margin(egui::Margin::same(20))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
-                            // border is Width=Auto in a stretch StackPanel); only the
-                            // text itself is capped (~650px) and left-aligned.
+                            // border is Width=Auto in a stretch StackPanel).
                             ui.set_min_width(ui.available_width());
-                            let text_width = ui.available_width().min(650.0);
-                            ui.scope(|ui| {
-                                ui.set_max_width(text_width);
-                                let body = body.trim_end();
-                                if let Some(text) = highlighted_italic_widget_text(
-                                    ui,
-                                    body,
-                                    TextStyle::Monospace,
-                                    text_dark(),
-                                    FindTargetKind::Documentation,
-                                ) {
-                                    ui.label(text);
-                                } else {
-                                    ui.label(
-                                        RichText::new(body)
-                                            .color(text_dark())
-                                            .monospace()
-                                            .italics()
-                                            .size(12.0),
-                                    );
-                                }
-                            });
+                            // Explanations are laid out by hand for a fixed-pitch
+                            // face (rows of asterisks, aligned columns), so they're
+                            // drawn in one, upright as Foundation draws them, and
+                            // never wrapped: a line wider than the box scrolls.
+                            let galley = findable_galley(
+                                ui,
+                                body.trim_end(),
+                                FontId::monospace(12.0),
+                                text_dark(),
+                                FindTargetKind::Documentation,
+                            );
+                            egui::ScrollArea::horizontal()
+                                .id_salt(scroll_id)
+                                .auto_shrink([false, true])
+                                .show(ui, |ui| {
+                                    ui.add(egui::Label::new(galley).wrap_mode(egui::TextWrapMode::Extend));
+                                });
                         });
                 }
             },
@@ -636,7 +641,7 @@ pub(super) fn visible_container_title(name: &str, path_prefix: &str) -> String {
 }
 
 pub(in crate::app) fn foundation_block_title(name: &str) -> String {
-    clean_field_name(name)
+    display_field_name(name)
         .split_whitespace()
         .map(|word| {
             let mut chars = word.chars();
@@ -1052,10 +1057,11 @@ pub(in crate::app) fn draw_foundation_block(
 ) {
     let count = block.len();
     let sel = block_selected_index(ui, edit, path_prefix, count);
+    let labeler = BlockLabeler::new(edit, names);
     let selected_label = if count == 0 {
         "NONE".to_owned()
     } else {
-        block_element_dropdown_label(block.element(sel), names, sel)
+        labeler.label(path_prefix, block, sel)
     };
 
     let block_default_open = edit.default_open(depth == 0 || is_priority_section(name));
@@ -1103,7 +1109,7 @@ pub(in crate::app) fn draw_foundation_block(
         edit.is_active_filter(),
         paste_gate,
         block_size_label.as_deref(),
-        |i| block_element_dropdown_label(block.element(i), names, i),
+        |i| labeler.label(path_prefix, block, i),
         |ui| {
             if count == 0 {
                 ui.label(
@@ -1328,6 +1334,95 @@ thread_local! {
     /// How many dropdown labels this thread has built, for tests that bound it.
     pub(in crate::app) static DROPDOWN_LABELS_BUILT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+}
+
+/// The game's block-element label rules, read once per definitions folder and
+/// game. `None` when the definitions can't be read, and the editor falls back
+/// to its own content label.
+pub(in crate::app) fn element_labels(
+    definitions_root: Option<&std::path::Path>,
+    game: Option<GameId>,
+) -> Option<std::sync::Arc<blam_tags::element_label::ElementLabels>> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Rules = Option<Arc<blam_tags::element_label::ElementLabels>>;
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<(std::path::PathBuf, GameId), Rules>>> =
+        OnceLock::new();
+    let (root, game) = (definitions_root?, game?);
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry((root.to_path_buf(), game))
+        .or_insert_with(|| {
+            blam_tags::element_label::ElementLabels::load(root.join(game.as_str()))
+                .map(Arc::new)
+                .ok()
+        })
+        .clone()
+}
+
+/// Labels block elements as the game's own editor writes them (blam-tags
+/// `element_label`), with Baboon's `N. ` prefix. Built from a
+/// [`FieldEditContext`] up front, so a dropdown can label rows while the
+/// context is borrowed elsewhere.
+#[derive(Clone)]
+pub(in crate::app) struct BlockLabeler<'a> {
+    rules: Option<std::sync::Arc<blam_tags::element_label::ElementLabels>>,
+    group: u32,
+    root: Option<TagStruct<'a>>,
+    names: &'a TagNameIndex,
+}
+
+impl<'a> BlockLabeler<'a> {
+    pub(in crate::app) fn new(edit: &FieldEditContext<'a>, names: &'a TagNameIndex) -> Self {
+        Self::for_tag(edit.definitions_root, edit.game, edit.group_tag, edit.root, names)
+    }
+
+    /// The labeller for a tag of `group` in `game`, whose root is `root`.
+    pub(in crate::app) fn for_tag(
+        definitions_root: Option<&std::path::Path>,
+        game: Option<GameId>,
+        group: u32,
+        root: Option<TagStruct<'a>>,
+        names: &'a TagNameIndex,
+    ) -> Self {
+        BlockLabeler { rules: element_labels(definitions_root, game), group, root, names }
+    }
+
+    /// The label of element `index` of the block at `block_path`. The prefix
+    /// is left off a label that already starts with it: the editors' fallback
+    /// is `"N. <struct name>"`, and some callbacks print the index themselves.
+    /// Without the game's rules, Baboon's own content label.
+    /// The editor's label alone, for a view that shows the index itself (the
+    /// block table). Without the game's rules, Baboon's own content label.
+    pub(in crate::app) fn bare_label(&self, block_path: &str, block: TagBlock<'_>, index: usize) -> String {
+        let Some(rules) = &self.rules else {
+            let element = block.element(index);
+            return element
+                .and_then(|element| block_element_content_label(element, self.names))
+                .unwrap_or_else(|| element.map(|element| element.name().to_owned()).unwrap_or_default());
+        };
+        let ctx = blam_tags::element_label::Context { group: Some(self.group) };
+        self.root
+            .and_then(|root| rules.label_at_in(&ctx, root, block_path, index as i64))
+            .unwrap_or_else(|| rules.label_in(&ctx, &[], block, index as i64))
+    }
+
+    pub(in crate::app) fn label(&self, block_path: &str, block: TagBlock<'_>, index: usize) -> String {
+        let Some(rules) = &self.rules else {
+            return block_element_dropdown_label(block.element(index), self.names, index);
+        };
+        #[cfg(test)]
+        DROPDOWN_LABELS_BUILT.with(|count| count.set(count.get() + 1));
+        let ctx = blam_tags::element_label::Context { group: Some(self.group) };
+        let label = self
+            .root
+            .and_then(|root| rules.label_at_in(&ctx, root, block_path, index as i64))
+            .unwrap_or_else(|| rules.label_in(&ctx, &[], block, index as i64));
+        let prefix = format!("{index}. ");
+        if label.starts_with(&prefix) { label } else { prefix + &label }
+    }
 }
 
 pub(in crate::app) fn block_element_dropdown_label(
@@ -2891,7 +2986,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let target_block_path = target.path.as_str();
-    let editable = edit.editable && !meta.read_only;
+    let editable = edit.can_edit(meta);
     let in_range = current >= 0 && (current as usize) < target.len;
     // Only the selected element's label is needed to draw a closed combo. The
     // rest used to be built here too, every frame, for every block-index field
@@ -2899,17 +2994,16 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     let root = edit.root;
     let default_names = TagNameIndex::default();
     let names = edit.names.unwrap_or(&default_names);
+    let labeler = BlockLabeler::new(edit, names);
+    let target_label = |block: Option<TagBlock<'_>>, index: usize| match block {
+        Some(block) => labeler.label(target_block_path, block, index),
+        None => format!("{index}."),
+    };
     let selected_text = if in_range {
         let block = root
             .and_then(|root| root.field_path(target_block_path))
             .and_then(|field| field.as_block());
-        block_element_dropdown_label(
-            block
-                .as_ref()
-                .and_then(|block| block.element(current as usize)),
-            names,
-            current as usize,
-        )
+        target_label(block, current as usize)
     } else {
         "<none>".to_owned()
     };
@@ -2944,11 +3038,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                         root.and_then(|root| root.field_path(target_block_path))
                             .and_then(|field| field.as_block())
                     });
-                    block_element_dropdown_label(
-                        block.as_ref().and_then(|block| block.element(index)),
-                        names,
-                        index,
-                    )
+                    target_label(*block, index)
                 },
                 Some("<none>"),
             );
@@ -3002,6 +3092,44 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Block headers and block-index dropdowns show the game's own editor
+    /// label (blam-tags `element_label`) with Baboon's `N. ` prefix, not
+    /// Baboon's content guess. The prefix isn't doubled on the editor's own
+    /// `"N. <struct>"` fallback, and a Halo 2 entry is found because the
+    /// labeller passes the tag's group.
+    #[test]
+    fn block_labels_come_from_the_games_editor() {
+        let defs = crate::core::bundled::locate_definitions_root();
+        let names = TagNameIndex::default();
+        let h3 = crate::core::test_kits::h3ek_tags();
+        let chud = h3.join("ui/chud/globals.chud_globals_definition");
+        if chud.exists() {
+            let game = GameId::from_id("halo3_mcc");
+            let tag = crate::core::source::read_tag_at_path(&chud, game, Some(&defs), u32::from_be_bytes(*b"chgd")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, tag.group().tag, Some(tag.root()), &names);
+            let skins = tag.root().field_path("skins").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("skins", skins, 1), "1. dervish");
+            let jungle = crate::core::source::read_tag_at_path(
+                &h3.join("levels/solo/010_jungle/010_jungle.scenario"), game, Some(&defs), u32::from_be_bytes(*b"scnr")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, jungle.group().tag, Some(jungle.root()), &names);
+            let pvs = jungle.root().field_path("zone set pvs").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("zone set pvs", pvs, 0), "0. scenario_zone_set_pvs_block");
+        } else {
+            eprintln!("skipped the H3 half: set BLAM_TEST_H3EK");
+        }
+        let h2 = crate::core::test_kits::h2ek_tags();
+        let delta = h2.join("scenarios/solo/08b_deltacontrol/08b_deltacontrol.scenario");
+        if delta.exists() {
+            let game = GameId::from_id("halo2_mcc");
+            let tag = crate::core::source::read_tag_at_path(&delta, game, Some(&defs), u32::from_be_bytes(*b"scnr")).unwrap();
+            let labeler = BlockLabeler::for_tag(Some(&defs), game, tag.group().tag, Some(tag.root()), &names);
+            let controls = tag.root().field_path("controls").unwrap().as_block().unwrap();
+            assert_eq!(labeler.label("controls", controls, 0), "0. s8_hunter_door_switch dcr_holo_switch");
+        } else {
+            eprintln!("skipped the H2 half: set BLAM_TEST_H2EK");
+        }
+    }
     use crate::core::source::{load_iostore_container_set, read_entry};
     use std::path::{Path, PathBuf};
 
@@ -4066,6 +4194,483 @@ mod tests {
             small, large,
             "a frame built {small} labels over 8 target elements and {large} over 40"
         );
+    }
+
+    /// A tag's field names have lost their trailing `*` and `!` (shipped
+    /// tags store them stripped, and so do layouts built from the
+    /// definitions), so read-only and hidden come from the definition. A `!`
+    /// field shows only in expert mode, and a `*` field is marked read-only.
+    /// What one frame of [`TextBoxRows`] showed.
+    struct TextBoxFrame {
+        /// Texts in view, as `text@y`, sorted.
+        shown: Vec<String>,
+        /// How far the field list is scrolled.
+        offset: f32,
+        /// The text data field's box, and its resize grip.
+        text_box: Option<egui::Rect>,
+        grip: Option<egui::Rect>,
+        /// Where the box's first line is painted.
+        first_line: Option<f32>,
+    }
+
+    /// A tag of rows with a text data field `notes` holding `text` between
+    /// them, drawn in a scroll area as the tag pane draws them, step by step:
+    /// each step is the scroll offset to set (when it changes) and the events
+    /// of that frame.
+    struct TextBoxRows {
+        root: std::path::PathBuf,
+        tag: TagFile,
+    }
+
+    impl TextBoxRows {
+        fn new(text: &str) -> Self {
+            let root = crate::core::test_kits::unique_temp_path("data-rows");
+            let game = root.join("haloreach_mcc");
+            std::fs::create_dir_all(&game).unwrap();
+            let mut fields: Vec<String> =
+                (0..3).map(|n| format!(r#"{{"type":"long_integer","name":"before_{n}"}}"#)).collect();
+            fields.push(r#"{"type":"data","name":"notes","definition":"notes_text"}"#.to_owned());
+            fields.extend((0..40).map(|n| format!(r#"{{"type":"long_integer","name":"after_{n:02}"}}"#)));
+            fields.push(r#"{"type":"terminator","name":null}"#.to_owned());
+            std::fs::write(
+                game.join("data_rows.json"),
+                format!(
+                    r#"{{"name":"data_rows","tag":"drow","version":1,"flags":0,"block":"data_rows_block",
+                        "blocks":{{"data_rows_block":{{"max_count":1,"struct":"data_rows_struct"}}}},
+                        "structs":{{"data_rows_struct":{{"guid":"00112233445566778899aabbccddeeff","size":192,"fields":[{}]}}}},
+                        "datas":{{"notes_text":{{"flags":2,"alignment_bits":0,"max_size":65536}}}}}}"#,
+                    fields.join(",")
+                ),
+            )
+            .unwrap();
+            let mut tag = TagFile::new(game.join("data_rows.json")).unwrap();
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            tag.root_mut().field_path_mut("notes").unwrap().set(TagFieldData::Data(bytes)).unwrap();
+            Self { root, tag }
+        }
+
+        fn run(&self, culling: bool, steps: &[(f32, Vec<egui::Event>)]) -> Vec<TextBoxFrame> {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            // The edit context's lifetime is the helper's own; test code may leak.
+            let heights: &'static mut RowHeights = Box::leak(Box::default());
+            let root: &'static std::path::Path = Box::leak(self.root.clone().into_boxed_path());
+            let mut frames = Vec::new();
+            with_test_edit_context(|edit| {
+                edit.definitions_root = Some(root);
+                edit.game = Some(GameId::HaloReach);
+                // Rows are keyed by positional field path: `notes` is field 3.
+                let grip_id = edit
+                    .widget_id(("data_text", &format!("{}|notes#3", edit.tag_key)))
+                    .with("resize")
+                    .with("__resize_corner");
+                edit.row_heights = Some(heights);
+                for (index, (offset, events)) in steps.iter().enumerate() {
+                    edit.row_heights.as_deref_mut().unwrap().begin(
+                        RowHeightsBasis { layout: (0, 0), width: 900.0, pixels_per_point: 1.0, expert_mode: false, filtering: false },
+                        culling,
+                    );
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 500.0))),
+                        time: Some(index as f64 / 30.0),
+                        events: events.clone(),
+                        ..Default::default()
+                    };
+                    let (mut shown_offset, mut grip) = (0.0, None);
+                    let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            // As the tag pane's: full width, so its floating scroll
+                            // bar runs down the right edge.
+                            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                            // Set only when a step moves it, as a user's scroll does.
+                            if index == 0 || steps[index - 1].0 != *offset {
+                                area = area.vertical_scroll_offset(*offset);
+                            }
+                            shown_offset = area
+                                .show(ui, |ui| {
+                                    draw_fields_with_docs(ui, &self.tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                                })
+                                .state
+                                .offset
+                                .y;
+                            // Read in the pass: egui forgets widgets once it ends.
+                            grip = ui.ctx().read_response(grip_id).map(|response| response.rect);
+                        });
+                    });
+                    let texts = output.shapes.iter().filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) if clipped.clip_rect.contains(text.pos) => Some((text.galley.text().to_owned(), text.pos.y)),
+                        _ => None,
+                    });
+                    // The box is the rectangle painted in the text-edit fill;
+                    // the text editor inside it is as tall as all its text.
+                    let box_fill = ctx.global_style().visuals.text_edit_bg_color();
+                    fn filled(shape: &egui::Shape, fill: egui::Color32) -> Option<egui::Rect> {
+                        match shape {
+                            egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| filled(shape, fill)),
+                            _ => None,
+                        }
+                    }
+                    let text_box = output.shapes.iter().find_map(|clipped| filled(&clipped.shape, box_fill));
+                    let mut shown = Vec::new();
+                    let mut first_line = None;
+                    for (text, y) in texts {
+                        if text.starts_with("line 00") {
+                            first_line = Some(y);
+                        }
+                        shown.push(format!("{text}@{y:.0}"));
+                    }
+                    shown.sort();
+                    frames.push(TextBoxFrame { shown, offset: shown_offset, text_box, grip, first_line });
+                }
+            });
+            frames
+        }
+
+        /// Steps that settle, then drag the box's grip down by `by`.
+        fn drag_grip(&self, by: f32) -> Vec<(f32, Vec<egui::Event>)> {
+            let mut steps: Vec<(f32, Vec<egui::Event>)> = (0..3).map(|_| (0.0, Vec::new())).collect();
+            let grip = self.run(false, &steps).last().unwrap().grip.expect("the text box has a resize grip").center();
+            let press = |pos: egui::Pos2, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for step in 1..=3 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(grip - egui::vec2(30.0, 30.0) * (1.0 - step as f32 / 3.0))]));
+            }
+            steps.push((0.0, vec![press(grip, true)]));
+            for step in 1..=6 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(grip + egui::vec2(0.0, by * step as f32 / 6.0))]));
+            }
+            steps.push((0.0, vec![press(grip + egui::vec2(0.0, by), false)]));
+            steps.push((0.0, Vec::new()));
+            steps
+        }
+    }
+
+    impl Drop for TextBoxRows {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn numbered_lines(count: usize) -> String {
+        (0..count).map(|n| format!("line {n:02}")).collect::<Vec<_>>().join("\r\n")
+    }
+
+    fn top_of(frame: &TextBoxFrame, label: &str) -> f32 {
+        frame
+            .shown
+            .iter()
+            .find_map(|shown| shown.strip_prefix(&format!("{label}@")).map(|y| y.parse().unwrap()))
+            .unwrap_or_else(|| panic!("{label} is not in view: {:?}", frame.shown))
+    }
+
+    /// A text data field's box resized by its grip changes its row's height,
+    /// and rows out of view are stood in for by the height they had when last
+    /// drawn. Resizing only happens with the row on screen, so the height kept
+    /// for it follows; scrolled away and back, every row shows where it would
+    /// with nothing skipped.
+    #[test]
+    fn a_resized_text_box_keeps_hidden_rows_in_place() {
+        let rows = TextBoxRows::new(&numbered_lines(30));
+        let mut steps = rows.drag_grip(150.0);
+        let resized = steps.len() - 1;
+        // Scrolled until the data row is above the view, then back.
+        steps.extend([(900.0, Vec::new()), (900.0, Vec::new())]);
+        let scrolled = steps.len() - 1;
+        steps.extend([(0.0, Vec::new()), (0.0, Vec::new())]);
+        let back = steps.len() - 1;
+
+        let culled = rows.run(true, &steps);
+        let all = rows.run(false, &steps);
+        let grown = top_of(&culled[resized], "after_00") - top_of(&culled[2], "after_00");
+        assert!(grown > 100.0, "the grip drag grew the box by {grown}");
+        for (step, name) in [(resized, "resized"), (scrolled, "scrolled away"), (back, "scrolled back")] {
+            assert_eq!(culled[step].shown, all[step].shown, "{name}: rows show where drawing every row puts them");
+        }
+    }
+
+    /// The grip is the box's own corner, and the box grows no bigger than its
+    /// text: dragged far past it, it stops where the text ends.
+    #[test]
+    fn a_text_box_grows_no_bigger_than_its_text() {
+        let rows = TextBoxRows::new(&numbered_lines(30));
+        let frames = rows.run(false, &rows.drag_grip(2000.0));
+        let settled = &frames[2];
+        let (text_box, grip) = (settled.text_box.unwrap(), settled.grip.unwrap());
+        assert!(
+            (grip.max - text_box.max).length() < 1.0,
+            "the grip {grip:?} is not at the box's corner {text_box:?}"
+        );
+        assert!(text_box.width() <= 900.0 - DATA_TEXT_EDGE_GAP, "{text_box:?}");
+        let grown = frames.last().unwrap().text_box.unwrap();
+        assert!(grown.height() > settled.text_box.unwrap().height() + 100.0, "the box didn't grow: {grown:?}");
+        // As tall as its 30 lines and their padding, and no taller.
+        let ctx = egui::Context::default();
+        let mut row_height = 0.0;
+        let _ = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            row_height = ui.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(12.0)));
+        });
+        let text_height = 30.0 * row_height + 2.0 * DATA_TEXT_PADDING.y;
+        assert!(
+            (grown.height() - text_height).abs() < 2.0,
+            "dragged far past its text, the box is {} tall, its text {text_height}",
+            grown.height()
+        );
+    }
+
+    /// The wheel over a box whose text can still scroll moves only the box;
+    /// over a box that shows all its text, it moves the pane.
+    #[test]
+    fn the_wheel_scrolls_a_text_box_or_the_pane_never_both() {
+        let wheel = |dy: f32| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        for (lines, box_scrolls) in [(60, true), (3, false)] {
+            let rows = TextBoxRows::new(&numbered_lines(lines));
+            let mut steps: Vec<(f32, Vec<egui::Event>)> = (0..3).map(|_| (0.0, Vec::new())).collect();
+            let text_box = rows.run(false, &steps).last().unwrap().text_box.unwrap();
+            let over = text_box.center();
+            steps.push((0.0, vec![egui::Event::PointerMoved(over)]));
+            // Well past the end of the box's 60 lines: what it can't use
+            // used to scroll the pane on.
+            for _ in 0..40 {
+                steps.push((0.0, vec![egui::Event::PointerMoved(over), wheel(-40.0)]));
+            }
+            steps.extend((0..20).map(|_| (0.0, Vec::new())));
+            let frames = rows.run(false, &steps);
+            let (before, after) = (&frames[3], frames.last().unwrap());
+            // How far the text sits into its box: the box's own scroll.
+            let into_box = |frame: &TextBoxFrame| {
+                frame.first_line.unwrap_or(f32::NEG_INFINITY) - frame.text_box.unwrap().top()
+            };
+            let box_moved = into_box(before) - into_box(after) > 1.0;
+            if box_scrolls {
+                assert!(box_moved, "{lines} lines: the box didn't scroll");
+                assert_eq!(after.offset, 0.0, "{lines} lines: the pane scrolled along with the box");
+            } else {
+                assert!(after.offset > 1.0, "{lines} lines: the wheel didn't scroll the pane");
+            }
+        }
+    }
+
+    /// A data field gets the function editor when its definition says it
+    /// holds a function, not when its bytes happen to parse as one: a Halo 3
+    /// bitmap's processed pixels did, and showed a function editor.
+    #[test]
+    fn only_function_data_gets_the_function_editor() {
+        let function = blam_tags::default_function_definition_bytes(blam_tags::io::Endian::Le);
+        let painted = |group: &str, path: &str| {
+            let mut tag = TagFile::new(crate::app::test_definition_path(&format!("halo3_mcc/{group}.json"))).unwrap();
+            tag.root_mut().field_path_mut(path).unwrap().set(TagFieldData::Data(function.clone())).unwrap();
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::app::foundation_fonts());
+            let mut texts = Vec::new();
+            with_test_edit_context(|edit| {
+                for _ in 0..2 {
+                    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                            });
+                        });
+                    });
+                    texts = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                }
+            });
+            texts
+        };
+        let bitmap = painted("bitmap", "processed pixel data");
+        assert!(!bitmap.iter().any(|text| text == "Function type:"), "a bitmap's pixels drew a function editor");
+        assert!(bitmap.iter().any(|text| text.starts_with("Data size:")), "{bitmap:?}");
+        let widget = painted("gui_widget_color_animation_definition", "default function/data");
+        assert!(widget.iter().any(|text| text == "Function type:"), "a function field drew no function editor");
+    }
+
+    /// An explanation is drawn as it was written: in a fixed-pitch face,
+    /// upright, a row per line however narrow the pane, with its blank lines.
+    /// The bitmap's "IMPORT DATA" rows of asterisks used to wrap.
+    #[test]
+    fn explanations_keep_their_lines_as_written() {
+        let docs = crate::app::help::build_def_docs(&locate_definitions_root(), GameId::Halo3, "bitmap");
+        let body = docs
+            .all_entries()
+            .find_map(|entry| match entry {
+                DefEntry::Explanation { title, body } if title == "IMPORT DATA" => Some(body.clone()),
+                _ => None,
+            })
+            .expect("the bitmap's IMPORT DATA explanation");
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut galley = None;
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 900.0))),
+                ..Default::default()
+            };
+            let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_foundation_explanation_row(ui, "IMPORT DATA", Some(&body), 0, "import data", None);
+                });
+            });
+            galley = output.shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text().contains("Everything below") => Some(text.galley.clone()),
+                _ => None,
+            });
+        }
+        let galley = galley.expect("the explanation's text is painted");
+        let format = &galley.job.sections[0].format;
+        assert_eq!(format.font_id.family, egui::FontFamily::Monospace);
+        assert!(!format.italics);
+        let written = body.trim_end();
+        assert!(written.starts_with("\n\n\n"), "the blank lines it was written with are kept");
+        assert_eq!(galley.rows.len(), written.split('\n').count(), "a line wrapped in a 400 pixel pane");
+    }
+
+    /// Halo 3's `left/right bleed` shows its name as written (with `/`, as
+    /// Foundation does, not the `\` of its addressable name) and its range
+    /// closed, though the definition leaves the `[` open.
+    #[test]
+    fn a_field_name_shows_as_written_with_its_range_closed() {
+        let tag = TagFile::new(crate::app::test_definition_path("halo3_mcc/sound_mix.json")).unwrap();
+        let docs: &'static _ = Box::leak(Box::new(crate::app::help::build_def_docs(
+            &locate_definitions_root(),
+            GameId::Halo3,
+            "sound_mix",
+        )));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut texts = Vec::new();
+        with_test_edit_context(|edit| {
+            edit.docs = Some(docs);
+            edit.expand_all = Some(true);
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 6000.0))),
+                    ..Default::default()
+                };
+                let output = crate::app::run_ui_test(&ctx, input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
+                    });
+                });
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+        });
+        assert!(texts.iter().any(|t| t == "left/right bleed"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.contains("left\\right")), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t == "real [0 = no bleed, 1 = swap left/right, 0.5 = mono]"),
+            "{texts:?}"
+        );
+        // Every explanation's scroll area has an id of its own: egui paints
+        // a warning over any it sees twice.
+        assert!(!texts.iter().any(|t| t.contains("use of ScrollArea ID")), "{texts:?}");
+    }
+
+    #[test]
+    fn read_only_and_hidden_come_from_the_definition() {
+        let root = crate::core::test_kits::unique_temp_path("marker-definitions");
+        let game = root.join("haloreach_mcc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(
+            game.join("marker_test.json"),
+            r#"{"name":"marker_test","tag":"mrkt","version":1,"flags":0,"block":"marker_test_block",
+                "blocks":{"marker_test_block":{"max_count":1,"struct":"marker_test_struct"}},
+                "structs":{"marker_test_struct":{"guid":"0123456789abcdef0123456789abcdef","size":12,
+                  "fields":[{"type":"long_integer","name":"visible"},{"type":"long_integer","name":"locked*"},
+                            {"type":"long_integer","name":"secret!"},{"type":"custom","name":"editor hook"},
+                            {"type":"terminator","name":null}]}}}"#,
+        )
+        .unwrap();
+        let tag = TagFile::new(game.join("marker_test.json")).unwrap();
+        assert!(
+            tag.root().fields().all(|field| !field.name().contains(['*', '!'])),
+            "the tag's own names should be stripped, as a shipped tag's are"
+        );
+        // The edit context's lifetime is the helper's own; test code may leak.
+        let docs: &'static _ =
+            Box::leak(Box::new(crate::app::help::build_def_docs(&root, GameId::HaloReach, "marker_test")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let texts = |expert_mode: bool| -> Vec<String> {
+            let mut texts = Vec::new();
+            with_test_edit_context(|edit| {
+                edit.docs = Some(docs);
+                for _ in 0..2 {
+                    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            draw_fields_with_docs(
+                                ui,
+                                &tag.root(),
+                                &TagNameIndex::default(),
+                                0,
+                                expert_mode,
+                                "",
+                                edit,
+                                None,
+                            );
+                        });
+                    });
+                    // Each value box greyed as read-only stands in as a text,
+                    // so the counts below can see it.
+                    texts = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                            egui::Shape::Rect(rect) if rect.fill == crate::app::ui_kit::foundation_input_read_only() => {
+                                Some("<greyed box>".to_owned())
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                }
+            });
+            texts
+        };
+        let normal = texts(false);
+        assert!(normal.iter().any(|t| t == "visible"), "{normal:?}");
+        assert!(normal.iter().any(|t| t == "locked"), "{normal:?}");
+        assert!(!normal.iter().any(|t| t == "secret"), "a `!` field shows outside expert mode: {normal:?}");
+        // A read-only field is shown as Foundation shows one: its box greyed,
+        // with no note beside it.
+        assert_eq!(
+            normal.iter().filter(|t| *t == "<greyed box>").count(),
+            1,
+            "only the `*` field is greyed: {normal:?}"
+        );
+        assert!(!normal.iter().any(|t| t == "read-only"), "a read-only note: {normal:?}");
+        let expert = texts(true);
+        assert!(expert.iter().any(|t| t == "secret"), "expert mode hides a `!` field: {expert:?}");
+        for texts in [&normal, &expert] {
+            assert!(
+                !texts.iter().any(|t| t == "editor hook" || t.starts_with("custom [")),
+                "a custom field, which nothing here draws, is shown: {texts:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A field navigation (reference jump, Find) selects the element holding

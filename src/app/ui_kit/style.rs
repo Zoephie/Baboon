@@ -457,6 +457,16 @@ pub(in crate::app) fn foundation_input() -> Color32 {
     }
 }
 
+/// A value box whose value can't be changed: Foundation greys a read-only
+/// field's box (`#EDEDED` against white), and Baboon dims its own the same way.
+pub(in crate::app) fn foundation_input_read_only() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(38, 38, 38)
+    } else {
+        Color32::from_rgb(234, 234, 232)
+    }
+}
+
 pub(in crate::app) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(84, 84, 84)

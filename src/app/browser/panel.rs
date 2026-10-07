@@ -199,7 +199,7 @@ pub(in crate::app) fn draw_folder_browser_pane(
         .collect();
     let pane_favorite_folders =
         std::sync::Arc::new(cx.model.kits[kit_index].active_favorite_folders.clone());
-    let selected = cx.model.kits[kit_index].selected_key.clone();
+    let selected = current_browser_item(&cx.model.kits[kit_index], view);
     let modified_tags = std::sync::Arc::clone(&view.browser.modified_tags);
     let deletable_keys = std::sync::Arc::clone(&view.browser.deletable_keys);
     let game = cx.model.kits[kit_index].source.as_ref().and_then(|source| source.game);
@@ -810,7 +810,7 @@ fn draw_kit_browser_inner(
             need_scan = true;
         }
         ui.add_space(4.0);
-        let selected = kit.selected_key.clone();
+        let selected = current_browser_item(kit, view);
         let filter = view.browser.filter.trim().to_owned();
         let mode = view.browser.mode;
         edit_browser_prefs(cx, show_prefixes, folders_before_tags);
@@ -834,13 +834,27 @@ fn draw_kit_browser_inner(
         // Only this kit's browser may consume it: with two browsers on
         // screen, whichever drew first would otherwise swallow a reveal
         // meant for the other and scroll to a tag it does not have.
+        //
+        // The tree follows the current tab, as an editor's explorer does:
+        // when the tag or folder whose tab the user is on changes, it opens
+        // down to it and scrolls it into view. An explicit reveal already
+        // waiting goes first.
+        if selected != view.browser.followed_item && browser.reveal_target.is_none() {
+            view.browser.followed_item = selected.clone();
+            browser.reveal_target = selected.as_deref().and_then(|item| follow_reveal(kit_id, kit, item));
+        }
         let reveal_owned = match &browser.reveal_target {
             Some(request) if request.kit == kit_id => browser.reveal_target.take(),
             _ => None,
         };
+        set_reveal_align(
+            ui.ctx(),
+            reveal_owned.as_ref().map_or(Some(egui::Align::Center), |request| request.align),
+        );
         let reveal = reveal_owned.as_ref().map(|request| Reveal {
             key: request.key.as_str(),
             remaining: request.ancestors.as_slice(),
+            folder: request.folder,
         });
         let sort = view.browser.sort;
         let action = ScrollArea::vertical()
@@ -1466,6 +1480,36 @@ fn draw_folder_header_launcher(
     });
 }
 
+/// What the browser highlights: the tag whose tab the user is on, or, when
+/// that tab is a folder pane, the folder it shows as a folder-pane key.
+/// `None` when no tab is open.
+pub(in crate::app) fn current_browser_item(kit: &Kit, view: &KitView) -> Option<String> {
+    if let Some(key) = &kit.selected_key {
+        return Some(key.clone());
+    }
+    let pane = kit.current_pane.as_deref()?;
+    view.browser.folder_browsers.get(pane).map(|folder| folder_pane_key(&folder.rel_path))
+}
+
+/// The reveal that follows the current tab to `item`, as
+/// [`current_browser_item`] names it: a tag by its key, a folder by its path.
+/// It scrolls no further than it must.
+fn follow_reveal(kit_id: KitId, kit: &Kit, item: &str) -> Option<RevealRequest> {
+    let (key, ancestors, folder) = match item.strip_prefix(FOLDER_PANE_PREFIX) {
+        Some(path) => {
+            let mut labels: Vec<String> =
+                path.split('/').filter(|label| !label.is_empty()).map(str::to_owned).collect();
+            let label = labels.pop()?;
+            (label, labels, true)
+        }
+        None => {
+            let entry = kit.entry_for_key(item)?;
+            (entry.key.clone(), ancestor_labels(&entry.display_path), false)
+        }
+    };
+    Some(RevealRequest { kit: kit_id, key, ancestors, folder, align: None })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1587,3 +1631,4 @@ mod tests {
         );
     }
 }
+

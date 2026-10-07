@@ -35,8 +35,9 @@ pub(in crate::app) struct SearchFeature {
     /// Modeless find-in-tag dialog and its exact occurrence list.
     pub(in crate::app) find: FindDialogState,
     pub(in crate::app) field_value_searching: bool,
-    /// Find result waiting for its target open tab to finish parsing.
-    pub(in crate::app) pending_find_jump: Option<FindOccurrence>,
+    /// Find result waiting for its target open tab to finish parsing, with
+    /// the kit it was found in: a key only means something in its own kit.
+    pub(in crate::app) pending_find_jump: Option<(KitId, FindOccurrence)>,
 }
 
 /// What search can be asked to do.
@@ -92,7 +93,7 @@ impl Baboon {
             SearchCommand::BuildFieldIndex => self.begin_build_field_index(ctx.clone()),
             SearchCommand::FindInTag { kit, key } => {
                 if let Some(index) = self.model.kit_index(kit) {
-                    self.model.active = index;
+                    self.focus_kit(index);
                     self.model.kits[index].selected_key = Some(key);
                     self.search.find.within = FindWithin::CurrentTag;
                     self.open_find();

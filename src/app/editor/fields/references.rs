@@ -229,16 +229,16 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
+    let droppable = edit.can_edit(meta);
     let draft = edit.buffers.draft_mut(&buffer_key, value);
 
-    let droppable = edit.editable && !meta.read_only;
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
     let accepted = tag_reference_accepted_groups(meta, &hierarchy);
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-            let editable = edit.editable && !meta.read_only;
+            let editable = droppable;
             let has_ref = target.is_some();
             let icon_group =
                 tag_reference_value_icon_group(meta, target.as_ref(), &draft.text, edit.game);
@@ -418,7 +418,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 }
             }
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
-            draw_field_help(ui, meta);
         })
         .response;
 
@@ -799,22 +798,20 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
     let painter = ui.painter().clone();
 
-    let label_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + 4.0, 4.0),
-        Vec2::new(FOUNDATION_LABEL_WIDTH - 8.0, 24.0),
+    // The label cell every other row uses (help cue, gutter, hover docs), level
+    // with the first flag; the panel starts where other rows' values do.
+    let mut label_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_size(
+                rect.left_top() + Vec2::new(indent, 4.0),
+                Vec2::new(FOUNDATION_LABEL_WIDTH, 24.0),
+            ))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    paint_findable_text(
-        ui,
-        label_rect.left_center(),
-        Align2::LEFT_CENTER,
-        &truncate_for_cell(&meta.label, label_rect.width()),
-        FontId::proportional(12.5),
-        text_dark(),
-        FindTargetKind::Label,
-    );
+    foundation_label_cell(&mut label_ui, &meta.label, meta.help.as_deref());
 
     let flags_rect = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH, 0.0),
+        rect.left_top() + Vec2::new(indent + FOUNDATION_LABEL_WIDTH + ui.spacing().item_spacing.x, 0.0),
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
@@ -847,7 +844,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 row_rect.left_top() + Vec2::new(0.0, 3.0),
                 Vec2::splat(13.0),
             );
-            let enabled = edit.editable && !meta.read_only;
+            let enabled = edit.can_edit(meta);
             let response = ui.interact(
                 row_rect,
                 ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit)),
@@ -923,15 +920,6 @@ pub(in crate::app) fn draw_foundation_flags_row(
         );
     }
 
-    if meta.help.is_some() || meta.read_only {
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-                flags_rect.right_top() + Vec2::new(8.0, 0.0),
-                Vec2::new(120.0, 24.0),
-            )),
-            |ui| draw_field_help(ui, meta),
-        );
-    }
     ui.add_space(4.0);
 }
 
@@ -942,6 +930,75 @@ mod tests {
 
     // Foundation unit tests.
     // It owns test-only characterization and does not participate in runtime application behavior.
+
+    /// A read-only flags row leaves the cursor below its panel, so the next
+    /// field starts under it. Its `read-only` hint was drawn in a scope at the
+    /// panel's top, which pulled the cursor back up and laid the next field
+    /// over the flags.
+    #[test]
+    fn read_only_flags_row_keeps_the_next_field_below_it() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let field = root
+            .fields_all()
+            .find(|field| field.value().as_ref().and_then(flag_value_parts).is_some_and(|(_, names)| names.len() >= 2)
+                || matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2))
+            .expect("a flags field with several options");
+        let (raw, names) = field.value().as_ref().and_then(flag_value_parts).unwrap_or_default();
+        let mut meta = field_display_meta(field.name());
+        meta.read_only = true;
+        let ctx = egui::Context::default();
+        let mut moved = 0.0;
+        crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            super::with_test_edit_context(|edit| {
+                let before = ui.cursor().top();
+                draw_foundation_flags_row(ui, &meta, raw, &names, field, 0, "flags", edit);
+                moved = ui.cursor().top() - before;
+            });
+        });
+        assert!(moved > 50.0, "the cursor moved {moved}px past a flags panel of several rows");
+    }
+
+    /// A flags row lines up with every other row: its label where theirs are
+    /// painted, its panel where their values start.
+    #[test]
+    fn flags_row_lines_up_with_other_rows() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("halo3_mcc/damage_effect.json")).unwrap();
+        let root = tag.root();
+        let field = root
+            .fields_all()
+            .find(|field| matches!(field.options(), Some(blam_tags::TagOptions::Flags(options)) if options.len() >= 2))
+            .expect("a flags field with several options");
+        let mut meta = field_display_meta(field.name());
+        meta.label = "flagsrow".to_owned();
+        meta.read_only = true;
+        let ctx = egui::Context::default();
+        let mut value_left = 0.0;
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                foundation_label_cell(ui, "otherrow", None);
+                value_left = ui.allocate_exact_size(Vec2::new(100.0, 24.0), Sense::hover()).0.left();
+            });
+            super::with_test_edit_context(|edit| {
+                draw_foundation_flags_row(ui, &meta, 0, &[], field, 1, "flags", edit);
+            });
+        });
+        let mut text_x = std::collections::HashMap::new();
+        let mut panels = Vec::new();
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    text_x.insert(text.galley.text().to_owned(), text.pos.x);
+                }
+                egui::Shape::Rect(rect) if rect.rect.height() > 40.0 && rect.fill == foundation_input() => panels.push(rect.rect.left()),
+                _ => {}
+            }
+        }
+        assert_eq!(text_x.get("flagsrow"), text_x.get("otherrow"), "labels: {text_x:?}");
+        assert!(text_x.contains_key("flagsrow"));
+        assert_eq!(panels.first().copied(), Some(value_left), "panel left vs value left");
+    }
 
     #[test]
     fn ce_collision_geometry_reference_uses_loaded_game_extension() {
@@ -1220,6 +1277,7 @@ mod tests {
             tag_reference_allowed: vec![structure_design],
             read_only: false,
             advanced: false,
+            slider: None,
         };
 
         assert_eq!(
@@ -1244,6 +1302,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta(vec![object]), &hierarchy).unwrap();
         for group in ["scen", "weap"] {
@@ -1282,6 +1341,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
         for group in ["shdr", "soso", "senv", "schi", "swat"] {
@@ -1324,6 +1384,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
         let accepted = tag_reference_accepted_groups(&meta, &hierarchy).unwrap();
         for (extension, group) in [
@@ -1511,6 +1572,7 @@ mod tests {
             tag_reference_allowed: allowed,
             read_only: false,
             advanced: false,
+            slider: None,
         };
 
         assert_eq!(

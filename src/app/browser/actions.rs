@@ -307,9 +307,7 @@ impl Baboon {
                         asset_models: true,
                         asset_cell_size: DEFAULT_CELL,
                     });
-                let selected = self.model.kits[self.model.active].selected_key.clone();
                 self.kit_and_view(self.model.active).open_tag_pane(&key);
-                self.model.kits[self.model.active].selected_key = selected;
             }
             BrowserAction::ToggleFolderFavorite(rel_path) => self.toggle_folder_favorite(&rel_path),
             BrowserAction::Select(key) => self.select_entry(key, ctx),
@@ -544,11 +542,18 @@ impl Baboon {
         };
         self.views[self.model.kits[self.model.active].id].browser.filter.clear();
         self.views[self.model.kits[self.model.active].id].browser.mode = BrowserMode::Folders;
-        self.model.kits[self.model.active].selected_key = Some(entry.key.clone());
+        // An open tag comes to the front as well as being selected; one that is
+        // not open is only revealed. Selecting a tag with no tab would leave
+        // Save and Undo pointing at something the user cannot see.
+        if self.model.kits[self.model.active].open_tabs.contains(&entry.key) {
+            self.kit_and_view(self.model.active).open_tag_pane(&entry.key);
+        }
         self.browser.reveal_target = Some(RevealRequest {
             kit: self.model.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),
+            folder: false,
+            align: Some(egui::Align::Center),
         });
     }
 }
@@ -849,15 +854,17 @@ mod tests {
                 setup: |app, kit| {
                     kit.open(app, BARREL);
                 },
-                check: |app, kit, _| {
+                check: |app, _, _| {
                     let pane = folder_pane_key(Path::new(FOLDER));
                     let state = app.views[app.model.kits[0].id].browser.folder_browsers.get(&pane).ok_or("no pane")?;
                     ensure(state.label == "props", "label")?;
                     ensure(state.rel_path == Path::new(FOLDER), "rel path")?;
                     ensure(app.model.kits[0].open_tabs.contains(&pane), "not a tab")?;
+                    // The folder pane covers the barrel's tab, so no tag is
+                    // selected: Save must not act on a tag nobody can see.
                     ensure(
-                        app.model.kits[0].selected_key.as_deref() == Some(kit.key(BARREL).as_str()),
-                        "a folder pane must not take the tag selection",
+                        app.model.kits[0].selected_key.is_none(),
+                        "a folder pane in front leaves no tag selected",
                     )
                 },
             },

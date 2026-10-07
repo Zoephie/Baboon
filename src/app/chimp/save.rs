@@ -120,7 +120,7 @@ impl Baboon {
         };
         match self.discard_chimp_packages(index, &prompt.packages) {
             Ok(count) => {
-                self.model.active = index;
+                self.focus_kit(index);
                 self.model.status = format!("Discarded {count} modified Chimp package(s)");
                 if let Some(action) = prompt.pending_action {
                     self.request_close_action(action, ctx);
@@ -959,7 +959,7 @@ impl Dialog for ChimpSaveDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::shell::apply_next_worker_message;
+    use crate::app::shell::{apply_next_worker_message, apply_one_worker_message};
 
     /// A save rebuilds packages on the UI thread and writes them on a worker.
     /// An edit that lands in between is not in what was written, so that
@@ -1366,7 +1366,9 @@ mod tests {
         assert_eq!(app.model.status, "Overwriting 1 source container(s)…");
         assert!(app.chimp.chimp_writes.contains_key(&app.model.kits[0].id));
 
-        assert!(apply_next_worker_message(&mut app), "the overwrite answered");
+        // Only its answer: the remount it starts is quick enough to land in
+        // the same drain, and its classification would replace the status.
+        assert!(apply_one_worker_message(&mut app), "the overwrite answered");
         assert_eq!(
             app.model.status,
             "Overwrote 1 modified Unreal package(s) across 1 source container(s)"
