@@ -102,7 +102,7 @@ pub(in crate::app) fn draw_foundation_value_row(
     }
 
     let formatted = format_foundation_scalar_value(names, value);
-    if edit.editable && !meta.read_only && is_text_editable_value(value) {
+    if edit.can_edit(meta) && is_text_editable_value(value) {
         draw_foundation_editable_text_row(
             ui,
             meta,
@@ -188,7 +188,7 @@ pub(in crate::app) fn draw_foundation_color_row(
         float_channel_to_u8(g),
         float_channel_to_u8(b),
     );
-    let editable = edit.editable && !meta.read_only;
+    let editable = edit.can_edit(meta);
 
     ui.horizontal(|ui| {
         ui.add_space(depth as f32 * 12.0);
@@ -299,7 +299,7 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        let editable = edit.editable && !meta.read_only;
+        let editable = edit.can_edit(meta);
         let lower_response = foundation_value_cell(ui, &mut lower.text, 92.0, lower_id, editable);
         ui.label(RichText::new("to").color(subtle_dark()).small());
         let upper_response = foundation_value_cell(ui, &mut upper.text, 92.0, upper_id, editable);
@@ -349,7 +349,7 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        let editable = edit.editable && !meta.read_only;
+        let editable = edit.can_edit(meta);
         draw_foundation_component_cells(ui, parts, 92.0, path, editable, edit);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -600,7 +600,7 @@ mod tests {
         // Float ARGB: the first cell is alpha.
         let mut light = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
         let path = "color lower bound";
-        let pending = type_into_first_value_cell(&light, path, "0.25");
+        let pending = type_into_first_value_cell(&light, path, "0.25", Marked::Editable);
         assert_eq!(pending.len(), 1, "one committed edit for the whole color");
         assert_eq!(pending[0].path, path);
         crate::core::document::apply::apply_field_edit(&mut light, path, &pending[0].input)
@@ -616,7 +616,7 @@ mod tests {
         let mut hud =
             TagFile::new(crate::app::test_definition_path("haloce_mcc/grenade_hud_interface.json")).unwrap();
         let path = "override icon color";
-        let pending = type_into_first_value_cell(&hud, path, "1");
+        let pending = type_into_first_value_cell(&hud, path, "1", Marked::Editable);
         assert_eq!(pending.len(), 1);
         crate::core::document::apply::apply_field_edit(&mut hud, path, &pending[0].input).unwrap();
         match hud.root().field_path(path).unwrap().value() {
@@ -627,10 +627,39 @@ mod tests {
 
     /// Click along a value row until a cell takes focus, replace its text with
     /// `text`, press Enter, and return the edits the row queued.
-    fn type_into_first_value_cell(tag: &TagFile, path: &str, text: &str) -> Vec<PendingFieldEdit> {
+    /// How the field typed into is marked, and whether expert mode is on.
+    #[derive(Clone, Copy)]
+    enum Marked {
+        Editable,
+        ReadOnly,
+        ReadOnlyInExpertMode,
+    }
+
+    /// A field the definitions mark read-only is shown but not editable,
+    /// until expert mode is on.
+    #[test]
+    fn expert_mode_edits_read_only_fields() {
+        let light = TagFile::new(crate::app::test_definition_path("haloce_mcc/light.json")).unwrap();
+        let path = "color lower bound";
+        assert!(
+            type_into_first_value_cell(&light, path, "0.25", Marked::ReadOnly).is_empty(),
+            "a read-only field committed an edit outside expert mode"
+        );
+        let pending = type_into_first_value_cell(&light, path, "0.25", Marked::ReadOnlyInExpertMode);
+        assert_eq!(pending.len(), 1, "a read-only field took no edit in expert mode");
+        assert_eq!(pending[0].path, path);
+    }
+
+    fn type_into_first_value_cell(
+        tag: &TagFile,
+        path: &str,
+        text: &str,
+        marked: Marked,
+    ) -> Vec<PendingFieldEdit> {
         let ctx = egui::Context::default();
         let mut pending = Vec::new();
         with_test_edit_context(|edit| {
+            edit.expert_mode = matches!(marked, Marked::ReadOnlyInExpertMode);
             let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
@@ -641,7 +670,8 @@ mod tests {
                     egui::CentralPanel::default().show(ui, |ui| {
                         let field = tag.root().field_path(path).expect("color field");
                         let value = field.value().expect("color value");
-                        let meta = field_display_meta(field.name());
+                        let mut meta = field_display_meta(field.name());
+                        meta.read_only = !matches!(marked, Marked::Editable);
                         draw_foundation_value_row(
                             ui, field, &meta, field.type_name(), &value,
                             &TagNameIndex::default(), 0, path, edit, None, 300.0,

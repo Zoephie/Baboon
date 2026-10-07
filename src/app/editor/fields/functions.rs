@@ -43,7 +43,7 @@ fn draw_foundation_function_row_contents(
                     ui.set_min_width(640.0);
                     ui.horizontal(|ui| {
                         foundation_input_cell(ui, &shader_function_grid_text(function), 520.0);
-                        let can_edit = edit.editable && !meta.read_only;
+                        let can_edit = edit.can_edit(meta);
                         let function_button = foundation_header_button_clicked_hint(
                             ui,
                             "f()",
@@ -299,7 +299,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
     ui.horizontal(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        ui.add_enabled_ui(edit.editable && !meta.read_only, |ui| {
+        ui.add_enabled_ui(edit.can_edit(meta), |ui| {
             let selected_label = enum_option_label(options, selected);
             let selected_text = highlighted_widget_text(
                 ui,

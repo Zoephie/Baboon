@@ -504,6 +504,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) tag_reference_picker: &'a mut Option<TagReferencePickerState>,
     pub(in crate::app) status: Option<&'a mut String>,
     pub(in crate::app) editable: bool,
+    /// Expert mode: fields the definitions mark read-only can be edited too.
+    pub(in crate::app) expert_mode: bool,
     pub(in crate::app) show_block_sizes: bool,
     pub(in crate::app) buffers: &'a mut EditDrafts,
     pub(in crate::app) pending: &'a mut Vec<PendingFieldEdit>,
@@ -735,6 +737,7 @@ impl<'a> FieldEditContext<'a> {
             tag_reference_picker: &mut sinks.tag_reference_picker,
             status: None,
             editable: false,
+            expert_mode: false,
             show_block_sizes: false,
             buffers: &mut sinks.buffers,
             pending: &mut sinks.pending,
@@ -779,6 +782,12 @@ impl<'a> FieldEditContext<'a> {
 }
 
 impl FieldEditContext<'_> {
+    /// Whether `meta`'s field can be changed here: the tag must be editable,
+    /// and a field the definitions mark read-only needs expert mode.
+    pub(in crate::app) fn can_edit(&self, meta: &FieldDisplayMeta) -> bool {
+        self.editable && (!meta.read_only || self.expert_mode)
+    }
+
     /// Queue `ops`, as a row's own commit does: the same ops a
     /// [`DraftCommit`] builds when the row cannot commit itself.
     pub(in crate::app) fn push_ops(&mut self, ops: DeferredOps) {

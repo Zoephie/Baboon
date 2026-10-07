@@ -2891,7 +2891,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let target_block_path = target.path.as_str();
-    let editable = edit.editable && !meta.read_only;
+    let editable = edit.can_edit(meta);
     let in_range = current >= 0 && (current as usize) < target.len;
     // Only the selected element's label is needed to draw a closed combo. The
     // rest used to be built here too, every frame, for every block-index field

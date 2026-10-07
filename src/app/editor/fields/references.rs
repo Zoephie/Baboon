@@ -229,16 +229,16 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
+    let droppable = edit.can_edit(meta);
     let draft = edit.buffers.draft_mut(&buffer_key, value);
 
-    let droppable = edit.editable && !meta.read_only;
     let hierarchy = group_hierarchy(edit.definitions_root, edit.game);
     let accepted = tag_reference_accepted_groups(meta, &hierarchy);
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-            let editable = edit.editable && !meta.read_only;
+            let editable = droppable;
             let has_ref = target.is_some();
             let icon_group =
                 tag_reference_value_icon_group(meta, target.as_ref(), &draft.text, edit.game);
@@ -845,7 +845,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 row_rect.left_top() + Vec2::new(0.0, 3.0),
                 Vec2::splat(13.0),
             );
-            let enabled = edit.editable && !meta.read_only;
+            let enabled = edit.can_edit(meta);
             let response = ui.interact(
                 row_rect,
                 ui.make_persistent_id((edit.view_scope, edit.tag_key, path, "flag", *bit)),
