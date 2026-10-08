@@ -200,15 +200,26 @@ fn paint_icon_tinted(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32
         .paint_at(ui, rect);
 }
 
-/// The textures of recolored icons, by icon, color and pixel size. Kept in
-/// the egui context whose textures they are.
+/// The textures of recolored icons, by icon, color and pixel size, with the
+/// pass each was last painted in. Kept in the egui context whose textures
+/// they are.
+///
+/// The cache owns the handles, so a texture lives as long as its entry.
+/// Keeping only the id of a texture egui's loader made let it be freed under
+/// us: the loader drops an SVG's sizes that were not asked for in the last
+/// pass once a URI has two, and a cached id never asks again. The icon then
+/// painted nothing for the rest of the session.
 #[derive(Clone, Default)]
-struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32), egui::TextureId>);
+struct IconTextures(HashMap<(ButtonIcon, Color32, u32, u32), (egui::TextureHandle, u64)>);
+
+/// Passes an icon texture may go unpainted before a miss sweeps it out,
+/// so sizes left behind by a zoom or a monitor change do not pile up.
+const ICON_TEXTURE_UNUSED_PASSES: u64 = 600;
 
 /// The texture of `icon` recolored to `color` at `pixels`, once egui has
-/// loaded it. Icons are painted on every frame, a dozen to a block header,
-/// and each used to format its URI and have egui's loaders hash it to find
-/// the texture; this is a lookup of a small key instead.
+/// rasterized it. Icons are painted on every frame, a dozen to a block
+/// header, and each used to format its URI and have egui's loaders hash it
+/// to find the texture; this is a lookup of a small key instead.
 fn icon_texture(
     ctx: &egui::Context,
     icon: ButtonIcon,
@@ -218,7 +229,12 @@ fn icon_texture(
 ) -> Option<egui::TextureId> {
     let key = (icon, color, pixels.x as u32, pixels.y as u32);
     let id = egui::Id::new("baboon_icon_textures");
-    let cached = ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.get(&key).copied());
+    let pass = ctx.cumulative_pass_nr();
+    let cached = ctx.data_mut(|data| {
+        let (texture, last_used) = data.get_temp_mut_or_default::<IconTextures>(id).0.get_mut(&key)?;
+        *last_used = pass;
+        Some(texture.id())
+    });
     if cached.is_some() {
         return cached;
     }
@@ -229,13 +245,17 @@ fn icon_texture(
         height: key.3,
         maintain_aspect_ratio: false,
     };
-    let Ok(egui::load::TexturePoll::Ready { texture }) =
-        ctx.try_load_texture(&uri, egui::TextureOptions::default(), size_hint)
-    else {
+    let Ok(egui::load::ImagePoll::Ready { image }) = ctx.try_load_image(&uri, size_hint) else {
         return None;
     };
-    ctx.data_mut(|data| data.get_temp_mut_or_default::<IconTextures>(id).0.insert(key, texture.id));
-    Some(texture.id)
+    let texture = ctx.load_texture(uri, image, egui::TextureOptions::default());
+    let texture_id = texture.id();
+    ctx.data_mut(|data| {
+        let textures = &mut data.get_temp_mut_or_default::<IconTextures>(id).0;
+        textures.retain(|_, (_, last_used)| pass <= *last_used + ICON_TEXTURE_UNUSED_PASSES);
+        textures.insert(key, (texture, pass));
+    });
+    Some(texture_id)
 }
 
 pub(in crate::app) fn button_icon_image(
@@ -1016,5 +1036,48 @@ mod tests {
         let shown = click(&mut frame, first, &mut picks);
         assert_eq!(picks, 1);
         assert!(find(&shown, "second item").is_some(), "the menu is still open");
+    }
+
+    /// A cached icon keeps its texture after a text button showing the same
+    /// icon comes and goes, as the shader editor's Clear button does when a
+    /// color picker's "Cancel" closes. The button sizes its image at a second
+    /// size hint of the same URI, and once it is gone egui's loader frees
+    /// every size of that URI nobody asked for in the last pass; with only an
+    /// id cached, the icon painted nothing from then on.
+    #[test]
+    fn a_cached_icon_survives_a_text_button_with_the_same_icon_closing() {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        let mut painted = Vec::new();
+        let mut freed = Vec::new();
+        for pass in 0..6 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(400.0, 300.0))),
+                    time: Some(pass as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::splat(BUTTON_ICON_SIZE));
+                        paint_button_icon_at(ui, ButtonIcon::Clear, rect, material_delete_text());
+                        if (1..3).contains(&pass) {
+                            ui.add_space(40.0);
+                            icon_text_button(ui, ButtonIcon::Clear, "Cancel", true);
+                        }
+                    });
+                },
+            );
+            freed.extend(output.textures_delta.free.iter().copied());
+            output.textures_delta.clear();
+            let icon_textures = ctx.data(|data| {
+                data.get_temp::<IconTextures>(egui::Id::new("baboon_icon_textures")).unwrap_or_default()
+            });
+            painted.extend(icon_textures.0.values().map(|(texture, _)| texture.id()));
+        }
+        painted.dedup();
+        assert_eq!(painted.len(), 1, "one texture for the one cached icon: {painted:?}");
+        assert!(!freed.contains(&painted[0]), "the cached icon's texture was freed: {freed:?}");
+        assert!(ctx.tex_manager().read().meta(painted[0]).is_some());
     }
 }
