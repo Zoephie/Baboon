@@ -55,6 +55,63 @@ pub(in crate::app) fn bitmap_reimport_data_path(
     Some(source.to_string_lossy().replace('/', "\\"))
 }
 
+/// What reimporting a bitmap tag runs: the game's `tool` verb on the tag's
+/// source image in the kit's data folder, after recovering that image from
+/// the tag when the data folder has none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::app) struct BitmapReimport {
+    pub(in crate::app) command: String,
+    /// Where to write the source image recovered from the tag first.
+    pub(in crate::app) recover_to: Option<PathBuf>,
+}
+
+/// The source images `tool` reads for a bitmap, in the order it looks for
+/// them: Halo CE and Halo 2 take TIFFs; Halo 3 and later's `bitmap_single`
+/// takes any of its image types.
+fn bitmap_source_extensions(game: GameId) -> &'static [&'static str] {
+    match game {
+        GameId::HaloCe | GameId::Halo2 => &["tif", "tiff"],
+        _ => &["tif", "tiff", "dds", "pfm", "bmp", "jpg", "jpeg", "tga", "png", "ppm", "dib", "hdr", "pic"],
+    }
+}
+
+/// How to reimport the bitmap whose tag is at `data_path` (relative, `\`,
+/// no extension) in a kit of `game` whose data folder is `data`.
+///
+/// Each game's tool imports one image with a different verb: Halo CE's
+/// `bitmap <path>`, Halo 3 and later's `bitmap_single <path with its
+/// extension>`. Halo 2's has none, so its `bitmaps` imports the image's
+/// whole folder. `bitmaps` given one image's path, as this used to run,
+/// looks for a folder of that name and imports nothing.
+///
+/// With no source image in the data folder, a Halo CE or Halo 2 tag's own
+/// color plate is written there first; later games' tags keep none.
+pub(in crate::app) fn bitmap_reimport_plan(game: GameId, data: &Path, data_path: &str) -> Result<BitmapReimport, String> {
+    let on_disk = |relative: &str| data.join(relative.replace('\\', std::path::MAIN_SEPARATOR_STR));
+    let existing = bitmap_source_extensions(game)
+        .iter()
+        .find(|extension| on_disk(&format!("{data_path}.{extension}")).is_file());
+    let classic = matches!(game, GameId::HaloCe | GameId::Halo2);
+    let (extension, recover_to) = match existing {
+        Some(extension) => (*extension, None),
+        None if classic => ("tif", Some(on_disk(&format!("{data_path}.tif")))),
+        None => {
+            return Err(format!(
+                "No source image for {data_path} in the data folder, and this game's bitmap tags don't keep one to recover"
+            ));
+        }
+    };
+    let command = match game {
+        GameId::HaloCe => format!("tool bitmap \"{data_path}\""),
+        GameId::Halo2 => {
+            let folder = data_path.rsplit_once('\\').map(|(folder, _)| folder).unwrap_or("");
+            format!("tool bitmaps \"{folder}\"")
+        }
+        _ => format!("tool bitmap_single \"{data_path}.{extension}\""),
+    };
+    Ok(BitmapReimport { command, recover_to })
+}
+
 pub(in crate::app) fn draw_bitmap_preview(
     ui: &mut Ui,
     ctx: &egui::Context,
@@ -1197,5 +1254,50 @@ mod tests {
         preview.show_blue = false;
         preview.show_alpha = true;
         assert_eq!(filtered_bitmap_rgba(&data, &preview), [40, 40, 40, 255]);
+    }
+
+    /// A data folder holding `files` (relative, `/`-separated).
+    fn data_folder(files: &[&str]) -> std::path::PathBuf {
+        let data = crate::core::test_kits::unique_temp_dir("bitmap_reimport");
+        for file in files {
+            let path = data.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        data
+    }
+
+    /// Each game imports one bitmap with its own verb. `tool bitmaps` on
+    /// one image's path, as reimport used to run, imports nothing: it looks
+    /// for a folder of that name.
+    #[test]
+    fn each_game_reimports_one_bitmap_with_its_own_verb() {
+        let data = data_folder(&["objects/rock/bitmaps/rock.tif", "objects/glass/bitmaps/glass.png"]);
+        let plan = |game, path: &str| bitmap_reimport_plan(game, &data, path).unwrap();
+        let rock = "objects\\rock\\bitmaps\\rock";
+        assert_eq!(plan(GameId::HaloCe, rock).command, "tool bitmap \"objects\\rock\\bitmaps\\rock\"");
+        assert_eq!(plan(GameId::Halo2, rock).command, "tool bitmaps \"objects\\rock\\bitmaps\"");
+        assert_eq!(plan(GameId::Halo3, rock).command, "tool bitmap_single \"objects\\rock\\bitmaps\\rock.tif\"");
+        assert_eq!(plan(GameId::HaloReach, "objects\\glass\\bitmaps\\glass").command, "tool bitmap_single \"objects\\glass\\bitmaps\\glass.png\"");
+        for game in [GameId::HaloCe, GameId::Halo2, GameId::Halo3, GameId::HaloReach] {
+            assert_eq!(plan(game, rock).recover_to, None, "{game:?}: the source is there");
+            assert_ne!(plan(game, rock).command, "tool bitmaps \"objects\\rock\\bitmaps\\rock\"");
+        }
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    /// A Halo CE or Halo 2 source image missing from the data folder is
+    /// recovered from the tag into it first; a later game's tag keeps none.
+    #[test]
+    fn a_missing_source_is_recovered_only_where_the_tag_keeps_one() {
+        let data = data_folder(&[]);
+        let rock = "objects\\rock\\bitmaps\\rock";
+        for game in [GameId::HaloCe, GameId::Halo2] {
+            let plan = bitmap_reimport_plan(game, &data, rock).unwrap();
+            assert_eq!(plan.recover_to, Some(data.join("objects").join("rock").join("bitmaps").join("rock.tif")), "{game:?}");
+        }
+        let error = bitmap_reimport_plan(GameId::Halo3, &data, rock).unwrap_err();
+        assert!(error.contains("don't keep one"), "{error}");
+        std::fs::remove_dir_all(&data).ok();
     }
 }

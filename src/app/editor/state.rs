@@ -600,6 +600,11 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// The pane's row heights, for skipping rows out of view; `None` draws
     /// every row.
     pub(in crate::app) row_heights: Option<&'a mut RowHeights>,
+    /// The tag being drawn, for string editors' menus: the tag itself, its
+    /// path in the kit's tags folder (`\`-separated, no extension), a stamp
+    /// that changes with every edit to it, and the kit it came from (to open
+    /// the other tags a menu reads). `None` outside a tag pane.
+    pub(in crate::app) string_editor_tag: Option<super::fields::string_editors::EditedTag<'a>>,
 }
 
 /// What a tag pane's field rows measured when last drawn, so the rows outside
@@ -777,6 +782,7 @@ impl<'a> FieldEditContext<'a> {
             expand_all: None,
             nested_default: NestedDefault::default(),
             row_heights: None,
+            string_editor_tag: None,
         }
     }
 }

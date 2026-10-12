@@ -41,13 +41,16 @@ pub(in crate::app) fn field_suffix(meta: &FieldDisplayMeta, type_name: &str) -> 
     }
 }
 
+/// An enum or flags option name is marked up as a field name is (`#` help,
+/// `&` display name, `!` hidden): Foundation reads both with
+/// `TagFieldNameInfo`, so the label is the parsed one.
 pub(in crate::app) fn enum_option_label(options: &[&str], selected: i64) -> String {
     if selected < 0 {
         return "NONE".to_owned();
     }
     options
         .get(selected as usize)
-        .map(|name| format!("{selected}. {name}"))
+        .map(|name| format!("{selected}. {}", field_display_meta(name).label))
         .unwrap_or_else(|| selected.to_string())
 }
 
@@ -81,6 +84,18 @@ mod tests {
         let both_rev = field_display_meta("aabb center!*");
         assert!(both_rev.read_only && both_rev.advanced, "order-independent");
         assert_eq!(both_rev.label, "aabb center");
+    }
+
+    #[test]
+    fn enum_option_label_shows_the_parsed_name() {
+        let options = [
+            "none",
+            "strict deviation angle#deviation angle is allowed",
+            "best score&medium compression",
+        ];
+        assert_eq!(enum_option_label(&options, 1), "1. strict deviation angle");
+        assert_eq!(enum_option_label(&options, 2), "2. medium compression");
+        assert_eq!(enum_option_label(&options, -1), "NONE");
     }
 
     #[test]

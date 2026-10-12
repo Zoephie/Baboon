@@ -425,8 +425,16 @@ pub(in crate::app) fn draw_foundation_enum_row(
                     .width(240.0)
                     .selected_text(selected_text),
                 |ui| {
+                    // `!` options are listed only in expert mode, as Foundation does.
                     for (index, option) in options.iter().enumerate() {
-                        ui.selectable_value(&mut selected, index as i64, *option);
+                        let option = field_display_meta(option);
+                        if option.advanced && !edit.expert_mode {
+                            continue;
+                        }
+                        let response = ui.selectable_value(&mut selected, index as i64, option.label);
+                        if let Some(help) = option.help {
+                            response.on_hover_text(help);
+                        }
                     }
                 },
             );

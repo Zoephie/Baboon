@@ -776,14 +776,21 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let display_flags = if options.is_empty() {
         flag_names
             .iter()
-            .map(|(bit, label)| (*bit, label.clone(), true))
+            .map(|(bit, name)| (*bit, name.as_str(), true))
             .collect::<Vec<_>>()
     } else {
         options
             .iter()
-            .map(|option| (option.bit, option.name.to_owned(), option.is_set))
+            .map(|option| (option.bit, option.name, option.is_set))
             .collect::<Vec<_>>()
     };
+    // An option's name is marked up as a field's is; `!` options are listed
+    // only in expert mode, as Foundation does. A hidden bit keeps its value.
+    let display_flags = display_flags
+        .into_iter()
+        .map(|(bit, name, is_set)| (bit, field_display_meta(name), is_set))
+        .filter(|(_, option, _)| !option.advanced || edit.expert_mode)
+        .collect::<Vec<_>>();
 
     let indent = depth as f32 * 12.0;
     let row_width = ui.available_width().max(620.0);
@@ -834,7 +841,8 @@ pub(in crate::app) fn draw_foundation_flags_row(
         );
     } else {
         let mut next_mask = raw;
-        for (index, (bit, label, is_set)) in display_flags.iter().enumerate() {
+        for (index, (bit, option, is_set)) in display_flags.iter().enumerate() {
+            let label = &option.label;
             let row_top = flags_rect.top() + 6.0 + index as f32 * flag_row_height;
             let row_rect = egui::Rect::from_min_size(
                 egui::pos2(flags_rect.left() + 8.0, row_top),
@@ -856,7 +864,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
             );
             if response.hovered() {
                 painter.rect_filled(row_rect, 0.0, foundation_flag_hover());
-                response.clone().on_hover_text(label);
+                response.clone().on_hover_text(match &option.help {
+                    Some(help) => format!("{label}\n\n{help}"),
+                    None => label.clone(),
+                });
             }
 
             painter.rect_filled(checkbox_rect, 0.0, foundation_checkbox_bg(enabled));
@@ -998,6 +1009,51 @@ mod tests {
         assert_eq!(text_x.get("flagsrow"), text_x.get("otherrow"), "labels: {text_x:?}");
         assert!(text_x.contains_key("flagsrow"));
         assert_eq!(panels.first().copied(), Some(value_left), "panel left vs value left");
+    }
+
+    /// An option's name is marked up as a field's is. CE's weapon flags showed
+    /// `prevents crouching*#NOT YET BACKPORTED from H3` and `unused0!` as written;
+    /// Foundation shows `prevents crouching`, and lists `!` options only in
+    /// expert mode.
+    #[test]
+    fn flags_row_shows_option_names_as_foundation_does() {
+        let tag = blam_tags::TagFile::new(locate_definitions_root().join("haloce_mcc/weapon.json")).unwrap();
+        let root = tag.root();
+        let field = root
+            .fields_all()
+            .find(|field| {
+                matches!(field.options(), Some(blam_tags::TagOptions::Flags(options))
+                    if options.iter().any(|option| option.name.contains('#'))
+                        && options.iter().any(|option| option.name.contains('!')))
+            })
+            .expect("the CE weapon flags, with `#` and `!` options");
+        let meta = field_display_meta(field.name());
+        let painted = |expert_mode: bool| {
+            let ctx = egui::Context::default();
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                super::with_test_edit_context(|edit| {
+                    edit.expert_mode = expert_mode;
+                    draw_foundation_flags_row(ui, &meta, 0, &[], field, 0, "flags", edit);
+                });
+            });
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let normal = painted(false);
+        assert!(normal.iter().any(|text| text == "prevents crouching"), "{normal:?}");
+        assert!(normal.iter().all(|text| !text.contains(['#', '!', '*'])), "{normal:?}");
+        assert!(!normal.iter().any(|text| text == "unused0"), "{normal:?}");
+
+        let expert = painted(true);
+        assert!(expert.iter().any(|text| text == "unused0"), "{expert:?}");
+        assert!(expert.len() > normal.len(), "expert mode lists the `!` options too");
     }
 
     #[test]

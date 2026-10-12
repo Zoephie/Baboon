@@ -256,11 +256,24 @@ pub(in crate::app) fn foundation_value_cell(
     id: egui::Id,
     editable: bool,
 ) -> egui::Response {
+    foundation_value_cell_filled(ui, text, width, id, editable, None)
+}
+
+/// [`foundation_value_cell`] with the box's fill given: a string editor's box
+/// is pink while its value isn't one the editor offers.
+pub(in crate::app) fn foundation_value_cell_filled(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    editable: bool,
+    fill: Option<Color32>,
+) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     if editable {
-        foundation_value_text(ui, rect, text, Some(id), text_dark(), VALUE_PADDING)
+        foundation_value_text_filled(ui, rect, text, Some(id), text_dark(), VALUE_PADDING, fill)
     } else {
-        foundation_value_text(ui, rect, &mut text.as_str(), Some(id), text_dark(), VALUE_PADDING)
+        foundation_value_text_filled(ui, rect, &mut text.as_str(), Some(id), text_dark(), VALUE_PADDING, fill)
     }
 }
 
@@ -279,11 +292,23 @@ fn foundation_value_text(
     color: Color32,
     left_padding: f32,
 ) -> egui::Response {
+    foundation_value_text_filled(ui, rect, text, id, color, left_padding, None)
+}
+
+fn foundation_value_text_filled(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    text: &mut dyn egui::TextBuffer,
+    id: Option<egui::Id>,
+    color: Color32,
+    left_padding: f32,
+    fill: Option<Color32>,
+) -> egui::Response {
     // A box whose text can't change is greyed, as Foundation greys a
     // read-only field's: a dimmer fill and dimmer text (a missing reference
     // keeps its red). It still takes focus, so its text can be copied.
     let read_only = !text.is_mutable();
-    let fill = if read_only { foundation_input_read_only() } else { foundation_input() };
+    let fill = fill.unwrap_or(if read_only { foundation_input_read_only() } else { foundation_input() });
     let color = if read_only && color == text_dark() { subtle_dark() } else { color };
     ui.painter().rect_filled(rect, 0.0, fill);
     let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();

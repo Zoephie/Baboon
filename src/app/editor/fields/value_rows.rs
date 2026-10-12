@@ -119,6 +119,24 @@ pub(in crate::app) fn draw_foundation_value_row(
         );
         return;
     }
+    if matches!(
+        value,
+        TagFieldData::StringId(_) | TagFieldData::OldStringId(_) | TagFieldData::String(_) | TagFieldData::LongString(_)
+    ) && let Some((editors, editor)) = string_editors::field_string_editor(edit, path)
+    {
+        string_editors::draw_string_editor_row(
+            ui,
+            meta,
+            &formatted,
+            field_suffix(meta, type_name).as_str(),
+            depth,
+            path,
+            edit,
+            &editors,
+            &editor,
+        );
+        return;
+    }
     if edit.can_edit(meta) && is_text_editable_value(value) {
         draw_foundation_editable_text_row(
             ui,
@@ -831,7 +849,7 @@ fn draw_foundation_slider_row(
 
 /// A labelled row holding one value box, read-only or editable: `cell`
 /// draws the box, given the width there is for it.
-fn draw_foundation_labelled_cell_row(
+pub(super) fn draw_foundation_labelled_cell_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
     suffix: &str,

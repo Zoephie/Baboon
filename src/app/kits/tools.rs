@@ -204,18 +204,27 @@ impl Baboon {
             self.model.status = "Bitmap reimport requires a loose tags folder".to_owned();
             return;
         };
-        let Some(work_dir) = self.model.kit_layout_for(self.model.active).map(|layout| layout.root) else {
+        let Some(layout) = self.model.kit_layout_for(self.model.active) else {
             self.model.status = "Could not resolve editing-kit root".to_owned();
             return;
         };
+        let work_dir = layout.root.clone();
         let Some(data_path) = bitmap_reimport_data_path(&entry, Some(tags_root)) else {
             self.model.status = "Could not resolve bitmap data path".to_owned();
             return;
         };
-        let command = with_tool_folder_options(
-            &format!("tool bitmaps \"{data_path}\""),
-            &self.model.active_kit_tool_folder_options(),
-        );
+        let Some(game) = self.model.source().and_then(|source| source.game) else {
+            self.model.status = "Bitmap reimport needs the kit's game".to_owned();
+            return;
+        };
+        let plan = match bitmap_reimport_plan(game, &layout.data, &data_path) {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.model.status = error;
+                return;
+            }
+        };
+        let command = with_tool_folder_options(&plan.command, &self.model.active_kit_tool_folder_options());
         self.views[self.model.kits[self.model.active].id].terminal.open = true;
         self.kit_tools.terminal
             .lines
@@ -247,9 +256,20 @@ impl Baboon {
             &self.tx,
             &ctx,
             move || {
-                let result =
-                    run_terminal_command_for_reimport(&command, &work_dir, &tx, &worker_ctx, log_file)
-                        .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
+                // A source image missing from the data folder is written from
+                // the tag's own color plate first (Halo CE, Halo 2).
+                let recovered = match &plan.recover_to {
+                    Some(path) => crate::app::export::write_bitmap_source(&source, &entry, path)
+                        .map(|_| {
+                            let _ = tx.send(WorkerMessage::TerminalLine(format!("Recovered the source image from the tag to {}", path.display())));
+                            worker_ctx.request_repaint();
+                        })
+                        .map_err(|error| format!("Could not recover the source image from the tag: {error}")),
+                    None => Ok(()),
+                };
+                let result = recovered
+                    .and_then(|_| run_terminal_command_for_reimport(&command, &work_dir, &tx, &worker_ctx, log_file))
+                    .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
                 WorkerMessage::BitmapReimportFinished { kit, key, result }
             },
             move |error| WorkerMessage::BitmapReimportFinished {

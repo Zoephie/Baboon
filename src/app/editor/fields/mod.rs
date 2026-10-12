@@ -9,6 +9,8 @@ pub(in crate::app) use traversal::*;
 mod containers;
 pub(in crate::app) use containers::*;
 mod value_rows;
+
+pub(in crate::app) mod string_editors;
 pub(in crate::app) use value_rows::*;
 mod references;
 pub(in crate::app) use references::*;
