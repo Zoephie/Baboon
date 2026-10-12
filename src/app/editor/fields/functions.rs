@@ -40,6 +40,10 @@ fn draw_foundation_function_row_contents(
                 // top-to-bottom (Guerilla-style) instead of sprawling to the
                 // right.
                 ui.vertical(|ui| {
+                    let inline = is_inline_object_function(path, function.encoding(), edit.game);
+                    if inline {
+                        ui.set_width(623.0);
+                    } else {
                     ui.set_min_width(640.0);
                     ui.horizontal(|ui| {
                         foundation_input_cell(ui, &shader_function_grid_text(function), 520.0);
@@ -62,9 +66,17 @@ fn draw_foundation_function_row_contents(
                         }
                     });
                     ui.add_space(4.0);
+                    }
                     #[cfg(test)]
                     FUNCTION_PREVIEWS_BUILT.with(|count| count.set(count.get() + 1));
                     ui.push_id(("function", path), |ui| {
+                        if is_inline_object_function(path, function.encoding(), edit.game) {
+                            let view = FunctionView::from_function(function.clone()).with_edit(
+                                foundation_function_edit_paths(path, function.encoding()),
+                            );
+                            draw_editable_inline_object_function(ui, view, edit.can_edit(meta), edit);
+                            return;
+                        }
                         // Inline preview is always read-only; the editable
                         // editor lives in the f() popup.
                         let mut view = FunctionView::from_function(function.clone());
@@ -94,9 +106,8 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
     let encoding = view.function.encoding();
     view = view.with_edit(foundation_function_edit_paths(data_path, encoding));
 
-    // Every function, whatever its game, shows the same row: its summary, the
-    // f() button that opens the editor, and the editor itself as a read-only
-    // preview.
+    // Halo 2/3/ODST Object functions edit directly in this row; others keep
+    // their read-only preview and the f() button for the full editor.
     draw_foundation_wrapped_function_row(ui, label, view, depth, edit);
 }
 
@@ -131,6 +142,10 @@ fn draw_foundation_wrapped_function_row_contents(
             .inner_margin(egui::Margin::same(5))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
+                    let inline = is_inline_object_function(data_path_id(&view), view.function.encoding(), edit.game);
+                    if inline {
+                        ui.set_width(623.0);
+                    } else {
                     ui.set_min_width(640.0);
                     ui.horizontal(|ui| {
                         foundation_input_cell(
@@ -154,9 +169,14 @@ fn draw_foundation_wrapped_function_row_contents(
                         }
                     });
                     ui.add_space(4.0);
+                    }
                     #[cfg(test)]
                     FUNCTION_PREVIEWS_BUILT.with(|count| count.set(count.get() + 1));
                     ui.push_id(("wrapped_function", data_path_id(&view)), |ui| {
+                        if is_inline_object_function(data_path_id(&view), view.function.encoding(), edit.game) {
+                            draw_editable_inline_object_function(ui, view.clone(), edit.editable, edit);
+                            return;
+                        }
                         let mut preview = view.clone();
                         let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
                         draw_function_editor(
@@ -175,7 +195,7 @@ fn draw_foundation_wrapped_function_row_contents(
 
 #[cfg(test)]
 thread_local! {
-    /// Read-only function previews this thread built.
+    /// Inline function editors and previews this thread built.
     pub(in crate::app) static FUNCTION_PREVIEWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Off draws every function row, as the editor did before it culled any.
     pub(in crate::app) static FUNCTION_ROWS_CULLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
@@ -217,7 +237,7 @@ fn function_row_key(
 
 /// Draw a function row, unless the height it had when last drawn puts all of
 /// it outside the clip rect: then reserve that height instead. Each row
-/// builds a full read-only function editor, graphs sampled and all, so a tag
+/// builds a full function editor, graphs sampled and all, so a tag
 /// with many functions paid for every one of them each frame, on screen or
 /// not.
 ///
@@ -236,8 +256,10 @@ fn draw_function_row_unless_offscreen(
         return;
     }
     let id = ui.make_persistent_id(id_source);
+    let gesture_active = ui.data(|data| data.get_temp::<bool>(id.with("gesture_active"))).unwrap_or(false);
     let spacing = ui.spacing().item_spacing.y;
     if function_rows_culled()
+        && !gesture_active
         && let Some((cached_key, height)) = ui.data(|data| data.get_temp::<(u64, f32)>(id))
         && cached_key == key
         && height > spacing
@@ -250,7 +272,10 @@ fn draw_function_row_unless_offscreen(
         }
     }
     let top = ui.cursor().top();
+    let current_row = egui::Id::new("drawing_function_row");
+    ui.data_mut(|data| data.insert_temp(current_row, id));
     draw(ui);
+    ui.data_mut(|data| data.remove::<egui::Id>(current_row));
     let height = ui.cursor().top() - top;
     ui.data_mut(|data| data.insert_temp(id, (key, height)));
 }
@@ -258,8 +283,94 @@ fn draw_function_row_unless_offscreen(
 fn data_path_id(view: &FunctionView) -> &str {
     view.edit
         .as_ref()
-        .and_then(|paths| paths.data.data_field_path())
+        .map(|paths| match &paths.data {
+            FunctionDataStorage::DataField(path) | FunctionDataStorage::Halo2ByteBlock(path) => {
+                path.as_str()
+            }
+        })
         .unwrap_or("function")
+}
+
+fn is_inline_h2_object_function(path: &str, encoding: FunctionEncoding) -> bool {
+    encoding == FunctionEncoding::H2 && is_object_function_path(path)
+}
+
+fn is_object_function_path(path: &str) -> bool {
+    path
+            .split('/')
+            .any(|segment| segment.contains('[')
+                && segment.split(['#', '[']).next() == Some("functions"))
+}
+
+fn is_inline_object_function(path: &str, encoding: FunctionEncoding, game: Option<GameId>) -> bool {
+    is_inline_h2_object_function(path, encoding)
+        || (encoding == FunctionEncoding::Blob
+            && matches!(game, Some(GameId::Halo3 | GameId::Halo3Odst))
+            && is_object_function_path(path))
+}
+
+fn draw_editable_inline_object_function(
+    ui: &mut Ui,
+    mut view: FunctionView,
+    editable: bool,
+    edit: &mut FieldEditContext<'_>,
+) {
+    // Match the graph (465), gap (8), and right-hand controls (150), rather
+    // than expanding the parameter fields across the tag pane.
+    ui.set_width(623.0);
+    let id = edit.widget_id(("inline_function_selection", data_path_id(&view)));
+    let (mut graph, mut point) = ui
+        .data(|data| data.get_temp::<(usize, usize)>(id))
+        .unwrap_or_default();
+    let previous = FunctionSnapshot::from_view(&view);
+    let gesture_id = id.with("function_gesture");
+    let mut gesture = ui.data_mut(|data| {
+        let gesture = data.get_temp::<InlineFunctionGesture>(gesture_id);
+        data.remove::<InlineFunctionGesture>(gesture_id);
+        gesture
+    })
+        .filter(|gesture| gesture.matches_document(&view))
+        .unwrap_or_else(|| InlineFunctionGesture::new(&view));
+    view = gesture.view.clone();
+    let mut color = None;
+    draw_inline_mapping_function_editor(
+        ui, &mut view, editable, &mut graph, &mut point, &mut color,
+    );
+    let dragging = ui.input(|input| input.pointer.primary_down());
+    if let Some(row) = ui.data(|data| data.get_temp::<egui::Id>(egui::Id::new("drawing_function_row"))) {
+        ui.data_mut(|data| data.insert_temp(row.with("gesture_active"), dragging));
+    }
+    if dragging {
+        gesture.view = view.clone();
+        ui.data_mut(|data| data.insert_temp(gesture_id, gesture));
+        ui.ctx().request_repaint();
+    }
+    if !dragging && FunctionSnapshot::from_view(&view) != previous
+        && let Some(paths) = view.edit.as_ref()
+    {
+        let batch = push_function_edit(paths, &previous, &view);
+        edit.pending.extend(batch.edits);
+        edit.h2_shader_param_ops
+            .extend(
+                batch
+                    .data_ops
+                    .into_iter()
+                    .map(|op| H2ShaderParamOp::EditFunctionData {
+                        block_path: op.block_path,
+                        data: op.data,
+                    }),
+            );
+    }
+    ui.data_mut(|data| data.insert_temp(id, (graph, point)));
+    if let Some(color) = color
+        && let Some(paths) = view.edit.as_ref()
+    {
+        *edit.color_request = Some(color.with_inline_function_target(
+            edit.tag_key,
+            paths.data.clone(),
+            view.function.clone(),
+        ));
+    }
 }
 
 /// Write targets for a function at `data_path`. Where its bytes go follows
@@ -357,6 +468,187 @@ mod tests {
         raw[8..12].copy_from_slice(&1.0f32.to_le_bytes());
         let view = FunctionView::from_function(h2_tag_function(&raw).expect("an H2 block"));
         assert_eq!(view.function.encoding(), FunctionEncoding::H2);
+    }
+
+    #[test]
+    fn inline_object_function_controls_fit_the_graph_grid_without_summary() {
+        for kind in [FunctionType::Transition, FunctionType::Periodic] {
+            let ctx = egui::Context::default();
+            let mut editor = TagFunctionEditor::from_function(h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap());
+            editor.set_function_type(kind).unwrap();
+            let view = FunctionView::from_function(editor.into_function())
+                .with_edit(foundation_function_edit_paths("object#0/functions#21[0]/default function#5/data", FunctionEncoding::H2));
+            let summary = shader_function_grid_text(&view.function);
+            let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1800.0, 1000.0))),
+                ..Default::default()
+            }, |ui| with_test_edit_context(|edit| {
+                draw_foundation_wrapped_function_row_contents(ui, "default function".to_owned(), view.clone(), 0, edit);
+            }));
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == summary)));
+            let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == function_plot_bg() && (rect.rect.width() - 445.0).abs() < 1.0 => Some(rect.rect),
+                _ => None,
+            }).unwrap();
+            let right = plot.left() - 10.0 + 623.0;
+            for shape in &output.shapes {
+                if let egui::Shape::Rect(rect) = &shape.shape
+                    && rect.rect.top() < plot.top() && rect.rect.height() <= 36.0
+                    && rect.rect.left() >= plot.left() - 10.0
+                {
+                    assert!(rect.rect.right() <= right + 1.0, "{kind:?}: a control extends beyond the graph grid");
+                }
+            }
+        }
+    }
+
+        fn functions_path(st: TagStruct<'_>, prefix: &str) -> Option<String> {
+            for field in st.fields() {
+                let path = append_field_path_for(prefix, &field);
+                if field.clean_name() == "functions" && field.as_block().is_some() {
+                    return Some(path);
+                }
+                if let Some(nested) = field.as_struct()
+                    && let Some(path) = functions_path(nested, &path)
+                {
+                    return Some(path);
+                }
+            }
+            None
+        }
+
+    #[test]
+    fn inherited_h2_object_functions_use_the_inline_editor_with_positional_paths() {
+        for kind in ["biped", "vehicle", "weapon", "scenery", "equipment"] {
+            let mut tag = TagFile::new(test_definition_path(&format!("halo2_mcc/{kind}.json"))).unwrap();
+            let path = functions_path(tag.root(), "").unwrap_or_else(|| panic!("{kind} inherits Object functions"));
+            assert!(path.contains('#'), "test real positional field addresses");
+            apply_one_block_op(&mut tag, &BlockOp { path: path.clone(), kind: BlockOpKind::Add }).unwrap();
+            let element_path = format!("{path}[0]");
+            let element = tag.root().descend(&element_path).unwrap();
+            let field = element.fields().find(|field| field.clean_name() == "default function" && field.as_struct().is_some()).unwrap();
+            let struct_path = append_field_path_for(&element_path, &field);
+            let (view, data_path) = inline_mapping_function_from_struct(field.as_struct().unwrap(), &struct_path).unwrap();
+            assert!(is_inline_h2_object_function(&data_path, view.function.encoding()), "{kind}: {data_path}");
+        }
+        assert!(!is_inline_h2_object_function("functions#21[0]/default function#5/data", FunctionEncoding::Blob));
+        assert!(!is_inline_h2_object_function("old functions#20[0]/data", FunctionEncoding::H2));
+    }
+
+    #[test]
+    fn halo3_and_odst_object_functions_edit_inline_without_changing_reach_or_halo4() {
+        for (schema, game) in [("halo3_mcc", GameId::Halo3), ("halo3odst_mcc", GameId::Halo3Odst)] {
+            for kind in ["biped", "vehicle", "weapon"] {
+                let mut tag = TagFile::new(test_definition_path(&format!("{schema}/{kind}.json"))).unwrap();
+                let block_path = functions_path(tag.root(), "").unwrap();
+                apply_one_block_op(&mut tag, &BlockOp { path: block_path.clone(), kind: BlockOpKind::Add }).unwrap();
+                let element_path = format!("{block_path}[0]");
+                let element = tag.root().descend(&element_path).unwrap();
+                let field = element.fields().find(|field| field.clean_name() == "default function" && field.as_struct().is_some()).unwrap();
+                let struct_path = append_field_path_for(&element_path, &field);
+                let (mut view, data_path) = inline_mapping_function_from_struct(field.as_struct().unwrap(), &struct_path).unwrap();
+                assert!(is_inline_object_function(&data_path, view.function.encoding(), Some(game)));
+                let mut editor = TagFunctionEditor::from_function(view.function.clone());
+                // Fresh Object functions are Identity (also presented as
+                // Curve), so explicitly author a control-point curve here.
+                editor.set_master_type(EngineMasterType::Basic).unwrap();
+                editor.set_master_type(EngineMasterType::Curve).unwrap();
+                view.function = editor.into_function();
+                view = view.with_edit(foundation_function_edit_paths(&data_path, FunctionEncoding::Blob));
+                let ctx = egui::Context::default();
+                let mut pending = Vec::new();
+                let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+                    events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 1000.0))), ..Default::default()
+                }, |ui| with_test_edit_context(|edit| {
+                    edit.game = Some(game);
+                    draw_foundation_wrapped_function_row_contents(ui, "default function".to_owned(), view.clone(), 0, edit);
+                    assert!(edit.function_request.is_none());
+                    assert!(edit.h2_shader_param_ops.is_empty());
+                    pending.extend(edit.pending.iter().cloned());
+                    if ui.input(|input| input.pointer.primary_down()) {
+                        assert!(edit.pending.is_empty(), "the graph draft is not committed during a drag");
+                    }
+                }));
+                frame(Vec::new());
+                let output = frame(Vec::new());
+                for label in ["Input", "Range", "Time Period"] {
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)));
+                }
+                let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == function_plot_bg() && (rect.rect.width() - 445.0).abs() < 1.0 => Some(rect.rect), _ => None,
+                }).unwrap();
+                let point = TagFunctionEditor::from_function(view.function.clone()).curve_control_point(0, 0).unwrap();
+                let start = egui::pos2(egui::lerp(plot.left()..=plot.right(), point.0), egui::lerp(plot.bottom()..=plot.top(), point.1));
+                let end = egui::pos2(start.x, plot.center().y);
+                frame(vec![egui::Event::PointerMoved(start)]);
+                frame(vec![egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+                frame(vec![egui::Event::PointerMoved(end)]);
+                frame(vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+                assert_eq!(pending.len(), 1, "one blob edit per completed drag");
+                let edit = pending.last().expect("inline graph emits a blob field edit");
+                assert_eq!(edit.path, data_path);
+                apply_field_edit(&mut tag, &edit.path, &edit.input).unwrap();
+                let bytes = tag.root().field_path(&data_path).unwrap().as_data().unwrap().to_vec();
+                let edited = TagFunctionEditor::from_function(TagFunction::parse(&bytes).unwrap());
+                assert!((edited.curve_control_point(0, 0).unwrap().1 - 0.5).abs() < 0.01);
+            }
+        }
+        for game in [GameId::HaloReach, GameId::Halo4] {
+            assert!(!is_inline_object_function("object#0/functions#21[0]/default function#5/data", FunctionEncoding::Blob, Some(game)));
+        }
+    }
+
+    #[test]
+    fn h2_object_functions_edit_inline_without_wrapper_fields() {
+        let ctx = egui::Context::default();
+        let mut editor = TagFunctionEditor::from_function(h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap());
+        editor.set_function_type(FunctionType::Spline).unwrap();
+        let path = "functions[0]/default function/data";
+        let view = FunctionView::from_function(editor.into_function()).with_edit(foundation_function_edit_paths(path, FunctionEncoding::H2));
+        assert!(is_inline_h2_object_function(path, FunctionEncoding::H2));
+        assert!(!is_inline_h2_object_function("parameters[0]/animation properties[0]/function/data", FunctionEncoding::H2));
+        let initial = TagFunctionEditor::from_function(view.function.clone()).curve_control_point(0, 0).unwrap();
+        let mut pending = Vec::new();
+        let mut selection = None;
+        let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput {
+            events,
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 1000.0))),
+            ..Default::default()
+        }, |ui| {
+            ui.set_width(623.0);
+            with_test_edit_context(|edit| {
+                let id = edit.widget_id(("inline_function_selection", path));
+                draw_editable_inline_object_function(ui, view.clone(), true, edit);
+                if ui.input(|input| input.pointer.primary_down()) {
+                    assert!(edit.h2_shader_param_ops.is_empty(), "dragging only changes the live draft");
+                }
+                pending.extend(edit.h2_shader_param_ops.iter().cloned());
+                selection = ui.data(|data| data.get_temp::<(usize, usize)>(id));
+            });
+        });
+        frame(Vec::new());
+        let output = frame(Vec::new());
+        for label in ["Input", "Range", "Time Period"] {
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)));
+        }
+        let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if rect.fill == function_plot_bg() && (rect.rect.width() - 445.0).abs() < 1.0 => Some(rect.rect),
+            _ => None,
+        }).unwrap();
+        let start = egui::pos2(egui::lerp(plot.left()..=plot.right(), initial.0), egui::lerp(plot.bottom()..=plot.top(), initial.1));
+        let end = egui::pos2(start.x, plot.center().y);
+        frame(vec![egui::Event::PointerMoved(start)]);
+        frame(vec![egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+        frame(vec![egui::Event::PointerMoved(end)]);
+        frame(vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+        assert_eq!(pending.len(), 1, "the whole drag commits once on release");
+        let op = pending.last().expect("dragging inline queues a tag edit");
+        let H2ShaderParamOp::EditFunctionData { block_path, data } = op else { panic!("a byte-block edit"); };
+        assert_eq!(block_path, path);
+        let edited = TagFunctionEditor::from_function(h2_tag_function(data).unwrap());
+        assert!((edited.curve_control_point(0, 0).unwrap().1 - 0.5).abs() < 0.01);
+        assert_eq!(selection, Some((0, 0)));
+        assert_ne!(data_path_id(&view), data_path_id(&view.clone().with_edit(foundation_function_edit_paths("functions[1]/default function/data", FunctionEncoding::H2))));
     }
 
     /// Adding a block element that contains a `mapping_function` used to leave the

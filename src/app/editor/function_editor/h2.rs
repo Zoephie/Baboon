@@ -430,6 +430,7 @@ impl FunctionView {
 /// The original write targets and last-applied snapshot prevent selection or
 /// presentation-setting changes from redirecting an in-progress edit.
 pub(in crate::app) struct FunctionPopup {
+    pub(super) history: FunctionHistory,
     /// The tag the function belongs to — edits target this tag's doc.
     pub(super) tag_key: String,
     pub(super) title: String,
@@ -447,6 +448,17 @@ pub(in crate::app) struct FunctionPopup {
 }
 
 impl FunctionPopup {
+    pub(in crate::app) fn can_step_history(&self, redo: bool) -> bool {
+        self.editable && self.history.can_step(redo)
+    }
+
+    pub(in crate::app) fn step_history(&mut self, redo: bool) {
+        if self.editable && self.history.step(&mut self.view, redo) {
+            self.selected_graph = 0;
+            self.selected_point = 0;
+        }
+    }
+
     /// The tag the editor's edits go to.
     pub(in crate::app) fn tag_key(&self) -> &str {
         &self.tag_key
@@ -460,6 +472,7 @@ impl FunctionPopup {
     ) -> Self {
         let last_applied = FunctionSnapshot::from_view(&view);
         Self {
+            history: FunctionHistory::new(&view),
             tag_key,
             title,
             view,
@@ -480,6 +493,7 @@ impl FunctionPopup {
         let mut editor = TagFunctionEditor::from_function(self.view.function.clone());
         if editor.set_color(index, argb).is_ok() {
             self.view.function = editor.into_function();
+            self.history.observe(&self.view, false);
         }
     }
 }

@@ -6,6 +6,12 @@ use anyhow::Context as _;
 
 impl Baboon {
     pub(in crate::app) fn undo_current_tag(&mut self) {
+        if let Some(window) = self.dialogs.get_mut::<crate::app::editor::FunctionPopupWindow>()
+            && let Some(popup) = window.popup.as_mut()
+        {
+            popup.step_history(false);
+            return;
+        }
         if self.chimp_surface_is_active() {
             self.step_current_chimp_journal(false);
             return;
@@ -25,6 +31,12 @@ impl Baboon {
     }
 
     pub(in crate::app) fn redo_current_tag(&mut self) {
+        if let Some(window) = self.dialogs.get_mut::<crate::app::editor::FunctionPopupWindow>()
+            && let Some(popup) = window.popup.as_mut()
+        {
+            popup.step_history(true);
+            return;
+        }
         if self.chimp_surface_is_active() {
             self.step_current_chimp_journal(true);
             return;
@@ -94,6 +106,11 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_undo_current(&self) -> bool {
+        if let Some(window) = self.dialogs.get::<crate::app::editor::FunctionPopupWindow>()
+            && let Some(popup) = window.popup.as_ref()
+        {
+            return popup.can_step_history(false);
+        }
         if self.chimp_surface_is_active() {
             return self.can_step_chimp_journal(false);
         }
@@ -108,6 +125,11 @@ impl Baboon {
     }
 
     pub(in crate::app) fn can_redo_current(&self) -> bool {
+        if let Some(window) = self.dialogs.get::<crate::app::editor::FunctionPopupWindow>()
+            && let Some(popup) = window.popup.as_ref()
+        {
+            return popup.can_step_history(true);
+        }
         if self.chimp_surface_is_active() {
             return self.can_step_chimp_journal(true);
         }

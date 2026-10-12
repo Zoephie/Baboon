@@ -329,7 +329,7 @@ fn push_shader_override_create(edit: &mut FieldEditContext<'_>, row_edit: &Shade
     }
 }
 
-fn parse_shader_rgba(input: &str) -> Option<[f32; 4]> {
+pub(in crate::app) fn parse_shader_rgba(input: &str) -> Option<[f32; 4]> {
     let values = input
         .split(',')
         .map(str::trim)
@@ -684,6 +684,18 @@ fn draw_shader_grid_row_inner(
         .then(|| unused_delete.cloned().or_else(|| reset_op_for_row(row)))
         .flatten();
     let has_clear = !show_override && (function_reset.is_some() || reset.is_some());
+    let graph_preview = row.function.as_ref().or(row.constant_function_view.as_ref())
+        .filter(|view| view.function.function_type() != FunctionType::Constant);
+    let color_preview = !show_override && row.is_overridden && row.edit.as_ref().is_some_and(|edit| {
+        matches!(edit.kind,
+            ShaderRowEditKind::ColorField { .. }
+            | ShaderRowEditKind::FunctionColor { .. }
+            | ShaderRowEditKind::H2FunctionColor { .. }
+            | ShaderRowEditKind::H2CreateTemplateColor { .. }
+        ) && parse_shader_rgba(&edit.current).is_some()
+    });
+    let has_preview = !show_override && (graph_preview.is_some() || color_preview);
+    const PREVIEW_WIDTH: f32 = 96.0;
     let right_controls_width = if show_override {
         SHADER_ROW_RIGHT_PADDING
     } else if function_capable {
@@ -697,6 +709,8 @@ fn draw_shader_grid_row_inner(
         (available - label_width - indent - default_width - 16.0 - right_controls_width).max(40.0);
     let height = if ranged {
         64.0
+    } else if graph_preview.is_some() && !show_override {
+        shader_grid_row_height(ui, row, value_width).max(48.0)
     } else {
         shader_grid_row_height(ui, row, value_width)
     };
@@ -884,9 +898,13 @@ fn draw_shader_grid_row_inner(
         egui::pos2(value_left, default_rect.top()),
         egui::pos2(value_right, default_rect.bottom()),
     );
-    let mut value_rect = full_value_rect;
+    let mut content_value_rect = full_value_rect;
+    if has_preview {
+        content_value_rect.min.x += PREVIEW_WIDTH + 6.0;
+    }
+    let mut value_rect = content_value_rect;
     let range_input_rect = if has_range_input {
-        let field_width = (full_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
+        let field_width = (content_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
         value_rect.max.x = value_rect.left() + field_width;
         Some(egui::Rect::from_min_max(
             egui::pos2(value_rect.right() + 8.0, full_value_rect.top()),
@@ -897,7 +915,17 @@ fn draw_shader_grid_row_inner(
     };
     // Editable value cell when the row carries an edit path and the tag is
     // writable; otherwise the read-only painted cell.
-    if ranged && let Some(control) = range_control.as_ref() {
+    if !show_override && graph_preview.is_some() {
+        draw_shader_function_name(ui, value_rect, row, edit, false);
+    } else if color_preview {
+        ui.painter().text(
+            value_rect.left_center() + Vec2::new(4.0, 0.0),
+            Align2::LEFT_CENTER,
+            truncate_for_cell(&row.value_cell.text, value_rect.width() - 8.0),
+            egui::TextStyle::Body.resolve(ui.style()),
+            material_text(),
+        );
+    } else if ranged && let Some(control) = range_control.as_ref() {
         draw_shader_range_values(ui, value_rect, row, control, edit);
     } else if show_override && let Some(row_edit) = row.edit.as_ref() {
         shader_cell_scope(ui, value_rect, |ui| {
@@ -947,6 +975,44 @@ fn draw_shader_grid_row_inner(
         draw_shader_range_name(ui, input_rect, row, edit);
     }
 
+    if !show_override && let Some(function) = graph_preview {
+        let preview_rect = egui::Rect::from_min_size(
+            egui::pos2(full_value_rect.left(), rect.top() + 4.0),
+            Vec2::new(PREVIEW_WIDTH, rect.height() - 8.0),
+        );
+        let preview_response = function_graph_preview_button(
+            ui, preview_rect, &function.function,
+            edit.widget_id(("shader_function_preview", &row.label)),
+        ).on_hover_text("Open function editor");
+        if preview_response.clicked() {
+            *function_popup = Some(FunctionPopup::new(
+                tag_key.to_owned(), row.label.clone(), function.clone(),
+                editable && function.edit.is_some(),
+            ));
+        }
+    } else if color_preview && let Some(row_edit) = row.edit.as_ref() {
+        let preview_rect = egui::Rect::from_min_size(
+            egui::pos2(full_value_rect.left(), value_rect.top()),
+            Vec2::new(PREVIEW_WIDTH, BUTTON_HEIGHT),
+        );
+        // Reuse the color cell's popup/write targets, with a separate widget
+        // scope so the value cell and preview remain independently clickable.
+        if editable {
+            ui.push_id(("shader_color_preview", &row.label), |ui| {
+                draw_shader_editable_value(ui, preview_rect, &row.label, row_edit, edit, color_popup);
+            });
+        } else if ui.interact(preview_rect, edit.widget_id(("shader_color_preview", &row.label)), Sense::click())
+            .on_hover_text("View color").clicked()
+        {
+            *color_popup = row.value_cell.color.clone();
+        }
+        if let Some([r, g, b, _]) = parse_shader_rgba(&row_edit.current) {
+            paint_shader_color_preview(ui, preview_rect, Color32::from_rgb(
+                float_channel_to_u8(r), float_channel_to_u8(g), float_channel_to_u8(b),
+            ));
+        }
+    }
+
     if !show_override && let Some(function) = row.function.as_ref() {
         // Function viewer; the shared Clear control is placed last below.
         let button_rect = egui::Rect::from_min_size(
@@ -962,7 +1028,7 @@ fn draw_shader_grid_row_inner(
             true,
         )
         .on_hover_text("Click to open function viewer");
-        if response.clicked() || click_response.clicked() {
+        if click_response.clicked() {
             *function_popup = Some(FunctionPopup::new(
                 tag_key.to_owned(),
                 row.label.clone(),
@@ -1473,17 +1539,28 @@ fn draw_shader_range_name(
     row: &ShaderGridRow,
     edit: &mut FieldEditContext<'_>,
 ) {
+    draw_shader_function_name(ui, rect, row, edit, true);
+}
+
+fn draw_shader_function_name(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    row: &ShaderGridRow,
+    edit: &mut FieldEditContext<'_>,
+    range: bool,
+) {
     let view = row
         .function
         .as_ref()
         .or(row.constant_function_view.as_ref());
     let path = view
         .and_then(|view| view.edit.as_ref())
-        .map(|paths| paths.range_name.as_str())
+        .map(|paths| if range { paths.range_name.as_str() } else { paths.input_name.as_str() })
         .filter(|path| !path.is_empty());
-    let current = view.map(|view| view.range_name.as_str()).unwrap_or("");
-    let key = format!("{}|shader_range_name:{}", edit.tag_key, row.label);
-    let id = edit.widget_id(("shader_range_name", &row.label));
+    let current = view.map(|view| if range { view.range_name.as_str() } else { view.input_name.as_str() }).unwrap_or("");
+    let name = if range { "shader_range_name" } else { "shader_input_name" };
+    let key = format!("{}|{name}:{}", edit.tag_key, row.label);
+    let id = edit.widget_id((name, &row.label));
     let draft = edit.buffers.draft_mut(&key, current);
     shader_cell_scope(ui, rect, |ui| {
         ui.visuals_mut().extreme_bg_color = material_input();
@@ -1495,12 +1572,16 @@ fn draw_shader_range_name(
                 .min_size(Vec2::new(0.0, BUTTON_HEIGHT))
                 .font(egui::TextStyle::Body)
                 .vertical_align(egui::Align::Center)
-                .hint_text("Range input"),
+                .hint_text(if range { "Range input" } else { "Input" }),
         );
         if path.is_none() {
             response
                 .clone()
-                .on_hover_text("Enable range or add a function to edit its range input");
+                .on_hover_text(if range {
+                    "Enable range or add a function to edit its range input"
+                } else {
+                    "This function has no writable input field"
+                });
         }
         draft.note_response(&response);
         if draft.should_commit(ui, &response)
@@ -2833,6 +2914,12 @@ pub(super) fn shader_color_swatch_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 
+pub(in crate::app) fn paint_shader_color_preview(ui: &Ui, rect: egui::Rect, color: Color32) {
+    ui.painter().rect_filled(rect, 3.0, material_input());
+    ui.painter().rect_filled(rect.shrink(3.0), 0.0, Color32::from_rgb(color.r(), color.g(), color.b()));
+    ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, material_input_edge()), egui::StrokeKind::Inside);
+}
+
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
@@ -3033,6 +3120,70 @@ mod tests {
     use super::*;
     use crate::app::browser::draw_entry;
     use crate::app::editor::fields::with_test_edit_context;
+
+    #[test]
+    fn shader_graph_and_color_previews_open_their_editors() {
+        for graph in [true, false] {
+            let ctx = egui::Context::default();
+            let mut row = empty_shader_grid_row();
+            row.label = "preview_test".to_owned();
+            row.is_overridden = true;
+            if graph {
+                let mut editor = TagFunctionEditor::from_function(
+                    h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap(),
+                );
+                editor.set_function_type(FunctionType::Spline).unwrap();
+                row.function = Some(FunctionView::from_function(editor.function().clone()));
+            } else {
+                row.edit = Some(ShaderRowEdit {
+                    path: "parameters[0]/color".to_owned(),
+                    current: "1,0,0.5,1".to_owned(),
+                    kind: ShaderRowEditKind::ColorField { argb: true },
+                });
+            }
+            let mut color_popup = None;
+            let mut function_popup = None;
+            let mut frame = |events| crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 600.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| with_test_edit_context(|edit| {
+                    draw_shader_grid_row(ui, &row, 0, &mut color_popup, &mut function_popup, edit);
+                }),
+            );
+            frame(Vec::new());
+            let output = frame(Vec::new());
+            let center = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if (rect.rect.width() - 96.0).abs() < 0.1 => Some(rect.rect.center()),
+                _ => None,
+            }).expect("preview button is drawn");
+            if graph {
+                assert!(output.shapes.iter().any(|shape| matches!(
+                    &shape.shape, egui::Shape::Text(text)
+                        if text.galley.text() == "Input" && text.pos.x > center.x + 48.0
+                )), "the input field follows the preview in the override column");
+            }
+            frame(vec![egui::Event::PointerMoved(center)]);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            if graph {
+                assert_eq!(function_popup.as_ref().unwrap().tag_key(), "test");
+                assert!(color_popup.is_none());
+            } else {
+                assert!(color_popup.is_some());
+                assert!(function_popup.is_none());
+            }
+        }
+    }
 
     #[test]
     fn cached_function_row_uses_the_current_theme_background() {

@@ -46,10 +46,17 @@ pub(in crate::app) enum FunctionDraftColorTarget {
     Logical(usize),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FunctionDraftColorWrite {
     target: FunctionDraftColorTarget,
     original_alpha: u8,
+    inline: Option<InlineFunctionColorWrite>,
+}
+
+#[derive(Clone)]
+struct InlineFunctionColorWrite {
+    storage: FunctionDataStorage,
+    function: TagFunction,
 }
 
 /// Target for writing a picked color back into a plain color-valued field.
@@ -109,7 +116,7 @@ impl MaterialColorPopup {
     /// Whether OK sets a color in the open function editor's draft rather
     /// than writing to a tag.
     pub(in crate::app) fn edits_function_draft(&self) -> bool {
-        self.function_draft_color.is_some()
+        self.function_draft_color.as_ref().is_some_and(|target| target.inline.is_none())
     }
 
     pub(in crate::app) fn with_write(
@@ -183,8 +190,38 @@ impl MaterialColorPopup {
         self.function_draft_color = Some(FunctionDraftColorWrite {
             target,
             original_alpha,
+            inline: None,
         });
         self
+    }
+
+    pub(in crate::app) fn with_inline_function_target(
+        mut self, tag_key: &str, storage: FunctionDataStorage, function: TagFunction,
+    ) -> Self {
+        self.tag_key = tag_key.to_owned();
+        if let Some(target) = self.function_draft_color.as_mut() {
+            target.inline = Some(InlineFunctionColorWrite { storage, function });
+        }
+        self
+    }
+
+    fn function_color_result(&self, target: FunctionDraftColorWrite, argb: u32) -> Option<ColorPopupResult> {
+        if let Some(inline) = target.inline {
+            let FunctionDraftColorTarget::Logical(index) = target.target;
+            let mut editor = TagFunctionEditor::from_function(inline.function);
+            editor.set_color(index, argb).ok()?;
+            Some(match inline.storage {
+                FunctionDataStorage::Halo2ByteBlock(block_path) => ColorPopupResult::H2ShaderParamOp {
+                    tag_key: self.tag_key.clone(),
+                    op: H2ShaderParamOp::EditFunctionData { block_path, data: editor.to_bytes() },
+                },
+                FunctionDataStorage::DataField(path) => ColorPopupResult::FieldEdit {
+                    tag_key: self.tag_key.clone(), edit: PendingFieldEdit { path, input: encode_hex(&editor.to_bytes()) },
+                },
+            })
+        } else {
+            Some(ColorPopupResult::FunctionDraftColor { target: target.target, argb })
+        }
     }
 
     pub(in crate::app) fn with_alpha_available(mut self, available: bool) -> Self {
@@ -426,15 +463,12 @@ pub(in crate::app) fn draw_color_popup(
                         close = true;
                     }
                     if icon_text_button(ui, ButtonIcon::Confirm, "OK", true).clicked() {
-                        if let Some(target) = color.function_draft_color {
+                        if let Some(target) = color.function_draft_color.clone() {
                             let argb = ((target.original_alpha as u32) << 24)
                                 | ((float_channel_to_u8(color.red) as u32) << 16)
                                 | ((float_channel_to_u8(color.green) as u32) << 8)
                                 | float_channel_to_u8(color.blue) as u32;
-                            result = Some(ColorPopupResult::FunctionDraftColor {
-                                target: target.target,
-                                argb,
-                            });
+                            result = color.function_color_result(target, argb);
                         } else if let Some(field) = color.write_color_field.clone() {
                             // Plain color value: emit the channel string the field
                             // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
@@ -1619,6 +1653,50 @@ pub(in crate::app) fn truncate_for_cell(text: &str, width: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_blob_function_color_preserves_shape_and_writes_a_data_field() {
+        let bytes = decode_hex(&constant_function_hex(1.0)).unwrap();
+        let mut editor = TagFunctionEditor::from_function(TagFunction::parse(&bytes).unwrap());
+        editor.set_master_type(EngineMasterType::Periodic).unwrap();
+        editor.set_color_graph_type(ColorGraphType::TwoColor).unwrap();
+        editor.set_color(0, 0xff112233).unwrap();
+        editor.set_color(1, 0xff445566).unwrap();
+        let params = editor.periodic_params(0);
+        let popup = MaterialColorPopup::new("Function color", 0.0, 0.0, 0.0, 1.0)
+            .with_function_draft_color(FunctionDraftColorTarget::Logical(1), 0xff)
+            .with_inline_function_target("halo3_object", FunctionDataStorage::DataField("functions#21[0]/default function#5/data".to_owned()), editor.into_function());
+        assert!(!popup.edits_function_draft());
+        let result = popup.function_color_result(popup.function_draft_color.clone().unwrap(), 0xff00ff00).unwrap();
+        let ColorPopupResult::FieldEdit { tag_key, edit } = result else { panic!("H3+ inline colors write a data field"); };
+        assert_eq!(tag_key, "halo3_object");
+        assert_eq!(edit.path, "functions#21[0]/default function#5/data");
+        let function = TagFunction::parse(&decode_hex(&edit.input).unwrap()).unwrap();
+        let editor = TagFunctionEditor::from_function(function);
+        assert_eq!(editor.master_type(), EngineMasterType::Periodic);
+        assert_eq!(editor.periodic_params(0), params);
+        assert_eq!(editor.get_color(0), Some(0xff112233));
+        assert_eq!(editor.get_color(1), Some(0xff00ff00));
+    }
+
+    #[test]
+    fn inline_function_color_preserves_the_graph_and_writes_to_the_tag() {
+        let mut editor = TagFunctionEditor::from_function(h2_tag_function(&h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None)).unwrap());
+        editor.set_function_type(FunctionType::Periodic).unwrap();
+        let before = editor.to_bytes();
+        let popup = MaterialColorPopup::new("Function color", 1.0, 0.0, 0.0, 1.0)
+            .with_function_draft_color(FunctionDraftColorTarget::Logical(0), 0xff)
+            .with_inline_function_target("object", FunctionDataStorage::Halo2ByteBlock("functions[0]/default function/data".to_owned()), editor.into_function());
+        assert!(!popup.edits_function_draft());
+        let result = popup.function_color_result(popup.function_draft_color.clone().unwrap(), 0xff00ff00).unwrap();
+        let ColorPopupResult::H2ShaderParamOp { tag_key, op: H2ShaderParamOp::EditFunctionData { block_path, data } } = result else { panic!("inline color commits to the tag"); };
+        assert_eq!(tag_key, "object");
+        assert_eq!(block_path, "functions[0]/default function/data");
+        let after = TagFunctionEditor::from_function(h2_tag_function(&data).unwrap());
+        assert_eq!(after.function_type(), FunctionType::Periodic);
+        assert_eq!(after.get_color(0), Some(0xff00ff00));
+        assert_eq!(after.periodic_params(0), TagFunctionEditor::from_function(h2_tag_function(&before).unwrap()).periodic_params(0));
+    }
     use crate::app::editor::{decode_baboon_palette, decode_halo3_color_preferences, default_color_swatches, encode_baboon_palette, encode_halo3_color_preferences};
 
     #[test]

@@ -3,9 +3,7 @@
 
 use super::*;
 
-/// Curated function-input string_ids offered in the Input/Range combos.
-/// The current value is always added if missing, and free text is
-/// accepted, so this is only a convenience seed.
+/// Convenience suggestions for the Input/Range name menus.
 pub(in crate::app) const COMMON_FUNCTION_INPUTS: [&str; 7] = [
     "",
     "time",
@@ -36,109 +34,67 @@ pub(in crate::app) const COLOR_GRAPH_OPTIONS: [(ColorGraphType, &str); 5] = [
     (ColorGraphType::FourColor, "4-color"),
 ];
 
-/// Editable combo seeded from the curated list + current value, with a
-/// free-text box for arbitrary string_ids. Returns whether `value`
-/// changed.
-pub(in crate::app) fn seeded_name_combo(
+fn function_name_input(
     ui: &mut Ui,
     id: &str,
     value: &mut String,
     editable: bool,
+    _encoding: FunctionEncoding,
 ) -> bool {
-    if !editable {
-        foundation_input_cell(ui, if value.is_empty() { "none" } else { value }, 120.0);
-        return false;
-    }
-    let mut changed = false;
-    let mut options: Vec<String> = COMMON_FUNCTION_INPUTS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    if !value.is_empty() && !options.iter().any(|o| o == value) {
-        options.push(value.clone());
-    }
-    let (_, wheel_delta) = combo_box_with_scroll(
-        ui,
-        egui::ComboBox::from_id_salt(id)
-            .selected_text(if value.is_empty() {
-                "none".to_owned()
-            } else {
-                value.clone()
-            })
-            .width(120.0),
-        |ui| {
-            for opt in &options {
-                let label = if opt.is_empty() { "none" } else { opt.as_str() };
-                if ui.selectable_label(value == opt, label).clicked() {
-                    *value = opt.clone();
-                    changed = true;
-                }
-            }
-        },
-    );
-    if let Some(delta) = wheel_delta {
-        let current = options.iter().position(|opt| opt == value).unwrap_or(0);
-        if let Some(next) = combo_scroll_next_index(current, options.len(), delta) {
-            *value = options[next].clone();
-            changed = true;
-        }
-    }
-    let response = ui.add(egui::TextEdit::singleline(value).desired_width(90.0));
-    text_edit_cursor_to_start_on_tab_focus(ui, &response);
-    if response.changed() {
-        changed = true;
-    }
-    changed
-}
-
-pub(in crate::app) fn output_type_combo(
-    ui: &mut Ui,
-    output_index: &mut Option<i32>,
-    editable: bool,
-) -> bool {
-    let label = output_index
-        .and_then(|i| {
-            OUTPUT_TYPE_OPTIONS
-                .iter()
-                .find(|(v, _)| *v == i)
-                .map(|(_, n)| *n)
+    const MENU_WIDTH: f32 = 48.0;
+    let width = (ui.available_width() - MENU_WIDTH - ui.spacing().item_spacing.x).max(40.0);
+    let response = ui
+        .add_enabled_ui(editable, |ui| {
+            ui.add_sized(
+                Vec2::new(width, 24.0),
+                egui::TextEdit::singleline(value)
+                    .id_salt(id)
+                    .desired_width(width)
+                    .vertical_align(egui::Align::Center)
+                    .hint_text("none"),
+            )
         })
-        .unwrap_or("—");
-    if !editable {
-        foundation_input_cell(ui, label, 120.0);
-        return false;
-    }
-    let mut changed = false;
-    let (_, wheel_delta) = combo_box_with_scroll(
-        ui,
-        egui::ComboBox::from_id_salt("fn_output")
-            .selected_text(label)
-            .width(120.0),
-        |ui| {
-            for (value, name) in OUTPUT_TYPE_OPTIONS {
-                if ui
-                    .selectable_label(*output_index == Some(value), name)
-                    .clicked()
-                    && *output_index != Some(value)
-                {
-                    *output_index = Some(value);
-                    changed = true;
-                }
-            }
-        },
-    );
-    if let Some(delta) = wheel_delta {
-        let current_index = OUTPUT_TYPE_OPTIONS
-            .iter()
-            .position(|(value, _)| *output_index == Some(*value))
-            .unwrap_or(0);
-        if let Some(next) = combo_scroll_next_index(current_index, OUTPUT_TYPE_OPTIONS.len(), delta)
-        {
-            let value = OUTPUT_TYPE_OPTIONS[next].0;
-            *output_index = Some(value);
-            changed = true;
-        }
-    }
+        .inner;
+    text_edit_cursor_to_start_on_tab_focus(ui, &response);
+    let mut changed = response.changed();
+    ui.add_enabled_ui(editable, |ui| {
+        ui.push_id((id, "suggestions"), |ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(MENU_WIDTH, 24.0),
+                egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
+                |ui| {
+                    icon_text_dropdown_button(ui, ButtonIcon::Function, "", |ui| {
+                        ui.label(
+                            RichText::new(if id.ends_with("_range") {
+                                "Range Presets"
+                            } else {
+                                "Input Presets"
+                            })
+                            .color(subtle_dark())
+                            .strong(),
+                        );
+                        for suggestion in COMMON_FUNCTION_INPUTS {
+                            if ui
+                                .selectable_label(
+                                    value == suggestion,
+                                    if suggestion.is_empty() {
+                                        "none"
+                                    } else {
+                                        suggestion
+                                    },
+                                )
+                                .clicked()
+                            {
+                                *value = suggestion.to_owned();
+                                changed = true;
+                                close_menu(ui);
+                            }
+                        }
+                    });
+                },
+            );
+        });
+    });
     changed
 }
 
@@ -159,13 +115,13 @@ fn foundation_master_type_combo(
 ) -> bool {
     let current = editor.master_type();
     if !editable {
-        foundation_input_cell(ui, master_label(current), 130.0);
+        foundation_input_cell(ui, master_label(current), ui.available_width());
         return false;
     }
     let mut changed = false;
     egui::ComboBox::from_id_salt("foundation_fn_type")
         .selected_text(master_label(current))
-        .width(130.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for master in [
                 EngineMasterType::Basic,
@@ -235,13 +191,13 @@ fn color_type_combo(
 ) -> bool {
     let current = editor.color_graph_type();
     if !editable {
-        foundation_input_cell(ui, color_type_label(editor, current), 120.0);
+        foundation_input_cell(ui, color_type_label(editor, current), ui.available_width());
         return false;
     }
     let mut changed = false;
     egui::ComboBox::from_id_salt("function_color_type")
         .selected_text(color_type_label(editor, current))
-        .width(120.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (kind, _) in COLOR_GRAPH_OPTIONS {
                 if !choices.allows(kind) && kind != current {
@@ -270,13 +226,13 @@ fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable:
     let current = editor.function_type();
     let label = function_type_name(current);
     if !editable {
-        foundation_input_cell(ui, label, 130.0);
+        foundation_input_cell(ui, label, ui.available_width());
         return false;
     }
     let mut changed = false;
     egui::ComboBox::from_id_salt("h2_function_type")
         .selected_text(label)
-        .width(130.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for kind in FUNCTION_TYPES {
                 if ui
@@ -292,8 +248,7 @@ fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable:
     changed
 }
 
-/// The function editor, for every game: drawn in the f() window and, read-only,
-/// as the inline preview in the tag editor.
+/// The full function editor shown in the f() window and shared inline previews.
 pub(in crate::app) fn draw_function_editor(
     ui: &mut Ui,
     view: &mut FunctionView,
@@ -302,8 +257,129 @@ pub(in crate::app) fn draw_function_editor(
     selected_point: &mut usize,
     color_popup: &mut Option<MaterialColorPopup>,
 ) -> bool {
+    draw_function_editor_contents(
+        ui,
+        view,
+        editable,
+        selected_graph,
+        selected_point,
+        color_popup,
+        true,
+    )
+}
+
+pub(in crate::app) fn draw_inline_mapping_function_editor(
+    ui: &mut Ui,
+    view: &mut FunctionView,
+    editable: bool,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+) -> bool {
+    draw_function_editor_contents(
+        ui,
+        view,
+        editable,
+        selected_graph,
+        selected_point,
+        color_popup,
+        false,
+    )
+}
+
+fn draw_function_type_row(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    color_types: ColorTypeChoices,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+    graph_view: &mut FunctionGraphView,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.vertical(|ui| {
+            ui.set_width(FUNCTION_GRAPH_SIZE.x);
+            ui.label(RichText::new("Function Type").strong().color(text_dark()));
+            ui.horizontal(|ui| {
+                let has_options = editor.function().as_blob().is_some()
+                    && editor.master_type() == EngineMasterType::Curve;
+                let width = FUNCTION_GRAPH_SIZE.x - 32.0 - if has_options { 32.0 } else { 0.0 };
+                let retyped = ui
+                    .scope(|ui| {
+                        ui.set_width(width);
+                        match editor.function().encoding() {
+                            FunctionEncoding::Blob => {
+                                foundation_master_type_combo(ui, editor, editable)
+                            }
+                            FunctionEncoding::H2 => h2_function_type_combo(ui, editor, editable),
+                        }
+                    })
+                    .inner;
+                if retyped {
+                    *selected_graph = 0;
+                    *selected_point = 0;
+                    changed = true;
+                }
+                icon_menu_button(ui, ButtonIcon::Find, "Zoom and grid", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut graph_view.zoom_percent, 50.0..=100.0)
+                            .text("Zoom")
+                            .suffix("%")
+                            .step_by(1.0),
+                    );
+                    ui.separator();
+                    ui.label(RichText::new("Grid").color(text_dark().gamma_multiply(0.5)));
+                    for (grid, label) in [
+                        (FunctionGrid::Off, "Off"),
+                        (FunctionGrid::Ten, "10×10"),
+                        (FunctionGrid::Twenty, "20×20"),
+                    ] {
+                        ui.scope(|ui| {
+                            ui.spacing_mut().button_padding = Vec2::new(BUTTON_TEXT_PADDING_X, 2.0);
+                            if ui
+                                .add(egui::Button::selectable(graph_view.grid == grid, label))
+                                .clicked()
+                            {
+                                graph_view.grid = grid;
+                            }
+                        });
+                    }
+                });
+                if has_options {
+                    icon_menu_button(ui, ButtonIcon::Other, "Curve options", |ui| {
+                        changed |=
+                            draw_curve_panel(ui, editor, editable, selected_graph, selected_point);
+                    });
+                }
+            });
+        });
+        ui.vertical(|ui| {
+            ui.set_width(150.0);
+            ui.label(RichText::new("Output Type").strong().color(text_dark()));
+            changed |= color_type_combo(ui, editor, color_types, editable);
+        });
+    });
+    changed
+}
+
+fn draw_function_editor_contents(
+    ui: &mut Ui,
+    view: &mut FunctionView,
+    editable: bool,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+    color_popup: &mut Option<MaterialColorPopup>,
+    show_wrapper: bool,
+) -> bool {
     let mut changed = false;
     let mut editor = TagFunctionEditor::from_function(view.function.clone());
+    let graph_view_id = ui.id().with("function_graph_view");
+    let mut graph_view = ui
+        .data(|data| data.get_temp::<FunctionGraphView>(graph_view_id))
+        .unwrap_or_default();
+    ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
     let input_editable = editable
         && view
             .edit
@@ -314,122 +390,357 @@ pub(in crate::app) fn draw_function_editor(
             .edit
             .as_ref()
             .is_some_and(|paths| !paths.range_name.is_empty());
-    let output_editable = editable
-        && view
-            .edit
-            .as_ref()
-            .is_some_and(|paths| !paths.parameter_type.is_empty());
     let time_editable = editable
         && view
             .edit
             .as_ref()
             .is_some_and(|paths| !paths.time_period.is_empty());
 
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Input:").color(text_dark()).small());
-        changed |= seeded_name_combo(
+    if !show_wrapper {
+        changed |= draw_function_type_row(
             ui,
-            "foundation_fn_input",
-            &mut view.input_name,
-            input_editable,
+            &mut editor,
+            editable,
+            view.color_types,
+            selected_graph,
+            selected_point,
+            &mut graph_view,
         );
-        let mut ranged = editor.is_ranged();
-        if ui
-            .add_enabled(editable, egui::Checkbox::new(&mut ranged, "Range:"))
-            .changed()
-            && editor.set_ranged(ranged).is_ok()
-        {
-            *selected_graph = (*selected_graph).min(editor.graph_count().saturating_sub(1));
-            changed = true;
-        }
-        if ranged {
-            changed |= seeded_name_combo(
-                ui,
-                "foundation_fn_range",
-                &mut view.range_name,
-                range_editable,
-            );
-        } else {
-            foundation_input_cell(ui, "none", 120.0);
-        }
-        // The output enum is the H3+ render-method parameter type; Halo 2's
-        // animation type is not part of the function.
-        if editor.function().encoding() == FunctionEncoding::Blob {
-            ui.label(RichText::new("Output:").color(text_dark()).small());
-            changed |= output_type_combo(ui, &mut view.output_index, output_editable);
-        }
-        ui.label(RichText::new("Function type:").color(text_dark()).small());
-        let retyped = match editor.function().encoding() {
-            FunctionEncoding::Blob => foundation_master_type_combo(ui, &mut editor, editable),
-            FunctionEncoding::H2 => h2_function_type_combo(ui, &mut editor, editable),
-        };
-        if retyped {
-            *selected_graph = 0;
-            *selected_point = 0;
-            changed = true;
-        }
-        ui.label(RichText::new("Color:").color(text_dark()).small());
-        changed |= color_type_combo(ui, &mut editor, view.color_types, editable);
-    });
+    }
+    if show_wrapper {
+        egui::Frame::new()
+            .inner_margin(4.0)
+            .corner_radius(4.0)
+            .stroke(Stroke::new(1.0, foundation_input_edge()))
+            .show(ui, |ui| {
+                ui.columns(2, |columns| {
+                    let mut input_height = 0.0;
+                    for slot in 0..2 {
+                        let fill = if slot == 0 {
+                            Color32::from_rgba_unmultiplied(42, 190, 72, 26)
+                        } else {
+                            Color32::from_rgba_unmultiplied(220, 55, 55, 26)
+                        };
+                        let panel = egui::Frame::new()
+                            .fill(fill)
+                            .corner_radius(4.0)
+                            .inner_margin(8.0)
+                            .show(&mut columns[slot], |ui| {
+                                if slot == 1 {
+                                    ui.set_min_height(input_height);
+                                }
+                                if slot == 0 {
+                                    ui.horizontal(|ui| {
+                                        ui.set_min_height(24.0);
+                                        ui.label(
+                                            RichText::new("Input").strong().color(text_dark()),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        changed |= function_name_input(
+                                            ui,
+                                            "foundation_fn_input",
+                                            &mut view.input_name,
+                                            input_editable,
+                                            editor.function().encoding(),
+                                        );
+                                    });
+                                } else {
+                                    let mut ranged = editor.is_ranged();
+                                    ui.horizontal(|ui| {
+                                        ui.set_min_height(24.0);
+                                        if ui
+                                            .add_enabled(
+                                                editable,
+                                                egui::Checkbox::without_text(&mut ranged),
+                                            )
+                                            .changed()
+                                            && set_function_ranged(&mut editor, ranged)
+                                        {
+                                            *selected_graph = (*selected_graph)
+                                                .min(editor.graph_count().saturating_sub(1));
+                                            changed = true;
+                                        }
+                                        ui.label(
+                                            RichText::new("Range").strong().color(text_dark()),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        if ranged {
+                                            changed |= function_name_input(
+                                                ui,
+                                                "foundation_fn_range",
+                                                &mut view.range_name,
+                                                range_editable,
+                                                editor.function().encoding(),
+                                            );
+                                        } else {
+                                            changed |= function_name_input(
+                                                ui,
+                                                "foundation_fn_range",
+                                                &mut view.range_name,
+                                                false,
+                                                editor.function().encoding(),
+                                            );
+                                        }
+                                    });
+                                }
+                                if slot < editor.graph_count() {
+                                    changed |= draw_function_slot(ui, &mut editor, editable, slot);
+                                }
+                            });
+                        if slot == 0 {
+                            input_height = (panel.response.rect.height() - 16.0).max(0.0);
+                        }
+                    }
+                });
+            });
+    } else if matches!(
+        editor.master_type(),
+        EngineMasterType::Periodic | EngineMasterType::Exponent | EngineMasterType::Transition
+    ) {
+        ui.add_space(4.0);
+        ui.columns(editor.graph_count(), |columns| {
+            for (slot, column) in columns.iter_mut().enumerate() {
+                changed |= draw_function_slot(column, &mut editor, editable, slot);
+            }
+        });
+    }
+    if show_wrapper {
+        ui.add_space(4.0);
+        changed |= draw_function_type_row(
+            ui,
+            &mut editor,
+            editable,
+            view.color_types,
+            selected_graph,
+            selected_point,
+            &mut graph_view,
+        );
+    }
 
+    ui.data_mut(|data| data.insert_temp(graph_view_id, graph_view));
     let master = editor.master_type();
     if master == EngineMasterType::Basic {
         // A constant's value is its output range (min, and max when ranged).
         ui.add_space(8.0);
-        changed |= draw_foundation_right_rail(ui, &mut editor, editable, color_popup);
+        changed |= draw_foundation_right_rail(ui, &mut editor, editable, color_popup, None);
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("time period").color(text_dark()).small());
-            changed |= ui
-                .add_enabled(
-                    time_editable,
-                    egui::DragValue::new(&mut view.time_period_in_seconds)
-                        .speed(0.1)
-                        .range(0.0..=f32::MAX),
-                )
-                .changed();
-            ui.label(RichText::new("seconds").color(subtle_dark()).small());
-        });
+        if show_wrapper {
+            changed |=
+                draw_function_time_period(ui, &mut view.time_period_in_seconds, time_editable);
+        }
         if changed {
             view.function = editor.into_function();
         }
         return changed;
     }
 
-    ui.add_space(6.0);
-    ui.horizontal_top(|ui| {
-        changed |= draw_foundation_graph(ui, &mut editor, editable, selected_graph, selected_point);
-        ui.add_space(8.0);
-        changed |= draw_foundation_right_rail(ui, &mut editor, editable, color_popup);
+    ui.add_space(4.0);
+    let mut preview_rect = None;
+    let mut selection_rect = None;
+    let row = ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let mut left_bottom = 0.0;
+        let viewport = egui::Rect::from_min_size(ui.cursor().min, FUNCTION_GRAPH_SIZE)
+            .shrink2(FUNCTION_PLOT_INSET);
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(FUNCTION_GRAPH_SIZE.x);
+            changed |= draw_foundation_graph_with_preview(
+                ui,
+                &mut editor,
+                editable,
+                selected_graph,
+                selected_point,
+                &mut graph_view,
+                show_wrapper,
+            );
+            if !show_wrapper {
+                ui.add_space(8.0);
+                preview_rect = Some(
+                    ui.allocate_exact_size(Vec2::new(FUNCTION_GRAPH_SIZE.x, 52.0), Sense::hover())
+                        .0,
+                );
+            }
+            if show_wrapper {
+                ui.add_space(8.0);
+                changed |=
+                    draw_function_time_period(ui, &mut view.time_period_in_seconds, time_editable);
+            }
+            left_bottom = ui.min_rect().bottom();
+        });
+        let plot = egui::Rect::from_center_size(
+            viewport.center(),
+            viewport.size() * (graph_view.zoom_percent / 100.0),
+        );
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(150.0);
+            changed |= draw_foundation_right_rail(
+                ui,
+                &mut editor,
+                editable,
+                color_popup,
+                Some((plot.top(), plot.bottom())),
+            );
+            ui.add_space(8.0);
+            let selection_top = ui.cursor().top();
+            let selection_frame = egui::Frame::new()
+                .inner_margin(6.0)
+                .corner_radius(4.0)
+                .stroke(Stroke::new(1.0, foundation_input_edge()))
+                .show(ui, |ui| {
+                    ui.set_width(136.0);
+                    ui.set_min_height((left_bottom - selection_top - 14.0).max(0.0));
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.spacing_mut().interact_size.y = 20.0;
+                    if master == EngineMasterType::Curve {
+                        changed |= draw_curve_selection_with_view(
+                            ui,
+                            &mut editor,
+                            editable,
+                            selected_graph,
+                            selected_point,
+                            graph_view,
+                        );
+                    } else {
+                        ui.label(RichText::new("Selected Point").color(text_dark()));
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("No selectable points").color(subtle_dark()));
+                    }
+                });
+            selection_rect = Some(selection_frame.response.rect);
+        });
     });
 
-    ui.add_space(8.0);
-    match master {
-        EngineMasterType::Curve => {
-            changed |= draw_curve_panel(ui, &mut editor, editable, selected_graph, selected_point)
+    if let Some(mut rect) = preview_rect {
+        if let Some(selection) = selection_rect {
+            rect.min.y = selection.top();
         }
-        EngineMasterType::Periodic => changed |= draw_periodic_panel(ui, &mut editor, editable),
-        EngineMasterType::Exponent => changed |= draw_exponent_panel(ui, &mut editor, editable),
-        EngineMasterType::Transition => changed |= draw_transition_panel(ui, &mut editor, editable),
-        EngineMasterType::Basic => unreachable!(),
+        rect.max.y = row.response.rect.bottom();
+        let width =
+            (FUNCTION_GRAPH_SIZE.x - FUNCTION_PLOT_INSET.x * 2.0) * graph_view.zoom_percent / 100.0;
+        draw_function_preview_container(ui.painter(), rect, width, editor.function());
     }
+
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("time period").color(text_dark()).small());
-        changed |= ui
-            .add_enabled(
-                time_editable,
-                egui::DragValue::new(&mut view.time_period_in_seconds)
-                    .speed(0.1)
-                    .range(0.0..=f32::MAX),
-            )
-            .changed();
-        ui.label(RichText::new("seconds").color(subtle_dark()).small());
-    });
+    draw_function_shortcuts(ui, &editor, editable);
+
+    ui.data_mut(|data| data.insert_temp(graph_view_id, graph_view));
     if changed {
         view.function = editor.into_function();
     }
     changed
+}
+
+fn draw_function_shortcuts(
+    ui: &mut Ui,
+    editor: &TagFunctionEditor,
+    editable: bool,
+) {
+    let curve = editor.master_type() == EngineMasterType::Curve;
+    let can_add = editable
+        && curve
+        && (editor.function().as_blob().is_some() || editor.curve_points_are_editable_structure());
+    let can_remove = can_add;
+    let paired_handles = editable && curve && editor.function().as_blob().is_some();
+    let can_snap = editable && curve;
+    egui::Frame::new()
+        .inner_margin(8.0)
+        .corner_radius(4.0)
+        .fill(foundation_group_bg())
+        .stroke(Stroke::new(1.0, foundation_input_edge()))
+        .show(ui, |ui| {
+            ui.set_width(FUNCTION_GRAPH_SIZE.x + 8.0 + 150.0 - 18.0);
+            ui.spacing_mut().interact_size.y = 16.0;
+            ui.spacing_mut().item_spacing = Vec2::new(16.0, 2.0);
+            if can_snap || can_add || can_remove {
+                ui.horizontal_wrapped(|ui| {
+                    if can_snap {
+                        function_shortcut_hint(ui, "Ctrl + Drag", "Snap to selected grid");
+                    }
+                    if can_add {
+                        function_shortcut_hint(ui, "Shift + Click", "Add point");
+                    }
+                    if can_remove {
+                        function_shortcut_hint(ui, "Alt + Click", "Remove point");
+                    }
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                if paired_handles {
+                    function_shortcut_hint(ui, "Shift + Drag", "Mirror angle & length");
+                    function_shortcut_hint(ui, "Alt + Drag", "Decouple angle");
+                }
+                function_shortcut_hint(ui, "Scroll Wheel", "Zoom");
+            });
+        });
+}
+
+fn function_shortcut_hint(ui: &mut Ui, keys: &str, action: &str) {
+    let mut text = egui::text::LayoutJob::default();
+    let regular = egui::TextStyle::Small.resolve(ui.style());
+    let bold = bold_font(regular.size);
+    // Standalone UI contexts may not install the app's named font families.
+    let key_font = if ui.fonts(|fonts| fonts.families().contains(&bold.family)) {
+        bold
+    } else {
+        regular
+    };
+    RichText::new(format!("{keys}: "))
+        .font(key_font)
+        .color(text_dark())
+        .append_to(
+            &mut text,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+    RichText::new(action).small().color(text_dark()).append_to(
+        &mut text,
+        ui.style(),
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    );
+    ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
+}
+fn draw_function_time_period(ui: &mut Ui, value: &mut f32, editable: bool) -> bool {
+    // Include the frame's horizontal padding and 1pt border in the graph width.
+    let content_width = FUNCTION_GRAPH_SIZE.x - 22.0;
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .corner_radius(4.0)
+        .stroke(Stroke::new(1.0, foundation_input_edge()))
+        .show(ui, |ui| {
+            ui.set_width(content_width);
+            ui.allocate_ui_with_layout(
+                Vec2::new(content_width, 24.0),
+                egui::Layout::left_to_right(egui::Align::Center)
+                    .with_main_align(egui::Align::Min),
+                |ui| {
+                ui.label(RichText::new("Time Period").color(text_dark()));
+                let changed = ui
+                    .add_enabled_ui(editable, |ui| {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new((ui.available_width() - 65.0).max(40.0), 24.0),
+                            egui::Layout::left_to_right(egui::Align::Center)
+                                .with_main_align(egui::Align::Min)
+                                .with_main_justify(true),
+                            |ui| {
+                                ui.add(egui::DragValue::new(value).speed(0.1).range(0.0..=f32::MAX))
+                            },
+                        )
+                        .inner
+                        .changed()
+                    })
+                    .inner;
+                ui.label(RichText::new("seconds").color(subtle_dark()));
+                changed
+            })
+            .inner
+        })
+        .inner
 }
 
 fn draw_foundation_right_rail(
@@ -437,39 +748,38 @@ fn draw_foundation_right_rail(
     editor: &mut TagFunctionEditor,
     editable: bool,
     color_popup: &mut Option<MaterialColorPopup>,
+    plot_bounds: Option<(f32, f32)>,
 ) -> bool {
     let mut changed = false;
-    ui.vertical(|ui| {
+    let scalar = editor.clamp_range().is_some();
+    let mut draw_rail = |ui: &mut Ui| {
         if let Some((mut min, mut max)) = editor.clamp_range() {
+            align_function_rail_row(ui, plot_bounds, 0, 2, ui.spacing().interact_size.y);
             if labeled_drag(ui, "Max", &mut max, editable) {
                 changed |= editor.set_clamp_range(min, max).is_ok();
             }
+            align_function_rail_row(ui, plot_bounds, 1, 2, ui.spacing().interact_size.y);
             if labeled_drag(ui, "Min", &mut min, editable) {
                 changed |= editor.set_clamp_range(min, max).is_ok();
             }
         } else {
-            for index in (0..editor.color_count()).rev() {
+            let count = editor.color_count();
+            for (row, index) in (0..count).rev().enumerate() {
                 let Some(argb) = editor.get_color(index) else {
                     continue;
                 };
                 let alpha = (argb >> 24) as u8;
                 let color = color32_from_argb(argb);
+                align_function_rail_row(ui, plot_bounds, row, count, 24.0);
                 let (rect, response) = ui.allocate_exact_size(
-                    Vec2::splat(24.0),
+                    Vec2::new(ui.available_width().max(96.0), 24.0),
                     if editable {
                         Sense::click()
                     } else {
                         Sense::hover()
                     },
                 );
-                ui.painter().rect_filled(rect, 0.0, color);
-                ui.painter()
-                    .rect_stroke(
-                        rect,
-                        0.0,
-                        Stroke::new(1.0_f32, foundation_input_edge()),
-                        egui::StrokeKind::Middle,
-                    );
+                paint_shader_color_preview(ui, rect, color);
                 if response.clicked() {
                     *color_popup = Some(
                         MaterialColorPopup::new(
@@ -484,8 +794,40 @@ fn draw_foundation_right_rail(
                 }
             }
         }
+    };
+    ui.vertical(|ui| {
+        if plot_bounds.is_some() {
+            egui::Frame::new()
+                .inner_margin(4.0)
+                .corner_radius(4.0)
+                .stroke(Stroke::new(1.0, foundation_input_edge()))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width().max(if scalar { 110.0 } else { 24.0 }));
+                    // Frame padding and stroke add 10pt to the content height.
+                    ui.set_min_height(FUNCTION_GRAPH_SIZE.y - 10.0);
+                    draw_rail(ui);
+                });
+        } else {
+            draw_rail(ui);
+        }
     });
     changed
+}
+
+fn align_function_rail_row(
+    ui: &mut Ui,
+    plot_bounds: Option<(f32, f32)>,
+    row: usize,
+    count: usize,
+    height: f32,
+) {
+    if let Some((top, bottom)) = plot_bounds {
+        // Keep the first/last fields inside the plot edges, with intermediate
+        // fields centered at equally spaced positions along the gradient.
+        let position = if count > 1 { row as f32 / (count - 1) as f32 } else { 0.0 };
+        let y = egui::lerp(top..=(bottom - height), position);
+        ui.add_space((y - ui.cursor().top()).max(0.0));
+    }
 }
 
 /// Returns whether the color graph type changed (Halo 2 functions refuse it).
@@ -528,7 +870,7 @@ fn sample_argb_stops(stops: &[u32], t: f32) -> u32 {
     (lerp(24) << 24) | (lerp(16) << 16) | (lerp(8) << 8) | lerp(0)
 }
 
-fn set_editor_flag(editor: &mut TagFunctionEditor, flag: u8, value: bool) {
+pub(super) fn set_editor_flag(editor: &mut TagFunctionEditor, flag: u8, value: bool) {
     let mut function = editor.function().clone();
     if let Some(blob) = function.as_blob_mut() {
         blob.set_flag(flag, value);
@@ -545,12 +887,134 @@ fn labeled_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bo
                 .small(),
         );
         changed = ui
-            .add_enabled(
-                editable,
-                egui::DragValue::new(value).speed(0.01).max_decimals(5),
-            )
-            .changed();
+            .add_enabled_ui(editable, |ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), 24.0),
+                    egui::Layout::left_to_right(egui::Align::Center)
+                        .with_main_align(egui::Align::Min)
+                        .with_main_justify(true),
+                    |ui| ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(5)),
+                )
+                .inner
+                .changed()
+            })
+            .inner;
     });
+    changed
+}
+
+#[cfg(test)]
+fn draw_curve_selection(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+) -> bool {
+    draw_curve_selection_with_view(
+        ui,
+        editor,
+        editable,
+        selected_graph,
+        selected_point,
+        FunctionGraphView::default(),
+    )
+}
+
+fn draw_curve_selection_with_view(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+    graph_view: FunctionGraphView,
+) -> bool {
+    let mut changed = false;
+    let selection_bottom = ui.min_rect().bottom();
+    let graph = (*selected_graph).min(editor.graph_count().saturating_sub(1));
+    let point_count = editor.curve_control_point_count(graph).unwrap_or(0);
+    *selected_point = (*selected_point).min(point_count.saturating_sub(1));
+    if let Some((mut x, mut y)) = editor.curve_control_point(graph, *selected_point) {
+        ui.horizontal(|ui| {
+            let (marker, marker_response) =
+                ui.allocate_exact_size(Vec2::splat(12.0), Sense::click());
+            draw_function_selection_marker(
+                ui.painter(),
+                marker.center(),
+                editor,
+                graph,
+                *selected_point,
+            );
+            let point_kind = if function_point_is_on_curve(editor, graph, *selected_point) {
+                "Point"
+            } else {
+                "Curve handle"
+            };
+            if marker_response
+                .on_hover_text(format!(
+                    "{point_kind} on the {} curve. Click to switch curves.",
+                    if graph == 0 { "green" } else { "red" }
+                ))
+                .clicked()
+            {
+                *selected_graph = (graph + 1) % editor.graph_count().max(1);
+            }
+            ui.label(RichText::new("Selected Point").color(text_dark()));
+        });
+        let x_movable = editor.curve_point_x_movable(graph, *selected_point);
+        if grouped_function_drag(ui, "X", &mut x, editable && x_movable) {
+            changed |= move_function_point_in_view(
+                editor,
+                graph,
+                *selected_point,
+                (x, y),
+                ui.input(|input| input.modifiers),
+                graph_view,
+            );
+            if let Some(value) = editor.curve_control_point(graph, *selected_point) {
+                (x, y) = value;
+            }
+        }
+        if grouped_function_drag(ui, "Y", &mut y, editable) {
+            changed |= move_function_point_in_view(
+                editor,
+                graph,
+                *selected_point,
+                (x, y),
+                ui.input(|input| input.modifiers),
+                graph_view,
+            );
+        }
+        if let Some(segment) = function_join_segment(editor, graph, *selected_point) {
+            let mode = function_join_mode(editor, graph, segment);
+            let curved_join = [segment - 1, segment].into_iter().all(|index| {
+                editor
+                    .curve_segment_type(graph, index)
+                    .is_some_and(|kind| kind != CurveSegmentType::Linear)
+            });
+            ui.add_space(
+                (selection_bottom - ui.cursor().top() - ui.spacing().interact_size.y).max(4.0),
+            );
+            ui.horizontal(|ui| {
+                for (target, label) in [
+                    (CurvePointMode::Corner, "Corner"),
+                    (CurvePointMode::Smooth, "Smooth"),
+                ] {
+                    if ui
+                        .add_enabled(
+                            editable && curved_join,
+                            egui::Button::selectable(mode == target, label),
+                        )
+                        .clicked()
+                        && mode != target
+                        && set_function_join_mode(editor, graph, segment, target, graph_view)
+                    {
+                        changed = true;
+                    }
+                }
+            });
+        }
+    }
     changed
 }
 
@@ -558,205 +1022,150 @@ fn draw_curve_panel(
     ui: &mut Ui,
     editor: &mut TagFunctionEditor,
     editable: bool,
-    selected_graph: &mut usize,
-    selected_point: &mut usize,
+    _selected_graph: &mut usize,
+    _selected_point: &mut usize,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        for graph in 0..editor.graph_count() {
-            let label = if graph == 0 {
-                "Graph 1 (green)"
-            } else {
-                "Graph 2 (red)"
-            };
-            ui.selectable_value(selected_graph, graph, label);
-        }
-    });
-    let graph = (*selected_graph).min(editor.graph_count().saturating_sub(1));
-    let point_count = editor.curve_control_point_count(graph).unwrap_or(0);
-    *selected_point = (*selected_point).min(point_count.saturating_sub(1));
-    if let Some((mut x, mut y)) = editor.curve_control_point(graph, *selected_point) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Selected point").color(text_dark()).strong());
-            let x_movable = editor.curve_point_x_movable(graph, *selected_point);
-            if labeled_drag(ui, "X", &mut x, editable && x_movable)
-                && editor
-                    .set_curve_control_point(graph, *selected_point, (x, y))
-                    .is_ok()
-            {
-                changed = true;
-            }
-            if labeled_drag(ui, "Y", &mut y, editable)
-                && editor
-                    .set_curve_control_point(graph, *selected_point, (x, y))
-                    .is_ok()
-            {
-                changed = true;
-            }
+    ui.vertical(|ui| {
+        // H3+ header flags follow a separate, vertically stacked section.
+        if editor.function().encoding() != FunctionEncoding::H2 {
+            ui.label(RichText::new("Curve Options").color(text_dark().gamma_multiply(0.5)));
+            let mut clamped = editor.is_clamped();
             if ui
-                .add_enabled(
-                    editable
-                        && editor.curve_points_are_editable_structure()
-                        && editor
-                            .curve_is_graph_point(graph, *selected_point)
-                            .unwrap_or(false),
-                    egui::Button::new("Delete point"),
-                )
-                .clicked()
-                && editor.delete_curve_point(graph, *selected_point).is_ok()
+                .add_enabled(editable, egui::Checkbox::new(&mut clamped, "Clamped"))
+                .changed()
             {
-                *selected_point = (*selected_point).saturating_sub(1);
+                set_editor_flag(editor, FunctionFlags::CLAMPED, clamped);
                 changed = true;
             }
-        });
-    }
-
-    let segment_count = editor.curve_segment_count(graph).unwrap_or(0);
-    ui.horizontal_wrapped(|ui| {
-        for segment in 0..segment_count {
-            let Some(current) = editor.curve_segment_type(graph, segment) else {
-                continue;
-            };
-            ui.label(RichText::new(format!("Segment {}", segment + 1)).small());
-            egui::ComboBox::from_id_salt(("curve_segment", graph, segment))
-                .selected_text(curve_segment_label(current))
-                .show_ui(ui, |ui| {
-                    for target in [
-                        CurveSegmentType::Linear,
-                        CurveSegmentType::Spline,
-                        CurveSegmentType::Spline2,
-                    ] {
-                        if ui
-                            .add_enabled(
-                                editable,
-                                egui::Button::selectable(
-                                    target == current,
-                                    curve_segment_label(target),
-                                ),
-                            )
-                            .clicked()
-                            && target != current
-                            && editor
-                                .set_curve_segment_type(graph, segment, target)
-                                .is_ok()
-                        {
-                            changed = true;
-                        }
-                    }
-                });
-            if segment > 0 {
-                let mode = editor
-                    .curve_join_mode(graph, segment)
-                    .unwrap_or(CurvePointMode::Corner);
-                for target in [CurvePointMode::Corner, CurvePointMode::Smooth] {
-                    if ui
-                        .add_enabled(
-                            editable,
-                            egui::Button::selectable(
-                                mode == target,
-                                if target == CurvePointMode::Corner {
-                                    "corner"
-                                } else {
-                                    "smooth"
-                                },
-                            ),
-                        )
-                        .clicked()
-                        && mode != target
-                        && editor.set_curve_join_mode(graph, segment, target).is_ok()
-                    {
-                        changed = true;
-                    }
-                }
+            let mut cyclic = editor.is_cyclic();
+            if ui
+                .add_enabled(editable, egui::Checkbox::new(&mut cyclic, "Cyclic"))
+                .changed()
+            {
+                set_function_cyclic(editor, cyclic);
+                changed = true;
             }
-        }
-    });
-
-    // Clamped/cyclic/exclusion are H3+ header flags; Halo 2 has none.
-    if editor.function().encoding() == FunctionEncoding::H2 {
-        return changed;
-    }
-    ui.horizontal(|ui| {
-        let mut clamped = editor.is_clamped();
-        if ui
-            .add_enabled(editable, egui::Checkbox::new(&mut clamped, "clamped"))
-            .changed()
-        {
-            set_editor_flag(editor, FunctionFlags::CLAMPED, clamped);
-            changed = true;
-        }
-        let mut cyclic = editor.is_cyclic();
-        if ui
-            .add_enabled(editable, egui::Checkbox::new(&mut cyclic, "cyclic"))
-            .changed()
-        {
-            set_editor_flag(editor, FunctionFlags::CYCLIC, cyclic);
-            changed = true;
-        }
-        let mut exclusion = editor.is_exclusion();
-        if ui
-            .add_enabled(editable, egui::Checkbox::new(&mut exclusion, "exclusion"))
-            .changed()
-        {
-            set_editor_flag(editor, FunctionFlags::EXCLUSION, exclusion);
-            changed = true;
-        }
-        if exclusion {
-            ui.label(
-                RichText::new(format!(
-                    "range {:.3} – {:.3}",
-                    editor
-                        .function()
-                        .as_blob()
-                        .map_or(0.0, BlobFunction::exclusion_min),
-                    editor
-                        .function()
-                        .as_blob()
-                        .map_or(0.0, BlobFunction::exclusion_max)
-                ))
-                .color(subtle_dark())
-                .small(),
-            );
+            let mut exclusion = editor.is_exclusion();
+            if ui
+                .add_enabled(editable, egui::Checkbox::new(&mut exclusion, "Exclusion"))
+                .changed()
+            {
+                set_editor_flag(editor, FunctionFlags::EXCLUSION, exclusion);
+                if exclusion
+                    && editor.function().as_blob().is_some_and(|blob| {
+                        blob.exclusion_min() == 0.0 && blob.exclusion_max() == 0.0
+                    })
+                {
+                    set_function_exclusion_bounds(editor, 0.25, 0.75);
+                }
+                changed = true;
+            }
+            if exclusion {
+                ui.label(
+                    RichText::new(format!(
+                        "range {:.3} – {:.3}",
+                        editor
+                            .function()
+                            .as_blob()
+                            .map_or(0.0, BlobFunction::exclusion_min),
+                        editor
+                            .function()
+                            .as_blob()
+                            .map_or(0.0, BlobFunction::exclusion_max)
+                    ))
+                    .color(subtle_dark())
+                    .small(),
+                );
+            }
         }
     });
     changed
 }
 
-fn curve_segment_label(kind: CurveSegmentType) -> &'static str {
-    match kind {
-        CurveSegmentType::Linear => "linear",
-        CurveSegmentType::Spline => "spline",
-        CurveSegmentType::Spline2 => "spline2",
-    }
-}
-
-fn draw_periodic_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
+fn draw_function_slot(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    slot: usize,
+) -> bool {
     let mut changed = false;
-    let names = editor.periodic_functions();
-    ui.columns(editor.graph_count(), |columns| {
-        for (slot, column) in columns.iter_mut().enumerate() {
+    ui.add_space(4.0);
+    match editor.master_type() {
+        EngineMasterType::Periodic => {
+            let names = editor.periodic_functions();
             let Some(mut params) = editor.periodic_params(slot) else {
-                continue;
+                return false;
             };
-            column.label(
-                RichText::new(if slot == 0 {
-                    "Function"
-                } else {
-                    "Function (range)"
-                })
-                .color(text_dark())
-                .strong(),
-            );
-            let mut slot_changed =
-                periodic_function_combo(column, slot, &mut params, names, editable);
-            slot_changed |= labeled_drag(column, "Frequency", &mut params.frequency, editable);
-            slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
-            slot_changed |= labeled_drag(column, "Phase", &mut params.phase, editable);
-            slot_changed |= labeled_drag(column, "Min", &mut params.amplitude_min, editable);
+            ui.label(RichText::new("Exponent").color(text_dark()).strong());
+            let mut slot_changed = periodic_function_combo(ui, slot, &mut params, names, editable);
+            ui.columns(2, |columns| {
+                slot_changed |= stacked_function_drag(
+                    &mut columns[0],
+                    "Frequency",
+                    &mut params.frequency,
+                    editable,
+                );
+                slot_changed |= stacked_function_drag(&mut columns[1], "Phase", &mut params.phase, editable);
+            });
+            slot_changed |= function_bounds_row(ui, &mut params.amplitude_min, &mut params.amplitude_max, editable);
             if slot_changed && editor.set_periodic_params(slot, params).is_ok() {
                 changed = true;
             }
         }
+        EngineMasterType::Exponent => changed |= draw_exponent_slot(ui, editor, editable, slot),
+        EngineMasterType::Transition => changed |= draw_transition_slot(ui, editor, editable, slot),
+        EngineMasterType::Basic | EngineMasterType::Curve => {}
+    }
+    changed
+}
+
+fn grouped_function_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bool {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(24.0, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center)
+                .with_main_align(egui::Align::Min)
+                .with_main_justify(true),
+            |ui| ui.label(RichText::new(label).color(text_dark())),
+        );
+        ui.add_enabled_ui(editable, |ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
+                egui::Layout::left_to_right(egui::Align::Center)
+                    .with_main_align(egui::Align::Min)
+                    .with_main_justify(true),
+                |ui| ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(5)),
+            )
+            .inner
+        })
+        .inner
+        .changed()
+    })
+    .inner
+}
+
+fn stacked_function_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bool {
+    ui.label(RichText::new(label).color(text_dark()));
+    ui.add_enabled_ui(editable, |ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), 24.0),
+            egui::Layout::left_to_right(egui::Align::Center)
+                .with_main_align(egui::Align::Min)
+                .with_main_justify(true),
+            |ui| ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(5)),
+        )
+        .inner
+        .changed()
+    })
+    .inner
+}
+
+fn function_bounds_row(ui: &mut Ui, min: &mut f32, max: &mut f32, editable: bool) -> bool {
+    let mut changed = false;
+    ui.columns(2, |columns| {
+        changed |= stacked_function_drag(&mut columns[0], "Min", min, editable);
+        changed |= stacked_function_drag(&mut columns[1], "Max", max, editable);
     });
     changed
 }
@@ -773,7 +1182,7 @@ fn periodic_function_combo(
     let mut changed = false;
     egui::ComboBox::from_id_salt(("periodic_function", slot))
         .selected_text(label)
-        .width(180.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
@@ -791,59 +1200,41 @@ fn periodic_function_combo(
     changed
 }
 
-fn draw_exponent_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
+fn draw_exponent_slot(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    slot: usize,
+) -> bool {
     let mut changed = false;
-    ui.columns(editor.graph_count(), |columns| {
-        for (slot, column) in columns.iter_mut().enumerate() {
-            let Some(mut params) = editor.exponent_params(slot) else {
-                continue;
-            };
-            column.label(
-                RichText::new(if slot == 0 {
-                    "Exponent"
-                } else {
-                    "Exponent (range)"
-                })
-                .color(text_dark())
-                .strong(),
-            );
-            let slot_changed = labeled_drag(column, "Exponent", &mut params.exponent, editable)
-                | labeled_drag(column, "Max", &mut params.amplitude_max, editable)
-                | labeled_drag(column, "Min", &mut params.amplitude_min, editable);
-            if slot_changed && editor.set_exponent_params(slot, params).is_ok() {
-                changed = true;
-            }
-        }
-    });
+    let Some(mut params) = editor.exponent_params(slot) else {
+        return false;
+    };
+    let mut slot_changed = stacked_function_drag(ui, "Exponent", &mut params.exponent, editable);
+    slot_changed |= function_bounds_row(ui, &mut params.amplitude_min, &mut params.amplitude_max, editable);
+    if slot_changed && editor.set_exponent_params(slot, params).is_ok() {
+        changed = true;
+    }
     changed
 }
 
-fn draw_transition_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
+fn draw_transition_slot(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    slot: usize,
+) -> bool {
     let mut changed = false;
     let names = editor.transition_functions();
-    ui.columns(editor.graph_count(), |columns| {
-        for (slot, column) in columns.iter_mut().enumerate() {
-            let Some(mut params) = editor.transition_params(slot) else {
-                continue;
-            };
-            column.label(
-                RichText::new(if slot == 0 {
-                    "Function"
-                } else {
-                    "Function (range)"
-                })
-                .color(text_dark())
-                .strong(),
-            );
-            let mut slot_changed =
-                transition_function_combo(column, slot, &mut params, names, editable);
-            slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
-            slot_changed |= labeled_drag(column, "Min", &mut params.amplitude_min, editable);
-            if slot_changed && editor.set_transition_params(slot, params).is_ok() {
-                changed = true;
-            }
-        }
-    });
+    let Some(mut params) = editor.transition_params(slot) else {
+        return false;
+    };
+    ui.label(RichText::new("Exponent").color(text_dark()).strong());
+    let mut slot_changed = transition_function_combo(ui, slot, &mut params, names, editable);
+    slot_changed |= function_bounds_row(ui, &mut params.amplitude_min, &mut params.amplitude_max, editable);
+    if slot_changed && editor.set_transition_params(slot, params).is_ok() {
+        changed = true;
+    }
     changed
 }
 
@@ -859,7 +1250,7 @@ fn transition_function_combo(
     let mut changed = false;
     egui::ComboBox::from_id_salt(("transition_function", slot))
         .selected_text(label)
-        .width(160.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (index, label) in names.iter().enumerate() {
                 if ui
@@ -881,11 +1272,298 @@ fn transition_function_combo(
 mod tests {
     use super::*;
 
+    #[test]
+    fn curve_menu_has_a_heading_and_flags_without_segment_controls() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        editor.insert_curve_point(0, 0.5).unwrap();
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+            ui.set_width(220.0);
+            draw_curve_panel(ui, &mut editor, true, &mut 0, &mut 0);
+        });
+        let text_pos = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => Some(text.pos),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing selection label: {label}"))
+        };
+        let labels = ["Curve Options", "Clamped", "Cyclic", "Exclusion"].map(text_pos);
+        assert!(labels.windows(2).all(|pair| pair[0].y < pair[1].y));
+        assert!((labels[1].x - labels[2].x).abs() < 1.0 && (labels[2].x - labels[3].x).abs() < 1.0);
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if matches!(text.galley.text(), "Corner" | "Smooth") || text.galley.text().starts_with("Segment "))));
+    }
+
+    #[test]
+    fn selection_join_controls_appear_below_coordinates_and_edit_the_selected_join() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        editor
+            .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+            .unwrap();
+        let mut selected = insert_function_point(&mut editor, 0, 0.5).unwrap();
+        editor
+            .set_curve_join_mode(0, 1, CurvePointMode::Corner)
+            .unwrap();
+        let mut frame = |events| {
+            crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(136.0);
+                    draw_curve_selection(ui, &mut editor, true, &mut 0, &mut selected);
+                },
+            )
+        };
+        frame(vec![]);
+        let output = frame(vec![]);
+        let text_rect = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let smooth = text_rect("Smooth");
+        assert!(text_rect("Corner").top() > text_rect("Y").bottom());
+        assert!(smooth.top() > text_rect("Y").bottom());
+        let pos = smooth.center();
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        assert_eq!(editor.curve_join_mode(0, 1), Some(CurvePointMode::Smooth));
+        assert_eq!(
+            TagFunctionEditor::parse(&editor.to_bytes())
+                .unwrap()
+                .curve_join_mode(0, 1),
+            Some(CurvePointMode::Smooth)
+        );
+    }
+
     fn constant_editor() -> TagFunctionEditor {
         let mut bytes = vec![0u8; 32];
         bytes[0] = FunctionType::Constant as u8;
         bytes[8..12].copy_from_slice(&1.0f32.to_le_bytes());
         TagFunctionEditor::parse(&bytes).expect("constant function")
+    }
+
+    #[test]
+    fn input_and_range_suggestions_fill_the_textbox() {
+        for id in ["foundation_fn_input", "foundation_fn_range"] {
+            let ctx = egui::Context::default();
+            let origin = std::cell::Cell::new(egui::Pos2::ZERO);
+            let mut value = "body vitality".to_owned();
+            let mut changed = false;
+            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                ui.set_width(280.0);
+                ui.horizontal(|ui| {
+                    origin.set(ui.cursor().min);
+                    changed |= function_name_input(ui, id, &mut value, true, FunctionEncoding::H2);
+                });
+            });
+            frame(Vec::new());
+            frame(Vec::new());
+            let button = origin.get() + Vec2::new(256.0, 12.0);
+            frame(vec![egui::Event::PointerMoved(button)]);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerButton {
+                    pos: button, button: egui::PointerButton::Primary, pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let output = frame(Vec::new());
+            let suggestion = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "time" => Some(text.pos + text.galley.size() * 0.5),
+                _ => None,
+            }).expect("suggestions menu opens");
+            frame(vec![egui::Event::PointerMoved(suggestion)]);
+            for pressed in [true, false] {
+                frame(vec![egui::Event::PointerButton {
+                    pos: suggestion, button: egui::PointerButton::Primary, pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let output = frame(Vec::new());
+            assert!(!output.shapes.iter().any(|shape| matches!(
+                &shape.shape, egui::Shape::Text(text) if text.galley.text() == "distance to camera"
+            )), "the menu closes after selection");
+            assert_eq!(value, "time");
+            assert!(changed);
+        }
+    }
+
+    #[test]
+    fn shortcut_hints_follow_available_graph_actions() {
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        let hints = |editor: &TagFunctionEditor, editable| {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(foundation_fonts());
+            let output =
+                crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    draw_function_shortcuts(ui, editor, editable)
+                });
+            for shape in &output.shapes {
+                if let egui::Shape::Text(text) = &shape.shape {
+                    let sections = &text.galley.job.sections;
+                    assert_eq!(sections[0].format.font_id.family, bold_font(12.0).family);
+                    assert_ne!(sections[0].format.font_id.family, sections[1].format.font_id.family);
+                }
+            }
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let linear = hints(&editor, true);
+        assert!(linear.contains("Ctrl + Drag") && linear.contains("Shift + Click"));
+        assert!(
+            linear.contains("Alt + Click")
+                && linear.contains("Shift + Drag")
+                && linear.contains("Alt + Drag")
+        );
+        assert!(
+            !linear.contains("Undo") && !linear.contains("Redo") && !linear.contains("Right Click")
+        );
+        editor
+            .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+            .unwrap();
+        insert_function_point(&mut editor, 0, 0.5).unwrap();
+        let curved = hints(&editor, true);
+        assert_eq!(linear, curved, "curve hints stay stable as points and handles change");
+        assert!(
+            curved.contains("Alt + Click")
+                && curved.contains("Shift + Drag")
+                && curved.contains("Alt + Drag")
+        );
+        editor.set_master_type(EngineMasterType::Periodic).unwrap();
+        let periodic = hints(&editor, true);
+        assert!(periodic.contains("Scroll Wheel"));
+        assert!(!periodic.contains("Click") && !periodic.contains("Drag"));
+        let read_only = hints(&editor, false);
+        assert!(read_only.contains("Zoom") && !read_only.contains("Drag"));
+    }
+
+    #[test]
+    fn inline_preview_fills_the_height_of_the_selection_panel() {
+        for color_type in [ColorGraphType::Scalar, ColorGraphType::TwoColor] {
+            let mut editor = constant_editor();
+            editor.set_master_type(EngineMasterType::Curve).unwrap();
+            editor
+                .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+                .unwrap();
+            let point = insert_function_point(&mut editor, 0, 0.5).unwrap();
+            editor.set_color_graph_type(color_type).unwrap();
+            let mut view = FunctionView::from_function(editor.into_function());
+            let ctx = egui::Context::default();
+            let mut frame = || {
+                crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    draw_inline_mapping_function_editor(
+                        ui,
+                        &mut view,
+                        true,
+                        &mut 0,
+                        &mut point.clone(),
+                        &mut None,
+                    );
+                })
+            };
+            frame();
+            let output = frame();
+            let frames: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.stroke.color == foundation_input_edge() => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            let graph = frames
+                .iter()
+                .find(|rect| (rect.width() - 465.0).abs() < 0.1 && (rect.height() - 225.0).abs() < 0.1)
+                .unwrap();
+            let preview = frames
+                .iter()
+                .find(|rect| (rect.width() - 465.0).abs() < 0.1 && rect.top() > graph.bottom())
+                .unwrap();
+            let selection = frames
+                .iter()
+                .find(|rect| (rect.width() - 150.0).abs() < 0.1 && rect.top() > graph.bottom())
+                .unwrap();
+            assert!(preview.height() > 52.0);
+            assert!((preview.top() - selection.top()).abs() < 0.1, "preview {preview:?}, selection {selection:?}");
+            assert!((preview.bottom() - selection.bottom()).abs() < 0.1, "preview {preview:?}, selection {selection:?}");
+        }
+    }
+
+    #[test]
+    fn periodic_layout_keeps_parameter_columns_and_selection_placeholder() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Periodic).unwrap();
+        editor.set_ranged(true).unwrap();
+        editor.set_color_graph_type(ColorGraphType::ThreeColor).unwrap();
+        let mut view = FunctionView::from_function(editor.into_function());
+        let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 900.0))),
+            ..Default::default()
+        }, |ui| {
+            ui.set_width(623.0);
+            draw_function_editor(ui, &mut view, true, &mut 0, &mut 0, &mut None);
+        });
+        let label_pos = |label: &str| output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => Some(text.pos),
+            _ => None,
+        }).unwrap_or_else(|| panic!("missing label: {label}"));
+        let frequency = label_pos("Frequency");
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Output:")));
+        assert!(label_pos("Input").y < label_pos("Function Type").y);
+        let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if (rect.rect.width() - FUNCTION_GRAPH_SIZE.x).abs() < 1.0 && (rect.rect.height() - FUNCTION_GRAPH_SIZE.y).abs() < 1.0 => Some(rect.rect.shrink2(FUNCTION_PLOT_INSET)), _ => None,
+        }).unwrap();
+        assert!(label_pos("Function Type").y < plot.top());
+        assert!((label_pos("Output Type").x - (plot.left() - 10.0 + 473.0)).abs() < 1.0);
+        let phase = label_pos("Phase");
+        let max = label_pos("Max");
+        let min = label_pos("Min");
+        assert!(phase.x > frequency.x);
+        assert!((phase.y - frequency.y).abs() < 1.0);
+        assert!(min.y > frequency.y);
+        assert!(max.x > min.x);
+        assert!((min.y - max.y).abs() < 1.0);
+        assert!(label_pos("No selectable points").y > min.y);
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape, egui::Shape::Rect(rect)
+                if rect.rect.width() > 100.0 && rect.rect.height() == 24.0 && rect.corner_radius.nw == 3
+        )), "the color rail uses wide shader color preview buttons");
     }
 
     #[test]
@@ -943,14 +1621,24 @@ mod tests {
         assert_eq!(reparsed.periodic_params(1), Some(second));
     }
 
-    /// One frame of the function editor's graph at the origin, so its plot sits at
-    /// a known place: the graph allocates 465x225 and plots inside a 30x20 inset.
+    /// One frame of the function editor's graph at the origin.
     fn graph_frame(
         ctx: &egui::Context,
         editor: &mut TagFunctionEditor,
         selected: &mut (usize, usize),
         events: Vec<egui::Event>,
     ) {
+        graph_frame_with_modifiers(ctx, editor, selected, events, egui::Modifiers::NONE);
+    }
+
+    fn graph_frame_with_modifiers(
+        ctx: &egui::Context,
+        editor: &mut TagFunctionEditor,
+        selected: &mut (usize, usize),
+        mut events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
         let _ = crate::app::run_ui_test(
             &ctx,
             egui::RawInput {
@@ -972,7 +1660,163 @@ mod tests {
     }
 
     fn graph_screen((x, y): (f32, f32)) -> egui::Pos2 {
-        egui::pos2(30.0 + x * 405.0, 205.0 - y * 185.0)
+        let plot = egui::Rect::from_min_size(egui::Pos2::ZERO, FUNCTION_GRAPH_SIZE)
+            .shrink2(FUNCTION_PLOT_INSET);
+        egui::pos2(
+            egui::lerp(plot.left()..=plot.right(), x),
+            egui::lerp(plot.bottom()..=plot.top(), y),
+        )
+    }
+
+    #[test]
+    fn alt_and_shift_drag_handles_without_adding_or_deleting_points() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        editor
+            .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+            .unwrap();
+        let anchor = insert_function_point(&mut editor, 0, 0.5).unwrap();
+        let mut selected = (0, 0);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        for (modifiers, target, mode) in [
+            (egui::Modifiers::ALT, (0.75, 0.65), CurvePointMode::Corner),
+            (egui::Modifiers::SHIFT, (0.7, 0.6), CurvePointMode::Smooth),
+        ] {
+            let start = graph_screen(editor.curve_control_point(0, anchor + 1).unwrap());
+            let end = graph_screen(target);
+            graph_frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut selected,
+                vec![egui::Event::PointerMoved(start)],
+                modifiers,
+            );
+            graph_frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut selected,
+                vec![egui::Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers,
+                }],
+                modifiers,
+            );
+            for _ in 0..2 {
+                graph_frame_with_modifiers(
+                    &ctx,
+                    &mut editor,
+                    &mut selected,
+                    vec![egui::Event::PointerMoved(end)],
+                    modifiers,
+                );
+            }
+            graph_frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut selected,
+                vec![egui::Event::PointerButton {
+                    pos: end,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                }],
+                modifiers,
+            );
+            assert_eq!(selected, (0, anchor + 1));
+            assert_eq!(editor.curve_segment_count(0), Some(2));
+            assert_eq!(editor.curve_join_mode(0, 1), Some(mode));
+        }
+        let a = editor.curve_control_point(0, anchor - 1).unwrap();
+        let b = editor.curve_control_point(0, anchor + 1).unwrap();
+        assert!((a.0 + b.0 - 1.0).abs() < 0.001 && (a.1 + b.1 - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn adding_and_removing_points_requires_shift_and_alt() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        let mut selected = (0, 0);
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        let pos = graph_screen((0.5, 0.5));
+        for modifiers in [
+            egui::Modifiers::NONE,
+            egui::Modifiers::SHIFT,
+            egui::Modifiers::ALT,
+        ] {
+            graph_frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut selected,
+                vec![egui::Event::PointerMoved(pos)],
+                modifiers,
+            );
+            for pressed in [true, false] {
+                graph_frame_with_modifiers(
+                    &ctx,
+                    &mut editor,
+                    &mut selected,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers,
+                    }],
+                    modifiers,
+                );
+            }
+            let expected = if modifiers.shift { 2 } else { 1 };
+            assert_eq!(editor.curve_segment_count(0), Some(expected));
+        }
+    }
+
+    #[test]
+    fn control_drag_snaps_to_grid_intersections() {
+        let ctx = egui::Context::default();
+        let mut editor = constant_editor();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        editor
+            .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+            .unwrap();
+        let mut selected = (0, 0);
+        let start = graph_screen(editor.curve_control_point(0, 1).unwrap());
+        let end = graph_screen((0.26, 0.44));
+        graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+        graph_frame(
+            &ctx,
+            &mut editor,
+            &mut selected,
+            vec![egui::Event::PointerMoved(start)],
+        );
+        graph_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut selected,
+            vec![egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            egui::Modifiers::CTRL,
+        );
+        for _ in 0..2 {
+            graph_frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut selected,
+                vec![egui::Event::PointerMoved(end)],
+                egui::Modifiers::CTRL,
+            );
+        }
+        let value = editor.curve_control_point(0, 1).unwrap();
+        assert!(
+            (value.0 - 0.3).abs() < 0.001 && (value.1 - 0.4).abs() < 0.001,
+            "{value:?}"
+        );
     }
 
     /// Press at `from`, move to `to` in steps, release: a user's drag.
