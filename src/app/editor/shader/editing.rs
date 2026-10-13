@@ -695,6 +695,7 @@ fn draw_shader_grid_row_inner(
         ) && parse_shader_rgba(&edit.current).is_some()
     });
     let has_preview = !show_override && (graph_preview.is_some() || color_preview);
+    let show_range_values = ranged && !has_preview;
     const PREVIEW_WIDTH: f32 = 96.0;
     let right_controls_width = if show_override {
         SHADER_ROW_RIGHT_PADDING
@@ -707,7 +708,7 @@ fn draw_shader_grid_row_inner(
     };
     let value_width =
         (available - label_width - indent - default_width - 16.0 - right_controls_width).max(40.0);
-    let height = if ranged {
+    let height = if show_range_values {
         64.0
     } else if graph_preview.is_some() && !show_override {
         shader_grid_row_height(ui, row, value_width).max(48.0)
@@ -773,7 +774,7 @@ fn draw_shader_grid_row_inner(
         .edit
         .as_ref()
         .is_some_and(|edit| matches!(edit.kind, ShaderRowEditKind::Flags(_)));
-    let (label_position, label_alignment) = if ranged {
+    let (label_position, label_alignment) = if show_range_values {
         (
             label_rect.right_top() + Vec2::new(-6.0, 16.0),
             Align2::RIGHT_CENTER,
@@ -904,8 +905,10 @@ fn draw_shader_grid_row_inner(
     }
     let mut value_rect = content_value_rect;
     let range_input_rect = if has_range_input {
-        let field_width = (content_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
-        value_rect.max.x = value_rect.left() + field_width;
+        // Split the full column consistently. A preview consumes space from
+        // the Input field, rather than shifting the Range controls to the right.
+        let field_width = (full_value_rect.width() - H2_RANGE_CONTROL_WIDTH - 12.0) / 2.0;
+        value_rect.max.x = full_value_rect.left() + field_width;
         Some(egui::Rect::from_min_max(
             egui::pos2(value_rect.right() + 8.0, full_value_rect.top()),
             full_value_rect.right_bottom(),
@@ -925,7 +928,7 @@ fn draw_shader_grid_row_inner(
             egui::TextStyle::Body.resolve(ui.style()),
             material_text(),
         );
-    } else if ranged && let Some(control) = range_control.as_ref() {
+    } else if show_range_values && let Some(control) = range_control.as_ref() {
         draw_shader_range_values(ui, value_rect, row, control, edit);
     } else if show_override && let Some(row_edit) = row.edit.as_ref() {
         shader_cell_scope(ui, value_rect, |ui| {
@@ -999,14 +1002,16 @@ fn draw_shader_grid_row_inner(
         // scope so the value cell and preview remain independently clickable.
         if editable {
             ui.push_id(("shader_color_preview", &row.label), |ui| {
-                draw_shader_editable_value(ui, preview_rect, &row.label, row_edit, edit, color_popup);
+                draw_shader_editable_value_with_color_preview(
+                    ui, preview_rect, &row.label, row_edit, edit, color_popup, true,
+                );
             });
         } else if ui.interact(preview_rect, edit.widget_id(("shader_color_preview", &row.label)), Sense::click())
             .on_hover_text("View color").clicked()
         {
             *color_popup = row.value_cell.color.clone();
         }
-        if let Some([r, g, b, _]) = parse_shader_rgba(&row_edit.current) {
+        if !editable && let Some([r, g, b, _]) = parse_shader_rgba(&row_edit.current) {
             paint_shader_color_preview(ui, preview_rect, Color32::from_rgb(
                 float_channel_to_u8(r), float_channel_to_u8(g), float_channel_to_u8(b),
             ));
@@ -1528,7 +1533,7 @@ fn draw_shader_range_checkbox(
         ui.add_enabled(edit.editable, egui::Checkbox::new(&mut ranged, "range:"))
     })
     .inner;
-    if response.changed() && editor.set_ranged(ranged).is_ok() {
+    if response.changed() && set_function_ranged(&mut editor, ranged) {
         push_shader_range_edit(edit, control, editor);
     }
 }
@@ -1783,6 +1788,20 @@ pub(in crate::app) fn draw_shader_editable_value(
     row_edit: &ShaderRowEdit,
     edit: &mut FieldEditContext<'_>,
     color_popup: &mut Option<MaterialColorPopup>,
+) {
+    draw_shader_editable_value_with_color_preview(
+        ui, rect, label, row_edit, edit, color_popup, false,
+    );
+}
+
+fn draw_shader_editable_value_with_color_preview(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    label: &str,
+    row_edit: &ShaderRowEdit,
+    edit: &mut FieldEditContext<'_>,
+    color_popup: &mut Option<MaterialColorPopup>,
+    color_preview: bool,
 ) {
     let buffer_key = format!("{}|{}", edit.tag_key, row_edit.path);
     match &row_edit.kind {
@@ -2043,15 +2062,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, swatch_rect, color32);
-            let inner = shader_color_swatch_rect(swatch_rect);
-            ui.painter().text(
-                swatch_rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
-                Align2::LEFT_CENTER,
-                "color: RGB",
-                egui::TextStyle::Body.resolve(ui.style()),
-                material_text(),
-            );
+            draw_shader_color_value(ui, swatch_rect, color32, color_preview, true);
             if ui
                 .interact(
                     swatch_rect,
@@ -2085,15 +2096,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, rect, color32);
-            let inner = shader_color_swatch_rect(rect);
-            ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
-                Align2::LEFT_CENTER,
-                "color: RGB",
-                egui::TextStyle::Body.resolve(ui.style()),
-                material_text(),
-            );
+            draw_shader_color_value(ui, rect, color32, color_preview, true);
             if ui
                 .interact(
                     rect,
@@ -2128,15 +2131,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, rect, color32);
-            let inner = shader_color_swatch_rect(rect);
-            ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
-                Align2::LEFT_CENTER,
-                "color: RGB",
-                egui::TextStyle::Body.resolve(ui.style()),
-                material_text(),
-            );
+            draw_shader_color_value(ui, rect, color32, color_preview, true);
             if ui
                 .interact(
                     rect,
@@ -2213,15 +2208,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, rect, color32);
-            let inner = shader_color_swatch_rect(rect);
-            ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
-                Align2::LEFT_CENTER,
-                "color: RGB",
-                egui::TextStyle::Body.resolve(ui.style()),
-                material_text(),
-            );
+            draw_shader_color_value(ui, rect, color32, color_preview, true);
             if ui
                 .interact(
                     rect,
@@ -2266,15 +2253,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, rect, color32);
-            let inner = shader_color_swatch_rect(rect);
-            ui.painter().text(
-                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
-                Align2::LEFT_CENTER,
-                "color: RGB",
-                egui::TextStyle::Body.resolve(ui.style()),
-                material_text(),
-            );
+            draw_shader_color_value(ui, rect, color32, color_preview, true);
             if ui
                 .interact(
                     rect,
@@ -2465,7 +2444,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            draw_shader_color_swatch(ui, rect, color32);
+            draw_shader_color_value(ui, rect, color32, color_preview, false);
             if ui
                 .interact(
                     rect,
@@ -2920,6 +2899,30 @@ pub(in crate::app) fn paint_shader_color_preview(ui: &Ui, rect: egui::Rect, colo
     ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, material_input_edge()), egui::StrokeKind::Inside);
 }
 
+fn draw_shader_color_value(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    color: Color32,
+    preview: bool,
+    label: bool,
+) {
+    if preview {
+        paint_shader_color_preview(ui, rect, color);
+    } else {
+        draw_shader_color_swatch(ui, rect, color);
+        if label {
+            let inner = shader_color_swatch_rect(rect);
+            ui.painter().text(
+                rect.left_center() + Vec2::new(inner.width() + 6.0, 0.0),
+                Align2::LEFT_CENTER,
+                "color: RGB",
+                egui::TextStyle::Body.resolve(ui.style()),
+                material_text(),
+            );
+        }
+    }
+}
+
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
@@ -3241,6 +3244,117 @@ mod tests {
             legacy_data: Some(h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None)),
         };
         assert!(h2_range_control_for_row(&row).is_none());
+    }
+
+    #[test]
+    fn shader_range_checkbox_preserves_authored_curves_and_periodic_parameters() {
+        for periodic in [false, true] {
+            let function =
+                TagFunction::parse(&decode_hex(&constant_function_hex(1.0)).unwrap()).unwrap();
+            let mut editor = TagFunctionEditor::from_function(function);
+            if periodic {
+                editor.set_master_type(EngineMasterType::Periodic).unwrap();
+                let mut params = editor.periodic_params(0).unwrap();
+                params.frequency = 3.5;
+                params.phase = 0.4;
+                params.amplitude_min = 0.2;
+                params.amplitude_max = 0.8;
+                editor.set_periodic_params(0, params).unwrap();
+            } else {
+                editor.set_master_type(EngineMasterType::Curve).unwrap();
+                editor.insert_curve_point(0, 0.4).unwrap();
+                editor
+                    .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+                    .unwrap();
+                editor
+                    .set_curve_segment_type(0, 1, CurveSegmentType::Spline2)
+                    .unwrap();
+                editor.set_curve_control_point(0, 1, (0.1, 0.7)).unwrap();
+                editor.set_curve_control_point(0, 5, (0.8, 0.3)).unwrap();
+            }
+            let original = editor.clone();
+            let mut control = ShaderRangeControl {
+                owner: ShaderRangeOwner::Field("function/data".to_owned()),
+                function: editor.into_function(),
+            };
+            let ctx = egui::Context::default();
+            let position = std::cell::Cell::new(egui::Pos2::ZERO);
+            let mut writes = Vec::new();
+            let mut frame = |events| {
+                crate::app::run_ui_test(
+                    &ctx,
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let rect =
+                            egui::Rect::from_min_size(ui.cursor().min, Vec2::new(100.0, BUTTON_HEIGHT));
+                        position.set(rect.center());
+                        with_test_edit_context(|edit| {
+                            draw_shader_range_checkbox(ui, rect, &control, edit);
+                            for pending in edit.pending.iter() {
+                                assert_eq!(pending.path, "function/data");
+                                let bytes = decode_hex(&pending.input).unwrap();
+                                control.function = TagFunction::parse(&bytes).unwrap();
+                                writes.push(bytes);
+                            }
+                        });
+                    },
+                )
+            };
+            frame(Vec::new());
+            frame(Vec::new());
+            let pos = position.get();
+            for _ in 0..2 {
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                }
+            }
+            assert_eq!(writes.len(), 2, "both checkbox clicks write function data");
+            let ranged = TagFunctionEditor::parse(&writes[0]).unwrap();
+            assert!(ranged.is_ranged());
+            if periodic {
+                assert_eq!(ranged.periodic_params(0), original.periodic_params(0));
+            } else {
+                assert_eq!(
+                    ranged.curve_control_point_count(0),
+                    original.curve_control_point_count(0)
+                );
+                for point in 0..original.curve_control_point_count(0).unwrap() {
+                    assert_eq!(
+                        ranged.curve_control_point(0, point),
+                        original.curve_control_point(0, point)
+                    );
+                }
+                for segment in 0..2 {
+                    assert_eq!(
+                        ranged.curve_segment_type(0, segment),
+                        original.curve_segment_type(0, segment)
+                    );
+                }
+            }
+            for step in 0..=100 {
+                let x = step as f32 / 100.0;
+                assert!(
+                    (ranged.function().evaluate_shape(x, 0.0)
+                        - original.function().evaluate_shape(x, 0.0))
+                    .abs()
+                        < 0.000001
+                );
+            }
+            assert_eq!(
+                writes[1],
+                original.to_bytes(),
+                "disabling Range restores the original data exactly"
+            );
+        }
     }
 
     #[test]

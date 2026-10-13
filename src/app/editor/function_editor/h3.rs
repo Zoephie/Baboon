@@ -1669,6 +1669,111 @@ mod tests {
     }
 
     #[test]
+    fn repeated_clicks_cycle_overlapping_points_and_handles_without_retargeting_drags() {
+        for halo2 in [false, true] {
+            for point in [0, 1] {
+                let ctx = egui::Context::default();
+                let mut editor = if halo2 {
+                    let mut editor = TagFunctionEditor::from_function(
+                        h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap(),
+                    );
+                    editor.set_function_type(FunctionType::Spline).unwrap();
+                    editor
+                } else {
+                    let mut editor = constant_editor();
+                    editor.set_master_type(EngineMasterType::Curve).unwrap();
+                    editor
+                        .set_curve_segment_type(0, 0, CurveSegmentType::Spline)
+                        .unwrap();
+                    editor
+                };
+                set_function_ranged(&mut editor, true);
+                if !halo2 {
+                    editor
+                        .set_curve_segment_type(1, 0, CurveSegmentType::Spline)
+                        .unwrap();
+                }
+                let value = if point == 0 {
+                    editor.curve_control_point(0, point).unwrap()
+                } else {
+                    (0.25, 0.5)
+                };
+                for graph in 0..2 {
+                    editor.set_curve_control_point(graph, point, value).unwrap();
+                }
+                let original = editor.to_bytes();
+                let mut selected = (0, point);
+                graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+                graph_frame(&ctx, &mut editor, &mut selected, vec![]);
+                let pos = graph_screen(value);
+                for graph in [1, 0, 1] {
+                    graph_frame(
+                        &ctx,
+                        &mut editor,
+                        &mut selected,
+                        vec![egui::Event::PointerMoved(pos)],
+                    );
+                    for pressed in [true, false] {
+                        graph_frame(
+                            &ctx,
+                            &mut editor,
+                            &mut selected,
+                            vec![egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            }],
+                        );
+                    }
+                    assert_eq!(selected, (graph, point));
+                    assert_eq!(
+                        editor.to_bytes(),
+                        original,
+                        "cycling only changes selection"
+                    );
+                }
+                graph_frame(
+                    &ctx,
+                    &mut editor,
+                    &mut selected,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+                let end = pos + Vec2::new(0.0, if value.1 > 0.5 { 30.0 } else { -30.0 });
+                graph_frame(
+                    &ctx,
+                    &mut editor,
+                    &mut selected,
+                    vec![egui::Event::PointerMoved(end)],
+                );
+                graph_frame(
+                    &ctx,
+                    &mut editor,
+                    &mut selected,
+                    vec![egui::Event::PointerButton {
+                        pos: end,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+                assert_eq!(
+                    selected,
+                    (1, point),
+                    "dragging keeps the selected overlap target"
+                );
+                assert_eq!(editor.curve_control_point(0, point), Some(value));
+                assert_ne!(editor.curve_control_point(1, point), Some(value));
+            }
+        }
+    }
+
+    #[test]
     fn alt_and_shift_drag_handles_without_adding_or_deleting_points() {
         let ctx = egui::Context::default();
         let mut editor = constant_editor();

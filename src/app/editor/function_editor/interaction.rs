@@ -58,7 +58,7 @@ pub(super) fn set_function_exclusion_bounds(
 /// Toggle the wrapper without rebuilding the authored primary graph. The
 /// engine supplies the default second graph; existing compact/editor bytes
 /// are retained verbatim, including variable-length multipart compacts.
-pub(super) fn set_function_ranged(editor: &mut TagFunctionEditor, ranged: bool) -> bool {
+pub(in crate::app) fn set_function_ranged(editor: &mut TagFunctionEditor, ranged: bool) -> bool {
     if editor.is_ranged() == ranged {
         return false;
     }

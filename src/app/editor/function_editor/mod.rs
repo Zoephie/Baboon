@@ -13,6 +13,7 @@ pub(in crate::app) use graph::*;
 pub(in crate::app) use h2::*;
 pub(in crate::app) use h3::*;
 use interaction::*;
+pub(in crate::app) use interaction::set_function_ranged;
 pub(in crate::app) use history::InlineFunctionGesture;
 use history::FunctionHistory;
 

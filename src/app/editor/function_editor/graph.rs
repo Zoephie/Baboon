@@ -323,6 +323,7 @@ pub(super) fn draw_foundation_graph(
     )
 }
 
+#[cfg(test)]
 pub(super) fn draw_foundation_graph_with_view(
     ui: &mut Ui,
     editor: &mut TagFunctionEditor,
@@ -420,6 +421,7 @@ pub(super) fn draw_foundation_graph_with_preview(
         } else {
             None
         };
+    let point_selection = (*selected_graph, *selected_point);
     if response.secondary_clicked() || (response.clicked() && hovered_segment.is_some()) {
         ui.data_mut(|data| data.insert_temp(segment_id, hovered_segment));
         if let Some((graph, _)) = hovered_segment {
@@ -439,10 +441,30 @@ pub(super) fn draw_foundation_graph_with_preview(
     if editable && editor.master_type() == EngineMasterType::Curve && !exclusion_captured {
         let hit_points = curve_points(editor);
         let nearest = |pos: egui::Pos2| {
-            hit_points
+            let closest = hit_points
                 .iter()
                 .map(|&(graph, point, value)| (graph, point, to_screen(value).distance(pos)))
-                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))?;
+            if closest.2 > 13.0 {
+                return Some(closest);
+            }
+            let center = to_screen(editor.curve_control_point(closest.0, closest.1)?);
+            let overlapping: Vec<_> = hit_points
+                .iter()
+                .filter(|(_, _, value)| to_screen(*value).distance(center) <= 3.0)
+                .map(|&(graph, point, value)| (graph, point, to_screen(value).distance(pos)))
+                .filter(|hit| hit.2 <= 13.0)
+                .collect();
+            let selected = overlapping
+                .iter()
+                .position(|hit| (hit.0, hit.1) == point_selection);
+            let cycle = response.clicked() && !modifiers.alt && !modifiers.shift;
+            let index = match selected {
+                Some(index) if cycle => (index + 1) % overlapping.len(),
+                Some(index) => index,
+                None => return Some(closest),
+            };
+            Some(overlapping[index])
         };
         if let Some(pos) = response.interact_pointer_pos() {
             if response.drag_started() || response.clicked() {
@@ -773,7 +795,32 @@ pub(super) fn draw_foundation_graph_with_preview(
         }
     }
 
-    for (graph, point, value) in curve_points(editor) {
+    for (center, left, selected) in exclusion_markers {
+        let direction = if left { 1.0 } else { -1.0 };
+        let points = [
+            (-4.0, -3.0),
+            (1.0, -3.0),
+            (4.0, 0.0),
+            (1.0, 3.0),
+            (-4.0, 3.0),
+        ]
+        .into_iter()
+        .map(|(x, y)| center + Vec2::new(x * direction, y))
+        .collect();
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            if selected {
+                function_curve_color(0)
+            } else {
+                function_plot_bg()
+            },
+            Stroke::new(1.0, Color32::WHITE),
+        ));
+    }
+    let mut drawn_points = curve_points(editor);
+    drawn_points
+        .sort_by_key(|(graph, point, _)| (*graph, *point) == (*selected_graph, *selected_point));
+    for (graph, point, value) in drawn_points {
         // The backend classifies all H2 control points as graph points, but
         // spline p1/p2 are the tangent handles drawn above, not endpoints.
         let graph_point = function_point_is_on_curve(editor, graph, point);
@@ -803,28 +850,6 @@ pub(super) fn draw_foundation_graph_with_preview(
         }
     }
 
-    for (center, left, selected) in exclusion_markers {
-        let direction = if left { 1.0 } else { -1.0 };
-        let points = [
-            (-4.0, -3.0),
-            (1.0, -3.0),
-            (4.0, 0.0),
-            (1.0, 3.0),
-            (-4.0, 3.0),
-        ]
-        .into_iter()
-        .map(|(x, y)| center + Vec2::new(x * direction, y))
-        .collect();
-        painter.add(egui::Shape::convex_polygon(
-            points,
-            if selected {
-                function_curve_color(0)
-            } else {
-                function_plot_bg()
-            },
-            Stroke::new(1.0, Color32::WHITE),
-        ));
-    }
     let painter = ui.painter();
     if editable
         && response.hovered()
@@ -1214,6 +1239,42 @@ mod tests {
                     });
             },
         )
+    }
+
+    #[test]
+    fn selected_point_is_painted_over_an_overlapping_range_point() {
+        let mut editor =
+            TagFunctionEditor::parse(&decode_hex(&constant_function_hex(0.0)).unwrap()).unwrap();
+        editor.set_master_type(EngineMasterType::Curve).unwrap();
+        set_function_ranged(&mut editor, true);
+        let value = editor.curve_control_point(0, 0).unwrap();
+        editor.set_curve_control_point(1, 0, value).unwrap();
+        for graph in [0, 1] {
+            let output =
+                crate::app::run_ui_test(&egui::Context::default(), egui::RawInput::default(), |ui| {
+                    draw_foundation_graph(ui, &mut editor, true, &mut graph.clone(), &mut 0);
+                });
+            let selected_center = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Circle(circle) if circle.radius == 5.0 => Some(circle.center),
+                    _ => None,
+                })
+                .unwrap();
+            let last = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Circle(circle) if circle.center == selected_center => {
+                        Some(circle.fill)
+                    }
+                    _ => None,
+                })
+                .last()
+                .unwrap();
+            assert_eq!(last, function_curve_color(graph));
+        }
     }
 
     #[test]

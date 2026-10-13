@@ -413,7 +413,7 @@ pub(in crate::app) fn draw_color_popup(
         .collapsible(false)
         .movable(true)
         .resizable(false)
-        .default_size(window_size(ctx, Vec2::new(560.0, 480.0), false))
+        .default_size(window_size(ctx, if editable { Vec2::new(560.0, 480.0) } else { Vec2::new(440.0, 360.0) }, false))
         .show(ctx, |ui| {
             crate::app::search::draw_icon_window_header_without_close(
                 ui,
@@ -424,32 +424,9 @@ pub(in crate::app) fn draw_color_popup(
             if editable {
                 draw_color_picker_editor(ui, color, custom_swatches);
             } else {
-                ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(80.0), Sense::hover());
-                    ui.painter().rect_filled(rect, 0.0, color.color32());
-                    ui.painter()
-                        .rect_stroke(
-                            rect,
-                            0.0,
-                            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-                            egui::StrokeKind::Middle,
-                        );
-                    ui.add_space(14.0);
-                    draw_color_channel_table(ui, color);
-                });
+                draw_color_picker_preview(ui, color);
             }
-            if !editable {
-                ui.add_space(10.0);
-                let sc_hex = current_pc_hex(color);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("PC Hex:").color(text_dark()));
-                    let response = draw_copy_text(ui, &sc_hex, 225.0);
-                    if response.clicked() {
-                        ui.copy_text(sc_hex.clone());
-                    }
-                });
-                ui.small(RichText::new("Click PC Hex to copy").color(subtle_dark()));
-            } else {
+            if editable {
                 draw_palette_feedback(ui, color, custom_swatches);
             }
             ui.add_space(10.0);
@@ -462,7 +439,10 @@ pub(in crate::app) fn draw_color_popup(
                     {
                         close = true;
                     }
-                    if icon_text_button(ui, ButtonIcon::Confirm, "OK", true).clicked() {
+                    if !editable && ui.button("Close").clicked() {
+                        close = true;
+                    }
+                    if editable && icon_text_button(ui, ButtonIcon::Confirm, "OK", true).clicked() {
                         if let Some(target) = color.function_draft_color.clone() {
                             let argb = ((target.original_alpha as u32) << 24)
                                 | ((float_channel_to_u8(color.red) as u32) << 16)
@@ -779,16 +759,26 @@ fn paint_color_slider_marker(painter: &egui::Painter, strip: egui::Rect, y: f32,
 }
 
 pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColorPopup) {
+    draw_color_sv_square_with_editable(ui, color, true);
+}
+
+fn draw_color_sv_square_with_editable(ui: &mut Ui, color: &mut MaterialColorPopup, editable: bool) {
     let size = Vec2::new(248.0, 268.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let (rect, response) = ui.allocate_exact_size(
+        size,
+        if editable {
+            Sense::click_and_drag()
+        } else {
+            Sense::hover()
+        },
+    );
     paint_sv_gradient(ui.painter(), rect, color.hue as f32 / 255.0);
-    ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
+        egui::StrokeKind::Middle,
+    );
     let cursor = egui::pos2(
         egui::lerp(rect.left()..=rect.right(), color.saturation as f32 / 255.0),
         egui::lerp(rect.bottom()..=rect.top(), color.brightness as f32 / 255.0),
@@ -803,7 +793,7 @@ pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColo
         .circle_stroke(cursor, 6.0, Stroke::new(1.0_f32, Color32::BLACK));
     ui.painter()
         .circle_stroke(cursor, 5.0, Stroke::new(1.0_f32, Color32::WHITE));
-    if response.dragged() || response.clicked() {
+    if editable && (response.dragged() || response.clicked()) {
         if let Some(pos) = response.interact_pointer_pos() {
             let sat = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
             let bri = (1.0 - (pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
@@ -872,28 +862,32 @@ pub(in crate::app) fn draw_color_alpha_strip(ui: &mut Ui, color: &mut MaterialCo
     }
 }
 
+fn draw_color_numeric_headers(ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            Vec2::new(COLOR_ROW_LABEL_WIDTH, COLOR_ROW_HEIGHT),
+            egui::Label::new(""),
+        );
+        ui.add_sized(
+            Vec2::new(48.0, 20.0),
+            egui::Label::new(RichText::new("Xenon").color(text_dark()).small())
+                .halign(egui::Align::Center),
+        )
+        .on_hover_cursor(egui::CursorIcon::Default);
+        ui.add_sized(
+            Vec2::new(54.0, 20.0),
+            egui::Label::new(RichText::new("PC").color(text_dark()).small())
+                .halign(egui::Align::Center),
+        )
+        .on_hover_cursor(egui::CursorIcon::Default);
+    });
+}
+
 pub(in crate::app) fn draw_color_numeric_editor(ui: &mut Ui, color: &mut MaterialColorPopup) {
     let (mut h, mut s, mut b) = (color.hue, color.saturation, color.brightness);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(COLOR_ROW_LABEL_WIDTH, COLOR_ROW_HEIGHT),
-                egui::Label::new(""),
-            );
-            ui.add_sized(
-                Vec2::new(48.0, 20.0),
-                egui::Label::new(RichText::new("Xenon").color(text_dark()).small())
-                    .halign(egui::Align::Center),
-            )
-            .on_hover_cursor(egui::CursorIcon::Default);
-            ui.add_sized(
-                Vec2::new(54.0, 20.0),
-                egui::Label::new(RichText::new("PC").color(text_dark()).small())
-                    .halign(egui::Align::Center),
-            )
-            .on_hover_cursor(egui::CursorIcon::Default);
-        });
+        draw_color_numeric_headers(ui);
         let h_pc = h as f32 / 255.0;
         let s_pc = s as f32 / 255.0;
         let b_pc = b as f32 / 255.0;
@@ -1567,28 +1561,50 @@ pub(in crate::app) fn hsb_to_rgb(h: f32, s: f32, b: f32) -> (f32, f32, f32) {
     }
 }
 
+fn draw_color_picker_preview(ui: &mut Ui, color: &mut MaterialColorPopup) {
+    ui.add_space(10.0);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(248.0, COLOR_TOP_ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Min),
+            |ui| draw_color_sv_square_with_editable(ui, color, false),
+        );
+        ui.add_space(18.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(COLOR_NUMERIC_PANEL_WIDTH, COLOR_TOP_ROW_HEIGHT),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| draw_color_channel_table(ui, color),
+        );
+    });
+    ui.add_space(6.0);
+    ui.separator();
+}
+
 pub(in crate::app) fn draw_color_channel_table(ui: &mut Ui, color: &MaterialColorPopup) {
     let (hue, saturation, brightness) = rgb_to_hsb_255(color.red, color.green, color.blue);
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            ui.add_space(34.0);
-            ui.label(RichText::new("0-255").color(subtle_dark()));
-            ui.add_space(23.0);
-            ui.label(RichText::new("PC (float)").color(subtle_dark()));
-        });
-        egui::Grid::new("material_color_channels")
-            .spacing(Vec2::new(6.0, 4.0))
-            .show(ui, |ui| {
-                draw_color_channel_row(ui, "R:", float_channel_to_u8(color.red), color.red);
-                draw_color_channel_row(ui, "G:", float_channel_to_u8(color.green), color.green);
-                draw_color_channel_row(ui, "B:", float_channel_to_u8(color.blue), color.blue);
-                if color.alpha_available {
-                    draw_color_channel_row(ui, "A:", float_channel_to_u8(color.alpha), color.alpha);
-                }
-                draw_hsb_row(ui, "H:", hue);
-                draw_hsb_row(ui, "S:", saturation);
-                draw_hsb_row(ui, "B:", brightness);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+        draw_color_numeric_headers(ui);
+        draw_color_channel_row(ui, "H:", hue, byte_to_float(hue));
+        draw_color_channel_row(ui, "S:", saturation, byte_to_float(saturation));
+        draw_color_channel_row(ui, "B:", brightness, byte_to_float(brightness));
+        ui.separator();
+        draw_color_channel_row(ui, "R:", float_channel_to_u8(color.red), color.red);
+        draw_color_channel_row(ui, "G:", float_channel_to_u8(color.green), color.green);
+        draw_color_channel_row(ui, "B:", float_channel_to_u8(color.blue), color.blue);
+        if color.alpha_available {
+            draw_color_channel_row(ui, "A:", float_channel_to_u8(color.alpha), color.alpha);
+        }
+        ui.separator();
+        for (label, value) in [
+            ("Hex:", format_rgb_hex(color.red, color.green, color.blue)),
+            ("PC Hex:", current_pc_hex(color)),
+        ] {
+            ui.horizontal(|ui| {
+                draw_color_row_label(ui, label);
+                draw_copy_text(ui, &value, COLOR_COMBINED_FIELD_WIDTH);
             });
+        }
     });
 }
 
@@ -1598,45 +1614,37 @@ pub(in crate::app) fn draw_color_channel_row(
     channel_255: u8,
     channel_float: f32,
 ) {
-    ui.label(RichText::new(label).color(text_dark()).strong());
-    draw_copy_text(ui, &channel_255.to_string(), 56.0);
-    draw_copy_text(ui, &format_pc_float(channel_float), 72.0);
-    ui.end_row();
-}
-
-pub(in crate::app) fn draw_hsb_row(ui: &mut Ui, label: &str, value: u8) {
-    ui.label(RichText::new(label).color(text_dark()).strong());
-    draw_copy_text(ui, &value.to_string(), 56.0);
-    ui.label("");
-    ui.end_row();
+    ui.horizontal(|ui| {
+        draw_color_row_label(ui, label);
+        draw_copy_text(ui, &channel_255.to_string(), 48.0);
+        draw_copy_text(ui, &format_pc_float(channel_float), 54.0);
+    });
 }
 
 pub(in crate::app) fn draw_copy_text(ui: &mut Ui, value: &str, width: f32) -> egui::Response {
-    let height = 22.0;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
-    let fill = if response.hovered() {
-        Color32::from_rgb(246, 246, 244)
-    } else {
-        Color32::from_rgb(238, 238, 235)
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, COLOR_ROW_HEIGHT), Sense::click());
+    let visuals = ui.style().interact(&response);
     ui.painter()
-        .rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE),
-            egui::StrokeKind::Middle,
-        );
+        .rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
+    ui.painter().rect_stroke(
+        rect,
+        visuals.corner_radius,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
     ui.painter().text(
         rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
         truncate_for_cell(value, width - 10.0),
-        FontId::monospace(12.5),
-        MATERIAL_TEXT,
+        egui::TextStyle::Monospace.resolve(ui.style()),
+        text_dark(),
     );
-    response
+    if response.clicked() {
+        ui.copy_text(value.to_owned());
+    }
+    response.on_hover_text(format!("{value}\nClick to copy"))
 }
-
 pub(in crate::app) fn truncate_for_cell(text: &str, width: f32) -> String {
     let max_chars = (width / 7.0).floor().max(8.0) as usize;
     if text.chars().count() <= max_chars {
@@ -1653,6 +1661,123 @@ pub(in crate::app) fn truncate_for_cell(text: &str, width: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_color_viewer_reuses_picker_layout_without_editing_the_color() {
+        let ctx = egui::Context::default();
+        let color = MaterialColorPopup::new("default color", 0.75, 0.25, 0.5, 0.5);
+        let expected_pc_hex = current_pc_hex(&color);
+        let mut popup = Some(color);
+        let observed = std::cell::Cell::new([0.0; 4]);
+        let mut frame = |events| {
+            crate::app::run_ui_test(
+                &ctx,
+                egui::RawInput {
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::splat(1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |_| {
+                    assert!(draw_color_popup(&ctx, &mut popup, &mut Vec::new(), &mut None).is_none());
+                    if let Some(color) = &popup {
+                        observed.set([color.red, color.green, color.blue, color.alpha]);
+                    }
+                },
+            )
+        };
+        frame(Vec::new());
+        frame(Vec::new());
+        let output = frame(Vec::new());
+        for label in [
+            "Xenon", "PC", "H:", "S:", "R:", "G:", "A:", "Hex:", "PC Hex:", "Close",
+        ] {
+            assert!(output.shapes.iter().any(
+                |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)
+            ));
+        }
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if matches!(text.galley.text(), "OK" | "Cancel"))));
+        let square = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.width() - 248.0).abs() < 0.1
+                        && (rect.rect.height() - 268.0).abs() < 0.1 =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let pos = square.center();
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let pos = square.left_bottom() + Vec2::new(10.0, -10.0);
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        let output = frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(observed.get(), [0.75, 0.25, 0.5, 0.5]);
+        let pc_hex = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().starts_with("sc#") => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap();
+        frame(vec![egui::Event::PointerMoved(pc_hex)]);
+        frame(vec![egui::Event::PointerButton {
+            pos: pc_hex,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let output = frame(vec![egui::Event::PointerButton {
+            pos: pc_hex,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(
+            crate::app::copied_text(&output.platform_output),
+            expected_pc_hex
+        );
+        let close = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Close" => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap();
+        frame(vec![egui::Event::PointerMoved(close)]);
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton {
+                pos: close,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        drop(frame);
+        assert!(popup.is_none());
+    }
 
     #[test]
     fn inline_blob_function_color_preserves_shape_and_writes_a_data_field() {
