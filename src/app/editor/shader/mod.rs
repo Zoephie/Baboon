@@ -1547,6 +1547,11 @@ mod tests {
         // A constant is a "basic" function: no graph, just its value rail.
         editor.click("basic", &mut draw);
         editor.click("periodic", &mut draw);
+        // Retyping adds the graph and exponent controls. Let the window's
+        // measured size and position settle before locating its footer.
+        for _ in 0..3 {
+            editor.frame(Vec::new(), &mut draw);
+        }
         editor.click("OK", &mut draw);
         drop(draw);
         assert!(function_popup.is_none(), "OK closes the editor");
@@ -1569,7 +1574,10 @@ mod tests {
             TagFunctionEditor::from_function(function).master_type(),
             EngineMasterType::Periodic
         );
-        grid.click_at(rightmost_on_row(&grid, "p0_1", "×").center());
+        // The preview makes this row taller; its actions stay at the top,
+        // rather than following the label's vertical center. This parameter
+        // owns the first reset button (the second belongs to its alpha row).
+        grid.click("×", 0);
         assert!(grid.ops.block_ops.is_empty());
         grid.apply();
         assert_eq!(constant_color(&grid.doc.tag, 0, 0).unwrap().map(float_channel_to_u8),

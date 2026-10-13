@@ -3371,8 +3371,11 @@ mod tests {
                 |h| {
                     let key = fixture::open_document(&mut h.app, "objects/smoke.light", light_tag());
                     fixture::expand_all(&mut h.app, &key);
+                    // The grouped input controls make the editor taller;
+                    // include it beneath the light's preceding fields.
+                    h.ctx.set_zoom_factor(0.75);
                 },
-                &["smoke.light", "Function type:"],
+                &["smoke.light", "Function Type"],
             ),
             // --- synthetic panes ---
             case(

@@ -4475,7 +4475,11 @@ mod tests {
             let mut texts = Vec::new();
             with_test_edit_context(|edit| {
                 for _ in 0..2 {
-                    let output = crate::app::run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+                    let output = crate::app::run_ui_test(&ctx, egui::RawInput {
+                        // Keep the editor below the tag's preceding fields visible.
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 2000.0))),
+                        ..Default::default()
+                    }, |ui| {
                         egui::CentralPanel::default().show(ui, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 draw_fields_with_docs(ui, &tag.root(), &TagNameIndex::default(), 0, false, "", edit, None);
@@ -4495,10 +4499,10 @@ mod tests {
             texts
         };
         let bitmap = painted("bitmap", "processed pixel data");
-        assert!(!bitmap.iter().any(|text| text == "Function type:"), "a bitmap's pixels drew a function editor");
+        assert!(!bitmap.iter().any(|text| text == "Function Type"), "a bitmap's pixels drew a function editor");
         assert!(bitmap.iter().any(|text| text.starts_with("Data size:")), "{bitmap:?}");
         let widget = painted("gui_widget_color_animation_definition", "default function/data");
-        assert!(widget.iter().any(|text| text == "Function type:"), "a function field drew no function editor");
+        assert!(widget.iter().any(|text| text == "Function Type"), "a function field drew no function editor: {widget:?}");
     }
 
     /// An explanation is drawn as it was written: in a fixed-pitch face,
