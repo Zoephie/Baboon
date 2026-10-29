@@ -221,6 +221,9 @@ pub(in crate::app) fn draw_string_editor_row(
     let mut popup_drawn = false;
     let filter_id = menu_id.with("filter");
     let was_open_id = menu_id.with("was open");
+    let grouping_id = egui::Id::new("model variant picker prefix grouping");
+    let can_group = matches!(editor, "default_model_variant" | "object_variant" | "cinematic_object_variant");
+    let mut grouped = can_group && ui.data(|data| data.get_temp::<bool>(grouping_id)).unwrap_or(false);
     let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
     draw_foundation_labelled_cell_row(ui, meta, "", depth, |ui, available_width| {
         let width = foundation_value_width(&draft.text, available_width).clamp(150.0, 300.0);
@@ -240,16 +243,28 @@ pub(in crate::app) fn draw_string_editor_row(
                         filter.clear();
                         opened = true;
                     }
-                    let width = string_picker::menu_popup_width(ui, &menu.items, &filter);
+                    let mut items = if grouped {
+                        std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
+                    } else {
+                        std::borrow::Cow::Borrowed(menu.items.as_slice())
+                    };
+                    let width = string_picker::menu_popup_width(ui, &items, &filter);
                     string_picker::search(ui, &mut filter, filter_id, just_opened, width, &search_hint);
+                    if can_group && ui.checkbox(&mut grouped, "Group by Prefix").changed() {
+                        items = if grouped {
+                            std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
+                        } else {
+                            std::borrow::Cow::Borrowed(menu.items.as_slice())
+                        };
+                    }
                     ui.separator();
-                    string_picker::scroll(ui, menu_id.with("choices")).show(ui, |ui| {
+                    string_picker::scroll(ui, menu_id.with(("choices", grouped))).show(ui, |ui| {
                         if menu.items.is_empty() {
                             ui.add_enabled(false, egui::Label::new(menu.note.as_deref().unwrap_or("No values are available.")));
-                        } else if !string_picker::menu_has_matches(&menu.items, &filter) {
+                        } else if !string_picker::menu_has_matches(&items, &filter) {
                             ui.label("No matching strings.");
                         } else {
-                            string_picker::menu_items(ui, &menu.items, &filter, menu_id, &mut picked);
+                            string_picker::menu_items(ui, &items, &filter, menu_id.with(grouped), &mut picked);
                         }
                     });
                 });
@@ -264,6 +279,7 @@ pub(in crate::app) fn draw_string_editor_row(
     ui.data_mut(|data| {
         data.insert_temp(filter_id, filter);
         data.insert_temp(was_open_id, popup_drawn);
+        if can_group { data.insert_temp(grouping_id, grouped); }
     });
     if opened {
         menu_for(edit, editors, editor, path, true);
@@ -562,6 +578,164 @@ mod tests {
         let (_, pending) = frame(click(parent_rect.center()));
         assert!(pending.iter().any(|edit| edit.path == path && edit.input == "metal"),
             "a hierarchical parent remains selectable as its own leaf");
+    }
+
+    /// The object field is inherited through different depths (unit/object,
+    /// item/object, and object). Every model-based game's definitions should
+    /// supply the same picker, using the referenced model rather than self.
+    #[test]
+    fn default_model_variant_lookup_follows_inherited_model_references() {
+        struct ModelSource(Arc<TagFile>);
+        impl blam_tags::string_editor::TagSource for ModelSource {
+            fn tag(&self, group: u32, path: &str) -> Option<Arc<TagFile>> {
+                (group == self.0.group().tag && path == "objects\\test\\model")
+                    .then(|| self.0.clone())
+            }
+        }
+        let definitions = locate_definitions_root();
+        for game in [GameId::Halo2, GameId::Halo2Amp, GameId::Halo3,
+            GameId::Halo3Odst, GameId::HaloReach, GameId::Halo4, GameId::CampaignEvolved]
+        {
+            let root = definitions.join(game.as_str());
+            let editors = StringEditors::load(&root).unwrap();
+            let mut model = TagFile::new(root.join("model.json")).unwrap();
+            add_names(&mut model, "variants", "name", None, &[("default", ""), ("armored", "")]);
+            let source = ModelSource(Arc::new(model));
+            for (group, prefix) in [("biped", "unit/object/"), ("vehicle", "unit/object/"),
+                ("weapon", "item/object/"), ("scenery", "object/")]
+            {
+                let mut tag = TagFile::new(root.join(format!("{group}.json"))).unwrap();
+                let path = format!("{prefix}default model variant");
+                let editor = editors.editor_at(tag.root(), &path).unwrap_or_else(|| panic!("{game:?} {group}"));
+                assert_eq!(editor, "default_model_variant");
+                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                assert!(menu.items.is_empty(), "an empty reference must not guess a model");
+                assert!(menu.accepts("unresolved"));
+                set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\test\\model");
+                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                assert_eq!(menu.picks(), ["default", "armored"], "{game:?} {group}");
+                assert!(menu.accepts("ARMORED"));
+                assert!(menu.accepts(""), "NONE remains valid");
+                assert!(!menu.accepts("missing_variant"));
+                set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\missing");
+                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                assert!(menu.items.is_empty());
+                assert!(menu.accepts("unresolved"), "missing models cannot validate a name");
+            }
+        }
+    }
+
+    fn variant_kit(value: &str) -> LooseKit {
+        let kit = LooseKit::new("default_model_variant", "halo3_mcc");
+        kit.write_mcc("objects/test/model", "model", |tag| {
+            add_names(tag, "variants", "name", None, &[("default", ""), ("armored", "")]);
+        });
+        kit.write_mcc("objects/test/unit", "biped", |tag| {
+            set_ref(tag, "unit/object/model", u32::from_be_bytes(*b"hlmt"), "objects\\test\\model");
+            set_text(tag, "unit/object/default model variant", value);
+        });
+        kit
+    }
+
+    #[test]
+    fn default_model_variant_uses_shared_validation_style() {
+        for (value, invalid) in [("ARMORED", false), ("", false), ("missing_variant", true)] {
+            let kit = variant_kit(value);
+            let (texts, pink, menu) = draw_field(&kit, "objects/test/unit.biped", "biped",
+                "unit/object/default model variant", false);
+            assert!(texts.iter().any(|text| text == "Model Variants"));
+            assert_eq!(menu.picks(), ["default", "armored"]);
+            assert_eq!(pink, invalid, "{value}");
+        }
+    }
+
+    #[test]
+    fn default_model_variant_shared_picker_searches_and_commits_selection() {
+        let kit = variant_kit("");
+        kit.write_mcc("objects/test/model", "model", |tag| {
+            add_names(tag, "variants", "name", None, &[("default", ""), ("armored", ""),
+                ("minor_scl", ""), ("minor_dog", ""), ("major_scl", ""), ("major_dog", "")]);
+        });
+        let definitions = locate_definitions_root();
+        let tag = crate::core::source::read_tag_at_path(&kit.path("objects/test/unit.biped"),
+            Some(GameId::Halo3), Some(&definitions), u32::from_be_bytes(*b"bipd")).unwrap();
+        let source = kit.source();
+        let key = kit.key("objects/test/unit.biped");
+        let entry = source.entry_for_key(&key).unwrap();
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let mut sinks = EditSinks::default();
+        let mut time = 0.0;
+        let filter_id = std::cell::Cell::new(None);
+        let path = "unit/object/default model variant";
+        let mut frame = |events| {
+            time += 0.2;
+            let mut pending = Vec::new();
+            let output = crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(events, time), |ui| {
+                let mut edit = FieldEditContext::read_only(&mut sinks, "variant-search", &key);
+                edit.root = Some(tag.root());
+                edit.game = Some(GameId::Halo3);
+                edit.definitions_root = Some(&definitions);
+                edit.editable = true;
+                edit.string_editor_tag = Some(EditedTag { tag: &tag, entry, stamp: (1, 0), source: &source });
+                filter_id.set(Some(edit.widget_id(("string editor", format!("{key}|{path}"))).with("filter")));
+                let field = tag.root().field_path(path).unwrap();
+                draw_foundation_value_row(ui, field, &field_display_meta("default model variant"),
+                    "string id", &field.value().unwrap(), &source.names, 0, path, &mut edit, None, 300.0);
+                pending = std::mem::take(edit.pending);
+            });
+            (output, pending)
+        };
+        let rect = |output: &egui::FullOutput, text: &str| {
+            output.shapes.iter().rev().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(t) if t.galley.text() == text => Some(egui::Rect::from_min_size(t.pos, t.galley.size())),
+                _ => None,
+            })
+        };
+        let click = |pos| vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+        ];
+        let (output, _) = frame(vec![]);
+        frame(click(rect(&output, "Model Variants").unwrap().center()));
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "Search Model Variants").is_some());
+        assert!(rect(&output, "default").is_some());
+        assert!(rect(&output, "armored").is_some());
+        assert!(rect(&output, "minor_scl").is_some(), "grouping starts off");
+        assert!(rect(&output, "minor (2)").is_none());
+        let (_, pending) = frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        assert!(pending.is_empty(), "grouping must not edit the tag");
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor (2)").is_some());
+        assert!(rect(&output, "major (2)").is_some());
+        assert!(rect(&output, "minor_scl").is_none(), "browse children stay in their submenu");
+        assert!(rect(&output, "armored").is_some(), "singletons remain selectable");
+        frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor_scl").is_some(), "grouping can be disabled again");
+        assert!(rect(&output, "minor (2)").is_none());
+        frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None,
+            pressed: true, repeat: false, modifiers: Default::default() }]);
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        frame(click(rect(&output, "Model Variants").unwrap().center()));
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor (2)").is_some(), "grouping survives closing and reopening");
+        ctx.memory_mut(|memory| memory.request_focus(filter_id.get().unwrap()));
+        frame(vec![egui::Event::Text("DOG".into())]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "default").is_none());
+        assert!(rect(&output, "minor_scl").is_none());
+        assert!(rect(&output, "minor (1)").is_some(), "search retains matching group headings");
+        assert!(rect(&output, "major (1)").is_some());
+        let (_, pending) = frame(click(rect(&output, "minor_dog").unwrap().center()));
+        assert!(pending.iter().any(|edit| edit.path == path && edit.input == "minor_dog"),
+            "grouped selection writes the complete variant ID");
     }
 
     /// A name globals doesn't have turns the box pink; case doesn't count.

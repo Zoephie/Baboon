@@ -308,6 +308,11 @@ The editor renders the full tag structure — nested blocks, arrays, structs, an
 pageable resources — with inline editing for loose little-endian tags:
 
 - Scalars, integers, reals, strings, and `string_id`s.
+- **Default model variants** use the shared searchable string ID dropdown to
+  list names from the object's attached model, including inherited fields on
+  bipeds, vehicles, and weapons. Unknown names are highlighted when the model's
+  variant list is available; empty values remain valid. The optional **Group by
+  Prefix** setting groups names before the first underscore and starts off.
 - **Enums** and **bit flags** with named options.
 - **Colors** via an interactive color-picker popup with channel parsing.
 - **Tag references** with an *Open* button (Alt-click opens in a split beside
