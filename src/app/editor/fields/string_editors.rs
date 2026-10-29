@@ -583,11 +583,10 @@ mod tests {
             "a hierarchical parent remains selectable as its own leaf");
     }
 
-    /// The object field is inherited through different depths (unit/object,
-    /// item/object, and object). Every model-based game's definitions should
-    /// supply the same picker, using the referenced model rather than self.
+    /// Both root and nested color-permutation fields use the edited object's
+    /// referenced model, including through inherited unit/object and item/object.
     #[test]
-    fn default_model_variant_lookup_follows_inherited_model_references() {
+    fn model_variant_lookups_follow_inherited_model_references() {
         struct ModelSource(Arc<TagFile>);
         impl blam_tags::string_editor::TagSource for ModelSource {
             fn tag(&self, group: u32, path: &str) -> Option<Arc<TagFile>> {
@@ -604,26 +603,33 @@ mod tests {
             let mut model = TagFile::new(root.join("model.json")).unwrap();
             add_names(&mut model, "variants", "name", None, &[("default", ""), ("armored", "")]);
             let source = ModelSource(Arc::new(model));
-            for (group, prefix) in [("biped", "unit/object/"), ("vehicle", "unit/object/"),
+            for (group, prefix) in [("object", ""), ("biped", "unit/object/"), ("vehicle", "unit/object/"),
                 ("weapon", "item/object/"), ("scenery", "object/")]
             {
                 let mut tag = TagFile::new(root.join(format!("{group}.json"))).unwrap();
-                let path = format!("{prefix}default model variant");
-                let editor = editors.editor_at(tag.root(), &path).unwrap_or_else(|| panic!("{game:?} {group}"));
-                assert_eq!(editor, "default_model_variant");
-                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
-                assert!(menu.items.is_empty(), "an empty reference must not guess a model");
-                assert!(menu.accepts("unresolved"));
-                set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\test\\model");
-                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
-                assert_eq!(menu.picks(), ["default", "armored"], "{game:?} {group}");
-                assert!(menu.accepts("ARMORED"));
-                assert!(menu.accepts(""), "NONE remains valid");
-                assert!(!menu.accepts("missing_variant"));
-                set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\missing");
-                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
-                assert!(menu.items.is_empty());
-                assert!(menu.accepts("unresolved"), "missing models cannot validate a name");
+                add(&mut tag, &format!("{prefix}change colors"));
+                add(&mut tag, &format!("{prefix}change colors[0]/initial permutations"));
+                for path in [format!("{prefix}default model variant"),
+                    format!("{prefix}change colors[0]/initial permutations[0]/variant name")]
+                {
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "");
+                    let editor = editors.editor_at(tag.root(), &path)
+                        .unwrap_or_else(|| panic!("{game:?} {group} {path}"));
+                    assert_eq!(editor, "default_model_variant");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert!(menu.items.is_empty(), "an empty reference must not guess a model");
+                    assert!(menu.accepts("unresolved"));
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\test\\model");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert_eq!(menu.picks(), ["default", "armored"], "{game:?} {group} {path}");
+                    assert!(menu.accepts("ARMORED"));
+                    assert!(menu.accepts(""), "empty means any model variant");
+                    assert!(!menu.accepts("missing_variant"));
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\missing");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert!(menu.items.is_empty());
+                    assert!(menu.accepts("unresolved"), "missing models cannot validate a name");
+                }
             }
         }
     }
