@@ -9,6 +9,9 @@
 use super::*;
 #[path = "string_references.rs"]
 mod string_references;
+#[cfg(test)]
+#[path = "hud_lookup_coverage.rs"]
+mod hud_lookup_coverage;
 use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation};
 use blam_tags::string_editor::{Context as EditorContext, Menu, StringEditors};
 use std::cell::RefCell;
