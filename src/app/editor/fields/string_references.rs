@@ -76,7 +76,8 @@ pub(super) fn is_hud_message_list(edit: &FieldEditContext<'_>) -> bool {
     let context = EditorContext { tag: tag.tag, tag_path: &path, field_path: "" };
     let Some(list) = editors.string_references("hud_message", &context, &SavedTags::new(tag.source)) else { return false; };
     let normalize = |path: &str| path.trim_end_matches('\0').replace('/', "\\").to_ascii_lowercase();
-    list.source.is_some_and(|source| source.group_tag == tag.entry.group_tag && normalize(&source.path) == normalize(&path))
+    list.source.iter().chain(list.groups.iter().map(|group| &group.source))
+        .any(|source| source.group_tag == tag.entry.group_tag && normalize(&source.path) == normalize(&path))
 }
 
 fn snapshot(
@@ -166,17 +167,17 @@ fn entry_button(
 
 fn grouped_entries(
     ui: &mut Ui,
-    list: &StringReferenceList,
+    entries: &[blam_tags::string_editor::StringReferenceEntry],
     filter: &str,
     popup_id: egui::Id,
     enabled: bool,
     picked: &mut Option<String>,
 ) {
     use crate::app::editor::string_groups::{StringIdGroup, group_string_ids};
-    for group in group_string_ids(list.entries.iter().map(|entry| entry.id.as_str())) {
+    for group in group_string_ids(entries.iter().map(|entry| entry.id.as_str())) {
         match group {
             StringIdGroup::Entry(index) => {
-                let entry = &list.entries[index];
+                let entry = &entries[index];
                 if matches(entry, filter) {
                     entry_button(ui, entry, enabled, picked);
                 }
@@ -186,7 +187,7 @@ fn grouped_entries(
                 // result, so a group doesn't disappear when one member matches.
                 let entries: Vec<_> = indices
                     .iter()
-                    .map(|&index| &list.entries[index])
+                    .map(|&index| &entries[index])
                     .filter(|entry| matches(entry, filter))
                     .collect();
                 if entries.is_empty() {
@@ -218,18 +219,18 @@ fn grouped_entries(
     }
 }
 
-fn popup_width(ui: &Ui, list: &StringReferenceList, filter: &str, grouped: bool) -> f32 {
+fn choice_rows(entries: &[blam_tags::string_editor::StringReferenceEntry], filter: &str, grouped: bool) -> Vec<(String, bool, usize)> {
     use crate::app::editor::string_groups::{StringIdGroup, group_string_ids};
     let mut rows = Vec::new();
     if grouped {
-        for group in group_string_ids(list.entries.iter().map(|entry| entry.id.as_str())) {
+        for group in group_string_ids(entries.iter().map(|entry| entry.id.as_str())) {
             match group {
                 StringIdGroup::Entry(index) => {
-                    let entry = &list.entries[index];
+                    let entry = &entries[index];
                     if matches(entry, filter) { rows.push((entry.id.clone(), false, 0)); }
                 }
                 StringIdGroup::Prefix { prefix, indices } => {
-                    let entries: Vec<_> = indices.iter().map(|&index| &list.entries[index])
+                    let entries: Vec<_> = indices.iter().map(|&index| &entries[index])
                         .filter(|entry| matches(entry, filter)).collect();
                     if entries.is_empty() { continue; }
                     rows.push((format!("{prefix} ({})", entries.len()), filter.is_empty(), 0));
@@ -240,10 +241,79 @@ fn popup_width(ui: &Ui, list: &StringReferenceList, filter: &str, grouped: bool)
             }
         }
     } else {
-        rows.extend(list.entries.iter().filter(|entry| matches(entry, filter))
+        rows.extend(entries.iter().filter(|entry| matches(entry, filter))
             .map(|entry| (entry.id.clone(), false, 0)));
     }
+    rows
+}
+
+fn source_label(list: &StringReferenceList, group: &blam_tags::string_editor::StringReferenceGroup) -> String {
+    let basename = |path: &str| path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
+    let name = basename(&group.source.path);
+    if list.groups.iter().filter(|g| basename(&g.source.path).eq_ignore_ascii_case(&name)).count() > 1 {
+        group.source.path.clone()
+    } else { name }
+}
+
+fn popup_width(ui: &Ui, list: &StringReferenceList, filter: &str, grouped: bool) -> f32 {
+    let rows = if list.groups.len() > 1 {
+        list.groups.iter().flat_map(|group| {
+            let entries = &list.entries[group.entries.clone()];
+            let count = entries.iter().filter(|e| matches(e, filter)).count();
+            if !filter.is_empty() && count == 0 { return Vec::new(); }
+            let mut rows = vec![(format!("{} ({count})", source_label(list, group)), filter.is_empty(), 0)];
+            if !filter.is_empty() { rows.extend(choice_rows(entries, filter, grouped).into_iter().map(|(s,b,d)|(s,b,d+1))); }
+            rows
+        }).collect()
+    } else { choice_rows(&list.entries, filter, grouped) };
     string_picker::popup_width(ui, rows)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn source_entries(ui: &mut Ui, list: &StringReferenceList, filter: &str, grouped: bool, popup_id: egui::Id, enabled: bool, picked: &mut Option<String>) {
+    if !filter.is_empty() && !list.entries.iter().any(|entry| matches(entry, filter)) {
+        ui.label("No matching String IDs.");
+        return;
+    }
+    for (index, group) in list.groups.iter().enumerate() {
+        let entries = &list.entries[group.entries.clone()];
+        let count = entries.iter().filter(|e| matches(e, filter)).count();
+        if !filter.is_empty() && count == 0 { continue; }
+        let caption = string_picker::group_caption(ui, &source_label(list, group), count);
+        let group_id = popup_id.with(("source", index));
+        if filter.is_empty() {
+            string_picker::submenu(ui, group_id, caption, |ui| {
+                ui.set_width(string_picker::popup_width(ui, choice_rows(entries, "", grouped)));
+                ui.label(RichText::new(&group.source.path).small().color(subtle_dark()));
+                ui.separator();
+                string_picker::scroll(ui, group_id.with(("choices", grouped))).show(ui, |ui| {
+                    if let Some(reason) = &group.unavailable { ui.label(reason); }
+                    else if entries.is_empty() { ui.label("The source string list is empty."); }
+                    else if grouped { grouped_entries(ui, entries, "", group_id, enabled, picked); }
+                    else { for entry in entries { entry_button(ui, entry, enabled, picked); } }
+                });
+            });
+        } else {
+            string_picker::group_heading(ui, caption);
+            ui.indent(group_id.with("search"), |ui| {
+                if grouped { grouped_entries(ui, entries, filter, group_id, enabled, picked); }
+                else { for entry in entries.iter().filter(|e| matches(e, filter)) { entry_button(ui, entry, enabled, picked); } }
+            });
+        }
+    }
+}
+
+fn value_preview(list: &StringReferenceList, id: &str) -> String {
+    if list.groups.len() > 1 {
+        let previews: Vec<_> = list.groups.iter().flat_map(|group| {
+            list.entries[group.entries.clone()].iter().filter(|entry| entry.id == id).map(|entry| {
+                format!("{}: {}", group.source.path, entry.preview.as_deref().unwrap_or("No English text is available for this ID."))
+            })
+        }).collect();
+        if !previews.is_empty() { return previews.join("\n\n"); }
+    }
+    list.entries.iter().find(|entry|entry.id==id).and_then(|entry|entry.preview.clone())
+        .unwrap_or_else(||"Choose a HUD message from the list.".to_owned())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -279,6 +349,7 @@ pub(super) fn draw_row(
     let mut refresh = false;
     let mut popup_drawn = false;
     let mut open = false;
+    let mut open_source = None;
     // Read the draft before the row borrows its other sinks.
     let draft = edit.buffers.draft_mut(&buffer_key, value);
     let validation = list.validate(&draft.text);
@@ -296,7 +367,7 @@ pub(super) fn draw_row(
         let hover = match validation {
             StringReferenceValidation::Missing => "This ID was not found in the HUD message list. Manual edits and saving are still allowed.".to_owned(),
             StringReferenceValidation::Unavailable => format!("Could not validate: {}",list.unavailable.as_deref().unwrap_or("source unavailable")),
-            StringReferenceValidation::Valid => list.entries.iter().find(|entry|entry.id==draft.text).and_then(|entry|entry.preview.clone()).unwrap_or_else(||"Choose a HUD message from the list.".to_owned()),
+            StringReferenceValidation::Valid => value_preview(&list, &draft.text),
         };
         response.clone().on_hover_text(hover);
         if enabled && draft.should_commit(ui, &response) {
@@ -328,7 +399,8 @@ pub(super) fn draw_row(
                 ui.separator();
                 if let Some(reason) = &list.unavailable {
                     ui.label(format!("Could not validate: {reason}"));
-                } else {
+                }
+                {
                     let entries: Vec<_> = list
                         .entries
                         .iter()
@@ -342,12 +414,14 @@ pub(super) fn draw_row(
                     } else {
                         "No matching String IDs."
                     };
-                    if grouped {
+                    if list.groups.len() > 1 {
+                        scroll.show(ui, |ui| source_entries(ui, &list, &filter, grouped, popup_id, enabled, &mut picked));
+                    } else if grouped {
                         scroll.show(ui, |ui| {
                             if entries.is_empty() {
                                 ui.label(empty_message);
                             } else {
-                                grouped_entries(ui, &list, &filter, popup_id, enabled, &mut picked);
+                                grouped_entries(ui, &list.entries, &filter, popup_id, enabled, &mut picked);
                             }
                         });
                     } else {
@@ -366,14 +440,21 @@ pub(super) fn draw_row(
         // Navigation remains available for read-only fields, just like tag references.
         open = ui
             .scope_builder(egui::UiBuilder::new().id(popup_id.with("open")), |ui| {
-                icon_button(
-                    ui,
-                    ButtonIcon::Open,
-                    "Open source string list",
-                    list.source.is_some(),
-                    text_dark(),
-                )
-                .clicked()
+                if list.groups.len() > 1 {
+                    let image = button_icon_image(ui, ButtonIcon::Open, text_dark(), 16.0);
+                    crate::app::ui_kit::button_icons::text_dropdown_button(ui, "Open", Some(image), |ui| {
+                        ui.set_width(250.0);
+                        for group in &list.groups {
+                            if string_picker::entry(ui, &source_label(&list, group), true, Some(&group.source.path)).clicked() {
+                                open_source = Some(group.source.clone());
+                                crate::app::ui_kit::button_icons::close_menu(ui);
+                            }
+                        }
+                    });
+                    false
+                } else {
+                    icon_button(ui, ButtonIcon::Open, "Open source string list", list.source.is_some(), text_dark()).clicked()
+                }
             })
             .inner;
         if !suffix.is_empty() {
@@ -391,7 +472,7 @@ pub(super) fn draw_row(
         edit.buffers.draft_mut(&buffer_key, value).text = id.clone();
         edit.pending.extend(field_edit_ops(path, &id).pending);
     }
-    if open && let Some(source) = &list.source {
+    if let Some(source) = open_source.as_ref().or_else(|| open.then_some(list.source.as_ref()).flatten()) {
         *edit.open_request = Some(OpenTagRequest {
             group_tag: source.group_tag,
             rel_path: source.path.clone(),
@@ -462,6 +543,8 @@ mod tests {
         tag
     }
     struct Panel {
+        game: GameId,
+        field: &'static str,
         kit: LooseKit,
         source: LoadedSourceData,
         tag: TagFile,
@@ -536,6 +619,8 @@ mod tests {
                 .unwrap()
                 .clone();
             Self {
+                game: GameId::Halo2,
+                field: FIELD,
                 kit,
                 source,
                 tag,
@@ -560,7 +645,7 @@ mod tests {
                 let mut edit =
                     FieldEditContext::read_only(&mut self.sinks, "reference-test", &self.entry.key);
                 edit.root = Some(self.tag.root());
-                edit.game = Some(GameId::Halo2);
+                edit.game = Some(self.game);
                 edit.definitions_root = Some(&defs);
                 edit.editable = self.enabled;
                 edit.string_editor_tag = Some(EditedTag {
@@ -569,10 +654,10 @@ mod tests {
                     stamp: (1, 0),
                     source: &self.source,
                 });
-                field_string_editor(&edit, FIELD).expect("annotated inherited field");
-                filter_id = Some(edit.widget_id(("string references", FIELD)).with("filter"));
-                field_id = Some(edit.widget_id(("text", format!("{}|{}", self.entry.key, FIELD))));
-                let field = self.tag.root().field_path(FIELD).unwrap();
+                field_string_editor(&edit, self.field).expect("annotated inherited field");
+                filter_id = Some(edit.widget_id(("string references", self.field)).with("filter"));
+                field_id = Some(edit.widget_id(("text", format!("{}|{}", self.entry.key, self.field))));
+                let field = self.tag.root().field_path(self.field).unwrap();
                 draw_foundation_value_row(
                     ui,
                     field,
@@ -581,7 +666,7 @@ mod tests {
                     &field.value().unwrap(),
                     &self.source.names,
                     0,
-                    FIELD,
+                    self.field,
                     &mut edit,
                     None,
                     300.0,
@@ -666,7 +751,7 @@ mod tests {
             let mut edit =
                 FieldEditContext::read_only(&mut self.sinks, "reference-test", &self.entry.key);
             edit.root = Some(self.tag.root());
-            edit.game = Some(GameId::Halo2);
+            edit.game = Some(self.game);
             edit.definitions_root = Some(&defs);
             edit.string_editor_tag = Some(EditedTag {
                 tag: &self.tag,
@@ -674,8 +759,8 @@ mod tests {
                 stamp: (1, 0),
                 source: &self.source,
             });
-            let (editors, editor) = field_string_editor(&edit, FIELD).unwrap();
-            snapshot(&edit, &editors, &editor, FIELD, check_now)
+            let (editors, editor) = field_string_editor(&edit, self.field).unwrap();
+            snapshot(&edit, &editors, &editor, self.field, check_now)
         }
     }
     #[test]
@@ -1290,5 +1375,91 @@ mod tests {
             Some("unsaved")
         );
         assert_eq!(panel.resolve(true).entries[0].id, "other");
+    }
+
+    impl Panel {
+        fn collection(game: GameId) -> Self {
+            let kit=LooseKit::new("multi-list-hud-picker",game.as_str());
+            let new=|group:&str| TagFile::new(locate_definitions_root().join(game.as_str()).join(format!("{group}.json"))).unwrap();
+            let add=|tag:&mut TagFile,path:&str| {tag.root_mut().field_path_mut(path).unwrap().as_block_mut().unwrap().add_element();};
+            let mut globals=new("globals");add(&mut globals,"interface tags");
+            set_ref(&mut globals,"interface tags[0]/multiplayer ui globals",b"wgtz","ui\\multiplayer");
+            write(&kit,"globals/globals.globals",&globals);
+            let mut ui=new("user_interface_globals_definition");set_ref(&mut ui,"HUD globals",b"uihg","ui\\hud");
+            write(&kit,"ui/multiplayer.user_interface_globals_definition",&ui);
+            let mut hud=new("user_interface_hud_globals_definition");
+            for(index,name,rows)in [
+                (0,"ingame",vec![("vehicle_enter","Enter vehicle"),("vehicle_flip","Flip vehicle"),("shared","First shared prompt")]),
+                (1,"ingame_interact",vec![("device_use","Use device"),("shared","Second shared prompt")]),
+            ]{
+                add(&mut hud,"string references");set_ref(&mut hud,&format!("string references[{index}]/string list"),b"unic",&format!("ui\\strings\\{name}"));
+                let mut tag=new("multilingual_unicode_string_list");let list=strings::read_string_list(&tag).unwrap();
+                let entries=rows.into_iter().map(|(id,text)|{let mut row=list.new_entry();row.id=Some(id.into());row.texts[0]=Some(text.into());row}).collect();
+                strings::apply_string_list_edits(&mut tag,Some(game),&[StringListEdit::Insert{at:0,entries}]).unwrap();
+                write(&kit,&format!("ui/strings/{name}.multilingual_unicode_string_list"),&tag);
+            }
+            write(&kit,"ui/hud.user_interface_hud_globals_definition",&hud);
+            let tag=new("vehicle");write(&kit,"objects/test.vehicle",&tag);let source=kit.source();
+            let entry=source.entry_for_key(&kit.key("objects/test.vehicle")).unwrap().clone();
+            Self{kit,source,tag,entry,game,field:"flip message",ctx:egui::Context::default(),sinks:EditSinks::default(),time:0.0,enabled:true,filter_id:None,field_id:None}
+        }
+    }
+    #[test]
+    fn string_references_source_groups_precede_prefix_groups_and_pick_exact_id() {
+        for game in [GameId::Halo2Amp,GameId::Halo4] {
+            let mut panel=Panel::collection(game);let frame=panel.frame(vec![]);panel.click(frame.at("HUD Messages"));
+            panel.frame(vec![]);let frame=panel.frame(vec![]);
+            assert!(frame.has("ingame (3)"));assert!(frame.has("ingame_interact (2)"));assert!(!frame.has("vehicle (2)"));
+            panel.click(frame.at("ingame (3)"));let frame=panel.frame(vec![]);
+            assert!(frame.has("vehicle (2)"));assert!(!frame.has("vehicle_flip"));
+            panel.click(frame.at("vehicle (2)"));let frame=panel.frame(vec![]);
+            assert!(frame.has("vehicle_flip"));
+            let frame=panel.click(frame.at("vehicle_flip"));
+            assert!(frame.pending.iter().any(|edit|edit.path=="flip message"&&edit.input=="vehicle_flip"));
+        }
+    }
+    #[test]
+    fn string_references_searches_all_sources_and_retains_duplicate_previews() {
+        let mut panel=Panel::collection(GameId::Halo2Amp);let list=panel.resolve(true);
+        let preview=value_preview(&list,"shared");assert!(preview.contains("First shared prompt"));assert!(preview.contains("Second shared prompt"));
+        let frame=panel.frame(vec![]);panel.click(frame.at("HUD Messages"));panel.frame(vec![]);
+        panel.ctx.memory_mut(|memory|memory.request_focus(panel.filter_id.unwrap()));
+        let frame=panel.frame(vec![egui::Event::Text("shared prompt".into())]);
+        assert!(frame.has("ingame (1)"));assert!(frame.has("ingame_interact (1)"));
+        let shared:Vec<_>=frame.texts.iter().filter(|(text,_)|text=="shared").collect();assert_eq!(shared.len(),2);
+        assert!(!frame.has("device_use"));let frame=panel.click(shared[1].1.center());
+        assert!(frame.pending.iter().any(|edit|edit.input=="shared"));
+    }
+    #[test]
+    fn string_references_multi_source_open_menu_navigates_to_selected_list() {
+        let mut panel=Panel::collection(GameId::Halo2Amp);panel.enabled=false;
+        let frame=panel.frame(vec![]);panel.click(frame.at("Open"));let frame=panel.frame(vec![]);
+        let frame=panel.click(frame.at("ingame_interact"));
+        assert_eq!(frame.open.unwrap().rel_path,"ui\\strings\\ingame_interact");
+        assert!(frame.pending.is_empty());
+    }
+
+    #[test]
+    fn string_references_h2a_and_h4_verified_fields_share_the_multi_list_lookup() {
+        let cases=[("biped","assassination chud text"),("vehicle","flip message"),
+            ("device_control","action string"),("device_control","action denied string"),("device_control","MP team use denied string"),
+            ("vehicle","unit/seats[0]/enter seat string"),("vehicle","unit/seats[0]/boarding grenade string"),
+            ("vehicle","unit/seats[0]/boarding melee string"),("vehicle","unit/seats[0]/in-seat string"),("vehicle","unit/seats[0]/Seat Selection String"),
+            ("weapon","item/pickup message"),("weapon","item/swap message"),("weapon","item/pickup message (dual)"),("weapon","item/swap message (dual)"),
+            ("weapon","item/switch-to msg"),("weapon","item/switch-to from ai msg"),("weapon","item/notify empty msg")];
+        for game in [GameId::Halo2Amp,GameId::Halo4]{
+            let mut panel=Panel::collection(game);let list=panel.resolve(true);
+            assert_eq!(list.validate("vehicle_flip"),StringReferenceValidation::Valid);
+            assert_eq!(list.validate("device_use"),StringReferenceValidation::Valid);
+            let editors=StringEditors::load(locate_definitions_root().join(game.as_str())).unwrap();
+            for(group,path)in cases{
+                let mut tag=TagFile::new(locate_definitions_root().join(game.as_str()).join(format!("{group}.json"))).unwrap();
+                if path.contains("/seats["){tag.root_mut().field_path_mut("unit/seats").unwrap().as_block_mut().unwrap().add_element();}
+                assert_eq!(editors.editor_at(tag.root(),path),Some("hud_message"),"{game:?}/{group}/{path}");
+            }
+            // Do not turn unrelated item/icon or terminal-page strings into HUD IDs.
+            let weapon=TagFile::new(locate_definitions_root().join(game.as_str()).join("weapon.json")).unwrap();
+            assert_ne!(editors.editor_at(weapon.root(),"item/picked up msg"),Some("hud_message"));
+        }
     }
 }

@@ -44,30 +44,61 @@ Terminal names and `pages[*]/text` are deliberately excluded: Reach terminals
 have their own `strings` reference. A regression test uses different HUD/page
 lists to ensure the action lookup cannot silently use the page list.
 
-## H4 and H2A: pending real-tag verification
+## H2A: saved-tag verification and list grouping
 
-Neither tag corpus is installed locally. The user confirmed that H4/H2A tags
-are unavailable. No HUD annotations or guessed source rules were added for them.
-Campaign Evolved's parallel candidates were also left unchanged by this pass.
+The installed H2A MP kit was extracted and its 17,611 eligible tags parsed
+without errors. The census examined 1,154,001 nonempty string ID instances.
+Its saved globals resolve multiplayer UI globals, then HUD globals, then
+six `string references[*]/string list` tags: `ui/strings/ingame`,
+`ingame_campaign`, `ingame_interact`, `ingame_pve`, `ingame_pvp`, and
+`ingame_film`. These hold 1,788 ID entries, or 1,766 distinct IDs. The MP kit
+retains references to absent main-menu/SP/firefight globals; its multiplayer
+route is verified. Do not hardcode the old tooltip path `ui/hud/hud_messages`.
 
-The H4/H2A schemas establish that the earlier CHUD route cannot be reused:
+The following seventeen fields are annotated in both H2A and H4. Counts are
+H2A matches / nonempty field instances:
 
-- `globals/interface tags[*]` has `singleplayer ui globals`, `multiplayer ui
-  globals`, `firefight ui globals`, and `mainmenu ui globals` (`wgtz`), not
-  `chud globals`.
-- `user_interface_globals_definition` has `HUD globals` (`uihg`) and `shared
-  globals` (`wigl`) references. UI shared globals expose several different
-  Unicode lists, including a general UI list and a damage-reporting list.
-- `user_interface_hud_globals_definition` training `display string` says it
-  comes from HUD text globals, but this alone does not identify the saved list.
-- `crate/grab pickup string` explicitly names `ui/hud/hud_messages`; that is
-  strong schema evidence, but its saved values and availability still need a
-  real-tag check before adding coverage.
+| Definition / fields | Matches / nonempty |
+| --- | ---: |
+| Biped assassination CHUD text | 3/3 |
+| Vehicle flip message | 12/12 |
+| Control action / action-denied / MP-team-denied strings | 5/5, 1/1, 1/1 |
+| Seat enter / grenade / melee / in-seat / selection strings | 63/63, 6/6, 7/7, 1/1, 10/10 |
+| Item pickup / swap / dual pickup / dual swap | 30/31, 31/32, 8/8, 8/8 |
+| Item switch-to / switch-to-from-AI / notify-empty messages | 23/23, 23/23, 22/22 |
 
-When either corpus is available, inspect its globals and UI-globals references,
-compare singleplayer/multiplayer/firefight sources, and check nonempty values in
-items, unit seats, training, flip/action/denied strings, assassination text and
-crate pickup fields. Determine whether HUD messages use a fixed tag, a shared
-referenced list, or multiple lists before extending the resolver. Never use a
-terminal's page list as the HUD source. Test missing and conflicting source
-references as well as the successful route.
+The unmatched item IDs are `ord_equip_damageboost` and `grenade_frag_swap`.
+Manual editing remains available. The 516 crate pickup fields are blank;
+training/terminal/dispenser fields provide no populated-value evidence in
+this MP kit and are not annotated by this pass.
+
+The resolver collects distinct referenced lists, preserving their order and
+individual previews. Twenty-two IDs occur in more than one list; eight have
+differing English text. The picker groups by list before optional prefix
+groups. Search expands matching entries beneath source headings, and source
+navigation lets the user choose a list. Known IDs remain valid if another
+list cannot load; unknown IDs then have unavailable validation, not a false
+missing warning. A loaded empty collection remains a known empty source.
+
+Do not extend the existing shared-CHUD-skin rule to collect conflicting
+skins: collection is a separate operation. H2A multiplayer event display
+strings use a separate game-engine text reference (0/116 in HUD lists;
+82/116 in the referenced list). Status messages resolve the multiplayer
+in-game list (22/22 each); blocked-teleporter text occurs there and in HUD
+lists. Item picked-up and H2A weapon-spawn fields include IDs from
+`ui/strings/weapons`, so neither receives a HUD-only annotation.
+
+## H4: schema-backed coverage, pending corpus verification
+
+All seventeen annotated fields have the same string-ID fields and owning
+struct GUIDs as H2A. Both schemas provide UI globals → HUD globals → a block
+of Unicode-list references. H4 follows available singleplayer, multiplayer,
+and firefight routes, collecting distinct lists and retaining their actual
+paths; it does not assume H2A's six list paths. Missing mode roots are
+expected in mode-specific kits; at least one root must resolve. Configured
+leaf lists that cannot load retain an unavailable reason.
+
+H4 tags are not installed. The annotations and shared route are supported
+by the matching definitions and synthetic tests, not H4 saved-value
+verification. Verify the populated mode routes and IDs when its kit becomes
+available. Terminal page/name strings retain their own referenced source.

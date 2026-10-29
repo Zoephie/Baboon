@@ -313,6 +313,11 @@ pageable resources — with inline editing for loose little-endian tags:
   bipeds, vehicles, and weapons. Unknown names are highlighted when the model's
   variant list is available; empty values remain valid. The optional **Group by
   Prefix** setting groups names before the first underscore and starts off.
+- **HUD string IDs** search IDs and localized text from the configured HUD
+  lists. H2A and H4 group choices by source string list, with optional prefix
+  groups inside each list. Search spans every list; duplicate IDs retain each
+  list's preview, and the Open menu selects which source tag to open. Missing
+  IDs warn without blocking manual edits or saving.
 - **Enums** and **bit flags** with named options.
 - **Colors** via an interactive color-picker popup with channel parsing.
 - **Tag references** with an *Open* button (Alt-click opens in a split beside
