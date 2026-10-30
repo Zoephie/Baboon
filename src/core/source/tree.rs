@@ -610,8 +610,7 @@ fn probe_tag_group(path: &Path) -> Result<Option<u32>> {
     file.seek(SeekFrom::Start(0))?;
     file.read_exact(&mut header)?;
     if blam_tags::halo5::looks_like_halo5(&header) {
-        let names = TagNameIndex::load_meta(&crate::core::bundled::locate_definitions_root().join("halo5_guardians/_meta.json"))?;
-        return Ok(path.extension().and_then(|x| x.to_str()).and_then(|x| names.group_tag_for(x)));
+        return Ok(halo5_group_for_path(path));
     }
     if let Some((classic, _)) = ClassicHeader::parse(&header) {
         return Ok(Some(u32::from_be_bytes(classic.group_tag)));
@@ -625,6 +624,34 @@ fn probe_tag_group(path: &Path) -> Result<Option<u32>> {
         ]))),
         _ => Ok(None),
     }
+}
+
+/// A Halo 5 tag's group comes from its extension, and the shared index can't be
+/// asked: `.particle_model` is Halo 2's `PRTM` there, not Halo 5's `pmdf`.
+pub(super) fn halo5_group_for_path(path: &Path) -> Option<u32> {
+    let extension = path.extension()?.to_str()?;
+    TagNameIndex::halo5()?.group_tag_for(extension)
+}
+
+/// Files a folder with no tags near the top is searched through before giving up.
+const HALO5_FOLDER_PROBE_LIMIT: usize = 4096;
+
+/// Whether a folder's first tag is a Halo 5 tag. Nothing else identifies these
+/// folders: they have no editing kit to detect.
+pub(super) fn folder_holds_halo5_tags(root: &Path) -> bool {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.file_type().is_file())
+        .take(HALO5_FOLDER_PROBE_LIMIT)
+        .find_map(|item| {
+            probe_tag_group(item.path()).ok().flatten()?;
+            let mut header = [0u8; 8];
+            File::open(item.path()).ok()?.read_exact(&mut header).ok()?;
+            Some(blam_tags::halo5::looks_like_halo5(&header))
+        })
+        .unwrap_or(false)
 }
 
 fn finish_node(label: String, node: TreeBuildNode, parent: &Path) -> TagTreeNode {
@@ -755,6 +782,7 @@ pub fn insert_entry_sorted(entries: &mut Vec<TagEntry>, entry: TagEntry) -> usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::bundled::locate_definitions_root;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1486,6 +1514,77 @@ mod tests {
             probe_tag_group(&path).unwrap(),
             Some(u32::from_be_bytes(*b"mode"))
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn write_fake_halo5_tag(path: &Path, version: u32) {
+        let mut bytes = [0u8; 64];
+        bytes[..4].copy_from_slice(b"ucsh");
+        bytes[4..8].copy_from_slice(&version.to_le_bytes());
+        fs::write(path, bytes).unwrap();
+    }
+
+    /// Each of these means something else in the shared index, and the source's
+    /// index is what names references and labels as well as entries.
+    #[test]
+    fn a_halo5_folder_names_groups_from_halo5() {
+        let root = temp_dir("halo5_folder");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        let shared = TagNameIndex::load_from_definitions(&locate_definitions_root());
+        let files = [
+            ("grip.weapon_attachment", b"weat", "weapon_attachment"),
+            ("hud.wpf_font", b"font", "wpf_font"),
+            ("smoke.particle_model", b"pmdf", "particle_model"),
+        ];
+        for (file, ..) in files {
+            write_fake_halo5_tag(&root.join("objects").join(file), 27);
+        }
+
+        let loaded = load_folder(root.clone(), &shared, &locate_definitions_root(), &[]).unwrap();
+
+        for (file, group, name) in files {
+            let path = root.join("objects").join(file);
+            assert_eq!(loaded.names.name_for(u32::from_be_bytes(*group)), Some(name));
+            let entry = loose_file_entry(&root, &path, &loaded.names).unwrap().unwrap();
+            assert_eq!(entry.group_tag, u32::from_be_bytes(*group), "{file}");
+            assert_eq!(entry.group_name.as_deref(), Some(name), "{file}");
+            assert_eq!(entry.display_path, format!("objects\\{file}"));
+        }
+        assert_eq!(
+            loaded.names.group_tag_for("particle_model"),
+            Some(u32::from_be_bytes(*b"pmdf"))
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_folder_of_other_tags_keeps_the_shared_names() {
+        let root = temp_dir("not_halo5_folder");
+        fs::create_dir_all(&root).unwrap();
+        write_fake_tag(&root.join("grunt.biped"), b"bipd");
+        let shared = TagNameIndex::load_from_definitions(&locate_definitions_root());
+
+        let loaded = load_folder(root.clone(), &shared, &locate_definitions_root(), &[]).unwrap();
+
+        assert_eq!(
+            loaded.names.name_for(u32::from_be_bytes(*b"weat")),
+            Some("weather_system")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_ucsh_file_that_is_not_a_known_halo5_tag_is_not_listed() {
+        let root = temp_dir("halo5_probe_skip");
+        fs::create_dir_all(&root).unwrap();
+        let unknown_group = root.join("grunt.not_a_group");
+        write_fake_halo5_tag(&unknown_group, 27);
+        let other_version = root.join("grunt.biped");
+        write_fake_halo5_tag(&other_version, 28);
+
+        assert_eq!(probe_tag_group(&unknown_group).unwrap(), None);
+        assert_eq!(probe_tag_group(&other_version).unwrap(), None);
 
         fs::remove_dir_all(&root).unwrap();
     }

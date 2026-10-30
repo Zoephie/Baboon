@@ -150,6 +150,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("read {}: {error}", root.display()))
             .flatten()
             .filter(|entry| entry.path().join("scenario.json").is_file())
+            .filter(|entry| entry.file_name() != crate::core::format::HALO5_DEFINITIONS)
             .map(|entry| {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 GameId::from_id(&name).unwrap_or_else(|| panic!("definitions/{name} names no game"))

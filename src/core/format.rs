@@ -90,6 +90,10 @@ fn shown_angle(radians: f32) -> f32 {
     }
 }
 
+/// The `definitions/` folder of Halo 5 Guardians, which is viewable but has no
+/// [`GameId`]: its tags carry no kit to detect, and nothing launches or builds them.
+pub const HALO5_DEFINITIONS: &str = "halo5_guardians";
+
 #[derive(Clone, Debug, Default)]
 /// Bidirectional group-tag/name lookup assembled from definition metadata.
 /// Merging keeps the first observed mapping so the default cross-game index is
@@ -107,11 +111,16 @@ impl TagNameIndex {
             return index;
         };
 
-        for game in games.flatten() {
+        let mut games: Vec<_> = games.flatten().collect();
+        games.sort_by_key(|game| game.file_name());
+        for game in games {
             let Ok(file_type) = game.file_type() else {
                 continue;
             };
             if !file_type.is_dir() {
+                continue;
+            }
+            if game.file_name() == HALO5_DEFINITIONS {
                 continue;
             }
             let meta_path = game.path().join("_meta.json");
@@ -119,6 +128,32 @@ impl TagNameIndex {
                 index.merge_missing(game_index);
             }
         }
+        // Halo 5 means something else by `weat`, `cmps` and `hsc*`, so it only
+        // fills the gaps the others leave; its own sources use `halo5_first`.
+        let halo5 = definitions_root.join(HALO5_DEFINITIONS).join("_meta.json");
+        if let Ok(game_index) = TagNameIndex::load_meta(&halo5) {
+            index.merge_missing(game_index);
+        }
+        index
+    }
+
+    /// Halo 5's own names. Its tags hold no group tag, so a scan asks this for
+    /// every one of them; `None` when the definitions are missing.
+    pub fn halo5() -> Option<&'static TagNameIndex> {
+        static NAMES: std::sync::OnceLock<Option<TagNameIndex>> = std::sync::OnceLock::new();
+        NAMES
+            .get_or_init(|| {
+                let root = crate::core::bundled::locate_definitions_root();
+                TagNameIndex::load_meta(&root.join(HALO5_DEFINITIONS).join("_meta.json")).ok()
+            })
+            .as_ref()
+    }
+
+    /// This index with Halo 5's names taking precedence, for a source of Halo 5
+    /// tags. A copy of this index when the definitions are missing.
+    pub fn halo5_first(&self) -> Self {
+        let mut index = TagNameIndex::halo5().cloned().unwrap_or_default();
+        index.merge_missing(self.clone());
         index
     }
 
@@ -417,6 +452,32 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Halo 5 reuses fourccs like `weat` for other groups. The first mapping
+    /// wins and folders merge sorted, so a game after `halo5_guardians` is the
+    /// one that would lose its name if Halo 5 merged in turn.
+    #[test]
+    fn halo5_only_fills_gaps_in_the_shared_index() {
+        let root = crate::core::test_kits::unique_temp_path("halo5_shared_index");
+        let meta = |game: &str, json: &str| {
+            let folder = root.join(game);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("_meta.json"), json).unwrap();
+        };
+        meta("zz_game", r#"{"tag_index":{"weat":"weather_system"}}"#);
+        meta(
+            HALO5_DEFINITIONS,
+            r#"{"tag_index":{"weat":"weapon_attachment","wpfz":"only_in_halo5"}}"#,
+        );
+
+        let index = TagNameIndex::load_from_definitions(&root);
+        fs::remove_dir_all(&root).unwrap();
+
+        let weat = u32::from_be_bytes(*b"weat");
+        assert_eq!(index.name_for(weat), Some("weather_system"));
+        assert_eq!(index.group_tag_for("only_in_halo5"), Some(u32::from_be_bytes(*b"wpfz")));
+        assert_eq!(TagNameIndex::halo5().unwrap().name_for(weat), Some("weapon_attachment"));
+    }
 
     #[test]
     fn loads_group_names_from_meta_json() {

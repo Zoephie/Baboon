@@ -478,7 +478,7 @@ mod tests {
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().is_dir())
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| !name.starts_with('.'))
+            .filter(|name| !name.starts_with('.') && name != crate::core::format::HALO5_DEFINITIONS)
             .collect();
         assert!(!games.is_empty(), "definitions/ has per-game folders");
         let without_sapien: Vec<&String> = games
