@@ -962,22 +962,28 @@ fn collect_block_index_edits(
     };
 
     for field in tag_struct.fields_all() {
-        let declared_state = (!is_new_element)
-            .then(|| field_block_index_definition(tag_struct, &field, Some(root)))
+        let custom_state = (!is_new_element)
+            .then(|| custom_block_index_target(tag_struct, &field, root, struct_path))
             .flatten()
-            .and_then(|target| {
-                *declared.entry(target.name().to_owned()).or_insert_with(|| {
-                    is_target(
-                        declared_block_index_target(
-                            tag_struct,
-                            Some(root),
-                            struct_path,
-                            target.name(),
+            .and_then(|target| is_target(Some(target.path)));
+        let declared_state = custom_state.or_else(|| {
+            (!is_new_element)
+                .then(|| field_block_index_definition(tag_struct, &field, Some(root)))
+                .flatten()
+                .and_then(|target| {
+                    *declared.entry(target.name().to_owned()).or_insert_with(|| {
+                        is_target(
+                            declared_block_index_target(
+                                tag_struct,
+                                Some(root),
+                                struct_path,
+                                target.name(),
+                            )
+                            .map(|target| target.path),
                         )
-                        .map(|target| target.path),
-                    )
+                    })
                 })
-            });
+        });
         if declared_state == Some(true) {
             let field_path = append_field_path_for(struct_path, &field);
             let value = field.value();
@@ -1116,6 +1122,112 @@ pub(crate) fn field_block_index_definition<'a>(
     let sections = holder.field_path("damage sections")?.as_block()?;
     let target = sections.definition();
     (target.name() == "global_damage_section_block").then_some(target)
+}
+
+/// Native custom indices with a known local target. Keep the selected parent
+/// in the returned path: identical block definitions in different objectives,
+/// zones, point sets or regions are not interchangeable.
+fn custom_block_index_target(
+    holder: &blam_tags::TagStruct<'_>,
+    field: &TagField<'_>,
+    root: blam_tags::TagStruct<'_>,
+    holder_path: &str,
+) -> Option<BlockIndexTarget> {
+    if field.field_type() != TagFieldType::CustomShortBlockIndex {
+        return None;
+    }
+    let versionless = holder.name().split("__v").next()?;
+    let owner = versionless.strip_suffix("_struct").unwrap_or(versionless);
+    let name = field.clean_name();
+    match (owner, name.as_ref()) {
+        ("squads" | "squads_block", "initial task") => {
+            selected_index_child(holder, root, holder_path, "initial objective", "tasks")
+        }
+        ("zone_set_block" | "secondary_zone_set_block" | "area_reference_block", "area") => {
+            selected_index_child(holder, root, holder_path, "zone", "areas")
+        }
+        ("rigid_bodies_block", "permutation" | "permutattion") => {
+            selected_index_child(holder, root, holder_path, "region", "permutations")
+        }
+        (
+            "fire_team_block"
+            | "actor_starting_locations_block"
+            | "spawn_formation_block"
+            | "spawn_points_block"
+            | "cell_block",
+            "point set",
+        ) => {
+            let field = root.field_path("scripting data")?;
+            let block = field.as_block()?;
+            // The schema allows one scripting-data element. Refuse ambiguous
+            // malformed data rather than choosing an arbitrary source.
+            if block.len() != 1 {
+                return None;
+            }
+            let path = format!("{}[0]", append_field_path_for("", &field));
+            named_child_block(&block.element(0)?, &path, "point sets")
+        }
+        ("patrol_point_block", "point") => {
+            let (parent_path, _) = holder_path.rsplit_once('/')?;
+            let parent = root.descend(parent_path)?;
+            let selector = parent.field_path("point set")?;
+            let index = selector.value().as_ref().and_then(block_index_value)?;
+            let target = custom_block_index_target(&parent, &selector, root, parent_path)?;
+            selected_child_block(root, &target, index, "points")
+        }
+        _ => None,
+    }
+}
+
+fn named_child_block(
+    holder: &blam_tags::TagStruct<'_>,
+    path: &str,
+    name: &str,
+) -> Option<BlockIndexTarget> {
+    find_sibling_block(holder, path, |field| {
+        field.clean_name() == name && field.as_block().is_some()
+    })
+}
+
+fn selected_index_child(
+    holder: &blam_tags::TagStruct<'_>,
+    root: blam_tags::TagStruct<'_>,
+    holder_path: &str,
+    selector_name: &str,
+    child_name: &str,
+) -> Option<BlockIndexTarget> {
+    let selector = holder.field_path(selector_name)?;
+    let index = selector.value().as_ref().and_then(block_index_value)?;
+    let definition = selector.definition().block_index_target()?;
+    let target = declared_block_index_target(holder, Some(root), holder_path, definition.name())?;
+    selected_child_block(root, &target, index, child_name)
+}
+
+fn selected_child_block(
+    root: blam_tags::TagStruct<'_>,
+    target: &BlockIndexTarget,
+    index: i64,
+    child_name: &str,
+) -> Option<BlockIndexTarget> {
+    let index = usize::try_from(index).ok()?;
+    let block = root.field_path(&target.path)?.as_block()?;
+    let holder = block.element(index)?;
+    let path = format!("{}[{index}]", target.path);
+    named_child_block(&holder, &path, child_name)
+}
+
+/// Shared by picker presentation and structural-edit reference repair.
+pub(crate) fn field_block_index_target(
+    holder: &blam_tags::TagStruct<'_>,
+    field: &TagField<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
+    holder_path: &str,
+) -> Option<BlockIndexTarget> {
+    root.and_then(|root| custom_block_index_target(holder, field, root, holder_path))
+        .or_else(|| {
+            let target = field_block_index_definition(holder, field, root)?;
+            declared_block_index_target(holder, root, holder_path, target.name())
+        })
 }
 
 /// The block a declared block-index field points into: the first sibling, or

@@ -3,6 +3,10 @@
 
 use super::*;
 
+#[cfg(test)]
+#[path = "block_index_lookup_coverage.rs"]
+mod block_index_lookup_coverage;
+
 pub(in crate::app) fn draw_struct_fields(
     ui: &mut Ui,
     tag_struct: TagStruct<'_>,
@@ -2999,8 +3003,7 @@ pub(in crate::app) fn block_index_target_options(
     root: Option<TagStruct<'_>>,
     struct_path: &str,
 ) -> Option<BlockIndexTarget> {
-    let target = crate::core::document::apply::field_block_index_definition(tag_struct, field, root)?;
-    crate::app::editor::declared_block_index_target(tag_struct, root, struct_path, target.name())
+    crate::core::document::apply::field_block_index_target(tag_struct, field, root, struct_path)
 }
 
 /// A block-index field rendered like Foundation: a dropdown of the target
