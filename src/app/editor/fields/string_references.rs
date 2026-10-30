@@ -269,7 +269,6 @@ fn popup_width(ui: &Ui, list: &StringReferenceList, filter: &str, grouped: bool)
     string_picker::popup_width(ui, rows)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn source_entries(ui: &mut Ui, list: &StringReferenceList, filter: &str, grouped: bool, popup_id: egui::Id, enabled: bool, picked: &mut Option<String>) {
     if !filter.is_empty() && !list.entries.iter().any(|entry| matches(entry, filter)) {
         ui.label("No matching String IDs.");
@@ -418,7 +417,7 @@ pub(super) fn draw_row(
                         scroll.show(ui, |ui| source_entries(ui, &list, &filter, grouped, popup_id, enabled, &mut picked));
                     } else if grouped {
                         scroll.show(ui, |ui| {
-                            if entries.is_empty() {
+                            if entries.is_empty() && list.unavailable.is_none() {
                                 ui.label(empty_message);
                             } else {
                                 grouped_entries(ui, &list.entries, &filter, popup_id, enabled, &mut picked);
@@ -426,7 +425,7 @@ pub(super) fn draw_row(
                         });
                     } else {
                         scroll.show_rows(ui, BUTTON_HEIGHT, entries.len(), |ui, range| {
-                            if entries.is_empty() {
+                            if entries.is_empty() && list.unavailable.is_none() {
                                 ui.label(empty_message);
                             }
                             for index in range {
@@ -1272,10 +1271,18 @@ mod tests {
         let frame = panel.frame(vec![]);
         assert!(!frame.pink);
         assert!(frame.has("Could not validate"));
+        panel.click(frame.at("HUD Messages"));
+        let frame = panel.frame(vec![]);
+        assert!(frame.popup_height.is_some(), "the popup must be open");
+        assert!(!frame.has("The source string list is empty."), "an unavailable source is not an empty source");
         let mut panel = Panel::new("missing", Some(&[]));
         let frame = panel.frame(vec![]);
         assert!(frame.pink);
         assert!(!frame.has("Could not validate"));
+        panel.click(frame.at("HUD Messages"));
+        let frame = panel.frame(vec![]);
+        assert!(frame.popup_height.is_some(), "the popup must be open");
+        assert!(frame.has("The source string list is empty."));
     }
     #[test]
     fn string_references_hud_list_default_uses_the_globals_destination() {

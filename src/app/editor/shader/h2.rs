@@ -2461,13 +2461,23 @@ mod tests {
             return;
         }
         let definitions = locate_definitions_root();
-        let tag = crate::core::source::read_tag_at_path(
+        let mut tag = crate::core::source::read_tag_at_path(
             &path,
             Some(GameId::Halo2),
             Some(&definitions),
             u32::from_be_bytes(*b"shad"),
         )
         .unwrap();
+        // The installed kit may leave this name unset. Seed the regression's
+        // input in memory so it tests the reader rather than one kit revision.
+        let parameter = tag.root().field_path("parameters").unwrap().as_block().unwrap()
+            .iter().position(|parameter| parameter.read_string_id("name").as_deref() == Some("meter_on_color"))
+            .expect("the gauge shader has a meter_on_color parameter");
+        crate::core::document::apply::apply_field_edit(
+            &mut tag,
+            &format!("parameters[{parameter}]/animation properties[0]/range name"),
+            "primary_charged",
+        ).unwrap();
         let source = TagSource::LooseFolder {
             root,
             game: Some(GameId::Halo2),
@@ -2492,8 +2502,8 @@ mod tests {
             .as_ref()
             .or(row.constant_function_view.as_ref())
             .unwrap();
-        assert_eq!(view.range_name, "primary_charged");
         let range_path = &view.edit.as_ref().unwrap().range_name;
+        assert_eq!(view.range_name, "primary_charged");
         assert!(range_path.ends_with("/range name"));
         assert_eq!(
             tag.root()

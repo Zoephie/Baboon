@@ -68,6 +68,9 @@ fn audited_marker_fields_resolve_markers_in_saved_kits() {
         eprintln!("{engine}: {count} saved marker field contexts checked");
         exercised += count;
     }
+    if ["BLAM_TEST_H2EK", "BLAM_TEST_H3EK", "BLAM_TEST_ODSTEK", "BLAM_TEST_HREK", "BLAM_TEST_H2AEK"].iter().any(|name| std::env::var_os(name).is_some()) {
+        assert!(exercised > 0, "a kit variable was set but no saved marker contexts ran");
+    }
     eprintln!("{exercised} saved marker field contexts checked in total");
 }
 

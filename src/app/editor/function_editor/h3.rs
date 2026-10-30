@@ -90,7 +90,7 @@ fn function_name_input(
                             if !string_picker::menu_has_matches(items, &filter) {
                                 ui.add_enabled(false, egui::Label::new("No matching functions."));
                             } else {
-                                string_picker::menu_items(ui, items, &filter, menu_id, &mut picked);
+                                string_picker::menu_items_selected(ui, items, &filter, menu_id, Some(value), &mut picked);
                             }
                         });
                     });
