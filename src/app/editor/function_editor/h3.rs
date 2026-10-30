@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Convenience suggestions for the Input/Range name menus.
+/// Fallback suggestions when the kit has no built-in function catalog.
 pub(in crate::app) const COMMON_FUNCTION_INPUTS: [&str; 7] = [
     "",
     "time",
@@ -39,7 +39,7 @@ fn function_name_input(
     id: &str,
     value: &mut String,
     editable: bool,
-    _encoding: FunctionEncoding,
+    inputs: Option<&blam_tags::string_editor::Menu>,
 ) -> bool {
     const MENU_WIDTH: f32 = 48.0;
     let width = (ui.available_width() - MENU_WIDTH - ui.spacing().item_spacing.x).max(40.0);
@@ -57,6 +57,14 @@ fn function_name_input(
         .inner;
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     let mut changed = response.changed();
+    use crate::app::editor::string_picker;
+    use blam_tags::string_editor::MenuItem;
+    let menu_id = ui.make_persistent_id((id, "function choices"));
+    let filter_id = menu_id.with("filter");
+    let was_open_id = menu_id.with("was open");
+    let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
+    let mut popup_drawn = false;
+    let mut picked = None;
     ui.add_enabled_ui(editable, |ui| {
         ui.push_id((id, "suggestions"), |ui| {
             ui.allocate_ui_with_layout(
@@ -64,37 +72,40 @@ fn function_name_input(
                 egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
                 |ui| {
                     icon_text_dropdown_button(ui, ButtonIcon::Function, "", |ui| {
-                        ui.label(
-                            RichText::new(if id.ends_with("_range") {
-                                "Range Presets"
+                        popup_drawn = true;
+                        let just_opened = !ui.data(|data| data.get_temp::<bool>(was_open_id)).unwrap_or(false);
+                        if just_opened { filter.clear(); }
+                        let fallback;
+                        let items = if let Some(menu) = inputs {
+                            menu.items.as_slice()
+                        } else {
+                            fallback = COMMON_FUNCTION_INPUTS.iter().filter(|name| !name.is_empty())
+                                .map(|name| MenuItem::item(*name)).collect::<Vec<_>>();
+                            &fallback
+                        };
+                        let width = string_picker::menu_popup_width(ui, items, &filter);
+                        string_picker::search(ui, &mut filter, filter_id, just_opened, width, "Search Functions");
+                        ui.separator();
+                        string_picker::scroll(ui, menu_id.with("choices")).show(ui, |ui| {
+                            if !string_picker::menu_has_matches(items, &filter) {
+                                ui.add_enabled(false, egui::Label::new("No matching functions."));
                             } else {
-                                "Input Presets"
-                            })
-                            .color(subtle_dark())
-                            .strong(),
-                        );
-                        for suggestion in COMMON_FUNCTION_INPUTS {
-                            if ui
-                                .selectable_label(
-                                    value == suggestion,
-                                    if suggestion.is_empty() {
-                                        "none"
-                                    } else {
-                                        suggestion
-                                    },
-                                )
-                                .clicked()
-                            {
-                                *value = suggestion.to_owned();
-                                changed = true;
-                                close_menu(ui);
+                                string_picker::menu_items(ui, items, &filter, menu_id, &mut picked);
                             }
-                        }
+                        });
                     });
                 },
             );
         });
     });
+    ui.data_mut(|data| {
+        data.insert_temp(filter_id, filter);
+        data.insert_temp(was_open_id, popup_drawn);
+    });
+    if let Some(picked) = picked {
+        *value = picked;
+        changed = true;
+    }
     changed
 }
 
@@ -442,7 +453,7 @@ fn draw_function_editor_contents(
                                             "foundation_fn_input",
                                             &mut view.input_name,
                                             input_editable,
-                                            editor.function().encoding(),
+                                            view.function_inputs.as_deref(),
                                         );
                                     });
                                 } else {
@@ -472,7 +483,7 @@ fn draw_function_editor_contents(
                                                 "foundation_fn_range",
                                                 &mut view.range_name,
                                                 range_editable,
-                                                editor.function().encoding(),
+                                                view.function_inputs.as_deref(),
                                             );
                                         } else {
                                             changed |= function_name_input(
@@ -480,7 +491,7 @@ fn draw_function_editor_contents(
                                                 "foundation_fn_range",
                                                 &mut view.range_name,
                                                 false,
-                                                editor.function().encoding(),
+                                                view.function_inputs.as_deref(),
                                             );
                                         }
                                     });
@@ -1378,7 +1389,7 @@ mod tests {
                 ui.set_width(280.0);
                 ui.horizontal(|ui| {
                     origin.set(ui.cursor().min);
-                    changed |= function_name_input(ui, id, &mut value, true, FunctionEncoding::H2);
+                    changed |= function_name_input(ui, id, &mut value, true, None);
                 });
             });
             frame(Vec::new());
@@ -1408,6 +1419,78 @@ mod tests {
                 &shape.shape, egui::Shape::Text(text) if text.galley.text() == "distance to camera"
             )), "the menu closes after selection");
             assert_eq!(value, "time");
+            assert!(changed);
+        }
+    }
+
+    #[test]
+    fn engine_function_catalogs_include_all_object_types_without_custom_exports() {
+        let defs = crate::core::bundled::locate_definitions_root();
+        for game in [GameId::Halo2, GameId::Halo3, GameId::Halo3Odst,
+            GameId::HaloReach, GameId::Halo4, GameId::Halo2Amp]
+        {
+            let editors = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(game)).unwrap();
+            let menu = editors.built_in_function_menu().unwrap();
+            for name in ["engine_power", "heat", "body_vitality"] {
+                assert!(menu.picks().contains(&name), "{game:?}: {name}");
+            }
+            assert!(menu.items.iter().any(|item| item.text == "vehicle"));
+            assert!(menu.items.iter().any(|item| item.text == "weapon"));
+            assert!(menu.picks().len() > 100, "{game:?}");
+            let metadata: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(defs.join(game.as_str()).join("_meta.json")).unwrap()).unwrap();
+            for (_, names) in metadata["string_editors"]["object_function"]["lists"].as_object().unwrap() {
+                for name in names.as_array().unwrap() {
+                    assert!(menu.picks().contains(&name.as_str().unwrap()), "{game:?}: {name}");
+                }
+            }
+            assert!(menu.accepts("a_custom_function_not_in_the_catalog"));
+        }
+        for game in [GameId::HaloCe, GameId::CampaignEvolved] {
+            let editors = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(game)).unwrap();
+            assert!(editors.built_in_function_menu().is_none());
+        }
+    }
+
+    #[test]
+    fn input_and_range_search_built_in_functions_and_write_exact_ids() {
+        let defs = crate::core::bundled::locate_definitions_root();
+        let menu = crate::app::editor::fields::string_editors::string_editors(Some(&defs), Some(GameId::Halo4))
+            .unwrap().built_in_function_menu().unwrap();
+        for id in ["foundation_fn_input", "foundation_fn_range"] {
+            let ctx = egui::Context::default();
+            let origin = std::cell::Cell::new(egui::Pos2::ZERO);
+            let mut value = "my_custom_export".to_owned();
+            let mut changed = false;
+            let mut frame = |events| crate::app::run_ui_test(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+                ui.set_width(280.0);
+                ui.horizontal(|ui| {
+                    origin.set(ui.cursor().min);
+                    changed |= function_name_input(ui, id, &mut value, true, Some(&menu));
+                });
+            });
+            let click = |pos| vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+            ];
+            frame(vec![]);frame(vec![]);
+            frame(click(origin.get() + Vec2::new(256.0, 12.0)));
+            let output = frame(vec![]);
+            assert!(output.shapes.iter().any(|shape| matches!(
+                &shape.shape, egui::Shape::Text(text) if text.galley.text() == "Search Functions")));
+            // The shared search field receives focus on opening. Search a
+            // vehicle-only input from a shader with no owning object tag.
+            frame(vec![egui::Event::Text("ENGINE_TURBO".into())]);
+            let output = frame(vec![]);
+            let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "engine_turbo" => Some(text.pos + text.galley.size() * 0.5),
+                _ => None,
+            }).expect("search reaches built-ins inside object type groups");
+            frame(click(target));
+            frame(vec![]);
+            drop(frame);
+            assert_eq!(value, "engine_turbo", "write the exact ID rather than the search query or heading");
             assert!(changed);
         }
     }

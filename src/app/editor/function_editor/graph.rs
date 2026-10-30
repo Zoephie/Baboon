@@ -1196,6 +1196,9 @@ pub(in crate::app) struct FunctionEditPaths {
 /// path from the display label.
 pub(in crate::app) struct FunctionView {
     pub(in crate::app) function: TagFunction,
+    /// Per-game built-ins captured from the owning kit when the popup opens.
+    /// These are suggestions; custom names remain editable.
+    pub(in crate::app) function_inputs: Option<std::sync::Arc<blam_tags::string_editor::Menu>>,
     pub(in crate::app) input_name: String,
     pub(in crate::app) range_name: String,
     /// Output enum index (`RenderMethodAnimatedParameterType`), when the
