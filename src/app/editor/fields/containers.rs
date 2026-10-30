@@ -2999,10 +2999,7 @@ pub(in crate::app) fn block_index_target_options(
     root: Option<TagStruct<'_>>,
     struct_path: &str,
 ) -> Option<BlockIndexTarget> {
-    let definition = field.definition();
-    let target = definition
-        .block_index_target()
-        .or_else(|| definition.block_flags_target())?;
+    let target = crate::core::document::apply::field_block_index_definition(tag_struct, field, root)?;
     crate::app::editor::declared_block_index_target(tag_struct, root, struct_path, target.name())
 }
 
@@ -3494,6 +3491,174 @@ mod tests {
         assert_eq!(target.bottom(), header.bottom());
         assert_eq!(target.left(), header.left());
         assert_eq!(target.right(), header.right());
+    }
+
+    #[test]
+    fn material_damage_section_uses_named_sections_and_tracks_block_edits() {
+        assert_model_damage_section_references(false);
+    }
+
+    #[test]
+    fn target_damage_section_uses_named_sections_and_tracks_block_edits() {
+        assert_model_damage_section_references(true);
+    }
+
+    fn assert_model_damage_section_references(targets: bool) {
+        use crate::core::document::apply::{apply_field_edit, apply_one_block_op};
+        use crate::core::document::ops::{BlockOp, BlockOpKind};
+        for game in ["halo2_mcc", "halo3_mcc", "halo3odst_mcc", "haloreach_mcc", "halo4_mcc", "halo2amp_mcc", "haloce_evolved"] {
+            let mut tag = TagFile::new(crate::app::test_definition_path(&format!("{game}/model.json"))).unwrap();
+            let modern = tag.root().field_path("model materials").is_some();
+            let references = match (targets, modern) {
+                (true, true) => "model targets",
+                (true, false) => "targets",
+                (false, true) => "model materials",
+                (false, false) => "materials",
+            };
+            let sections = if modern { "damage info/damage sections" } else { "new damage info[0]/damage sections" };
+            let op = |tag: &mut TagFile, path: &str, kind| {
+                apply_one_block_op(tag, &BlockOp { path: path.into(), kind }).unwrap();
+            };
+            if !modern { op(&mut tag, "new damage info", BlockOpKind::Add); }
+            op(&mut tag, references, BlockOpKind::Add);
+            for (index, name) in ["body", "shield"].iter().enumerate() {
+                op(&mut tag, sections, BlockOpKind::Add);
+                apply_field_edit(&mut tag, &format!("{sections}[{index}]/name"), name).unwrap();
+            }
+            let holder_path = format!("{references}[0]");
+            let field_path = format!("{holder_path}/damage section");
+            apply_field_edit(&mut tag, &field_path, "1").unwrap();
+            let bytes = tag.write_to_bytes().unwrap();
+            for mut tag in [tag, TagFile::read_from_bytes(&bytes).unwrap()] {
+                let root = tag.root();
+                let holder = root.descend(&holder_path).unwrap();
+                let field = holder.field_path("damage section").unwrap();
+                let target = block_index_target_options(&holder, &field, Some(root), &holder_path)
+                    .unwrap_or_else(|| panic!("{game}: {references} damage section needs a named picker"));
+                assert_eq!(target.len, 2, "{game}");
+                let labels = block_index_target_labels(Some(root), &target, &TagNameIndex::default());
+                assert!(labels[0].contains("body") && labels[1].contains("shield"), "{game}: {labels:?}");
+                let value = |tag: &TagFile| match tag.root().field_path(&field_path).unwrap().value().unwrap() {
+                    TagFieldData::CustomShortBlockIndex(v) | TagFieldData::ShortBlockIndex(v) => v,
+                    other => panic!("unexpected index: {other:?}"),
+                };
+                op(&mut tag, sections, BlockOpKind::Insert(0));
+                assert_eq!(value(&tag), 2, "{game}");
+                op(&mut tag, sections, BlockOpKind::Reorder { order: vec![2, 0, 1] });
+                assert_eq!(value(&tag), 0, "{game}");
+                op(&mut tag, sections, BlockOpKind::Delete(0));
+                assert_eq!(value(&tag), -1, "{game}");
+            }
+        }
+    }
+
+    #[test]
+    fn installed_models_resolve_material_and_target_damage_section_pickers() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        for (game, rel) in [
+            ("halo2_mcc", "objects/characters/brute/brute.model"),
+            ("halo3_mcc", "objects/characters/masterchief/masterchief.model"),
+            ("halo3odst_mcc", "objects/characters/brute/brute.model"),
+            ("haloreach_mcc", "objects/characters/spartan_jorge/spartan_jorge.model"),
+            ("halo2amp_mcc", "objects/characters/storm_masterchief/storm_masterchief.model"),
+        ] {
+            let path = std::path::PathBuf::from(crate::core::test_kits::tag_path(game, rel));
+            if !path.exists() { eprintln!("skip {game}: installed model not available"); continue; }
+            let tag = crate::core::source::read_tag_at_path(&path, GameId::from_id(game), Some(&definitions), u32::from_be_bytes(*b"hlmt")).unwrap();
+            let root = tag.root();
+            let modern = root.field_path("model materials").is_some();
+            for holder_path in if modern {
+                ["model materials[0]", "model targets[0]"]
+            } else {
+                ["materials[0]", "targets[0]"]
+            } {
+                let holder = root.descend(holder_path).expect("model has materials and targets");
+                let field = holder.field_path("damage section").unwrap();
+                let target = block_index_target_options(&holder, &field, Some(root), holder_path)
+                    .unwrap_or_else(|| panic!("{game}: {holder_path} must resolve damage sections"));
+                let sections = root.field_path(&target.path).unwrap().as_block().unwrap();
+                assert!(target.len > 0, "{game}");
+                let labels = block_index_target_labels(Some(root), &target, &TagNameIndex::default());
+                eprintln!("{game}: {} -> {labels:?}", target.path);
+                for (index, label) in labels.iter().enumerate() {
+                    let name = sections.element(index).unwrap().read_string_id("name").unwrap();
+                    assert!(!name.is_empty());
+                    assert!(label.contains(&name), "{game}: {label:?} should identify {name:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indirect_damage_section_uses_named_sections_and_tracks_block_edits() {
+        use crate::core::document::apply::{apply_field_edit, apply_one_block_op};
+        use crate::core::document::ops::{BlockOp, BlockOpKind};
+        for game in ["halo2_mcc", "halo3_mcc", "halo3odst_mcc"] {
+            let mut tag = TagFile::new(crate::app::test_definition_path(&format!("{game}/model.json"))).unwrap();
+            let op = |tag: &mut TagFile, path: &str, kind| {
+                apply_one_block_op(tag, &BlockOp { path: path.into(), kind }).unwrap();
+            };
+            op(&mut tag, "new damage info", BlockOpKind::Add);
+            let sections = "new damage info[0]/damage sections";
+            for name in ["body", "shield"] {
+                op(&mut tag, sections, BlockOpKind::Add);
+                let index = tag.root().field_path(sections).unwrap().as_block().unwrap().len() - 1;
+                apply_field_edit(&mut tag, &format!("{sections}[{index}]/name"), name).unwrap();
+            }
+            let field_path = "new damage info[0]/indirect damage section";
+            apply_field_edit(&mut tag, field_path, "1").unwrap();
+            // Embedded layouts retain custom index types, too. The picker
+            // must work without changing those types or serializing metadata.
+            let bytes = tag.write_to_bytes().unwrap();
+            for mut tag in [tag, TagFile::read_from_bytes(&bytes).unwrap()] {
+                let root = tag.root();
+                let holder = root.descend("new damage info[0]").unwrap();
+                let field = holder.field_path("indirect damage section").unwrap();
+                assert_eq!(field.field_type(), blam_tags::TagFieldType::CustomShortBlockIndex);
+                let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]")
+                    .unwrap_or_else(|| panic!("{game}: indirect damage section needs a named picker"));
+                assert_eq!(target.len, 2);
+                assert_eq!(root.field_path(&target.path).unwrap().as_block().unwrap().definition().name(), "global_damage_section_block");
+                let labels = block_index_target_labels(Some(root), &target, &TagNameIndex::default());
+                assert!(labels[0].contains("body") && labels[1].contains("shield"), "{game}: {labels:?}");
+                op(&mut tag, sections, BlockOpKind::Insert(0));
+                assert!(matches!(tag.root().field_path(field_path).unwrap().value(), Some(TagFieldData::CustomShortBlockIndex(2))));
+                op(&mut tag, sections, BlockOpKind::Reorder { order: vec![2, 0, 1] });
+                assert!(matches!(tag.root().field_path(field_path).unwrap().value(), Some(TagFieldData::CustomShortBlockIndex(0))));
+                op(&mut tag, sections, BlockOpKind::Delete(0));
+                assert!(matches!(tag.root().field_path(field_path).unwrap().value(), Some(TagFieldData::CustomShortBlockIndex(-1))));
+            }
+        }
+    }
+
+    #[test]
+    fn installed_models_resolve_their_indirect_damage_section_picker() {
+        let definitions = crate::core::bundled::locate_definitions_root();
+        for (game, rel) in [
+            ("halo2_mcc", "objects/characters/brute/brute.model"),
+            ("halo3_mcc", "objects/characters/masterchief/masterchief.model"),
+            ("halo3odst_mcc", "objects/characters/brute/brute.model"),
+        ] {
+            let path = std::path::PathBuf::from(crate::core::test_kits::tag_path(game, rel));
+            if !path.exists() { eprintln!("skip {game}: installed model not available"); continue; }
+            let tag = crate::core::source::read_tag_at_path(&path, GameId::from_id(game), Some(&definitions), u32::from_be_bytes(*b"hlmt")).unwrap();
+            let root = tag.root();
+            let holder = root.descend("new damage info[0]").unwrap();
+            let field = holder.field_path("indirect damage section").unwrap();
+            eprintln!("{game}: {} / {}", holder.name(), field.name());
+            let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]")
+                .unwrap_or_else(|| panic!("{game}: saved model must resolve damage sections"));
+            let sections = holder.field_path("damage sections").unwrap().as_block().unwrap();
+            assert_eq!(target.len, sections.len());
+            assert!(target.len > 0);
+            let labels = block_index_target_labels(Some(root), &target, &TagNameIndex::default());
+            eprintln!("{game}: {labels:?}");
+            for (index, label) in labels.iter().enumerate() {
+                let name = sections.element(index).unwrap().read_string_id("name").unwrap();
+                assert!(!name.is_empty());
+                assert!(label.contains(&name), "{game}: {label:?} should identify {name:?}");
+            }
+        }
     }
 
     #[test]

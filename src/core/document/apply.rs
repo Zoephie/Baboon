@@ -962,13 +962,8 @@ fn collect_block_index_edits(
     };
 
     for field in tag_struct.fields_all() {
-        let definition = field.definition();
         let declared_state = (!is_new_element)
-            .then(|| {
-                definition
-                    .block_index_target()
-                    .or_else(|| definition.block_flags_target())
-            })
+            .then(|| field_block_index_definition(tag_struct, &field, Some(root)))
             .flatten()
             .and_then(|target| {
                 *declared.entry(target.name().to_owned()).or_insert_with(|| {
@@ -1083,6 +1078,46 @@ fn path_is_within_target_element(
     range.contains(&index)
 }
 
+/// The declared target, including known native custom-index relationships.
+/// Custom indices store a search callback rather than a block definition, so
+/// their wire definition cannot be interpreted as an ordinary block index.
+/// Keep this shared by dropdowns and structural-edit reference remapping.
+pub(crate) fn field_block_index_definition<'a>(
+    holder: &blam_tags::TagStruct<'a>,
+    field: &TagField<'a>,
+    root: Option<blam_tags::TagStruct<'a>>,
+) -> Option<blam_tags::TagBlockDefinition<'a>> {
+    let definition = field.definition();
+    if let Some(target) = definition.block_index_target().or_else(|| definition.block_flags_target()) {
+        return Some(target);
+    }
+    // Legacy model materials and targets use a native search callback into the first
+    // damage-info element, rather than a declared block definition.
+    if field.field_type() == TagFieldType::CustomShortBlockIndex
+        && blam_tags::field_name::clean_field_name(field.name()) == "damage section"
+        && matches!(holder.name(), "model_material_block" | "model_material_block_struct" | "model_material_block_old"
+            | "model_target_block" | "model_target_block_struct" | "model_target_block_old")
+    {
+        let root = root?;
+        if root.name() != "model_block_struct" && root.name() != "model_block_struct__v0" { return None; }
+        let info = root.descend("new damage info[0]")?;
+        let target = info.field_path("damage sections")?.as_block()?.definition();
+        return (target.name() == "global_damage_section_block").then_some(target);
+    }
+    // H2/H3/ODST model damage info: AOE and child damage is routed to a
+    // section in this same damage-info element. Saved gen3 tags keep this
+    // custom type, so resolving it must not depend on changing JSON types.
+    if field.field_type() != TagFieldType::CustomShortBlockIndex
+        || blam_tags::field_name::clean_field_name(field.name()) != "indirect damage section"
+        || !matches!(holder.name(), "global_damage_info_block" | "global_damage_info_block_struct")
+    {
+        return None;
+    }
+    let sections = holder.field_path("damage sections")?.as_block()?;
+    let target = sections.definition();
+    (target.name() == "global_damage_section_block").then_some(target)
+}
+
 /// The block a declared block-index field points into: the first sibling, or
 /// failing that the nearest ancestor's field, holding a block of the target
 /// definition.
@@ -1104,6 +1139,27 @@ pub(crate) fn declared_block_index_target(
         field
             .as_block()
             .is_some_and(|block| block.definition().name() == target_definition)
+    }).or_else(|| {
+        // Model references in materials/targets/variants cross into a sibling
+        // damage-info container. Do not search arbitrary descendants: old and
+        // new damage systems can coexist and have different section lists.
+        let root = root?;
+        if !matches!(root.name(), "model_block_struct" | "model_block_struct__v0") { return None; }
+        let (info, path) = match target_definition {
+            "global_damage_section_block" => {
+                let field = root.field_path("new damage info")?;
+                let path = format!("{}[0]", append_field_path_for("", &field));
+                (field.as_block()?.element(0)?, path)
+            }
+            "new_global_damage_section_block" => {
+                let field = root.field_path("damage info")?;
+                (field.as_struct()?, append_field_path_for("", &field))
+            }
+            _ => return None,
+        };
+        find_sibling_block(&info, &path, |field| {
+            field.as_block().is_some_and(|block| block.definition().name() == target_definition)
+        })
     })
 }
 
