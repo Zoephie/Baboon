@@ -3382,7 +3382,7 @@ mod tests {
         let order=vec![4,7,8,0,2,1,3,5,6];
         crate::core::document::apply::apply_deferred_ops(&mut doc,crate::core::document::apply::DeferredOps {
             index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
-                    block_ops:vec![crate::core::document::ops::BlockOp {path:"string references".into(),
+            block_ops:vec![crate::core::document::ops::BlockOp {path:"string references".into(),
                 kind:crate::core::document::ops::BlockOpKind::Reorder {order}}],..Default::default()
         },"Move three groups");
         panel.tag=TagFile::read_from_bytes(&doc.tag.write_to_bytes().unwrap()).unwrap();
