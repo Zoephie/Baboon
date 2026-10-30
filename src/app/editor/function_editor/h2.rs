@@ -386,6 +386,7 @@ impl FunctionView {
             output_index: None,
             time_period_in_seconds: 0.0,
             edit: None,
+            function_inputs: None,
             color_types: ColorTypeChoices::All,
         }
     }
@@ -406,6 +407,7 @@ impl FunctionView {
             }),
             time_period_in_seconds: animated.time_period_in_seconds,
             edit: None,
+            function_inputs: None,
             color_types: ColorTypeChoices::All,
         }
     }
@@ -448,6 +450,13 @@ pub(in crate::app) struct FunctionPopup {
 }
 
 impl FunctionPopup {
+    /// Capture suggestions before editing starts, including the initial undo state.
+    pub(in crate::app) fn with_function_inputs(mut self, menu: Option<blam_tags::string_editor::Menu>) -> Self {
+        self.view.function_inputs = menu.map(std::sync::Arc::new);
+        self.history = FunctionHistory::new(&self.view);
+        self
+    }
+
     pub(in crate::app) fn can_step_history(&self, redo: bool) -> bool {
         self.editable && self.history.can_step(redo)
     }

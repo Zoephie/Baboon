@@ -183,3 +183,28 @@ mod tests {
         assert!(!app.can_redo_current());
     }
 }
+
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+    #[test]
+    fn popup_undo_and_redo_keep_the_original_kits_function_catalog() {
+        let function = h2_tag_function(&h2_constant_scalar_function_data(1.0, None)).unwrap();
+        let menu = blam_tags::string_editor::Menu {
+            items: vec![blam_tags::string_editor::MenuItem::item("engine_power")],
+            accepts_anything: true, ..Default::default()
+        };
+        let mut popup = FunctionPopup::new("shader".into(), "input".into(), FunctionView::from_function(function), true)
+            .with_function_inputs(Some(menu));
+        let catalog = popup.view.function_inputs.as_ref().unwrap().clone();
+        popup.view.input_name = "engine_power".into();
+        popup.history.observe(&popup.view, false);
+        popup.step_history(false);
+        assert!(popup.view.input_name.is_empty());
+        assert!(std::sync::Arc::ptr_eq(popup.view.function_inputs.as_ref().unwrap(), &catalog));
+        popup.step_history(true);
+        assert_eq!(popup.view.input_name, "engine_power");
+        assert!(std::sync::Arc::ptr_eq(popup.view.function_inputs.as_ref().unwrap(), &catalog));
+    }
+}

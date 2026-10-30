@@ -386,6 +386,10 @@ pub(in crate::app) fn draw_tag_pane(
         status: Some(&mut status),
         editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
         structure_locked: doc.tag.is_halo5(),
+        index_targets: Some(crate::core::index_targets::load(source.and_then(|source| match &source.source {
+            TagSource::LooseFolder { definitions_root, .. } => Some(definitions_root.as_path()),
+            _ => None,
+        }), source.and_then(|source| source.game), doc.tag.is_halo5())),
         expert_mode,
         show_block_sizes: cx.model.prefs.show_block_sizes,
         string_list_checkboxes: cx.model.prefs.string_list_checkboxes,
@@ -565,6 +569,13 @@ pub(in crate::app) fn draw_tag_pane(
         });
     }
     if let Some(popup) = grid_function_popup.or(function_request) {
+        let definitions_root = source.and_then(|source| match &source.source {
+            TagSource::LooseFolder { definitions_root, .. } => Some(definitions_root.as_path()),
+            _ => None,
+        });
+        let inputs = fields::string_editors::string_editors(definitions_root, source.and_then(|source| source.game))
+            .and_then(|editors| editors.built_in_function_menu());
+        let popup = popup.with_function_inputs(inputs);
         cx.open_dialog(FunctionPopupWindow {
             popup: Some(popup),
             kit: kit_id,

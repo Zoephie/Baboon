@@ -37,7 +37,7 @@ impl Baboon {
         kit_index: usize,
         tag_key: &str,
         label: &str,
-        ops: DeferredOps,
+        mut ops: DeferredOps,
         step: UndoStep,
     ) -> Option<AppliedDeferredOps> {
         if self.model.editing_kit_is_read_only(kit_index) {
@@ -52,6 +52,16 @@ impl Baboon {
         if !ops.is_empty() && let Err(error) = self.check_hud_ops(kit_index, tag_key, &ops) {
             self.model.status = error;
             return None;
+        }
+        if !ops.block_ops.is_empty() {
+            let kit = &self.model.kits[kit_index];
+            let source = kit.source.as_ref();
+            let root = source.and_then(|source| match &source.source {
+                TagSource::LooseFolder { definitions_root, .. } => Some(definitions_root.as_path()),
+                _ => None,
+            });
+            let halo5 = kit.parsed_tags.get(tag_key)?.tag.is_halo5();
+            ops.index_targets = Some(crate::core::index_targets::load(root, source.and_then(|source| source.game), halo5));
         }
         // Only retain operation data when an explicit string search needs its
         // captured rows rebased after this edit.

@@ -9,6 +9,12 @@
 use super::*;
 #[path = "string_references.rs"]
 mod string_references;
+#[cfg(test)]
+#[path = "hud_lookup_coverage.rs"]
+mod hud_lookup_coverage;
+#[cfg(test)]
+#[path = "marker_lookup_coverage.rs"]
+mod marker_lookup_coverage;
 use crate::core::source::{LoadedSourceData, TagEntry, TagEntryLocation};
 use blam_tags::string_editor::{Context as EditorContext, Menu, StringEditors};
 use std::cell::RefCell;
@@ -221,6 +227,9 @@ pub(in crate::app) fn draw_string_editor_row(
     let mut popup_drawn = false;
     let filter_id = menu_id.with("filter");
     let was_open_id = menu_id.with("was open");
+    let grouping_id = egui::Id::new("model variant picker prefix grouping");
+    let can_group = matches!(editor, "default_model_variant" | "child_model_variant" | "object_variant" | "cinematic_object_variant");
+    let mut grouped = can_group && ui.data(|data| data.get_temp::<bool>(grouping_id)).unwrap_or(false);
     let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
     draw_foundation_labelled_cell_row(ui, meta, "", depth, |ui, available_width| {
         let width = foundation_value_width(&draft.text, available_width).clamp(150.0, 300.0);
@@ -240,16 +249,28 @@ pub(in crate::app) fn draw_string_editor_row(
                         filter.clear();
                         opened = true;
                     }
-                    let width = string_picker::menu_popup_width(ui, &menu.items, &filter);
+                    let mut items = if grouped {
+                        std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
+                    } else {
+                        std::borrow::Cow::Borrowed(menu.items.as_slice())
+                    };
+                    let width = string_picker::menu_popup_width(ui, &items, &filter);
                     string_picker::search(ui, &mut filter, filter_id, just_opened, width, &search_hint);
+                    if can_group && ui.checkbox(&mut grouped, "Group by Prefix").changed() {
+                        items = if grouped {
+                            std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
+                        } else {
+                            std::borrow::Cow::Borrowed(menu.items.as_slice())
+                        };
+                    }
                     ui.separator();
-                    string_picker::scroll(ui, menu_id.with("choices")).show(ui, |ui| {
+                    string_picker::scroll(ui, menu_id.with(("choices", grouped))).show(ui, |ui| {
                         if menu.items.is_empty() {
                             ui.add_enabled(false, egui::Label::new(menu.note.as_deref().unwrap_or("No values are available.")));
-                        } else if !string_picker::menu_has_matches(&menu.items, &filter) {
+                        } else if !string_picker::menu_has_matches(&items, &filter) {
                             ui.label("No matching strings.");
                         } else {
-                            string_picker::menu_items(ui, &menu.items, &filter, menu_id, &mut picked);
+                            string_picker::menu_items(ui, &items, &filter, menu_id.with(grouped), &mut picked);
                         }
                     });
                 });
@@ -264,6 +285,7 @@ pub(in crate::app) fn draw_string_editor_row(
     ui.data_mut(|data| {
         data.insert_temp(filter_id, filter);
         data.insert_temp(was_open_id, popup_drawn);
+        if can_group { data.insert_temp(grouping_id, grouped); }
     });
     if opened {
         menu_for(edit, editors, editor, path, true);
@@ -287,7 +309,12 @@ mod tests {
         for (index, (name, parent_name)) in rows.iter().enumerate() {
             block.add_element();
             let mut element = block.element_mut(index).expect("the element");
-            element.field_path_mut(label).expect("the label").set(TagFieldData::StringId(StringIdData { string: (*name).to_owned() })).unwrap();
+            let mut field = element.field_path_mut(label).expect("the label");
+            let id = StringIdData { string: (*name).to_owned() };
+            let value = if field.as_ref().field_type() == blam_tags::TagFieldType::OldStringId {
+                TagFieldData::OldStringId(id)
+            } else { TagFieldData::StringId(id) };
+            field.set(value).unwrap();
             if let Some(parent) = parent {
                 element.field_path_mut(parent).expect("the parent").set(TagFieldData::StringId(StringIdData { string: (*parent_name).to_owned() })).unwrap();
             }
@@ -562,6 +589,306 @@ mod tests {
         let (_, pending) = frame(click(parent_rect.center()));
         assert!(pending.iter().any(|edit| edit.path == path && edit.input == "metal"),
             "a hierarchical parent remains selectable as its own leaf");
+    }
+
+    /// Both root and nested color-permutation fields use the edited object's
+    /// referenced model, including through inherited unit/object and item/object.
+    #[test]
+    fn model_variant_lookups_follow_inherited_model_references() {
+        struct ModelSource(Arc<TagFile>);
+        impl blam_tags::string_editor::TagSource for ModelSource {
+            fn tag(&self, group: u32, path: &str) -> Option<Arc<TagFile>> {
+                (group == self.0.group().tag && path == "objects\\test\\model")
+                    .then(|| self.0.clone())
+            }
+        }
+        let definitions = locate_definitions_root();
+        for game in [GameId::Halo2, GameId::Halo2Amp, GameId::Halo3,
+            GameId::Halo3Odst, GameId::HaloReach, GameId::Halo4, GameId::CampaignEvolved]
+        {
+            let root = definitions.join(game.as_str());
+            let editors = StringEditors::load(&root).unwrap();
+            let mut model = TagFile::new(root.join("model.json")).unwrap();
+            add_names(&mut model, "variants", "name", None, &[("default", ""), ("armored", "")]);
+            let source = ModelSource(Arc::new(model));
+            for (group, prefix) in [("object", ""), ("biped", "unit/object/"), ("vehicle", "unit/object/"),
+                ("weapon", "item/object/"), ("scenery", "object/")]
+            {
+                let mut tag = TagFile::new(root.join(format!("{group}.json"))).unwrap();
+                add(&mut tag, &format!("{prefix}change colors"));
+                add(&mut tag, &format!("{prefix}change colors[0]/initial permutations"));
+                for path in [format!("{prefix}default model variant"),
+                    format!("{prefix}change colors[0]/initial permutations[0]/variant name")]
+                {
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "");
+                    let editor = editors.editor_at(tag.root(), &path)
+                        .unwrap_or_else(|| panic!("{game:?} {group} {path}"));
+                    assert_eq!(editor, "default_model_variant");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert!(menu.items.is_empty(), "an empty reference must not guess a model");
+                    assert!(menu.accepts("unresolved"));
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\test\\model");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert_eq!(menu.picks(), ["default", "armored"], "{game:?} {group} {path}");
+                    assert!(menu.accepts("ARMORED"));
+                    assert!(menu.accepts(""), "empty means any model variant");
+                    assert!(!menu.accepts("missing_variant"));
+                    set_ref(&mut tag, &format!("{prefix}model"), source.0.group().tag, "objects\\missing");
+                    let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: "objects\\test\\object", field_path: &path }, &source);
+                    assert!(menu.items.is_empty());
+                    assert!(menu.accepts("unresolved"), "missing models cannot validate a name");
+                }
+            }
+        }
+    }
+
+    /// Distinct parents, children, variants and object indices catch accidental
+    /// use of the root model or the first attachment for a nested field.
+    #[test]
+    fn model_attachment_lookups_follow_parent_and_each_child() {
+        struct Source(HashMap<(u32, String), Arc<TagFile>>);
+        impl blam_tags::string_editor::TagSource for Source {
+            fn tag(&self, group: u32, path: &str) -> Option<Arc<TagFile>> {
+                self.0.get(&(group, path.to_owned())).cloned()
+            }
+        }
+        let definitions = locate_definitions_root();
+        for game in [GameId::Halo2, GameId::Halo3, GameId::Halo3Odst,
+            GameId::HaloReach, GameId::Halo4, GameId::Halo2Amp, GameId::CampaignEvolved]
+        {
+            let root = definitions.join(game.as_str());
+            let editors = StringEditors::load(&root).unwrap();
+            let new = |group: &str| TagFile::new(root.join(format!("{group}.json"))).unwrap();
+            let mut source = Source(HashMap::new());
+            let has_render_model = root.join("render_model.json").exists();
+            if has_render_model {
+            let mut parent_render = new("render_model");
+            add_names(&mut parent_render, "marker groups", "name", None,
+                &[("parent_only", ""), ("head", ""), ("head_top", "")]);
+            source.0.insert((parent_render.group().tag, "parent_render".into()), Arc::new(parent_render));
+            }
+            for (child, group, model_field, markers, variants) in [
+                ("a", "biped", "unit/object/model", vec![("child_only", ""), ("attach", "")], vec![("default", ""), ("pilot", "")]),
+                ("b", "scenery", "object/model", vec![("other_child", "")], vec![("damaged", "")]),
+            ] {
+                let render = has_render_model.then(|| {
+                    let mut render = new("render_model");
+                    add_names(&mut render, "marker groups", "name", None, &markers);
+                    render
+                });
+                let mut model = new("model");
+                add_names(&mut model, "variants", "name", None, &variants);
+                if let Some(render) = &render {
+                    set_ref(&mut model, "render model", render.group().tag, &format!("render_{child}"));
+                }
+                let mut object = new(group);
+                set_ref(&mut object, model_field, model.group().tag, &format!("model_{child}"));
+                if let Some(render) = render {
+                    source.0.insert((render.group().tag, format!("render_{child}")), Arc::new(render));
+                }
+                source.0.insert((model.group().tag, format!("model_{child}")), Arc::new(model));
+                source.0.insert((object.group().tag, format!("object_{child}")), Arc::new(object));
+            }
+            let mut tag = new("model");
+            if has_render_model {
+                set_ref(&mut tag, "render model", u32::from_be_bytes(*b"mode"), "parent_render");
+            }
+            add_names(&mut tag, "variants", "name", None, &[("parent_default", ""), ("parent_pilot", "")]);
+            for i in 0..2 {
+                let path = format!("variants[{i}]/objects");
+                add(&mut tag, &path);
+                add(&mut tag, &path);
+                for (j, child) in if i == 0 { [(0, "a"), (1, "b")] } else { [(0, "b"), (1, "a")] } {
+                    let group = if child == "a" { "biped" } else { "scenery" };
+                    let group = crate::app::loose_fixture::group_tag(game.as_str(), group);
+                    set_ref(&mut tag, &format!("{path}[{j}]/child object"), group, &format!("object_{child}"));
+                }
+            }
+            let bytes = tag.write_to_bytes().unwrap();
+            for tag in [tag, TagFile::read_from_bytes(&bytes).unwrap()] {
+                for i in 0..2 {
+                    for j in 0..2 {
+                        let child_a = i == j;
+                        for field in ["parent marker", "child marker", "child variant name"] {
+                            // Campaign Evolved has no render-model tag/schema.
+                            if !has_render_model && field != "child variant name" { continue; }
+                            let path = format!("variants[{i}]/objects[{j}]/{field}");
+                            if tag.root().field_path(&path).is_none() {
+                                assert!(game == GameId::Halo2 && field == "child variant name");
+                                continue;
+                            }
+                            let editor = editors.editor_at(tag.root(), &path).expect("attachment field has a picker");
+                            let ctx = EditorContext { tag: &tag, tag_path: "parent", field_path: &path };
+                            let menu = editors.menu(editor, &ctx, &source);
+                            let expected = match (field, child_a) {
+                                ("parent marker", _) => vec!["head", "head_top", "parent_only"],
+                                ("child marker", true) => vec!["attach", "child_only"],
+                                ("child marker", false) => vec!["other_child"],
+                                (_, true) => vec!["default", "pilot"],
+                                (_, false) => vec!["damaged"],
+                            };
+                            assert_eq!(menu.picks(), expected, "{game:?} {path}");
+                            assert!(menu.accepts(""), "optional marker/variant may be empty");
+                            if field == "child variant name" {
+                                assert!(menu.accepts(&expected[0].to_uppercase()));
+                                assert!(!menu.accepts("parent_default"), "must validate against the child model");
+                            }
+                            assert!(editors.menu(editor, &ctx, &Source(HashMap::new())).items.is_empty(),
+                                "missing references must not guess marker/variant names");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn installed_h3_model_attachment_lookups_follow_actual_child_objects() {
+        struct Source { root: PathBuf, definitions: PathBuf, names: serde_json::Value }
+        impl blam_tags::string_editor::TagSource for Source {
+            fn tag(&self, group: u32, path: &str) -> Option<Arc<TagFile>> {
+                let key = String::from_utf8(group.to_be_bytes().to_vec()).ok()?;
+                let extension = self.names["tag_index"][key].as_str()?;
+                let path = self.root.join(path.replace('\\', "/")).with_extension(extension);
+                crate::core::source::read_tag_at_path(&path, Some(GameId::Halo3), Some(&self.definitions), group).ok().map(Arc::new)
+            }
+        }
+        let root = PathBuf::from(crate::core::test_kits::tag_path("halo3_mcc", ""));
+        if !root.exists() { eprintln!("skip: H3 kit not available"); return; }
+        let definitions = locate_definitions_root();
+        let source = Source { root, names: serde_json::from_slice(&std::fs::read(definitions.join("halo3_mcc/_meta.json")).unwrap()).unwrap(), definitions: definitions.clone() };
+        let editors = StringEditors::load(definitions.join("halo3_mcc")).unwrap();
+        use blam_tags::string_editor::TagSource;
+        for (path, prefix, parent, child, variant) in [
+            ("objects/characters/marine/marine", "variants[2]/objects[0]", "head", "", ""),
+            ("objects/characters/masterchief/mp_masterchief/mp_masterchief", "variants[0]/objects[0]", "backpack", "backpack", "backpack"),
+        ] {
+            let tag = source.tag(u32::from_be_bytes(*b"hlmt"), path).unwrap();
+            for (field, expected) in [("parent marker", parent), ("child marker", child), ("child variant name", variant)] {
+                let field_path = format!("{prefix}/{field}");
+                let editor = editors.editor_at(tag.root(), &field_path).unwrap();
+                let menu = editors.menu(editor, &EditorContext { tag: &tag, tag_path: path, field_path: &field_path }, &source);
+                if field != "child variant name" || !expected.is_empty() {
+                    assert!(!menu.picks().is_empty(), "{path} {field_path}: {:?}", menu.note);
+                }
+                assert!(menu.accepts(expected), "{path} {field_path}: missing {expected}");
+                if !expected.is_empty() { assert!(menu.picks().contains(&expected)); }
+                eprintln!("{path} {field}: {} choices, includes {expected:?}", menu.picks().len());
+            }
+        }
+    }
+
+    fn variant_kit(value: &str) -> LooseKit {
+        let kit = LooseKit::new("default_model_variant", "halo3_mcc");
+        kit.write_mcc("objects/test/model", "model", |tag| {
+            add_names(tag, "variants", "name", None, &[("default", ""), ("armored", "")]);
+        });
+        kit.write_mcc("objects/test/unit", "biped", |tag| {
+            set_ref(tag, "unit/object/model", u32::from_be_bytes(*b"hlmt"), "objects\\test\\model");
+            set_text(tag, "unit/object/default model variant", value);
+        });
+        kit
+    }
+
+    #[test]
+    fn default_model_variant_uses_shared_validation_style() {
+        for (value, invalid) in [("ARMORED", false), ("", false), ("missing_variant", true)] {
+            let kit = variant_kit(value);
+            let (texts, pink, menu) = draw_field(&kit, "objects/test/unit.biped", "biped",
+                "unit/object/default model variant", false);
+            assert!(texts.iter().any(|text| text == "Model Variants"));
+            assert_eq!(menu.picks(), ["default", "armored"]);
+            assert_eq!(pink, invalid, "{value}");
+        }
+    }
+
+    #[test]
+    fn default_model_variant_shared_picker_searches_and_commits_selection() {
+        let kit = variant_kit("");
+        kit.write_mcc("objects/test/model", "model", |tag| {
+            add_names(tag, "variants", "name", None, &[("default", ""), ("armored", ""),
+                ("minor_scl", ""), ("minor_dog", ""), ("major_scl", ""), ("major_dog", "")]);
+        });
+        let definitions = locate_definitions_root();
+        let tag = crate::core::source::read_tag_at_path(&kit.path("objects/test/unit.biped"),
+            Some(GameId::Halo3), Some(&definitions), u32::from_be_bytes(*b"bipd")).unwrap();
+        let source = kit.source();
+        let key = kit.key("objects/test/unit.biped");
+        let entry = source.entry_for_key(&key).unwrap();
+        let ctx = egui::Context::default();
+        Baboon::configure_context(&ctx);
+        let mut sinks = EditSinks::default();
+        let mut time = 0.0;
+        let filter_id = std::cell::Cell::new(None);
+        let path = "unit/object/default model variant";
+        let mut frame = |events| {
+            time += 0.2;
+            let mut pending = Vec::new();
+            let output = crate::app::run_ui_test(&ctx, crate::app::loose_fixture::screen(events, time), |ui| {
+                let mut edit = FieldEditContext::read_only(&mut sinks, "variant-search", &key);
+                edit.root = Some(tag.root());
+                edit.game = Some(GameId::Halo3);
+                edit.definitions_root = Some(&definitions);
+                edit.editable = true;
+                edit.string_editor_tag = Some(EditedTag { tag: &tag, entry, stamp: (1, 0), source: &source });
+                filter_id.set(Some(edit.widget_id(("string editor", format!("{key}|{path}"))).with("filter")));
+                let field = tag.root().field_path(path).unwrap();
+                draw_foundation_value_row(ui, field, &field_display_meta("default model variant"),
+                    "string id", &field.value().unwrap(), &source.names, 0, path, &mut edit, None, 300.0);
+                pending = std::mem::take(edit.pending);
+            });
+            (output, pending)
+        };
+        let rect = |output: &egui::FullOutput, text: &str| {
+            output.shapes.iter().rev().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(t) if t.galley.text() == text => Some(egui::Rect::from_min_size(t.pos, t.galley.size())),
+                _ => None,
+            })
+        };
+        let click = |pos| vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+        ];
+        let (output, _) = frame(vec![]);
+        frame(click(rect(&output, "Model Variants").unwrap().center()));
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "Search Model Variants").is_some());
+        assert!(rect(&output, "default").is_some());
+        assert!(rect(&output, "armored").is_some());
+        assert!(rect(&output, "minor_scl").is_some(), "grouping starts off");
+        assert!(rect(&output, "minor (2)").is_none());
+        let (_, pending) = frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        assert!(pending.is_empty(), "grouping must not edit the tag");
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor (2)").is_some());
+        assert!(rect(&output, "major (2)").is_some());
+        assert!(rect(&output, "minor_scl").is_none(), "browse children stay in their submenu");
+        assert!(rect(&output, "armored").is_some(), "singletons remain selectable");
+        frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor_scl").is_some(), "grouping can be disabled again");
+        assert!(rect(&output, "minor (2)").is_none());
+        frame(click(rect(&output, "Group by Prefix").unwrap().center()));
+        frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None,
+            pressed: true, repeat: false, modifiers: Default::default() }]);
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        frame(click(rect(&output, "Model Variants").unwrap().center()));
+        frame(vec![]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "minor (2)").is_some(), "grouping survives closing and reopening");
+        ctx.memory_mut(|memory| memory.request_focus(filter_id.get().unwrap()));
+        frame(vec![egui::Event::Text("DOG".into())]);
+        let (output, _) = frame(vec![]);
+        assert!(rect(&output, "default").is_none());
+        assert!(rect(&output, "minor_scl").is_none());
+        assert!(rect(&output, "minor (1)").is_some(), "search retains matching group headings");
+        assert!(rect(&output, "major (1)").is_some());
+        let (_, pending) = frame(click(rect(&output, "minor_dog").unwrap().center()));
+        assert!(pending.iter().any(|edit| edit.path == path && edit.input == "minor_dog"),
+            "grouped selection writes the complete variant ID");
     }
 
     /// A name globals doesn't have turns the box pink; case doesn't count.

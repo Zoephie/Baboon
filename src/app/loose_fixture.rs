@@ -46,6 +46,8 @@ fn ek_folder(game: &str) -> &'static str {
     match game {
         "haloce_mcc" => "HCEEK",
         "halo2_mcc" => "H2EK",
+        "halo2amp_mcc" => "H2AMPEK",
+        "halo4_mcc" => "H4EK",
         "halo3_mcc" => "H3EK",
         "haloreach_mcc" => "HREK",
         other => panic!("no fixture editing kit for {other}"),

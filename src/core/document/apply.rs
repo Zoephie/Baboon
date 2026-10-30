@@ -3,12 +3,13 @@
 //! shader parameters, and model variants. Each batch is one undo step, and a
 //! batch that fails partway leaves the tag as it was.
 
-use std::collections::HashMap;
 
+use std::sync::Arc;
+use blam_tags::index_targets::IndexTargets;
 use blam_tags::string_list::apply_string_list_edits;
 #[cfg(test)]
 use blam_tags::string_list::StringListEdit;
-use blam_tags::{H2Function, TagField, TagFieldData, TagFieldType, TagFile};
+use blam_tags::{H2Function, TagFieldData, TagFieldType, TagFile};
 
 use crate::core::document::ops::{
     BlockOp, BlockOpKind, FunctionDataOp, H2ShaderParamOp, ModelVariantOp,
@@ -36,6 +37,9 @@ pub(crate) struct AppliedFieldEdits {
 pub(crate) struct DeferredOps {
     pub(crate) pending: Vec<PendingFieldEdit>,
     pub(crate) block_ops: Vec<BlockOp>,
+    /// The same per-game catalog used by the picker. Errors refuse structural
+    /// edits before any fields or block entries can be changed.
+    pub(crate) index_targets: Option<Result<Arc<IndexTargets>, String>>,
     pub(crate) shader_ops: Vec<ShaderOp>,
     pub(crate) shader_param_ops: Vec<ShaderParamOp>,
     pub(crate) h2_shader_param_ops: Vec<H2ShaderParamOp>,
@@ -129,6 +133,9 @@ pub(crate) fn apply_deferred_ops(
             model_variants_changed: false,
         };
     }
+    if let Err(error) = block_edit_targets(&ops) {
+        return refused_batch(ops, unchanged, &error);
+    }
     if doc.tag.is_halo5() {
         return apply_halo5_ops(doc, ops, label, unchanged);
     }
@@ -206,10 +213,27 @@ fn refused_batch(
     }
 }
 
+/// An unsuccessful catalog load must never become an empty rule table.
+fn block_edit_targets(ops: &DeferredOps) -> Result<Option<Arc<IndexTargets>>, String> {
+    if ops.block_ops.is_empty() {
+        return Ok(None);
+    }
+    match ops.index_targets.as_ref() {
+        Some(Ok(targets)) => Ok(Some(targets.clone())),
+        Some(Err(error)) => Err(error.clone()),
+        None => Err("Block edit refused: index-target metadata was not supplied.".to_owned()),
+    }
+}
+
 fn apply_ops_to(tag: &mut TagFile, dirty: &mut Dirty, ops: DeferredOps) -> AppliedDeferredOps {
+    let targets = match block_edit_targets(&ops) {
+        Ok(targets) => targets,
+        Err(error) => return refused_batch(ops, Vec::new(), &error),
+    };
     let DeferredOps {
         pending,
         block_ops,
+        index_targets: _,
         shader_ops,
         shader_param_ops,
         h2_shader_param_ops,
@@ -227,7 +251,9 @@ fn apply_ops_to(tag: &mut TagFile, dirty: &mut Dirty, ops: DeferredOps) -> Appli
     // String cell commits address the rows drawn this frame, before a drag
     // reorders the complete entries (including all language offsets).
     keep(apply_string_list_ops(tag, &string_list_ops, dirty));
-    keep(apply_block_ops(tag, block_ops, dirty));
+    if let Some(targets) = targets {
+        keep(apply_block_ops_with_targets(tag, block_ops, dirty, &targets));
+    }
     keep(apply_shader_ops(tag, shader_ops, dirty));
     keep(apply_shader_param_ops(tag, shader_param_ops, dirty));
     keep(apply_h2_shader_param_ops(tag, h2_shader_param_ops, dirty));
@@ -296,14 +322,15 @@ pub(crate) fn apply_pending_edits(
     AppliedFieldEdits { status, outcomes }
 }
 
-pub(crate) fn apply_block_ops(
+pub(crate) fn apply_block_ops_with_targets(
     tag: &mut TagFile,
     ops: Vec<BlockOp>,
     dirty: &mut Dirty,
+    targets: &IndexTargets,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
-        let result = apply_one_block_op(tag, &op);
+        let result = apply_one_block_op_with_targets(tag, &op, targets);
         match result {
             Ok(msg) => {
                 dirty.touch();
@@ -654,9 +681,10 @@ fn h2_animation_property_index(
     })
 }
 
-pub(crate) fn apply_one_block_op(
+pub(crate) fn apply_one_block_op_with_targets(
     tag: &mut TagFile,
     op: &BlockOp,
+    targets: &IndexTargets,
 ) -> Result<String, String> {
     let remap = block_element_remap(tag, op)?;
     let message = apply_one_block_structure_op(tag, op)?;
@@ -665,7 +693,7 @@ pub(crate) fn apply_one_block_op(
     // The walker sees references inside moved, duplicated, or pasted elements
     // at their new paths and adjusts those along with every outside reference.
     if let Some(remap) = remap {
-        remap_block_index_references(tag, &op.path, &remap)?;
+        remap_block_index_references(tag, &op.path, &remap, targets)?;
     }
 
     Ok(message)
@@ -926,11 +954,12 @@ fn remap_block_index_references(
     tag: &mut TagFile,
     target_path: &str,
     remap: &BlockElementRemap,
+    targets: &IndexTargets,
 ) -> Result<usize, String> {
     let root = tag.root();
     let target_path = path_without_field_ordinals(target_path);
     let mut edits = Vec::new();
-    collect_block_index_edits(&root, "", root, &target_path, remap, &mut edits);
+    collect_block_index_edits(&root, "", root, &target_path, remap, &mut edits, targets);
 
     for edit in &edits {
         apply_field_edit(tag, &edit.path, &edit.value.to_string())?;
@@ -945,44 +974,24 @@ fn collect_block_index_edits(
     target_path: &str,
     remap: &BlockElementRemap,
     edits: &mut Vec<BlockIndexEdit>,
+    targets: &IndexTargets,
 ) {
-    // Everything here depends on the struct, not the field, so it is worked
-    // out once per struct. It used to be redone for every field of the tag on
-    // every structural block edit, target resolution included, and that
-    // resolution descends from the root once per ancestor.
+    // New entries keep schema defaults; existing references are resolved
+    // against the same catalog used by the picker.
     let is_new_element = remap
         .excluded_new_elements
         .as_ref()
         .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
-    // Per target, whether it resolves to the edited block; `None` when it does
-    // not resolve at all.
-    let mut declared: HashMap<String, Option<bool>> = HashMap::new();
-    let is_target = |resolved: Option<String>| {
-        resolved.map(|path| path_without_field_ordinals(&path) == target_path)
-    };
-
     for field in tag_struct.fields_all() {
         let definition = field.definition();
-        let declared_state = (!is_new_element)
-            .then(|| {
-                definition
-                    .block_index_target()
-                    .or_else(|| definition.block_flags_target())
-            })
+        let is_index = definition.block_index_target().is_some()
+            || definition.block_flags_target().is_some()
+            || matches!(field.field_type(), TagFieldType::CustomCharBlockIndex
+                | TagFieldType::CustomShortBlockIndex | TagFieldType::CustomLongBlockIndex);
+        let declared_state = (!is_new_element && is_index)
+            .then(|| targets.resolve(root, &append_field_path_for(struct_path, &field)))
             .flatten()
-            .and_then(|target| {
-                *declared.entry(target.name().to_owned()).or_insert_with(|| {
-                    is_target(
-                        declared_block_index_target(
-                            tag_struct,
-                            Some(root),
-                            struct_path,
-                            target.name(),
-                        )
-                        .map(|target| target.path),
-                    )
-                })
-            });
+            .map(|target| path_without_field_ordinals(&target.path) == target_path);
         if declared_state == Some(true) {
             let field_path = append_field_path_for(struct_path, &field);
             let value = field.value();
@@ -1017,6 +1026,7 @@ fn collect_block_index_edits(
                     target_path,
                     remap,
                     edits,
+                    targets,
                 );
             }
         } else if let Some(array) = field.as_array() {
@@ -1029,11 +1039,12 @@ fn collect_block_index_edits(
                     target_path,
                     remap,
                     edits,
+                    targets,
                 );
             }
         } else if let Some(nested) = field.as_struct() {
             let field_path = append_field_path_for(struct_path, &field);
-            collect_block_index_edits(&nested, &field_path, root, target_path, remap, edits);
+            collect_block_index_edits(&nested, &field_path, root, target_path, remap, edits, targets);
         }
     }
 }
@@ -1081,78 +1092,6 @@ fn path_is_within_target_element(
         return false;
     };
     range.contains(&index)
-}
-
-/// The block a declared block-index field points into: the first sibling, or
-/// failing that the nearest ancestor's field, holding a block of the target
-/// definition.
-///
-/// The one rule for this, used both by the field's element dropdown and by
-/// the renumbering that follows an element insert, delete or move, so what
-/// the dropdown offers is what renumbering keeps pointing at. `root` is only
-/// needed to climb past the field's own struct.
-pub(crate) fn declared_block_index_target(
-    tag_struct: &blam_tags::TagStruct<'_>,
-    root: Option<blam_tags::TagStruct<'_>>,
-    struct_path: &str,
-    target_definition: &str,
-) -> Option<BlockIndexTarget> {
-    if target_definition.is_empty() {
-        return None;
-    }
-    find_block_target(tag_struct, root, struct_path, |field| {
-        field
-            .as_block()
-            .is_some_and(|block| block.definition().name() == target_definition)
-    })
-}
-
-fn find_block_target(
-    tag_struct: &blam_tags::TagStruct<'_>,
-    root: Option<blam_tags::TagStruct<'_>>,
-    struct_path: &str,
-    matches: impl Fn(&TagField<'_>) -> bool + Copy,
-) -> Option<BlockIndexTarget> {
-    find_sibling_block(tag_struct, struct_path, matches)
-        .or_else(|| find_ancestor_block(root?, struct_path, matches))
-}
-
-fn find_sibling_block(
-    tag_struct: &blam_tags::TagStruct<'_>,
-    struct_path: &str,
-    matches: impl Fn(&TagField<'_>) -> bool,
-) -> Option<BlockIndexTarget> {
-    tag_struct
-        .fields_all()
-        .find(|field| matches(field))
-        .map(|field| BlockIndexTarget {
-            path: append_field_path_for(struct_path, &field),
-            len: field.as_block().map_or(0, |block| block.len()),
-        })
-}
-
-fn find_ancestor_block(
-    root: blam_tags::TagStruct<'_>,
-    struct_path: &str,
-    matches: impl Fn(&TagField<'_>) -> bool + Copy,
-) -> Option<BlockIndexTarget> {
-    let mut current = struct_path;
-    while !current.is_empty() {
-        let parent = current.rsplit_once('/').map(|(path, _)| path).unwrap_or("");
-        let ancestor = if parent.is_empty() {
-            root
-        } else {
-            root.descend(parent)?
-        };
-        if let Some(found) = find_sibling_block(&ancestor, parent, matches) {
-            return Some(found);
-        }
-        if parent.is_empty() {
-            break;
-        }
-        current = parent;
-    }
-    None
 }
 
 /// Normalize exact field paths for comparison while retaining concrete block
@@ -1457,18 +1396,19 @@ pub(crate) fn block_index_value(value: &TagFieldData) -> Option<i64> {
     }
 }
 
-/// Resolve a block-index field's target block, returning `(element labels, full
-/// target block path)`. Checks the field's own struct first (sibling target),
-/// then walks up the ancestry from `root` (ancestor target — e.g. weapon's
-/// "primary barrel" → the root "barrels" block). `None` for non-(plain)
-/// block-index fields, custom indices (no target in the definition), or targets
-/// that don't resolve — callers fall back to the numeric editor.
-/// The block a block-index field points into. Only its path and length are
-/// resolved per frame; the element labels, one per target element, are built
-/// by the row when it needs them.
-pub(crate) struct BlockIndexTarget {
-    pub(crate) path: String,
-    pub(crate) len: usize,
+/// Engine-resolved target used by both pickers and reference repair.
+pub(crate) type BlockIndexTarget = blam_tags::index_targets::IndexTarget;
+
+// Ordinary-index fixtures deliberately have no game metadata. Production
+// callers must use the variants that require an explicit catalog.
+#[cfg(test)]
+pub(crate) fn apply_one_block_op(tag: &mut TagFile, op: &BlockOp) -> Result<String, String> {
+    apply_one_block_op_with_targets(tag, op, &Default::default())
+}
+
+#[cfg(test)]
+pub(crate) fn apply_block_ops(tag: &mut TagFile, ops: Vec<BlockOp>, dirty: &mut Dirty) -> Option<String> {
+    apply_block_ops_with_targets(tag, ops, dirty, &Default::default())
 }
 
 #[cfg(test)]
@@ -1822,6 +1762,7 @@ mod tests {
 
     fn block_add(path: &str) -> DeferredOps {
         DeferredOps {
+            index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
             block_ops: vec![BlockOp { path: path.to_owned(), kind: BlockOpKind::Add }],
             ..Default::default()
         }
@@ -1884,6 +1825,23 @@ mod tests {
         assert!(applied.outcomes.iter().all(|outcome| outcome.result.is_err()));
         assert!(!halo5_scalar(&doc, &scalar).contains('7'));
         assert!(!doc.dirty.is_set());
+    }
+
+    #[test]
+    fn unavailable_index_metadata_refuses_fields_and_structure_before_mutation() {
+        for metadata in [None, Some(Err("invalid index_target in custom definitions".to_owned()))] {
+            let mut doc = document();
+            let before = doc.tag.write_to_bytes().unwrap();
+            let mut ops = field_edit("node list checksum", "42");
+            ops.block_ops.push(BlockOp { path: "nodes".into(), kind: BlockOpKind::Add });
+            ops.index_targets = metadata;
+            let applied = apply_deferred_ops(&mut doc, ops, "refused structural edit");
+            assert!(applied.status.is_some());
+            assert!(applied.outcomes.iter().all(|outcome| outcome.result.is_err()));
+            assert_eq!(doc.tag.write_to_bytes().unwrap(), before);
+            assert!(!doc.dirty.is_set());
+            assert!(!doc.journal.can_undo());
+        }
     }
 
     fn document() -> TagDocument {
@@ -1974,7 +1932,8 @@ mod tests {
             let before = doc.tag.write_to_bytes().unwrap();
             apply_deferred_ops(&mut doc, DeferredOps {
                 string_list_ops: vec![StringListOp { game: Some(game), edit: StringListEdit::SetText { index: 2, language: 0, text: "Edited before dropping".to_owned() } }],
-                block_ops: vec![BlockOp { path: "string references".to_owned(), kind: BlockOpKind::Reorder { order: vec![2, 0, 1] } }],
+                index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
+            block_ops: vec![BlockOp { path: "string references".to_owned(), kind: BlockOpKind::Reorder { order: vec![2, 0, 1] } }],
                 ..DeferredOps::default()
             }, "Reorder strings");
             let bytes = doc.tag.write_to_bytes().unwrap();
@@ -1997,7 +1956,7 @@ mod tests {
         let entries=vec![StringEntry {id:Some("pickup".into()),texts:vec![Some("Hold %{18} %{32}".into())]},StringEntry {id:Some("exit".into()),texts:vec![Some("%{13}".into())]}];
         strings::apply_string_list_edits(&mut tag,Some(GameId::HaloCe),&[StringListEdit::Insert {at:0,entries:entries.clone()}]).unwrap();
         let mut doc=TagDocument::clean(tag); let before=doc.tag.write_to_bytes().unwrap();
-        apply_deferred_ops(&mut doc,DeferredOps {block_ops:vec![BlockOp {path:"messages".into(),kind:BlockOpKind::Reorder {order:vec![1,0]}}],..Default::default()},"Reorder HUD messages");
+        apply_deferred_ops(&mut doc,DeferredOps {index_targets: Some(Ok(std::sync::Arc::new(Default::default()))), block_ops:vec![BlockOp {path:"messages".into(),kind:BlockOpKind::Reorder {order:vec![1,0]}}],..Default::default()},"Reorder HUD messages");
         assert_eq!(strings::read_string_list(&doc.tag).unwrap().entries,vec![entries[1].clone(),entries[0].clone()]);
         strings::apply_string_list_edits(&mut doc.tag,Some(GameId::HaloCe),&[StringListEdit::SetText {index:0,language:0,text:"Changed %{26}".into()}]).unwrap();
         let bytes=doc.tag.write_to_bytes().unwrap();

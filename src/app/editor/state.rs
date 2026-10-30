@@ -532,6 +532,7 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// The tag's writer can only patch values in place: its string_ids,
     /// references and block counts are fixed, even in expert mode.
     pub(in crate::app) structure_locked: bool,
+    pub(in crate::app) index_targets: Option<Result<Arc<blam_tags::index_targets::IndexTargets>, String>>,
     /// Expert mode: fields the definitions mark read-only can be edited too.
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) show_block_sizes: bool,
@@ -781,6 +782,7 @@ impl<'a> FieldEditContext<'a> {
             status: None,
             editable: false,
             structure_locked: false,
+            index_targets: Some(Ok(Arc::new(Default::default()))),
             expert_mode: false,
             show_block_sizes: false,
             hud_message_usage: Default::default(),
@@ -853,6 +855,7 @@ impl FieldEditContext<'_> {
             model_variant_ops,
             function_data_ops,
             string_list_ops,
+            index_targets: _,
         } = ops;
         // Function-data writes come only from the function popup, never from
         // a text row.

@@ -308,6 +308,16 @@ The editor renders the full tag structure — nested blocks, arrays, structs, an
 pageable resources — with inline editing for loose little-endian tags:
 
 - Scalars, integers, reals, strings, and `string_id`s.
+- **Default model variants** use the shared searchable string ID dropdown to
+  list names from the object's attached model, including inherited fields on
+  bipeds, vehicles, and weapons. Unknown names are highlighted when the model's
+  variant list is available; empty values remain valid. The optional **Group by
+  Prefix** setting groups names before the first underscore and starts off.
+- **HUD string IDs** search IDs and localized text from the configured HUD
+  lists. H2A and H4 group choices by source string list, with optional prefix
+  groups inside each list. Search spans every list; duplicate IDs retain each
+  list's preview, and the Open menu selects which source tag to open. Missing
+  IDs warn without blocking manual edits or saving.
 - **Enums** and **bit flags** with named options.
 - **Colors** via an interactive color-picker popup with channel parsing.
 - **Tag references** with an *Open* button (Alt-click opens in a split beside
@@ -888,9 +898,8 @@ placement to the compositor when coordinates are unavailable.
   via its `audio` feature), the monolithic cache reader, and — via its `iostore`
   feature — UE5 container reading, Zen-package (de)serialisation, and the
   in-place container edits behind Campaign Evolved duplicate/delete and Chimp.
-  It is currently pinned to the `codex/chimp-backend` branch of the
-  [`Zoephie/blam-tags`](https://github.com/Zoephie/blam-tags) fork, which carries
-  those container-writing changes ahead of upstream.
+  Cargo pins a specific commit from the canonical repository for reproducible
+  builds, with the `audio`, `iostore`, and `halo5` features enabled.
 - **Concurrency** — all file I/O (loading, scanning, indexing, export) runs on
   worker threads that communicate with the UI via an `mpsc` channel and request
   repaints; the UI thread never blocks on disk.

@@ -56,6 +56,7 @@ pub(super) fn image(ui: &Ui, editor: &str) -> Option<egui::Image<'static>> {
             ButtonIcon::Function
         }
         "object_marker" | "marker_names" => ButtonIcon::Markers,
+        "default_model_variant" | "child_model_variant" => ButtonIcon::Model,
         _ => return None,
     };
     Some(button_icon_image(ui, icon, text_dark(), 16.0))
@@ -155,9 +156,13 @@ pub(super) fn entry(
     enabled: bool,
     details: Option<&str>,
 ) -> egui::Response {
+    entry_selected(ui, text, enabled, details, false)
+}
+
+fn entry_selected(ui: &mut Ui, text: &str, enabled: bool, details: Option<&str>, selected: bool) -> egui::Response {
     let response = ui.add_enabled(
         enabled,
-        egui::Button::new(text)
+        egui::Button::new(text).selected(selected)
             .right_text("")
             .min_size(Vec2::new(ui.available_width(), BUTTON_HEIGHT))
             .truncate(),
@@ -216,6 +221,22 @@ pub(super) fn submenu(
     });
 }
 
+/// Use the same first-underscore grouping as the string list pickers. Only
+/// presentation changes: leaves keep their complete IDs for search and edits.
+pub(super) fn prefix_groups(items: &[MenuItem]) -> Vec<MenuItem> {
+    use super::string_groups::{StringIdGroup, group_string_ids};
+    group_string_ids(items.iter().map(|item| item.text.as_str()))
+        .into_iter()
+        .map(|group| match group {
+            StringIdGroup::Entry(index) => items[index].clone(),
+            StringIdGroup::Prefix { prefix, indices } => MenuItem::submenu(
+                prefix,
+                indices.into_iter().map(|index| items[index].clone()).collect(),
+            ),
+        })
+        .collect()
+}
+
 fn match_count(item: &MenuItem, query: &str) -> usize {
     if item.is_submenu() {
         item.children
@@ -233,6 +254,18 @@ pub(super) fn menu_items(
     items: &[MenuItem],
     filter: &str,
     id: egui::Id,
+    picked: &mut Option<String>,
+) {
+    menu_items_selected(ui, items, filter, id, None, picked);
+}
+
+/// Retain the current choice while browsing or searching nested suggestions.
+pub(super) fn menu_items_selected(
+    ui: &mut Ui,
+    items: &[MenuItem],
+    filter: &str,
+    id: egui::Id,
+    selected: Option<&str>,
     picked: &mut Option<String>,
 ) {
     let query = filter.to_lowercase();
@@ -259,16 +292,16 @@ pub(super) fn menu_items(
                     );
                     ui.set_width(width);
                     scroll(ui, child_id.with("scroll")).show(ui, |ui| {
-                        menu_items(ui, &item.children, filter, child_id, picked);
+                        menu_items_selected(ui, &item.children, filter, child_id, selected, picked);
                     });
                 });
             } else {
                 group_heading(ui, caption);
                 ui.indent(child_id, |ui| {
-                    menu_items(ui, &item.children, filter, child_id, picked)
+                    menu_items_selected(ui, &item.children, filter, child_id, selected, picked)
                 });
             }
-        } else if entry(ui, &item.text, true, None).clicked() {
+        } else if entry_selected(ui, &item.text, true, None, selected.is_some_and(|value| value.eq_ignore_ascii_case(&item.text))).clicked() {
             *picked = Some(item.text.clone());
             crate::app::ui_kit::button_icons::close_menu(ui);
         }
@@ -305,4 +338,28 @@ pub(super) fn menu_popup_width(ui: &Ui, items: &[MenuItem], filter: &str) -> f32
     let mut rows = Vec::new();
     collect(items, &filter.to_lowercase(), 0, &mut rows);
     popup_width(ui, rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefix_groups_keep_full_variant_ids_and_singletons() {
+        let items: Vec<_> = ["minor_scl", "plain", "minor_dog", "major_scl", "major_dog", "odd_one"]
+            .into_iter().map(MenuItem::item).collect();
+        let grouped = prefix_groups(&items);
+        assert_eq!(grouped, vec![
+            MenuItem::submenu("major", vec![MenuItem::item("major_dog"), MenuItem::item("major_scl")]),
+            MenuItem::submenu("minor", vec![MenuItem::item("minor_dog"), MenuItem::item("minor_scl")]),
+            MenuItem::item("odd_one"), MenuItem::item("plain"),
+        ]);
+        assert!(menu_has_matches(&grouped, "DOG"));
+        assert!(!menu_has_matches(&grouped, "unmatched"));
+        let menu = blam_tags::string_editor::Menu { items: grouped, ..Default::default() };
+        assert!(menu.accepts("MINOR_DOG"));
+        assert!(!menu.accepts("minor"), "group headings are not variant IDs");
+        assert_eq!(items[0].text, "minor_scl");
+        assert!(items.iter().all(|item| !item.is_submenu()));
+    }
 }

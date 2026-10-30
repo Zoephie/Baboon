@@ -900,7 +900,8 @@ mod tests {
         /// Apply what the grid raised, as the tag pane does after its draw, and
         /// move the document to a new revision so the grid rebuilds from it.
         fn apply(&mut self) -> AppliedDeferredOps {
-            let ops = std::mem::take(&mut self.ops);
+            let mut ops = std::mem::take(&mut self.ops);
+            ops.index_targets = Some(crate::core::index_targets::load(None, Some(GameId::Halo3), false));
             let applied = apply_deferred_ops(&mut self.doc, ops, "test");
             // The pane applies every frame; the next frame's empty batch is what
             // closes the undo step.

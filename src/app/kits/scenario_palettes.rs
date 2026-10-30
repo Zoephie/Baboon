@@ -150,14 +150,13 @@ mod tests {
             .unwrap_or_else(|error| panic!("read {}: {error}", root.display()))
             .flatten()
             .filter(|entry| entry.path().join("scenario.json").is_file())
-            .filter(|entry| entry.file_name() != crate::core::format::HALO5_DEFINITIONS)
-            .map(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                GameId::from_id(&name).unwrap_or_else(|| panic!("definitions/{name} names no game"))
-            })
+            // Definitions can include formats without a supported editing kit.
+            .filter_map(|entry| GameId::from_id(&entry.file_name().to_string_lossy()))
             .collect::<Vec<_>>();
         games.sort();
-        assert!(!games.is_empty(), "no game under {}", root.display());
+        let mut expected = GameId::ALL.to_vec();
+        expected.sort();
+        assert_eq!(games, expected, "all supported games have scenario definitions under {}", root.display());
         games
     }
 
