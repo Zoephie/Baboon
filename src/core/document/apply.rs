@@ -3,8 +3,9 @@
 //! shader parameters, and model variants. Each batch is one undo step, and a
 //! batch that fails partway leaves the tag as it was.
 
-
+use std::collections::HashMap;
 use std::sync::Arc;
+
 use blam_tags::index_targets::IndexTargets;
 use blam_tags::string_list::apply_string_list_edits;
 #[cfg(test)]
@@ -982,16 +983,33 @@ fn collect_block_index_edits(
         .excluded_new_elements
         .as_ref()
         .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+    // Unannotated fields sharing a declared target resolve alike, so that is
+    // worked out once per struct: resolution descends from the root once per
+    // ancestor, and this runs for the whole tag on every structural block edit.
+    let mut declared: HashMap<String, Option<bool>> = HashMap::new();
     for field in tag_struct.fields_all() {
         let definition = field.definition();
-        let is_index = definition.block_index_target().is_some()
-            || definition.block_flags_target().is_some()
+        let declared_target = definition
+            .block_index_target()
+            .or_else(|| definition.block_flags_target());
+        let is_index = declared_target.is_some()
             || matches!(field.field_type(), TagFieldType::CustomCharBlockIndex
                 | TagFieldType::CustomShortBlockIndex | TagFieldType::CustomLongBlockIndex);
-        let declared_state = (!is_new_element && is_index)
-            .then(|| targets.resolve(root, &append_field_path_for(struct_path, &field)))
-            .flatten()
-            .map(|target| path_without_field_ordinals(&target.path) == target_path);
+        let is_target = || {
+            targets
+                .resolve_field(root, *tag_struct, struct_path, field)
+                .map(|target| path_without_field_ordinals(&target.path) == target_path)
+        };
+        let declared_state = if is_new_element || !is_index {
+            None
+        } else {
+            match declared_target {
+                Some(target) if !targets.is_annotated(*tag_struct, field) => {
+                    *declared.entry(target.name().to_owned()).or_insert_with(is_target)
+                }
+                _ => is_target(),
+            }
+        };
         if declared_state == Some(true) {
             let field_path = append_field_path_for(struct_path, &field);
             let value = field.value();
@@ -1933,7 +1951,7 @@ mod tests {
             apply_deferred_ops(&mut doc, DeferredOps {
                 string_list_ops: vec![StringListOp { game: Some(game), edit: StringListEdit::SetText { index: 2, language: 0, text: "Edited before dropping".to_owned() } }],
                 index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
-            block_ops: vec![BlockOp { path: "string references".to_owned(), kind: BlockOpKind::Reorder { order: vec![2, 0, 1] } }],
+                block_ops: vec![BlockOp { path: "string references".to_owned(), kind: BlockOpKind::Reorder { order: vec![2, 0, 1] } }],
                 ..DeferredOps::default()
             }, "Reorder strings");
             let bytes = doc.tag.write_to_bytes().unwrap();
