@@ -529,6 +529,9 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) tag_reference_picker: &'a mut Option<TagReferencePickerState>,
     pub(in crate::app) status: Option<&'a mut String>,
     pub(in crate::app) editable: bool,
+    /// The tag's writer can only patch values in place: its string_ids,
+    /// references and block counts are fixed, even in expert mode.
+    pub(in crate::app) structure_locked: bool,
     /// Expert mode: fields the definitions mark read-only can be edited too.
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) show_block_sizes: bool,
@@ -777,6 +780,7 @@ impl<'a> FieldEditContext<'a> {
             tag_reference_picker: &mut sinks.tag_reference_picker,
             status: None,
             editable: false,
+            structure_locked: false,
             expert_mode: false,
             show_block_sizes: false,
             hud_message_usage: Default::default(),

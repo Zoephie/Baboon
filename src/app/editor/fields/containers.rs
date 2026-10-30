@@ -256,6 +256,15 @@ pub(in crate::app) fn draw_fields_with_docs(
     }
 }
 
+/// The value rows a structure-locked tag can't change. Blocks are held back at
+/// their own control, since the fields inside them stay editable.
+fn is_structural_value(field_type: TagFieldType) -> bool {
+    matches!(
+        field_type,
+        TagFieldType::StringId | TagFieldType::OldStringId | TagFieldType::TagReference
+    )
+}
+
 pub(in crate::app) fn draw_field(
     ui: &mut Ui,
     field: TagField<'_>,
@@ -270,6 +279,25 @@ pub(in crate::app) fn draw_field(
     block_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
+    if edit.editable && edit.structure_locked && is_structural_value(field.field_type()) {
+        edit.editable = false;
+        draw_field(
+            ui,
+            field,
+            field_path,
+            parent_raw,
+            names,
+            depth,
+            expert_mode,
+            path_prefix,
+            edit,
+            meta_override,
+            block_index,
+            tag_reference_value_width,
+        );
+        edit.editable = true;
+        return;
+    }
     #[cfg(test)]
     FIELD_ROWS_BUILT.with(|built| built.set(built.get() + 1));
     mark_find_render_cell(ui, edit.tag_key, &field_path);
@@ -1076,6 +1104,7 @@ pub(in crate::app) fn draw_foundation_block(
     let paste_gate = match edit.block_clipboard {
         Some(clip)
             if edit.editable
+                && !edit.structure_locked
                 && clip.group_tag == edit.group_tag
                 && strip_element_indices(&clip.block_path)
                     == strip_element_indices(path_prefix) =>
@@ -1099,7 +1128,7 @@ pub(in crate::app) fn draw_foundation_block(
         count,
         Some(block.definition().max_count()),
         edit.editable,
-        true, // is a real block — add/delete allowed
+        !edit.structure_locked, // a real block allows add/delete
         edit.view_scope,
         edit.tag_key,
         path_prefix,

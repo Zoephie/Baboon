@@ -58,6 +58,16 @@ impl DeferredOps {
             && self.function_data_ops.is_empty()
             && self.string_list_ops.is_empty()
     }
+
+    /// Whether these ops can move fields, not just change their values.
+    fn change_layout(&self) -> bool {
+        !(self.block_ops.is_empty()
+            && self.shader_ops.is_empty()
+            && self.shader_param_ops.is_empty()
+            && self.h2_shader_param_ops.is_empty()
+            && self.model_variant_ops.is_empty()
+            && self.string_list_ops.is_empty())
+    }
 }
 
 /// Whether a batch of edits is its own undo step or joins the one open.
@@ -119,16 +129,84 @@ pub(crate) fn apply_deferred_ops(
             model_variants_changed: false,
         };
     }
+    if doc.tag.is_halo5() {
+        return apply_halo5_ops(doc, ops, label, unchanged);
+    }
     doc.journal.begin_edit(&doc.tag, label);
-    if !(ops.block_ops.is_empty()
-        && ops.shader_ops.is_empty()
-        && ops.shader_param_ops.is_empty()
-        && ops.h2_shader_param_ops.is_empty()
-        && ops.model_variant_ops.is_empty()
-        && ops.string_list_ops.is_empty())
-    {
+    if ops.change_layout() {
         doc.note_layout_change();
     }
+    let mut applied = apply_ops_to(&mut doc.tag, &mut doc.dirty, ops);
+    applied.outcomes.extend(unchanged);
+    applied
+}
+
+/// Halo 5 tags are patched into their original bytes, so a string_id, reference
+/// or block count that moves leaves the whole tag unwritable, with no snapshot
+/// left for undo. The batch runs on a copy and lands only if that copy can
+/// still be written, leaving a refused batch no trace in the tag or its history.
+fn apply_halo5_ops(
+    doc: &mut TagDocument,
+    ops: DeferredOps,
+    label: &str,
+    unchanged: Vec<FieldEditOutcome>,
+) -> AppliedDeferredOps {
+    let change_layout = ops.change_layout();
+    let group_tag = doc.tag.group().tag;
+    let copy = doc
+        .tag
+        .write_to_bytes()
+        .map_err(anyhow::Error::from)
+        .and_then(|bytes| crate::core::source::read_tag_from_bytes(&bytes, None, None, group_tag));
+    let mut trial = match copy {
+        Ok(trial) => trial,
+        Err(error) => return refused_batch(ops, unchanged, &error.to_string()),
+    };
+    let mut trial_dirty = Dirty::default();
+    let mut applied = apply_ops_to(&mut trial, &mut trial_dirty, ops);
+    if let Err(error) = trial.write_to_bytes() {
+        let reason = error.to_string();
+        for outcome in &mut applied.outcomes {
+            outcome.result = Err(reason.clone());
+        }
+        applied.status = Some(format!("Edit refused: {reason}"));
+        applied.model_variants_changed = false;
+    } else if trial_dirty.is_set() {
+        doc.journal.begin_edit(&doc.tag, label);
+        if change_layout {
+            doc.note_layout_change();
+        }
+        doc.tag = trial;
+        doc.dirty.touch();
+    }
+    applied.outcomes.extend(unchanged);
+    applied
+}
+
+/// The result of a batch that never ran.
+fn refused_batch(
+    ops: DeferredOps,
+    unchanged: Vec<FieldEditOutcome>,
+    reason: &str,
+) -> AppliedDeferredOps {
+    let mut outcomes: Vec<_> = ops
+        .pending
+        .into_iter()
+        .map(|edit| FieldEditOutcome {
+            path: edit.path,
+            input: edit.input,
+            result: Err(reason.to_owned()),
+        })
+        .collect();
+    outcomes.extend(unchanged);
+    AppliedDeferredOps {
+        status: Some(format!("Edit refused: {reason}")),
+        outcomes,
+        model_variants_changed: false,
+    }
+}
+
+fn apply_ops_to(tag: &mut TagFile, dirty: &mut Dirty, ops: DeferredOps) -> AppliedDeferredOps {
     let DeferredOps {
         pending,
         block_ops,
@@ -139,8 +217,6 @@ pub(crate) fn apply_deferred_ops(
         function_data_ops,
         string_list_ops,
     } = ops;
-    let tag = &mut doc.tag;
-    let dirty = &mut doc.dirty;
     let applied = apply_pending_edits(tag, pending, dirty);
     let mut status = applied.status;
     let mut keep = |next: Option<String>| {
@@ -159,11 +235,9 @@ pub(crate) fn apply_deferred_ops(
     let model_variants_changed = variant_status.is_some();
     keep(variant_status);
     keep(apply_function_data_ops(tag, function_data_ops, dirty));
-    let mut outcomes = applied.outcomes;
-    outcomes.extend(unchanged);
     AppliedDeferredOps {
         status,
-        outcomes,
+        outcomes: applied.outcomes,
         model_variants_changed,
     }
 }
@@ -1692,6 +1766,124 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parameter_count(&tag), before + 1);
+    }
+
+    /// An empty Halo 5 tag, built as the engine's own tests build one. The
+    /// string list has both a fixed array of scalars and a block at its root.
+    fn halo5_document() -> TagDocument {
+        let path = crate::core::bundled::locate_definitions_root()
+            .join("halo5_guardians/multilingual_unicode_string_list.json");
+        let (layout, meta) = blam_tags::TagLayout::from_json_with_meta(&path).unwrap();
+        let root = &layout.struct_layouts
+            [layout.block_layouts[layout.header.tag_group_block_index as usize].struct_index as usize];
+        let mut bytes = vec![0u8; 128 + root.size];
+        bytes[..4].copy_from_slice(b"ucsh");
+        for (offset, value) in [
+            (4, 27u32),
+            (32, 1),
+            (36, 1),
+            (60, 128),
+            (64, root.size as u32),
+            (80, root.size as u32),
+            (120, u32::MAX),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[86] = 1;
+        bytes[96..112].copy_from_slice(&root.guid);
+        let tag = blam_tags::halo5::read_halo5_tag_file(&bytes, layout, meta.tag).unwrap();
+        TagDocument::clean(tag)
+    }
+
+    fn halo5_scalar_path(doc: &TagDocument) -> String {
+        let root = doc.tag.root();
+        let array = root.fields().find(|f| f.as_array().is_some()).unwrap();
+        let element = array.as_array().unwrap().iter().nth(1).unwrap();
+        let scalar = element.fields().find(|f| f.type_name() == "short integer").unwrap();
+        blam_tags::TagFieldPath::default()
+            .with_field(&array)
+            .with_index(1)
+            .with_field(&scalar)
+            .to_string()
+    }
+
+    fn halo5_block_path(doc: &TagDocument) -> String {
+        let root = doc.tag.root();
+        let block = root.fields().find(|f| f.as_block().is_some()).unwrap();
+        blam_tags::TagFieldPath::default().with_field(&block).to_string()
+    }
+
+    fn field_edit(path: &str, input: &str) -> DeferredOps {
+        DeferredOps {
+            pending: vec![PendingFieldEdit { path: path.to_owned(), input: input.to_owned() }],
+            ..Default::default()
+        }
+    }
+
+    fn block_add(path: &str) -> DeferredOps {
+        DeferredOps {
+            block_ops: vec![BlockOp { path: path.to_owned(), kind: BlockOpKind::Add }],
+            ..Default::default()
+        }
+    }
+
+    fn halo5_scalar(doc: &TagDocument, path: &str) -> String {
+        format!("{:?}", doc.tag.root().field_path(path).unwrap().value().unwrap())
+    }
+
+    #[test]
+    fn a_halo5_scalar_edit_lands_and_undoes() {
+        let mut doc = halo5_document();
+        let scalar = halo5_scalar_path(&doc);
+
+        let applied = apply_deferred_ops(&mut doc, field_edit(&scalar, "7"), "edit");
+
+        assert!(applied.outcomes.iter().all(|outcome| outcome.result.is_ok()));
+        assert!(doc.tag.is_halo5());
+        assert!(doc.dirty.is_set());
+        assert!(halo5_scalar(&doc, &scalar).contains('7'));
+        assert!(doc.tag.write_to_bytes().is_ok());
+        assert!(doc.journal.can_undo());
+    }
+
+    /// A block add can't be written. Applied, it would leave every later edit
+    /// without an undo step, so the scalar after it must still take one.
+    #[test]
+    fn a_halo5_edit_the_writer_refuses_leaves_no_trace() {
+        let mut doc = halo5_document();
+        let scalar = halo5_scalar_path(&doc);
+        let block = halo5_block_path(&doc);
+        apply_deferred_ops(&mut doc, field_edit(&scalar, "7"), "first");
+        doc.journal.end_edit_window();
+        let before = doc.tag.write_to_bytes().unwrap();
+        let revision = doc.dirty.revision();
+        let undo_steps = doc.journal.top_id();
+
+        let applied = apply_deferred_ops(&mut doc, block_add(&block), "add");
+
+        assert!(applied.status.unwrap().starts_with("Edit refused"));
+        assert_eq!(doc.tag.write_to_bytes().unwrap(), before);
+        assert_eq!(doc.dirty.revision(), revision);
+        assert_eq!(doc.journal.top_id(), undo_steps);
+
+        apply_deferred_ops(&mut doc, field_edit(&scalar, "9"), "second");
+        assert_ne!(doc.journal.top_id(), undo_steps);
+        assert!(halo5_scalar(&doc, &scalar).contains('9'));
+    }
+
+    #[test]
+    fn a_refused_halo5_batch_fails_every_draft_in_it() {
+        let mut doc = halo5_document();
+        let scalar = halo5_scalar_path(&doc);
+        let block = halo5_block_path(&doc);
+        let mut ops = field_edit(&scalar, "7");
+        ops.block_ops = block_add(&block).block_ops;
+
+        let applied = apply_deferred_ops(&mut doc, ops, "both");
+
+        assert!(applied.outcomes.iter().all(|outcome| outcome.result.is_err()));
+        assert!(!halo5_scalar(&doc, &scalar).contains('7'));
+        assert!(!doc.dirty.is_set());
     }
 
     fn document() -> TagDocument {

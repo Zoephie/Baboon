@@ -385,6 +385,7 @@ pub(in crate::app) fn draw_tag_pane(
         tag_reference_picker: &mut tag_reference_picker,
         status: Some(&mut status),
         editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
+        structure_locked: doc.tag.is_halo5(),
         expert_mode,
         show_block_sizes: cx.model.prefs.show_block_sizes,
         string_list_checkboxes: cx.model.prefs.string_list_checkboxes,
