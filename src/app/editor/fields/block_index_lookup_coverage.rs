@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::document::apply::{apply_field_edit, apply_one_block_op};
+use crate::core::document::apply::{apply_field_edit, apply_one_block_op_with_targets};
 use crate::core::document::ops::{BlockOp, BlockOpKind};
 use blam_tags::TagFile;
 
@@ -13,18 +13,24 @@ const GAMES: [&str; 7] = [
     "haloce_evolved",
 ];
 
-fn op(tag: &mut TagFile, path: &str, kind: BlockOpKind) {
-    apply_one_block_op(
+fn op(
+    tag: &mut TagFile,
+    path: &str,
+    kind: BlockOpKind,
+    targets: &blam_tags::index_targets::IndexTargets,
+) {
+    apply_one_block_op_with_targets(
         tag,
         &BlockOp {
             path: path.into(),
             kind,
         },
+        targets,
     )
     .unwrap();
 }
 
-fn ensure_holder(tag: &mut TagFile, path: &str) {
+fn ensure_holder(tag: &mut TagFile, path: &str, targets: &blam_tags::index_targets::IndexTargets) {
     let mut prefix = String::new();
     for segment in path.split('/').filter(|s| !s.is_empty()) {
         if let Some((block, index)) = segment.split_once('[') {
@@ -43,7 +49,7 @@ fn ensure_holder(tag: &mut TagFile, path: &str) {
                 .len()
                 <= index
             {
-                op(tag, &block_path, BlockOpKind::Add);
+                op(tag, &block_path, BlockOpKind::Add, &targets);
             }
         }
         if !prefix.is_empty() {
@@ -53,9 +59,14 @@ fn ensure_holder(tag: &mut TagFile, path: &str) {
     }
 }
 
-fn seed(tag: &mut TagFile, path: &str, names: [&str; 2]) {
+fn seed(
+    tag: &mut TagFile,
+    path: &str,
+    names: [&str; 2],
+    targets: &blam_tags::index_targets::IndexTargets,
+) {
     if let Some((parent, _)) = path.rsplit_once('/') {
-        ensure_holder(tag, parent);
+        ensure_holder(tag, parent, &targets);
     }
     for name in names {
         let index = tag
@@ -65,7 +76,7 @@ fn seed(tag: &mut TagFile, path: &str, names: [&str; 2]) {
             .as_block()
             .unwrap()
             .len();
-        op(tag, path, BlockOpKind::Add);
+        op(tag, path, BlockOpKind::Add, &targets);
         apply_field_edit(tag, &format!("{path}[{index}]/name"), name).unwrap();
     }
 }
@@ -86,15 +97,24 @@ fn verify(
     target_path: &str,
     alternate: Option<&str>,
 ) {
+    let targets = blam_tags::index_targets::IndexTargets::load(
+        crate::core::bundled::locate_definitions_root().join(game),
+    )
+    .unwrap();
     let mut tag = TagFile::new(crate::app::test_definition_path(&format!(
         "{game}/{group}.json"
     )))
     .unwrap();
-    ensure_holder(&mut tag, holder_path);
+    ensure_holder(&mut tag, holder_path, &targets);
     if let Some(alternate) = alternate {
-        seed(&mut tag, alternate, ["other_alpha", "other_bravo"]);
+        seed(
+            &mut tag,
+            alternate,
+            ["other_alpha", "other_bravo"],
+            &targets,
+        );
     }
-    seed(&mut tag, target_path, ["alpha", "bravo"]);
+    seed(&mut tag, target_path, ["alpha", "bravo"], &targets);
     if let Some(selector) = selector {
         apply_field_edit(&mut tag, selector, "1").unwrap();
     }
@@ -106,7 +126,7 @@ fn verify(
             let root = tag.root();
             let holder = root.descend(holder_path).unwrap();
             let field = holder.field_path(field_name).unwrap();
-            block_index_target_options(&holder, &field, Some(root), holder_path)
+            block_index_target_options(&holder, &field, Some(root), holder_path, &targets)
         };
         let target = resolve(&tag).unwrap_or_else(|| panic!("{game} {path}: missing named picker"));
         assert_eq!(target.len, 2);
@@ -128,14 +148,14 @@ fn verify(
             apply_field_edit(&mut tag, selector, "1").unwrap();
         }
         if let Some(alternate) = alternate {
-            op(&mut tag, alternate, BlockOpKind::Insert(0));
+            op(&mut tag, alternate, BlockOpKind::Insert(0), &targets);
             assert_eq!(
                 value(&tag, &path),
                 1,
                 "{game} {path}: unrelated parent must not remap this index"
             );
         }
-        op(&mut tag, target_path, BlockOpKind::Insert(0));
+        op(&mut tag, target_path, BlockOpKind::Insert(0), &targets);
         assert_eq!(value(&tag, &path), 2, "{game} {path}");
         op(
             &mut tag,
@@ -143,9 +163,10 @@ fn verify(
             BlockOpKind::Reorder {
                 order: vec![2, 0, 1],
             },
+            &targets,
         );
         assert_eq!(value(&tag, &path), 0, "{game} {path}");
-        op(&mut tag, target_path, BlockOpKind::Delete(0));
+        op(&mut tag, target_path, BlockOpKind::Delete(0), &targets);
         assert_eq!(value(&tag, &path), -1, "{game} {path}");
     }
 }
@@ -241,13 +262,14 @@ fn installed_h3_custom_indices_resolve_named_entries() {
         root: TagStruct<'_>,
         prefix: &str,
         counts: &mut std::collections::BTreeMap<String, usize>,
+        targets: &blam_tags::index_targets::IndexTargets,
     ) {
         for field in holder.fields_all() {
             let path = format!("{prefix}/{}#{}", field.clean_name(), field.ordinal());
             if let Some(TagFieldData::CustomShortBlockIndex(index)) = field.value()
                 && index >= 0
                 && let Some(target) =
-                    block_index_target_options(&holder, &field, Some(root), prefix)
+                    block_index_target_options(&holder, &field, Some(root), prefix, &targets)
                 && (index as usize) < target.len
             {
                 let block = root.field_path(&target.path).unwrap().as_block().unwrap();
@@ -271,16 +293,18 @@ fn installed_h3_custom_indices_resolve_named_entries() {
                 }
             }
             if let Some(child) = field.as_struct() {
-                visit(child, root, &path, counts);
+                visit(child, root, &path, counts, &targets);
             }
             if let Some(block) = field.as_block() {
                 for (index, child) in block.iter().enumerate() {
-                    visit(child, root, &format!("{path}[{index}]"), counts);
+                    visit(child, root, &format!("{path}[{index}]"), counts, &targets);
                 }
             }
         }
     }
     let definitions = crate::core::bundled::locate_definitions_root();
+    let targets =
+        blam_tags::index_targets::IndexTargets::load(definitions.join("halo3_mcc")).unwrap();
     for (relative, group, blocks, required) in [
         (
             "levels/solo/030_outskirts/030_outskirts.scenario",
@@ -314,7 +338,13 @@ fn installed_h3_custom_indices_resolve_named_entries() {
             let field = root.field_path(name).unwrap();
             let path = format!("{}#{}", field.clean_name(), field.ordinal());
             for (index, holder) in field.as_block().unwrap().iter().enumerate() {
-                visit(holder, root, &format!("{path}[{index}]"), &mut counts);
+                visit(
+                    holder,
+                    root,
+                    &format!("{path}[{index}]"),
+                    &mut counts,
+                    &targets,
+                );
             }
         }
         for required in required {

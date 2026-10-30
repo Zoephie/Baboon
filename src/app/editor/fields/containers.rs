@@ -224,7 +224,15 @@ pub(in crate::app) fn draw_fields_with_docs(
         // Resolve a block-index field's target block (sibling or ancestor) for
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
-        let block_index = block_index_target_options(tag_struct, &field, root, path_prefix);
+        let block_index = match edit.index_targets.as_ref() {
+            Some(Ok(targets)) => block_index_target_options(tag_struct, &field, root, path_prefix, targets),
+            Some(Err(error)) => {
+                if let Some(status) = edit.status.as_deref_mut() { *status = error.clone(); }
+                edit.structure_locked = true;
+                None
+            }
+            None => None,
+        };
         draw_field(
             ui,
             field,
@@ -3002,8 +3010,17 @@ pub(in crate::app) fn block_index_target_options(
     field: &TagField<'_>,
     root: Option<TagStruct<'_>>,
     struct_path: &str,
+    targets: &blam_tags::index_targets::IndexTargets,
 ) -> Option<BlockIndexTarget> {
-    crate::core::document::apply::field_block_index_target(tag_struct, field, root, struct_path)
+    let definition = field.definition();
+    if definition.block_index_target().is_none()
+        && definition.block_flags_target().is_none()
+        && !matches!(field.field_type(), TagFieldType::CustomCharBlockIndex | TagFieldType::CustomShortBlockIndex | TagFieldType::CustomLongBlockIndex)
+    {
+        return None;
+    }
+    let path = append_field_path_for(if root.is_some() { struct_path } else { "" }, field);
+    targets.resolve(root.unwrap_or(*tag_struct), &path)
 }
 
 /// A block-index field rendered like Foundation: a dropdown of the target
@@ -3506,13 +3523,14 @@ mod tests {
         assert_model_damage_section_references(true);
     }
 
-    fn assert_model_damage_section_references(targets: bool) {
-        use crate::core::document::apply::{apply_field_edit, apply_one_block_op};
+    fn assert_model_damage_section_references(is_target: bool) {
+        use crate::core::document::apply::{apply_field_edit, apply_one_block_op_with_targets};
         use crate::core::document::ops::{BlockOp, BlockOpKind};
         for game in ["halo2_mcc", "halo3_mcc", "halo3odst_mcc", "haloreach_mcc", "halo4_mcc", "halo2amp_mcc", "haloce_evolved"] {
+            let targets = blam_tags::index_targets::IndexTargets::load(crate::core::bundled::locate_definitions_root().join(game)).unwrap();
             let mut tag = TagFile::new(crate::app::test_definition_path(&format!("{game}/model.json"))).unwrap();
             let modern = tag.root().field_path("model materials").is_some();
-            let references = match (targets, modern) {
+            let references = match (is_target, modern) {
                 (true, true) => "model targets",
                 (true, false) => "targets",
                 (false, true) => "model materials",
@@ -3520,7 +3538,7 @@ mod tests {
             };
             let sections = if modern { "damage info/damage sections" } else { "new damage info[0]/damage sections" };
             let op = |tag: &mut TagFile, path: &str, kind| {
-                apply_one_block_op(tag, &BlockOp { path: path.into(), kind }).unwrap();
+                apply_one_block_op_with_targets(tag, &BlockOp { path: path.into(), kind }, &targets).unwrap();
             };
             if !modern { op(&mut tag, "new damage info", BlockOpKind::Add); }
             op(&mut tag, references, BlockOpKind::Add);
@@ -3536,7 +3554,7 @@ mod tests {
                 let root = tag.root();
                 let holder = root.descend(&holder_path).unwrap();
                 let field = holder.field_path("damage section").unwrap();
-                let target = block_index_target_options(&holder, &field, Some(root), &holder_path)
+                let target = block_index_target_options(&holder, &field, Some(root), &holder_path, &targets)
                     .unwrap_or_else(|| panic!("{game}: {references} damage section needs a named picker"));
                 assert_eq!(target.len, 2, "{game}");
                 let labels = block_index_target_labels(Some(root), &target, &TagNameIndex::default());
@@ -3565,6 +3583,7 @@ mod tests {
             ("haloreach_mcc", "objects/characters/spartan_jorge/spartan_jorge.model"),
             ("halo2amp_mcc", "objects/characters/storm_masterchief/storm_masterchief.model"),
         ] {
+            let targets = blam_tags::index_targets::IndexTargets::load(definitions.join(game)).unwrap();
             let path = std::path::PathBuf::from(crate::core::test_kits::tag_path(game, rel));
             if !path.exists() { eprintln!("skip {game}: installed model not available"); continue; }
             let tag = crate::core::source::read_tag_at_path(&path, GameId::from_id(game), Some(&definitions), u32::from_be_bytes(*b"hlmt")).unwrap();
@@ -3577,7 +3596,7 @@ mod tests {
             } {
                 let holder = root.descend(holder_path).expect("model has materials and targets");
                 let field = holder.field_path("damage section").unwrap();
-                let target = block_index_target_options(&holder, &field, Some(root), holder_path)
+                let target = block_index_target_options(&holder, &field, Some(root), holder_path, &targets)
                     .unwrap_or_else(|| panic!("{game}: {holder_path} must resolve damage sections"));
                 let sections = root.field_path(&target.path).unwrap().as_block().unwrap();
                 assert!(target.len > 0, "{game}");
@@ -3594,12 +3613,13 @@ mod tests {
 
     #[test]
     fn indirect_damage_section_uses_named_sections_and_tracks_block_edits() {
-        use crate::core::document::apply::{apply_field_edit, apply_one_block_op};
+        use crate::core::document::apply::{apply_field_edit, apply_one_block_op_with_targets};
         use crate::core::document::ops::{BlockOp, BlockOpKind};
         for game in ["halo2_mcc", "halo3_mcc", "halo3odst_mcc"] {
+            let targets = blam_tags::index_targets::IndexTargets::load(crate::core::bundled::locate_definitions_root().join(game)).unwrap();
             let mut tag = TagFile::new(crate::app::test_definition_path(&format!("{game}/model.json"))).unwrap();
             let op = |tag: &mut TagFile, path: &str, kind| {
-                apply_one_block_op(tag, &BlockOp { path: path.into(), kind }).unwrap();
+                apply_one_block_op_with_targets(tag, &BlockOp { path: path.into(), kind }, &targets).unwrap();
             };
             op(&mut tag, "new damage info", BlockOpKind::Add);
             let sections = "new damage info[0]/damage sections";
@@ -3618,7 +3638,7 @@ mod tests {
                 let holder = root.descend("new damage info[0]").unwrap();
                 let field = holder.field_path("indirect damage section").unwrap();
                 assert_eq!(field.field_type(), blam_tags::TagFieldType::CustomShortBlockIndex);
-                let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]")
+                let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]", &targets)
                     .unwrap_or_else(|| panic!("{game}: indirect damage section needs a named picker"));
                 assert_eq!(target.len, 2);
                 assert_eq!(root.field_path(&target.path).unwrap().as_block().unwrap().definition().name(), "global_damage_section_block");
@@ -3642,6 +3662,7 @@ mod tests {
             ("halo3_mcc", "objects/characters/masterchief/masterchief.model"),
             ("halo3odst_mcc", "objects/characters/brute/brute.model"),
         ] {
+            let targets = blam_tags::index_targets::IndexTargets::load(definitions.join(game)).unwrap();
             let path = std::path::PathBuf::from(crate::core::test_kits::tag_path(game, rel));
             if !path.exists() { eprintln!("skip {game}: installed model not available"); continue; }
             let tag = crate::core::source::read_tag_at_path(&path, GameId::from_id(game), Some(&definitions), u32::from_be_bytes(*b"hlmt")).unwrap();
@@ -3649,7 +3670,7 @@ mod tests {
             let holder = root.descend("new damage info[0]").unwrap();
             let field = holder.field_path("indirect damage section").unwrap();
             eprintln!("{game}: {} / {}", holder.name(), field.name());
-            let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]")
+            let target = block_index_target_options(&holder, &field, Some(root), "new damage info[0]", &targets)
                 .unwrap_or_else(|| panic!("{game}: saved model must resolve damage sections"));
             let sections = holder.field_path("damage sections").unwrap().as_block().unwrap();
             assert_eq!(target.len, sections.len());
@@ -3675,7 +3696,7 @@ mod tests {
             .fields_all()
             .find(|field| field.name() == "short block index")
             .unwrap();
-        let target = block_index_target_options(&root, &index, Some(root), "")
+        let target = block_index_target_options(&root, &index, Some(root), "", &Default::default())
             .unwrap()
             .path;
 
@@ -3732,8 +3753,7 @@ mod tests {
                                     &element,
                                     &sub,
                                     Some(root),
-                                    "vehicles[0]",
-                                )
+                                    "vehicles[0]", &Default::default())
                                 && target.path.contains("palette")
                             {
                                 return Some(block_index_target_labels(
@@ -3893,7 +3913,7 @@ mod tests {
                     for field in st.fields_all() {
                         if field.definition().block_index_target().is_some()
                             && let Some(target) =
-                                block_index_target_options(&st, &field, Some(root), struct_path)
+                                block_index_target_options(&st, &field, Some(root), struct_path, &Default::default())
                         {
                             return Some((target.path, target.len));
                         }
@@ -4347,7 +4367,7 @@ mod tests {
                 .fields_all()
                 .find(|field| field.name() == "short block index")
                 .unwrap();
-            block_index_target_options(&root, &index, Some(root), "")
+            block_index_target_options(&root, &index, Some(root), "", &Default::default())
                 .expect("the test tag's block index resolves")
                 .path
         };

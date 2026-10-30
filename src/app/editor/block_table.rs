@@ -117,12 +117,14 @@ impl BlockTableState {
         {
             return Err(format!("Block is at its schema maximum of {cap} entries"));
         }
-        apply_one_block_op(
+        let targets = crate::core::index_targets::load(self.definitions_root.as_deref(), self.game, candidate.is_halo5())?;
+        apply_one_block_op_with_targets(
             &mut candidate,
             &BlockOp {
                 path: self.request.path.clone(),
                 kind: kind.clone(),
             },
+            &targets,
         )?;
         let mut rows = self.rows.clone();
         for row in &mut rows {

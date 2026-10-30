@@ -3362,6 +3362,7 @@ mod tests {
                 let mut doc=crate::core::document::TagDocument::clean(panel.tag);
                 crate::core::document::apply::apply_deferred_ops(&mut doc,crate::core::document::apply::DeferredOps {
                     string_list_ops:dropped.edits.into_iter().map(|edit|StringListOp {game:Some(GameId::Halo3),edit}).collect(),
+                    index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
                     block_ops:dropped.orders.into_iter().map(|order|crate::core::document::ops::BlockOp {
                         path:"string references".into(),kind:crate::core::document::ops::BlockOpKind::Reorder {order},
                     }).collect(),..Default::default()
@@ -3380,7 +3381,8 @@ mod tests {
         let mut doc=crate::core::document::TagDocument::clean(TagFile::read_from_bytes(&panel.tag.write_to_bytes().unwrap()).unwrap());
         let order=vec![4,7,8,0,2,1,3,5,6];
         crate::core::document::apply::apply_deferred_ops(&mut doc,crate::core::document::apply::DeferredOps {
-            block_ops:vec![crate::core::document::ops::BlockOp {path:"string references".into(),
+            index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
+                    block_ops:vec![crate::core::document::ops::BlockOp {path:"string references".into(),
                 kind:crate::core::document::ops::BlockOpKind::Reorder {order}}],..Default::default()
         },"Move three groups");
         panel.tag=TagFile::read_from_bytes(&doc.tag.write_to_bytes().unwrap()).unwrap();
@@ -4375,6 +4377,7 @@ mod tests {
                 let original = panel.tag.write_to_bytes().unwrap();
                 let mut doc = crate::core::document::TagDocument::clean(panel.tag);
                 crate::core::document::apply::apply_deferred_ops(&mut doc,crate::core::document::apply::DeferredOps {
+                    index_targets: Some(Ok(std::sync::Arc::new(Default::default()))),
                     block_ops: vec![crate::core::document::ops::BlockOp { path: "string references".to_owned(),
                         kind: crate::core::document::ops::BlockOpKind::Reorder { order: dropped.orders[0].clone() } }],
                     ..Default::default()
