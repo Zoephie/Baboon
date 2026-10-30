@@ -90,6 +90,7 @@ mod tests {
             "halo3odst_mcc",
             "haloreach_mcc",
             "halo4_mcc",
+            "halo5_guardians",
         ] {
             assert!(
                 root.join(game).join("_meta.json").is_file(),

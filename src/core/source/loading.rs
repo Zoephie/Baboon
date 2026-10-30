@@ -1007,7 +1007,7 @@ pub fn read_tag_at_path(
     group_tag: u32,
 ) -> Result<TagFile> {
     let bytes = std::fs::read(path)?;
-    if blam_tags::halo5::is_halo5(&bytes) {
+    if blam_tags::halo5::looks_like_halo5(&bytes) {
         return read_halo5_with_layout(&bytes, definitions_root.unwrap_or(&crate::core::bundled::locate_definitions_root()), group_tag);
     }
     if ClassicHeader::parse(&bytes).is_some() {
@@ -1036,7 +1036,7 @@ pub fn read_tag_from_bytes(
     definitions_root: Option<&Path>,
     group_tag: u32,
 ) -> Result<TagFile> {
-    if blam_tags::halo5::is_halo5(bytes) {
+    if blam_tags::halo5::looks_like_halo5(bytes) {
         return read_halo5_with_layout(bytes, definitions_root.unwrap_or(&crate::core::bundled::locate_definitions_root()), group_tag);
     }
     if ClassicHeader::parse(bytes).is_some() {
@@ -1059,7 +1059,7 @@ fn read_loose_tag(
     definitions_root: &Path,
 ) -> Result<TagFile> {
     let bytes = std::fs::read(path)?;
-    if blam_tags::halo5::is_halo5(&bytes) {
+    if blam_tags::halo5::looks_like_halo5(&bytes) {
         return read_halo5_with_layout(&bytes, definitions_root, entry.group_tag);
     }
     if ClassicHeader::parse(&bytes).is_some() {
@@ -1100,7 +1100,7 @@ fn read_non_classic_tag(path: &Path) -> Result<TagFile> {
     let mut header = [0u8; 64];
     if let Ok(mut file) = File::open(path) {
         let read = file.read(&mut header)?;
-        if blam_tags::halo5::is_halo5(&header[..read]) {
+        if blam_tags::halo5::looks_like_halo5(&header[..read]) {
             let root = crate::core::bundled::locate_definitions_root();
             let names = TagNameIndex::load_meta(&root.join("halo5_guardians/_meta.json"))?;
             let extension = path.extension().and_then(|x| x.to_str()).context("Halo 5 tag needs its group extension")?;

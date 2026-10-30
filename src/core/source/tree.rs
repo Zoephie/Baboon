@@ -609,7 +609,7 @@ fn probe_tag_group(path: &Path) -> Result<Option<u32>> {
     let mut header = [0u8; 64];
     file.seek(SeekFrom::Start(0))?;
     file.read_exact(&mut header)?;
-    if blam_tags::halo5::is_halo5(&header) {
+    if blam_tags::halo5::looks_like_halo5(&header) {
         let names = TagNameIndex::load_meta(&crate::core::bundled::locate_definitions_root().join("halo5_guardians/_meta.json"))?;
         return Ok(path.extension().and_then(|x| x.to_str()).and_then(|x| names.group_tag_for(x)));
     }
