@@ -1007,6 +1007,9 @@ pub fn read_tag_at_path(
     group_tag: u32,
 ) -> Result<TagFile> {
     let bytes = std::fs::read(path)?;
+    if blam_tags::halo5::is_halo5(&bytes) {
+        return read_halo5_with_layout(&bytes, definitions_root.unwrap_or(&crate::core::bundled::locate_definitions_root()), group_tag);
+    }
     if ClassicHeader::parse(&bytes).is_some() {
         let game = game.context("classic tag requires a detected game profile")?;
         let definitions_root =
@@ -1033,6 +1036,9 @@ pub fn read_tag_from_bytes(
     definitions_root: Option<&Path>,
     group_tag: u32,
 ) -> Result<TagFile> {
+    if blam_tags::halo5::is_halo5(bytes) {
+        return read_halo5_with_layout(bytes, definitions_root.unwrap_or(&crate::core::bundled::locate_definitions_root()), group_tag);
+    }
     if ClassicHeader::parse(bytes).is_some() {
         let game = game.context("classic tag requires a detected game profile")?;
         let definitions_root =
@@ -1053,6 +1059,9 @@ fn read_loose_tag(
     definitions_root: &Path,
 ) -> Result<TagFile> {
     let bytes = std::fs::read(path)?;
+    if blam_tags::halo5::is_halo5(&bytes) {
+        return read_halo5_with_layout(&bytes, definitions_root, entry.group_tag);
+    }
     if ClassicHeader::parse(&bytes).is_some() {
         let game = game.context(
             "classic Halo CE / Halo 2 tags require a detected game profile to locate definitions",
@@ -1091,6 +1100,13 @@ fn read_non_classic_tag(path: &Path) -> Result<TagFile> {
     let mut header = [0u8; 64];
     if let Ok(mut file) = File::open(path) {
         let read = file.read(&mut header)?;
+        if blam_tags::halo5::is_halo5(&header[..read]) {
+            let root = crate::core::bundled::locate_definitions_root();
+            let names = TagNameIndex::load_meta(&root.join("halo5_guardians/_meta.json"))?;
+            let extension = path.extension().and_then(|x| x.to_str()).context("Halo 5 tag needs its group extension")?;
+            let group = names.group_tag_for(extension).context("unknown Halo 5 tag group extension")?;
+            return read_halo5_with_layout(&std::fs::read(path)?, &root, group);
+        }
         if read >= 64 && ClassicHeader::parse(&header).is_some() {
             anyhow::bail!(
                 "classic Halo CE / Halo 2 tags require opening an editing-kit tags folder so Baboon can detect the game profile"
@@ -2017,5 +2033,57 @@ mod tests {
         };
         assert_eq!(gain(&restored), Some(-3.0), "the edit survives the round trip");
         assert_eq!(restored.write_to_bytes().unwrap(), snapshot);
+    }
+}
+
+// Like classic tags, extracted Halo 5 tags use external JSON definitions.
+fn read_halo5_with_layout(
+    bytes: &[u8],
+    definitions_root: &Path,
+    group_tag: u32,
+) -> Result<TagFile> {
+    let root = definitions_root.join("halo5_guardians");
+    let names = TagNameIndex::load_meta(&root.join("_meta.json"))?;
+    let name = names
+        .name_for(group_tag)
+        .context("missing Halo 5 group definition")?;
+    let (layout, meta) = TagLayout::from_json_with_meta(root.join(format!("{name}.json")))?;
+    blam_tags::halo5::read_halo5_tag_file(bytes, layout, meta.tag)
+}
+
+#[cfg(test)]
+mod halo5_tests {
+    use super::*;
+    #[test]
+    fn extracted_xbox_tag_uses_standard_source_document_and_snapshot_reads() {
+        let Some(root) = std::env::var_os("HALO5_TEST_DUMP") else {
+            return;
+        };
+        let path =
+            PathBuf::from(root).join("tag_dump/objects/characters/grunt_mecha/grunt_mecha.biped");
+        let original = std::fs::read(&path).unwrap();
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let names = TagNameIndex::load_from_definitions(&definitions);
+        let loaded = load_single_file(path.clone(), &names).unwrap();
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].group_tag, u32::from_be_bytes(*b"bipd"));
+        let (_, tag) = loaded.initial_tag.unwrap();
+        assert!(tag.is_halo5());
+        assert_eq!(tag.write_to_bytes().unwrap(), original);
+        let restored =
+            read_tag_from_bytes(&original, None, Some(&definitions), tag.group().tag).unwrap();
+        assert!(restored.is_halo5());
+        assert_eq!(restored.write_to_bytes().unwrap(), original);
+        let folder = TagSource::LooseFolder {
+            root: path.parent().unwrap().to_path_buf(),
+            game: None,
+            definitions_root: definitions.clone(),
+        };
+        let discovered = super::super::loose_file_entry(path.parent().unwrap(), &path, &names)
+            .unwrap()
+            .unwrap();
+        assert_eq!(discovered.group_tag, tag.group().tag);
+        let reread = read_entry(&folder, &loaded.entries[0]).unwrap();
+        assert_eq!(reread.write_to_bytes().unwrap(), original);
     }
 }
