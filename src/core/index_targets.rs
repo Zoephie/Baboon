@@ -13,13 +13,15 @@ pub(crate) fn load(
     game: Option<GameId>,
     halo5: bool,
 ) -> Result<Arc<IndexTargets>, String> {
-    let root = root
-        .map(Path::to_path_buf)
-        .unwrap_or_else(crate::core::bundled::locate_definitions_root);
+    // Panes ask every frame, and locating the bundled root touches the disk.
+    static BUNDLED: OnceLock<PathBuf> = OnceLock::new();
+    let root = root.unwrap_or_else(|| {
+        BUNDLED.get_or_init(crate::core::bundled::locate_definitions_root).as_path()
+    });
     let path = match game {
         Some(game) => root.join(game.as_str()),
         None if halo5 => root.join(crate::core::format::HALO5_DEFINITIONS),
-        None => root,
+        None => root.to_path_buf(),
     };
     load_directory(path, game.is_none() && !halo5)
 }
