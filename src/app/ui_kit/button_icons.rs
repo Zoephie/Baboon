@@ -184,7 +184,7 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::InsertRowBelow => include_root_str!("assets/Button Icons/Insert Row (below).svg"),
         ButtonIcon::Json => include_root_str!("assets/Button Icons/JSON.svg"),
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
-        ButtonIcon::Markers => include_root_str!("assets/icons/markers.svg"),
+        ButtonIcon::Markers => include_root_str!("assets/Button Icons/Markers.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpUp => include_root_str!("assets/Button Icons/Jump Up.svg"),
@@ -1043,9 +1043,12 @@ mod tests {
 
     #[test]
     fn colorized_icon_replaces_current_color() {
-        let svg = colorized_icon_svg(ButtonIcon::Open, Color32::from_rgb(1, 2, 3));
-        assert!(svg.contains("#010203"));
-        assert!(!svg.contains("currentColor"));
+        for icon in [ButtonIcon::Open, ButtonIcon::Markers] {
+            let svg = colorized_icon_svg(icon, Color32::from_rgb(1, 2, 3));
+            assert!(svg.contains("#010203"));
+            assert!(!svg.contains("currentColor"));
+            assert!(!svg.contains("#00B2FF"));
+        }
     }
 
     /// Painting an icon again hands egui the bytes made the first time, not

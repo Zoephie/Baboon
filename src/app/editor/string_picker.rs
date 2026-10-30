@@ -56,7 +56,7 @@ pub(super) fn image(ui: &Ui, editor: &str) -> Option<egui::Image<'static>> {
             ButtonIcon::Function
         }
         "object_marker" | "marker_names" => ButtonIcon::Markers,
-        "default_model_variant" => ButtonIcon::Model,
+        "default_model_variant" | "child_model_variant" => ButtonIcon::Model,
         _ => return None,
     };
     Some(button_icon_image(ui, icon, text_dark(), 16.0))

@@ -1,0 +1,974 @@
+[
+  {
+    "engine": "halo2amp_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "effect marker name",
+    "tag": "objects\\vehicles\\h2a_banshee\\h2a_banshee_mp.model",
+    "value": "fx_hull_explosion",
+    "field_path": "new damage info#39[0]/damage sections#14[1]/instant responses#4[0]/effect marker name#23"
+  },
+  {
+    "engine": "halo2amp_mcc",
+    "group": "model",
+    "struct": "instantaneous_response_damage_effect_marker_struct",
+    "field": "damage effect marker name",
+    "tag": "objects\\levels\\forge\\fw_gadgets\\fw_dice_explosive\\fw_dice_explosive.model",
+    "value": "core",
+    "field_path": "damage info#40/damage sections#9[0]/instant responses#25[0]/damage effect marker#9/damage effect marker name#0"
+  },
+  {
+    "engine": "halo2amp_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "delay effect marker name",
+    "tag": "objects\\equipment\\storm_hologram\\bipeds\\storm_hologram_storm_masterchief.model",
+    "value": "fx_shield_core",
+    "field_path": "damage info#40/damage sections#9[0]/instant responses#25[0]/delay effect marker name#18"
+  },
+  {
+    "engine": "halo2amp_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "generic effect marker",
+    "tag": "objects\\characters\\h2a_elite\\h2a_elite.model",
+    "value": "fx_shield_core",
+    "field_path": "damage info#40/damage sections#9[2]/instant responses#25[0]/generic effect marker#5"
+  },
+  {
+    "engine": "halo2amp_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "specific effect marker",
+    "tag": "objects\\levels\\forge\\fw_gadgets\\fw_dice_explosive\\fw_dice_explosive.model",
+    "value": "core",
+    "field_path": "damage info#40/damage sections#9[0]/instant responses#25[0]/specific effect marker#7"
+  },
+  {
+    "engine": "halo2amp_mcc",
+    "group": "vehicle",
+    "struct": "unit_struct_definition",
+    "field": "target aiming pivot marker name",
+    "tag": "objects\\vehicles\\h2a_warthog\\weapons\\storm_warthogchaingun\\h2a_warthogchaingun.vehicle",
+    "value": "aiming_pivot",
+    "field_path": "unit#0/target aiming pivot marker name#54"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "contact_point_block_struct",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.biped",
+    "value": "left_foot",
+    "field_path": "contact points#35[0]/marker name#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\brute\\tartarus\\brute_tartarus.biped",
+    "value": "body",
+    "field_path": "unit#0/object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "unit_camera_struct_2",
+    "field": "camera marker name",
+    "tag": "objects\\characters\\masterchief\\masterchief.biped",
+    "value": "head",
+    "field_path": "unit#0/unit camera#10/camera marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "unit_seat_block_struct",
+    "field": "boarding grenade marker",
+    "tag": "objects\\characters\\hunter\\hunter.biped",
+    "value": "grenade_gun",
+    "field_path": "unit#0/seats#51[0]/boarding grenade marker#4"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "unit_seat_block_struct",
+    "field": "entry marker(s) name",
+    "tag": "objects\\characters\\hunter\\hunter.biped",
+    "value": "hunter_b_b_enter",
+    "field_path": "unit#0/seats#51[0]/entry marker(s) name#3"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "biped",
+    "struct": "unit_seat_block_struct",
+    "field": "marker name",
+    "tag": "objects\\characters\\hunter\\hunter.biped",
+    "value": "hunter_b_b",
+    "field_path": "unit#0/seats#51[0]/marker name#2"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "crate",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\gear\\covenant\\military\\antennae_comm\\antennae_comm.crate",
+    "value": "humhigh",
+    "field_path": "object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "creature",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_constructor\\sentinel_constructor.creature",
+    "value": "primary_trigger",
+    "field_path": "object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "device_machine",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\cinematics\\human\\inamberclad_to_scale\\in_amber_clad_to_scale.device_machine",
+    "value": "engine_large",
+    "field_path": "device#0/object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block_struct",
+    "field": "delay effect marker name",
+    "tag": "objects\\characters\\sentinel_aggressor\\sentinel_aggressor.model",
+    "value": "body_destroyed",
+    "field_path": "new damage info#21[0]/damage sections#28[4]/instant responses#4[0]/delay effect marker name#16"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block_struct",
+    "field": "destroyed child object marker name",
+    "tag": "objects\\characters\\sentinel_enforcer\\sentinel_enforcer.model",
+    "value": "left_shield_gen",
+    "field_path": "new damage info#21[0]/damage sections#28[3]/instant responses#4[1]/destroyed child object marker name#24"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block_struct",
+    "field": "effect marker name",
+    "tag": "objects\\characters\\ambient_life\\bird_quadwing\\bird_quadwing.model",
+    "value": "body",
+    "field_path": "new damage info#21[0]/damage sections#28[0]/instant responses#4[0]/effect marker name#11"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "instantaneous_response_damage_effect_marker_struct_2",
+    "field": "damage effect marker name",
+    "tag": "objects\\gear\\human\\military\\fusion_coil\\fusion_coil.model",
+    "value": "core",
+    "field_path": "new damage info#21[0]/damage sections#28[0]/instant responses#4[1]/damage effect marker#12/damage effect marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "model_target_block_struct",
+    "field": "marker name",
+    "tag": "objects\\characters\\ambient_life\\bird_quadwing\\bird_quadwing.model",
+    "value": "body",
+    "field_path": "targets#22[0]/marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "model",
+    "struct": "model_variant_state_block_struct",
+    "field": "looping effect marker name",
+    "tag": "objects\\characters\\sentinel_enforcer\\sentinel_enforcer.model",
+    "value": "l_arm_destroyed",
+    "field_path": "variants#19[0]/regions#2[1]/permutations#4[0]/states#5[1]/looping effect marker name#5"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "projectile",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_enforcer\\weapons\\rocket\\sentinel_enforcer_rocket.projectile",
+    "value": "exhaust",
+    "field_path": "object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "scenery",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\elite\\elite_jetpack\\elite_jetpack.scenery",
+    "value": "jet_fire",
+    "field_path": "object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "anti_gravity_point_definition_block_struct",
+    "field": "marker name",
+    "tag": "objects\\vehicles\\creep\\creep.vehicle",
+    "value": "left_front_antigrav",
+    "field_path": "havok vehicle physics#53/anti gravity points#12[0]/marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "friction_point_definition_block_struct",
+    "field": "marker name",
+    "tag": "objects\\vehicles\\mongoose\\mongoose.vehicle",
+    "value": "lf_tire",
+    "field_path": "havok vehicle physics#53/friction points#13[0]/marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_enforcer\\sentinel_enforcer.vehicle",
+    "value": "eye_flare",
+    "field_path": "unit#0/object#0/attachments#39[0]/marker#1"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "unit_camera_struct_2",
+    "field": "camera marker name",
+    "tag": "objects\\vehicles\\creep\\creep.vehicle",
+    "value": "creep_g_camera",
+    "field_path": "unit#0/seats#51[1]/unit camera#23/camera marker name#0"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block_struct",
+    "field": "boarding grenade marker",
+    "tag": "objects\\vehicles\\scorpion\\scorpion.vehicle",
+    "value": "driver_grenade",
+    "field_path": "unit#0/seats#51[5]/boarding grenade marker#4"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block_struct",
+    "field": "entry marker(s) name",
+    "tag": "objects\\vehicles\\banshee\\banshee.vehicle",
+    "value": "driver_enter",
+    "field_path": "unit#0/seats#51[0]/entry marker(s) name#3"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block_struct",
+    "field": "marker name",
+    "tag": "objects\\vehicles\\banshee\\banshee.vehicle",
+    "value": "driver",
+    "field_path": "unit#0/seats#51[0]/marker name#2"
+  },
+  {
+    "engine": "halo2_mcc",
+    "group": "weapon",
+    "struct": "object_attachment_block_struct",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_aggressor\\weapons\\beam\\sentinel_aggressor_beam.weapon",
+    "value": "primary_trigger",
+    "field_path": "item#0/object#0/attachments#39[1]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "biped",
+    "struct": "contact_point_block",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.biped",
+    "value": "left_foot",
+    "field_path": "contact points#53[0]/marker name#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "biped",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\brute\\brute_jumppack.biped",
+    "value": "fx_jump",
+    "field_path": "unit#0/object#0/attachments#24[1]/marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "biped",
+    "struct": "unit_camera_struct",
+    "field": "camera marker name",
+    "tag": "objects\\characters\\masterchief\\masterchief.biped",
+    "value": "head",
+    "field_path": "unit#0/unit camera#9/camera marker name#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "crate",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\gear\\atlas\\civilian\\hu_civ_car\\hu_civ_car.crate",
+    "value": "fx_brakelight",
+    "field_path": "object#0/attachments#24[0]/marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "creature",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_constructor\\sentinel_constructor.creature",
+    "value": "eyelight",
+    "field_path": "object#0/attachments#24[1]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "device_control",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\levels\\solo\\020_base\\door_switch\\door_switch.device_control",
+    "value": "light_marker",
+    "field_path": "device#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "device_machine",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\monitor\\monitor_boss.device_machine",
+    "value": "attach_marker",
+    "field_path": "device#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "equipment",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\engineer\\garbage\\backpack_bomb\\backpack_bomb.equipment",
+    "value": "fx_petal_glow",
+    "field_path": "item#0/object#0/attachments#24[0]/marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "giant",
+    "struct": "giant_buckle_parameters_block",
+    "field": "buckling marker",
+    "tag": "objects\\giants\\scarab\\scarab.giant",
+    "value": "belly",
+    "field_path": "buckle-settings#10[0]/buckling marker#12"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "giant",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\giants\\scarab\\scarab.giant",
+    "value": "belly",
+    "field_path": "unit#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "delay effect marker name",
+    "tag": "objects\\characters\\sentinel_aggressor\\sentinel_aggressor.model",
+    "value": "fx_hull_destroyed",
+    "field_path": "new damage info#17[0]/damage sections#14[0]/instant responses#4[0]/delay effect marker name#25"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "destroyed child object marker name",
+    "tag": "objects\\characters\\monitor\\monitor_boss_device\\monitor_boss_device.model",
+    "value": "attach_marker",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/destroyed child object marker name#31"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "effect marker name",
+    "tag": "objects\\characters\\ambient_life\\bird_cockatoo\\bird_cockatoo.model",
+    "value": "body",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/effect marker name#20"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "instantaneous_response_damage_effect_marker_struct",
+    "field": "damage effect marker name",
+    "tag": "objects\\characters\\engineer\\garlic\\garlic_major\\garlic_major.model",
+    "value": "fx_damage_01",
+    "field_path": "new damage info#17[0]/damage sections#14[0]/instant responses#4[0]/damage effect marker#21/damage effect marker name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "model_grenade_target_block",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.model",
+    "value": "target_grenade",
+    "field_path": "grenade targets#19[0]/marker name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "model_occlusion_sphere_block",
+    "field": "marker 1 name",
+    "tag": "objects\\giants\\scarab\\scarab.model",
+    "value": "left_back_foot",
+    "field_path": "occlusion spheres#39[0]/marker 1 name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "model_occlusion_sphere_block",
+    "field": "marker 2 name",
+    "tag": "objects\\giants\\scarab\\scarab.model",
+    "value": "fx_all_hull_garbage_crate",
+    "field_path": "occlusion spheres#39[0]/marker 2 name#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "model_target_block",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.model",
+    "value": "target_main",
+    "field_path": "targets#18[0]/marker name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "model",
+    "struct": "model_variant_state_block",
+    "field": "looping effect marker name",
+    "tag": "objects\\gear\\covenant\\military\\antennae_comm\\antennae_comm.model",
+    "value": "spawn_mast",
+    "field_path": "variants#13[0]/regions#6[0]/permutations#4[0]/states#5[0]/looping effect marker name#5"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "projectile",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\vehicles\\hornet\\weapon\\hornet_missile.projectile",
+    "value": "exhaust",
+    "field_path": "object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "scenery",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\cortana\\cortana.scenery",
+    "value": "body",
+    "field_path": "object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "anti_gravity_point_definition_block",
+    "field": "marker name",
+    "tag": "objects\\equipment\\autoturret\\autoturret.vehicle",
+    "value": "antigrav",
+    "field_path": "havok vehicle physics#6/anti gravity points#15[0]/marker name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "chopper_block",
+    "field": "rotation marker",
+    "tag": "objects\\vehicles\\brute_chopper\\brute_chopper.vehicle",
+    "value": "antigrav_rotation",
+    "field_path": "physics types#4/type-chopper#8[0]/rotation marker#5"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "friction_point_definition_block",
+    "field": "marker name",
+    "tag": "objects\\levels\\multi\\shrine\\behemoth\\behemoth.vehicle",
+    "value": "tread_front_a_left",
+    "field_path": "havok vehicle physics#6/friction points#16[0]/marker name#0"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\levels\\atlas\\h100\\security_mount\\security_camera.vehicle",
+    "value": "fx_eye",
+    "field_path": "unit#0/object#0/attachments#24[1]/marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "unit_camera_struct",
+    "field": "camera marker name",
+    "tag": "objects\\gear\\covenant\\military\\engineer_recharge_station\\engineer_recharge_station.vehicle",
+    "value": "driver",
+    "field_path": "unit#0/seats#49[0]/unit camera#25/camera marker name#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "boarding grenade marker",
+    "tag": "objects\\vehicles\\scorpion\\scorpion.vehicle",
+    "value": "driver_grenade",
+    "field_path": "unit#0/seats#49[5]/boarding grenade marker#4"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "entry marker(s) name",
+    "tag": "objects\\giants\\scarab\\turrets\\main_turret\\main_turret.vehicle",
+    "value": "gunner",
+    "field_path": "unit#0/seats#45[0]/entry marker(s) name#3"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "marker name",
+    "tag": "objects\\giants\\scarab\\turrets\\main_turret\\main_turret.vehicle",
+    "value": "gunner",
+    "field_path": "unit#0/seats#45[0]/marker name#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "left lift marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust_l",
+    "field_path": "physics types#4/type-vtol#7[0]/left lift marker#1"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "right lift marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust_r",
+    "field_path": "physics types#4/type-vtol#7[0]/right lift marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "thrust marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust",
+    "field_path": "physics types#4/type-vtol#7[0]/thrust marker#3"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "weapon",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\weapons\\melee\\energy_blade\\energy_blade.weapon",
+    "value": "fx_bladetip",
+    "field_path": "item#0/object#0/attachments#24[0]/marker#2"
+  },
+  {
+    "engine": "halo3odst_mcc",
+    "group": "weapon",
+    "struct": "weapon_barrels",
+    "field": "optional barrel marker name",
+    "tag": "objects\\weapons\\pistol\\automag\\automag.weapon",
+    "value": "primary_trigger",
+    "field_path": "barrels#69[0]/optional barrel marker name#7"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "biped",
+    "struct": "contact_point_block",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.biped",
+    "value": "left_foot",
+    "field_path": "contact points#40[0]/marker name#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "biped",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\brute\\brute_jumppack.biped",
+    "value": "fx_jump",
+    "field_path": "unit#0/object#0/attachments#24[1]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "biped",
+    "struct": "unit_camera_struct",
+    "field": "camera marker name",
+    "tag": "objects\\characters\\masterchief\\masterchief.biped",
+    "value": "head",
+    "field_path": "unit#0/unit camera#9/camera marker name#2"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "crate",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\gear\\covenant\\military\\cov_watchtower\\cov_watchtower_base\\cov_watchtower_base.crate",
+    "value": "fx_gravlift",
+    "field_path": "object#0/attachments#24[1]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "creature",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\sentinel_constructor\\sentinel_constructor.creature",
+    "value": "eyelight",
+    "field_path": "object#0/attachments#24[1]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "device_control",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\levels\\dlc\\docks\\switch_bridge_on\\switch_bridge_on.device_control",
+    "value": "light",
+    "field_path": "device#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "device_machine",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\monitor\\monitor_boss.device_machine",
+    "value": "attach_marker",
+    "field_path": "device#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "equipment",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\equipment\\invincibility_equipment\\invincibility_equipment.equipment",
+    "value": "top",
+    "field_path": "item#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "giant",
+    "struct": "giant_buckle_parameters_block",
+    "field": "buckling marker",
+    "tag": "objects\\giants\\scarab\\scarab.giant",
+    "value": "belly",
+    "field_path": "buckle-settings#10[0]/buckling marker#12"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "giant",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\giants\\scarab\\scarab.giant",
+    "value": "belly",
+    "field_path": "unit#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "delay effect marker name",
+    "tag": "objects\\characters\\sentinel_aggressor\\sentinel_aggressor.model",
+    "value": "fx_hull_destroyed",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/delay effect marker name#25"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "destroyed child object marker name",
+    "tag": "objects\\characters\\monitor\\monitor_boss_device\\monitor_boss_device.model",
+    "value": "attach_marker",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/destroyed child object marker name#31"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "effect marker name",
+    "tag": "objects\\characters\\ambient_life\\bird_cockatoo\\bird_cockatoo.model",
+    "value": "body",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/effect marker name#20"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "instantaneous_response_damage_effect_marker_struct",
+    "field": "damage effect marker name",
+    "tag": "objects\\gear\\covenant\\military\\cov_camp_stool\\cov_camp_stool.model",
+    "value": "fx_garbage_damage",
+    "field_path": "new damage info#16[0]/damage sections#14[0]/instant responses#4[0]/damage effect marker#21/damage effect marker name#0"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "model_occlusion_sphere_block",
+    "field": "marker 1 name",
+    "tag": "objects\\giants\\scarab\\scarab.model",
+    "value": "left_back_foot",
+    "field_path": "occlusion spheres#37[0]/marker 1 name#0"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "model_occlusion_sphere_block",
+    "field": "marker 2 name",
+    "tag": "objects\\giants\\scarab\\scarab.model",
+    "value": "fx_all_hull_garbage_crate",
+    "field_path": "occlusion spheres#37[0]/marker 2 name#2"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "model_target_block",
+    "field": "marker name",
+    "tag": "objects\\characters\\brute\\brute.model",
+    "value": "target_main",
+    "field_path": "targets#17[0]/marker name#0"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "model",
+    "struct": "model_variant_state_block",
+    "field": "looping effect marker name",
+    "tag": "objects\\gear\\covenant\\military\\antennae_comm\\antennae_comm.model",
+    "value": "spawn_mast",
+    "field_path": "variants#13[0]/regions#2[0]/permutations#4[0]/states#5[0]/looping effect marker name#5"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "projectile",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\vehicles\\hornet\\weapon\\hornet_missile.projectile",
+    "value": "exhaust",
+    "field_path": "object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "scenery",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\characters\\cortana\\cortana.scenery",
+    "value": "body",
+    "field_path": "object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "anti_gravity_point_definition_block",
+    "field": "marker name",
+    "tag": "objects\\equipment\\autoturret\\autoturret.vehicle",
+    "value": "antigrav",
+    "field_path": "havok vehicle physics#6/anti gravity points#15[0]/marker name#0"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "chopper_block",
+    "field": "rotation marker",
+    "tag": "objects\\vehicles\\brute_chopper\\brute_chopper.vehicle",
+    "value": "antigrav_rotation",
+    "field_path": "physics types#4/type-chopper#8[0]/rotation marker#5"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "friction_point_definition_block",
+    "field": "marker name",
+    "tag": "objects\\levels\\multi\\shrine\\behemoth\\behemoth.vehicle",
+    "value": "tread_front_a_left",
+    "field_path": "havok vehicle physics#6/friction points#16[0]/marker name#0"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\levels\\dlc\\chillout\\monitor\\monitor.vehicle",
+    "value": "light",
+    "field_path": "unit#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "unit_camera_struct",
+    "field": "camera marker name",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "hornet_p_l_camera",
+    "field_path": "unit#0/seats#45[1]/unit camera#25/camera marker name#2"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "boarding grenade marker",
+    "tag": "objects\\vehicles\\scorpion\\scorpion.vehicle",
+    "value": "driver_grenade",
+    "field_path": "unit#0/seats#45[5]/boarding grenade marker#4"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "entry marker(s) name",
+    "tag": "objects\\giants\\scarab\\turrets\\main_turret\\main_turret.vehicle",
+    "value": "gunner",
+    "field_path": "unit#0/seats#45[0]/entry marker(s) name#3"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "unit_seat_block",
+    "field": "marker name",
+    "tag": "objects\\giants\\scarab\\turrets\\main_turret\\main_turret.vehicle",
+    "value": "gunner",
+    "field_path": "unit#0/seats#45[0]/marker name#2"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "left lift marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust_l",
+    "field_path": "physics types#4/type-vtol#7[0]/left lift marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "right lift marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust_r",
+    "field_path": "physics types#4/type-vtol#7[0]/right lift marker#2"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "vehicle",
+    "struct": "vtol_block",
+    "field": "thrust marker",
+    "tag": "objects\\levels\\dlc\\sidewinder\\hornet_lite\\hornet_lite.vehicle",
+    "value": "thrust",
+    "field_path": "physics types#4/type-vtol#7[0]/thrust marker#3"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "weapon",
+    "struct": "object_attachment_block",
+    "field": "marker",
+    "tag": "objects\\weapons\\melee\\energy_blade\\energy_blade.weapon",
+    "value": "fx_bladetip",
+    "field_path": "item#0/object#0/attachments#24[0]/marker#1"
+  },
+  {
+    "engine": "halo3_mcc",
+    "group": "weapon",
+    "struct": "weapon_barrels",
+    "field": "optional barrel marker name",
+    "tag": "objects\\weapons\\pistol\\automag\\automag.weapon",
+    "value": "primary_trigger",
+    "field_path": "barrels#70[0]/optional barrel marker name#7"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "equipment",
+    "struct": "equipment_type_treeoflife_block",
+    "field": "origin marker",
+    "tag": "objects\\equipment\\drop_shield\\drop_shield_shield\\drop_shield_shield.equipment",
+    "value": "sphere_center",
+    "field_path": "tree of life#41[0]/origin marker#1"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "delay effect marker name",
+    "tag": "objects\\giants\\scarab\\attachments\\engine_inner_shield\\engine_inner_shield.model",
+    "value": "fx_shield_down",
+    "field_path": "new damage info#25[0]/damage sections#14[0]/instant responses#4[1]/delay effect marker name#27"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "destroyed child object marker name",
+    "tag": "objects\\gear\\human\\military\\resupply_capsule\\resupply_capsule.model",
+    "value": "panel_attach",
+    "field_path": "new damage info#25[0]/damage sections#14[0]/instant responses#4[0]/destroyed child object marker name#33"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "instantaneous_damage_repsonse_block",
+    "field": "effect marker name",
+    "tag": "objects\\characters\\ambient_life\\fish_pirahna\\fish_pirahna.model",
+    "value": "spawn_body",
+    "field_path": "new damage info#25[0]/damage sections#14[0]/instant responses#4[0]/effect marker name#22"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "instantaneous_response_damage_effect_marker_struct",
+    "field": "damage effect marker name",
+    "tag": "objects\\characters\\grunt\\grunt.model",
+    "value": "fx_backpack",
+    "field_path": "damage info#28/damage sections#9[4]/instant responses#25[0]/damage effect marker#8/damage effect marker name#0"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "delay effect marker name",
+    "tag": "objects\\equipment\\hologram\\bipeds\\hologram_elite.model",
+    "value": "fx_shield_core",
+    "field_path": "damage info#27/damage sections#9[0]/instant responses#20[0]/delay effect marker name#17"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "destroyed child object marker name",
+    "tag": "objects\\gear\\human\\military\\resupply_capsule\\resupply_capsule.model",
+    "value": "panel_attach",
+    "field_path": "damage info#26/damage sections#9[1]/instant responses#20[0]/destroyed child object marker name#20"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "generic effect marker",
+    "tag": "objects\\cex\\cex_timberland\\crate_packing_easter\\crate_packing_easter.model",
+    "value": "fx_damage",
+    "field_path": "damage info#28/damage sections#9[0]/instant responses#25[0]/generic effect marker#4"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "model",
+    "struct": "new_instantaneous_damage_response_block",
+    "field": "specific effect marker",
+    "tag": "objects\\cex\\cex_timberland\\crate_packing_easter\\crate_packing_easter.model",
+    "value": "fx_lid_spawn",
+    "field_path": "damage info#28/damage sections#9[0]/instant responses#25[0]/specific effect marker#6"
+  },
+  {
+    "engine": "haloreach_mcc",
+    "group": "vehicle",
+    "struct": "unit_struct_definition",
+    "field": "target aiming pivot marker name",
+    "tag": "objects\\vehicles\\human\\warthog\\weapons\\warthog_chaingun\\warthog_chaingun.vehicle",
+    "value": "aiming_pivot",
+    "field_path": "unit#0/target aiming pivot marker name#53"
+  }
+]
