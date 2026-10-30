@@ -468,30 +468,22 @@ mod tests {
         }
     }
 
-    /// Every game with definitions is either offered the button or explicitly
-    /// not, so adding a game cannot leave this unanswered by accident.
+    /// Every supported editing-kit game is either offered the button or
+    /// explicitly not. Extra schemas (such as read-only Halo 5) are not kits.
     #[test]
-    fn every_shipped_game_has_a_decision_about_the_sapien_button() {
+    fn every_supported_game_has_a_decision_about_the_sapien_button() {
         let definitions = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
-        let games: Vec<String> = std::fs::read_dir(&definitions)
-            .expect("the definitions submodule is required to build")
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.path().is_dir())
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| !name.starts_with('.') && name != crate::core::format::HALO5_DEFINITIONS)
-            .collect();
-        assert!(!games.is_empty(), "definitions/ has per-game folders");
-        let without_sapien: Vec<&String> = games
-            .iter()
-            .filter(|game| {
-                let game = GameId::from_id(game).unwrap_or_else(|| panic!("definitions/{game} names no game"));
-                !game.sapien_takes_scenario_argument()
-            })
+        let games = GameId::ALL;
+        for game in games {
+            assert!(definitions.join(game.as_str()).is_dir(), "{game} has bundled definitions");
+        }
+        let without_sapien: Vec<_> = games.into_iter()
+            .filter(|game| !game.sapien_takes_scenario_argument())
             .collect();
         assert_eq!(
             without_sapien.len(),
             2,
-            "exactly two shipped games have no scenario-capable Sapien, got {without_sapien:?}"
+            "exactly two supported games have no scenario-capable Sapien, got {without_sapien:?}"
         );
     }
 
