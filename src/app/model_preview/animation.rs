@@ -1111,6 +1111,47 @@ mod tests {
         plays_a_classic_idle(source, entry, "halo2_mcc", "combat:rifle:idle");
     }
 
+    /// `BLAM_TEST_H2EK`: Miranda's own graph holds four animations, and
+    /// everything else she plays comes from the marine's.
+    #[test]
+    fn a_model_lists_and_plays_what_its_graph_inherits() {
+        let tags = crate::core::test_kits::h2ek_tags();
+        let rel = "objects/characters/miranda/miranda.model";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: tags.clone(),
+            game: Some(GameId::Halo2),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        };
+        let entry = TagEntry {
+            key: file_entry_key(&tags.join(rel)),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: Some("model".to_owned()),
+            location: TagEntryLocation::LooseFile(tags.join(rel)),
+        };
+        let list = list_model_animations(&source, &entry).expect("animation list");
+        assert_eq!(list.len(), 642);
+        let mut names: Vec<_> = list.iter().map(|entry| &entry.name).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), list.len(), "a child's animation should replace its parent's");
+
+        let inherited = list
+            .iter()
+            .enumerate()
+            .skip(4)
+            .find(|(_, entry)| entry.playable && entry.frame_count > 1)
+            .expect("no inherited animation plays")
+            .0;
+        let decoded = decode_model_animation(&source, &entry, inherited).expect("decode");
+        assert!(!decoded.frames.is_empty());
+        assert!(decoded.skeleton_names.iter().any(|name| name == "pelvis"));
+    }
+
     /// Only Halo CE's objects stand in for a `.model`. Campaign Evolved's game id
     /// also starts with `haloce`, but its tags are Reach's.
     #[test]
@@ -1410,12 +1451,14 @@ fn list_model_animations(
         blam_tags::game::Game::Halo2 | blam_tags::game::Game::Halo3 => {
             let jmad_ref = tag_ref_path(&model.root(), "animation")
                 .ok_or("This model references no animation graph.")?;
-            let jmad =
-                load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
-                    .map_err(|error| error.to_string())?;
-            let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
-            Ok(animation
+            let chain = load_graph_chain(source, &jmad_ref)?;
+            let animations = chain
                 .iter()
+                .map(|jmad| Animation::new(jmad).map_err(|error| error.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(inherited_animation_order(&animations)
+                .into_iter()
+                .filter_map(|(graph, index)| animations[graph].get(index))
                 .map(|group| PreviewAnimationEntry {
                     name: group
                         .name
@@ -1428,6 +1471,49 @@ fn list_model_animations(
                 .collect())
         }
     }
+}
+
+/// A model's graph, then each `parent animation graph` above it. A parent
+/// that will not load ends the chain rather than losing the graph's own list.
+fn load_graph_chain(source: &TagSource, first: &str) -> Result<Vec<TagFile>, String> {
+    let load = |path: &str| {
+        load_referenced_tag_from_source(source, path, "model_animation_graph", b"jmad")
+    };
+    let mut seen = vec![first.to_owned()];
+    let mut chain = vec![load(first).map_err(|error| error.to_string())?];
+    loop {
+        let parent = chain.last().and_then(|jmad| {
+            let parent = Animation::new(jmad).ok()?.parent()?.to_owned();
+            (!seen.contains(&parent)).then_some(parent)
+        });
+        let Some(jmad) = parent.and_then(|parent| {
+            let jmad = load(&parent).ok()?;
+            seen.push(parent);
+            Some(jmad)
+        }) else {
+            return Ok(chain);
+        };
+        chain.push(jmad);
+    }
+}
+
+/// Every animation of a graph chain as (graph, index): a graph's own, then
+/// what it inherits. A name a nearer graph holds replaces the one above it.
+fn inherited_animation_order(animations: &[Animation<'_>]) -> Vec<(usize, usize)> {
+    let mut names = std::collections::HashSet::new();
+    let mut order = Vec::new();
+    for (graph, animation) in animations.iter().enumerate() {
+        let start = order.len();
+        for group in animation.iter() {
+            if group.name.as_ref().is_none_or(|name| !names.contains(name.as_str())) {
+                order.push((graph, group.index));
+            }
+        }
+        names.extend(order[start..].iter().filter_map(|&(graph, index)| {
+            animations[graph].get(index)?.name.as_deref()
+        }));
+    }
+    order
 }
 
 /// A Halo CE object's `model_animations`.
@@ -1491,18 +1577,27 @@ fn decode_model_animation(
     let root = model.root();
     let jmad_ref =
         tag_ref_path(&root, "animation").ok_or("This model references no animation graph.")?;
-    let jmad = load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
-        .map_err(|error| error.to_string())?;
-    let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
-    let skeleton = Skeleton::from_tag(&jmad);
+    let chain = load_graph_chain(source, &jmad_ref)?;
+    let animations = chain
+        .iter()
+        .map(|jmad| Animation::new(jmad).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (graph, animation_index) = inherited_animation_order(&animations)
+        .get(animation_index)
+        .copied()
+        .ok_or("The graph no longer lists this animation.")?;
+    // An inherited clip decodes against the graph that holds it, and reaches
+    // the model by node name.
+    let (jmad, animation) = (&chain[graph], &animations[graph]);
+    let skeleton = Skeleton::from_tag(jmad);
     let render_tag = tag_ref_path(&root, "render model").and_then(|reference| {
         load_referenced_tag_from_source(source, &reference, "render_model", b"mode").ok()
     });
     let object_space =
-        blam_tags::extract::animation::additional_node_data_is_object_space(&animation);
+        blam_tags::extract::animation::additional_node_data_is_object_space(animation);
     let defaults = blam_tags::extract::animation::build_defaults(
         &skeleton,
-        &jmad,
+        jmad,
         render_tag.as_ref(),
         object_space,
     );
@@ -1521,7 +1616,7 @@ fn decode_model_animation(
     let kind = blam_tags::extract::animation::jma_kind_for(group);
     let base = match kind {
         JmaKind::Jmo | JmaKind::Jmr => {
-            let graph = AnimationGraph::from_tag(&jmad);
+            let graph = AnimationGraph::from_tag(jmad);
             animation
                 .overlay_base_pose(&graph, group, &skeleton, &defaults)
                 .unwrap_or_else(|| defaults.clone())
