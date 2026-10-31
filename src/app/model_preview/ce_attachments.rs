@@ -314,7 +314,7 @@ pub(crate) struct CeEquippable {
     pub(crate) name: String,
     /// The `weapons` entry of the animations that holds it.
     pub(crate) class: String,
-    label: String,
+    pub(super) label: String,
 }
 
 /// What a biped can hold, and which clips the held weapon leaves out.

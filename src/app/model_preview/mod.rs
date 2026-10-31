@@ -911,6 +911,20 @@ fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
     }
 }
 
+const WEAPON_PICKER_HEIGHT: f32 = 300.0;
+
+/// Whether the weapon list overflows its popup: `None`, a heading per class,
+/// and a row per weapon.
+fn weapon_picker_scrolls(weapons: &[ce_attachments::CeEquippable], row_height: f32) -> bool {
+    let classes = weapons.chunk_by(|a, b| a.class == b.class).count();
+    (1 + classes + weapons.len()) as f32 * row_height > WEAPON_PICKER_HEIGHT
+}
+
+/// A weapon's row survives a search by its own name or its class's.
+fn weapon_matches(weapon: &ce_attachments::CeEquippable, query: &str) -> bool {
+    weapon.name.to_lowercase().contains(query) || weapon.class.to_lowercase().contains(query)
+}
+
 /// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
 /// what should outlive that goes along with the state.
 fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
@@ -923,24 +937,71 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label("Weapon");
-        egui::ComboBox::from_id_salt(("ce_weapon_picker", &data.render_model_path))
-            .selected_text(held.map_or("None", |weapon| weapon.name.as_str()))
-            .height(320.0)
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(held.is_none(), "None").clicked() {
-                    chosen = Some(None);
+        let popup_id = ui.make_persistent_id(("ce_weapon_picker", &data.render_model_path));
+        let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+        let response = picker_button(
+            ui,
+            popup_id,
+            held.map_or("None", |weapon| weapon.name.as_str()),
+            weapons.equippable.len(),
+            220.0,
+            text_dark(),
+            true,
+        );
+        let just_opened = response.clicked() && !open;
+        if response.clicked() {
+            egui::Popup::toggle_id(ui.ctx(), popup_id);
+        }
+        // Open while its id is open in memory, as the button above toggles it;
+        // left alone, a popup built from a response is always open.
+        egui::Popup::from_response(&response)
+            .id(popup_id)
+            .open_memory(None)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                picker_popup_width(ui, &response);
+                let row_height = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+                let mut query = String::new();
+                let mut changed = false;
+                if weapon_picker_scrolls(&weapons.equippable, row_height) {
+                    let filter_id = popup_id.with("entry_search");
+                    let mut filter = ui
+                        .data(|data| data.get_temp::<String>(filter_id))
+                        .unwrap_or_default();
+                    changed = picker_search_field(ui, &mut filter, "search weapons…", just_opened);
+                    ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+                    ui.separator();
+                    query = filter.trim().to_lowercase();
                 }
-                let mut class = None;
-                for weapon in &weapons.equippable {
-                    if class != Some(&weapon.class) {
-                        class = Some(&weapon.class);
-                        ui.label(RichText::new(&weapon.class).color(subtle_dark()));
+                picker_results(ui, WEAPON_PICKER_HEIGHT, changed, |ui| {
+                    let mut shown = 0;
+                    if query.is_empty() || "none".contains(&query) {
+                        shown += 1;
+                        if ui.selectable_label(held.is_none(), "None").clicked() {
+                            chosen = Some(None);
+                            egui::Popup::close_id(ui.ctx(), popup_id);
+                        }
                     }
-                    let is_held = held.is_some_and(|held| held.path == weapon.path);
-                    if ui.selectable_label(is_held, &weapon.name).clicked() {
-                        chosen = Some(Some(weapon.path.clone()));
+                    let mut class = None;
+                    for weapon in &weapons.equippable {
+                        if !weapon_matches(weapon, &query) {
+                            continue;
+                        }
+                        shown += 1;
+                        if class != Some(&weapon.class) {
+                            class = Some(&weapon.class);
+                            ui.label(RichText::new(&weapon.class).color(subtle_dark()));
+                        }
+                        let is_held = held.is_some_and(|held| held.path == weapon.path);
+                        if ui.selectable_label(is_held, &weapon.name).clicked() {
+                            chosen = Some(Some(weapon.path.clone()));
+                            egui::Popup::close_id(ui.ctx(), popup_id);
+                        }
                     }
-                }
+                    if shown == 0 {
+                        ui.label(RichText::new("No weapons match.").color(subtle_dark()));
+                    }
+                });
             });
     });
     let Some(choice) = chosen.filter(|choice| *choice != state.ce_weapon) else {

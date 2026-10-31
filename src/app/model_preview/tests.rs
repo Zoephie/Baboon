@@ -942,3 +942,21 @@ fn a_shading_mode_is_picked_inside_the_view_menu() {
     click(&mut frame, option, &mut state);
     assert_eq!(state.render_mode, target, "the mode was picked");
 }
+
+#[test]
+fn the_weapon_picker_filters_only_a_list_that_scrolls() {
+    let weapon = |class: &str, name: &str| ce_attachments::CeEquippable {
+        path: name.to_owned(),
+        name: name.to_owned(),
+        class: class.to_owned(),
+        label: String::new(),
+    };
+    let few = [weapon("pistol", "pistol"), weapon("rifle", "needler")];
+    assert!(!weapon_picker_scrolls(&few, 20.0));
+    let many = vec![weapon("rifle", "shotgun"); 15];
+    assert!(weapon_picker_scrolls(&many, 20.0));
+
+    assert!(weapon_matches(&few[0], ""));
+    assert!(weapon_matches(&few[1], "rifle"));
+    assert!(!weapon_matches(&few[1], "pistol"));
+}
