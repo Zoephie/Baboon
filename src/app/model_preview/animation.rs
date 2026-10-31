@@ -280,7 +280,7 @@ pub(super) fn animation_skinning_rows(
     Some(rows)
 }
 
-/// Hold a preview at frame 0 of the clip named `clip`, for `h2_shot`.
+/// Hold a preview at `H2_SHOT_FRAME` of the clip named `clip`, for `h2_shot`.
 #[cfg(test)]
 pub(super) fn pose_for_shot(
     source: &TagSource,
@@ -292,13 +292,14 @@ pub(super) fn pose_for_shot(
     let list = list_model_animations(source, entry).unwrap();
     let index = list.iter().position(|animation| animation.name == clip).unwrap();
     let decoded = decode_model_animation(source, entry, index).unwrap();
+    let at = std::env::var("H2_SHOT_FRAME").map_or(0, |frame| frame.parse().unwrap());
     let frame = data
         .preview
         .nodes
         .iter()
         .map(|node| {
             let source = decoded.skeleton_names.iter().position(|name| *name == node.name);
-            source.and_then(|source| decoded.frames[0].get(source).copied()).unwrap_or(
+            source.and_then(|source| decoded.frames[at].get(source).copied()).unwrap_or(
                 PreviewNodeTransform {
                     rotation: node.bind_rotation,
                     translation: node.bind_translation,
@@ -1128,7 +1129,10 @@ mod tests {
             load_referenced_tag_from_source(&source, &reference, "gbxmodel", b"mod2").ok()
         });
         let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
-        let rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
+        let mut rest = ce_rest_pose(&skeleton, gbxmodel.as_ref());
+        rest.iter_mut().for_each(|node| node.rotation = node.rotation.conjugate());
+        let idle = ce_idle_beneath(&animations, animation).expect("the cyborg has no idle");
+        let idle = ce_inverted_clip(idle).pose(&skeleton, Some(&rest));
         let clip = animation.decode();
         let flags = clip.node_flags.as_ref().expect("node flags");
         let tracks = clip.animated_tracks.as_ref().expect("animated tracks");
@@ -1139,8 +1143,10 @@ mod tests {
                 continue;
             }
             for (frame, delta) in tracks.rotations[track].iter().enumerate() {
-                let want = (*delta * rest[node].rotation).conjugate().normalized();
-                let reversed = (rest[node].rotation * *delta).conjugate().normalized();
+                // The game's order, on the values as the tag stores them.
+                let base = idle.frames[frame % idle.frames.len()][node].rotation.conjugate();
+                let want = (*delta * base).conjugate().normalized();
+                let reversed = (base * *delta).conjugate().normalized();
                 orders_differ |= want.dot(reversed).abs() < 0.999;
                 let got = decoded.frames[frame][node].rotation;
                 let dot: f32 = got.iter().zip(want.to_array()).map(|(a, b)| a * b).sum();
@@ -1817,6 +1823,33 @@ fn decode_model_animation(
 /// The Halo CE half of [`decode_model_animation`]: the extractor's skeleton
 /// and the gbxmodel's rest pose, with overlays applied as the game applies
 /// them.
+/// A clip with its rotations turned to run forward; see [`decode_ce_animation`].
+fn ce_inverted_clip(animation: &CeAnimation<'_>) -> blam_tags::AnimationClip {
+    let mut clip = animation.decode();
+    for tracks in std::iter::once(&mut clip.static_tracks).chain(clip.animated_tracks.as_mut()) {
+        for rotation in tracks.rotations.iter_mut().flatten() {
+            *rotation = rotation.conjugate();
+        }
+    }
+    clip
+}
+
+/// The idle of a clip's seat and weapon class, which an action plays over in
+/// the preview. A clip with permutations is named for its first, `idle%0`.
+fn ce_idle_beneath<'a, 'tag>(
+    animations: &'a CeAnimations<'tag>,
+    animation: &CeAnimation<'_>,
+) -> Option<&'a CeAnimation<'tag>> {
+    let name = animation.name.as_deref()?;
+    let mut words = name.split(' ');
+    let idle = format!("{} {} idle", words.next()?, words.next()?);
+    let idle = [idle.clone(), format!("{idle}%0")];
+    let found = animations.iter().find(|clip| {
+        clip.frame_count > 0 && clip.name.as_ref().is_some_and(|name| idle.contains(name))
+    });
+    found
+}
+
 fn decode_ce_animation(
     source: &TagSource,
     object: &TagFile,
@@ -1846,16 +1879,79 @@ fn decode_ce_animation(
     for transform in &mut rest {
         transform.rotation = transform.rotation.conjugate();
     }
-    let mut clip = animation.decode();
-    for tracks in std::iter::once(&mut clip.static_tracks).chain(clip.animated_tracks.as_mut()) {
-        for rotation in tracks.rotations.iter_mut().flatten() {
-            *rotation = rotation.conjugate();
+    let clip = ce_inverted_clip(animation);
+    // `unit_preprocess_node_orientations` applies an action or overlay to the
+    // pose the unit's state already holds: `replacement_animation_apply` and
+    // `overlay_animation_apply` write only the nodes the clip animates.
+    let beneath = ce_idle_beneath(&animations, animation)
+        .map(|idle| ce_inverted_clip(idle).pose(&skeleton, Some(&rest)));
+    let over = |compose: &dyn Fn(&[NodeTransform]) -> blam_tags::Pose| match &beneath {
+        Some(idle) => {
+            let frames = (0..clip.frame_count.max(1) as usize).map(|frame| {
+                compose(&idle.frames[frame % idle.frames.len()]).frames.swap_remove(frame)
+            });
+            blam_tags::Pose { frames: frames.collect() }
         }
-    }
-    let pose = match ce_jma_kind(animation) {
-        JmaKind::Jmo => clip.runtime_overlay_pose(&skeleton, &rest),
-        JmaKind::Jmr => clip.replacement_pose(&skeleton, &rest),
+        None => compose(&rest),
+    };
+    let mut pose = match ce_jma_kind(animation) {
+        JmaKind::Jmo => over(&|base| clip.runtime_overlay_pose(&skeleton, base)),
+        JmaKind::Jmr => over(&|base| clip.replacement_pose(&skeleton, base)),
         _ => clip.pose(&skeleton, Some(&rest)),
     };
+    // Then the unit aims and looks straight ahead.
+    let name = animation.name.as_deref().unwrap_or_default();
+    for (index, frame) in super::ce_attachments::resting_aim(&antr, name) {
+        let Some(aim) = animations.get(index).filter(|aim| frame < aim.frame_count as usize) else {
+            continue;
+        };
+        let aim = ce_inverted_clip(aim);
+        for row in &mut pose.frames {
+            *row = aim.runtime_overlay_pose(&skeleton, row).frames.swap_remove(frame);
+        }
+    }
     Ok(DecodedAnimationPose::new(&skeleton, &pose, animation.loop_frame_index as usize))
+}
+
+#[cfg(test)]
+mod ce_replacement_tests {
+    use super::*;
+
+    /// With `BLAM_TEST_HCEEK`: an action's clip plays over the idle, so the
+    /// nodes it leaves alone stand where the idle puts them, not at bind.
+    #[test]
+    fn a_ce_replacement_clip_leaves_its_unanimated_nodes_to_the_idle() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloCe),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let path = "characters\\cyborg\\cyborg";
+        let object = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
+        let antr = load_object_animations(&source, &object).unwrap();
+        let animations = CeAnimations::new(&antr);
+        let index = |name: &str| {
+            animations.iter().position(|clip| clip.name.as_deref() == Some(name)).unwrap()
+        };
+        let pose = |name| decode_ce_animation(&source, &object, index(name)).unwrap();
+        let melee = pose("stand pistol b melee");
+        let idle = pose("stand pistol idle");
+        let flags = |name: &str| animations.get(index(name)).unwrap().decode().node_flags.unwrap();
+        let (clip, aim, look) =
+            (flags("stand pistol b melee"), flags("stand pistol aim-still"), flags("stand look"));
+        // The idle also takes the aiming screens, which an action shuts off.
+        let left_alone: Vec<_> = (0..melee.skeleton_names.len())
+            .filter(|node| {
+                ![&clip, &aim, &look].iter().any(|flags| flags.animated_rotation.bit(*node))
+            })
+            .collect();
+        assert!(!left_alone.is_empty());
+        for node in left_alone {
+            assert_eq!(melee.frames[8][node].rotation, idle.frames[8][node].rotation);
+        }
+    }
 }

@@ -90,6 +90,68 @@ pub(super) fn clip_runs_weapon_ik(clip: &str) -> bool {
     !NO_WEAPON_IK.contains(&last.split('%').next().unwrap_or(last))
 }
 
+/// `weapon_class_animation_block` slots of the aiming screens.
+const AIM_STILL: usize = 25;
+const AIM_MOVE: usize = 26;
+/// `unit_seat_animation_block` slot of the looking screen.
+const LOOK: usize = 9;
+
+/// Which aiming screen `unit_animation_state_get_aiming_screen_index` gives a
+/// clip's state. The screens run on through an overlay, not an action.
+fn aiming_screen_of(clip: &str) -> Option<usize> {
+    let last = clip.rsplit(' ').next()?;
+    match last.split('%').next()? {
+        "idle" | "turn-left" | "turn-right" | "airborne" | "land-soft" | "land-hard" | "fire-1"
+        | "fire-2" | "chamber-1" | "chamber-2" | "charged-1" | "charged-2" => Some(AIM_STILL),
+        name if name.starts_with("move-")
+            || name.starts_with("stunned-")
+            || name.starts_with("slide-") =>
+        {
+            Some(AIM_MOVE)
+        }
+        _ => None,
+    }
+}
+
+/// `aiming_screen_apply`'s frame for no yaw or pitch off the facing: screens
+/// run right to left, then down to up.
+fn resting_screen_frame(holder: TagStruct<'_>) -> usize {
+    let count = |name: &str| holder.read_int_any(name).unwrap_or(0).max(0) as usize;
+    let yaws = count("right frame count") + count("left frame count") + 1;
+    count("right frame count") + count("down pitch frame count") * yaws
+}
+
+/// The screens over a clip for a unit aiming and looking straight ahead, in
+/// the order `unit_preprocess_node_orientations` applies them, each as an
+/// animation index and its frame.
+pub(super) fn resting_aim(graph: &TagFile, clip: &str) -> Vec<(usize, usize)> {
+    let Some(screen) = aiming_screen_of(clip) else {
+        return Vec::new();
+    };
+    let mut words = clip.split(' ');
+    let (Some(seat_label), Some(class)) = (words.next(), words.next()) else {
+        return Vec::new();
+    };
+    let seats = elements(graph.root(), "UNITS");
+    let is_seat = |seat: &&TagStruct<'_>| {
+        seat.read_string("label").is_some_and(|label| label.eq_ignore_ascii_case(seat_label))
+    };
+    let Some(seat) = seats.iter().find(is_seat) else {
+        return Vec::new();
+    };
+    let clip_at = |holder: TagStruct<'_>, slot: usize| {
+        let entry = *elements(holder, "animations").get(slot)?;
+        usize::try_from(entry.read_block_index("animation")).ok()
+    };
+    let weapons = elements(*seat, "weapons");
+    let weapon = weapons.iter().find(|weapon| {
+        weapon.read_string("name").is_some_and(|name| name.eq_ignore_ascii_case(class))
+    });
+    let aim = weapon.and_then(|weapon| Some((clip_at(*weapon, screen)?, resting_screen_frame(*weapon))));
+    let look = clip_at(*seat, LOOK).map(|look| (look, resting_screen_frame(*seat)));
+    aim.into_iter().chain(look).collect()
+}
+
 /// A hand held to a marker of the weapon: an IK point of the animations.
 #[derive(Debug, Clone)]
 pub(crate) struct CeWeaponIk {
@@ -381,8 +443,9 @@ fn add_clips(
     }
 }
 
-/// Clips of weapons not held. Whatever no weapon names stays, and so does a
-/// seat with nothing for this weapon: `unit_enter_seat` then takes any.
+/// Clips of weapons not held. Whatever no weapon names stays. A seat with
+/// nothing for this weapon takes what `unit_enter_seat` does with no label:
+/// the first type of the last weapon that has one.
 fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeSet<usize> {
     let next: Vec<i16> = elements(graph.root(), "animations")
         .iter()
@@ -396,7 +459,11 @@ fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeS
             let kind = kinds.iter().position(|kind| type_matches(*kind, weapon_label))?;
             Some((index, kind))
         });
-        let Some((held_weapon, held_kind)) = found else {
+        let any = || {
+            let has_types = |weapon: &TagStruct<'_>| !elements(*weapon, "weapon types").is_empty();
+            Some((weapons.iter().rposition(has_types)?, 0))
+        };
+        let Some((held_weapon, held_kind)) = found.or_else(any) else {
             continue;
         };
         for (index, weapon) in weapons.iter().enumerate() {
@@ -614,6 +681,19 @@ pub(super) fn attach_ce_weapon(
 mod tests {
     use super::*;
 
+    struct CeAnimationsForTest(Vec<String>);
+
+    impl CeAnimationsForTest {
+        fn new(graph: &TagFile) -> Self {
+            let clips = elements(graph.root(), "animations");
+            Self(clips.iter().map(|clip| clip.read_string("name").unwrap_or_default()).collect())
+        }
+
+        fn name(&self, index: usize) -> &str {
+            &self.0[index]
+        }
+    }
+
     fn turned() -> MarkerFrame {
         // A quarter turn about up, set off along x.
         MarkerFrame {
@@ -699,6 +779,19 @@ mod tests {
         assert!(ik.runs_through("stand rifle idle"));
         assert!(!ik.runs_through("stand unarmed idle"));
         assert!(!ik.runs_through("stand rifle ar melee"));
+    }
+
+    #[test]
+    fn each_state_takes_its_aiming_screen() {
+        assert_eq!(aiming_screen_of("stand rifle idle"), Some(AIM_STILL));
+        assert_eq!(aiming_screen_of("stand pistol idle%0"), Some(AIM_STILL));
+        assert_eq!(aiming_screen_of("stand rifle move-front"), Some(AIM_MOVE));
+        assert_eq!(aiming_screen_of("stand rifle ar fire-1"), Some(AIM_STILL));
+        // Actions, and states past the aiming ones, keep the screens off.
+        assert_eq!(aiming_screen_of("stand rifle ar melee"), None);
+        assert_eq!(aiming_screen_of("stand rifle ar reload-1"), None);
+        assert_eq!(aiming_screen_of("stand rifle throw-grenade"), None);
+        assert_eq!(aiming_screen_of("stand rifle gesture"), None);
     }
 
     #[test]
@@ -791,6 +884,15 @@ mod tests {
         assert_eq!(rifle.hand, "right hand");
         assert_eq!(rifle.ik_points, [("left hand".to_owned(), "left hand cyborg".to_owned())]);
 
+        let cyborg_graph = graph("characters\\cyborg\\cyborg");
+        let names = CeAnimationsForTest::new(&cyborg_graph);
+        let name_of = |index: usize| names.name(index);
+        let aim = resting_aim(&cyborg_graph, "stand rifle idle");
+        assert_eq!(name_of(aim[0].0), "stand rifle aim-still");
+        assert_eq!(aim[0].1, 4);
+        assert_eq!(name_of(aim[1].0), "stand look");
+        assert!(resting_aim(&cyborg_graph, "stand rifle ar melee").is_empty());
+
         let cyborg = load_referenced_tag_from_source(&source, "characters\\cyborg\\cyborg", "biped", b"bipd").unwrap();
         let marine = graph("characters\\marine\\marine");
         assert_eq!(weapon_hold(&marine, "ar").unwrap().class, "rifle");
@@ -822,6 +924,16 @@ mod tests {
         let pistol = held("hp", "pistol");
         assert!(!pistol("stand pistol idle"));
         assert!(pistol("stand rifle idle"));
+        // `alert` has no rocket launcher, so it falls back on its last weapon.
+        let tag = graph("characters\\cyborg\\cyborg");
+        let alert_rifle = elements(tag.root(), "animations")
+            .iter()
+            .filter_map(|clip| clip.read_string("name"))
+            .find(|name| name.starts_with("alert rifle "))
+            .unwrap();
+        let launcher = held("rl", "launcher");
+        assert!(launcher(&alert_rifle));
+        assert!(!launcher("alert unarmed move-front"));
         let nothing = held("", "unused");
         assert!(!nothing("stand unarmed move-front"));
         assert!(nothing("stand rifle idle"));

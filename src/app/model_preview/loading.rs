@@ -609,9 +609,17 @@ const PARTICLE_OBJECT_PERMUTATION: &str = "default";
 pub(in crate::app) fn build_render_preview(
     render_tag: &TagFile,
 ) -> Result<RenderModelPreview, String> {
-    let render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
+    let mut render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
+    // `matrix4x3_rotation_from_quaternion` builds a CE marker from the conjugate
+    // of what the tag stores, as it does a node, and `RenderModel` only turns
+    // the nodes.
+    if blam_tags::game::Game::of(render_tag) == blam_tags::game::Game::Halo1 {
+        for marker in render_model.marker_groups.iter_mut().flat_map(|group| &mut group.markers) {
+            marker.rotation = marker.rotation.conjugate();
+        }
+    }
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
     // A gbxmodel's `shaders` run parallel to its materials.
     if let Some(shaders) = render_tag.root().field("shaders").and_then(|field| field.as_block()) {
