@@ -102,6 +102,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         active_camo: std::env::var_os("H2_SHOT_CAMO").is_some(),
         bloom: std::env::var_os("H2_SHOT_BLOOM").is_some(),
         self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
+        light_follows_camera: state.h2_light_follows_camera,
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state

@@ -124,6 +124,7 @@ pub(super) fn draw_model_viewport(
         active_camo: state.h2_active_camo,
         bloom: state.h2_bloom,
         self_shadow: state.h2_self_shadow,
+        light_follows_camera: state.h2_light_follows_camera,
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -747,12 +748,30 @@ struct ModelGpuFrame {
     active_camo: bool,
     bloom: bool,
     self_shadow: bool,
+    light_follows_camera: bool,
 }
 
 impl ModelGpuFrame {
     fn h2_lightmap_layer(&self) -> H2Layer {
         if self.default_lights { H2Layer::Lightmap } else { H2Layer::ObjectLightmap }
     }
+
+    /// Which way the object path's direct light lies from a surface.
+    fn h2_object_light(&self) -> [f32; 3] {
+        if self.light_follows_camera {
+            h2_camera_light(self.camera.yaw, self.camera.pitch)
+        } else {
+            h2_object_light_direction()
+        }
+    }
+}
+
+/// Over the viewer's shoulder, so orbiting never leaves the near side unlit.
+/// The preview's own, in view axes: right, forward and up.
+fn h2_camera_light(yaw: f32, pitch: f32) -> [f32; 3] {
+    const LIGHT: [f32; 3] = [-0.4, -0.7, 0.6];
+    let length = LIGHT.iter().map(|value| value * value).sum::<f32>().sqrt();
+    unrotate_view_vector(yaw, pitch, LIGHT.map(|value| value / length))
 }
 
 thread_local! {
@@ -2593,7 +2612,7 @@ impl ModelGlRenderer {
                 let toward = if frame.default_lights {
                     h2_prt_lights()[0].direction
                 } else {
-                    h2_object_light_direction()
+                    frame.h2_object_light()
                 };
                 let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
@@ -2634,7 +2653,12 @@ impl ModelGlRenderer {
             set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
             set_1(gl, program, "u_animated", if frame.bones.is_some() { 1.0 } else { 0.0 });
             let location = program.location(gl, "u_light_direct");
-            gl.uniform_3_f32_slice(location.as_ref(), &pass.light_direct);
+            let direct = if frame.default_lights || !pass.stage.is_lightmap() {
+                pass.light_direct
+            } else {
+                frame.h2_object_light().map(|value| -value)
+            };
+            gl.uniform_3_f32_slice(location.as_ref(), &direct);
             let location = program.location(gl, "u_light_indirect");
             gl.uniform_3_f32_slice(location.as_ref(), &pass.light_indirect);
             let location = program.location(gl, "u_center");
@@ -2841,6 +2865,19 @@ fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_camera_light_keeps_its_place_as_the_view_orbits() {
+        let toward_eye = |yaw, pitch| unrotate_view_vector(yaw, pitch, [0.0, -1.0, 0.0]);
+        let share = |yaw, pitch| {
+            let (light, eye): ([f32; 3], [f32; 3]) = (h2_camera_light(yaw, pitch), toward_eye(yaw, pitch));
+            (0..3).map(|axis| light[axis] * eye[axis]).sum::<f32>()
+        };
+        for (yaw, pitch) in [(0.0, 0.0), (1.5, 0.4), (3.1, -0.6), (-2.0, 1.0)] {
+            assert!((share(yaw, pitch) - share(0.0, 0.0)).abs() < 1e-5);
+        }
+        assert!(share(0.0, 0.0) > 0.5);
+    }
     use blam_tags::math::{RealPoint2d, RealPoint3d, RealVector3d};
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
 

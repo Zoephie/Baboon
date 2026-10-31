@@ -237,6 +237,8 @@ pub(in crate::app) struct ModelPreviewState {
     /// Take the game's no-lightmap path, with its two default lights, instead
     /// of its path for an object in a level.
     pub(in crate::app) h2_default_lights: bool,
+    /// Keep the direct light of the object path beside the viewer.
+    pub(in crate::app) h2_light_follows_camera: bool,
     pub(in crate::app) h2_active_camo: bool,
     pub(in crate::app) h2_bloom: bool,
     pub(in crate::app) h2_self_shadow: bool,
@@ -295,6 +297,7 @@ impl Default for ModelPreviewState {
             show_backfaces: false,
             h2_game_shaders: false,
             h2_default_lights: false,
+            h2_light_follows_camera: true,
             h2_active_camo: false,
             h2_bloom: false,
             h2_self_shadow: false,

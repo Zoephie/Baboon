@@ -1224,6 +1224,14 @@ fn draw_model_view_settings_menu(
                  object in a level with lightmaps.",
             );
             ui.add_enabled(
+                state.h2_game_shaders && !state.h2_default_lights,
+                egui::Checkbox::new(&mut state.h2_light_follows_camera, "Light Follows Camera"),
+            )
+            .on_hover_text(
+                "Keep the main light of Halo 2 models beside the viewer as you orbit. \
+                 This is the preview's own. Off, it stays fixed to the model.",
+            );
+            ui.add_enabled(
                 state.h2_game_shaders,
                 egui::Checkbox::new(&mut state.h2_active_camo, "Active Camo"),
             )
