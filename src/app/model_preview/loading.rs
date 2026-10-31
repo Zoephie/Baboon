@@ -190,7 +190,7 @@ impl Baboon {
             state.render_model_path = Some(data.render_model_path.clone());
             // Auto-select the canonical variant (named `default`, else the
             // first) so both cards arrive in one consistent state.
-            let default_variant = default_variant_index(&data.variants);
+            let default_variant = default_variant_index(data);
             reset_model_preview_selection(state, data, default_variant);
         }
         state.data = Some(result);
@@ -277,6 +277,7 @@ pub(super) fn load_model_preview(
         let model = preview_model_tag(source, model_tag)?;
         let model = model.as_ref().unwrap_or(model_tag);
         let mut data = load_model_preview(model, entry, names, Some(source), settings)?;
+        data.default_variant = object_default_variant(model_tag);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
         }

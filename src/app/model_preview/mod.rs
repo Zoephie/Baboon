@@ -7,7 +7,7 @@ use crate::app::kits::KitStamp;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
     clean_field_name, clean_field_name_basic, combo_scroll_next_index, dropdown_wheel_delta,
-    object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
+    object_default_variant, object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
     picker_button, picker_popup_width, picker_results, picker_search_field, viewport_wheel_zoom,
 };
 use crate::app::export::{
@@ -284,6 +284,7 @@ fn model_preview_data(
         textures_id: geometry_id,
         textures: None,
         variants,
+        default_variant: None,
         h2_change_colors: Default::default(),
         scenario_bsps: Vec::new(),
         animations: None,

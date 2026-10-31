@@ -74,7 +74,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     eprintln!("{}: {} materials, {with_passes} with passes", shot.model, textures.len());
     data.textures = Some(Arc::new(textures));
     let mut state = ModelPreviewState::default();
-    reset_model_preview_selection(&mut state, &data, default_variant_index(&data.variants));
+    reset_model_preview_selection(&mut state, &data, default_variant_index(&data));
     state.h2_game_shaders = shot.shaders;
     state.h2_default_lights = shot.lights;
     state.yaw = shot.yaw;

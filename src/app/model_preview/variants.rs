@@ -41,6 +41,30 @@ mod tests {
     }
 
     #[test]
+    fn an_object_s_default_variant_comes_first() {
+        let variant = |name: &str| ModelVariantPreview {
+            name: name.to_owned(),
+            regions: HashMap::new(),
+            hidden_regions: Default::default(),
+        };
+        let mut data = model_preview_data(
+            String::new(),
+            String::new(),
+            RenderModelPreview::default(),
+            vec![variant("first"), variant("default"), variant("chosen")],
+        );
+        assert_eq!(default_variant_index(&data), Some(1));
+        data.default_variant = Some("chosen".to_owned());
+        assert_eq!(default_variant_index(&data), Some(2));
+        data.default_variant = Some("gone".to_owned());
+        assert_eq!(default_variant_index(&data), Some(1));
+        data.variants.remove(1);
+        assert_eq!(default_variant_index(&data), Some(0));
+        data.variants.clear();
+        assert_eq!(default_variant_index(&data), None);
+    }
+
+    #[test]
     fn a_tilde_permutation_is_never_the_default() {
         let region = |permutations: &[&str]| RenderModelPreviewRegion {
             name: String::new(),
@@ -240,17 +264,17 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
     out
 }
 
-/// The variant to select on load: one literally named `default`, else the first
-/// (the canonical entry — `chief`, `minor`, `minor_scl`). `None` for models with
-/// no variants (CE gbxmodels), which fall back to base permutations.
-pub(super) fn default_variant_index(variants: &[ModelVariantPreview]) -> Option<usize> {
-    if variants.is_empty() {
-        return None;
-    }
-    variants
-        .iter()
-        .position(|v| v.name.eq_ignore_ascii_case("default"))
-        .or(Some(0))
+/// The variant to select on load: the one an object names, else one literally
+/// named `default`, else the first (the canonical entry — `chief`, `minor`,
+/// `minor_scl`). `None` for models with no variants (CE gbxmodels), which fall
+/// back to base permutations.
+pub(super) fn default_variant_index(data: &ModelPreviewData) -> Option<usize> {
+    let named = |name: &str| data.variants.iter().position(|v| v.name.eq_ignore_ascii_case(name));
+    data.default_variant
+        .as_deref()
+        .and_then(named)
+        .or_else(|| named("default"))
+        .or((!data.variants.is_empty()).then_some(0))
 }
 
 pub(super) fn read_named_string_exact(

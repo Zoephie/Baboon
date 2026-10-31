@@ -468,6 +468,8 @@ pub(in crate::app) struct ModelPreviewData {
     /// appears half-shaded and then changes under the cursor.
     pub(in crate::app) textures: Option<std::sync::Arc<Vec<MaterialTextures>>>,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
+    /// The variant an object tag starts in, when it names one.
+    pub(in crate::app) default_variant: Option<String>,
     /// The Halo 2 object beside this model's change colors; empty otherwise.
     pub(in crate::app) h2_change_colors: H2ChangeColors,
     /// Scenario tags only: the `structure bsps` block's references (one per

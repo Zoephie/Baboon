@@ -25,16 +25,32 @@ pub(in crate::app) fn is_object_family_group(group_tag: u32) -> bool {
     )
 }
 
+/// Where a child group's opening parent struct leaves the object's fields.
+const OBJECT_PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
+
 /// An object tag's own reference (Halo CE's `model`, `animation graph`,
 /// `collision model`, …; a `.model` after that). A child group opens with its parent's struct, so
 /// the object fields sit under `unit/object`, `item/object`, `device/object`
 /// or, for a direct child, `object`.
 pub(in crate::app) fn object_reference(tag: &TagFile, field: &str) -> Option<String> {
-    const PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
     let root = tag.root();
-    PARENTS
+    OBJECT_PARENTS
         .iter()
         .find_map(|parent| tag_ref_path(&root, &format!("{parent}/{field}")))
+}
+
+/// The variant an object starts in, when it names one.
+pub(in crate::app) fn object_default_variant(tag: &TagFile) -> Option<String> {
+    let root = tag.root();
+    OBJECT_PARENTS.iter().find_map(|parent| {
+        let field = root.field_path(&format!("{parent}/default model variant"))?;
+        match field.value()? {
+            TagFieldData::StringId(id) | TagFieldData::OldStringId(id) if !id.string.is_empty() => {
+                Some(id.string)
+            }
+            _ => None,
+        }
+    })
 }
 
 /// Show the connected `.model` reference at the top of object-family tags
