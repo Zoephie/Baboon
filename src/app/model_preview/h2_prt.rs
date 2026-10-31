@@ -17,7 +17,8 @@ const VERTEX_FLOATS: usize = 5;
 /// The vertex stage takes exactly four PCA vectors, in one `vec4` each.
 const PCA_VECTORS: usize = 4;
 /// Mean, then red, green and blue weights.
-pub(crate) const CLUSTER_REGISTERS: usize = 4;
+#[cfg(test)]
+const CLUSTER_REGISTERS: usize = 4;
 /// The size of the vertex stage's constant array: ten clusters on each of the
 /// scarab's three LODs, the most in the kit. Beside the bone palette, twice
 /// this is more than a driver links.

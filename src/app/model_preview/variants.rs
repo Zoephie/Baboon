@@ -7,6 +7,49 @@ use super::*;
 mod tests {
     use super::*;
 
+    fn entry(permutation: Option<&str>, probability: f32) -> RawVariantEntry {
+        RawVariantEntry { permutation: permutation.map(str::to_owned), probability }
+    }
+
+    fn variant(region: &str, entries: Vec<RawVariantEntry>, parent: i128) -> RawVariant {
+        RawVariant {
+            name: String::new(),
+            regions: vec![(region.to_owned(), RawVariantRegion { entries, parent })],
+        }
+    }
+
+    #[test]
+    fn a_child_keeps_its_entries_and_gains_what_its_parent_adds() {
+        let raw = [
+            variant("hull", vec![entry(Some("base"), 1.0), entry(Some("rust"), 3.0)], -1),
+            variant("hull", vec![entry(Some("base"), 2.0)], 0),
+            variant("hull", Vec::new(), 2),
+        ];
+        assert_eq!(
+            variant_region_entries(&raw, 1, "hull", &mut Vec::new()).unwrap(),
+            vec![entry(Some("base"), 2.0), entry(Some("rust"), 3.0)],
+        );
+        assert!(variant_region_entries(&raw, 1, "wing", &mut Vec::new()).is_none());
+        assert_eq!(variant_region_entries(&raw, 2, "hull", &mut Vec::new()), Some(Vec::new()), "a cycle ends");
+    }
+
+    #[test]
+    fn the_likeliest_entry_wins_and_the_first_breaks_a_tie() {
+        let entries = [entry(Some("a"), 1.0), entry(Some("b"), 2.0), entry(Some("c"), 2.0)];
+        assert_eq!(likeliest_entry(&entries), Some(&entries[1]));
+        assert_eq!(likeliest_entry(&[]), None);
+    }
+
+    #[test]
+    fn a_tilde_permutation_is_never_the_default() {
+        let region = |permutations: &[&str]| RenderModelPreviewRegion {
+            name: String::new(),
+            permutations: permutations.iter().map(|name| (*name).to_owned()).collect(),
+        };
+        assert_eq!(default_permutation(&region(&["~hidden", "base"])), "base");
+        assert_eq!(default_permutation(&region(&["~only"])), "~only");
+    }
+
     #[test]
     fn variant_picker_filters_and_preserves_none_and_original_indices() {
         let ctx = egui::Context::default();
@@ -17,7 +60,7 @@ mod tests {
             .map(|name| ModelVariantPreview {
                 name: name.to_owned(),
                 regions: HashMap::new(),
-                listed_regions: Default::default(),
+                hidden_regions: Default::default(),
             })
             .collect::<Vec<_>>();
         let frame = |events| {
@@ -84,31 +127,54 @@ mod tests {
     }
 }
 
-/// Resolve a region's effective permutation for variant `vi`, following the
-/// per-region `parent variant` chain when the variant doesn't set it directly.
-pub(super) fn resolve_variant_region(
+/// The entries of a region in variant `vi`, with those of its `parent
+/// variant` it doesn't name itself, as `model_postprocess_variant_inheritance`
+/// merges them. `None` when the variant doesn't list the region.
+pub(super) fn variant_region_entries(
     raw: &[RawVariant],
     vi: usize,
     region: &str,
-    depth: usize,
-) -> Option<String> {
-    if depth > raw.len() {
-        return None; // cycle guard
+    seen: &mut Vec<usize>,
+) -> Option<Vec<RawVariantEntry>> {
+    let own = raw.get(vi)?.regions.iter().find(|(name, _)| name == region).map(|(_, own)| own)?;
+    let mut entries = own.entries.clone();
+    seen.push(vi);
+    if let Ok(parent) = usize::try_from(own.parent)
+        && !seen.contains(&parent)
+    {
+        for entry in variant_region_entries(raw, parent, region, seen).unwrap_or_default() {
+            if !entries.iter().any(|known| known.permutation == entry.permutation) {
+                entries.push(entry);
+            }
+        }
     }
-    let rr = raw
-        .get(vi)?
-        .regions
-        .iter()
-        .find(|(name, _)| name == region)
-        .map(|(_, r)| r)?;
-    if let Some(perm) = &rr.perm {
-        return Some(perm.clone());
-    }
-    if rr.parent >= 0 && rr.parent as usize != vi {
-        return resolve_variant_region(raw, rr.parent as usize, region, depth + 1);
-    }
-    None
+    Some(entries)
 }
+
+/// The game draws one of these at random by probability. A preview keeps to
+/// the likeliest, the earliest of equals, so a variant always looks the same.
+fn likeliest_entry(entries: &[RawVariantEntry]) -> Option<&RawVariantEntry> {
+    entries.iter().rev().max_by(|a, b| a.probability.total_cmp(&b.probability))
+}
+
+/// What a permutation entry draws: a state it starts in if it has any likely
+/// ones, otherwise its own permutation.
+fn read_variant_entry(permutation: &TagStruct<'_>) -> RawVariantEntry {
+    let state = permutation.field("states").and_then(|field| field.as_block()).and_then(|states| {
+        (0..states.len())
+            .filter_map(|index| states.element(index))
+            .map(|state| (state.read_real("initial probability").unwrap_or(0.0), state))
+            .filter(|(probability, _)| *probability > 0.0)
+            .rev()
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, state)| state)
+    });
+    RawVariantEntry {
+        permutation: read_named_string_exact(state.as_ref().unwrap_or(permutation), "permutation name"),
+        probability: permutation.read_real("probability").unwrap_or(0.0),
+    }
+}
+
 
 pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
     let Some(variants) = tag.root().field_path("variants").and_then(|f| f.as_block()) else {
@@ -131,13 +197,18 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
                 let Some(region_name) = read_named_string_exact(&region, "region name") else {
                     continue;
                 };
-                let perm = region
+                let entries = region
                     .field("permutations")
                     .and_then(|f| f.as_block())
-                    .and_then(|perms| perms.element(0))
-                    .and_then(|perm| read_named_string_exact(&perm, "permutation name"));
+                    .map(|block| {
+                        (0..block.len())
+                            .filter_map(|index| block.element(index))
+                            .map(|entry| read_variant_entry(&entry))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let parent = region.read_int_any("parent variant").unwrap_or(-1);
-                regions.push((region_name, RawVariantRegion { perm, parent }));
+                regions.push((region_name, RawVariantRegion { entries, parent }));
             }
         }
         raw.push(RawVariant { name, regions });
@@ -146,20 +217,24 @@ pub(super) fn read_model_variants(tag: &TagFile) -> Vec<ModelVariantPreview> {
     let mut out = Vec::with_capacity(raw.len());
     for vi in 0..raw.len() {
         let mut regions = HashMap::new();
-        let mut listed_regions = std::collections::HashSet::new();
+        let mut hidden_regions = std::collections::HashSet::new();
         for (region_name, _) in &raw[vi].regions {
-            listed_regions.insert(region_name.clone());
-            if regions.contains_key(region_name) {
-                continue;
-            }
-            if let Some(perm) = resolve_variant_region(&raw, vi, region_name, 0) {
-                regions.insert(region_name.clone(), perm);
+            let entries = variant_region_entries(&raw, vi, region_name, &mut Vec::new()).unwrap_or_default();
+            // A region with no entries at all is not this variant's to choose.
+            match likeliest_entry(&entries).map(|entry| entry.permutation.clone()) {
+                Some(Some(permutation)) => {
+                    regions.insert(region_name.clone(), permutation);
+                }
+                Some(None) => {
+                    hidden_regions.insert(region_name.clone());
+                }
+                None => {}
             }
         }
         out.push(ModelVariantPreview {
             name: raw[vi].name.clone(),
             regions,
-            listed_regions,
+            hidden_regions,
         });
     }
     out
@@ -227,37 +302,14 @@ pub(super) fn compute_variant_selection(
 ) -> HashMap<String, ModelRegionSelection> {
     let mut selections = HashMap::new();
     let selected_variant = variant.and_then(|idx| data.variants.get(idx));
-    let variant_aliases = selected_variant
-        .map(|variant| variant_permutation_aliases(&variant.name))
-        .unwrap_or_default();
     for region in &data.preview.regions {
-        let default_perm = region.permutations.first().cloned().unwrap_or_default();
-        let variant_perm = selected_variant.and_then(|v| v.regions.get(&region.name));
-        let alias_perm = matching_variant_permutation(region, &variant_aliases);
-        let explicit_perm = variant_perm
-            .filter(|name| region.permutations.iter().any(|p| p == *name))
-            .cloned();
-        // Whether the variant's region block NAMES this region at all. A listed
-        // region with no resolvable permutation is explicitly REMOVED (hidden); an
-        // UNLISTED region is just uncustomised and falls back to the base
-        // permutation (shown) — e.g. the major elite doesn't list `helmet`, so it
-        // gets the base helmet, while spec-ops lists it empty to drop it.
-        let listed = selected_variant.is_some_and(|v| v.listed_regions.contains(&region.name));
-        let permutation = alias_perm
-            .clone()
-            .or(explicit_perm.clone())
-            .unwrap_or(default_perm);
-        let enabled = match selected_variant {
-            Some(_) => {
-                if alias_perm.is_some() || explicit_perm.is_some() {
-                    true // the variant provides a permutation for this region
-                } else if listed {
-                    false // listed with an empty permutation => explicitly removed
-                } else {
-                    !region.permutations.is_empty() // uncustomised => base, shown
-                }
-            }
-            None => !region.permutations.is_empty(),
+        let named = selected_variant.and_then(|variant| variant.regions.get(&region.name));
+        let hidden = selected_variant.is_some_and(|variant| variant.hidden_regions.contains(&region.name));
+        let (enabled, permutation) = match named {
+            Some(name) if region.permutations.contains(name) => (true, name.clone()),
+            // The game resolves a name the render model lacks to no permutation.
+            Some(_) => (false, default_permutation(region)),
+            None => (!hidden && !region.permutations.is_empty(), default_permutation(region)),
         };
         selections.insert(
             region.name.clone(),
@@ -268,6 +320,18 @@ pub(super) fn compute_variant_selection(
         );
     }
     selections
+}
+
+/// What `model_select_initial_permutation` falls back on: an ordinary
+/// permutation, as a name starting `~` keeps one out of its choosing.
+fn default_permutation(region: &RenderModelPreviewRegion) -> String {
+    region
+        .permutations
+        .iter()
+        .find(|permutation| !permutation.starts_with('~'))
+        .or(region.permutations.first())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Reverse-sync: which variant choice (`None` = `<None>`/base, `Some(idx)` =
@@ -299,41 +363,6 @@ pub(super) fn detect_active_variant(
         }
     }
     None // matches no known variant → "(custom)"
-}
-
-pub(super) fn matching_variant_permutation(
-    region: &RenderModelPreviewRegion,
-    aliases: &[String],
-) -> Option<String> {
-    aliases.iter().find_map(|alias| {
-        region
-            .permutations
-            .iter()
-            .find(|permutation| permutation.eq_ignore_ascii_case(alias))
-            .cloned()
-    })
-}
-
-pub(super) fn variant_permutation_aliases(name: &str) -> Vec<String> {
-    let mut aliases = Vec::new();
-    push_unique_alias(&mut aliases, name);
-    if let Some((base, _)) = name.rsplit_once('_') {
-        push_unique_alias(&mut aliases, base);
-    }
-    aliases
-}
-
-pub(super) fn push_unique_alias(aliases: &mut Vec<String>, alias: &str) {
-    let alias = alias.trim();
-    if alias.is_empty() {
-        return;
-    }
-    if !aliases
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(alias))
-    {
-        aliases.push(alias.to_owned());
-    }
 }
 
 pub(super) fn draw_variant_controls(
@@ -370,7 +399,7 @@ pub(super) fn draw_variant_controls(
             .entry(region.name.clone())
             .or_insert_with(|| ModelRegionSelection {
                 enabled: !region.permutations.is_empty(),
-                permutation: region.permutations.first().cloned().unwrap_or_default(),
+                permutation: default_permutation(region),
             });
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut selection.enabled, "");

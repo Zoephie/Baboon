@@ -1191,18 +1191,54 @@ mod tests {
         assert!(!list.is_empty());
     }
 
-    /// Only Halo CE's objects stand in for a `.model`. Campaign Evolved's game id
-    /// also starts with `haloce`, but its tags are Reach's.
+    /// `BLAM_TEST_H2EK`: `ultra_scl` names the base helmet, and a permutation
+    /// called `ultra` that no variant uses must not take its place.
     #[test]
-    fn only_halo_ce_is_halo1_for_animation_lists() {
-        let folder = |game: &str| TagSource::LooseFolder {
-            root: std::path::PathBuf::from("/tags"),
-            game: GameId::from_id(game),
-            definitions_root: std::path::PathBuf::new(),
+    fn a_variant_shows_the_permutation_it_names() {
+        let tags = crate::core::test_kits::h2ek_tags();
+        let rel = "objects/characters/elite/elite.model";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: tags.clone(),
+            game: Some(GameId::Halo2),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
         };
-        assert!(source_is_halo1(&folder("haloce_mcc")));
-        assert!(!source_is_halo1(&folder("haloce_evolved")));
-        assert!(!source_is_halo1(&folder("halo2_mcc")));
+        let entry = TagEntry {
+            key: file_entry_key(&tags.join(rel)),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: Some("model".to_owned()),
+            location: TagEntryLocation::LooseFile(tags.join(rel)),
+        };
+        let tag = crate::core::source::read_entry(&source, &entry).unwrap();
+        let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
+        let data = super::super::loading::load_model_preview(
+            &tag,
+            &entry,
+            &names,
+            Some(&source),
+            &super::super::loading::PreviewLoadSettings::default(),
+        )
+        .unwrap();
+        let helmet = |variant: &str| {
+            let index = data.variants.iter().position(|entry| entry.name == variant);
+            compute_variant_selection(&data, index)["helmet"].permutation.clone()
+        };
+        assert_eq!(helmet("ultra_scl"), "base");
+        assert_eq!(helmet("council_scl"), "council");
+        // Its honor armor is named by an empty entry on every other variant,
+        // inherited through `parent variant` on the `_dog` ones.
+        let armor = |variant: &str| {
+            let index = data.variants.iter().position(|entry| entry.name == variant);
+            compute_variant_selection(&data, index)["hg"].enabled
+        };
+        assert!(armor("honor_scl"));
+        assert!(!armor("minor_scl"));
+        assert!(!armor("minor_dog"));
     }
 }
 
@@ -1458,12 +1494,6 @@ impl Baboon {
 
 /// Whether a kit is Halo CE, whose objects stand in for the `.model`.
 ///
-/// Exactly `haloce_mcc`: a prefix test also took Campaign Evolved
-/// (`haloce_evolved`), whose tags are Reach's and have a `.model`.
-fn source_is_halo1(source: &TagSource) -> bool {
-    matches!(source, TagSource::LooseFolder { game: Some(GameId::HaloCe), .. })
-}
-
 /// Worker half of the list request.
 fn list_model_animations(
     source: &TagSource,

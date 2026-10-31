@@ -2228,8 +2228,16 @@ pub(super) fn expand_preview_bounds_local(min: &mut [f32; 3], max: &mut [f32; 3]
     }
 }
 
+/// One permutation a variant's region may take. `None` names nothing, which
+/// leaves the region undrawn.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RawVariantEntry {
+    pub(super) permutation: Option<String>,
+    pub(super) probability: f32,
+}
+
 pub(super) struct RawVariantRegion {
-    pub(super) perm: Option<String>,
+    pub(super) entries: Vec<RawVariantEntry>,
     pub(super) parent: i128,
 }
 pub(super) struct RawVariant {

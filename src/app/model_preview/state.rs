@@ -483,12 +483,11 @@ pub(in crate::app) struct ModelPreviewData {
 /// Resolved model variant with an explicit removed-vs-inherited region boundary.
 pub(in crate::app) struct ModelVariantPreview {
     pub(in crate::app) name: String,
-    /// Region name → resolved permutation (own perm or parent-inherited).
+    /// Region name → the permutation this variant draws it with. A name the
+    /// render model lacks draws nothing, as the game resolves it to none.
     pub(in crate::app) regions: HashMap<String, String>,
-    /// Region names the variant's block LISTS at all — including ones listed with
-    /// an empty permutation (which means "explicitly removed", e.g. spec-ops elite
-    /// has no helmet). A region NOT in this set is simply uncustomised and falls
-    /// back to its base permutation (e.g. major elite helmet → base), rather than
-    /// being hidden. Distinguishes "removed" from "not customised".
-    pub(in crate::app) listed_regions: std::collections::HashSet<String>,
+    /// Regions the variant gives an entry naming no permutation, which is how
+    /// a tag leaves one undrawn. A region in neither map is not this variant's
+    /// to choose, and takes an ordinary permutation.
+    pub(in crate::app) hidden_regions: std::collections::HashSet<String>,
 }
