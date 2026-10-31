@@ -23,6 +23,13 @@ use crate::core::source::TagSource;
 const COMMON_FILE: &str = "model_common.h";
 const GENERIC_FILE: &str = "transparent_generic_shader.psh";
 const CHICAGO_FILE: &str = "chicago_shader.psh";
+const GLASS_TINT_FILE: &str = "transparent_glass_tint.psh";
+const GLASS_FLAT_FILE: &str = "transparent_glass_reflection_flat.psh";
+const GLASS_BUMPED_FILE: &str = "transparent_glass_reflection_bumped.psh";
+const GLASS_DIFFUSE_FILE: &str = "transparent_glass_diffuse.psh";
+const METER_FILE: &str = "transparent_meter.psh";
+const WATER_OPACITY_FILE: &str = "transparent_water_opacity.psh";
+const WATER_REFLECTION_FILE: &str = "transparent_water_reflection.psh";
 const AMBIENT: [f32; 3] = [0.2, 0.2, 0.2];
 const FIRST_LIGHT_DIRECTION: [f32; 3] = [-0.577, -0.577, -0.577];
 const FIRST_LIGHT_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
@@ -260,6 +267,8 @@ impl CeColorAnimation {
 pub(crate) struct CeModelAnimation {
     maps: Vec<CeMapAnimation>,
     colors: Vec<CeColorAnimation>,
+    /// The constant that holds the way back along the view.
+    pub(crate) eye_register: Option<u32>,
 }
 
 impl CeModelAnimation {
@@ -516,6 +525,7 @@ fn read_model_animation(root: TagStruct<'_>, scale: [f32; 2], detail_mask: i32) 
     CeModelAnimation {
         maps: vec![read_map_animation(root, 0, scale, [0.0; 2], 0.0)],
         // The game only sets this color with no detail mask.
+        eye_register: None,
         colors: (detail_mask == 0)
             .then(|| CeColorAnimation {
                 register: 0,
@@ -883,7 +893,7 @@ fn generic_pass(
     let shader = translate_fx(GENERIC_FILE, H2_GLSL_VERSION, &defines, read)?;
     let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps, colors };
+    let animation = CeModelAnimation { maps, colors, eye_register: None };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
 }
 
@@ -945,7 +955,7 @@ fn chicago_pass(
     let shader = translate_fx(CHICAGO_FILE, H2_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
     let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps: animations, colors: Vec::new() };
+    let animation = CeModelAnimation { maps: animations, colors: Vec::new(), eye_register: None };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
 }
 
@@ -971,12 +981,25 @@ pub(super) fn ce_transparent_passes(
     group: &[u8; 4],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Vec<H2DrawPass> {
-    if !matches!(group, b"sotr" | b"schi" | b"scex") {
-        return Vec::new();
-    }
     let Some(directory) = shader_directory(source) else {
         return Vec::new();
     };
+    let single = match group {
+        b"sgla" => Some(glass_passes(&directory, root, &every_flag(root), bitmap)),
+        b"smet" => Some(meter_pass(&directory, root, &every_flag(root), bitmap).map(|pass| vec![pass])),
+        b"swat" => Some(water_passes(&directory, root, &every_flag(root), bitmap)),
+        b"spla" => Some(Ok(vec![unseen_pass()])),
+        _ => None,
+    };
+    if let Some(passes) = single {
+        return passes.unwrap_or_else(|error| {
+            eprintln!("model preview: transparent shader: {error}");
+            Vec::new()
+        });
+    }
+    if !matches!(group, b"sotr" | b"schi" | b"scex") {
+        return Vec::new();
+    }
     let mut passes = Vec::new();
     let layers = root.field("extra layers").and_then(|field| field.as_block());
     for index in 0..layers.as_ref().map_or(0, |layers| layers.len()) {
@@ -1009,6 +1032,342 @@ pub(super) fn ce_transparent_passes(
         }
     }
     passes
+}
+
+/// A pass of the shaders below: nothing but what differs.
+struct SimplePass {
+    stage: H2VertexStage,
+    fragment: String,
+    blend: H2Blend,
+    two_sided: bool,
+    write_depth: bool,
+    channels: [bool; 4],
+    textures: Vec<H2DrawTexture>,
+    constants: Vec<(u32, [f32; 4])>,
+    rows: [[f32; 4]; H2_TEXTURE_ROWS],
+}
+
+impl SimplePass {
+    fn build(self) -> H2DrawPass {
+        let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: self.write_depth };
+        let mut pass = H2DrawPass::new(self.stage, self.fragment, depth);
+        pass.blend = Some(self.blend);
+        pass.cull = if self.two_sided { H2Cull::None } else { H2Cull::Back };
+        pass.channels = self.channels;
+        pass.textures = self.textures;
+        pass.constants = self.constants;
+        pass.texture_rows = self.rows;
+        pass.light_direct = FIRST_LIGHT_DIRECTION;
+        pass
+    }
+}
+
+fn plain_blend(source: H2BlendFactor, destination: H2BlendFactor) -> H2Blend {
+    H2Blend { equation: H2BlendEquation::Add, source, destination, constant: [0; 4] }
+}
+
+fn lit_rows(scale: [f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    let vector = |[x, y, z]: [f32; 3]| [x, y, z, 0.0];
+    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    rows[2] = scale;
+    rows[4] = vector(AMBIENT);
+    rows[5] = vector(FIRST_LIGHT_COLOR);
+    rows[6] = vector(SECOND_LIGHT_DIRECTION);
+    rows[7] = vector(SECOND_LIGHT_COLOR);
+    rows
+}
+
+/// `H2VertexStage::Bumped`'s rows for one map at `scale`.
+fn bumped_rows(scale: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    rows[0] = [1.0, 1.0, 0.0, 0.0];
+    rows[2] = [scale, scale, 0.0, 0.0];
+    rows
+}
+
+fn normalization(slot: u32) -> H2DrawTexture {
+    let mut cube = texture(slot, SamplerKind::Cube, None);
+    cube.normalization = true;
+    cube
+}
+
+/// A flat normal, as the default vector bitmap has it.
+fn flat_normal() -> Arc<H2Image> {
+    Arc::new(H2Image::Flat(super::materials::TextureImage {
+        rgba: vec![128, 128, 255, 255],
+        width: 1,
+        height: 1,
+        repeat_x: true,
+        repeat_y: true,
+        scale: [1.0, 1.0],
+    }))
+}
+
+/// `rasterizer_glass_draw_tint`, `_reflection` and `_diffuse`, in that order.
+fn glass_passes(
+    directory: &std::path::Path,
+    root: TagStruct<'_>,
+    flags: &[String],
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+) -> Result<Vec<H2DrawPass>, String> {
+    let read = |name: &str| read_shader_source(directory, name);
+    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let two_sided = has("two-sided");
+    let path = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
+    let mut map = |name: &str, kind| path(name).and_then(|path| bitmap(&path, kind));
+    let rgb = |name: &str| {
+        let color = root.read_rgb(name);
+        [color.red, color.green, color.blue]
+    };
+    let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+    let scale = |name: &str| nonzero(root.read_real(name), 1.0);
+    let mut passes = Vec::new();
+
+    let tint = rgb("background tint color");
+    let tint_map = map("background tint map", SamplerKind::Texture2D);
+    if tint_map.is_some() || tint != [0.0; 3] {
+        let shader = translate_fx(GLASS_TINT_FILE, H2_GLSL_VERSION, &[], read)?;
+        let register = shader.register("c_tint_and_intensity").unwrap_or(0);
+        let size = scale("background tint map scale");
+        passes.push(SimplePass {
+            stage: H2VertexStage::CeGlassLit,
+            fragment: shader.entry("pixel_main(i)"),
+            blend: plain_blend(H2BlendFactor::Zero, H2BlendFactor::SrcColor),
+            two_sided,
+            write_depth: false,
+            channels: [true, true, true, false],
+            textures: vec![texture(0, SamplerKind::Texture2D, tint_map.or_else(|| Some(flat(WHITE))))],
+            constants: vec![(register, [tint[0], tint[1], tint[2], 1.0])],
+            rows: lit_rows([size, size, 0.0, 0.0]),
+        }.build());
+    }
+
+    let perpendicular = real("perpendicular brightness");
+    let parallel = real("parallel brightness");
+    let reflection = map("reflection map", SamplerKind::Cube);
+    let reflection_type = option_index(root, "reflection type", &["bumped cube-map", "flat cube-map", "dynamic mirror"]);
+    if (perpendicular > 0.0 || parallel > 0.0) && reflection.is_some() && reflection_type != 2 {
+        let bump = map("bump map", SamplerKind::Texture2D);
+        let specular_mask = has("bump map is specular mask");
+        let flat_surface = reflection_type != 0 || specular_mask || bump.is_none();
+        let file = if flat_surface { GLASS_FLAT_FILE } else { GLASS_BUMPED_FILE };
+        let shader = translate_fx(file, H2_GLSL_VERSION, &[], read)?;
+        let mut constants = Vec::new();
+        let mut constant = |name: &str, value: [f32; 4]| {
+            if let Some(register) = shader.register(name) {
+                constants.push((register, value));
+            }
+        };
+        let [red, green, blue] = rgb("perpendicular tint color");
+        constant("c_view_perpendicular_color", [red, green, blue, perpendicular]);
+        let [red, green, blue] = rgb("parallel tint color");
+        constant("c_view_parallel_color", [red, green, blue, parallel]);
+        let truth = |on: bool| f32::from(u8::from(on));
+        constant("params", [1.0, truth(bump.is_none()), truth(specular_mask), 0.0]);
+        constant("c_eye_forward", [0.0; 4]);
+        let size = real("bump map scale");
+        let size = if size == 0.0 { 1.0 } else { size };
+        let mut draw = SimplePass {
+            stage: if flat_surface { H2VertexStage::CeGlassFlat } else { H2VertexStage::Bumped },
+            fragment: shader.entry("pixel_main(i)"),
+            blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::One),
+            two_sided,
+            write_depth: false,
+            channels: [true, true, true, false],
+            textures: vec![
+                texture(0, SamplerKind::Texture2D, bump.or_else(|| Some(flat_normal()))),
+                normalization(1),
+                normalization(2),
+                texture(3, SamplerKind::Cube, reflection),
+            ],
+            constants,
+            rows: if flat_surface { lit_rows([size, size, 0.0, 0.0]) } else { bumped_rows(size) },
+        }
+        .build();
+        draw.ce_animation = Some(Arc::new(CeModelAnimation {
+            eye_register: shader.register("c_eye_forward"),
+            ..Default::default()
+        }));
+        passes.push(draw);
+    }
+
+    let diffuse = map("diffuse map", SamplerKind::Texture2D);
+    let detail = map("diffuse detail map", SamplerKind::Texture2D);
+    if diffuse.is_some() || detail.is_some() {
+        let shader = translate_fx(GLASS_DIFFUSE_FILE, H2_GLSL_VERSION, &[], read)?;
+        let (base, fine) = (scale("diffuse map scale"), scale("diffuse detail map scale"));
+        passes.push(SimplePass {
+            stage: H2VertexStage::CeGlassLit,
+            fragment: shader.entry("main_T0_P0(i)"),
+            blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::OneMinusSrcAlpha),
+            two_sided,
+            write_depth: false,
+            channels: [true, true, true, false],
+            textures: vec![
+                texture(0, SamplerKind::Texture2D, diffuse.or_else(|| Some(flat(WHITE)))),
+                texture(1, SamplerKind::Texture2D, detail.or_else(|| Some(flat(GREY)))),
+            ],
+            constants: Vec::new(),
+            rows: lit_rows([base, base, fine, fine]),
+        }.build());
+    }
+    // A dynamic mirror alone: there is nothing here for it to reflect.
+    if passes.is_empty() {
+        passes.push(unseen_pass());
+    }
+    Ok(passes)
+}
+
+/// The `shader_transparent_meter` case of
+/// `rasterizer_transparent_geometry_group_draw`. A source reads an object
+/// function, resting at 0; with none its input is 1.
+fn meter_pass(
+    directory: &std::path::Path,
+    root: TagStruct<'_>,
+    flags: &[String],
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+) -> Result<H2DrawPass, String> {
+    let input = |field: &str| {
+        if option_index(root, field, &FUNCTION_SOURCES) == 0 { 1.0 } else { 0.0 }
+    };
+    let (brightness, flash) = (input("meter brightness source"), input("flash brightness source"));
+    let (value, extension) = (input("value source"), input("flash-extension source"));
+    let rgb = |name: &str| {
+        let color = root.read_rgb(name);
+        [color.red, color.green, color.blue]
+    };
+    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let lit = |[r, g, b]: [f32; 3], w: f32| [r, g, b, w];
+    let flash_color = rgb("flash color").map(|channel| channel * flash);
+    let [max, min] = [rgb("gradient max color"), rgb("gradient min color")];
+    let mode_two = has("tint mode-2");
+    let meter_alpha = root.read_real("meter transparency").unwrap_or(0.0);
+    let tint = rgb("tint color");
+    let (first_alpha, tint_color, tint_alpha, background_alpha) = if mode_two {
+        let background = root.read_real("background transparency").unwrap_or(0.0);
+        (meter_alpha, tint.map(|channel| channel * brightness), meter_alpha, background)
+    } else {
+        (brightness, tint, brightness, 0.0)
+    };
+    let (sign, variable) = if has("flash color is negative") {
+        (-1.0, flash_color.map(|channel| -channel))
+    } else {
+        (1.0, flash_color)
+    };
+    let constants = vec![
+        (0, lit(flash_color, first_alpha)),
+        (1, lit(max, 1.0 / (extension * 8.0f32).max(1.0))),
+        (2, lit(min, value)),
+        (3, lit(rgb("background color"), background_alpha)),
+        (4, lit(tint_color, tint_alpha)),
+        (5, lit(variable, sign)),
+    ];
+    let image = root
+        .read_tag_ref_path("map")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| bitmap(&path, SamplerKind::Texture2D));
+    let read = |name: &str| read_shader_source(directory, name);
+    let shader = translate_fx(METER_FILE, H2_GLSL_VERSION, &[], read)?;
+    Ok(SimplePass {
+        stage: H2VertexStage::CeMeter,
+        fragment: shader.entry("pixel_main(i)"),
+        blend: plain_blend(H2BlendFactor::One, H2BlendFactor::One),
+        two_sided: has("two-sided"),
+        write_depth: false,
+        channels: [true, true, true, false],
+        textures: vec![texture(0, SamplerKind::Texture2D, image.or_else(|| Some(flat(WHITE))))],
+        constants,
+        rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+    }
+    .build())
+}
+
+/// `rasterizer_water_draw`, without its ripples: the game composes those into
+/// a target each frame, which this draws flat.
+fn water_passes(
+    directory: &std::path::Path,
+    root: TagStruct<'_>,
+    flags: &[String],
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+) -> Result<Vec<H2DrawPass>, String> {
+    let read = |name: &str| read_shader_source(directory, name);
+    let has = |flag: &str| flags.iter().any(|name| name == flag);
+    let path = |name: &str| root.read_tag_ref_path(name).filter(|path| !path.is_empty());
+    let base = path("base map")
+        .and_then(|path| bitmap(&path, SamplerKind::Texture2D))
+        .or_else(|| Some(flat(WHITE)));
+    let reflection = path("reflection map").and_then(|path| bitmap(&path, SamplerKind::Cube));
+    let perpendicular = root.read_real("view perpendicular brightness").unwrap_or(0.0);
+    let parallel = nonzero(root.read_real("view parallel brightness"), 1.0);
+    let modulates_reflection = has("base map alpha modulates reflection");
+    let opacity = translate_fx(WATER_OPACITY_FILE, H2_GLSL_VERSION, &[], read)?;
+    let constants = vec![(0, [perpendicular; 4]), (1, [parallel; 4]), (2, [0.0; 4])];
+    let mut passes = Vec::new();
+    let surface = |call: &str, blend, channels, textures, constants| {
+        SimplePass {
+            stage: H2VertexStage::CeWaterOpacity,
+            fragment: opacity.entry(call),
+            blend,
+            two_sided: true,
+            write_depth: false,
+            channels,
+            textures,
+            constants,
+            rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+        }
+        .build()
+    };
+    if modulates_reflection {
+        passes.push(surface(
+            "main_T0_P0(i)",
+            plain_blend(H2BlendFactor::One, H2BlendFactor::Zero),
+            [false, false, false, true],
+            vec![texture(0, SamplerKind::Texture2D, base.clone()), normalization(1)],
+            constants.clone(),
+        ));
+    }
+    if has("base map color modulates background") {
+        passes.push(surface(
+            "main_T0_P1(i)",
+            plain_blend(H2BlendFactor::Zero, H2BlendFactor::SrcColor),
+            [true, true, true, false],
+            vec![texture(0, SamplerKind::Texture2D, base), normalization(1)],
+            constants,
+        ));
+    }
+    let shader = translate_fx(WATER_REFLECTION_FILE, H2_GLSL_VERSION, &[], read)?;
+    let source = if modulates_reflection { H2BlendFactor::DstAlpha } else { H2BlendFactor::One };
+    passes.push(
+        SimplePass {
+            stage: H2VertexStage::Bumped,
+            fragment: shader.entry("pixel_main(i)"),
+            blend: plain_blend(source, H2BlendFactor::One),
+            two_sided: true,
+            write_depth: true,
+            channels: [true, true, true, false],
+            textures: vec![
+                texture(0, SamplerKind::Texture2D, Some(flat_normal())),
+                texture(3, SamplerKind::Cube, reflection),
+            ],
+            constants: vec![(0, [1.0, 1.0, 1.0, 0.0]), (1, [0.0; 4])],
+            rows: bumped_rows(1.0),
+        }
+        .build(),
+    );
+    Ok(passes)
+}
+
+/// A pass that draws nothing, for a surface with nothing to show a lone model.
+/// Every plasma in the kit is a shield hit, whose intensity reads an object
+/// function that rests at 0.
+fn unseen_pass() -> H2DrawPass {
+    let fragment = format!(
+        "{H2_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
+    );
+    let depth = H2Depth { compare: Some(H2Compare::LessOrEqual), write: false };
+    let mut pass = H2DrawPass::new(H2VertexStage::CeMeter, fragment, depth);
+    pass.channels = [false; 4];
+    pass
 }
 
 const LAYER_GROUPS: [(&str, &[u8; 4]); 3] = [
@@ -1131,6 +1490,13 @@ pub(super) fn ce_model_passes(
 mod tests {
     use super::*;
 
+    const SINGLE_GROUPS: [(&str, &[u8; 4]); 4] = [
+        ("shader_transparent_glass", b"sgla"),
+        ("shader_transparent_meter", b"smet"),
+        ("shader_transparent_water", b"swat"),
+        ("shader_transparent_plasma", b"spla"),
+    ];
+
     /// With `BLAM_TEST_HCEEK`: every `ShaderModel` the game can ask for links
     /// with its stage.
     #[test]
@@ -1206,14 +1572,22 @@ mod tests {
                     continue;
                 }
                 let extension = path.extension().and_then(|name| name.to_str()).unwrap_or("");
-                let Some((_, group)) = LAYER_GROUPS.iter().find(|(name, _)| *name == extension) else {
+                let Some((_, group)) = LAYER_GROUPS
+                    .iter()
+                    .chain(&SINGLE_GROUPS)
+                    .find(|(name, _)| *name == extension)
+                else {
                     continue;
                 };
                 let relative = path.strip_prefix(&tags).unwrap().with_extension("");
                 let relative = relative.to_string_lossy().replace('/', "\\");
                 let tag = load_referenced_tag_from_source(&source, &relative, extension, group).unwrap();
                 shaders += 1;
-                let passes = ce_transparent_passes(&source, tag.root(), group, &mut |_, _| None);
+                let passes = ce_transparent_passes(&source, tag.root(), group, &mut |_, kind| {
+                    (kind == SamplerKind::Cube).then(|| {
+                        Arc::new(H2Image::Cube { size: 1, faces: std::array::from_fn(|_| vec![0; 4]) })
+                    }).or_else(|| Some(flat(WHITE)))
+                });
                 assert!(!passes.is_empty(), "{} has no passes", path.display());
                 for pass in passes {
                     if !drawn.insert((pass.stage, pass.fragment.clone())) {

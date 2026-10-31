@@ -94,6 +94,14 @@ pub(in crate::app) enum H2VertexStage {
     CeTransparentViewer,
     /// With the first map laid across the view.
     CeTransparentScreen,
+    /// Halo CE's glass: two maps by scale, lit as `CeModel` is.
+    CeGlassLit,
+    /// A reflection with no bump map to bend it.
+    CeGlassFlat,
+    /// One map, as it lies.
+    CeMeter,
+    /// Water's base map, and the eye in tangent space.
+    CeWaterOpacity,
 }
 
 /// The first map's cube coordinate, from `cube` and the map's transform, and
@@ -293,6 +301,25 @@ impl H2VertexStage {
         v_color1.a *= clamp((along - u_texture_rows[8].x)
             / (u_texture_rows[8].y - u_texture_rows[8].x), 0.0, 1.0);
     }"
+            }
+            Self::CeGlassLit => {
+                "v_tc0.xy = uv.xy * u_texture_rows[2].xy;
+    v_tc1.xy = uv.xy * u_texture_rows[2].zw;
+    float first = max(dot(normal, -u_light_direct), 0.0);
+    float second = max(dot(normal, -u_texture_rows[6].xyz), 0.0);
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb + first * u_texture_rows[5].rgb
+        + second * u_texture_rows[7].rgb, 0.0, 1.0), 1.0);"
+            }
+            Self::CeGlassFlat => {
+                "v_tc0.xy = uv.xy * u_texture_rows[2].xy;
+    v_tc1.xyz = tangent_space(u_view_back, tangent, binormal, normal);
+    v_tc2.xyz = normal;
+    v_tc3.xyz = normal * dot(to_eye, normal) * 2.0 - to_eye;"
+            }
+            Self::CeMeter => "v_tc0.xy = uv.xy;",
+            Self::CeWaterOpacity => {
+                "v_tc0.xy = uv.xy;
+    v_tc1.xyz = tangent_space(to_eye, tangent, binormal, normal);"
             }
             Self::CeTransparent => CE_TRANSPARENT,
             Self::CeTransparentReflection => "vec3 cube = normal * dot(to_eye, normal) * 2.0 - to_eye;",
@@ -522,7 +549,11 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 35] = [
+    const STAGES: [H2VertexStage; 39] = [
+        H2VertexStage::CeGlassLit,
+        H2VertexStage::CeGlassFlat,
+        H2VertexStage::CeMeter,
+        H2VertexStage::CeWaterOpacity,
         H2VertexStage::CeModel,
         H2VertexStage::CeTransparent,
         H2VertexStage::CeTransparentReflection,

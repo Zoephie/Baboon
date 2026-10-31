@@ -1411,13 +1411,10 @@ mod tests {
         assert_eq!(shield.h2_layers[H2Layer::Transparent as usize].len(), 1);
         // `smet` is Halo 4's `structure_meta` in the cross-game extension table;
         // the kit's own names make it `shader_transparent_meter`, so the shader
-        // loads and is reported as what it is rather than as a missing file.
+        // loads rather than being reported as a missing file.
         let meter = resolve_classic(&source, r"vehicles\warthog\shaders\meter engine", b"smet");
-        assert!(
-            meter.error.as_deref().is_some_and(|error| error.contains("transparent")),
-            "{:?}",
-            meter.error
-        );
+        assert!(meter.error.is_none(), "{:?}", meter.error);
+        assert_eq!(meter.h2_layers[H2Layer::Transparent as usize].len(), 1);
     }
 
     /// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).

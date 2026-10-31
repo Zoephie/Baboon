@@ -2749,7 +2749,8 @@ impl ModelGlRenderer {
             set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
             set_1(gl, program, "u_animated", if frame.bones.is_some() { 1.0 } else { 0.0 });
             let location = program.location(gl, "u_light_direct");
-            let follows = pass.stage == H2VertexStage::CeModel && frame.light_follows_camera;
+            let follows = matches!(pass.stage, H2VertexStage::CeModel | H2VertexStage::CeGlassLit)
+                && frame.light_follows_camera;
             let direct = if !follows && (frame.default_lights || !pass.stage.is_lightmap()) {
                 pass.light_direct
             } else {
@@ -2785,6 +2786,11 @@ impl ModelGlRenderer {
                 pass.animate_constant(*register, &mut value, frame.time);
                 if let Some(animation) = &pass.ce_animation {
                     animation.constant(*register, &mut value, frame.time, &frame.change_colors);
+                    if animation.eye_register == Some(*register) {
+                        let [x, y, z] =
+                            unrotate_view_vector(frame.camera.yaw, frame.camera.pitch, [0.0, -1.0, 0.0]);
+                        value = [x, y, z, 1.0];
+                    }
                 }
                 for (changed, component, channel) in &pass.change_colors {
                     if changed == register {

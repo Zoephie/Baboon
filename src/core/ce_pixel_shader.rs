@@ -18,6 +18,8 @@ const MAX_TEXTURES: u32 = 8;
 /// Constants bound to a register land here, so an index may be computed.
 const REGISTER_ARRAY: &str = "ce_registers";
 const REGISTER_COUNT: usize = 32;
+/// HLSL's `dot` of a `float4` and a `float3` drops the fourth component.
+const DOT_TRUNCATING: &str = "float hlsl_dot(vec4 a, vec3 b) { return dot(a.xyz, b); }\n";
 /// Names GLSL keeps for itself that the kit's files use.
 const RENAMED: [(&str, &str); 2] = [("main", "pixel_main"), ("input", "ps_input")];
 
@@ -430,12 +432,13 @@ fn translate_body_line(
     widths: &mut HashMap<String, usize>,
 ) -> String {
     let mut code = rewrite_registers(&renamed(code), constants);
+    // A texture can be read through another's sampler state.
     for slot in 0..MAX_TEXTURES {
-        for sampler in ["TexSampler", "TexS"] {
-            code = code.replace(
-                &format!("Texture{slot}.Sample({sampler}{slot},"),
-                &format!("texture(s{slot},"),
-            );
+        let call = format!("Texture{slot}.Sample(");
+        while let Some(start) = code.find(&call) {
+            let arguments = start + call.len();
+            let comma = code[arguments..].find(',').map_or(arguments, |at| arguments + at);
+            code.replace_range(start..comma, &format!("texture(s{slot}"));
         }
     }
     convert_assignments(&translate_statement(&splat_scalars(&code, widths), None), widths)
@@ -589,7 +592,7 @@ pub(crate) fn translate_fx(
     }
 
     let mut glsl = version_declaration.to_owned();
-    for varying in ["color0", "color1", "tc0", "tc1", "tc2", "tc3"] {
+    for varying in ["color0", "color1", "tc0", "tc1", "tc2", "tc3", "tc4"] {
         glsl.push_str(&format!("in vec4 v_{varying};\n"));
     }
     glsl.push_str("out vec4 out_color;\n");
@@ -599,6 +602,7 @@ pub(crate) fn translate_fx(
     glsl.push_str(&uniforms);
     glsl.push_str(HELPERS);
     glsl.push_str(&promoting_helpers());
+    glsl.push_str(DOT_TRUNCATING);
     glsl.push_str(&code);
     let input = input.ok_or("The shader declares no input.")?;
     Ok(TranslatedFxShader { glsl, input, constants, samplers })

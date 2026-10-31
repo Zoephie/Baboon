@@ -95,6 +95,7 @@ vec4 DX11_texCUBE(samplerCube s, vec4 c) { return texture(s, c.xyz); }
 float hlsl_dot(float a, float b) { return a * b; }
 float hlsl_lerp(float a, float b, float t) { return mix(a, b, t); }
 float hlsl_max(float a, float b) { return max(a, b); }
+float hlsl_pow(float a, float b) { return pow(a, b); }
 ";
 
 /// `dot`, `lerp` and `max` promote scalar arguments in HLSL, in any position.
@@ -107,7 +108,9 @@ pub(crate) fn promoting_helpers() -> String {
              float hlsl_dot(float a, {ty} b) {{ return dot({ty}(a), b); }}\n\
              {ty} hlsl_max({ty} a, {ty} b) {{ return max(a, b); }}\n\
              {ty} hlsl_max({ty} a, float b) {{ return max(a, {ty}(b)); }}\n\
-             {ty} hlsl_max(float a, {ty} b) {{ return max({ty}(a), b); }}\n"
+             {ty} hlsl_max(float a, {ty} b) {{ return max({ty}(a), b); }}\n\
+             {ty} hlsl_pow({ty} a, float b) {{ return pow(a, {ty}(b)); }}\n\
+             {ty} hlsl_pow({ty} a, {ty} b) {{ return pow(a, b); }}\n"
         ));
         for (a, b, t) in [
             (ty, ty, ty),
@@ -421,6 +424,7 @@ pub(crate) fn translate_statement(code: &str, alpha_test: Option<AlphaTest>) -> 
                 "lerp" => out.push_str("hlsl_lerp"),
                 "dot" => out.push_str("hlsl_dot"),
                 "max" => out.push_str("hlsl_max"),
+                "pow" => out.push_str("hlsl_pow"),
                 "any" => out.push_str("hlsl_any"),
                 "ALPHA_TEST" => out.push_str(&float_literal(
                     alpha_test.map_or(0.0, |test| test.reference),
