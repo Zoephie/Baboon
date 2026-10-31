@@ -749,6 +749,12 @@ struct ModelGpuFrame {
     self_shadow: bool,
 }
 
+impl ModelGpuFrame {
+    fn h2_lightmap_layer(&self) -> H2Layer {
+        if self.default_lights { H2Layer::Lightmap } else { H2Layer::ObjectLightmap }
+    }
+}
+
 thread_local! {
     static MODEL_GL_RENDERER: RefCell<Option<CachedModelGlRenderer>> = const { RefCell::new(None) };
 }
@@ -2071,7 +2077,7 @@ impl ModelGlRenderer {
                     self.copy_h2_frame(gl, frame, &order);
                     self.fill_h2_texaccum(gl, frame, slot, &order);
                     for layer in [
-                        H2Layer::Lightmap,
+                        frame.h2_lightmap_layer(),
                         H2Layer::Prt,
                         H2Layer::Environment,
                         H2Layer::SelfIllumination,
@@ -2151,9 +2157,10 @@ impl ModelGlRenderer {
         if !frame.game_shaders {
             return false;
         }
-        self.h2_material_ready(frame, material, H2Layer::Lightmap)
+        let lightmap = frame.h2_lightmap_layer();
+        self.h2_material_ready(frame, material, lightmap)
             || self.h2_material_ready(frame, material, H2Layer::Prt)
-            || (Self::h2_passes(frame, material, H2Layer::Lightmap).is_empty()
+            || (Self::h2_passes(frame, material, lightmap).is_empty()
                 && !frame
                     .textures
                     .as_ref()

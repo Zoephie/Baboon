@@ -1219,8 +1219,9 @@ fn draw_model_view_settings_menu(
                 egui::Checkbox::new(&mut state.h2_default_lights, "Default Lights"),
             )
             .on_hover_text(
-                "The two sphere lights the game uses when nothing else lights a scene. \
-                 They add diffuse and specular shading.",
+                "Light Halo 2 models as the game does in a level with no lightmaps: \
+                 fixed lighting plus two sphere lights. Off, they are lit as an \
+                 object in a level with lightmaps.",
             );
             ui.add_enabled(
                 state.h2_game_shaders,

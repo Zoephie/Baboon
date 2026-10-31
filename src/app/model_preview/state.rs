@@ -234,7 +234,8 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) show_backfaces: bool,
     /// Draw Halo 2 opaque materials through the game's own passes.
     pub(in crate::app) h2_game_shaders: bool,
-    /// Add the game's two default lights on top of the opaque passes.
+    /// Take the game's no-lightmap path, with its two default lights, instead
+    /// of its path for an object in a level.
     pub(in crate::app) h2_default_lights: bool,
     pub(in crate::app) h2_active_camo: bool,
     pub(in crate::app) h2_bloom: bool,
@@ -293,7 +294,7 @@ impl Default for ModelPreviewState {
             render_mode: ModelRenderMode::Textured,
             show_backfaces: false,
             h2_game_shaders: false,
-            h2_default_lights: true,
+            h2_default_lights: false,
             h2_active_camo: false,
             h2_bloom: false,
             h2_self_shadow: false,

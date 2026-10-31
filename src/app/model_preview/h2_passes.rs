@@ -27,7 +27,11 @@ pub(crate) enum H2Layer {
     /// A late fill of the texaccum target, drawn to it per light in the game,
     /// for shaders whose color changes rather than sitting in a base map.
     LightAlbedo,
+    /// The fallback for a scene with no lightmaps, which adds the default
+    /// lights on top.
     Lightmap,
+    /// The object path in a level with lightmaps; see `H2_OBJECT_LIGHTMAP_IMPLEMENTATION`.
+    ObjectLightmap,
     /// Precomputed radiance transfer, for the shaders with no lightmap pass.
     Prt,
     Environment,
@@ -46,7 +50,7 @@ pub(crate) enum H2Layer {
     ShadowMask,
 }
 
-pub(crate) const H2_LAYER_COUNT: usize = 15;
+pub(crate) const H2_LAYER_COUNT: usize = 16;
 
 /// The sphere lights `render_lights` falls back on with nothing else lighting
 /// the scene: a warm key and a cool fill.
@@ -67,6 +71,7 @@ impl H2Layer {
         Self::Texaccum,
         Self::LightAlbedo,
         Self::Lightmap,
+        Self::ObjectLightmap,
         Self::Prt,
         Self::Environment,
         Self::SelfIllumination,
@@ -86,7 +91,7 @@ impl H2Layer {
         match self {
             Self::Texaccum => TEXACCUM_LAYER,
             Self::LightAlbedo => "light albedo",
-            Self::Lightmap => LIGHTMAP_LAYER,
+            Self::Lightmap | Self::ObjectLightmap => LIGHTMAP_LAYER,
             Self::Prt => "sh prt",
             Self::Environment => "environment map",
             Self::SelfIllumination => "self-illumination",
@@ -105,7 +110,8 @@ impl H2Layer {
     /// a choice to make; see `rasterizer_shader_get_implementation_index`.
     pub(in crate::app) fn implementation(self) -> usize {
         match self {
-            Self::Lightmap => H2_OBJECT_LIGHTMAP_IMPLEMENTATION,
+            Self::Lightmap => H2_FALLBACK_LIGHTMAP_IMPLEMENTATION,
+            Self::ObjectLightmap => H2_OBJECT_LIGHTMAP_IMPLEMENTATION,
             Self::LightDiffuse => H2_SPHERE_LIGHT_DIFFUSE_IMPLEMENTATION,
             Self::ActiveCamo => H2_FULL_ACTIVE_CAMO_IMPLEMENTATION,
             _ => 0,
@@ -190,8 +196,12 @@ const WATER_REFRACTION: &str = "GLOBAL water refraction";
 const CAMERA_FEEDS: [&str; 2] = ["GLOBAL texture camera", "FIRST-PERSON scope"];
 /// The shader's own bump map, by another name.
 const ACTIVE_CAMO_BUMP: &str = "SHADER active camo bump";
-/// The `lightmap_dynamic` implementation.
-const H2_OBJECT_LIGHTMAP_IMPLEMENTATION: usize = 3;
+/// What `render_visible_section_get_lightmap_mode` picks when the level has
+/// no lightmaps: fixed lighting, with the default lights doing the rest.
+const H2_FALLBACK_LIGHTMAP_IMPLEMENTATION: usize = 3;
+/// What it picks for a model in a level with lightmaps. This pass reads the
+/// object's lighting and takes its reflection from the object's brightness.
+const H2_OBJECT_LIGHTMAP_IMPLEMENTATION: usize = 2;
 /// "amount=1 (no blending, requires no opaque render)".
 const H2_FULL_ACTIVE_CAMO_IMPLEMENTATION: usize = 1;
 /// `render_light_get_diffuse_implementation_index` for a light of type sphere.
@@ -776,15 +786,16 @@ fn change_color_channel(source: &str) -> Option<usize> {
 /// The GL version every translated shader and vertex stage declares.
 pub(crate) const H2_GLSL_VERSION: &str = "#version 330\n";
 
-/// The game's `default_object_lighting`, the lighting a preview has in place
-/// of a level: an ambient color and two distant lights.
-const DEFAULT_AMBIENT: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
-const DEFAULT_DIRECT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+/// What a preview has in place of a level's lighting: the colors the
+/// no-lightmap passes hold as literals, so both paths light a surface alike.
+/// The vectors are the game's `default_object_lighting`.
+const DEFAULT_AMBIENT: [f32; 4] = [0.0627, 0.0627, 0.0627, 1.0];
+const DEFAULT_DIRECT_COLOR: [f32; 4] = [0.502, 0.490, 0.471, 1.0];
 /// Vertex registers holding a lightmap pass's light vectors.
 const LIGHT_DIRECT_REGISTER: i32 = 8;
 const LIGHT_INDIRECT_REGISTER: i32 = 9;
 const DEFAULT_DIRECT_VECTOR: [f32; 4] = [-0.577, -0.577, -0.577, 1.0];
-const DEFAULT_INDIRECT_COLOR: [f32; 4] = [0.4, 0.4, 0.5, 1.0];
+const DEFAULT_INDIRECT_COLOR: [f32; 4] = [0.373, 0.353, 0.333, 1.0];
 const DEFAULT_INDIRECT_VECTOR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 /// Reflection vectors in the game carry a scale of about 2.
 pub(crate) const H2_REFLECTION_SCALE: f32 = 2.0;
@@ -792,8 +803,12 @@ pub(crate) const H2_REFLECTION_SCALE: f32 = 2.0;
 fn extern_value(name: &str, specular_brightness: f32) -> [f32; 4] {
     let [r, g, b, a] = DEFAULT_DIRECT_COLOR;
     match name {
-        // The luminance of ambient plus direct, clamped: 1 under this lighting.
-        "LIGHTMAP object env brightness" => [1.0; 4],
+        // The luminance of ambient plus direct; see `rasterizer_get_value_extern`.
+        "LIGHTMAP object env brightness" => {
+            let [ambient, ..] = DEFAULT_AMBIENT;
+            let luminance = 0.299 * (r + ambient) + 0.587 * (g + ambient) + 0.114 * (b + ambient);
+            [luminance.clamp(0.0, 1.0); 4]
+        }
         "LIGHTMAP object specular color" => {
             [r * specular_brightness, g * specular_brightness, b * specular_brightness, a]
         }
@@ -1076,6 +1091,19 @@ pub(in crate::app) fn resolve_h2_layer_passes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
+        assert_eq!(H2Layer::Lightmap.implementation(), 3);
+        assert_eq!(H2Layer::ObjectLightmap.implementation(), 2);
+        assert_eq!(H2Layer::ObjectLightmap.tag_name(), H2Layer::Lightmap.tag_name());
+    }
+
+    #[test]
+    fn object_env_brightness_is_the_luminance_of_the_lighting() {
+        let [brightness, ..] = extern_value("LIGHTMAP object env brightness", 1.0);
+        assert!((brightness - 0.554).abs() < 0.001, "{brightness}");
+    }
 
     fn level(entries: &[(&str, &str, &str, f32)]) -> Parameters {
         entries

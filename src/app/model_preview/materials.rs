@@ -232,6 +232,11 @@ pub(crate) fn resolve_model_textures(
         }
     }
     for texture in &mut textures {
+        // A pass with no object implementation still has the fallback's.
+        if texture.h2_layers[H2Layer::ObjectLightmap as usize].is_empty() {
+            texture.h2_layers[H2Layer::ObjectLightmap as usize] =
+                texture.h2_layers[H2Layer::Lightmap as usize].clone();
+        }
         let lit = [H2Layer::Lightmap, H2Layer::Prt]
             .iter()
             .any(|layer| !texture.h2_layers[*layer as usize].is_empty());
