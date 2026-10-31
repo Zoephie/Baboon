@@ -9,7 +9,8 @@ use blam_tags::render_method::{
     ResolvedValue,
 };
 use super::h2_passes::{
-    H2DrawPass, H2Image, H2Layer, H2_LAYER_COUNT, animation_function, h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
+    H2DrawPass, H2Image, H2Layer, H2ParameterValue, H2_LAYER_COUNT, animation_function,
+    h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
     resolve_h2_layer_passes,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -177,6 +178,8 @@ struct ResolveCaches {
     /// Halo 2 shader templates' parameter defaults, by template path. 1,637
     /// shaders share a few dozen templates; `tex_bump` alone serves 296.
     h2_templates: HashMap<String, Option<Arc<H2TemplateDefaults>>>,
+    /// The kit's `global shader`, read at most once; see [`prepare_h2_camo_passes`].
+    h2_camo_shader: Option<Option<Arc<TagFile>>>,
     /// Pass maps by path and shape; a shader samples each in only one shape.
     h2_images: HashMap<(String, bool), Option<Arc<H2Image>>>,
     /// The kit's own group → extension names. The cross-game table answers
@@ -223,12 +226,11 @@ pub(crate) fn resolve_model_textures(
         })
         .collect();
     // A model's hologram shader is on no batch: every material takes its passes.
-    for layer in [H2Layer::Hologram as usize, H2Layer::ActiveCamo as usize] {
-        let overlay = textures.iter().find(|texture| !texture.h2_layers[layer].is_empty());
-        if let Some(passes) = overlay.map(|texture| texture.h2_layers[layer].clone()) {
-            for texture in &mut textures {
-                texture.h2_layers[layer].clone_from(&passes);
-            }
+    let hologram = H2Layer::Hologram as usize;
+    let overlay = textures.iter().find(|texture| !texture.h2_layers[hologram].is_empty());
+    if let Some(passes) = overlay.map(|texture| texture.h2_layers[hologram].clone()) {
+        for texture in &mut textures {
+            texture.h2_layers[hologram].clone_from(&passes);
         }
     }
     for texture in &mut textures {
@@ -499,14 +501,7 @@ fn resolve_h2_shader(
         .read_tag_ref_path("template")
         .filter(|path| !path.is_empty())
         .and_then(|path| cached_h2_template(source, &path, &mut caches.h2_templates));
-    let mut parameters: HashMap<String, TagStruct<'_>> = HashMap::new();
-    if let Some(block) = root.field("parameters").and_then(|field| field.as_block()) {
-        for parameter in (0..block.len()).filter_map(|index| block.element(index)) {
-            if let Some(name) = parameter.read_string_id("name") {
-                parameters.entry(name).or_insert(parameter);
-            }
-        }
-    }
+    let parameters = h2_shader_parameters(root);
 
     let mut textures = MaterialTextures {
         // Halo 2 combines on the stored values, as every pre-sRGB engine did.
@@ -568,7 +563,24 @@ fn resolve_h2_shader(
             caches,
             layer,
             has_texaccum,
+            None,
         );
+    }
+    let opted_out = root
+        .read_flag_names("flags")
+        .is_some_and(|flags| flags.iter().any(|(_, name)| name == "no active camo"));
+    if !opted_out {
+        const BUMP: &str = "active_camo_bump_map";
+        let bump = parameters
+            .get(BUMP)
+            .and_then(|parameter| parameter.read_tag_ref_path("bitmap"))
+            .filter(|path| !path.is_empty())
+            .or_else(|| {
+                let defaults = template.as_ref()?.parameters.get(BUMP)?;
+                Some(defaults.default_bitmap.clone()).filter(|path| !path.is_empty())
+            });
+        textures.h2_layers[H2Layer::ActiveCamo as usize] =
+            prepare_h2_camo_passes(source, bump, caches);
     }
     // 633 of halo2_mcc's 3,147 model materials land here, nearly all on
     // `transparent\*` templates (skies, plasma, alpha-blended env) and the
@@ -583,6 +595,58 @@ fn resolve_h2_shader(
         ));
     }
     textures
+}
+
+/// A shader's `parameters` block by name, the first of a name winning.
+fn h2_shader_parameters<'a>(root: TagStruct<'a>) -> HashMap<String, TagStruct<'a>> {
+    let mut parameters = HashMap::new();
+    if let Some(block) = root.field("parameters").and_then(|field| field.as_block()) {
+        for parameter in (0..block.len()).filter_map(|index| block.element(index)) {
+            if let Some(name) = parameter.read_string_id("name") {
+                parameters.entry(name).or_insert(parameter);
+            }
+        }
+    }
+    parameters
+}
+
+/// The passes a shader draws active camo with. The game swaps every shader
+/// but those flagged `no active camo` for one global on this layer (see
+/// `rasterizer_visible_section_build_rendered_geometry`): `globals.globals`'
+/// `global shader`, which reads the bump of the shader it replaced.
+fn prepare_h2_camo_passes(
+    source: &TagSource,
+    bump: Option<String>,
+    caches: &mut ResolveCaches,
+) -> Vec<H2DrawPass> {
+    let shader = caches
+        .h2_camo_shader
+        .get_or_insert_with(|| {
+            let globals =
+                load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+            let root = globals.root();
+            let path = root.descend("rasterizer data[0]")?.read_tag_ref_path("global shader")?;
+            load_referenced_tag_from_source(source, &path, "shader", b"shad").ok().map(Arc::new)
+        })
+        .clone();
+    let Some(shader) = shader else {
+        return Vec::new();
+    };
+    let root = shader.root();
+    let template = root
+        .read_tag_ref_path("template")
+        .filter(|path| !path.is_empty())
+        .and_then(|path| cached_h2_template(source, &path, &mut caches.h2_templates));
+    prepare_h2_passes(
+        source,
+        &shader,
+        &h2_shader_parameters(root),
+        template.as_deref(),
+        caches,
+        H2Layer::ActiveCamo,
+        false,
+        bump,
+    )
 }
 
 /// A parameter's tiling: what the shader authors over the template's default.
@@ -647,6 +711,7 @@ fn prepare_h2_passes(
     caches: &mut ResolveCaches,
     layer: H2Layer,
     has_texaccum: bool,
+    camo_bump: Option<String>,
 ) -> Vec<H2DrawPass> {
     let TagSource::LooseFolder { root, .. } = source else {
         return Vec::new();
@@ -654,13 +719,19 @@ fn prepare_h2_passes(
     let load = |path: &str, extension: &str, group: &[u8; 4]| {
         load_referenced_tag_from_source(source, path, extension, group).ok()
     };
-    let passes = match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
+    let mut passes = match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
         Ok(passes) => passes,
         Err(error) => {
             eprintln!("model preview: {error}");
             return Vec::new();
         }
     };
+    if let Some(path) = camo_bump {
+        for pass in &mut passes {
+            pass.parameters.retain(|(name, _)| name != "bump_map");
+            pass.parameters.push(("bump_map".to_owned(), H2ParameterValue::Bitmap(path.clone())));
+        }
+    }
     let mut cases = HashMap::from(["specular", "lightmap"].map(|name| {
         let value = shader.root().read_int_any(&format!("{name} type")).unwrap_or(0) as i32;
         (format!("{name}_type"), value)
@@ -1435,6 +1506,38 @@ mod tests {
         assert!(seam(1) > seam(2) * 2.0, "{} against {}", seam(1), seam(2));
         let mean = |face: usize| faces[face].iter().map(|byte| *byte as u64).sum::<u64>();
         assert!(mean(4) > mean(5), "the sky is on +Z");
+    }
+
+    /// With `BLAM_TEST_H2EK`: a brute names no camo shader, and still takes
+    /// the global one, with its own shader's bump.
+    #[test]
+    fn every_h2_shader_takes_the_global_active_camo() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo2),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let material = |path: &str| RenderModelPreviewMaterial {
+            shader_path: path.to_owned(),
+            shader_group: u32::from_be_bytes(*b"shad"),
+        };
+        let camo = |path: &str| {
+            let textures = resolve_model_textures(&source, &[material(path)]);
+            textures[0].h2_layers[H2Layer::ActiveCamo as usize].clone()
+        };
+        let chief = camo("objects\\characters\\masterchief\\shaders\\masterchief");
+        let brute = camo("objects\\characters\\brute\\shaders\\brute");
+        assert_eq!(chief.len(), 1);
+        assert_eq!(brute.len(), 1);
+        let bump = |passes: &[H2DrawPass]| match passes[0].textures[0].image.as_deref() {
+            Some(H2Image::Flat(image)) => image.rgba.clone(),
+            other => panic!("the bump should be a flat map: {other:?}"),
+        };
+        assert_ne!(bump(&chief), bump(&brute), "each shader brings its own bump");
     }
 
     /// With `BLAM_TEST_H2EK`: a volume's slices all decode.

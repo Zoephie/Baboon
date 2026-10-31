@@ -409,18 +409,15 @@ pub(super) fn load_model_preview(
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
-    // Halo 2 lays a model's hologram shader, and its active camo shader in the
-    // field the definitions call `UNUSED`, over all its materials.
+    // Halo 2 lays a model's hologram shader over all its materials.
     let shader_group = u32::from_be_bytes(*b"shad");
-    for field in ["hologram shader", "UNUSED"] {
-        let reference = model_tag.root().field(field).and_then(|field| field.value());
-        if let Some(blam_tags::TagFieldData::TagReference(reference)) = reference
-            && let Some((group, shader_path)) = reference.group_tag_and_name
-            && group == shader_group
-            && !shader_path.is_empty()
-        {
-            preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group });
-        }
+    let reference = model_tag.root().field("hologram shader").and_then(|field| field.value());
+    if let Some(blam_tags::TagFieldData::TagReference(reference)) = reference
+        && let Some((group, shader_path)) = reference.group_tag_and_name
+        && group == shader_group
+        && !shader_path.is_empty()
+    {
+        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group });
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the

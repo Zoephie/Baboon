@@ -229,6 +229,8 @@ const WATER_REFRACTION: &str = "GLOBAL water refraction";
 /// What a live camera feeds, which a preview has none of: a dark screen.
 const CAMERA_FEEDS: [&str; 2] = ["GLOBAL texture camera", "FIRST-PERSON scope"];
 /// The shader's own bump map, by another name.
+/// The bump of the shader the global one replaced; it reaches a pass as its
+/// `bump_map`, from `prepare_h2_camo_passes`.
 const ACTIVE_CAMO_BUMP: &str = "SHADER active camo bump";
 /// What `render_visible_section_get_lightmap_mode` picks when the level has
 /// no lightmaps: fixed lighting, with the default lights doing the rest.
