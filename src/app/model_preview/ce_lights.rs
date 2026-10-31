@@ -3,10 +3,11 @@
 
 use super::ce_attachments::{MarkerFrame, attached_marker_frame, elements, object_block};
 use super::ce_passes::{argb, periodic_evaluate};
-use super::h2_passes::H2Image;
+use super::h2_passes::{H2Image, ce_color_interpolate};
 use super::materials::decode_h2_image;
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
+use blam_tags::TagFieldData;
 
 /// One segment of an antenna: a bitmap sprite stretched along it.
 #[derive(Debug, Clone)]
@@ -183,6 +184,8 @@ pub(crate) struct CeReflection {
     tint: [f32; 4],
     lower: [f32; 4],
     upper: [f32; 4],
+    /// Its second `flags`, for [`ce_color_interpolate`].
+    interpolation: i128,
     animation_function: usize,
     animation_period: f32,
     animation_phase: f32,
@@ -195,6 +198,9 @@ pub(crate) struct CeFlare {
     cones: [f32; 2],
     fade: [f32; 2],
     corona_scale: [f32; 2],
+    /// `rotation function`, and its scale in radians.
+    rotation_function: i128,
+    rotation_scale: f32,
     /// How big a patch `rasterizer_lens_flares_submit_occlusion_tests` tests.
     pub(crate) occlusion_radius: f32,
     /// `occlusion offset direction`: toward the viewer, along the marker, none.
@@ -216,6 +222,8 @@ pub(crate) struct CeLight {
     change_color: Option<usize>,
     lower: [f32; 4],
     upper: [f32; 4],
+    /// `interpolation flags`, for [`ce_color_interpolate`].
+    interpolation: i128,
     /// `lights_preprocess_scene` submits it to light models.
     dynamic: bool,
     /// `find_point_lights_for_object_in_cluster` leaves its own object out.
@@ -257,14 +265,44 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-fn lerp3(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 3] {
-    std::array::from_fn(|channel| lerp(a[channel], b[channel], t))
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+fn rgb_of(color: [f32; 4]) -> [f32; 3] {
+    [color[0], color[1], color[2]]
+}
+
+/// The second `flags` of a tag struct that has two. A flare's reflections keep
+/// their first for how they draw and this for how their color blends.
+fn second_flags(holder: TagStruct<'_>) -> i128 {
+    holder.fields_all().filter(|field| field.name() == "flags").nth(1).map_or(0, |field| {
+        match field.value() {
+            Some(TagFieldData::WordFlags { value, .. }) => i128::from(value),
+            _ => 0,
+        }
+    })
+}
+
+/// `lens_flare_evaluate_corona_rotation_function`: how far round a corona
+/// turns as a share of a whole turn, or none for `none`.
+fn corona_rotation(function: i128, forward: [f32; 3], to_light: [f32; 3], view: &CeFlareView) -> f32 {
+    let back = view.forward.map(|axis| -axis);
+    let along = cross(cross(forward, view.right), forward);
+    let (sine, cosine) = match function {
+        1 => (dot(along, view.forward), -dot(forward, view.forward)),
+        2 => (-dot(view.right, forward), dot(back, forward)),
+        3 => (dot(along, to_light), -dot(forward, to_light)),
+        4 => (dot(view.right, to_light), -dot(back, to_light)),
+        _ => return 0.0,
+    };
+    if sine == 0.0 { 0.0 } else { sine.atan2(cosine) / std::f32::consts::TAU }
 }
 
 /// `rgb_colors_interpolate_and_scale`: the bounds' alphas say how much of the
 /// color the change color tints.
-fn light_color(lower: [f32; 4], upper: [f32; 4], change: [f32; 3], value: f32) -> [f32; 3] {
-    let color = lerp3(lower, upper, value);
+fn light_color(flags: i128, lower: [f32; 4], upper: [f32; 4], change: [f32; 3], value: f32) -> [f32; 3] {
+    let color = ce_color_interpolate(flags, rgb_of(lower), rgb_of(upper), value);
     if lower[3] <= 0.0001 && upper[3] <= 0.0001 {
         return std::array::from_fn(|channel| color[channel] * change[channel]);
     }
@@ -310,7 +348,7 @@ impl CeLight {
 
     fn color(&self, value: f32, change_colors: &[[f32; 3]; 4]) -> [f32; 3] {
         let change = self.change_color.map_or([1.0; 3], |index| change_colors[index]);
-        light_color(self.lower, self.upper, change, value)
+        light_color(self.interpolation, self.lower, self.upper, change, value)
     }
 
     /// `rasterizer_set_model_lighting_point_light`, in the form
@@ -380,6 +418,7 @@ impl CeLight {
             (dot(toward, view.forward) * slope + offset).clamp(0.0, 1.0),
         ];
         let screen_angle = dot(to_light, view.right).atan2(dot(to_light, view.up));
+        let corona = corona_rotation(flare.rotation_function, forward, to_light, view);
         let mut brightness = fade * occlusion;
         let mut sprites = Vec::new();
         for (index, reflection) in flare.reflections.iter().enumerate() {
@@ -400,6 +439,9 @@ impl CeLight {
                 radius *= distance;
             }
             let mut rotation = reflection.rotation.to_radians();
+            if index == 0 {
+                rotation += corona * flare.rotation_scale;
+            }
             if reflection.flags & ALIGN_WITH_SCREEN_CENTER != 0 {
                 rotation += screen_angle;
             }
@@ -433,7 +475,7 @@ impl CeReflection {
             let period = if self.animation_period == 0.0 { 1.0 } else { self.animation_period };
             let phase = (self.animation_phase + time) / period;
             let u = periodic_evaluate(self.animation_function, phase);
-            lerp3(self.lower, self.upper, u)
+            ce_color_interpolate(self.interpolation, rgb_of(self.lower), rgb_of(self.upper), u)
         } else {
             tint
         };
@@ -469,6 +511,7 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
             tint: argb(reflection, "tint color"),
             lower: argb(reflection, "color lower bound"),
             upper: argb(reflection, "color upper bound"),
+            interpolation: second_flags(reflection),
             animation_function: reflection.read_int_any("animation function").unwrap_or(0).max(0) as usize,
             animation_period: reflection.read_real("animation period").unwrap_or(0.0),
             animation_phase: reflection.read_real("animation phase").unwrap_or(0.0),
@@ -485,6 +528,12 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
             root.read_real("horizontal scale").filter(|scale| *scale != 0.0).unwrap_or(1.0),
             root.read_real("vertical scale").filter(|scale| *scale != 0.0).unwrap_or(1.0),
         ],
+        rotation_function: root.read_int_any("rotation function").unwrap_or(0),
+        // Tool's postprocess takes nothing, or a whole turn in degrees, for one.
+        rotation_scale: match root.read_real("rotation function scale").unwrap_or(0.0) {
+            scale if scale == 0.0 || scale == 360.0 => std::f32::consts::TAU,
+            scale => scale,
+        },
         occlusion_radius: root.read_real("occlusion radius").unwrap_or(0.0),
         occlusion_offset: root.read_int_any("occlusion offset direction").unwrap_or(0),
         reflections,
@@ -620,6 +669,7 @@ pub(super) fn read_ce_lights(
                 change_color: function_slot(attachment.read_int_any("change color")),
                 lower,
                 upper,
+                interpolation: root.read_int_any("interpolation flags").unwrap_or(0),
                 dynamic,
                 spares_owner: flags & LIGHT_SPARES_OWNER != 0,
                 radius,
@@ -669,6 +719,7 @@ mod tests {
             tint: NO_COLOR,
             lower: NO_COLOR,
             upper: NO_COLOR,
+            interpolation: 0,
             animation_function: 0,
             animation_period: 0.0,
             animation_phase: 0.0,
@@ -685,6 +736,7 @@ mod tests {
             change_color: None,
             lower: [0.0, 0.0, 0.0, 1.0],
             upper: [1.0, 0.5, 0.0, 1.0],
+            interpolation: 0,
             dynamic: true,
             spares_owner: false,
             radius: 2.0,
@@ -694,6 +746,8 @@ mod tests {
                 cones: [1.0, 1.0],
                 fade: [0.0, 0.0],
                 corona_scale: [2.0, 1.0],
+                rotation_function: 0,
+                rotation_scale: std::f32::consts::TAU,
                 occlusion_radius: 0.1,
                 occlusion_offset: 0,
                 reflections,
@@ -853,6 +907,25 @@ mod tests {
     }
 
     #[test]
+    fn a_corona_turns_with_how_the_light_faces_the_view() {
+        // Seen head on, the light points straight back at the viewer.
+        let facing = [0.0, -1.0, 0.0];
+        assert_eq!(corona_rotation(0, facing, [0.0, 1.0, 0.0], &VIEW), 0.0);
+        assert_eq!(corona_rotation(1, facing, [0.0, 1.0, 0.0], &VIEW), 0.0);
+        // Turned a quarter away to the right, the share is a quarter turn.
+        let sideways = corona_rotation(2, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], &VIEW);
+        assert!((sideways.abs() - 0.25).abs() < 1e-5, "{sideways}");
+        // Only the first reflection, the corona, carries it.
+        let mut turning = light(vec![reflection(0.0), reflection(0.0)]);
+        let flare = Arc::make_mut(turning.flare.as_mut().unwrap());
+        flare.rotation_function = 2;
+        turning.forward = [1.0, 0.0, 0.0];
+        let drawn = sprites(&turning, 1.0);
+        assert!(drawn[0].rotation.abs() > 1.0);
+        assert_eq!(drawn[1].rotation, 0.0);
+    }
+
+    #[test]
     fn no_source_reads_full() {
         let mut light = light(vec![reflection(0.0)]);
         light.primary = None;
@@ -888,8 +961,8 @@ mod tests {
 
     #[test]
     fn a_change_color_tints_by_the_bounds_alpha() {
-        assert_eq!(light_color([1.0; 4], [1.0; 4], [0.5; 3], 1.0), [1.0; 3]);
+        assert_eq!(light_color(0, [1.0; 4], [1.0; 4], [0.5; 3], 1.0), [1.0; 3]);
         let unset = [1.0, 1.0, 1.0, 0.0];
-        assert_eq!(light_color(unset, unset, [0.5; 3], 1.0), [0.5; 3]);
+        assert_eq!(light_color(0, unset, unset, [0.5; 3], 1.0), [0.5; 3]);
     }
 }

@@ -1138,10 +1138,11 @@ fn hsv_to_rgb([hue, saturation, value]: [f32; 3]) -> [f32; 3] {
     }
 }
 
-/// `rgb_colors_interpolate` with its HSV flag: the short way round the hue.
-fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32) -> [f32; 3] {
+/// `rgb_colors_interpolate` with its HSV flag: the short way round the hue,
+/// or the long way with its `...more colors` flag.
+fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32, long_way: bool) -> [f32; 3] {
     let (mut from, mut to) = (rgb_to_hsv(lower), rgb_to_hsv(upper));
-    if (from[0] - to[0]).abs() > 0.5 {
+    if ((from[0] - to[0]).abs() > 0.5) != long_way {
         if from[0] >= to[0] {
             to[0] += 1.0;
         } else {
@@ -1166,10 +1167,19 @@ fn ce_change_color(permutations: &[H2ChangePermutation], channel: usize) -> [f32
     for entry in permutations {
         running += weight(entry) / total;
         if pick <= running {
-            return hsv_interpolate(entry.lower, entry.upper, u).map(|value| value.clamp(0.0, 1.0));
+            return hsv_interpolate(entry.lower, entry.upper, u, false).map(|value| value.clamp(0.0, 1.0));
         }
     }
     [1.0; 3]
+}
+
+/// `rgb_colors_interpolate`: bit 0 of `flags` blends in HSV, bit 1 the long way.
+pub(crate) fn ce_color_interpolate(flags: i128, lower: [f32; 3], upper: [f32; 3], u: f32) -> [f32; 3] {
+    if flags & 1 != 0 {
+        hsv_interpolate(lower, upper, u, flags & 2 != 0)
+    } else {
+        std::array::from_fn(|channel| lower[channel] * (1.0 - u) + upper[channel] * u)
+    }
 }
 
 pub(crate) fn ce_change_colors(colors: &H2ChangeColors) -> [[f32; 3]; 4] {
@@ -2094,11 +2104,14 @@ mod tests {
     #[test]
     fn ce_colors_blend_the_short_way_round_the_hue() {
         // Red and a red just shy of the wrap meet near red, not across cyan.
-        let mixed = hsv_interpolate([1.0, 0.0, 0.0], [1.0, 0.0, 0.2], 0.5);
+        let mixed = hsv_interpolate([1.0, 0.0, 0.0], [1.0, 0.0, 0.2], 0.5, false);
         assert!(mixed[0] > 0.99 && mixed[1] < 0.01, "{mixed:?}");
         // Unlike an RGB blend, yellow keeps its brightness between red and green.
-        let middle = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5);
+        let middle = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, false);
         assert!((middle[0] - 1.0).abs() < 1e-5 && (middle[1] - 1.0).abs() < 1e-5, "{middle:?}");
+        // The long way from red to green goes through blue.
+        let long = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5, true);
+        assert!(long[2] > 0.99 && long[1] < 0.01, "{long:?}");
         // A color survives the trip.
         let color = [0.34, 0.4, 0.15];
         let back = hsv_to_rgb(rgb_to_hsv(color));
