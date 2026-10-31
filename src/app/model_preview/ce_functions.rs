@@ -227,18 +227,16 @@ impl CeObjectFunctions {
         }
     }
 
-    /// The inputs to draw with: what the panel set for this model, or rest.
-    pub(crate) fn inputs_for(&self, set: Option<&CeFunctionInputs>, geometry: u64) -> [f32; 4] {
-        set.filter(|set| set.geometry == geometry).map_or(self.inputs, |set| set.values)
+    /// The inputs to draw with: what the panel set, or rest.
+    pub(crate) fn inputs_for(&self, set: &CeFunctionInputs, key: CeObjectKey) -> [f32; 4] {
+        set.get(&key).copied().unwrap_or(self.inputs)
     }
 }
 
-/// Inputs set by hand, for the model they were set on.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CeFunctionInputs {
-    geometry: u64,
-    values: [f32; 4],
-}
+/// A model, and which of its objects.
+pub(crate) type CeObjectKey = (u64, u8);
+/// Inputs set by hand, each for the object it was set on.
+pub(crate) type CeFunctionInputs = std::collections::HashMap<CeObjectKey, [f32; 4]>;
 
 /// Sliders for an opened object's inputs, and what its functions make of them.
 /// `read` is which outputs the model's shaders read, once they have resolved:
@@ -246,21 +244,23 @@ pub(crate) struct CeFunctionInputs {
 pub(super) fn draw_ce_function_controls(
     ui: &mut Ui,
     functions: &CeObjectFunctions,
-    geometry: u64,
-    set: &mut Option<CeFunctionInputs>,
+    name: Option<&str>,
+    key: CeObjectKey,
+    set: &mut CeFunctionInputs,
     read: Option<[bool; 4]>,
 ) {
     const UNREAD: &str = "No shader on this model reads this.";
     let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
     let read = read.unwrap_or([true; 4]);
-    let mut values = functions.inputs_for(set.as_ref(), geometry);
+    let mut values = functions.inputs_for(set, key);
     ui.add_space(6.0);
+    ui.push_id(key.1, |ui| {
     ui.horizontal(|ui| {
-        ui.strong("Object Functions");
+        ui.strong(name.map_or("Object Functions".to_owned(), |name| format!("{name} Functions")));
         let changed = values != functions.inputs;
         if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() {
             values = functions.inputs;
-            *set = None;
+            set.remove(&key);
         }
     });
     let before = values;
@@ -272,7 +272,7 @@ pub(super) fn draw_ce_function_controls(
             .on_disabled_hover_text(UNREAD);
     }
     if values != before {
-        *set = Some(CeFunctionInputs { geometry, values });
+        set.insert(key, values);
     }
     let time = ui.input(|input| input.time) as f32;
     let outputs = functions.outputs(&values, time);
@@ -280,6 +280,7 @@ pub(super) fn draw_ce_function_controls(
         let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
         ui.add_enabled(read[index], egui::Label::new(text)).on_disabled_hover_text(UNREAD);
     }
+    });
 }
 
 /// An object's chain of parent structs, ending at `object`.
@@ -454,12 +455,12 @@ mod tests {
     }
 
     #[test]
-    fn inputs_set_on_one_model_do_not_carry_to_another() {
+    fn inputs_set_on_one_object_do_not_carry_to_another() {
         let objects = CeObjectFunctions { inputs: [1.0, 0.0, 0.0, 0.0], ..Default::default() };
-        let set = CeFunctionInputs { geometry: 7, values: [0.25; 4] };
-        assert_eq!(objects.inputs_for(Some(&set), 7), [0.25; 4]);
-        assert_eq!(objects.inputs_for(Some(&set), 8), [1.0, 0.0, 0.0, 0.0]);
-        assert_eq!(objects.inputs_for(None, 7), [1.0, 0.0, 0.0, 0.0]);
+        let set = CeFunctionInputs::from([((7, 0), [0.25; 4])]);
+        assert_eq!(objects.inputs_for(&set, (7, 0)), [0.25; 4]);
+        assert_eq!(objects.inputs_for(&set, (8, 0)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(objects.inputs_for(&set, (7, 1)), [1.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]

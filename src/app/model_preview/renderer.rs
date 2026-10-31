@@ -129,17 +129,8 @@ pub(super) fn draw_model_viewport(
         light_follows_camera: state.h2_light_follows_camera,
         time,
         h2_prt_clusters: None,
-        object_outputs: data
-            .ce_object_functions
-            .as_ref()
-            .map_or([0.0; 4], |functions| {
-                let set = state.ce_function_inputs.as_ref();
-                functions.outputs(&functions.inputs_for(set, data.geometry_id), time)
-            }),
-        object_moves: data
-            .ce_object_functions
-            .as_ref()
-            .is_some_and(|functions| functions.move_at_rest()),
+        object_states: object_states(data, &state.ce_function_inputs, time),
+        object_moves: object_functions(data).any(|functions| functions.move_at_rest()),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -764,8 +755,9 @@ struct ModelGpuFrame {
     bones: Option<Arc<Vec<[f32; 4]>>>,
     /// The selected variant's change colors for Halo 2 passes.
     change_colors: [[f32; 3]; 4],
-    /// The opened object's `A out` to `D out` this frame, 0 with none.
-    object_outputs: [f32; 4],
+    /// Halo CE: each object's `A out` to `D out` and change colors this frame,
+    /// the opened one first. Empty with none.
+    object_states: Vec<CeObjectState>,
     /// Whether those change by themselves.
     object_moves: bool,
     /// Draw opaque Halo 2 materials through their passes.
@@ -784,7 +776,56 @@ struct ModelGpuFrame {
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
 const H2_TIME_WRAP: f64 = 3600.0;
 
+/// What the parts an object owns draw with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CeObjectState {
+    outputs: [f32; 4],
+    change_colors: [[f32; 3]; 4],
+}
+
+/// The opened object's functions, then those of what is attached to it.
+fn object_functions(
+    data: &ModelPreviewData,
+) -> impl Iterator<Item = &ce_functions::CeObjectFunctions> {
+    data.ce_object_functions
+        .iter()
+        .chain(data.ce_attached.iter().filter_map(|object| object.functions.as_ref()))
+}
+
+fn object_states(
+    data: &ModelPreviewData,
+    set: &ce_functions::CeFunctionInputs,
+    time: f32,
+) -> Vec<CeObjectState> {
+    let state = |functions: Option<&ce_functions::CeObjectFunctions>, object, colors| {
+        let outputs = functions.map_or([0.0; 4], |functions| {
+            functions.outputs(&functions.inputs_for(set, (data.geometry_id, object)), time)
+        });
+        CeObjectState { outputs, change_colors: h2_change_colors_for(colors, "") }
+    };
+    let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.h2_change_colors)];
+    for (index, object) in data.ce_attached.iter().enumerate() {
+        states.push(state(object.functions.as_ref(), index as u8 + 1, &object.change_colors));
+    }
+    states
+}
+
 impl ModelGpuFrame {
+    /// The outputs of the object that owns `material`.
+    fn outputs_of(&self, material: usize) -> [f32; 4] {
+        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
+        self.object_states.get(object as usize).map_or([0.0; 4], |state| state.outputs)
+    }
+
+    /// The change colors of the object that owns `material`.
+    fn change_colors_of(&self, material: usize) -> [[f32; 3]; 4] {
+        let object = self.preview.materials.get(material).map_or(0, |material| material.object);
+        match object {
+            0 => self.change_colors,
+            _ => self.object_states.get(object as usize).map_or([[1.0; 3]; 4], |state| state.change_colors),
+        }
+    }
+
     /// Transparent passes draw whether or not game shaders are on.
     fn h2_draws(&self, layer: H2Layer) -> bool {
         match layer {
@@ -805,18 +846,20 @@ impl ModelGpuFrame {
             return false;
         };
         self.visible_batches.iter().any(|&index| {
-            self.preview
-                .batches
-                .get(index)
-                .and_then(|batch| textures.get(batch.material_index as usize))
+            let Some(batch) = self.preview.batches.get(index) else {
+                return false;
+            };
+            textures
+                .get(batch.material_index as usize)
                 .is_some_and(|material| {
                     H2Layer::ALL
                         .iter()
                         .filter(|layer| self.h2_draws(**layer))
                         .flat_map(|layer| &material.h2_layers[*layer as usize])
                         .any(|pass| {
+                            let outputs = self.outputs_of(batch.material_index as usize);
                             pass.moves()
-                                || pass.moves_with(&self.object_outputs)
+                                || pass.moves_with(&outputs)
                                 || (self.object_moves && pass.reads_outputs())
                         })
                 })
@@ -2592,7 +2635,7 @@ impl ModelGlRenderer {
                 if camouflaged && pass.hidden_by_camo {
                     continue;
                 }
-                if pass.numeric.as_ref().is_some_and(|numeric| !numeric.shows(&frame.object_outputs)) {
+                if pass.numeric.as_ref().is_some_and(|numeric| !numeric.shows(&frame.outputs_of(material))) {
                     continue;
                 }
                 let key = (pass.stage, pass.fragment.clone());
@@ -2602,7 +2645,7 @@ impl ModelGlRenderer {
                 drew = true;
                 unsafe {
                     gl.use_program(Some(program.program));
-                    self.bind_h2_uniforms(gl, frame, &mut program, pass, eye, light);
+                    self.bind_h2_uniforms(gl, frame, material, &mut program, pass, eye, light);
                     let textures = self.slots[slot]
                         .materials
                         .get(material)
@@ -2713,6 +2756,7 @@ impl ModelGlRenderer {
         &self,
         gl: &glow::Context,
         frame: &ModelGpuFrame,
+        material: usize,
         program: &mut H2GlProgram,
         pass: &H2DrawPass,
         eye: [f32; 3],
@@ -2805,7 +2849,8 @@ impl ModelGlRenderer {
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             let location = program.location(gl, "u_texture_rows");
-            let rows = pass.texture_rows_at(frame.time, &frame.object_outputs);
+            let (outputs, change_colors) = (frame.outputs_of(material), frame.change_colors_of(material));
+            let rows = pass.texture_rows_at(frame.time, &outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             let (tint_facing, tint_glancing) = pass.tints_at(frame.time);
             let location = program.location(gl, "u_tint_facing");
@@ -2820,8 +2865,8 @@ impl ModelGlRenderer {
                         *register,
                         &mut value,
                         frame.time,
-                        &frame.change_colors,
-                        &frame.object_outputs,
+                        &change_colors,
+                        &outputs,
                     );
                     if animation.eye_register == Some(*register) {
                         let [x, y, z] =
@@ -2831,7 +2876,7 @@ impl ModelGlRenderer {
                 }
                 for (changed, component, channel) in &pass.change_colors {
                     if changed == register {
-                        value[*component] = frame.change_colors[*channel][*component];
+                        value[*component] = change_colors[*channel][*component];
                     }
                 }
                 if let Some(light) = light {
@@ -3986,6 +4031,7 @@ pub(super) fn render_model_to_preview(
                 shader_group: material.render_method_group,
                 overlay: false,
                 permutation: 0,
+                object: 0,
             })
             .collect(),
         nodes: preview_skeleton_nodes(&model.nodes),

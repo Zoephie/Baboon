@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
+mod ce_attachments;
 mod ce_functions;
 mod ce_passes;
 mod h2_bloom;
@@ -143,6 +144,9 @@ pub(crate) struct RenderModelPreviewMaterial {
     pub overlay: bool,
     /// Halo CE: which image of each bitmap it draws, wrapping at their count.
     pub permutation: usize,
+    /// Which object owns it, for its function outputs and change colors: 0
+    /// for the opened one, then its attached objects in order.
+    pub object: u8,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -294,6 +298,7 @@ fn model_preview_data(
         default_variant: None,
         h2_change_colors: Default::default(),
         ce_object_functions: None,
+        ce_attached: Vec::new(),
         scenario_bsps: Vec::new(),
         animations: None,
     }
@@ -898,23 +903,34 @@ fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
 }
 
 fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
-    if let Some(functions) = &data.ce_object_functions {
-        let read = data.textures.as_ref().map(|textures| {
+    let read = |object: u8| {
+        data.textures.as_ref().map(|textures| {
             let mut read = [false; 4];
-            let passes = textures.iter().flat_map(|material| material.h2_layers.iter().flatten());
+            let owned = data.preview.materials.iter().zip(textures.iter());
+            let passes = owned
+                .filter(|(material, _)| material.object == object)
+                .flat_map(|(_, texture)| texture.h2_layers.iter().flatten());
             for animation in passes.filter_map(|pass| pass.ce_animation.as_ref()) {
                 for (read, output) in read.iter_mut().zip(animation.outputs_read()) {
                     *read |= output;
                 }
             }
             read
-        });
+        })
+    };
+    let attached = data.ce_attached.iter().enumerate().filter_map(|(index, object)| {
+        let functions = object.functions.as_ref()?;
+        Some((index as u8 + 1, Some(object.name.as_str()), functions))
+    });
+    let own = data.ce_object_functions.iter().map(|functions| (0, None, functions));
+    for (object, name, functions) in own.chain(attached) {
         ce_functions::draw_ce_function_controls(
             ui,
             functions,
-            data.geometry_id,
+            name,
+            (data.geometry_id, object),
             &mut state.ce_function_inputs,
-            read,
+            read(object),
         );
     }
 }

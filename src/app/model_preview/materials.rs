@@ -1175,6 +1175,7 @@ mod tests {
                     shader_group: material.render_method_group,
                     overlay: false,
                     permutation: 0,
+                    object: 0,
                 })
                 .collect(),
         )
@@ -1343,6 +1344,7 @@ mod tests {
                 shader_group: 0,
                 overlay: false,
                 permutation: 0,
+                object: 0,
             }],
         );
         assert_eq!(resolved.len(), 1);
@@ -1409,6 +1411,7 @@ mod tests {
                 shader_group: u32::from_be_bytes(*b"rmsh"),
                 overlay: false,
                 permutation: 0,
+                object: 0,
             }],
         );
         let material = &resolved[0];
@@ -1442,6 +1445,7 @@ mod tests {
                 shader_group: u32::from_be_bytes(*group),
                 overlay: false,
                 permutation: 0,
+                object: 0,
             }],
         )
         .remove(0)
@@ -1533,6 +1537,7 @@ mod tests {
                 shader_group: u32::from_be_bytes(*b"soso"),
                 overlay: false,
                 permutation,
+                object: 0,
             };
             resolve_model_textures(&source, &[material]).remove(0)
         };
@@ -1690,6 +1695,7 @@ mod tests {
             shader_group: u32::from_be_bytes(*b"shad"),
             overlay: false,
             permutation: 0,
+            object: 0,
         };
         let camo = |path: &str| {
             let textures = resolve_model_textures(&source, &[material(path)]);

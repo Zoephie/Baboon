@@ -268,6 +268,7 @@ pub(super) fn load_model_preview(
                 shader_group,
                 overlay: true,
                 permutation: 0,
+                object: 0,
             });
         }
         // `render_model_parts`: an object's own index wins over each shader's.
@@ -275,9 +276,11 @@ pub(super) fn load_model_preview(
         if forced != 0 {
             preview.materials.iter_mut().for_each(|material| material.permutation = forced);
         }
+        let attached = super::ce_attachments::attach_ce_weapon(source, model_tag, &mut preview);
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
         data.ce_object_functions = super::ce_functions::read_ce_object_functions(model_tag);
+        data.ce_attached.extend(attached);
         return Ok(data);
     }
 
@@ -430,7 +433,7 @@ pub(super) fn load_model_preview(
         && group == shader_group
         && !shader_path.is_empty()
     {
-        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false, permutation: 0 });
+        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false, permutation: 0, object: 0 });
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the

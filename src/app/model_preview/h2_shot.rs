@@ -4,7 +4,8 @@
 //! `H2_SHOT="<model path>|<out file>|<shaders 0/1>|<lights 0/1>|<yaw>|<pitch>"`,
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
 //! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
-//! bipeds with `H2_SHOT_BIPED`, whose function inputs `H2_SHOT_INPUTS` can set.
+//! bipeds with `H2_SHOT_BIPED`, or vehicles with `H2_SHOT_OBJECT=vehicle`, whose
+//! function inputs `H2_SHOT_INPUTS` can set.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -64,7 +65,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if std::env::var_os("H2_SHOT_BIPED").is_some() {
+    let (extension, group) = if let Ok(kind) = std::env::var("H2_SHOT_OBJECT") { if kind == "vehicle" { ("vehicle", b"vehi") } else { ("biped", b"bipd") } } else if std::env::var_os("H2_SHOT_BIPED").is_some() {
         ("biped", b"bipd")
     } else if shot_game() == GameId::HaloCe {
         ("gbxmodel", b"mod2")
@@ -121,21 +122,15 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         light_follows_camera: state.h2_light_follows_camera,
         time,
         h2_prt_clusters: None,
-        object_outputs: data
-            .ce_object_functions
-            .as_ref()
-            .map_or([0.0; 4], |functions| {
-                let mut inputs = functions.inputs_for(None, data.geometry_id);
-                if let Ok(set) = std::env::var("H2_SHOT_INPUTS") {
-                    let values = set.split(',').map(|value| value.parse().unwrap());
-                    inputs.iter_mut().zip(values).for_each(|(input, value)| *input = value);
-                }
-                functions.outputs(&inputs, time)
-            }),
-        object_moves: data
-            .ce_object_functions
-            .as_ref()
-            .is_some_and(|functions| functions.move_at_rest()),
+        object_states: {
+            let mut set = state.ce_function_inputs.clone();
+            if let Ok(values) = std::env::var("H2_SHOT_INPUTS") {
+                let values: Vec<f32> = values.split(',').map(|value| value.parse().unwrap()).collect();
+                set.insert((data.geometry_id, 0), std::array::from_fn(|index| values[index]));
+            }
+            object_states(&data, &set, time)
+        },
+        object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state

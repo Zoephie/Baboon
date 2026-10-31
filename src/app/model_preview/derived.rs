@@ -1144,6 +1144,7 @@ fn sbsp_preview_materials(root: &TagStruct<'_>) -> Vec<RenderModelPreviewMateria
                     shader_group,
                     overlay: false,
                     permutation: 0,
+                    object: 0,
                 })
                 .unwrap_or_default()
         })
