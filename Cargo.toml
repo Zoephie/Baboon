@@ -23,7 +23,7 @@ path = "src/main.rs"
 anyhow = "1"
 arboard = { version = "3.6", default-features = false }
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "45dc4ec846fa53726f04a6e90908c83df807fc19", features = ["audio", "iostore", "halo5"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "e0c76d15d806be20b63d23e54d9ff0aef3b5360d", features = ["audio", "iostore", "halo5"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "links", "wayland", "x11"] }

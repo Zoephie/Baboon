@@ -598,10 +598,7 @@ fn h2_bitmap_scale(
         .unwrap_or([inherited, inherited])
 }
 
-/// Decode a map in the shape its sampler asks for. Halo 2 keeps a cube's six
-/// faces, and a volume's slices, side by side in the top level with the smaller
-/// levels after them. `compose_cube_cross` steps a whole mip chain per face,
-/// which reads every face but the first from the wrong place here.
+/// Decode a map in the shape its sampler asks for.
 fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<H2Image> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
@@ -619,25 +616,7 @@ fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<
     let image = bitmap.image(0)?;
     let (width, height) = (image.width(), image.height());
     let format = image.format().ok()?;
-    let slice_bytes = format.level_bytes(width, height) as usize;
-    // `pixel_bytes` sizes a volume as one slice, so take the tag's own data.
-    let root = tag.root();
-    let offset = root
-        .descend("bitmaps[0]")
-        .and_then(|image| image.read_int_any("pixels offset"))
-        .unwrap_or(0)
-        .max(0) as usize;
-    let tag_bytes = match root.field("processed pixel data").and_then(|field| field.value()) {
-        Some(blam_tags::TagFieldData::Data(data)) => data,
-        _ => Vec::new(),
-    };
-    let bytes: &[u8] = if kind == SamplerKind::Volume {
-        tag_bytes.get(offset..)?
-    } else {
-        image.pixel_bytes().ok()?
-    };
-    let slice = |index: usize| {
-        let data = bytes.get(index * slice_bytes..(index + 1) * slice_bytes)?;
+    let decode = |data: &[u8]| {
         blam_tags::bitmap::decode::decode_to_rgba8(format, width, height, data, bitmap.p8_palette())
             .ok()
     };
@@ -645,16 +624,14 @@ fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<
         if !image.is_cube() {
             return None;
         }
-        // Stored +X +Y -X -Y +Z -Z: the tool lays them out as a ring around
-        // the Z-up world. Seam continuity picks this order on every cube map
-        // in the kit's reflection set, with the sky on +Z.
-        let faces = [slice(0)?, slice(2)?, slice(1)?, slice(3)?, slice(4)?, slice(5)?];
+        let face = |index| decode(image.cube_face_bytes(index).ok()?);
+        let faces = [face(0)?, face(1)?, face(2)?, face(3)?, face(4)?, face(5)?];
         return Some(H2Image::Cube { size: width as usize, faces });
     }
     let depth = image.depth() as usize;
     let mut rgba = Vec::new();
     for index in 0..depth {
-        rgba.extend(slice(index)?);
+        rgba.extend(decode(image.volume_slice_bytes(index as u32).ok()?)?);
     }
     Some(H2Image::Volume { width: width as usize, height: height as usize, depth, rgba })
 }
