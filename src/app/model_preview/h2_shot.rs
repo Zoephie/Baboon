@@ -138,6 +138,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             object_states(&data, &set, time)
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
+        ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -148,6 +149,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     };
     let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
+    frame.ce_points = frame.ce_point_lights();
     unsafe {
         let color = gl.create_renderbuffer().unwrap();
         gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));

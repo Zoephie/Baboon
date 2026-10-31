@@ -131,6 +131,7 @@ pub(super) fn draw_model_viewport(
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, time),
         object_moves: object_functions(data).any(|functions| functions.move_at_rest()),
+        ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -141,6 +142,7 @@ pub(super) fn draw_model_viewport(
     };
     let mut frame = frame;
     frame.h2_prt_clusters = frame.h2_object_prt_clusters();
+    frame.ce_points = frame.ce_point_lights();
     if frame.h2_moves() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -760,6 +762,8 @@ struct ModelGpuFrame {
     object_states: Vec<CeObjectState>,
     /// Whether those change by themselves.
     object_moves: bool,
+    /// Each object's point lights this frame, in step with `object_states`.
+    ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
     /// Draw opaque Halo 2 materials through their passes.
     game_shaders: bool,
     default_lights: bool,
@@ -839,6 +843,28 @@ impl ModelGpuFrame {
         let prt = self.preview.h2_prt.as_ref().filter(|_| self.game_shaders && !self.default_lights)?;
         let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
         Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
+    }
+
+    /// `lights_prepare_for_object_dynamic`, for the opened object and what it
+    /// holds, as one sphere around the model.
+    fn ce_point_lights(&self) -> Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]> {
+        if self.preview.ce_lights.is_empty() {
+            return Vec::new();
+        }
+        let (low, high) = (self.preview.bounds_min, self.preview.bounds_max);
+        let center: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) * 0.5);
+        let reach = (0..3).map(|axis| (high[axis] - center[axis]).powi(2)).sum::<f32>().sqrt();
+        let bones = self.bones.as_ref().map(|bones| bones.as_slice());
+        let state = |object: u8| {
+            let state = self.object_states.get(usize::from(object));
+            (state.map_or([0.0; 4], |state| state.outputs),
+             state.map_or([[1.0; 3]; 4], |state| state.change_colors))
+        };
+        (0..self.object_states.len().max(1) as u8)
+            .map(|object| {
+                ce_lights::point_light_rows(&self.preview.ce_lights, object, center, reach, state, bones)
+            })
+            .collect()
     }
 
     fn h2_moves(&self) -> bool {
@@ -1997,6 +2023,8 @@ struct CeFlareGl {
     buffer: glow::NativeBuffer,
     color: Option<glow::NativeUniformLocation>,
     map: Option<glow::NativeUniformLocation>,
+    /// A patch's samples past the depth buffer, and in all.
+    queries: [glow::NativeQuery; 2],
 }
 
 struct ModelGlRenderer {
@@ -2337,9 +2365,10 @@ impl ModelGlRenderer {
     }
 
     /// `rasterizer_lens_flares_draw`: added to the frame by their alpha, on
-    /// color alone. The game fades a covered flare by occlusion query; here
-    /// each is depth tested from its marker, brought forward by its occlusion
-    /// radius so a marker on the surface still shows.
+    /// color alone, over everything. What hides one is its occlusion test, a
+    /// patch whose share of pixels past the depth buffer scales the flare. The
+    /// game reads that a frame late and eases it; a pane paints on demand, so
+    /// this waits for the answer.
     unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
         unsafe {
             if self.ce_flares.is_none() {
@@ -2358,7 +2387,8 @@ impl ModelGlRenderer {
                     .ce_lights
                     .iter()
                     .map(|light| {
-                        light.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
+                        let images = light.flare.iter().flat_map(|flare| &flare.images);
+                        images.map(|image| upload_h2_image(gl, image)).collect()
                     })
                     .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);
@@ -2382,12 +2412,42 @@ impl ModelGlRenderer {
                 let state = frame.object_states.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
                 let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
-                let toward = view.forward.map(|axis| -axis * light.flare.occlusion_radius);
-                for sprite in light.sprites(&outputs, &colors, bones, &view, frame.time) {
+                let Some(patch) = light.occlusion_patch(&outputs, &colors, bones, &view) else {
+                    continue;
+                };
+                let vertices = ce_flare_quad(camera, &view, &patch);
+                gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                gl.enable(glow::DEPTH_TEST);
+                gl.color_mask(false, false, false, false);
+                let mut samples = [0.0; 2];
+                for (sample, (query, compare)) in samples.iter_mut().zip([
+                    (flares.queries[0], glow::LEQUAL),
+                    (flares.queries[1], glow::ALWAYS),
+                ]) {
+                    gl.depth_func(compare);
+                    gl.begin_query(glow::SAMPLES_PASSED, query);
+                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                    gl.end_query(glow::SAMPLES_PASSED);
+                    // glow's plain reads take the EXT entry point below GL 4.5,
+                    // which panics on a Mac. This one checks the core entry
+                    // point, and with no query buffer bound its offset is
+                    // where the result goes.
+                    let mut passed = 0_u64;
+                    let result = &raw mut passed as usize;
+                    gl.get_query_parameter_u64_with_offset(query, glow::QUERY_RESULT, result);
+                    *sample = passed as f32;
+                }
+                gl.disable(glow::DEPTH_TEST);
+                gl.color_mask(true, true, true, false);
+                if samples[1] <= 0.0 {
+                    continue;
+                }
+                let occlusion = samples[0] / samples[1];
+                for sprite in light.sprites(&outputs, &colors, bones, &view, frame.time, occlusion) {
                     let Some(texture) = uploaded.flare_textures[index].get(sprite.image).copied().flatten() else {
                         continue;
                     };
-                    let vertices = ce_flare_quad(camera, &view, &sprite, toward);
+                    let vertices = ce_flare_quad(camera, &view, &sprite);
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
                     gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                     let [red, green, blue] = sprite.color;
@@ -2397,6 +2457,8 @@ impl ModelGlRenderer {
             }
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
+            gl.depth_func(glow::LEQUAL);
+            gl.enable(glow::DEPTH_TEST);
             gl.disable(glow::BLEND);
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.use_program(Some(self.program));
@@ -2877,6 +2939,12 @@ impl ModelGlRenderer {
         light: Option<&H2DefaultLight>,
     ) {
         unsafe {
+            if matches!(pass.stage, H2VertexStage::CeModel | H2VertexStage::CeGlassLit) {
+                let object = frame.preview.materials.get(material).map_or(0, |material| material.object);
+                let location = program.location(gl, "u_ce_point");
+                let rows = frame.ce_points.get(usize::from(object)).copied().unwrap_or_default();
+                gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
+            }
             if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
                 let location = program.location(gl, "u_shadow_matrix");
                 let toward = if frame.default_lights {
@@ -4437,10 +4505,9 @@ fn ce_flare_quad(
     camera: &ModelGpuCamera,
     view: &ce_lights::CeFlareView,
     sprite: &ce_lights::CeSprite,
-    toward: [f32; 3],
 ) -> [[f32; 6]; 4] {
     let (sine, cosine) = sprite.rotation.sin_cos();
-    let center: [f32; 3] = std::array::from_fn(|axis| sprite.center[axis] + toward[axis]);
+    let center = sprite.center;
     let depth = ce_flare_clip(camera, center);
     [[0.0, 0.0, -1.0, -1.0], [1.0, 0.0, 1.0, -1.0], [0.0, 1.0, -1.0, 1.0], [1.0, 1.0, 1.0, 1.0]].map(
         |[u, v, x, y]| {
@@ -4476,6 +4543,7 @@ unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<C
             buffer,
             color: gl.get_uniform_location(program, "u_color"),
             map: gl.get_uniform_location(program, "u_map"),
+            queries: [gl.create_query().ok()?, gl.create_query().ok()?],
         })
     }
 }

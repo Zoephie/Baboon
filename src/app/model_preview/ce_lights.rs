@@ -14,6 +14,14 @@ const NO_COLOR: [f32; 4] = [0.0; 4];
 /// `reflection.flags`, as `rasterizer_lens_flares_draw` reads them.
 const ALIGN_WITH_SCREEN_CENTER: i128 = 1;
 const RADIUS_NOT_SCALED_BY_DISTANCE: i128 = 2;
+const RADIUS_SCALED_BY_OCCLUSION: i128 = 4;
+
+/// Below this tool's light postprocess takes a value for unset.
+const UNSET: f32 = 0.0001;
+
+/// A `light`'s `flags`.
+const LIGHT_DYNAMIC: i128 = 1;
+const LIGHT_SPARES_OWNER: i128 = 4;
 
 /// One sprite of a flare, set along the axis through the screen's center.
 #[derive(Debug, Clone)]
@@ -41,8 +49,10 @@ pub(crate) struct CeFlare {
     cones: [f32; 2],
     fade: [f32; 2],
     corona_scale: [f32; 2],
-    /// How far ahead of its marker it is tested against the model.
+    /// How big a patch `rasterizer_lens_flares_submit_occlusion_tests` tests.
     pub(crate) occlusion_radius: f32,
+    /// `occlusion offset direction`: toward the viewer, along the marker, none.
+    occlusion_offset: i128,
     reflections: Vec<CeReflection>,
     pub(crate) images: Vec<Arc<H2Image>>,
 }
@@ -60,7 +70,15 @@ pub(crate) struct CeLight {
     change_color: Option<usize>,
     lower: [f32; 4],
     upper: [f32; 4],
-    pub(crate) flare: Arc<CeFlare>,
+    /// `lights_preprocess_scene` submits it to light models.
+    dynamic: bool,
+    /// `find_point_lights_for_object_in_cluster` leaves its own object out.
+    spares_owner: bool,
+    radius: f32,
+    radius_bounds: [f32; 2],
+    /// Cosines of its `falloff angle` and `cutoff angle`, or none in all ways.
+    cone: Option<[f32; 2]>,
+    pub(crate) flare: Option<Arc<CeFlare>>,
 }
 
 /// One quad, ready to place.
@@ -114,6 +132,67 @@ impl CeLight {
         self.primary.map_or(1.0, |index| outputs[index])
     }
 
+    /// The patch tested for how much of the flare the model hides, if it
+    /// shows at all: `rasterizer_lens_flares_submit_occlusion_tests`.
+    pub(crate) fn occlusion_patch(
+        &self,
+        outputs: &[f32; 4],
+        change_colors: &[[f32; 3]; 4],
+        bones: Option<&[[f32; 4]]>,
+        view: &CeFlareView,
+    ) -> Option<CeSprite> {
+        let flare = self.flare.as_deref()?;
+        if self.color(self.value(outputs), change_colors) == [0.0; 3] {
+            return None;
+        }
+        let (position, forward) = self.posed(bones);
+        let radius = flare.occlusion_radius;
+        let offset = match flare.occlusion_offset {
+            0 => view.forward.map(|axis| -axis * radius),
+            1 => forward.map(|axis| axis * radius * std::f32::consts::SQRT_2),
+            _ => [0.0; 3],
+        };
+        Some(CeSprite {
+            center: std::array::from_fn(|axis| position[axis] + offset[axis]),
+            extent: [radius; 2],
+            rotation: 0.0,
+            color: [0.0; 3],
+            alpha: 0.0,
+            image: 0,
+        })
+    }
+
+    fn color(&self, value: f32, change_colors: &[[f32; 3]; 4]) -> [f32; 3] {
+        let change = self.change_color.map_or([1.0; 3], |index| change_colors[index]);
+        light_color(self.lower, self.upper, change, value)
+    }
+
+    /// `rasterizer_set_model_lighting_point_light`, in the form
+    /// [`CE_POINT_LIGHT_ROWS`] takes.
+    fn point_rows(&self, outputs: &[f32; 4], change_colors: &[[f32; 3]; 4], bones: Option<&[[f32; 4]]>) -> Option<([[f32; 4]; 3], f32)> {
+        if !self.dynamic {
+            return None;
+        }
+        let value = self.value(outputs);
+        let color = self.color(value, change_colors);
+        let radius = self.radius * lerp(self.radius_bounds[0], self.radius_bounds[1], value);
+        if color == [0.0; 3] || radius <= 0.0 {
+            return None;
+        }
+        let (position, forward) = self.posed(bones);
+        let (a, b) = match self.cone {
+            Some([falloff, cutoff]) if falloff != cutoff => {
+                let a = 1.0 / (falloff - cutoff);
+                (a, -cutoff * a)
+            }
+            _ => (0.0, 1.0),
+        };
+        let [x, y, z] = position;
+        let [i, j, k] = forward;
+        let [red, green, blue] = color;
+        Some(([[x, y, z, 1.0 / (radius * radius)], [i, j, k, a], [red, green, blue, b]], radius))
+    }
+
     /// `rasterizer_lens_flares_draw`, for one light of `lights_preprocess_scene`.
     pub(crate) fn sprites(
         &self,
@@ -122,15 +201,17 @@ impl CeLight {
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
         time: f32,
+        occlusion: f32,
     ) -> Vec<CeSprite> {
+        let Some(flare) = self.flare.as_deref() else {
+            return Vec::new();
+        };
         let value = self.value(outputs);
-        let change = self.change_color.map_or([1.0; 3], |index| change_colors[index]);
-        let color = light_color(self.lower, self.upper, change, value);
+        let color = self.color(value, change_colors);
         if color == [0.0; 3] {
             return Vec::new();
         }
         let (position, forward) = self.posed(bones);
-        let flare = &*self.flare;
         let to_light: [f32; 3] = std::array::from_fn(|axis| position[axis] - view.eye[axis]);
         let distance = dot(to_light, view.forward);
         let length = dot(to_light, to_light).sqrt().max(0.0001);
@@ -153,7 +234,7 @@ impl CeLight {
             (dot(toward, view.forward) * slope + offset).clamp(0.0, 1.0),
         ];
         let screen_angle = dot(to_light, view.right).atan2(dot(to_light, view.up));
-        let mut brightness = fade;
+        let mut brightness = fade * occlusion;
         let mut sprites = Vec::new();
         for (index, reflection) in flare.reflections.iter().enumerate() {
             let scale = scales.get(reflection.brightness_scaled_by).copied().unwrap_or(1.0);
@@ -166,6 +247,9 @@ impl CeLight {
                 continue;
             }
             let mut radius = lerp(reflection.radius[0], reflection.radius[1], value);
+            if reflection.flags & RADIUS_SCALED_BY_OCCLUSION != 0 {
+                radius *= (occlusion + 1.0) * 0.5;
+            }
             if reflection.flags & RADIUS_NOT_SCALED_BY_DISTANCE != 0 {
                 radius *= distance;
             }
@@ -263,9 +347,49 @@ fn read_flare(source: &TagSource, path: &str) -> Option<CeFlare> {
             root.read_real("vertical scale").filter(|scale| *scale != 0.0).unwrap_or(1.0),
         ],
         occlusion_radius: root.read_real("occlusion radius").unwrap_or(0.0),
+        occlusion_offset: root.read_int_any("occlusion offset direction").unwrap_or(0),
         reflections,
         images,
     })
+}
+
+/// Point lights a model takes: position and inverse radius squared, direction
+/// and spot A, color and spot B, for each of two.
+pub(crate) const CE_POINT_LIGHT_ROWS: usize = 6;
+
+/// `lights_prepare_for_object_dynamic` for one object: the two lights strongest
+/// at `center`, within `reach` of their radius.
+pub(super) fn point_light_rows(
+    lights: &[CeLight],
+    object: u8,
+    center: [f32; 3],
+    reach: f32,
+    state: impl Fn(u8) -> ([f32; 4], [[f32; 3]; 4]),
+    bones: Option<&[[f32; 4]]>,
+) -> [[f32; 4]; CE_POINT_LIGHT_ROWS] {
+    let mut found: Vec<([[f32; 4]; 3], f32)> = Vec::new();
+    for light in lights {
+        if light.spares_owner && light.object == object {
+            continue;
+        }
+        let (outputs, colors) = state(light.object);
+        let Some((rows, radius)) = light.point_rows(&outputs, &colors, bones) else {
+            continue;
+        };
+        let offset: [f32; 3] = std::array::from_fn(|axis| rows[0][axis] - center[axis]);
+        let distance = dot(offset, offset).sqrt();
+        if distance >= radius + reach {
+            continue;
+        }
+        let brightness = (rows[2][0] + rows[2][1] + rows[2][2]) / 3.0;
+        found.push((rows, brightness * (1.0 - distance * distance / (radius * radius))));
+    }
+    found.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut out = [[0.0; 4]; CE_POINT_LIGHT_ROWS];
+    for (index, (rows, _)) in found.iter().take(2).enumerate() {
+        out[index * 3..index * 3 + 3].copy_from_slice(rows);
+    }
+    out
 }
 
 /// Mark the outputs an object's lights take their value from.
@@ -276,12 +400,32 @@ pub(super) fn mark_outputs_read(lights: &[CeLight], object: u8, read: &mut [bool
     }
 }
 
+/// What tool's light postprocess makes of a pair of `falloff` and `cutoff`
+/// angles: their cosines, or none for a light that shines all ways.
+fn baked_cone(falloff: f32, cutoff: f32) -> Option<[f32; 2]> {
+    use std::f32::consts::PI;
+    let (falloff, cutoff) =
+        if cutoff < UNSET { (PI, PI) } else { (falloff.min(PI), cutoff.min(PI)) };
+    let falloff = if falloff > cutoff { 0.0 } else { falloff };
+    (falloff < PI).then(|| [falloff.cos(), cutoff.cos()])
+}
+
+/// The same for color bounds with nothing in them, which turn white. Only the
+/// color channels count; alpha stays.
+fn baked_colors(mut lower: [f32; 4], mut upper: [f32; 4]) -> ([f32; 4], [f32; 4]) {
+    if lower[..3].iter().chain(&upper[..3]).all(|channel| *channel < UNSET) {
+        lower[..3].fill(1.0);
+        upper[..3].fill(1.0);
+    }
+    (lower, upper)
+}
+
 /// `A out`..`D out` of a `primary scale` or `change color` option, `none` first.
 fn function_slot(value: Option<i128>) -> Option<usize> {
     usize::try_from(value? - 1).ok().filter(|slot| *slot < 4)
 }
 
-/// The lens flares among `object`'s attachments, one per marker of the name.
+/// The lights among `object`'s attachments, one per marker of the name.
 /// `frame` turns a marker to where the preview holds it, and its node.
 pub(super) fn read_ce_lights(
     source: &TagSource,
@@ -307,9 +451,24 @@ pub(super) fn read_ce_lights(
         };
         let root = light.root();
         let flare_path = root.read_tag_ref_path("lens flare").filter(|flare| !flare.is_empty());
-        let Some(flare) = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new) else {
+        let flare = flare_path.and_then(|flare| read_flare(source, &flare)).map(Arc::new);
+        let flags = root.read_int_any("flags").unwrap_or(0);
+        let dynamic = flags & LIGHT_DYNAMIC != 0;
+        // `light_new`: it needs one or the other to exist.
+        if flare.is_none() && !dynamic {
             continue;
+        }
+        // Tags on disk lack what tool's postprocess gives them for the game.
+        let modifier = root.read_real_bounds("radius modifier");
+        let radius_bounds = if modifier.lower < UNSET && modifier.upper < UNSET {
+            [1.0, 1.0]
+        } else {
+            [modifier.lower, modifier.upper]
         };
+        let radius = root.read_real("radius").filter(|radius| *radius != 0.0).unwrap_or(1.0);
+        let angle = |name: &str| root.read_real(name).unwrap_or(0.0);
+        let (lower, upper) =
+            baked_colors(argb(root, "color lower bound"), argb(root, "color upper bound"));
         let name = attachment.read_string("marker").unwrap_or_default();
         for marker in markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&name)) {
             let (place, node) = frame(marker);
@@ -320,9 +479,14 @@ pub(super) fn read_ce_lights(
                 forward: place.axes[0],
                 primary: function_slot(attachment.read_int_any("primary scale")),
                 change_color: function_slot(attachment.read_int_any("change color")),
-                lower: argb(root, "color lower bound"),
-                upper: argb(root, "color upper bound"),
-                flare: Arc::clone(&flare),
+                lower,
+                upper,
+                dynamic,
+                spares_owner: flags & LIGHT_SPARES_OWNER != 0,
+                radius,
+                radius_bounds,
+                cone: baked_cone(angle("falloff angle"), angle("cutoff angle")),
+                flare: flare.clone(),
             });
         }
     }
@@ -382,19 +546,25 @@ mod tests {
             change_color: None,
             lower: [0.0, 0.0, 0.0, 1.0],
             upper: [1.0, 0.5, 0.0, 1.0],
-            flare: Arc::new(CeFlare {
+            dynamic: true,
+            spares_owner: false,
+            radius: 2.0,
+            radius_bounds: [1.0, 1.0],
+            cone: None,
+            flare: Some(Arc::new(CeFlare {
                 cones: [1.0, 1.0],
                 fade: [0.0, 0.0],
                 corona_scale: [2.0, 1.0],
                 occlusion_radius: 0.1,
+                occlusion_offset: 0,
                 reflections,
                 images: Vec::new(),
-            }),
+            })),
         }
     }
 
     fn sprites(light: &CeLight, value: f32) -> Vec<CeSprite> {
-        light.sprites(&[value, 0.0, 0.0, 0.0], &[[1.0; 3]; 4], None, &VIEW, 0.0)
+        light.sprites(&[value, 0.0, 0.0, 0.0], &[[1.0; 3]; 4], None, &VIEW, 0.0, 1.0)
     }
 
     #[test]
@@ -413,6 +583,99 @@ mod tests {
         assert_eq!(read, [false; 4]);
         mark_outputs_read(&[light], 0, &mut read);
         assert_eq!(read, [false, true, false, false]);
+    }
+
+    fn rows(lights: &[CeLight], object: u8, value: f32) -> [[f32; 4]; CE_POINT_LIGHT_ROWS] {
+        let state = |_| ([value, 0.0, 0.0, 0.0], [[1.0; 3]; 4]);
+        point_light_rows(lights, object, [0.0; 3], 0.5, state, None)
+    }
+
+    #[test]
+    fn a_point_light_has_the_games_constants() {
+        let mut lit = light(Vec::new());
+        lit.cone = Some([0.75, 0.5]);
+        let rows = rows(&[lit], 0, 1.0);
+        assert_eq!(rows[0], [1.0, 0.0, 0.0, 0.25]);
+        assert_eq!(rows[1], [0.0, -1.0, 0.0, 4.0]);
+        assert_eq!(rows[2], [1.0, 0.5, 0.0, -2.0]);
+    }
+
+    #[test]
+    fn a_light_with_no_cone_shines_all_ways() {
+        let rows = rows(&[light(Vec::new())], 0, 1.0);
+        assert_eq!((rows[1][3], rows[2][3]), (0.0, 1.0));
+    }
+
+    #[test]
+    fn dark_flare_only_and_out_of_reach_lights_add_nothing() {
+        let lit = light(Vec::new());
+        assert_eq!(rows(&[lit.clone()], 0, 0.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+        let mut flare_only = lit.clone();
+        flare_only.dynamic = false;
+        assert_eq!(rows(&[flare_only], 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+        let mut far = lit;
+        far.position = [9.0, 0.0, 0.0];
+        assert_eq!(rows(&[far], 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+    }
+
+    #[test]
+    fn a_light_can_spare_only_its_own_object() {
+        let mut lit = light(Vec::new());
+        lit.spares_owner = true;
+        assert_eq!(rows(std::slice::from_ref(&lit), 0, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+        assert_ne!(rows(&[lit], 1, 1.0), [[0.0; 4]; CE_POINT_LIGHT_ROWS]);
+    }
+
+    #[test]
+    fn the_two_strongest_lights_win() {
+        let dim = |x: f32| CeLight { position: [x, 0.0, 0.0], ..light(Vec::new()) };
+        let rows = rows(&[dim(1.5), dim(0.0), dim(1.0)], 0, 1.0);
+        assert_eq!((rows[0][0], rows[3][0]), (0.0, 1.0));
+    }
+
+    #[test]
+    fn tool_bakes_a_lights_cone() {
+        use std::f32::consts::{FRAC_PI_3, FRAC_PI_2, PI};
+        assert_eq!(baked_cone(0.0, 0.0), None);
+        assert_eq!(baked_cone(FRAC_PI_2, 0.0), None);
+        assert_eq!(baked_cone(PI, PI), None);
+        assert_eq!(baked_cone(FRAC_PI_3, FRAC_PI_2), Some([FRAC_PI_3.cos(), FRAC_PI_2.cos()]));
+        // A falloff past the cutoff starts from straight ahead.
+        assert_eq!(baked_cone(FRAC_PI_2, FRAC_PI_3), Some([1.0, FRAC_PI_3.cos()]));
+    }
+
+    #[test]
+    fn tool_whitens_a_light_with_no_color() {
+        let black = [0.0, 0.0, 0.0, 0.5];
+        assert_eq!(baked_colors(black, black), ([1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.5]));
+        let upper = [1.0, 0.5, 0.0, 1.0];
+        assert_eq!(baked_colors(black, upper), (black, upper));
+    }
+
+    #[test]
+    fn a_hidden_flare_draws_nothing_and_a_half_hidden_one_dims() {
+        let light = light(vec![reflection(0.0), reflection(0.0)]);
+        let at = |occlusion| light.sprites(&[1.0; 4], &[[1.0; 3]; 4], None, &VIEW, 0.0, occlusion);
+        assert!(at(0.0).is_empty());
+        let half = at(0.5);
+        assert_eq!(half.len(), 2);
+        assert_eq!(half[0].alpha, 0.5);
+    }
+
+    #[test]
+    fn the_occlusion_patch_sits_where_the_flare_says() {
+        let patch = |offset| {
+            let mut light = light(Vec::new());
+            let mut flare = (**light.flare.as_ref().unwrap()).clone();
+            flare.occlusion_offset = offset;
+            light.flare = Some(Arc::new(flare));
+            light.occlusion_patch(&[1.0; 4], &[[1.0; 3]; 4], None, &VIEW).unwrap().center
+        };
+        assert_eq!(patch(0), [1.0, -0.1, 0.0]);
+        assert!((patch(1)[1] + 0.141_421_4).abs() < 1e-6);
+        assert_eq!(patch(2), [1.0, 0.0, 0.0]);
+        // A dark light tests nothing.
+        assert!(light(Vec::new()).occlusion_patch(&[0.0; 4], &[[1.0; 3]; 4], None, &VIEW).is_none());
     }
 
     #[test]

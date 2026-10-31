@@ -6,6 +6,7 @@
 //! transforms. The preview has no fog, and the pixel shaders scale the scene
 //! by `color1.a`, so `color1` is left at 1.
 
+use super::ce_lights::CE_POINT_LIGHT_ROWS;
 use super::h2_prt::H2_PRT_REGISTERS;
 use super::renderer::model_vertex_prelude;
 
@@ -81,7 +82,7 @@ pub(in crate::app) enum H2VertexStage {
     /// A sphere light's specular pass: light and eye in tangent space.
     LightSpecular,
     /// Halo CE's `model.vsh` for a lone object: the two distant lights and
-    /// ambient of `CeModelRows`, with no point lights or fog.
+    /// ambient of `CeModelRows`, and the object's point lights, with no fog.
     CeModel,
     /// Halo CE's `transparent_generic`: four maps through their transforms,
     /// the fades in the colors.
@@ -296,7 +297,7 @@ impl H2VertexStage {
     float first = dot(surface, -u_light_direct);
     first = max(first, -first * u_texture_rows[3].x);
     float second = dot(surface, -u_texture_rows[6].xyz);
-    v_color0 = vec4(clamp(u_texture_rows[4].rgb
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb + ce_point_light(position, surface)
         + max(first, 0.0) * u_texture_rows[5].rgb
         + max(second, 0.0) * u_texture_rows[7].rgb, 0.0, 1.0), 0.0);
     float view = dot(normalize(to_eye), surface);
@@ -312,8 +313,8 @@ impl H2VertexStage {
     v_tc1.xy = uv.xy * u_texture_rows[2].zw;
     float first = max(dot(normal, -u_light_direct), 0.0);
     float second = max(dot(normal, -u_texture_rows[6].xyz), 0.0);
-    v_color0 = vec4(clamp(u_texture_rows[4].rgb + first * u_texture_rows[5].rgb
-        + second * u_texture_rows[7].rgb, 0.0, 1.0), 1.0);"
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb + ce_point_light(position, normal)
+        + first * u_texture_rows[5].rgb + second * u_texture_rows[7].rgb, 0.0, 1.0), 1.0);"
             }
             Self::CeGlassFlat => {
                 "v_tc0.xy = uv.xy * u_texture_rows[2].xy;
@@ -532,11 +533,29 @@ uniform vec3 u_light_direct;
 uniform vec3 u_light_indirect;
 uniform vec3 u_light_position;
 uniform float u_light_falloff;
+uniform vec4 u_ce_point[{CE_POINT_LIGHT_ROWS}];
 vec3 tangent_space(vec3 value, vec3 tangent, vec3 binormal, vec3 normal) {{
     return vec3(dot(value, tangent), dot(value, binormal), dot(value, normal));
 }}
 float row(int index, vec3 point) {{
     return dot(u_texture_rows[index].xyz, point) + u_texture_rows[index].w;
+}}
+vec3 ce_point_light(vec3 position, vec3 normal) {{
+    vec3 sum = vec3(0.0);
+    for (int light = 0; light < 2; light++) {{
+        vec4 place = u_ce_point[light * 3];
+        vec4 aim = u_ce_point[light * 3 + 1];
+        vec4 color = u_ce_point[light * 3 + 2];
+        vec3 to_light = place.xyz - position;
+        float squared = dot(to_light, to_light);
+        to_light /= sqrt(max(squared, 0.000001));
+        float near = max(1.0 - squared * place.w, 0.0);
+        float facing = clamp(dot(to_light, normal), 0.0, 1.0);
+        float spot = max(dot(to_light, -aim.xyz) * aim.w + color.w, 0.0);
+        // `model.vsh` caps only the second light's spot at 1.
+        sum += near * facing * (light == 1 ? min(spot, 1.0) : spot) * color.rgb;
+    }}
+    return sum;
 }}
 void main() {{
     vec3 position;
