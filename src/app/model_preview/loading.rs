@@ -262,6 +262,7 @@ pub(super) fn load_model_preview(
         }
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
+        data.ce_object_functions = super::ce_functions::read_ce_object_functions(model_tag);
         return Ok(data);
     }
 

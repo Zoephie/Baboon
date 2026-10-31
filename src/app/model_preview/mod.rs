@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
+mod ce_functions;
 mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_passes;
@@ -287,6 +288,7 @@ fn model_preview_data(
         variants,
         default_variant: None,
         h2_change_colors: Default::default(),
+        ce_object_functions: None,
         scenario_bsps: Vec::new(),
         animations: None,
     }

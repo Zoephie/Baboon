@@ -100,6 +100,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     let camera = PreviewCamera::new(&data, &state, rect);
     let preview = Arc::clone(&data.preview);
     let visible_batches = visible_batch_indices(&preview, &state);
+    let time = std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap());
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
@@ -118,8 +119,16 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         bloom: std::env::var_os("H2_SHOT_BLOOM").is_some(),
         self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
         light_follows_camera: state.h2_light_follows_camera,
-        time: std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap()),
+        time,
         h2_prt_clusters: None,
+        object_outputs: data
+            .ce_object_functions
+            .as_ref()
+            .map_or([0.0; 4], |functions| functions.outputs(time)),
+        object_moves: data
+            .ce_object_functions
+            .as_ref()
+            .is_some_and(|functions| functions.move_at_rest()),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state

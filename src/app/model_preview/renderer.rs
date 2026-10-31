@@ -104,6 +104,7 @@ pub(super) fn draw_model_viewport(
     let preview = Arc::clone(&data.preview);
     let visible_batches = visible_batch_indices(&preview, state);
     let skinning_rows = animation_skinning_rows(data, state);
+    let time = ui.input(|input| input.time % H2_TIME_WRAP) as f32;
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
@@ -126,8 +127,16 @@ pub(super) fn draw_model_viewport(
         bloom: state.h2_bloom,
         self_shadow: state.h2_self_shadow,
         light_follows_camera: state.h2_light_follows_camera,
-        time: ui.input(|input| input.time % H2_TIME_WRAP) as f32,
+        time,
         h2_prt_clusters: None,
+        object_outputs: data
+            .ce_object_functions
+            .as_ref()
+            .map_or([0.0; 4], |functions| functions.outputs(time)),
+        object_moves: data
+            .ce_object_functions
+            .as_ref()
+            .is_some_and(|functions| functions.move_at_rest()),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -752,6 +761,10 @@ struct ModelGpuFrame {
     bones: Option<Arc<Vec<[f32; 4]>>>,
     /// The selected variant's change colors for Halo 2 passes.
     change_colors: [[f32; 3]; 4],
+    /// The opened object's `A out` to `D out` this frame, 0 with none.
+    object_outputs: [f32; 4],
+    /// Whether those change by themselves.
+    object_moves: bool,
     /// Draw opaque Halo 2 materials through their passes.
     game_shaders: bool,
     default_lights: bool,
@@ -798,7 +811,7 @@ impl ModelGpuFrame {
                         .iter()
                         .filter(|layer| self.h2_draws(**layer))
                         .flat_map(|layer| &material.h2_layers[*layer as usize])
-                        .any(|pass| pass.moves())
+                        .any(|pass| pass.moves() || (self.object_moves && pass.reads_outputs()))
                 })
         })
     }
@@ -2774,7 +2787,7 @@ impl ModelGlRenderer {
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             let location = program.location(gl, "u_texture_rows");
-            let rows = pass.texture_rows_at(frame.time);
+            let rows = pass.texture_rows_at(frame.time, &frame.object_outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             let (tint_facing, tint_glancing) = pass.tints_at(frame.time);
             let location = program.location(gl, "u_tint_facing");
@@ -2785,7 +2798,13 @@ impl ModelGlRenderer {
                 let mut value = *value;
                 pass.animate_constant(*register, &mut value, frame.time);
                 if let Some(animation) = &pass.ce_animation {
-                    animation.constant(*register, &mut value, frame.time, &frame.change_colors);
+                    animation.constant(
+                        *register,
+                        &mut value,
+                        frame.time,
+                        &frame.change_colors,
+                        &frame.object_outputs,
+                    );
                     if animation.eye_register == Some(*register) {
                         let [x, y, z] =
                             unrotate_view_vector(frame.camera.yaw, frame.camera.pitch, [0.0, -1.0, 0.0]);

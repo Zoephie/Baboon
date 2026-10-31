@@ -984,11 +984,16 @@ impl H2DrawPass {
             || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
     }
 
-    pub(crate) fn texture_rows_at(&self, time: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    /// Whether it changes with the object's outputs.
+    pub(crate) fn reads_outputs(&self) -> bool {
+        self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())
+    }
+
+    pub(crate) fn texture_rows_at(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
         self.animated_rows.iter().for_each(|row| row.apply(&mut rows, time));
         if let Some(animation) = &self.ce_animation {
-            animation.apply_rows(&mut rows, time);
+            animation.apply_rows(&mut rows, time, outputs);
         }
         rows
     }

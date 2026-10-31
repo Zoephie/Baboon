@@ -472,6 +472,8 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) default_variant: Option<String>,
     /// The Halo 2 object beside this model's change colors; empty otherwise.
     pub(in crate::app) h2_change_colors: H2ChangeColors,
+    /// An opened Halo CE object's functions.
+    pub(in crate::app) ce_object_functions: Option<super::ce_functions::CeObjectFunctions>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

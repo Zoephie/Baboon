@@ -132,7 +132,7 @@ static PERIODIC_TABLES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
 });
 
 /// `periodic_function_evaluate`.
-fn periodic_evaluate(function: usize, time: f32) -> f32 {
+pub(super) fn periodic_evaluate(function: usize, time: f32) -> f32 {
     if function == PERIODIC_ONE {
         return 1.0;
     }
@@ -178,15 +178,14 @@ impl TextureWave {
         }
     }
 
-    /// With the object input a function reads, or 1 with none. A lone model's
-    /// are all 0, as a resting object's.
-    fn value(&self, source: bool, time: f32) -> f32 {
-        let input = if source { 0.0 } else { 1.0 };
+    /// With the object output a wave reads, or 1 with none.
+    fn value(&self, source: Option<usize>, time: f32, outputs: &[f32; 4]) -> f32 {
+        let input = source.map_or(1.0, |source| outputs[source]);
         periodic_evaluate(self.function, (self.phase + time) / self.period) * self.scale * input
     }
 
-    fn moves(&self, source: bool) -> bool {
-        !source && self.function != PERIODIC_ONE && self.function != PERIODIC_ZERO
+    fn moves(&self) -> bool {
+        self.function != PERIODIC_ONE && self.function != PERIODIC_ZERO
     }
 }
 
@@ -195,8 +194,8 @@ impl TextureWave {
 struct CeMapAnimation {
     /// The first of its two texture rows.
     row: usize,
-    /// Whether u, v and rotation read an object input.
-    sources: [bool; 3],
+    /// The object output u, v and rotation read, if any.
+    sources: [Option<usize>; 3],
     waves: [TextureWave; 3],
     center: [f32; 2],
     scale: [f32; 2],
@@ -205,12 +204,16 @@ struct CeMapAnimation {
 }
 
 impl CeMapAnimation {
-    fn moves(&self) -> bool {
-        (0..3).any(|axis| self.waves[axis].moves(self.sources[axis]))
+    /// Whether it moves with no object output doing the moving.
+    fn moves(&self, outputs: &[f32; 4]) -> bool {
+        (0..3).any(|axis| {
+            self.waves[axis].moves() && self.sources[axis].is_none_or(|source| outputs[source] != 0.0)
+        })
     }
 
-    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32) {
-        let [u, v, r] = std::array::from_fn(|axis| self.waves[axis].value(self.sources[axis], time));
+    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+        let [u, v, r] =
+            std::array::from_fn(|axis| self.waves[axis].value(self.sources[axis], time, outputs));
         let (offset_u, offset_v) =
             (self.offset[0] - self.center[0] + u, self.offset[1] - self.center[1] + v);
         let turn = r + self.rotation;
@@ -242,6 +245,8 @@ struct CeColorAnimation {
     animates_alpha: bool,
     /// The change color channel it is tinted by.
     channel: Option<usize>,
+    /// `A-out controls color0 animation`: the object's output for the wave.
+    follows_output: bool,
 }
 
 impl CeColorAnimation {
@@ -249,8 +254,12 @@ impl CeColorAnimation {
         self.function != PERIODIC_ONE && self.function != PERIODIC_ZERO && self.lower != self.upper
     }
 
-    fn apply(&self, value: &mut [f32; 4], time: f32, change_colors: &[[f32; 3]; 4]) {
-        let wave = periodic_evaluate(self.function, time / self.period);
+    fn apply(&self, value: &mut [f32; 4], time: f32, change_colors: &[[f32; 3]; 4], outputs: &[f32; 4]) {
+        let wave = if self.follows_output {
+            outputs[0]
+        } else {
+            periodic_evaluate(self.function, time / self.period)
+        };
         let at = |axis: usize| self.lower[axis] + (self.upper[axis] - self.lower[axis]) * wave;
         for axis in 0..3 {
             let tint = self.channel.map_or(1.0, |channel| change_colors[channel][axis]);
@@ -269,15 +278,75 @@ pub(crate) struct CeModelAnimation {
     colors: Vec<CeColorAnimation>,
     /// The constant that holds the way back along the view.
     pub(crate) eye_register: Option<u32>,
+    /// The object output a `framebuffer fade source` reads.
+    fade_source: Option<usize>,
+    meter: Option<CeMeter>,
+}
+
+/// What `shader_transparent_meter` works out from its sources.
+#[derive(Debug, Clone, PartialEq)]
+struct CeMeter {
+    /// Brightness, flash, value and flash extension.
+    sources: [Option<usize>; 4],
+    flash: [f32; 3],
+    maximum: [f32; 3],
+    minimum: [f32; 3],
+    background: [f32; 3],
+    tint: [f32; 3],
+    /// `tint mode-2`: meter and background transparency.
+    transparency: Option<[f32; 2]>,
+    negative: bool,
+}
+
+impl CeMeter {
+    /// `c0` to `c5` of the kit's shader. With no source an input is 1.
+    fn constants(&self, outputs: &[f32; 4]) -> [[f32; 4]; 6] {
+        let input = |index: usize| self.sources[index].map_or(1.0, |source| outputs[source]);
+        let (brightness, flash, value, extension) = (input(0), input(1), input(2), input(3));
+        let with = |[r, g, b]: [f32; 3], w: f32| [r, g, b, w];
+        let lit = self.flash.map(|channel| channel * flash);
+        let (first_alpha, tint, tint_alpha, background_alpha) = match self.transparency {
+            Some([meter, background]) => {
+                (meter, self.tint.map(|channel| channel * brightness), meter, background)
+            }
+            None => (brightness, self.tint, brightness, 0.0),
+        };
+        let (variable, sign) = if self.negative { (lit.map(|c| -c), -1.0) } else { (lit, 1.0) };
+        [
+            with(lit, first_alpha),
+            with(self.maximum, 1.0 / (extension * 8.0f32).max(1.0)),
+            with(self.minimum, value),
+            with(self.background, background_alpha),
+            with(tint, tint_alpha),
+            with(variable, sign),
+        ]
+    }
 }
 
 impl CeModelAnimation {
     pub(crate) fn moves(&self) -> bool {
-        self.maps.iter().any(CeMapAnimation::moves) || self.colors.iter().any(CeColorAnimation::moves)
+        self.maps.iter().any(|map| map.moves(&[0.0; 4]))
+            || self.colors.iter().any(CeColorAnimation::moves)
     }
 
-    pub(crate) fn apply_rows(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32) {
-        self.maps.iter().for_each(|map| map.apply(rows, time));
+    /// Whether anything here follows an object output.
+    pub(crate) fn reads_outputs(&self) -> bool {
+        self.fade_source.is_some()
+            || self.meter.is_some()
+            || self.maps.iter().any(|map| map.sources.iter().any(Option::is_some))
+            || self.colors.iter().any(|color| color.follows_output)
+    }
+
+    pub(crate) fn apply_rows(
+        &self,
+        rows: &mut [[f32; 4]; H2_TEXTURE_ROWS],
+        time: f32,
+        outputs: &[f32; 4],
+    ) {
+        self.maps.iter().for_each(|map| map.apply(rows, time, outputs));
+        if let Some(source) = self.fade_source {
+            rows[8][0] = outputs[source];
+        }
     }
 
     /// The color `register` holds, if it is one of these.
@@ -287,9 +356,15 @@ impl CeModelAnimation {
         value: &mut [f32; 4],
         time: f32,
         change_colors: &[[f32; 3]; 4],
+        outputs: &[f32; 4],
     ) {
         for color in self.colors.iter().filter(|color| color.register == register) {
-            color.apply(value, time, change_colors);
+            color.apply(value, time, change_colors, outputs);
+        }
+        if let Some(meter) = &self.meter
+            && let Some(constant) = meter.constants(outputs).get(register as usize)
+        {
+            *value = *constant;
         }
     }
 }
@@ -458,7 +533,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
 }
 
 /// A shader's option by name, with a list's position standing for its value.
-fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
+pub(super) fn option_index(root: TagStruct<'_>, field: &str, options: &[&str]) -> i32 {
     let name = root.read_enum_name(field);
     options.iter().position(|option| name.as_deref() == Some(*option)).unwrap_or(0) as i32
 }
@@ -467,7 +542,7 @@ const DETAIL_FUNCTIONS: [&str; 3] = ["double/biased multiply", "multiply", "doub
 const COLOR_SOURCES: [&str; 5] = ["none", "A", "B", "C", "D"];
 /// An object function's outputs, as animation and fade fields name them.
 const FUNCTION_SOURCES: [&str; 5] = ["none", "A out", "B out", "C out", "D out"];
-const PERIODIC_FUNCTIONS: [&str; 12] = [
+pub(super) const PERIODIC_FUNCTIONS: [&str; 12] = [
     "one",
     "zero",
     "cosine",
@@ -487,6 +562,11 @@ fn color_channel(root: TagStruct<'_>, field: &str) -> Option<usize> {
     (option_index(root, field, &COLOR_SOURCES) as usize).checked_sub(1)
 }
 
+/// The object output a source field reads, with `none` as `None`.
+fn function_source(root: TagStruct<'_>, field: &str) -> Option<usize> {
+    (option_index(root, field, &FUNCTION_SOURCES) as usize).checked_sub(1)
+}
+
 fn nonzero(value: Option<f32>, default: f32) -> f32 {
     value.filter(|value| *value != 0.0).unwrap_or(default)
 }
@@ -498,14 +578,13 @@ fn read_map_animation(
     offset: [f32; 2],
     rotation: f32,
 ) -> CeMapAnimation {
-    let source = |field: &str| option_index(root, field, &FUNCTION_SOURCES) != 0;
     let center = root.read_point2d("rotation-animation center");
     CeMapAnimation {
         row,
         sources: [
-            source("u-animation source"),
-            source("v-animation source"),
-            source("rotation-animation source"),
+            function_source(root, "u-animation source"),
+            function_source(root, "v-animation source"),
+            function_source(root, "rotation-animation source"),
         ],
         waves: [
             TextureWave::read(root, "u", 1.0),
@@ -526,6 +605,8 @@ fn read_model_animation(root: TagStruct<'_>, scale: [f32; 2], detail_mask: i32) 
         maps: vec![read_map_animation(root, 0, scale, [0.0; 2], 0.0)],
         // The game only sets this color with no detail mask.
         eye_register: None,
+        fade_source: None,
+        meter: None,
         colors: (detail_mask == 0)
             .then(|| CeColorAnimation {
                 register: 0,
@@ -535,6 +616,7 @@ fn read_model_animation(root: TagStruct<'_>, scale: [f32; 2], detail_mask: i32) 
                 upper: [upper.red, upper.green, upper.blue, 0.0],
                 animates_alpha: false,
                 channel: color_channel(root, "color source"),
+                follows_output: false,
             })
             .into_iter()
             .collect(),
@@ -795,12 +877,8 @@ fn transparent_pass(
     pass.textures = textures;
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();
-    // A fade source reads an object function, which rests at 0 on a lone
-    // model: damage and shield overlays stay out of sight, as on a whole one.
-    if option_index(root, "framebuffer fade source", &FUNCTION_SOURCES) != 0 {
-        pass.texture_rows[8][0] = 0.0;
-    }
-    pass.ce_animation = Some(Arc::new(animation));
+    let fade_source = function_source(root, "framebuffer fade source");
+    pass.ce_animation = Some(Arc::new(CeModelAnimation { fade_source, ..animation }));
     pass
 }
 
@@ -875,6 +953,7 @@ fn generic_pass(
             upper,
             animates_alpha: true,
             channel,
+            follows_output: has("A-out controls color0 animation"),
         });
     }
     let blend = option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS);
@@ -893,7 +972,7 @@ fn generic_pass(
     let shader = translate_fx(GENERIC_FILE, H2_GLSL_VERSION, &defines, read)?;
     let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps, colors, eye_register: None };
+    let animation = CeModelAnimation { maps, colors, ..Default::default() };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
 }
 
@@ -955,7 +1034,7 @@ fn chicago_pass(
     let shader = translate_fx(CHICAGO_FILE, H2_GLSL_VERSION, &[("USE_CUBE", cube)], read)?;
     let reference = flags.iter().any(|name| name == "alpha-tested").then_some(ALPHA_REFERENCE);
     let fragment = shader.entry_tested("pixel_main(i)", reference);
-    let animation = CeModelAnimation { maps: animations, colors: Vec::new(), eye_register: None };
+    let animation = CeModelAnimation { maps: animations, ..Default::default() };
     Ok(transparent_pass(root, first_map, flags, fragment, textures, constants, animation))
 }
 
@@ -1219,56 +1298,42 @@ fn glass_passes(
 }
 
 /// The `shader_transparent_meter` case of
-/// `rasterizer_transparent_geometry_group_draw`. A source reads an object
-/// function, resting at 0; with none its input is 1.
+/// `rasterizer_transparent_geometry_group_draw`.
 fn meter_pass(
     directory: &std::path::Path,
     root: TagStruct<'_>,
     flags: &[String],
     bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
 ) -> Result<H2DrawPass, String> {
-    let input = |field: &str| {
-        if option_index(root, field, &FUNCTION_SOURCES) == 0 { 1.0 } else { 0.0 }
-    };
-    let (brightness, flash) = (input("meter brightness source"), input("flash brightness source"));
-    let (value, extension) = (input("value source"), input("flash-extension source"));
     let rgb = |name: &str| {
         let color = root.read_rgb(name);
         [color.red, color.green, color.blue]
     };
     let has = |flag: &str| flags.iter().any(|name| name == flag);
-    let lit = |[r, g, b]: [f32; 3], w: f32| [r, g, b, w];
-    let flash_color = rgb("flash color").map(|channel| channel * flash);
-    let [max, min] = [rgb("gradient max color"), rgb("gradient min color")];
-    let mode_two = has("tint mode-2");
-    let meter_alpha = root.read_real("meter transparency").unwrap_or(0.0);
-    let tint = rgb("tint color");
-    let (first_alpha, tint_color, tint_alpha, background_alpha) = if mode_two {
-        let background = root.read_real("background transparency").unwrap_or(0.0);
-        (meter_alpha, tint.map(|channel| channel * brightness), meter_alpha, background)
-    } else {
-        (brightness, tint, brightness, 0.0)
+    let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+    let meter = CeMeter {
+        sources: [
+            function_source(root, "meter brightness source"),
+            function_source(root, "flash brightness source"),
+            function_source(root, "value source"),
+            function_source(root, "flash-extension source"),
+        ],
+        flash: rgb("flash color"),
+        maximum: rgb("gradient max color"),
+        minimum: rgb("gradient min color"),
+        background: rgb("background color"),
+        tint: rgb("tint color"),
+        transparency: has("tint mode-2")
+            .then(|| [real("meter transparency"), real("background transparency")]),
+        negative: has("flash color is negative"),
     };
-    let (sign, variable) = if has("flash color is negative") {
-        (-1.0, flash_color.map(|channel| -channel))
-    } else {
-        (1.0, flash_color)
-    };
-    let constants = vec![
-        (0, lit(flash_color, first_alpha)),
-        (1, lit(max, 1.0 / (extension * 8.0f32).max(1.0))),
-        (2, lit(min, value)),
-        (3, lit(rgb("background color"), background_alpha)),
-        (4, lit(tint_color, tint_alpha)),
-        (5, lit(variable, sign)),
-    ];
     let image = root
         .read_tag_ref_path("map")
         .filter(|path| !path.is_empty())
         .and_then(|path| bitmap(&path, SamplerKind::Texture2D));
     let read = |name: &str| read_shader_source(directory, name);
     let shader = translate_fx(METER_FILE, H2_GLSL_VERSION, &[], read)?;
-    Ok(SimplePass {
+    let mut pass = SimplePass {
         stage: H2VertexStage::CeMeter,
         fragment: shader.entry("pixel_main(i)"),
         blend: plain_blend(H2BlendFactor::One, H2BlendFactor::One),
@@ -1276,10 +1341,13 @@ fn meter_pass(
         write_depth: false,
         channels: [true, true, true, false],
         textures: vec![texture(0, SamplerKind::Texture2D, image.or_else(|| Some(flat(WHITE))))],
-        constants,
+        constants: (0..6).map(|register| (register, [0.0; 4])).collect(),
         rows: [[0.0; 4]; H2_TEXTURE_ROWS],
     }
-    .build())
+    .build();
+    pass.ce_animation =
+        Some(Arc::new(CeModelAnimation { meter: Some(meter), ..Default::default() }));
+    Ok(pass)
 }
 
 /// `rasterizer_water_draw`, without its ripples: the game composes those into
@@ -1629,7 +1697,7 @@ mod tests {
         }
     }
 
-    fn map(waves: [TextureWave; 3], sources: [bool; 3]) -> CeMapAnimation {
+    fn map(waves: [TextureWave; 3], sources: [Option<usize>; 3]) -> CeMapAnimation {
         CeMapAnimation {
             row: 0,
             sources,
@@ -1645,26 +1713,27 @@ mod tests {
     fn a_full_turn_of_rotation_leaves_the_rows_square() {
         let still = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 360.0 };
         let idle = TextureWave { function: PERIODIC_ZERO, period: 1.0, phase: 0.0, scale: 1.0 };
-        let animation = map([idle.clone(), idle, still], [false; 3]);
+        let animation = map([idle.clone(), idle, still], [None; 3]);
         let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-        animation.apply(&mut rows, 1.0);
+        animation.apply(&mut rows, 1.0, &[0.0; 4]);
         assert_eq!(rows[0], [2.0, 0.0, 0.0, 0.0]);
         assert_eq!(rows[1], [0.0, 3.0, 0.0, 0.0]);
-        assert!(!animation.moves());
+        assert!(!animation.moves(&[0.0; 4]));
     }
 
     #[test]
     fn scrolling_moves_and_an_input_that_rests_does_not() {
         let scroll = TextureWave { function: 6, period: 2.0, phase: 0.0, scale: 1.0 };
         let idle = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 1.0 };
-        let mut animation = map([scroll, idle.clone(), idle], [false; 3]);
-        assert!(animation.moves());
-        animation.sources[0] = true;
-        assert!(!animation.moves());
+        let mut animation = map([scroll, idle.clone(), idle], [None; 3]);
+        assert!(animation.moves(&[0.0; 4]));
+        animation.sources[0] = Some(0);
+        assert!(!animation.moves(&[0.0; 4]));
+        assert!(animation.moves(&[1.0, 0.0, 0.0, 0.0]));
     }
 
-    /// With `BLAM_TEST_HCEEK`: the blink reads `A out`, so a lone model's eyes
-    /// stay open, and the jitter beside it still moves them.
+    /// With `BLAM_TEST_HCEEK`: the blink reads `A out`, so eyes with no object
+    /// behind them stay open and its output shuts them.
     #[test]
     fn an_eye_shader_reads_its_blink_from_an_object_function() {
         let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
@@ -1684,11 +1753,32 @@ mod tests {
         )
         .unwrap();
         let animation = read_map_animation(tag.root(), 0, [1.0; 2], [0.0; 2], 0.0);
-        assert_eq!(animation.sources, [false, true, false]);
+        assert_eq!(animation.sources, [None, Some(0), None]);
         let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-        animation.apply(&mut rows, 0.0);
+        animation.apply(&mut rows, 0.0, &[0.0; 4]);
         assert_eq!(rows[1][3], 0.0);
-        assert!(animation.moves());
+        animation.apply(&mut rows, 0.0, &[1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(rows[1][3], -0.06);
+        assert!(animation.moves(&[0.0; 4]));
+    }
+
+    #[test]
+    fn a_meter_follows_its_sources_and_an_unset_one_reads_one() {
+        let meter = CeMeter {
+            sources: [Some(0), None, Some(1), None],
+            flash: [1.0, 0.5, 0.0],
+            maximum: [0.0; 3],
+            minimum: [0.0; 3],
+            background: [0.0; 3],
+            tint: [1.0; 3],
+            transparency: None,
+            negative: true,
+        };
+        let constants = meter.constants(&[0.25, 0.75, 0.0, 0.0]);
+        assert_eq!(constants[0], [1.0, 0.5, 0.0, 0.25]);
+        assert_eq!(constants[2][3], 0.75);
+        assert_eq!(constants[1][3], 1.0 / 8.0);
+        assert_eq!(constants[5], [-1.0, -0.5, -0.0, -1.0]);
     }
 
     #[test]
