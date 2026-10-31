@@ -299,7 +299,7 @@ impl Default for ModelPreviewState {
             h2_default_lights: false,
             h2_light_follows_camera: true,
             h2_active_camo: false,
-            h2_bloom: false,
+            h2_bloom: true,
             h2_self_shadow: false,
             textures_pending: false,
             show_render: true,
