@@ -8,6 +8,12 @@ use blam_tags::render_method::{
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, ResolvedRenderMethod,
     ResolvedValue,
 };
+use super::h2_passes::{
+    H2DrawPass, H2Image, H2Layer, H2_LAYER_COUNT, h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
+    resolve_h2_layer_passes,
+};
+use crate::core::h2_pixel_shader::SamplerKind;
+use std::sync::Arc;
 use std::collections::HashMap;
 
 /// The texture roles the preview understands.
@@ -137,6 +143,9 @@ pub(crate) struct MaterialTextures {
     /// from an option default — including the detail maps' tiling, which lives
     /// there and defaults to 16.
     pub used_shader_parameters_only: bool,
+    /// Halo 2 passes by `H2Layer`, drawn in place of the slots above; empty
+    /// for other games and outside a loose kit, whose `.psh` sources they need.
+    pub h2_layers: [Vec<H2DrawPass>; H2_LAYER_COUNT],
 }
 
 impl MaterialTextures {
@@ -168,6 +177,8 @@ struct ResolveCaches {
     /// Halo 2 shader templates' parameter defaults, by template path. 1,637
     /// shaders share a few dozen templates; `tex_bump` alone serves 296.
     h2_templates: HashMap<String, Option<Arc<H2TemplateDefaults>>>,
+    /// Pass maps by path and shape; a shader samples each in only one shape.
+    h2_images: HashMap<(String, bool), Option<Arc<H2Image>>>,
     /// The kit's own group → extension names. The cross-game table answers
     /// with the H3+ meaning on a collision, and Halo CE's
     /// `shader_transparent_meter` (`smet`) is Halo 4's `structure_meta` there.
@@ -193,7 +204,7 @@ pub(crate) fn resolve_model_textures(
         },
         ..Default::default()
     };
-    materials
+    let mut textures: Vec<MaterialTextures> = materials
         .iter()
         .map(|material| {
             // Guarded per material: blam-tags' enum resolver panics on names
@@ -210,7 +221,27 @@ pub(crate) fn resolve_model_textures(
                 )
             })
         })
-        .collect()
+        .collect();
+    // A model's hologram shader is on no batch: every material takes its passes.
+    for layer in [H2Layer::Hologram as usize, H2Layer::ActiveCamo as usize] {
+        let overlay = textures.iter().find(|texture| !texture.h2_layers[layer].is_empty());
+        if let Some(passes) = overlay.map(|texture| texture.h2_layers[layer].clone()) {
+            for texture in &mut textures {
+                texture.h2_layers[layer].clone_from(&passes);
+            }
+        }
+    }
+    for texture in &mut textures {
+        let lit = [H2Layer::Lightmap, H2Layer::Prt]
+            .iter()
+            .any(|layer| !texture.h2_layers[*layer as usize].is_empty());
+        if lit {
+            for (layer, pass) in h2_shadow_passes() {
+                texture.h2_layers[layer as usize] = vec![pass];
+            }
+        }
+    }
+    textures
 }
 
 fn resolve_one_material(
@@ -491,12 +522,7 @@ fn resolve_h2_shader(
         let Some(path) = path else {
             continue;
         };
-        let positive = |scale: f32| (scale.is_finite() && scale > 0.0).then_some(scale);
-        let inherited = defaults.and_then(|defaults| positive(defaults.bitmap_scale)).unwrap_or(1.0);
-        let scale = authored
-            .and_then(h2_scale_animation)
-            .map(|[x, y]| [x.and_then(positive).unwrap_or(inherited), y.and_then(positive).unwrap_or(inherited)])
-            .unwrap_or([inherited, inherited]);
+        let scale = h2_bitmap_scale(authored, defaults);
         let binding = SlotBitmap {
             path,
             image_index: 0,
@@ -520,10 +546,31 @@ fn resolve_h2_shader(
     // Without the template, what the shader authors still resolves; what is
     // lost is the defaults, the same as a render method without its definition.
     textures.used_shader_parameters_only = template.is_none();
+    // The game skips the specular pass for a shader with no specular type.
+    let has_specular = root.read_int_any("specular type").unwrap_or(0) != 0;
+    for layer in H2Layer::ALL {
+        if (layer == H2Layer::LightSpecular && !has_specular) || layer.tag_name().is_empty() {
+            continue;
+        }
+        let has_texaccum = [H2Layer::Texaccum, H2Layer::LightAlbedo]
+            .iter()
+            .any(|layer| !textures.h2_layers[*layer as usize].is_empty());
+        textures.h2_layers[layer as usize] = prepare_h2_passes(
+            source,
+            shader,
+            &parameters,
+            template.as_deref(),
+            caches,
+            layer,
+            has_texaccum,
+        );
+    }
     // 633 of halo2_mcc's 3,147 model materials land here, nearly all on
     // `transparent\*` templates (skies, plasma, alpha-blended env) and the
     // self-illumination-only `illum*` ones.
-    if textures.slots.iter().all(Option::is_none) {
+    if textures.slots.iter().all(Option::is_none)
+        && textures.h2_layers[H2Layer::Transparent as usize].is_empty()
+    {
         let template = root.read_tag_ref_path("template").unwrap_or_default();
         let leaf = tag_path::name(&template);
         textures.error = Some(format!(
@@ -531,6 +578,164 @@ fn resolve_h2_shader(
         ));
     }
     textures
+}
+
+/// A parameter's tiling: what the shader authors over the template's default.
+fn h2_bitmap_scale(
+    authored: Option<&TagStruct<'_>>,
+    defaults: Option<&H2TemplateParameter>,
+) -> [f32; 2] {
+    let positive = |scale: f32| (scale.is_finite() && scale > 0.0).then_some(scale);
+    let inherited = defaults.and_then(|defaults| positive(defaults.bitmap_scale)).unwrap_or(1.0);
+    authored
+        .and_then(|parameter| h2_scale_animation(parameter))
+        .map(|[x, y]| [x.and_then(positive).unwrap_or(inherited), y.and_then(positive).unwrap_or(inherited)])
+        .unwrap_or([inherited, inherited])
+}
+
+/// Decode a map in the shape its sampler asks for. Halo 2 keeps a cube's six
+/// faces, and a volume's slices, side by side in the top level with the smaller
+/// levels after them. `compose_cube_cross` steps a whole mip chain per face,
+/// which reads every face but the first from the wrong place here.
+fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<H2Image> {
+    let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
+    if kind == SamplerKind::Texture2D {
+        let image = decode_thumbnail(&tag, 0, MAX_TEXTURE_EDGE).ok()?;
+        return Some(H2Image::Flat(TextureImage {
+            rgba: image.rgba,
+            width: image.width,
+            height: image.height,
+            repeat_x: true,
+            repeat_y: true,
+            scale: [1.0, 1.0],
+        }));
+    }
+    let bitmap = blam_tags::bitmap::Bitmap::new(&tag).ok()?;
+    let image = bitmap.image(0)?;
+    let (width, height) = (image.width(), image.height());
+    let format = image.format().ok()?;
+    let slice_bytes = format.level_bytes(width, height) as usize;
+    // `pixel_bytes` sizes a volume as one slice, so take the tag's own data.
+    let root = tag.root();
+    let offset = root
+        .descend("bitmaps[0]")
+        .and_then(|image| image.read_int_any("pixels offset"))
+        .unwrap_or(0)
+        .max(0) as usize;
+    let tag_bytes = match root.field("processed pixel data").and_then(|field| field.value()) {
+        Some(blam_tags::TagFieldData::Data(data)) => data,
+        _ => Vec::new(),
+    };
+    let bytes: &[u8] = if kind == SamplerKind::Volume {
+        tag_bytes.get(offset..)?
+    } else {
+        image.pixel_bytes().ok()?
+    };
+    let slice = |index: usize| {
+        let data = bytes.get(index * slice_bytes..(index + 1) * slice_bytes)?;
+        blam_tags::bitmap::decode::decode_to_rgba8(format, width, height, data, bitmap.p8_palette())
+            .ok()
+    };
+    if kind == SamplerKind::Cube {
+        if !image.is_cube() {
+            return None;
+        }
+        // Stored +X +Y -X -Y +Z -Z: the tool lays them out as a ring around
+        // the Z-up world. Seam continuity picks this order on every cube map
+        // in the kit's reflection set, with the sky on +Z.
+        let faces = [slice(0)?, slice(2)?, slice(1)?, slice(3)?, slice(4)?, slice(5)?];
+        return Some(H2Image::Cube { size: width as usize, faces });
+    }
+    let depth = image.depth() as usize;
+    let mut rgba = Vec::new();
+    for index in 0..depth {
+        rgba.extend(slice(index)?);
+    }
+    Some(H2Image::Volume { width: width as usize, height: height as usize, depth, rgba })
+}
+
+/// A shader's transparent passes, ready to draw. A pass that cannot be
+/// prepared drops them all, and the material keeps its slot drawing rather
+/// than losing a layer: this needs a loose kit's `.psh` files.
+fn prepare_h2_passes(
+    source: &TagSource,
+    shader: &TagFile,
+    parameters: &HashMap<String, TagStruct<'_>>,
+    template: Option<&H2TemplateDefaults>,
+    caches: &mut ResolveCaches,
+    layer: H2Layer,
+    has_texaccum: bool,
+) -> Vec<H2DrawPass> {
+    let TagSource::LooseFolder { root, .. } = source else {
+        return Vec::new();
+    };
+    let load = |path: &str, extension: &str, group: &[u8; 4]| {
+        load_referenced_tag_from_source(source, path, extension, group).ok()
+    };
+    let passes = match resolve_h2_layer_passes(shader, load, layer.tag_name(), layer.implementation()) {
+        Ok(passes) => passes,
+        Err(error) => {
+            eprintln!("model preview: {error}");
+            return Vec::new();
+        }
+    };
+    let mut cases = HashMap::from(["specular", "lightmap"].map(|name| {
+        let value = shader.root().read_int_any(&format!("{name} type")).unwrap_or(0) as i32;
+        (format!("{name}_type"), value)
+    }));
+    // A default light's definition has specular on; see `rasterizer_get_switch_extern`.
+    cases.insert("light_definition_specular_enabled".to_owned(), 1);
+    let directory = root.join("rasterizer").join("pixel_shaders_dx9");
+    let specular_brightness =
+        shader.root().read_real("lightmap specular brightness").unwrap_or(1.0);
+    let mut prepared = Vec::with_capacity(passes.len());
+    for pass in &passes {
+        // The texaccum target and friends need a frame this preview does not
+        // render, so such a material keeps the slots.
+        if layer != H2Layer::Transparent && h2_pass_needs_frame_texture(pass, has_texaccum) {
+            return Vec::new();
+        }
+        let file = directory.join(pass.pixel_shader_file());
+        let bytes = match std::fs::read(&file) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("model preview: {}: {error}", file.display());
+                return Vec::new();
+            }
+        };
+        let psh = String::from_utf8_lossy(&bytes);
+        let drawn = prepare_draw_pass(
+            pass,
+            &psh,
+            cases.clone(),
+            specular_brightness,
+            |path, kind| {
+                let key = (path.to_owned(), kind == SamplerKind::Texture2D);
+                if let Some(cached) = caches.h2_images.get(&key) {
+                    return cached.clone();
+                }
+                let decoded = decode_h2_image(source, path, kind).map(Arc::new);
+                caches.h2_images.insert(key, decoded.clone());
+                decoded
+            },
+            |name| {
+                h2_bitmap_scale(
+                    parameters.get(name),
+                    template.and_then(|template| template.parameters.get(name)),
+                )
+            },
+        );
+        match drawn {
+            Ok(drawn) => prepared.push(drawn),
+            Err(error) => {
+                if layer == H2Layer::Transparent {
+                    eprintln!("model preview: {}: {error}", pass.path);
+                }
+                return Vec::new();
+            }
+        }
+    }
+    prepared
 }
 
 /// A Halo 2 parameter's own tiling, per axis, from its animation properties:
@@ -1218,5 +1423,66 @@ mod tests {
         assert!(detail.contains("shaders/b"));
         assert!(!detail.contains("shaders/c"));
         assert_eq!(texture_resolve_note(&textures[2..], &materials[2..]), None);
+    }
+
+    /// With `BLAM_TEST_H2EK`: `+X`'s top row is `+Y`'s right column reversed,
+    /// so a cube in the right order joins there. In D3D order this pair is
+    /// `+X` and `-X`, which share no edge at all.
+    #[test]
+    fn h2_cube_faces_join_at_their_edges() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo2),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
+        let Some(H2Image::Cube { size, faces }) = decode_h2_image(&source, path, SamplerKind::Cube)
+        else {
+            panic!("{path} should decode as a cube");
+        };
+        let texel = |face: usize, x: usize, y: usize| -> [u8; 3] {
+            let at = (y * size + x) * 4;
+            [faces[face][at], faces[face][at + 1], faces[face][at + 2]]
+        };
+        let seam = |other: usize| -> f32 {
+            let total: u32 = (0..size)
+                .map(|x| {
+                    let (a, b) = (texel(0, x, 0), texel(other, size - 1, size - 1 - x));
+                    (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
+                })
+                .sum();
+            total as f32 / size as f32
+        };
+        assert!(seam(2) < 30.0, "+X and +Y should join: {}", seam(2));
+        assert!(seam(1) > seam(2) * 2.0, "{} against {}", seam(1), seam(2));
+        let mean = |face: usize| faces[face].iter().map(|byte| *byte as u64).sum::<u64>();
+        assert!(mean(4) > mean(5), "the sky is on +Z");
+    }
+
+    /// With `BLAM_TEST_H2EK`: a volume's slices all decode.
+    #[test]
+    fn h2_volumes_decode_every_slice() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo2),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let Some(H2Image::Volume { width, height, depth, rgba }) =
+            decode_h2_image(&source, "rasterizer\\plasma_shield_noise", SamplerKind::Volume)
+        else {
+            panic!("the plasma noise should decode as a volume");
+        };
+        assert!(depth > 1);
+        assert_eq!(rgba.len(), width * height * depth * 4);
+        let slice = width * height * 4;
+        assert_ne!(rgba[..slice], rgba[slice * (depth - 1)..], "slices differ");
     }
 }

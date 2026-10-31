@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::core::source::MountedContainer;
+use super::h2_passes::h2_prt_lights;
+use super::h2_prt::read_h2_prt;
 use blam_tags::iostore::IoStoreArchive;
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
@@ -387,21 +389,65 @@ pub(super) fn load_model_preview(
     };
     let render_tag =
         read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
-    let preview = build_render_preview(&render_tag)?;
+    let mut preview = build_render_preview(&render_tag)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
+    }
+    // Halo 2 lays a model's hologram shader, and its active camo shader in the
+    // field the definitions call `UNUSED`, over all its materials.
+    let shader_group = u32::from_be_bytes(*b"shad");
+    for field in ["hologram shader", "UNUSED"] {
+        let reference = model_tag.root().field(field).and_then(|field| field.value());
+        if let Some(blam_tags::TagFieldData::TagReference(reference)) = reference
+            && let Some((group, shader_path)) = reference.group_tag_and_name
+            && group == shader_group
+            && !shader_path.is_empty()
+        {
+            preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group });
+        }
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the
     // physics shapes froze the frame every time a toggle rebuilt the merge.
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
-    Ok(model_preview_data(
+    let mut data = model_preview_data(
         render_entry.key,
         normalized,
         preview,
         read_model_variants(model_tag),
-    ))
+    );
+    data.h2_change_colors = source
+        .filter(|source| {
+            matches!(
+                source,
+                TagSource::LooseFolder { game: Some(crate::core::game::GameId::Halo2), .. }
+            )
+        })
+        .and_then(|source| load_h2_object(source, &entry.display_path))
+        .map(|object| read_h2_change_colors(&object))
+        .unwrap_or_default();
+    Ok(data)
+}
+
+/// The object a Halo 2 model belongs to: the kit keeps them side by side
+/// under one name, as `brute.biped` beside `brute.model`.
+fn load_h2_object(source: &TagSource, model_path: &str) -> Option<TagFile> {
+    const OBJECTS: [(&str, &[u8; 4]); 7] = [
+        ("biped", b"bipd"),
+        ("vehicle", b"vehi"),
+        ("weapon", b"weap"),
+        ("equipment", b"eqip"),
+        ("garbage", b"garb"),
+        ("scenery", b"scen"),
+        ("crate", b"bloc"),
+    ];
+    let stem = model_path.strip_suffix(".model").unwrap_or(model_path);
+    OBJECTS
+        .iter()
+        .find_map(|(extension, group)| {
+            load_referenced_tag_from_source(source, stem, extension, group).ok()
+        })
 }
 
 /// Build preview geometry from a render-geometry tag — a `render_model`
@@ -517,6 +563,8 @@ pub(in crate::app) fn build_render_preview(
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
+    preview.h2_prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
+        .filter(|prt| prt.vertices.len() == preview.vertices.len());
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
     Ok(preview)
 }
@@ -3542,5 +3590,30 @@ mod tests {
             let apex = if edited { [1.0, 4.0, 5.0] } else { [1.0, 2.0, 3.0] };
             assert_eq!(data.preview.bounds_max, apex, "edited: {edited}");
         }
+    }
+}
+
+#[cfg(test)]
+mod h2_object_tests {
+    use super::*;
+
+    /// With `BLAM_TEST_H2EK`: the object is found from the path a preview has.
+    #[test]
+    fn a_model_finds_the_object_beside_it() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::Halo2),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let object = load_h2_object(&source, "objects\\characters\\brute\\brute.model")
+            .expect("brute.biped sits beside brute.model");
+        assert_eq!(object.header.group_tag, u32::from_be_bytes(*b"bipd"));
+        let colors = read_h2_change_colors(&object);
+        assert!(colors.iter().any(|channel| !channel.is_empty()));
+        assert!(load_h2_object(&source, "objects\\no\\such\\model.model").is_none());
     }
 }

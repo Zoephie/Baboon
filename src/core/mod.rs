@@ -9,6 +9,7 @@ pub(crate) mod created_tags;
 pub(crate) mod document;
 pub(crate) mod format;
 pub(crate) mod game;
+pub(crate) mod h2_pixel_shader;
 pub(crate) mod index_targets;
 pub(crate) mod keywords;
 pub(crate) mod process;

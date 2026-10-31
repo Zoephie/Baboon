@@ -232,6 +232,13 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_scenario_selection: std::collections::BTreeSet<usize>,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
+    /// Draw Halo 2 opaque materials through the game's own passes.
+    pub(in crate::app) h2_game_shaders: bool,
+    /// Add the game's two default lights on top of the opaque passes.
+    pub(in crate::app) h2_default_lights: bool,
+    pub(in crate::app) h2_active_camo: bool,
+    pub(in crate::app) h2_bloom: bool,
+    pub(in crate::app) h2_self_shadow: bool,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -285,6 +292,11 @@ impl Default for ModelPreviewState {
             loaded_scenario_selection: std::collections::BTreeSet::new(),
             render_mode: ModelRenderMode::Textured,
             show_backfaces: false,
+            h2_game_shaders: false,
+            h2_default_lights: true,
+            h2_active_camo: false,
+            h2_bloom: false,
+            h2_self_shadow: false,
             textures_pending: false,
             show_render: true,
             perspective: true,
@@ -452,6 +464,8 @@ pub(in crate::app) struct ModelPreviewData {
     /// appears half-shaded and then changes under the cursor.
     pub(in crate::app) textures: Option<std::sync::Arc<Vec<MaterialTextures>>>,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
+    /// The Halo 2 object beside this model's change colors; empty otherwise.
+    pub(in crate::app) h2_change_colors: H2ChangeColors,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

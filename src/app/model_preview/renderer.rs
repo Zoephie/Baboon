@@ -2,8 +2,18 @@
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
+use super::h2_passes::{
+    H2BlendEquation, H2BlendFactor, H2Compare, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
+    H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT,
+    H2_REFLECTION_SCALE, h2_change_colors_for, h2_normalization_face,
+};
+use super::h2_bloom::H2Bloom;
+use super::h2_passes::h2_prt_lights;
+use super::h2_stage::H2VertexStage;
+use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
@@ -109,6 +119,18 @@ pub(super) fn draw_model_viewport(
             .then(|| data.textures.clone())
             .flatten(),
         bones: skinning_rows.clone().map(Arc::new),
+        game_shaders: state.h2_game_shaders,
+        default_lights: state.h2_default_lights,
+        active_camo: state.h2_active_camo,
+        bloom: state.h2_bloom,
+        self_shadow: state.h2_self_shadow,
+        change_colors: h2_change_colors_for(
+            &data.h2_change_colors,
+            state
+                .selected_variant
+                .and_then(|index| data.variants.get(index))
+                .map_or("", |variant| variant.name.as_str()),
+        ),
     };
     painter.add(egui::PaintCallback {
         rect,
@@ -717,6 +739,14 @@ struct ModelGpuFrame {
     /// Skinning matrices for this frame — three vec4 rows per bone, in
     /// `RenderModelPreview::nodes` order. `None` draws the bind pose.
     bones: Option<Arc<Vec<[f32; 4]>>>,
+    /// The selected variant's change colors for Halo 2 passes.
+    change_colors: [[f32; 3]; 4],
+    /// Draw opaque Halo 2 materials through their passes.
+    game_shaders: bool,
+    default_lights: bool,
+    active_camo: bool,
+    bloom: bool,
+    self_shadow: bool,
 }
 
 thread_local! {
@@ -750,7 +780,7 @@ fn paint_model_gl(
         gl.scissor(left, bottom, right - left, top - bottom);
         gl.color_mask(true, true, true, true);
         gl.depth_mask(true);
-        gl.clear_color(228.0 / 255.0, 238.0 / 255.0, 244.0 / 255.0, 1.0);
+        gl.clear_color(PREVIEW_CLEAR[0], PREVIEW_CLEAR[1], PREVIEW_CLEAR[2], 1.0);
         gl.clear_depth_f32(1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
     }
@@ -780,6 +810,10 @@ fn paint_model_gl(
 
 /// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
 /// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
+#[cfg(all(test, target_os = "macos"))]
+#[path = "h2_shot.rs"]
+mod h2_shot;
+
 const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_base",
     "u_tex_detail",
@@ -788,6 +822,13 @@ const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
     "u_tex_alpha",
     "u_tex_multipurpose",
 ];
+
+/// The vertex declarations and helpers every model stage shares: all of the
+/// modern source before its `main`.
+pub(super) fn model_vertex_prelude(version_declaration: &str) -> String {
+    let (vertex, _) = model_shader_sources(version_declaration, true, "");
+    vertex.split("void main()").next().unwrap_or_default().to_owned()
+}
 
 /// Build the two GLSL sources.
 ///
@@ -870,11 +911,11 @@ fn model_shader_sources(
                  skinned_tan += weight * vec3(dot(r0.xyz, a_tangent), dot(r1.xyz, a_tangent), dot(r2.xyz, a_tangent));\n\
                  skinned_bin += weight * vec3(dot(r0.xyz, a_binormal), dot(r1.xyz, a_binormal), dot(r2.xyz, a_binormal));\n\
              }}\n\
-             void main() {{\n\
-                 vec3 position = a_position;\n\
-                 vec3 normal_in = a_normal;\n\
-                 vec3 tangent_in = a_tangent;\n\
-                 vec3 binormal_in = a_binormal;\n\
+             void skinned_pose(out vec3 position, out vec3 normal_in, out vec3 tangent_in, out vec3 binormal_in) {{\n\
+                 position = a_position;\n\
+                 normal_in = a_normal;\n\
+                 tangent_in = a_tangent;\n\
+                 binormal_in = a_binormal;\n\
                  float weight_total = a_node_weights.x + a_node_weights.y + a_node_weights.z + a_node_weights.w;\n\
                  if (u_animated > 0.5 && weight_total > 0.0001) {{\n\
                      vec4 point_h = vec4(a_position, 1.0);\n\
@@ -891,6 +932,8 @@ fn model_shader_sources(
                      tangent_in = st;\n\
                      binormal_in = sb;\n\
                  }}\n\
+             }}\n\
+             vec4 clip_position(vec3 position) {{\n\
                  vec3 view = rotate_view((position - u_center) * u_scale);\n\
                  // Perspective: the eye sits along -Y so w grows with depth;\n\
                  // at the focus plane (view.y = 0) w is exactly 1 and the\n\
@@ -898,7 +941,15 @@ fn model_shader_sources(
                  // on PERSPECTIVE_FOV_Y.\n\
                  float w = 1.0 + view.y * u_perspective;\n\
                  float z_clip = view.y * u_depth_scale * u_depth_map.x + u_depth_map.y;\n\
-                 gl_Position = vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
+                 return vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
+             }}\n\
+             void main() {{\n\
+                 vec3 position;\n\
+                 vec3 normal_in;\n\
+                 vec3 tangent_in;\n\
+                 vec3 binormal_in;\n\
+                 skinned_pose(position, normal_in, tangent_in, binormal_in);\n\
+                 gl_Position = clip_position(position);\n\
                  vec3 source_normal = length(normal_in) > 0.0001 ? normalize(normal_in) : vec3(0.0, 0.0, 1.0);\n\
                  v_normal = rotate_view(source_normal);\n\
                  v_tangent = rotate_view(tangent_in);\n\
@@ -1132,6 +1183,91 @@ unsafe fn bind_preview_vertex_layout(
     Ok(())
 }
 
+const H2_SHADOW_MAP_SIZE: i32 = 2048;
+/// Past the units a pass's own samplers take.
+const H2_SHADOW_MAP_UNIT: u32 = 8;
+
+/// A depth texture and the framebuffer to fill it through.
+unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, glow::NativeTexture)> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::DEPTH_COMPONENT24 as i32,
+            H2_SHADOW_MAP_SIZE,
+            H2_SHADOW_MAP_SIZE,
+            0,
+            glow::DEPTH_COMPONENT,
+            glow::UNSIGNED_INT,
+            glow::PixelUnpackData::Slice(None),
+        );
+        for (name, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+            (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
+        }
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        let framebuffer = gl.create_framebuffer().ok()?;
+        let previous = gl.get_parameter_framebuffer(glow::DRAW_FRAMEBUFFER_BINDING);
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER,
+            glow::DEPTH_ATTACHMENT,
+            glow::TEXTURE_2D,
+            Some(texture),
+            0,
+        );
+        gl.draw_buffer(glow::NONE);
+        gl.read_buffer(glow::NONE);
+        let complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, previous);
+        complete.then_some((framebuffer, texture))
+    }
+}
+
+/// The view from the key light, an orthographic box around the whole model.
+fn h2_shadow_matrix(preview: &RenderModelPreview) -> [f32; 16] {
+    let toward = h2_prt_lights()[0].direction;
+    let center: [f32; 3] =
+        std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
+    let radius = (0..3)
+        .map(|axis| (preview.bounds_max[axis] - preview.bounds_min[axis]).powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(1e-4)
+        * 0.55;
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    };
+    let unit = |v: [f32; 3]| {
+        let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+        [v[0] / length, v[1] / length, v[2] / length]
+    };
+    let forward = toward.map(|value| -value);
+    let right = unit(cross(forward, [0.0, 0.0, 1.0]));
+    let up = cross(right, forward);
+    let dot = |a: [f32; 3]| a[0] * center[0] + a[1] * center[1] + a[2] * center[2];
+    let row = |axis: [f32; 3]| {
+        [axis[0] / radius, axis[1] / radius, axis[2] / radius, -dot(axis) / radius]
+    };
+    let [x, y, z] = [row(right), row(up), row(forward)];
+    [
+        x[0], y[0], z[0], 0.0,
+        x[1], y[1], z[1], 0.0,
+        x[2], y[2], z[2], 0.0,
+        x[3], y[3], z[3], 1.0,
+    ]
+}
+
+/// Above the attributes the main program takes, which it numbers itself.
+const PRT_CLUSTER_ATTRIBUTE: u32 = 14;
+const PRT_WEIGHTS_ATTRIBUTE: u32 = 15;
+
 /// How many models stay on the GPU at once: geometry, ground grid and
 /// textures. Past this, the one drawn longest ago gives up its slot.
 const MODEL_GPU_SLOTS: usize = 4;
@@ -1185,6 +1321,8 @@ impl ModelSlotLru {
 struct ModelGpuSlot {
     vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
+    /// Halo 2 per-vertex PRT, unused by every other model.
+    prt_buffer: glow::NativeBuffer,
     index_buffer: glow::NativeBuffer,
     /// The ground grid's own vertex array and buffer, built per geometry
     /// (its spacing and extent follow the model's bounds).
@@ -1195,6 +1333,8 @@ struct ModelGpuSlot {
     grid_axis_start: i32,
     grid_built: bool,
     /// GL textures per material, in `RenderModelPreview::materials` order.
+    /// Per batch, where its transparent passes sort from.
+    h2_sort_points: Vec<[f32; 3]>,
     materials: Vec<MaterialGlTextures>,
     /// The `textures_id` the uploaded `materials` belong to, so a reloaded
     /// model, or another model given this slot, re-uploads rather than drawing
@@ -1209,6 +1349,7 @@ impl ModelGpuSlot {
                 .create_vertex_array()
                 .map_err(|error| error.to_string())?;
             let vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
+            let prt_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
             let index_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
             gl.bind_vertex_array(Some(vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
@@ -1226,8 +1367,10 @@ impl ModelGpuSlot {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             Ok(Self {
+                h2_sort_points: Vec::new(),
                 vertex_array,
                 vertex_buffer,
+                prt_buffer,
                 index_buffer,
                 grid_vertex_array,
                 grid_vertex_buffer,
@@ -1241,6 +1384,7 @@ impl ModelGpuSlot {
     }
 
     unsafe fn upload_geometry(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        self.h2_sort_points = h2_sort_points(&frame.preview);
         unsafe {
             gl.bind_vertex_array(Some(self.vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -1255,6 +1399,40 @@ impl ModelGpuSlot {
                 slice_bytes(&frame.preview.indices),
                 glow::STATIC_DRAW,
             );
+            match &frame.preview.h2_prt {
+                Some(prt) => {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.prt_buffer));
+                    gl.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        slice_bytes(&prt.vertices),
+                        glow::STATIC_DRAW,
+                    );
+                    let stride = std::mem::size_of::<[f32; 5]>() as i32;
+                    gl.enable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
+                    gl.vertex_attrib_pointer_f32(
+                        PRT_CLUSTER_ATTRIBUTE,
+                        1,
+                        glow::FLOAT,
+                        false,
+                        stride,
+                        0,
+                    );
+                    gl.enable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
+                    gl.vertex_attrib_pointer_f32(
+                        PRT_WEIGHTS_ATTRIBUTE,
+                        4,
+                        glow::FLOAT,
+                        false,
+                        stride,
+                        4,
+                    );
+                }
+                None => {
+                    gl.disable_vertex_attrib_array(PRT_CLUSTER_ATTRIBUTE);
+                    gl.disable_vertex_attrib_array(PRT_WEIGHTS_ATTRIBUTE);
+                }
+            }
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
         }
         self.grid_built = false;
     }
@@ -1304,6 +1482,21 @@ impl ModelGpuSlot {
                     uploaded.textures[index] = unsafe { upload_texture(gl, image) };
                 }
                 uploaded.detail = material.detail;
+                let upload = |passes: &[H2DrawPass]| -> Vec<Vec<Option<glow::NativeTexture>>> {
+                    passes
+                        .iter()
+                        .map(|pass| {
+                            pass.textures
+                                .iter()
+                                .map(|texture| {
+                                    let image = texture.image.as_ref()?;
+                                    unsafe { upload_h2_image(gl, image) }
+                                })
+                                .collect()
+                        })
+                        .collect()
+                };
+                uploaded.h2_textures = std::array::from_fn(|layer| upload(&material.h2_layers[layer]));
                 uploaded
             })
             .collect();
@@ -1311,14 +1504,321 @@ impl ModelGpuSlot {
 
     unsafe fn release_textures(&mut self, gl: &glow::Context) {
         for material in self.materials.drain(..) {
-            for texture in material.textures.into_iter().flatten() {
+            let passes = material.h2_textures.into_iter().flatten().flatten().flatten();
+            for texture in material.textures.into_iter().flatten().chain(passes) {
                 unsafe { gl.delete_texture(texture) };
             }
         }
     }
 }
 
+/// A color and depth target at a pane's size. One holds the whole scene while
+/// game shaders are on, because the environment layer blends by destination
+/// alpha, which the window's framebuffer need not keep. The other is texaccum,
+/// for lightmap passes to read back at each pixel's screen position.
+struct H2Target {
+    framebuffer: glow::NativeFramebuffer,
+    color: glow::NativeTexture,
+    depth: glow::NativeRenderbuffer,
+    size: [i32; 2],
+}
+
+impl H2Target {
+    unsafe fn new(gl: &glow::Context, width: i32, height: i32) -> Option<Self> {
+        unsafe {
+            let framebuffer = gl.create_framebuffer().ok()?;
+            let color = gl.create_texture().ok()?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(color));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA8 as i32,
+                width,
+                height,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+            for (name, value) in [
+                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+            ] {
+                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
+            }
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            let depth = gl.create_renderbuffer().ok()?;
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, width, height);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            let target = Self { framebuffer, color, depth, size: [width, height] };
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(color),
+                0,
+            );
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
+            let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+            if status != glow::FRAMEBUFFER_COMPLETE {
+                eprintln!("model preview: render target incomplete: {status:#x}");
+                target.delete(gl);
+                return None;
+            }
+            Some(target)
+        }
+    }
+
+    unsafe fn delete(&self, gl: &glow::Context) {
+        unsafe {
+            gl.delete_framebuffer(self.framebuffer);
+            gl.delete_texture(self.color);
+            gl.delete_renderbuffer(self.depth);
+        }
+    }
+}
+
+/// The clear color of the preview, shared with the scene target.
+const PREVIEW_CLEAR: [f32; 3] = [228.0 / 255.0, 238.0 / 255.0, 244.0 / 255.0];
+
+/// The framebuffer state a render target borrows and must return.
+struct H2FramebufferState {
+    framebuffer: Option<glow::NativeFramebuffer>,
+    viewport: [i32; 4],
+    scissor: [i32; 4],
+    scissored: bool,
+}
+
+impl H2FramebufferState {
+    unsafe fn capture(gl: &glow::Context) -> Self {
+        unsafe {
+            let (mut viewport, mut scissor) = ([0; 4], [0; 4]);
+            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
+            Self {
+                framebuffer: gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
+                viewport,
+                scissor,
+                scissored: gl.is_enabled(glow::SCISSOR_TEST),
+            }
+        }
+    }
+
+    fn size(&self) -> [i32; 2] {
+        [self.viewport[2].max(1), self.viewport[3].max(1)]
+    }
+
+    unsafe fn restore(&self, gl: &glow::Context) {
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, self.framebuffer);
+            let [x, y, width, height] = self.viewport;
+            gl.viewport(x, y, width, height);
+            if self.scissored {
+                gl.enable(glow::SCISSOR_TEST);
+            } else {
+                gl.disable(glow::SCISSOR_TEST);
+            }
+            let [x, y, width, height] = self.scissor;
+            gl.scissor(x, y, width, height);
+        }
+    }
+}
+
+/// One linked Halo 2 pass program. Uniforms are looked up once by name: a
+/// translated shader declares a different handful of constants each.
+struct H2GlProgram {
+    program: glow::NativeProgram,
+    uniforms: HashMap<String, Option<glow::NativeUniformLocation>>,
+}
+
+impl H2GlProgram {
+    unsafe fn location(
+        &mut self,
+        gl: &glow::Context,
+        name: &str,
+    ) -> Option<glow::NativeUniformLocation> {
+        if let Some(found) = self.uniforms.get(name) {
+            return *found;
+        }
+        let found = unsafe { gl.get_uniform_location(self.program, name) };
+        self.uniforms.insert(name.to_owned(), found);
+        found
+    }
+}
+
+/// Link a pass with the main program's attribute locations, because the
+/// model's vertex array is bound to those.
+unsafe fn link_h2_program(
+    gl: &glow::Context,
+    main: glow::NativeProgram,
+    vertex_source: &str,
+    fragment_source: &str,
+) -> Result<glow::NativeProgram, String> {
+    unsafe {
+        let vertex = compile_model_shader(gl, glow::VERTEX_SHADER, vertex_source)?;
+        let fragment = compile_model_shader(gl, glow::FRAGMENT_SHADER, fragment_source)?;
+        let program = gl.create_program().map_err(|error| error.to_string())?;
+        gl.attach_shader(program, vertex);
+        gl.attach_shader(program, fragment);
+        for name in [
+            "a_position",
+            "a_normal",
+            "a_texcoord",
+            "a_tangent",
+            "a_binormal",
+            "a_node_indices",
+            "a_node_weights",
+        ] {
+            if let Some(location) = gl.get_attrib_location(main, name) {
+                gl.bind_attrib_location(program, location, name);
+            }
+        }
+        gl.bind_attrib_location(program, PRT_CLUSTER_ATTRIBUTE, "a_prt_cluster");
+        gl.bind_attrib_location(program, PRT_WEIGHTS_ATTRIBUTE, "a_prt_weights");
+        gl.link_program(program);
+        gl.detach_shader(program, vertex);
+        gl.detach_shader(program, fragment);
+        gl.delete_shader(vertex);
+        gl.delete_shader(fragment);
+        if gl.get_program_link_status(program) {
+            Ok(program)
+        } else {
+            let error = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            Err(format!("Halo 2 pass failed to link: {error}"))
+        }
+    }
+}
+
+fn gl_blend_factor(factor: H2BlendFactor) -> u32 {
+    match factor {
+        H2BlendFactor::Zero => glow::ZERO,
+        H2BlendFactor::One => glow::ONE,
+        H2BlendFactor::SrcColor => glow::SRC_COLOR,
+        H2BlendFactor::OneMinusSrcColor => glow::ONE_MINUS_SRC_COLOR,
+        H2BlendFactor::SrcAlpha => glow::SRC_ALPHA,
+        H2BlendFactor::OneMinusSrcAlpha => glow::ONE_MINUS_SRC_ALPHA,
+        H2BlendFactor::DstColor => glow::DST_COLOR,
+        H2BlendFactor::OneMinusDstColor => glow::ONE_MINUS_DST_COLOR,
+        H2BlendFactor::DstAlpha => glow::DST_ALPHA,
+        H2BlendFactor::OneMinusDstAlpha => glow::ONE_MINUS_DST_ALPHA,
+        H2BlendFactor::SrcAlphaSaturate => glow::SRC_ALPHA_SATURATE,
+        H2BlendFactor::ConstantColor => glow::CONSTANT_COLOR,
+        H2BlendFactor::OneMinusConstantColor => glow::ONE_MINUS_CONSTANT_COLOR,
+        H2BlendFactor::ConstantAlpha => glow::CONSTANT_ALPHA,
+        H2BlendFactor::OneMinusConstantAlpha => glow::ONE_MINUS_CONSTANT_ALPHA,
+    }
+}
+
+fn gl_blend_equation(equation: H2BlendEquation) -> u32 {
+    match equation {
+        H2BlendEquation::Add => glow::FUNC_ADD,
+        H2BlendEquation::Subtract => glow::FUNC_SUBTRACT,
+        H2BlendEquation::ReverseSubtract => glow::FUNC_REVERSE_SUBTRACT,
+        H2BlendEquation::Min => glow::MIN,
+        H2BlendEquation::Max => glow::MAX,
+    }
+}
+
+fn gl_compare(compare: H2Compare) -> u32 {
+    match compare {
+        H2Compare::Never => glow::NEVER,
+        H2Compare::Less => glow::LESS,
+        H2Compare::Equal => glow::EQUAL,
+        H2Compare::LessOrEqual => glow::LEQUAL,
+        H2Compare::Greater => glow::GREATER,
+        H2Compare::NotEqual => glow::NOTEQUAL,
+        H2Compare::GreaterOrEqual => glow::GEQUAL,
+        H2Compare::Always => glow::ALWAYS,
+    }
+}
+
+/// Where a batch sorts from. The game keys a part by the depth of its rigid
+/// node, and a skinned part by node 0, so skinned parts keep their order among
+/// themselves: they all share one point here, and the sort is stable.
+fn h2_sort_points(preview: &RenderModelPreview) -> Vec<[f32; 3]> {
+    let center = preview.vertices.iter().fold([0.0f32; 3], |sum, vertex| {
+        std::array::from_fn(|axis| sum[axis] + vertex.position[axis])
+    });
+    let count = preview.vertices.len().max(1) as f32;
+    let center = center.map(|sum| sum / count);
+    preview
+        .batches
+        .iter()
+        .map(|batch| {
+            let start = batch.index_start as usize;
+            let end = start + batch.index_count as usize;
+            let indices = preview.indices.get(start..end).unwrap_or(&[]);
+            let vertex = |index: &u32| preview.vertices.get(*index as usize);
+            let rigid = indices.first().and_then(vertex).is_some_and(|first| {
+                indices.iter().filter_map(vertex).all(|other| {
+                    other.node_indices[0] == first.node_indices[0]
+                        && other.node_weights[1..].iter().all(|weight| *weight <= 0.0)
+                })
+            });
+            if !rigid || indices.is_empty() {
+                return center;
+            }
+            let sum = indices.iter().filter_map(vertex).fold([0.0f32; 3], |sum, vertex| {
+                std::array::from_fn(|axis| sum[axis] + vertex.position[axis])
+            });
+            sum.map(|sum| sum / indices.len() as f32)
+        })
+        .collect()
+}
+
+/// Visible batches farthest first; the eye looks along +Y in view space.
+fn h2_draw_order(frame: &ModelGpuFrame, points: &[[f32; 3]]) -> Vec<usize> {
+    let camera = &frame.camera;
+    let depth = |index: usize| {
+        let point = points.get(index).copied().unwrap_or(camera.center);
+        let offset = std::array::from_fn(|axis| point[axis] - camera.center[axis]);
+        rotate_view_vector(camera.yaw, camera.pitch, offset)[1]
+    };
+    let mut order = frame.visible_batches.clone();
+    order.sort_by(|a, b| depth(*b).total_cmp(&depth(*a)));
+    order
+}
+
+/// Whether a context can compile `H2_GLSL_VERSION`. This asks the context, not
+/// egui's `ShaderVersion`: that only sorts contexts into the dialects egui
+/// itself uses, and calls everything from GL 3.1 up `#version 140`.
+fn h2_context_supported(major: u32, minor: u32, embedded: bool) -> bool {
+    !embedded && (major, minor) >= (3, 3)
+}
+
+/// The eye in model space, which the pass stages measure Fresnel from. An
+/// orthographic view has no eye, so one far away along the view axis stands in.
+fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
+    let distance = if camera.perspective > 0.0 { 1.0 / camera.perspective } else { 1.0e5 };
+    let eye = unrotate_view_vector(camera.yaw, camera.pitch, [0.0, -distance, 0.0]);
+    std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
+}
+
 struct ModelGlRenderer {
+    /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
+    h2_supported: bool,
+    /// Linked pass programs. `None` records a failure, so it is not retried
+    /// every frame and the material keeps drawing as it did.
+    h2_programs: HashMap<(H2VertexStage, String), Option<H2GlProgram>>,
+    h2_black_cube: Option<glow::NativeTexture>,
+    h2_black_volume: Option<glow::NativeTexture>,
+    h2_white_volume: Option<glow::NativeTexture>,
+    h2_normalization_cube: Option<glow::NativeTexture>,
+    h2_target: Option<H2Target>,
+    h2_scene: Option<H2Target>,
+    h2_frame_copy: Option<H2Target>,
+    h2_bloom: Option<H2Bloom>,
+    h2_shadow_map: Option<(glow::NativeFramebuffer, glow::NativeTexture)>,
     program: glow::NativeProgram,
     slots: Vec<ModelGpuSlot>,
     lru: ModelSlotLru,
@@ -1351,6 +1851,8 @@ struct ModelGlRenderer {
 /// One material's textures on the GPU, in `TextureSlot` order.
 struct MaterialGlTextures {
     textures: [Option<glow::NativeTexture>; SLOT_COUNT],
+    /// By `H2Layer` and pass, one texture per entry of its `textures`.
+    h2_textures: [Vec<Vec<Option<glow::NativeTexture>>>; H2_LAYER_COUNT],
     uv_scales: [[f32; 2]; SLOT_COUNT],
     detail: DetailComposition,
 }
@@ -1359,6 +1861,7 @@ impl Default for MaterialGlTextures {
     fn default() -> Self {
         Self {
             textures: Default::default(),
+            h2_textures: Default::default(),
             uv_scales: [[1.0; 2]; SLOT_COUNT],
             detail: DetailComposition::default(),
         }
@@ -1397,7 +1900,19 @@ impl ModelGlRenderer {
                 gl.get_uniform_location(program, name)
                     .ok_or_else(|| format!("model preview shader has no {name} uniform"))
             };
+            let version = gl.version();
             Ok(Self {
+                h2_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
+                h2_programs: HashMap::new(),
+                h2_black_cube: upload_black_cube(gl),
+                h2_black_volume: upload_solid_volume(gl, [0, 0, 0, 255]),
+                h2_white_volume: upload_solid_volume(gl, [255; 4]),
+                h2_normalization_cube: upload_normalization_cube(gl),
+                h2_target: None,
+                h2_scene: None,
+                h2_frame_copy: None,
+                h2_bloom: None,
+                h2_shadow_map: None,
                 program,
                 slots: Vec::new(),
                 lru: ModelSlotLru::default(),
@@ -1445,6 +1960,7 @@ impl ModelGlRenderer {
                 self.slots[slot].upload_geometry(gl, frame);
             }
             self.slots[slot].sync_textures(gl, frame);
+            let scene = self.begin_h2_scene(gl, frame);
 
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1544,7 +2060,48 @@ impl ModelGlRenderer {
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
                 gl.uniform_1_f32(Some(&self.unlit), 0.0);
+                self.prepare_h2_programs(gl, frame);
                 self.draw_batches(gl, frame, false, &self.slots[slot].materials);
+                if frame.game_shaders && self.h2_camo_on(frame) {
+                    let order = frame.visible_batches.clone();
+                    self.copy_h2_frame(gl, frame, &order);
+                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::ActiveCamo, None);
+                } else if frame.game_shaders {
+                    let order = frame.visible_batches.clone();
+                    self.copy_h2_frame(gl, frame, &order);
+                    self.fill_h2_texaccum(gl, frame, slot, &order);
+                    for layer in [
+                        H2Layer::Lightmap,
+                        H2Layer::Prt,
+                        H2Layer::Environment,
+                        H2Layer::SelfIllumination,
+                        H2Layer::Overlay,
+                    ] {
+                        self.draw_h2_passes(gl, frame, slot, &order, layer, None);
+                    }
+                    if frame.default_lights {
+                        let shadowed = frame.self_shadow && self.draw_h2_shadow(gl, frame, slot, &order);
+                        for (index, light) in H2_DEFAULT_LIGHTS.iter().enumerate() {
+                            if shadowed && index == 0 {
+                                gl.enable(glow::STENCIL_TEST);
+                                gl.stencil_func(glow::EQUAL, 0, 0xFF);
+                                gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                            }
+                            for layer in [H2Layer::LightDiffuse, H2Layer::LightSpecular] {
+                                self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
+                            }
+                            gl.disable(glow::STENCIL_TEST);
+                        }
+                    }
+                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Hologram, None);
+                }
+                let order = h2_draw_order(frame, &self.slots[slot].h2_sort_points);
+                self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Transparent, None);
+                if frame.game_shaders && frame.bloom {
+                    self.draw_h2_bloom(gl, frame, slot, &order);
+                    gl.use_program(Some(self.program));
+                    gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
+                }
             }
             if frame.render_mode.draws_wireframe() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
@@ -1557,9 +2114,551 @@ impl ModelGlRenderer {
             // Polygon mode is not reset by egui_glow's generic callback-state
             // restoration and would otherwise turn subsequent UI meshes into wireframes.
             gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
+            if let Some(scene) = scene {
+                self.finish_h2_scene(gl, scene);
+            }
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
+        }
+    }
+
+    fn h2_passes(frame: &ModelGpuFrame, material: usize, layer: H2Layer) -> &[H2DrawPass] {
+        frame
+            .textures
+            .as_ref()
+            .and_then(|textures| textures.get(material))
+            .map_or(&[], |material| material.h2_layers[layer as usize].as_slice())
+    }
+
+    /// Whether a material's passes stand in for the slots. Transparent ones
+    /// always do. Opaque ones need game shaders on, and a template with a
+    /// lightmap layer needs that layer to have prepared.
+    /// Whether the model is camouflaged: camo needs the model's shader for it.
+    fn h2_camo_on(&self, frame: &ModelGpuFrame) -> bool {
+        frame.active_camo
+            && (0..frame.preview.materials.len())
+                .any(|material| self.h2_material_ready(frame, material, H2Layer::ActiveCamo))
+    }
+
+    fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
+        if self.h2_camo_on(frame) {
+            return self.h2_material_ready(frame, material, H2Layer::ActiveCamo);
+        }
+        if self.h2_material_ready(frame, material, H2Layer::Transparent) {
+            return true;
+        }
+        if !frame.game_shaders {
+            return false;
+        }
+        self.h2_material_ready(frame, material, H2Layer::Lightmap)
+            || self.h2_material_ready(frame, material, H2Layer::Prt)
+            || (Self::h2_passes(frame, material, H2Layer::Lightmap).is_empty()
+                && !frame
+                    .textures
+                    .as_ref()
+                    .and_then(|textures| textures.get(material))
+                    .is_some_and(|material| material.get(TextureSlot::Base).is_some())
+                && [H2Layer::SelfIllumination, H2Layer::Overlay]
+                    .iter()
+                    .any(|layer| self.h2_material_ready(frame, material, *layer)))
+    }
+
+    /// Whether a material draws through its passes rather than the slots: it
+    /// has some, and every one linked.
+    fn h2_material_ready(&self, frame: &ModelGpuFrame, material: usize, layer: H2Layer) -> bool {
+        let passes = Self::h2_passes(frame, material, layer);
+        self.h2_supported
+            && !passes.is_empty()
+            && (layer != H2Layer::Prt || frame.preview.h2_prt.is_some())
+            && passes.iter().all(|pass| {
+                self.h2_programs
+                    .get(&(pass.stage, pass.fragment.clone()))
+                    .is_some_and(Option::is_some)
+            })
+    }
+
+    unsafe fn prepare_h2_programs(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        if !self.h2_supported {
+            return;
+        }
+        let Some(textures) = frame.textures.as_ref() else {
+            return;
+        };
+        let passes = textures.iter().flat_map(|material| material.h2_layers.iter().flatten());
+        for pass in passes {
+            let key = (pass.stage, pass.fragment.clone());
+            if self.h2_programs.contains_key(&key) {
+                continue;
+            }
+            let vertex = pass.stage.source(H2_GLSL_VERSION);
+            let linked = unsafe { link_h2_program(gl, self.program, &vertex, &pass.fragment) };
+            let program = match linked {
+                Ok(program) => Some(H2GlProgram { program, uniforms: HashMap::new() }),
+                Err(error) => {
+                    eprintln!("model preview: {error}");
+                    None
+                }
+            };
+            self.h2_programs.insert(key, program);
+        }
+    }
+
+    /// With game shaders on, send the whole frame to the scene target. What it
+    /// replaces is handed back for `finish_h2_scene`.
+    unsafe fn begin_h2_scene(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+    ) -> Option<H2FramebufferState> {
+        if !frame.game_shaders || !self.h2_supported {
+            return None;
+        }
+        unsafe {
+            let state = H2FramebufferState::capture(gl);
+            let size = state.size();
+            if self.h2_scene.as_ref().is_none_or(|scene| scene.size != size) {
+                if let Some(old) = self.h2_scene.take() {
+                    old.delete(gl);
+                }
+                self.h2_scene = H2Target::new(gl, size[0], size[1]);
+            }
+            let Some(scene) = &self.h2_scene else {
+                state.restore(gl);
+                return None;
+            };
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene.framebuffer));
+            gl.viewport(0, 0, size[0], size[1]);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.clear_color(PREVIEW_CLEAR[0], PREVIEW_CLEAR[1], PREVIEW_CLEAR[2], 1.0);
+            gl.clear_depth_f32(1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+            Some(state)
+        }
+    }
+
+    /// Copy the scene target to where the frame belonged, and put everything
+    /// back.
+    unsafe fn finish_h2_scene(&self, gl: &glow::Context, state: H2FramebufferState) {
+        let Some(scene) = &self.h2_scene else {
+            return;
+        };
+        unsafe {
+            let [x, y, width, height] = state.viewport;
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(scene.framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, state.framebuffer);
+            if state.scissored {
+                gl.enable(glow::SCISSOR_TEST);
+            }
+            gl.scissor(state.scissor[0], state.scissor[1], state.scissor[2], state.scissor[3]);
+            gl.blit_framebuffer(
+                0,
+                0,
+                scene.size[0],
+                scene.size[1],
+                x,
+                y,
+                x + width,
+                y + height,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
+            state.restore(gl);
+        }
+    }
+
+    /// Draw every texaccum pass into the target, sized to the live viewport,
+    /// and put the framebuffer, viewport and scissor back exactly as found.
+    unsafe fn fill_h2_texaccum(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        order: &[usize],
+    ) {
+        let needed = order.iter().any(|&index| {
+            frame.preview.batches.get(index).is_some_and(|batch| {
+                let material = batch.material_index as usize;
+                self.h2_material_ready(frame, material, H2Layer::Texaccum)
+                    || self.h2_material_ready(frame, material, H2Layer::LightAlbedo)
+            })
+        });
+        if !needed {
+            return;
+        }
+        unsafe {
+            let state = H2FramebufferState::capture(gl);
+            let size = state.size();
+            if self.h2_target.as_ref().is_none_or(|target| target.size != size) {
+                if let Some(old) = self.h2_target.take() {
+                    old.delete(gl);
+                }
+                self.h2_target = H2Target::new(gl, size[0], size[1]);
+            }
+            if let Some(target) = &self.h2_target {
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
+                gl.viewport(0, 0, size[0], size[1]);
+                gl.disable(glow::SCISSOR_TEST);
+                // The game draws texaccum against the scene's depth: a shader
+                // may lay its depth down here alone, with its later passes
+                // testing for equal.
+                let scene_depth = self.h2_scene.as_ref().map(|scene| scene.depth);
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::DEPTH_STENCIL_ATTACHMENT,
+                    glow::RENDERBUFFER,
+                    Some(scene_depth.unwrap_or(target.depth)),
+                );
+                gl.clear_color(0.0, 0.0, 0.0, 1.0);
+                gl.clear_depth_f32(1.0);
+                gl.clear(if scene_depth.is_some() {
+                    glow::COLOR_BUFFER_BIT
+                } else {
+                    glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT
+                });
+                self.draw_h2_passes(gl, frame, slot, order, H2Layer::Texaccum, None);
+                self.draw_h2_passes(gl, frame, slot, order, H2Layer::LightAlbedo, None);
+            }
+            state.restore(gl);
+        }
+    }
+
+    /// Mark in the stencil what the key light cannot reach: the shadow map
+    /// from the light's side, then the model in view against it.
+    unsafe fn draw_h2_shadow(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        order: &[usize],
+    ) -> bool {
+        unsafe {
+            if self.h2_shadow_map.is_none() {
+                self.h2_shadow_map = h2_shadow_map(gl);
+            }
+            let Some((framebuffer, _)) = self.h2_shadow_map else {
+                return false;
+            };
+            let state = H2FramebufferState::capture(gl);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.viewport(0, 0, H2_SHADOW_MAP_SIZE, H2_SHADOW_MAP_SIZE);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.depth_mask(true);
+            gl.clear_depth_f32(1.0);
+            gl.clear(glow::DEPTH_BUFFER_BIT);
+            self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowCaster, None);
+            state.restore(gl);
+            gl.clear_stencil(0);
+            gl.clear(glow::STENCIL_BUFFER_BIT);
+            gl.enable(glow::STENCIL_TEST);
+            gl.stencil_func(glow::ALWAYS, 1, 0xFF);
+            gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
+            self.draw_h2_passes(gl, frame, slot, order, H2Layer::ShadowMask, None);
+            gl.disable(glow::STENCIL_TEST);
+            true
+        }
+    }
+
+    /// Write the bloom layer to the frame's alpha, and add the glow from it.
+    unsafe fn draw_h2_bloom(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        order: &[usize],
+    ) {
+        let Some((framebuffer, color, size)) =
+            self.h2_scene.as_ref().map(|scene| (scene.framebuffer, scene.color, scene.size))
+        else {
+            return;
+        };
+        unsafe {
+            gl.color_mask(false, false, false, true);
+            gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.color_mask(true, true, true, true);
+            self.draw_h2_passes(gl, frame, slot, order, H2Layer::Bloom, None);
+            if self.h2_bloom.is_none() {
+                self.h2_bloom = H2Bloom::new(gl, H2_GLSL_VERSION);
+            }
+            if let Some(bloom) = &mut self.h2_bloom {
+                bloom.apply(gl, framebuffer, color, size);
+            }
+        }
+    }
+
+    /// Keep what lies behind the model, for what shows through it: as
+    /// `sub_6BD480` does, before anything of the model has drawn.
+    unsafe fn copy_h2_frame(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, order: &[usize]) {
+        let needed = order.iter().any(|&index| {
+            frame.preview.batches.get(index).is_some_and(|batch| {
+                let material = batch.material_index as usize;
+                H2Layer::ALL.iter().any(|layer| {
+                    Self::h2_passes(frame, material, *layer)
+                        .iter()
+                        .any(|pass| pass.textures.iter().any(|texture| texture.frame_copy))
+                })
+            })
+        });
+        let Some(scene) = self.h2_scene.as_ref().filter(|_| needed) else {
+            return;
+        };
+        let (framebuffer, [width, height]) = (scene.framebuffer, scene.size);
+        unsafe {
+            if self.h2_frame_copy.as_ref().is_none_or(|copy| copy.size != [width, height]) {
+                if let Some(old) = self.h2_frame_copy.take() {
+                    old.delete(gl);
+                }
+                self.h2_frame_copy = H2Target::new(gl, width, height);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            }
+            if let Some(copy) = &self.h2_frame_copy {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(copy.framebuffer));
+                gl.blit_framebuffer(
+                    0,
+                    0,
+                    width,
+                    height,
+                    0,
+                    0,
+                    width,
+                    height,
+                    glow::COLOR_BUFFER_BIT,
+                    glow::NEAREST,
+                );
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            }
+        }
+    }
+
+    /// Draw Halo 2 materials through their passes, in `order`. Leaves the GL
+    /// state the wireframe pass and the UI expect.
+    unsafe fn draw_h2_passes(
+        &mut self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        slot: usize,
+        order: &[usize],
+        layer: H2Layer,
+        light: Option<&H2DefaultLight>,
+    ) {
+        let eye = h2_eye_position(&frame.camera);
+        let mut drew = false;
+        for &batch_index in order {
+            let Some(batch) = frame.preview.batches.get(batch_index) else {
+                continue;
+            };
+            let material = batch.material_index as usize;
+            if !self.h2_material_ready(frame, material, layer)
+                || (layer != H2Layer::Transparent && !self.h2_replaces_slots(frame, material))
+            {
+                continue;
+            }
+            let Some((byte_offset, index_count)) = model_draw_range(
+                batch.index_start,
+                batch.index_count,
+                frame.preview.indices.len(),
+            ) else {
+                continue;
+            };
+            for (pass_index, pass) in Self::h2_passes(frame, material, layer).iter().enumerate() {
+                let key = (pass.stage, pass.fragment.clone());
+                let Some(Some(mut program)) = self.h2_programs.remove(&key) else {
+                    continue;
+                };
+                drew = true;
+                unsafe {
+                    gl.use_program(Some(program.program));
+                    self.bind_h2_uniforms(gl, frame, &mut program, pass, eye, light);
+                    let textures = self.slots[slot]
+                        .materials
+                        .get(material)
+                        .and_then(|material| material.h2_textures[layer as usize].get(pass_index));
+                    for (index, texture) in pass.textures.iter().enumerate() {
+                        let uploaded = textures.and_then(|list| list.get(index)).copied().flatten();
+                        gl.active_texture(glow::TEXTURE0 + texture.slot);
+                        match texture.kind {
+                            SamplerKind::Texture2D => {
+                                let target = self.h2_target.as_ref().map(|target| target.color);
+                                let bound = if texture.texaccum {
+                                    target.or(self.placeholder)
+                                } else if texture.frame_copy {
+                                    let copy = self.h2_frame_copy.as_ref();
+                                    copy.map(|copy| copy.color).or(self.placeholder)
+                                } else {
+                                    uploaded.or(self.placeholder)
+                                };
+                                gl.bind_texture(glow::TEXTURE_2D, bound);
+                            }
+                            SamplerKind::Cube => gl.bind_texture(
+                                glow::TEXTURE_CUBE_MAP,
+                                if texture.normalization {
+                                    self.h2_normalization_cube
+                                } else {
+                                    uploaded.or(self.h2_black_cube)
+                                },
+                            ),
+                            SamplerKind::Volume => {
+                                let fallback = if texture.falloff {
+                                    self.h2_white_volume
+                                } else {
+                                    self.h2_black_volume
+                                };
+                                gl.bind_texture(glow::TEXTURE_3D, uploaded.or(fallback));
+                            }
+                        }
+                        let location = program.location(gl, &format!("s{}", texture.slot));
+                        if location.is_some() {
+                            gl.uniform_1_i32(location.as_ref(), texture.slot as i32);
+                        }
+                    }
+                    match pass.blend {
+                        Some(blend) => {
+                            gl.enable(glow::BLEND);
+                            gl.blend_equation(gl_blend_equation(blend.equation));
+                            gl.blend_func(
+                                gl_blend_factor(blend.source),
+                                gl_blend_factor(blend.destination),
+                            );
+                            let [a, r, g, b] = blend.constant.map(|value| value as f32 / 255.0);
+                            gl.blend_color(r, g, b, a);
+                        }
+                        None => gl.disable(glow::BLEND),
+                    }
+                    match pass.depth.compare {
+                        Some(compare) => {
+                            gl.enable(glow::DEPTH_TEST);
+                            gl.depth_func(gl_compare(compare));
+                        }
+                        None => gl.disable(glow::DEPTH_TEST),
+                    }
+                    gl.depth_mask(pass.depth.write);
+                    let [r, g, b, a] = pass.channels;
+                    gl.color_mask(r, g, b, a);
+                    gl.draw_elements(
+                        glow::TRIANGLES,
+                        index_count,
+                        glow::UNSIGNED_INT,
+                        byte_offset,
+                    );
+                }
+                self.h2_programs.insert(key, Some(program));
+            }
+        }
+        if drew {
+            unsafe {
+                gl.use_program(Some(self.program));
+                gl.disable(glow::BLEND);
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.enable(glow::DEPTH_TEST);
+                gl.depth_func(glow::LESS);
+                gl.depth_mask(true);
+                gl.color_mask(true, true, true, true);
+                gl.active_texture(glow::TEXTURE0);
+            }
+        }
+    }
+
+    unsafe fn bind_h2_uniforms(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        program: &mut H2GlProgram,
+        pass: &H2DrawPass,
+        eye: [f32; 3],
+        light: Option<&H2DefaultLight>,
+    ) {
+        unsafe {
+            if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
+                let location = program.location(gl, "u_shadow_matrix");
+                let matrix = h2_shadow_matrix(&frame.preview);
+                gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
+                if let Some((_, map)) = self.h2_shadow_map {
+                    gl.active_texture(glow::TEXTURE0 + H2_SHADOW_MAP_UNIT);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(map));
+                    let location = program.location(gl, "u_shadow_map");
+                    gl.uniform_1_i32(location.as_ref(), H2_SHADOW_MAP_UNIT as i32);
+                }
+            }
+            for (name, axis) in [
+                ("u_view_right", [1.0, 0.0, 0.0]),
+                ("u_view_up", [0.0, 0.0, 1.0]),
+                ("u_view_back", [0.0, -1.0, 0.0]),
+            ] {
+                let location = program.location(gl, name);
+                if location.is_some() {
+                    let vector = unrotate_view_vector(frame.camera.yaw, frame.camera.pitch, axis);
+                    gl.uniform_3_f32_slice(location.as_ref(), &vector);
+                }
+            }
+            if let Some(prt) = &frame.preview.h2_prt {
+                let location = program.location(gl, "u_prt");
+                if location.is_some() {
+                    gl.uniform_4_f32_slice(location.as_ref(), prt.clusters.as_flattened());
+                    let light = program.location(gl, "u_prt_light");
+                    gl.uniform_3_f32_slice(light.as_ref(), &prt.light);
+                }
+            }
+            let camera = &frame.camera;
+            let set_1 = |gl: &glow::Context, program: &mut H2GlProgram, name: &str, value: f32| {
+                let location = program.location(gl, name);
+                gl.uniform_1_f32(location.as_ref(), value);
+            };
+            set_1(gl, program, "u_scale", camera.scale);
+            set_1(gl, program, "u_depth_scale", camera.depth_scale);
+            set_1(gl, program, "u_perspective", camera.perspective);
+            set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
+            set_1(gl, program, "u_animated", if frame.bones.is_some() { 1.0 } else { 0.0 });
+            let location = program.location(gl, "u_light_direct");
+            gl.uniform_3_f32_slice(location.as_ref(), &pass.light_direct);
+            let location = program.location(gl, "u_light_indirect");
+            gl.uniform_3_f32_slice(location.as_ref(), &pass.light_indirect);
+            let location = program.location(gl, "u_center");
+            gl.uniform_3_f32_slice(location.as_ref(), &camera.center);
+            let location = program.location(gl, "u_eye");
+            gl.uniform_3_f32_slice(location.as_ref(), &eye);
+            let location = program.location(gl, "u_angles");
+            gl.uniform_2_f32(location.as_ref(), camera.yaw, camera.pitch);
+            let location = program.location(gl, "u_clip_scale");
+            gl.uniform_2_f32_slice(location.as_ref(), &camera.clip_scale);
+            let location = program.location(gl, "u_depth_map");
+            gl.uniform_2_f32_slice(location.as_ref(), &camera.depth_map);
+            if let Some(rows) = frame.bones.as_ref() {
+                let location = program.location(gl, "u_bones");
+                gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
+            }
+            let location = program.location(gl, "u_texture_rows");
+            gl.uniform_4_f32_slice(location.as_ref(), pass.texture_rows.as_flattened());
+            let location = program.location(gl, "u_tint_facing");
+            gl.uniform_4_f32_slice(location.as_ref(), &pass.tint_facing);
+            let location = program.location(gl, "u_tint_glancing");
+            gl.uniform_4_f32_slice(location.as_ref(), &pass.tint_glancing);
+            for (register, value) in &pass.constants {
+                let mut value = *value;
+                for (changed, component, channel) in &pass.change_colors {
+                    if changed == register {
+                        value[*component] = frame.change_colors[*channel][*component];
+                    }
+                }
+                if let Some(light) = light {
+                    for (changed, component) in &pass.light_colors {
+                        if changed == register {
+                            value[*component] = light.color[*component];
+                        }
+                    }
+                }
+                let location = program.location(gl, &format!("c{register}"));
+                gl.uniform_4_f32_slice(location.as_ref(), &value);
+            }
+            if let Some(light) = light {
+                let location = program.location(gl, "u_light_position");
+                gl.uniform_3_f32_slice(location.as_ref(), &light.position);
+                let location = program.location(gl, "u_light_falloff");
+                gl.uniform_1_f32(location.as_ref(), 0.5 / light.radius);
+            }
+            let location = program.location(gl, "zwriteout");
+            gl.uniform_4_f32(location.as_ref(), 1.0, 1.0, 1.0, 1.0);
         }
     }
 
@@ -1648,6 +2747,11 @@ impl ModelGlRenderer {
                     .map(|[r, g, b]| Color32::from_rgb(r, g, b))
                     .unwrap_or_else(|| material_color(batch.material_index))
             };
+            // Passes draw after every opaque batch; see `draw_h2_passes`.
+            let index = batch.material_index as usize;
+            if !wire && self.h2_replaces_slots(frame, index) {
+                continue;
+            }
             // The wireframe pass draws flat on purpose, so it never binds a
             // texture — and neither does a batch whose material did not resolve.
             let material = (!wire)
@@ -2014,6 +3118,14 @@ mod tests {
     /// only surface at runtime, as a preview that draws nothing. With
     /// `glslangValidator` on PATH (`brew install glslang`), compile every
     /// dialect egui can hand the renderer; without it, skip by name.
+    #[test]
+    fn pass_support_reads_the_context_version() {
+        assert!(h2_context_supported(4, 1, false), "the macOS core profile");
+        assert!(h2_context_supported(3, 3, false));
+        assert!(!h2_context_supported(3, 2, false));
+        assert!(!h2_context_supported(3, 3, true), "OpenGL ES");
+    }
+
     #[test]
     fn every_shader_dialect_compiles_under_glslang() {
         if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
@@ -2915,6 +4027,153 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
+unsafe fn upload_h2_image(gl: &glow::Context, image: &H2Image) -> Option<glow::NativeTexture> {
+    let texture_parameters = |target| unsafe {
+        gl.generate_mipmap(target);
+        gl.tex_parameter_i32(target, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+        gl.tex_parameter_i32(target, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+    };
+    unsafe {
+        match image {
+            H2Image::Flat(image) => upload_texture(gl, image),
+            H2Image::Cube { size, faces } => {
+                let texture = gl.create_texture().ok()?;
+                gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
+                for (face, rgba) in faces.iter().enumerate() {
+                    gl.tex_image_2d(
+                        glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32,
+                        0,
+                        glow::RGBA8 as i32,
+                        *size as i32,
+                        *size as i32,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelUnpackData::Slice(Some(rgba)),
+                    );
+                }
+                texture_parameters(glow::TEXTURE_CUBE_MAP);
+                for wrap in [glow::TEXTURE_WRAP_S, glow::TEXTURE_WRAP_T, glow::TEXTURE_WRAP_R] {
+                    gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, wrap, glow::CLAMP_TO_EDGE as i32);
+                }
+                gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
+                Some(texture)
+            }
+            H2Image::Volume { width, height, depth, rgba } => {
+                let texture = gl.create_texture().ok()?;
+                gl.bind_texture(glow::TEXTURE_3D, Some(texture));
+                gl.tex_image_3d(
+                    glow::TEXTURE_3D,
+                    0,
+                    glow::RGBA8 as i32,
+                    *width as i32,
+                    *height as i32,
+                    *depth as i32,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(rgba)),
+                );
+                texture_parameters(glow::TEXTURE_3D);
+                gl.bind_texture(glow::TEXTURE_3D, None);
+                Some(texture)
+            }
+        }
+    }
+}
+
+/// The cube `GLOBAL vector-normalization` names. Bilinear, as a direction
+/// lookup wants, and small: only its directions matter.
+unsafe fn upload_normalization_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
+    const SIZE: usize = 64;
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
+        for face in 0..6 {
+            gl.tex_image_2d(
+                glow::TEXTURE_CUBE_MAP_POSITIVE_X + face as u32,
+                0,
+                glow::RGBA8 as i32,
+                SIZE as i32,
+                SIZE as i32,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(&h2_normalization_face(face, SIZE))),
+            );
+        }
+        for (name, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
+            (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
+            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+            (glow::TEXTURE_WRAP_R, glow::CLAMP_TO_EDGE),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, name, value as i32);
+        }
+        gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
+        Some(texture)
+    }
+}
+
+/// A 1x1 black cube, for passes whose cube map is not read: a reflection
+/// that adds nothing.
+unsafe fn upload_black_cube(gl: &glow::Context) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(texture));
+        for face in 0..6 {
+            gl.tex_image_2d(
+                glow::TEXTURE_CUBE_MAP_POSITIVE_X + face,
+                0,
+                glow::RGBA8 as i32,
+                1,
+                1,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(&[0, 0, 0, 255])),
+            );
+        }
+        for (name, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+            (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, name, value as i32);
+        }
+        gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
+        Some(texture)
+    }
+}
+
+/// A 1x1x1 volume of one color: a stand-in for a 3D map that is not read.
+unsafe fn upload_solid_volume(gl: &glow::Context, color: [u8; 4]) -> Option<glow::NativeTexture> {
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_3D, Some(texture));
+        gl.tex_image_3d(
+            glow::TEXTURE_3D,
+            0,
+            glow::RGBA8 as i32,
+            1,
+            1,
+            1,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&color)),
+        );
+        for (name, value) in [
+            (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+            (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+        ] {
+            gl.tex_parameter_i32(glow::TEXTURE_3D, name, value as i32);
+        }
+        gl.bind_texture(glow::TEXTURE_3D, None);
+        Some(texture)
+    }
+}
+
 unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glow::NativeTexture> {
     if image.width == 0 || image.height == 0 {
         return None;

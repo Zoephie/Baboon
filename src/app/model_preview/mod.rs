@@ -23,6 +23,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
+mod h2_bloom;
+pub(in crate::app) mod h2_passes;
+pub(in crate::app) mod h2_prt;
+pub(in crate::app) mod h2_stage;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod renderer;
@@ -47,6 +51,7 @@ pub(in crate::app) use loading::build_render_preview;
 pub(in crate::app) use loading::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
+use h2_passes::{H2ChangeColors, read_h2_change_colors};
 use variants::*;
 
 // The material resolver understands the render-method shaders validated for
@@ -84,6 +89,8 @@ pub(crate) struct RenderModelPreview {
     pub errors: Vec<ModelErrorPrimitive>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
+    /// Halo 2 precomputed radiance transfer, on the few models that have it.
+    pub h2_prt: Option<h2_prt::H2Prt>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -277,6 +284,7 @@ fn model_preview_data(
         textures_id: geometry_id,
         textures: None,
         variants,
+        h2_change_colors: Default::default(),
         scenario_bsps: Vec::new(),
         animations: None,
     }
@@ -1201,6 +1209,44 @@ fn draw_model_view_settings_menu(
                     "Ground-reference grid on the z = 0 plane, spaced to the model's size.",
                 );
             ui.checkbox(&mut state.show_backfaces, "Render Backfaces");
+            ui.checkbox(&mut state.h2_game_shaders, "Game Shaders")
+                .on_hover_text(
+                    "Draw Halo 2 opaque materials through the game's own passes, \
+                     lit by its default lighting.",
+                );
+            ui.add_enabled(
+                state.h2_game_shaders,
+                egui::Checkbox::new(&mut state.h2_default_lights, "Default Lights"),
+            )
+            .on_hover_text(
+                "The two sphere lights the game uses when nothing else lights a scene. \
+                 They add diffuse and specular shading.",
+            );
+            ui.add_enabled(
+                state.h2_game_shaders,
+                egui::Checkbox::new(&mut state.h2_active_camo, "Active Camo"),
+            )
+            .on_hover_text(
+                "Draw a Halo 2 model through its active camouflage, for the models \
+                 that have it.",
+            );
+            ui.add_enabled(
+                state.h2_game_shaders,
+                egui::Checkbox::new(&mut state.h2_bloom, "Bloom"),
+            )
+            .on_hover_text(
+                "Add the glow of Halo 2 materials with a bloom pass. The blur is \
+                 the game's, but the strength is this preview's own: the game's \
+                 follows the exposure of the whole scene.",
+            );
+            ui.add_enabled(
+                state.h2_game_shaders && state.h2_default_lights,
+                egui::Checkbox::new(&mut state.h2_self_shadow, "Self Shadow"),
+            )
+            .on_hover_text(
+                "Shadow Halo 2 models from their key light. The game has no such \
+                 shadow under its default lights, so this is the preview's own.",
+            );
         },
     );
     preview_header_menu(ui, ButtonIcon::Find, "Camera", |ui| {
