@@ -300,6 +300,9 @@ pub(crate) struct CeNumeric {
     pub(super) digit: usize,
     /// The material's permutation: which place of the number it shows.
     pub(super) place: usize,
+    /// `numeric countdown timer`: it reads a clock only scripts set, not the
+    /// object. A preview has no script, so that stays at its zero.
+    pub(super) timer: bool,
 }
 
 impl CeNumeric {
@@ -310,6 +313,9 @@ impl CeNumeric {
     }
 
     pub(crate) fn shows(&self, outputs: &[f32; 4]) -> bool {
+        if self.timer {
+            return self.digit == 0;
+        }
         let base = self.count.max(1) as i32;
         let mut number = self.number(outputs);
         for _ in 0..self.place {
@@ -987,6 +993,9 @@ fn first_map_digits(root: TagStruct<'_>) -> Option<CeNumeric> {
         limit: root.read_int_any("numeric counter limit").unwrap_or(0) as i32,
         digit: 0,
         place: 0,
+        timer: root.read_flag_names("extra flags").is_some_and(|flags| {
+            flags.iter().any(|(_, name)| name.starts_with("numeric countdown timer"))
+        }),
     })
 }
 
@@ -2131,7 +2140,9 @@ mod tests {
             limit: 60,
             digit,
             place,
+            timer: false,
         };
+        let digit_at = |value| digit(value, 1);
         // Half of 60 is 30, read off the first output for ten images.
         let outputs = [0.5, 0.0, 0.0, 0.0];
         assert!(digit(0, 0).shows(&outputs));
@@ -2142,6 +2153,10 @@ mod tests {
         let octal = CeNumeric { count: 8, ..digit(1, 0) };
         assert!(octal.shows(&[0.0, 0.0, 0.0, 1.0 / 60.0]));
         assert!(!octal.shows(&[1.0 / 60.0, 0.0, 0.0, 0.0]));
+        // A countdown ignores the object, and with no script stays at zero.
+        let timer = |digit| CeNumeric { timer: true, ..digit_at(digit) };
+        assert!(timer(0).shows(&outputs));
+        assert!(!timer(3).shows(&outputs));
     }
 
     #[test]

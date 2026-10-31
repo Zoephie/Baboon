@@ -805,7 +805,7 @@ fn object_states(
         let outputs = functions.map_or([0.0; 4], |functions| {
             functions.outputs(&functions.inputs_for(set, (data.geometry_id, object)), time)
         });
-        CeObjectState { outputs, change_colors: h2_change_colors_for(colors, "") }
+        CeObjectState { outputs, change_colors: h2_passes::ce_change_colors(colors) }
     };
     let mut states = vec![state(data.ce_object_functions.as_ref(), 0, &data.h2_change_colors)];
     for (index, object) in data.ce_attached.iter().enumerate() {

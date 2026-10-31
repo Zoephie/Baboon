@@ -1107,6 +1107,75 @@ pub(crate) fn h2_change_colors_for(colors: &H2ChangeColors, variant: &str) -> [[
     std::array::from_fn(|channel| change_color_for(&colors[channel], variant))
 }
 
+fn rgb_to_hsv([red, green, blue]: [f32; 3]) -> [f32; 3] {
+    let high = red.max(green).max(blue);
+    let span = high - red.min(green).min(blue);
+    let hue = if span == 0.0 {
+        0.0
+    } else if high == red {
+        ((green - blue) / span).rem_euclid(6.0)
+    } else if high == green {
+        (blue - red) / span + 2.0
+    } else {
+        (red - green) / span + 4.0
+    };
+    [hue / 6.0, if high == 0.0 { 0.0 } else { span / high }, high]
+}
+
+fn hsv_to_rgb([hue, saturation, value]: [f32; 3]) -> [f32; 3] {
+    let sector = hue.rem_euclid(1.0) * 6.0;
+    let whole = sector.floor();
+    let part = sector - whole;
+    let (low, falling, rising) =
+        (value * (1.0 - saturation), value * (1.0 - saturation * part), value * (1.0 - saturation * (1.0 - part)));
+    match whole as u8 {
+        0 => [value, rising, low],
+        1 => [falling, value, low],
+        2 => [low, value, rising],
+        3 => [low, falling, value],
+        4 => [rising, low, value],
+        _ => [value, low, falling],
+    }
+}
+
+/// `rgb_colors_interpolate` with its HSV flag: the short way round the hue.
+fn hsv_interpolate(lower: [f32; 3], upper: [f32; 3], u: f32) -> [f32; 3] {
+    let (mut from, mut to) = (rgb_to_hsv(lower), rgb_to_hsv(upper));
+    if (from[0] - to[0]).abs() > 0.5 {
+        if from[0] >= to[0] {
+            to[0] += 1.0;
+        } else {
+            from[0] += 1.0;
+        }
+    }
+    hsv_to_rgb(std::array::from_fn(|channel| from[channel] * (1.0 - u) + to[channel] * u))
+}
+
+/// `object_choose_random_change_colors` for an object at the world's origin,
+/// where its hash of the position leaves only the channel. White with no
+/// permutation, as an unplaced object has.
+fn ce_change_color(permutations: &[H2ChangePermutation], channel: usize) -> [f32; 3] {
+    let pick = (channel as f32 * 431.12894).rem_euclid(1.0);
+    let u = (channel as f32 * 0.71210998).rem_euclid(1.0);
+    // Tool bakes the weights to a running share of the whole, shared out
+    // evenly where a block has none.
+    let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);
+    let weight = |entry: &H2ChangePermutation| if unweighted { 1.0 } else { entry.weight };
+    let total: f32 = permutations.iter().map(weight).sum();
+    let mut running = 0.0;
+    for entry in permutations {
+        running += weight(entry) / total;
+        if pick <= running {
+            return hsv_interpolate(entry.lower, entry.upper, u).map(|value| value.clamp(0.0, 1.0));
+        }
+    }
+    [1.0; 3]
+}
+
+pub(crate) fn ce_change_colors(colors: &H2ChangeColors) -> [[f32; 3]; 4] {
+    std::array::from_fn(|channel| ce_change_color(&colors[channel], channel))
+}
+
 /// Frame textures a pass needs that a preview has no way to produce. The
 /// texaccum target counts unless this material's own texaccum pass fills it.
 pub(in crate::app) fn h2_pass_needs_frame_texture(pass: &H2Pass, has_texaccum: bool) -> bool {
@@ -2000,5 +2069,39 @@ mod tests {
         for (register, value) in &drawn.constants {
             assert!(value.iter().any(|component| *component != 0.0), "c{register} is unset: {drawn:?}");
         }
+    }
+
+    fn permutation(weight: f32, lower: [f32; 3], upper: [f32; 3]) -> H2ChangePermutation {
+        H2ChangePermutation { weight, lower, upper, variant: String::new() }
+    }
+
+    #[test]
+    fn a_ce_object_at_the_origin_picks_by_channel() {
+        let red = [1.0, 0.0, 0.0];
+        let blue = [0.0, 0.0, 1.0];
+        let list = [permutation(0.3, red, red), permutation(0.7, blue, blue)];
+        // Channel 0 hashes to 0, and 1 to 0.129: both inside the first share.
+        assert_eq!(ce_change_color(&list, 0), red);
+        assert_eq!(ce_change_color(&list, 1), red);
+        // Channel 3 hashes to 0.387, into the second.
+        assert_eq!(ce_change_color(&list, 3), blue);
+        assert_eq!(ce_change_color(&[], 3), [1.0; 3]);
+        // No weights shares evenly: 0.387 is the first of two.
+        let even = [permutation(0.0, red, red), permutation(0.0, blue, blue)];
+        assert_eq!(ce_change_color(&even, 3), red);
+    }
+
+    #[test]
+    fn ce_colors_blend_the_short_way_round_the_hue() {
+        // Red and a red just shy of the wrap meet near red, not across cyan.
+        let mixed = hsv_interpolate([1.0, 0.0, 0.0], [1.0, 0.0, 0.2], 0.5);
+        assert!(mixed[0] > 0.99 && mixed[1] < 0.01, "{mixed:?}");
+        // Unlike an RGB blend, yellow keeps its brightness between red and green.
+        let middle = hsv_interpolate([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.5);
+        assert!((middle[0] - 1.0).abs() < 1e-5 && (middle[1] - 1.0).abs() < 1e-5, "{middle:?}");
+        // A color survives the trip.
+        let color = [0.34, 0.4, 0.15];
+        let back = hsv_to_rgb(rgb_to_hsv(color));
+        assert!(color.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5), "{back:?}");
     }
 }
