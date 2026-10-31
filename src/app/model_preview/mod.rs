@@ -28,6 +28,7 @@ mod ce_functions;
 mod ce_lights;
 mod ce_passes;
 mod h2_bloom;
+pub(in crate::app) mod h2_functions;
 pub(in crate::app) mod h2_passes;
 pub(in crate::app) mod h2_prt;
 pub(in crate::app) mod h2_stage;
@@ -307,6 +308,7 @@ fn model_preview_data(
         ce_object_functions: None,
         ce_attached: Vec::new(),
         ce_weapons: None,
+        h2_object_functions: None,
         scenario_bsps: Vec::new(),
         animations: None,
     }
@@ -1021,6 +1023,18 @@ fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
 
 fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
     draw_ce_weapon_picker(ui, data, state);
+    if let Some(functions) = &data.h2_object_functions {
+        let time = ui.input(|input| input.time) as f32;
+        let values = renderer::h2_function_values(data, &state.h2_function_inputs, time);
+        h2_functions::draw_h2_function_controls(
+            ui,
+            functions,
+            data.geometry_id,
+            &mut state.h2_function_inputs,
+            &values,
+            &renderer::h2_shader_inputs(data),
+        );
+    }
     let read = |object: u8| {
         data.textures.as_ref().map(|textures| {
             let mut read = [false; 4];

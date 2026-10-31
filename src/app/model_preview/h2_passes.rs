@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
+use super::h2_functions::H2FunctionValues;
+
 use super::h2_prt::H2PrtLight;
 use super::ce_passes::{CeModelAnimation, CeNumeric};
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
@@ -351,8 +353,9 @@ pub(crate) struct H2Animation {
     kind: H2AnimationKind,
     /// Seconds to a cycle. At zero the function reads the time itself.
     period: f32,
-    /// What an object input reads instead of time.
-    held_input: Option<f32>,
+    /// The object function this reads instead of time, and what it reads
+    /// with no such function.
+    held_input: Option<(String, f32)>,
     function: Arc<TagFunction>,
 }
 
@@ -365,26 +368,42 @@ impl PartialEq for H2Animation {
     }
 }
 
+/// When an animation reads, and the object functions it can read from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct H2Clock<'a> {
+    pub(crate) time: f32,
+    pub(crate) values: Option<&'a H2FunctionValues>,
+}
+
+impl From<f32> for H2Clock<'_> {
+    fn from(time: f32) -> Self {
+        Self { time, values: None }
+    }
+}
+
 impl H2Animation {
-    fn input(&self, time: f32) -> f32 {
-        match self.held_input {
-            Some(input) => input,
-            None if self.period > 0.0 => (time / self.period).rem_euclid(1.0),
-            None => time,
+    fn input(&self, clock: H2Clock<'_>) -> f32 {
+        match &self.held_input {
+            Some((name, rest)) => {
+                clock.values.and_then(|values| values.get(name)).copied().unwrap_or(*rest)
+            }
+            None if self.period > 0.0 => (clock.time / self.period).rem_euclid(1.0),
+            None => clock.time,
         }
     }
 
-    fn scalar(&self, time: f32) -> f32 {
-        self.function.evaluate(self.input(time), 0.0)
+    fn scalar<'a>(&self, clock: impl Into<H2Clock<'a>>) -> f32 {
+        self.function.evaluate(self.input(clock.into()), 0.0)
     }
 
-    fn vector(&self, time: f32) -> [f32; 4] {
+    fn vector<'a>(&self, clock: impl Into<H2Clock<'a>>) -> [f32; 4] {
+        let clock = clock.into();
         match self.kind {
             H2AnimationKind::Color => {
-                let color = self.function.evaluate_color(self.input(time), 0.0);
+                let color = self.function.evaluate_color(self.input(clock), 0.0);
                 [color.red, color.green, color.blue, 1.0]
             }
-            _ => [self.scalar(time); 4],
+            _ => [self.scalar(clock); 4],
         }
     }
 
@@ -414,13 +433,18 @@ impl H2Animation {
 
 /// The last value or color of a parameter's animations, as they overwrite
 /// one another in the game.
-fn animated_vector(animations: &[H2Animation], time: f32) -> Option<[f32; 4]> {
-    animations.iter().rev().find(|animation| !animation.is_transform()).map(|last| last.vector(time))
+fn animated_vector(animations: &[H2Animation], clock: H2Clock<'_>) -> Option<[f32; 4]> {
+    animations.iter().rev().find(|animation| !animation.is_transform()).map(|last| last.vector(clock))
 }
 
 /// The bytes of a `mapping_function`, as the engine's H2 function.
 pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
-    let data = property.field_path("function/data")?.as_block()?;
+    tag_function_at(property, "function")
+}
+
+/// The same for a `mapping_function` of another name.
+pub(super) fn tag_function_at(holder: &TagStruct<'_>, name: &str) -> Option<TagFunction> {
+    let data = holder.field_path(&format!("{name}/data"))?.as_block()?;
     let bytes: Vec<u8> = (0..data.len())
         .filter_map(|index| data.element(index))
         .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))
@@ -431,7 +455,7 @@ pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction
 /// What a whole, idle object reads for an input: full for what measures its
 /// condition, and otherwise the zero the game falls back on when nothing
 /// exports the name, which leaves boosts, hits and open doors off.
-fn object_input(name: &str) -> f32 {
+pub(super) fn object_input(name: &str) -> f32 {
     match name {
         "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
         | "power" | "shield" | "shield_strength" | "shield_vitality" => 1.0,
@@ -447,7 +471,10 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
             let held_input = property
                 .read_string_id("input name")
                 .filter(|name| !name.is_empty())
-                .map(|name| object_input(&name));
+                .map(|name| {
+                    let rest = object_input(&name);
+                    (name, rest)
+                });
             let kind = match property.read_enum_name("type")?.as_str() {
                 "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
                 "bitmap scale x" => H2AnimationKind::ScaleX,
@@ -491,11 +518,11 @@ pub(crate) struct H2AnimatedRow {
 impl H2AnimatedRow {
     /// `shader_setup_evaluate_overlay_bitmap_xform_animation`, which turns
     /// about the middle of the map.
-    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32) {
+    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], clock: H2Clock<'_>) {
         let [mut scale_x, mut scale_y] = self.scale;
         let (mut move_x, mut move_y, mut angle) = (0.0, 0.0, 0.0);
         for animation in &self.animations {
-            let value = animation.scalar(time);
+            let value = animation.scalar(clock);
             match animation.kind {
                 H2AnimationKind::ScaleUniform => (scale_x, scale_y) = (value, value),
                 H2AnimationKind::ScaleX => scale_x = value,
@@ -1001,33 +1028,43 @@ impl H2DrawPass {
         self.ce_animation.as_ref().is_some_and(|animation| animation.moves_with(outputs))
     }
 
+    /// The object functions its animations read.
+    pub(crate) fn function_inputs(&self) -> impl Iterator<Item = &str> {
+        let constants = self.animated_constants.iter().flat_map(|(_, _, animations)| animations);
+        constants
+            .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
+            .chain(&self.animated_tint_facing)
+            .chain(&self.animated_tint_glancing)
+            .filter_map(|animation| animation.held_input.as_ref().map(|(name, _)| name.as_str()))
+    }
+
     /// Whether it changes with the object's outputs.
     pub(crate) fn reads_outputs(&self) -> bool {
         self.numeric.is_some()
             || self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())
     }
 
-    pub(crate) fn texture_rows_at(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+    pub(crate) fn texture_rows_at(&self, clock: H2Clock<'_>, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
-        self.animated_rows.iter().for_each(|row| row.apply(&mut rows, time));
+        self.animated_rows.iter().for_each(|row| row.apply(&mut rows, clock));
         if let Some(animation) = &self.ce_animation {
-            animation.apply_rows(&mut rows, time, outputs);
+            animation.apply_rows(&mut rows, clock.time, outputs);
         }
         rows
     }
 
-    pub(crate) fn tints_at(&self, time: f32) -> ([f32; 4], [f32; 4]) {
+    pub(crate) fn tints_at(&self, clock: H2Clock<'_>) -> ([f32; 4], [f32; 4]) {
         (
-            animated_vector(&self.animated_tint_facing, time).unwrap_or(self.tint_facing),
-            animated_vector(&self.animated_tint_glancing, time).unwrap_or(self.tint_glancing),
+            animated_vector(&self.animated_tint_facing, clock).unwrap_or(self.tint_facing),
+            animated_vector(&self.animated_tint_glancing, clock).unwrap_or(self.tint_glancing),
         )
     }
 
     /// Fill what the shader animates of `value`, the constant at `register`.
-    pub(crate) fn animate_constant(&self, register: u32, value: &mut [f32; 4], time: f32) {
+    pub(crate) fn animate_constant(&self, register: u32, value: &mut [f32; 4], clock: H2Clock<'_>) {
         for (animated, component, animations) in &self.animated_constants {
             if *animated == register
-                && let Some(vector) = animated_vector(animations, time)
+                && let Some(vector) = animated_vector(animations, clock)
             {
                 value[*component] = vector[*component];
             }
@@ -1630,16 +1667,16 @@ mod tests {
     #[test]
     fn a_period_wraps_time_and_no_period_reads_it_raw() {
         let cycling = animation(H2AnimationKind::Value, 4.0, 0.0);
-        assert_eq!(cycling.input(1.0), 0.25);
-        assert_eq!(cycling.input(5.0), 0.25);
-        assert_eq!(animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0), 5.0);
+        assert_eq!(cycling.input(1.0.into()), 0.25);
+        assert_eq!(cycling.input(5.0.into()), 0.25);
+        assert_eq!(animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0.into()), 5.0);
     }
 
     #[test]
     fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
         let row = |form, animations| {
             let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
-            H2AnimatedRow { register: 1, form, scale: [2.0, 4.0], animations }.apply(&mut rows, 0.0);
+            H2AnimatedRow { register: 1, form, scale: [2.0, 4.0], animations }.apply(&mut rows, 0.0.into());
             rows[1]
         };
         let moved = vec![
@@ -1665,9 +1702,12 @@ mod tests {
         assert_eq!(object_input("shield_vitality"), 1.0);
         assert_eq!(object_input("object_overshield_amount"), 0.0);
         assert_eq!(object_input("boost"), 0.0);
-        let held = H2Animation { held_input: Some(1.0), ..animation(H2AnimationKind::Value, 4.0, 0.0) };
-        assert_eq!(held.input(3.0), 1.0);
+        let held = H2Animation { held_input: Some(("boost".to_owned(), 1.0)), ..animation(H2AnimationKind::Value, 4.0, 0.0) };
+        assert_eq!(held.input(3.0.into()), 1.0);
         assert!(!held.moves());
+        // An object's functions take over from the resting value.
+        let values = H2FunctionValues::from([("boost".to_owned(), 0.25)]);
+        assert_eq!(held.input(H2Clock { time: 3.0, values: Some(&values) }), 0.25);
     }
 
     #[test]
@@ -1980,7 +2020,7 @@ mod tests {
         let root = shader.root();
         let levels = shader_parameters(root);
         let animations = &levels["framebuffer_fade"].animations;
-        assert_eq!(animated_vector(animations, 3.0).map(|value| value[0]), Some(0.0));
+        assert_eq!(animated_vector(animations, 3.0.into()).map(|value| value[0]), Some(0.0));
     }
 
     /// With `BLAM_TEST_H2EK`: the brute hair that drew untextured.

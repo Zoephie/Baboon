@@ -344,6 +344,7 @@ pub(super) fn load_model_preview(
         data.default_variant = object_default_variant(model_tag);
         if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
             data.h2_change_colors = read_h2_change_colors(model_tag);
+            data.h2_object_functions = super::h2_functions::read_h2_object_functions(model_tag);
         }
         return Ok(data);
     }

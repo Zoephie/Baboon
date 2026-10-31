@@ -253,6 +253,8 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) h2_self_shadow: bool,
     /// What the panel set an opened Halo CE object's function inputs to.
     pub(in crate::app) ce_function_inputs: super::ce_functions::CeFunctionInputs,
+    /// What the panel has set of a Halo 2 object's functions.
+    pub(in crate::app) h2_function_inputs: super::h2_functions::H2FunctionInputs,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -317,6 +319,7 @@ impl Default for ModelPreviewState {
             h2_bloom: true,
             h2_self_shadow: false,
             ce_function_inputs: Default::default(),
+            h2_function_inputs: Default::default(),
             textures_pending: false,
             show_render: true,
             perspective: true,
@@ -495,6 +498,8 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) ce_attached: Vec<super::ce_attachments::CeAttachedObject>,
     /// Halo CE bipeds: what the unit can hold.
     pub(in crate::app) ce_weapons: Option<super::ce_attachments::CeBipedWeapons>,
+    /// Halo 2: the functions of an opened object.
+    pub(in crate::app) h2_object_functions: Option<super::h2_functions::H2ObjectFunctions>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

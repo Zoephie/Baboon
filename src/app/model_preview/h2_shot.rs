@@ -6,7 +6,8 @@
 //! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
 //! bipeds with `H2_SHOT_BIPED`, or vehicles with `H2_SHOT_OBJECT=vehicle`, whose
 //! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
-//! holding `H2_SHOT_WEAPON`.
+//! holding `H2_SHOT_WEAPON`, with named Halo 2
+//! function inputs from `H2_SHOT_FUNCTIONS=name=value,..`.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -138,6 +139,16 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
             object_states(&data, &set, time)
         },
         object_moves: object_functions(&data).any(|functions| functions.move_at_rest()),
+        h2_values: {
+            let mut set = state.h2_function_inputs.clone();
+            if let Ok(pairs) = std::env::var("H2_SHOT_FUNCTIONS") {
+                for pair in pairs.split(',') {
+                    let (name, value) = pair.split_once('=').unwrap();
+                    set.insert((data.geometry_id, name.to_owned()), value.parse().unwrap());
+                }
+            }
+            h2_function_values_for(&data, &set, time)
+        },
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,

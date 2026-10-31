@@ -8,7 +8,7 @@ use super::h2_passes::{
     h2_change_colors_for, h2_normalization_face, h2_object_light_direction, h2_prt_object_lights,
 };
 use super::h2_bloom::H2Bloom;
-use super::h2_passes::h2_prt_lights;
+use super::h2_passes::{H2Clock, h2_prt_lights};
 use super::h2_stage::H2VertexStage;
 use crate::core::h2_pixel_shader::SamplerKind;
 use eframe::glow::{self, HasContext as _};
@@ -130,7 +130,9 @@ pub(super) fn draw_model_viewport(
         time,
         h2_prt_clusters: None,
         object_states: object_states(data, &state.ce_function_inputs, time),
-        object_moves: object_functions(data).any(|functions| functions.move_at_rest()),
+        object_moves: object_functions(data).any(|functions| functions.move_at_rest())
+            || h2_functions_move(data, &state.h2_function_inputs, time),
+        h2_values: h2_function_values_for(data, &state.h2_function_inputs, time),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
@@ -762,6 +764,8 @@ struct ModelGpuFrame {
     object_states: Vec<CeObjectState>,
     /// Whether those change by themselves.
     object_moves: bool,
+    /// Halo 2: what its shaders can read of the object's functions.
+    h2_values: Option<h2_functions::H2FunctionValues>,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
     /// Draw opaque Halo 2 materials through their passes.
@@ -785,6 +789,49 @@ const H2_TIME_WRAP: f64 = 3600.0;
 struct CeObjectState {
     outputs: [f32; 4],
     change_colors: [[f32; 3]; 4],
+}
+
+/// The names a Halo 2 object's shaders read, besides what its functions import.
+pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let textures = data.textures.iter().flat_map(|textures| textures.iter());
+    let passes = textures.flat_map(|texture| texture.h2_layers.iter().flatten());
+    for name in passes.flat_map(|pass| pass.function_inputs()) {
+        if !names.iter().any(|known| known == name) {
+            names.push(name.to_owned());
+        }
+    }
+    names
+}
+
+/// Every name an opened Halo 2 object answers to.
+pub(super) fn h2_function_values(
+    data: &ModelPreviewData,
+    set: &h2_functions::H2FunctionInputs,
+    time: f32,
+) -> h2_functions::H2FunctionValues {
+    let inputs = h2_shader_inputs(data);
+    data.h2_object_functions.as_ref().map_or_else(Default::default, |functions| {
+        functions.values(set, data.geometry_id, &inputs, time)
+    })
+}
+
+fn h2_function_values_for(
+    data: &ModelPreviewData,
+    set: &h2_functions::H2FunctionInputs,
+    time: f32,
+) -> Option<h2_functions::H2FunctionValues> {
+    data.h2_object_functions.as_ref().map(|_| h2_function_values(data, set, time))
+}
+
+fn h2_functions_move(
+    data: &ModelPreviewData,
+    set: &h2_functions::H2FunctionInputs,
+    time: f32,
+) -> bool {
+    data.h2_object_functions
+        .as_ref()
+        .is_some_and(|functions| functions.move_at_rest(&h2_function_values(data, set, time)))
 }
 
 /// The opened object's functions, then those of what is attached to it.
@@ -3072,16 +3119,17 @@ impl ModelGlRenderer {
             }
             let location = program.location(gl, "u_texture_rows");
             let (outputs, change_colors) = (frame.outputs_of(material), frame.change_colors_of(material));
-            let rows = pass.texture_rows_at(frame.time, &outputs);
+            let clock = H2Clock { time: frame.time, values: frame.h2_values.as_ref() };
+            let rows = pass.texture_rows_at(clock, &outputs);
             gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
-            let (tint_facing, tint_glancing) = pass.tints_at(frame.time);
+            let (tint_facing, tint_glancing) = pass.tints_at(clock);
             let location = program.location(gl, "u_tint_facing");
             gl.uniform_4_f32_slice(location.as_ref(), &tint_facing);
             let location = program.location(gl, "u_tint_glancing");
             gl.uniform_4_f32_slice(location.as_ref(), &tint_glancing);
             for (register, value) in &pass.constants {
                 let mut value = *value;
-                pass.animate_constant(*register, &mut value, frame.time);
+                pass.animate_constant(*register, &mut value, clock);
                 if let Some(animation) = &pass.ce_animation {
                     animation.constant(
                         *register,
