@@ -94,6 +94,8 @@ pub(crate) struct RenderModelPreview {
     pub bounds_max: [f32; 3],
     /// Halo 2 precomputed radiance transfer, on the few models that have it.
     pub h2_prt: Option<h2_prt::H2Prt>,
+    /// Halo CE: where a held weapon pulls the unit's hands.
+    pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -299,6 +301,7 @@ fn model_preview_data(
         h2_change_colors: Default::default(),
         ce_object_functions: None,
         ce_attached: Vec::new(),
+        ce_weapons: None,
         scenario_bsps: Vec::new(),
         animations: None,
     }
@@ -308,6 +311,7 @@ fn draw_animation_combo(
     ui: &mut Ui,
     entry_key: &str,
     animations: &[PreviewAnimationEntry],
+    hidden: &std::collections::BTreeSet<usize>,
     playback: &mut PreviewAnimationPlayback,
     width: f32,
 ) {
@@ -322,10 +326,10 @@ fn draw_animation_combo(
         ui,
         popup_id,
         selected_text,
-        animations.len(),
+        animations.len() - hidden.len(),
         width,
         text_dark(),
-        !animations.is_empty(),
+        animations.len() > hidden.len(),
     );
     let just_opened = response.clicked() && !open;
     if response.clicked() {
@@ -346,7 +350,9 @@ fn draw_animation_combo(
             picker_results(ui, 300.0, filter_changed, |ui| {
                 let mut shown = 0;
                 for (index, row) in animations.iter().enumerate() {
-                    if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
+                    if hidden.contains(&index)
+                        || (!filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter))
+                    {
                         continue;
                     }
                     shown += 1;
@@ -491,10 +497,13 @@ pub(super) fn draw_model_preview_panel(
                         animation_header_group(ui, combo_width + spinner_width, |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             ui.add_enabled_ui(!animations.is_empty(), |ui| {
+                                let no_clips = std::collections::BTreeSet::new();
+                                let hidden = data.ce_weapons.as_ref().map_or(&no_clips, |weapons| &weapons.hidden_clips);
                                 draw_animation_combo(
                                     ui,
                                     &entry.key,
                                     animations,
+                                    hidden,
                                     &mut state.animation,
                                     combo_width,
                                 );
@@ -902,7 +911,50 @@ fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
     }
 }
 
+/// Which weapon a Halo CE biped holds. Changing it reloads the preview, so
+/// what should outlive that goes along with the state.
+fn draw_ce_weapon_picker(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    let Some(weapons) = data.ce_weapons.as_ref().filter(|weapons| !weapons.equippable.is_empty())
+    else {
+        return;
+    };
+    let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.ce_weapon.as_ref());
+    let mut chosen = None;
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Weapon");
+        egui::ComboBox::from_id_salt(("ce_weapon_picker", &data.render_model_path))
+            .selected_text(held.map_or("None", |weapon| weapon.name.as_str()))
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(held.is_none(), "None").clicked() {
+                    chosen = Some(None);
+                }
+                let mut class = None;
+                for weapon in &weapons.equippable {
+                    if class != Some(&weapon.class) {
+                        class = Some(&weapon.class);
+                        ui.label(RichText::new(&weapon.class).color(subtle_dark()));
+                    }
+                    let is_held = held.is_some_and(|held| held.path == weapon.path);
+                    if ui.selectable_label(is_held, &weapon.name).clicked() {
+                        chosen = Some(Some(weapon.path.clone()));
+                    }
+                }
+            });
+    });
+    let Some(choice) = chosen.filter(|choice| *choice != state.ce_weapon) else {
+        return;
+    };
+    let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
+    state.ce_clip_after_load =
+        state.animation.selected.and_then(|index| Some(animations.get(index)?.name.clone()));
+    state.ce_weapon_carry = Some((data.geometry_id, state.region_selections.clone()));
+    state.ce_weapon = choice;
+}
+
 fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    draw_ce_weapon_picker(ui, data, state);
     let read = |object: u8| {
         data.textures.as_ref().map(|textures| {
             let mut read = [false; 4];

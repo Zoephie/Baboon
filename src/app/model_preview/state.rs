@@ -213,6 +213,15 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `high_detail` value the cached `data` was built with, so toggling it
     /// invalidates the cache and reloads.
     pub(in crate::app) loaded_high_detail: bool,
+    /// Halo CE bipeds: the weapon held, by path. They start with none.
+    pub(in crate::app) ce_weapon: Option<String>,
+    /// The `ce_weapon` the cached `data` was built with.
+    pub(in crate::app) loaded_ce_weapon: Option<String>,
+    /// What outlives the reload a weapon change makes: the old geometry's id,
+    /// for its function inputs, and the region selections.
+    pub(in crate::app) ce_weapon_carry: Option<(u64, HashMap<String, ModelRegionSelection>)>,
+    /// The clip playing when the weapon changed, picked again once listed.
+    pub(in crate::app) ce_clip_after_load: Option<String>,
     /// `.model` tags only: draw the collision overlay. A draw-time filter,
     /// not a rebuild — the overlay geometry is built once on a worker when
     /// the preview loads, so toggling is instant in both directions.
@@ -289,6 +298,10 @@ impl Default for ModelPreviewState {
             marker_filter: String::new(),
             high_detail: true,
             loaded_high_detail: false,
+            ce_weapon: None,
+            loaded_ce_weapon: None,
+            ce_weapon_carry: None,
+            ce_clip_after_load: None,
             show_collision: false,
             show_physics: false,
             overlays_pending: false,
@@ -335,6 +348,7 @@ impl ModelPreviewState {
         self.loaded_key.as_deref() != Some(entry_key)
             || self.data.is_none()
             || self.loaded_high_detail != self.high_detail
+            || self.loaded_ce_weapon != self.ce_weapon
             || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }
@@ -479,6 +493,8 @@ pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) ce_object_functions: Option<super::ce_functions::CeObjectFunctions>,
     /// What the opened Halo CE object brings with it.
     pub(in crate::app) ce_attached: Vec<super::ce_attachments::CeAttachedObject>,
+    /// Halo CE bipeds: what the unit can hold.
+    pub(in crate::app) ce_weapons: Option<super::ce_attachments::CeBipedWeapons>,
     /// Scenario tags only: the `structure bsps` block's references (one per
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.

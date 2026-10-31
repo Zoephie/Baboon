@@ -3,6 +3,7 @@
 //! makes them, and `unit_ready_desired_weapon` hangs the first on a marker
 //! the unit's animation graph names.
 
+use blam_tags::math::Matrix4;
 use blam_tags::{TagFile, TagStruct};
 
 use super::ce_functions::{CeObjectFunctions, read_ce_forced_permutation, read_ce_object_functions};
@@ -20,6 +21,221 @@ pub(crate) struct CeAttachedObject {
     pub(crate) name: String,
     pub(crate) functions: Option<CeObjectFunctions>,
     pub(crate) change_colors: H2ChangeColors,
+}
+
+/// Clips the game runs without weapon IK, by the last word of their names.
+/// `unit_animation_weapon_ik` turns it off for an action, a soft ping, and
+/// the states of `unit_animation_set_state` these play in.
+const NO_WEAPON_IK: &[&str] = &[
+    // Actions.
+    "disarm",
+    "drop",
+    "ready",
+    "put-away",
+    "reload",
+    "reload-1",
+    "reload-2",
+    "melee",
+    "throw-grenade",
+    "overheat",
+    // States.
+    "airborne-dead",
+    "landing-dead",
+    "enter",
+    "exit",
+    "melee-airborne",
+    "melee-continuous",
+    "resurrect-front",
+    "resurrect-back",
+    "leap-start",
+    "leap-airborne",
+    "leap-melee",
+    // Impulses, which `unit_start_animation_impulse` plays in one state.
+    "dive-front",
+    "dive-back",
+    "dive-left",
+    "dive-right",
+    "surprise-front",
+    "surprise-back",
+    "berserk",
+    "evade-left",
+    "evade-right",
+    "signal-move",
+    "signal-attack",
+    "warn",
+    "celebrate",
+    "panic",
+    // Pings, by the part of the body hit.
+    "head",
+    "chest",
+    "gut",
+    "l-arm",
+    "r-arm",
+    "l-hand",
+    "r-hand",
+    "l-leg",
+    "r-leg",
+    "l-thigh",
+    "r-thigh",
+    "l-foot",
+    "r-foot",
+];
+/// `inverse_kinematics_adjust_matrices` keeps the arm this much short of straight.
+const LONGEST_REACH: f32 = 0.98;
+
+/// Whether the game keeps a held weapon's IK points on through a clip.
+pub(super) fn clip_runs_weapon_ik(clip: &str) -> bool {
+    let last = clip.rsplit(' ').next().unwrap_or(clip);
+    // `%1` numbers a clip's permutations.
+    !NO_WEAPON_IK.contains(&last.split('%').next().unwrap_or(last))
+}
+
+/// A hand held to a marker of the weapon: an IK point of the animations.
+#[derive(Debug, Clone)]
+pub(crate) struct CeWeaponIk {
+    /// The weapon class whose clips hold it, the second word of their names.
+    class: String,
+    hand: usize,
+    elbow: usize,
+    shoulder: usize,
+    /// From the marker on the hand to its node.
+    hand_from_marker: Matrix4,
+    /// The node the weapon rides on.
+    weapon_node: usize,
+    /// The marker on the weapon, in bind space.
+    grip: Matrix4,
+}
+
+const IDENTITY: Matrix4 = Matrix4 {
+    m: [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+};
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn scaled(a: [f32; 3], by: f32) -> [f32; 3] {
+    a.map(|value| value * by)
+}
+
+fn added(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|axis| a[axis] + b[axis])
+}
+
+fn apart(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|axis| a[axis] - b[axis])
+}
+
+/// Unit length, or as it is when it has none to speak of.
+fn unit(a: [f32; 3]) -> [f32; 3] {
+    let length = dot(a, a).sqrt();
+    if length >= 0.0001 { scaled(a, 1.0 / length) } else { a }
+}
+
+fn axis_of(matrix: &Matrix4, axis: usize) -> [f32; 3] {
+    std::array::from_fn(|row| matrix.m[row][axis])
+}
+
+fn place_of(matrix: &Matrix4) -> [f32; 3] {
+    axis_of(matrix, 3)
+}
+
+fn matrix_of(axes: [[f32; 3]; 3], position: [f32; 3]) -> Matrix4 {
+    let mut matrix = IDENTITY;
+    for row in 0..3 {
+        for axis in 0..3 {
+            matrix.m[row][axis] = axes[axis][row];
+        }
+        matrix.m[row][3] = position[row];
+    }
+    matrix
+}
+
+fn rigid_inverse(matrix: &Matrix4) -> Matrix4 {
+    let axes = [axis_of(matrix, 0), axis_of(matrix, 1), axis_of(matrix, 2)];
+    let place = place_of(matrix);
+    let mut inverse = IDENTITY;
+    for row in 0..3 {
+        inverse.m[row][0] = axes[row][0];
+        inverse.m[row][1] = axes[row][1];
+        inverse.m[row][2] = axes[row][2];
+        inverse.m[row][3] = -dot(axes[row], place);
+    }
+    inverse
+}
+
+/// `inverse_kinematics_adjust_matrices`: bend at the elbow, on the side it
+/// already bends, so the hand reaches `desired`.
+fn reach_with_arm(desired: Matrix4, shoulder: &mut Matrix4, elbow: &mut Matrix4, hand: &mut Matrix4) {
+    let start = place_of(shoulder);
+    let joint = place_of(elbow);
+    let upper = dot(apart(joint, start), apart(joint, start)).sqrt();
+    let fore = dot(apart(place_of(hand), joint), apart(place_of(hand), joint)).sqrt();
+    let to_goal = apart(place_of(&desired), start);
+    let mut reach = dot(to_goal, to_goal).sqrt();
+    if reach < 0.0001 {
+        return;
+    }
+    let toward = scaled(to_goal, 1.0 / reach);
+    let side = unit(cross(toward, apart(joint, start)));
+    let bend = cross(side, toward);
+    let mut goal = desired;
+    let longest = (upper + fore) * LONGEST_REACH;
+    if longest < reach {
+        reach = longest;
+        let place = added(start, scaled(toward, reach));
+        (0..3).for_each(|row| goal.m[row][3] = place[row]);
+    }
+    let along = (reach * reach + upper * upper - fore * fore) / (reach * 2.0);
+    let out = (upper * upper - along * along).max(0.0).sqrt();
+    // A bone's first axis runs down it, and its second stays as near as it can.
+    let aimed = |x: [f32; 3], up: [f32; 3], place: [f32; 3]| {
+        let z = unit(cross(x, up));
+        matrix_of([x, cross(z, x), z], place)
+    };
+    let upper_axis = unit(added(scaled(toward, along), scaled(bend, out)));
+    let fore_axis = unit(added(scaled(toward, reach - along), scaled(bend, -out)));
+    let bent = added(start, scaled(upper_axis, upper));
+    *elbow = aimed(fore_axis, axis_of(elbow, 1), bent);
+    *shoulder = aimed(upper_axis, axis_of(shoulder, 1), start);
+    *hand = goal;
+}
+
+impl CeWeaponIk {
+    /// Whether a clip is one of the held weapon's, played with IK on.
+    pub(super) fn runs_through(&self, clip: &str) -> bool {
+        clip.split(' ').any(|word| word.eq_ignore_ascii_case(&self.class)) && clip_runs_weapon_ik(clip)
+    }
+
+    /// Pose the arm. `worlds` holds each node's posed transform, and
+    /// `inverse_binds` what `skin` undoes of it.
+    pub(super) fn apply(&self, worlds: &mut [Matrix4], inverse_binds: &[Matrix4]) {
+        let (Some(weapon), Some(inverse)) =
+            (worlds.get(self.weapon_node).copied(), inverse_binds.get(self.weapon_node).copied())
+        else {
+            return;
+        };
+        let desired = weapon * inverse * self.grip * self.hand_from_marker;
+        let mut arm = [self.shoulder, self.elbow, self.hand].map(|node| worlds.get(node).copied());
+        let [Some(shoulder), Some(elbow), Some(hand)] = &mut arm else {
+            return;
+        };
+        reach_with_arm(desired, shoulder, elbow, hand);
+        (worlds[self.shoulder], worlds[self.elbow], worlds[self.hand]) = (*shoulder, *elbow, *hand);
+    }
 }
 
 /// A marker as a rigid transform: its three axes, then its position.
@@ -81,31 +297,194 @@ fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
         .collect()
 }
 
+/// What the animations say of a held weapon.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct WeaponHold {
+    class: String,
+    hand: String,
+    grip: String,
+    /// Marker on the unit, then the marker on the weapon it holds to.
+    ik_points: Vec<(String, String)>,
+}
+
+/// A weapon a biped's animations can hold.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CeEquippable {
+    pub(crate) path: String,
+    pub(crate) name: String,
+    /// The `weapons` entry of the animations that holds it.
+    pub(crate) class: String,
+    label: String,
+}
+
+/// What a biped can hold, and which clips the held weapon leaves out.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CeBipedWeapons {
+    pub(crate) equippable: Vec<CeEquippable>,
+    pub(crate) hidden_clips: std::collections::BTreeSet<usize>,
+}
+
+/// The game's own name for holding nothing, an empty type label in the tags.
+const UNARMED: &str = "unarmed";
+
+fn type_matches(kind: TagStruct<'_>, weapon_label: &str) -> bool {
+    kind.read_string("label").is_some_and(|label| {
+        label.eq_ignore_ascii_case(weapon_label) || (label.is_empty() && weapon_label == UNARMED)
+    })
+}
+
 /// `unit_set_or_test_seat_and_weapon_label`: every seat and weapon is tried
 /// and the last that matches stands. An empty type label is for `unarmed`.
-fn weapon_markers(graph: &TagFile, weapon_label: &str) -> Option<(String, String)> {
+fn weapon_hold(graph: &TagFile, weapon_label: &str) -> Option<WeaponHold> {
     let mut found = None;
     for seat in elements(graph.root(), "UNITS") {
         if !seat.read_string("label").is_some_and(|label| label.eq_ignore_ascii_case(RESTING_SEAT)) {
             continue;
         }
         for weapon in elements(seat, "weapons") {
-            let matches = elements(weapon, "weapon types").iter().any(|kind| {
-                kind.read_string("label").is_some_and(|label| label.eq_ignore_ascii_case(weapon_label))
-            });
-            if matches {
-                found = Some((
-                    weapon.read_string("hand marker").unwrap_or_default(),
-                    weapon.read_string("grip marker").unwrap_or_default(),
-                ));
+            if elements(weapon, "weapon types").iter().any(|kind| type_matches(*kind, weapon_label)) {
+                found = Some(WeaponHold {
+                    class: weapon.read_string("name").unwrap_or_default(),
+                    hand: weapon.read_string("hand marker").unwrap_or_default(),
+                    grip: weapon.read_string("grip marker").unwrap_or_default(),
+                    ik_points: elements(weapon, "ik points")
+                        .iter()
+                        .map(|point| {
+                            (
+                                point.read_string("marker").unwrap_or_default(),
+                                point.read_string("attach to marker").unwrap_or_default(),
+                            )
+                        })
+                        .collect(),
+                });
             }
         }
     }
     found
 }
 
+/// Every clip a block of `animation` indices starts, with the permutations
+/// hanging off each by `next animation`.
+fn add_clips(
+    holder: TagStruct<'_>,
+    next: &[i16],
+    clips: &mut std::collections::BTreeSet<usize>,
+) {
+    for entry in elements(holder, "animations") {
+        let mut clip = usize::try_from(entry.read_block_index("animation")).ok();
+        while let Some(index) = clip.filter(|index| *index < next.len()) {
+            if !clips.insert(index) {
+                break;
+            }
+            clip = usize::try_from(next[index]).ok();
+        }
+    }
+}
+
+/// Clips of weapons not held. Whatever no weapon names stays, and so does a
+/// seat with nothing for this weapon: `unit_enter_seat` then takes any.
+fn hidden_clips(graph: &TagFile, weapon_label: &str) -> std::collections::BTreeSet<usize> {
+    let next: Vec<i16> = elements(graph.root(), "animations")
+        .iter()
+        .map(|animation| animation.read_block_index("next animation"))
+        .collect();
+    let (mut held, mut other) = Default::default();
+    for seat in elements(graph.root(), "UNITS") {
+        let weapons = elements(seat, "weapons");
+        let found = weapons.iter().enumerate().rev().find_map(|(index, weapon)| {
+            let kinds = elements(*weapon, "weapon types");
+            let kind = kinds.iter().position(|kind| type_matches(*kind, weapon_label))?;
+            Some((index, kind))
+        });
+        let Some((held_weapon, held_kind)) = found else {
+            continue;
+        };
+        for (index, weapon) in weapons.iter().enumerate() {
+            let set = if index == held_weapon { &mut held } else { &mut other };
+            add_clips(*weapon, &next, set);
+            for (kind_index, kind) in elements(*weapon, "weapon types").iter().enumerate() {
+                let is_held = index == held_weapon && kind_index == held_kind;
+                add_clips(*kind, &next, if is_held { &mut held } else { &mut other });
+            }
+        }
+    }
+    other.difference(&held).copied().collect()
+}
+
+/// `.weapon` tags of a loose folder, by path without the extension.
+fn loose_weapon_paths(root: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut folders = vec![root.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for path in std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "weapon") {
+                let inner = path.strip_prefix(root).unwrap_or(&path).with_extension("");
+                found.push(inner.to_string_lossy().replace('/', "\\"));
+            }
+        }
+    }
+    found
+}
+
+/// The weapons `unit_can_use_weapon` lets this unit hold in its resting seat:
+/// the biped has no say, only its animations do.
+fn equippable_of(source: &TagSource, graph: &TagFile) -> Vec<CeEquippable> {
+    let TagSource::LooseFolder { root, .. } = source else {
+        return Vec::new();
+    };
+    let mut equippable: Vec<_> = loose_weapon_paths(root)
+        .into_iter()
+        .filter_map(|path| {
+            let weapon = load_referenced_tag_from_source(source, &path, "weapon", b"weap").ok()?;
+            let label = weapon.root().read_string("label")?;
+            let class = weapon_hold(graph, &label)?.class;
+            Some(CeEquippable { name: tag_path::name(&path).to_owned(), path, class, label })
+        })
+        .collect();
+    equippable.sort_by(|a, b| (&a.class, &a.name).cmp(&(&b.class, &b.name)));
+    equippable
+}
+
+/// A biped's weapon choices, with `chosen` held. `known` spares the scan when
+/// only the choice changed.
+pub(super) fn biped_weapons(
+    source: &TagSource,
+    object: &TagFile,
+    chosen: Option<&str>,
+    known: Option<&[CeEquippable]>,
+) -> CeBipedWeapons {
+    let Some(graph) = object_reference(object, "animation graph").and_then(|graph| {
+        load_referenced_tag_from_source(source, &graph, "model_animations", b"antr").ok()
+    }) else {
+        return CeBipedWeapons::default();
+    };
+    let equippable = known.map_or_else(|| equippable_of(source, &graph), <[_]>::to_vec);
+    let held = chosen.and_then(|path| equippable.iter().find(|weapon| weapon.path == path));
+    let hidden_clips = hidden_clips(&graph, held.map_or(UNARMED, |weapon| weapon.label.as_str()));
+    CeBipedWeapons { equippable, hidden_clips }
+}
+
+/// The clip to play after a weapon change: the same one if it is still shown,
+/// or this weapon's idle in the same seat.
+pub(super) fn clip_after_weapon_change(
+    clips: &[PreviewAnimationEntry],
+    hidden: &std::collections::BTreeSet<usize>,
+    clip: &str,
+    class: &str,
+) -> Option<usize> {
+    let shown = |name: &str| {
+        // A clip with permutations is named for its first, `idle%0`.
+        let matches = |entry: &PreviewAnimationEntry| entry.name.split('%').next() == Some(name);
+        (0..clips.len()).find(|index| matches(&clips[*index]) && !hidden.contains(index))
+    };
+    let seat = clip.split(' ').next()?;
+    shown(clip.split('%').next()?).or_else(|| shown(&format!("{seat} {class} idle")))
+}
+
 /// The unit's first weapon, which it has ready, by path.
-fn first_weapon(object: &TagFile) -> Option<String> {
+pub(super) fn first_weapon(object: &TagFile) -> Option<String> {
     let mut holder = object.root();
     loop {
         if let Some(weapons) = holder.field("weapons").and_then(|field| field.as_block()) {
@@ -161,14 +540,48 @@ fn merge_attached(
     }
 }
 
+/// An IK point of a weapon held on `parent`, if both markers and the arm exist.
+fn weapon_ik(
+    preview: &RenderModelPreview,
+    weapon: &RenderModelPreview,
+    class: &str,
+    parent: MarkerFrame,
+    child: MarkerFrame,
+    marker: &str,
+    attach_to: &str,
+) -> Option<CeWeaponIk> {
+    let named = |model: &RenderModelPreview, name: &str| {
+        let found = model.markers.iter().any(|marker| marker.name.eq_ignore_ascii_case(name));
+        found.then(|| MarkerFrame::find(model, name))
+    };
+    let on_hand = named(preview, marker)?;
+    let on_weapon = named(weapon, attach_to)?;
+    let hand = on_hand.node.max(0) as usize;
+    let elbow = usize::try_from(preview.nodes.get(hand)?.parent).ok()?;
+    let shoulder = usize::try_from(preview.nodes.get(elbow)?.parent).ok()?;
+    let rows = preview.nodes.get(hand)?.inverse_bind;
+    let inverse_bind = Matrix4 { m: [rows[0], rows[1], rows[2], [0.0, 0.0, 0.0, 1.0]] };
+    let moved = on_weapon.axes.map(|axis| attach_vector(&parent, &child, axis));
+    let position = attach_point(&parent, &child, on_weapon.position);
+    Some(CeWeaponIk {
+        class: class.to_owned(),
+        hand,
+        elbow,
+        shoulder,
+        hand_from_marker: rigid_inverse(&(inverse_bind * matrix_of(on_hand.axes, on_hand.position))),
+        weapon_node: parent.node.max(0) as usize,
+        grip: matrix_of(moved, position),
+    })
+}
+
 /// Hang the unit's ready weapon on it, returning the object that adds.
 pub(super) fn attach_ce_weapon(
     source: &TagSource,
     object: &TagFile,
+    path: &str,
     preview: &mut RenderModelPreview,
 ) -> Option<CeAttachedObject> {
-    let path = first_weapon(object)?;
-    let weapon = load_referenced_tag_from_source(source, &path, "weapon", b"weap").ok()?;
+    let weapon = load_referenced_tag_from_source(source, path, "weapon", b"weap").ok()?;
     let model = object_reference(&weapon, "model")?;
     let render = load_referenced_tag_from_source(source, &model, "gbxmodel", b"mod2").ok()?;
     let mut attached = build_render_preview(&render).ok()?;
@@ -177,15 +590,18 @@ pub(super) fn attach_ce_weapon(
         attached.materials.iter_mut().for_each(|material| material.permutation = forced);
     }
     let label = weapon.root().read_string("label").unwrap_or_default();
-    let (hand, grip) = object_reference(object, "animation graph")
+    let hold = object_reference(object, "animation graph")
         .and_then(|graph| {
             load_referenced_tag_from_source(source, &graph, "model_animations", b"antr").ok()
         })
-        .and_then(|graph| weapon_markers(&graph, &label))
+        .and_then(|graph| weapon_hold(&graph, &label))
         .unwrap_or_default();
-    let parent = MarkerFrame::find(preview, &hand);
-    let child = MarkerFrame::find(&attached, &grip);
-    let name = tag_path::name(&path).to_owned();
+    let parent = MarkerFrame::find(preview, &hold.hand);
+    let child = MarkerFrame::find(&attached, &hold.grip);
+    let name = tag_path::name(path).to_owned();
+    for (marker, attach_to) in &hold.ik_points {
+        preview.weapon_ik.extend(weapon_ik(preview, &attached, &hold.class, parent, child, marker, attach_to));
+    }
     merge_attached(preview, attached, parent, child, 1, &name);
     Some(CeAttachedObject {
         name,
@@ -213,6 +629,95 @@ mod tests {
         assert_eq!(attach_point(&turned(), &child, [0.0, 0.0, 1.0]), [2.0, 0.0, 0.0]);
         assert_eq!(attach_point(&turned(), &child, [1.0, 0.0, 1.0]), [2.0, 1.0, 0.0]);
         assert_eq!(attach_vector(&turned(), &child, [1.0, 0.0, 0.0]), [0.0, 1.0, 0.0]);
+    }
+
+    fn at(x: f32, y: f32, z: f32) -> Matrix4 {
+        matrix_of(MarkerFrame::ORIGIN.axes, [x, y, z])
+    }
+
+    fn distance(a: &Matrix4, b: &Matrix4) -> f32 {
+        let gap = apart(place_of(a), place_of(b));
+        dot(gap, gap).sqrt()
+    }
+
+    #[test]
+    fn an_arm_reaches_keeping_its_length_and_its_side() {
+        let (mut shoulder, mut elbow, mut hand) = (at(0.0, 0.0, 0.0), at(1.0, 0.0, 0.0), at(1.0, 1.0, 0.0));
+        reach_with_arm(at(1.2, 0.2, 0.0), &mut shoulder, &mut elbow, &mut hand);
+        assert!(distance(&hand, &at(1.2, 0.2, 0.0)) < 1e-5);
+        assert!((distance(&elbow, &shoulder) - 1.0).abs() < 1e-5);
+        assert!((distance(&hand, &elbow) - 1.0).abs() < 1e-5);
+        // The elbow started below the line to the goal, and stays there.
+        assert!(place_of(&elbow)[1] < place_of(&elbow)[0]);
+        // Each bone's first axis still runs down it.
+        let down = unit(apart(place_of(&elbow), place_of(&shoulder)));
+        assert!(dot(axis_of(&shoulder, 0), down) > 0.999);
+    }
+
+    #[test]
+    fn a_goal_out_of_reach_leaves_the_arm_just_short_of_straight() {
+        let (mut shoulder, mut elbow, mut hand) = (at(0.0, 0.0, 0.0), at(1.0, 0.0, 0.0), at(1.0, 1.0, 0.0));
+        reach_with_arm(at(5.0, 0.0, 0.0), &mut shoulder, &mut elbow, &mut hand);
+        assert!((distance(&hand, &shoulder) - 2.0 * LONGEST_REACH).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_inverse_of_a_rigid_transform_undoes_it() {
+        let matrix = matrix_of(turned().axes, [1.0, 2.0, 3.0]);
+        let round = matrix * rigid_inverse(&matrix);
+        assert!(distance(&round, &IDENTITY) < 1e-6);
+        assert!((axis_of(&round, 0)[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ik_runs_through_idle_and_stops_for_actions() {
+        assert!(clip_runs_weapon_ik("stand rifle idle"));
+        assert!(clip_runs_weapon_ik("stand rifle move-front"));
+        assert!(!clip_runs_weapon_ik("stand rifle ar melee"));
+        assert!(!clip_runs_weapon_ik("stand rifle ar reload-1"));
+        assert!(!clip_runs_weapon_ik("stand rifle throw-grenade"));
+        assert!(!clip_runs_weapon_ik("stand rifle s-ping gut"));
+        assert!(!clip_runs_weapon_ik("stand rifle h-kill l-hand%1"));
+        assert!(clip_runs_weapon_ik("stand rifle move-front%0"));
+        assert!(!clip_runs_weapon_ik("stand rifle evade-left"));
+        // An overlay leaves the state alone, so it keeps the hand on.
+        assert!(clip_runs_weapon_ik("stand rifle ar fire-1"));
+        assert!(clip_runs_weapon_ik("stand rifle ar chamber-1"));
+    }
+
+    #[test]
+    fn ik_belongs_to_the_held_weapons_clips() {
+        let ik = CeWeaponIk {
+            class: "rifle".to_owned(),
+            hand: 2,
+            elbow: 1,
+            shoulder: 0,
+            hand_from_marker: IDENTITY,
+            weapon_node: 3,
+            grip: IDENTITY,
+        };
+        assert!(ik.runs_through("stand rifle idle"));
+        assert!(!ik.runs_through("stand unarmed idle"));
+        assert!(!ik.runs_through("stand rifle ar melee"));
+    }
+
+    #[test]
+    fn a_hidden_clip_gives_way_to_the_weapons_idle() {
+        let clip = |name: &str| PreviewAnimationEntry {
+            name: name.to_owned(),
+            frame_count: 2,
+            kind: "jma",
+            playable: true,
+        };
+        let clips = [clip("stand rifle idle"), clip("stand pistol idle"), clip("stand gut")];
+        let hidden = std::collections::BTreeSet::from([0]);
+        let after = |name, class| clip_after_weapon_change(&clips, &hidden, name, class);
+        assert_eq!(after("stand gut", "pistol"), Some(2));
+        assert_eq!(after("stand rifle idle", "pistol"), Some(1));
+        assert_eq!(after("stand rifle idle", "sword"), None);
+        let clips = [clip("stand pistol idle%0"), clip("stand pistol idle%1")];
+        let none = Default::default();
+        assert_eq!(clip_after_weapon_change(&clips, &none, "stand rifle idle", "pistol"), Some(0));
     }
 
     #[test]
@@ -276,11 +781,49 @@ mod tests {
         let graph = |path: &str| {
             load_referenced_tag_from_source(&source, path, "model_animations", b"antr").unwrap()
         };
-        let markers = |path: &str, label: &str| weapon_markers(&graph(path), label);
-        let hand = |hand: &str| Some((hand.to_owned(), String::new()));
-        assert_eq!(markers("characters\\cyborg\\cyborg", "ar"), hand("right hand"));
-        assert_eq!(markers("vehicles\\warthog\\warthog", "cg"), hand("gun"));
-        assert_eq!(markers("vehicles\\scorpion\\scorpion", "cannon"), hand(""));
-        assert_eq!(markers("vehicles\\scorpion\\scorpion", "nothing"), None);
+        let hold = |path: &str, label: &str| weapon_hold(&graph(path), label);
+        let hand = |path: &str, label: &str| hold(path, label).map(|hold| hold.hand);
+        assert_eq!(hand("vehicles\\warthog\\warthog", "cg").as_deref(), Some("gun"));
+        assert_eq!(hand("vehicles\\scorpion\\scorpion", "cannon").as_deref(), Some(""));
+        assert_eq!(hand("vehicles\\scorpion\\scorpion", "nothing"), None);
+        let rifle = hold("characters\\cyborg\\cyborg", "ar").unwrap();
+        assert_eq!(rifle.class, "rifle");
+        assert_eq!(rifle.hand, "right hand");
+        assert_eq!(rifle.ik_points, [("left hand".to_owned(), "left hand cyborg".to_owned())]);
+
+        let cyborg = load_referenced_tag_from_source(&source, "characters\\cyborg\\cyborg", "biped", b"bipd").unwrap();
+        let marine = graph("characters\\marine\\marine");
+        assert_eq!(weapon_hold(&marine, "ar").unwrap().class, "rifle");
+        assert_eq!(weapon_hold(&marine, "fb"), None);
+        let held = |label: &str, path: &str| {
+            let equippable = [CeEquippable {
+                path: path.to_owned(),
+                name: String::new(),
+                class: String::new(),
+                label: label.to_owned(),
+            }];
+            let hidden = biped_weapons(&source, &cyborg, Some(path), Some(&equippable)).hidden_clips;
+            let tag = graph("characters\\cyborg\\cyborg");
+            let clips: Vec<_> = elements(tag.root(), "animations")
+                .iter()
+                .map(|clip| clip.read_string("name").unwrap_or_default())
+                .collect();
+            move |name: &str| {
+                let index = clips.iter().position(|clip| clip == name).unwrap();
+                hidden.contains(&index)
+            }
+        };
+        let rifle = held("ar", "rifle");
+        assert!(!rifle("stand rifle idle"));
+        assert!(!rifle("stand rifle ar reload-1"));
+        assert!(rifle("stand rifle sg reload-1"));
+        assert!(rifle("stand pistol idle"));
+        assert!(rifle("stand unarmed move-front"));
+        let pistol = held("hp", "pistol");
+        assert!(!pistol("stand pistol idle"));
+        assert!(pistol("stand rifle idle"));
+        let nothing = held("", "unused");
+        assert!(!nothing("stand unarmed move-front"));
+        assert!(nothing("stand rifle idle"));
     }
 }

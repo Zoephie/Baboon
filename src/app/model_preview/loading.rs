@@ -29,6 +29,10 @@ const CE_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageR
 pub(super) struct PreviewLoadSettings {
     pub(super) high_detail: bool,
     pub(super) scenario_selection: std::collections::BTreeSet<usize>,
+    /// Halo CE: the weapon a biped holds, by path.
+    pub(super) ce_weapon: Option<String>,
+    /// Halo CE: the biped's weapons, when an earlier load found them.
+    pub(super) ce_equippable: Option<Vec<super::ce_attachments::CeEquippable>>,
 }
 
 impl PreviewLoadSettings {
@@ -36,6 +40,11 @@ impl PreviewLoadSettings {
         Self {
             high_detail: state.high_detail,
             scenario_selection: state.scenario_bsp_selection.clone(),
+            ce_weapon: state.ce_weapon.clone(),
+            ce_equippable: match &state.data {
+                Some(Ok(data)) => data.ce_weapons.as_ref().map(|weapons| weapons.equippable.clone()),
+                _ => None,
+            },
         }
     }
 }
@@ -64,7 +73,8 @@ impl Baboon {
         }
         let desired_matches = state.loaded_key.as_deref() == Some(key)
             && state.loaded_high_detail == state.high_detail
-            && state.loaded_scenario_selection == state.scenario_bsp_selection;
+            && state.loaded_scenario_selection == state.scenario_bsp_selection
+            && state.loaded_ce_weapon == state.ce_weapon;
         if desired_matches && (state.data.is_some() || state.preview_load_id.is_some()) {
             return false;
         }
@@ -116,6 +126,7 @@ impl Baboon {
         state.loaded_key = Some(key.to_owned());
         state.loaded_high_detail = settings.high_detail;
         state.loaded_scenario_selection = settings.scenario_selection.clone();
+        state.loaded_ce_weapon = settings.ce_weapon.clone();
         state.preview_load_id = Some(request_id);
         state.data = None;
         state.render_model_path = None;
@@ -192,6 +203,17 @@ impl Baboon {
             // first) so both cards arrive in one consistent state.
             let default_variant = default_variant_index(data);
             reset_model_preview_selection(state, data, default_variant);
+            // A weapon change only swaps what the unit holds.
+            if let Some((geometry_id, regions)) = state.ce_weapon_carry.take() {
+                for (region, selection) in regions {
+                    if let Some(kept) = state.region_selections.get_mut(&region) {
+                        *kept = selection;
+                    }
+                }
+                if let Some(inputs) = state.ce_function_inputs.get(&(geometry_id, 0)).copied() {
+                    state.ce_function_inputs.insert((data.geometry_id, 0), inputs);
+                }
+            }
         }
         state.data = Some(result);
         false
@@ -276,11 +298,27 @@ pub(super) fn load_model_preview(
         if forced != 0 {
             preview.materials.iter_mut().for_each(|material| material.permutation = forced);
         }
-        let attached = super::ce_attachments::attach_ce_weapon(source, model_tag, &mut preview);
+        // A vehicle's guns are part of it. A biped holds what it is handed.
+        let is_biped = model_tag.header.group_tag == u32::from_be_bytes(*b"bipd");
+        let chosen = settings.ce_weapon.as_deref();
+        let weapons = is_biped.then(|| {
+            let known = settings.ce_equippable.as_deref();
+            super::ce_attachments::biped_weapons(source, model_tag, chosen, known)
+        });
+        let held = match &weapons {
+            Some(weapons) => chosen
+                .filter(|path| weapons.equippable.iter().any(|weapon| weapon.path == *path))
+                .map(str::to_owned),
+            None => super::ce_attachments::first_weapon(model_tag),
+        };
+        let attached = held.and_then(|path| {
+            super::ce_attachments::attach_ce_weapon(source, model_tag, &path, &mut preview)
+        });
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
         data.ce_object_functions = super::ce_functions::read_ce_object_functions(model_tag);
         data.ce_attached.extend(attached);
+        data.ce_weapons = weapons;
         return Ok(data);
     }
 
@@ -3507,6 +3545,7 @@ mod tests {
         let settings = PreviewLoadSettings {
             high_detail: true,
             scenario_selection: [0].into_iter().collect(),
+            ..Default::default()
         };
         let error = load_model_preview(
             &scenario,

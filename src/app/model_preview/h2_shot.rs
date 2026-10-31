@@ -5,7 +5,8 @@
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
 //! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
 //! bipeds with `H2_SHOT_BIPED`, or vehicles with `H2_SHOT_OBJECT=vehicle`, whose
-//! function inputs `H2_SHOT_INPUTS` can set.
+//! function inputs `H2_SHOT_INPUTS` can set, posed at `H2_SHOT_CLIP`,
+//! holding `H2_SHOT_WEAPON`.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -82,7 +83,10 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         group_name: Some(extension.to_owned()),
         location: TagEntryLocation::LooseFile(file.with_extension(extension)),
     };
-    let settings = PreviewLoadSettings::default();
+    let settings = PreviewLoadSettings {
+        ce_weapon: std::env::var("H2_SHOT_WEAPON").ok(),
+        ..Default::default()
+    };
     let mut data = load_model_preview(&tag, &entry, &names, Some(source), &settings).unwrap();
     let textures = materials::resolve_model_textures(source, &data.preview.materials);
     let with_passes = textures.iter().filter(|t| t.h2_layers.iter().any(|l| !l.is_empty())).count();
@@ -95,6 +99,9 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
     state.yaw = shot.yaw;
     state.pitch = shot.pitch;
     state.perspective = true;
+    if let Ok(clip) = std::env::var("H2_SHOT_CLIP") {
+        animation::pose_for_shot(source, &entry, &mut data, &mut state, &clip);
+    }
 
     let (width, height) = (1000i32, 760i32);
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
@@ -113,7 +120,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         show_backfaces: state.show_backfaces,
         show_grid: false,
         textures: data.textures.clone(),
-        bones: None,
+        bones: animation_skinning_rows(&data, &state).map(Arc::new),
         game_shaders: state.h2_game_shaders,
         default_lights: state.h2_default_lights,
         active_camo: std::env::var_os("H2_SHOT_CAMO").is_some(),

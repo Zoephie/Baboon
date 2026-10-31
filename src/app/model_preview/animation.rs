@@ -248,7 +248,8 @@ pub(super) fn animation_skinning_rows(
     let (frame_a, frame_b) = (&pose.frames[frame_a], &pose.frames[frame_b]);
 
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
-    let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
+    let mut matrices: Vec<Matrix4> = Vec::with_capacity(nodes.len());
+    let mut inverse_binds: Vec<Matrix4> = Vec::with_capacity(nodes.len());
     for (index, node) in nodes.iter().enumerate() {
         let local = blend_transforms(frame_a.get(index), frame_b.get(index), blend, node);
         let (rotation, translation, scale) = if node.parent >= 0 {
@@ -265,30 +266,95 @@ pub(super) fn animation_skinning_rows(
             local
         };
         world.push((rotation, translation, scale));
-
-        let world_matrix = Matrix4::from_loc_rot_scale(
-            RealPoint3d {
-                x: translation.i,
-                y: translation.j,
-                z: translation.k,
-            },
-            rotation,
-            scale,
-        );
-        let inverse_bind = Matrix4 {
-            m: [
-                node.inverse_bind[0],
-                node.inverse_bind[1],
-                node.inverse_bind[2],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-        };
-        let skin = world_matrix * inverse_bind;
+        matrices.push(world_matrix((rotation, translation, scale)));
+        inverse_binds.push(inverse_bind_matrix(node));
+    }
+    apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+    let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
+    for (matrix, inverse_bind) in matrices.iter().zip(&inverse_binds) {
+        let skin = *matrix * *inverse_bind;
         rows.push(skin.m[0]);
         rows.push(skin.m[1]);
         rows.push(skin.m[2]);
     }
     Some(rows)
+}
+
+/// Hold a preview at frame 0 of the clip named `clip`, for `h2_shot`.
+#[cfg(test)]
+pub(super) fn pose_for_shot(
+    source: &TagSource,
+    entry: &TagEntry,
+    data: &mut ModelPreviewData,
+    state: &mut ModelPreviewState,
+    clip: &str,
+) {
+    let list = list_model_animations(source, entry).unwrap();
+    let index = list.iter().position(|animation| animation.name == clip).unwrap();
+    let decoded = decode_model_animation(source, entry, index).unwrap();
+    let frame = data
+        .preview
+        .nodes
+        .iter()
+        .map(|node| {
+            let source = decoded.skeleton_names.iter().position(|name| *name == node.name);
+            source.and_then(|source| decoded.frames[0].get(source).copied()).unwrap_or(
+                PreviewNodeTransform {
+                    rotation: node.bind_rotation,
+                    translation: node.bind_translation,
+                    scale: 1.0,
+                },
+            )
+        })
+        .collect();
+    data.animations = Some(std::sync::Arc::new(list));
+    state.animation.selected = Some(index);
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(index, vec![frame])));
+}
+
+fn world_matrix((rotation, translation, scale): (RealQuaternion, RealVector3d, f32)) -> Matrix4 {
+    Matrix4::from_loc_rot_scale(
+        RealPoint3d {
+            x: translation.i,
+            y: translation.j,
+            z: translation.k,
+        },
+        rotation,
+        scale,
+    )
+}
+
+fn inverse_bind_matrix(node: &RenderModelPreviewNode) -> Matrix4 {
+    Matrix4 {
+        m: [
+            node.inverse_bind[0],
+            node.inverse_bind[1],
+            node.inverse_bind[2],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    }
+}
+
+/// Hold a Halo CE unit's hands to its weapon, for the clips the game does.
+fn apply_weapon_ik(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    matrices: &mut [Matrix4],
+    inverse_binds: &[Matrix4],
+) {
+    let clip = state
+        .animation
+        .selected
+        .and_then(|index| data.animations.as_ref()?.get(index))
+        .map(|entry| entry.name.as_str());
+    let Some(clip) = clip else {
+        return;
+    };
+    for point in &data.preview.weapon_ik {
+        if point.runs_through(clip) {
+            point.apply(matrices, inverse_binds);
+        }
+    }
 }
 
 /// World-space joint positions for the armature overlay. This follows the
@@ -315,7 +381,6 @@ pub(super) fn armature_node_positions(
         });
 
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
-    let mut positions = Vec::with_capacity(nodes.len());
     for (index, node) in nodes.iter().enumerate() {
         let local = if let Some((a, b, blend)) = sampled_frames {
             blend_transforms(a.get(index), b.get(index), blend, node)
@@ -343,10 +408,14 @@ pub(super) fn armature_node_positions(
         } else {
             local
         };
-        positions.push([transform.1.i, transform.1.j, transform.1.k]);
         world.push(transform);
     }
-    positions
+    let mut matrices: Vec<Matrix4> = world.iter().copied().map(world_matrix).collect();
+    if sampled_frames.is_some() {
+        let inverse_binds: Vec<_> = nodes.iter().map(inverse_bind_matrix).collect();
+        apply_weapon_ik(data, state, &mut matrices, &inverse_binds);
+    }
+    matrices.iter().map(Matrix4::translation).collect()
 }
 
 /// Blend one node between two frames — nlerp on the shorter arc for the
@@ -1401,6 +1470,16 @@ impl Baboon {
         match result {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
+                    if let (Some(clip), Some(weapons)) = (state.ce_clip_after_load.take(), &data.ce_weapons) {
+                        let held = weapons.equippable.iter().find(|weapon| Some(&weapon.path) == state.ce_weapon.as_ref());
+                        let class = held.map_or("unarmed", |weapon| weapon.class.as_str());
+                        state.animation.selected = super::ce_attachments::clip_after_weapon_change(
+                            &entries,
+                            &weapons.hidden_clips,
+                            &clip,
+                            class,
+                        );
+                    }
                     data.animations = Some(std::sync::Arc::new(entries));
                 }
             }

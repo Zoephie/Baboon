@@ -724,6 +724,7 @@ fn animation_picker_expands_after_clearing_search() {
                         ui,
                         "test_animation_picker",
                         &animations,
+                        &Default::default(),
                         playback,
                         240.0,
                     );
