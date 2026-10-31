@@ -267,7 +267,13 @@ pub(super) fn load_model_preview(
                 shader_path,
                 shader_group,
                 overlay: true,
+                permutation: 0,
             });
+        }
+        // `render_model_parts`: an object's own index wins over each shader's.
+        let forced = super::ce_functions::read_ce_forced_permutation(model_tag);
+        if forced != 0 {
+            preview.materials.iter_mut().for_each(|material| material.permutation = forced);
         }
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
@@ -424,7 +430,7 @@ pub(super) fn load_model_preview(
         && group == shader_group
         && !shader_path.is_empty()
     {
-        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false });
+        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false, permutation: 0 });
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the
@@ -566,6 +572,13 @@ pub(in crate::app) fn build_render_preview(
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
     let mut preview = render_model_to_preview(&render_model, &render_meshes);
+    // A gbxmodel's `shaders` run parallel to its materials.
+    if let Some(shaders) = render_tag.root().field("shaders").and_then(|field| field.as_block()) {
+        for (index, material) in preview.materials.iter_mut().enumerate() {
+            let permutation = shaders.element(index).and_then(|shader| shader.read_int_any("permutation"));
+            material.permutation = permutation.unwrap_or(0).max(0) as usize;
+        }
+    }
     preview.h2_prt = read_h2_prt(render_tag, &render_model, &render_meshes, &h2_prt_lights())
         .filter(|prt| prt.vertices.len() == preview.vertices.len());
     append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);

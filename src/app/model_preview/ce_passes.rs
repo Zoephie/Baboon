@@ -29,6 +29,7 @@ const GLASS_BUMPED_FILE: &str = "transparent_glass_reflection_bumped.psh";
 const GLASS_DIFFUSE_FILE: &str = "transparent_glass_diffuse.psh";
 const METER_FILE: &str = "transparent_meter.psh";
 const PLASMA_FILE: &str = "transparent_plasma.psh";
+const CAMO_FILE: &str = "active_camouflage_draw.psh";
 const WATER_OPACITY_FILE: &str = "transparent_water_opacity.psh";
 const WATER_REFLECTION_FILE: &str = "transparent_water_reflection.psh";
 const AMBIENT: [f32; 3] = [0.2, 0.2, 0.2];
@@ -960,6 +961,7 @@ fn transparent_pass(
     pass.blend =
         Some(framebuffer_blend(option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS)));
     pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
+    pass.hidden_by_camo = !has("don't fade active-camouflage");
     pass.textures = textures;
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();
@@ -1380,6 +1382,7 @@ fn glass_passes(
     if passes.is_empty() {
         passes.push(unseen_pass());
     }
+    passes.iter_mut().for_each(|pass| pass.hidden_by_camo = true);
     Ok(passes)
 }
 
@@ -1509,6 +1512,80 @@ fn water_passes(
         .build(),
     );
     Ok(passes)
+}
+
+/// What `globals` gives every object's active camouflage.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CeCamoSettings {
+    fragment: String,
+    effect_register: u32,
+    screen_register: u32,
+    refraction: f32,
+    falloff: f32,
+    tint: [f32; 3],
+    distortion: Option<String>,
+}
+
+/// `globals\globals`'s rasterizer data, and the kit's shader for it.
+pub(super) fn read_ce_camo_settings(source: &TagSource) -> Option<CeCamoSettings> {
+    let directory = shader_directory(source)?;
+    let globals = load_referenced_tag_from_source(source, "globals\\globals", "globals", b"matg").ok()?;
+    let root = globals.root();
+    let data = root.descend("rasterizer data[0]")?;
+    let tint = data.read_rgb("tint color");
+    let read = |name: &str| read_shader_source(&directory, name);
+    let shader = translate_fx(CAMO_FILE, H2_GLSL_VERSION, &[], read).ok()?;
+    let names = data.read_flag_names("flags").unwrap_or_default();
+    let entry = if names.iter().any(|(_, name)| name == "tint edge density") {
+        "main_T0_P1(i)"
+    } else {
+        "main_T0_P0(i)"
+    };
+    Some(CeCamoSettings {
+        fragment: shader.entry(entry),
+        effect_register: shader.register("c_effect_intensity")?,
+        screen_register: shader.register("c_split_screen_offset_and_scale")?,
+        refraction: data.read_real("refraction amount").unwrap_or(0.0),
+        falloff: data.read_real("distance falloff").unwrap_or(0.0),
+        tint: [tint.red, tint.green, tint.blue],
+        distortion: data
+            .read_tag_ref_path("active camouflage distortion")
+            .filter(|path| !path.is_empty()),
+    })
+}
+
+/// `rasterizer_active_camouflage_draw` at full intensity. A cheap copy of the
+/// frame behind stands in for its own primary target, as Halo 2's camo does.
+pub(super) fn ce_camo_pass(
+    settings: &CeCamoSettings,
+    two_sided: bool,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+) -> H2DrawPass {
+    /// `refraction amount` is in pixels of the half-width the game draws at.
+    const HALF_WIDTH: f32 = 320.0;
+    let distortion =
+        settings.distortion.as_deref().and_then(|path| bitmap(path, SamplerKind::Cube));
+    let mut frame = texture(2, SamplerKind::Texture2D, None);
+    frame.frame_copy = true;
+    let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+    rows[0] = [settings.refraction / HALF_WIDTH, settings.falloff, 0.0, 0.0];
+    let [red, green, blue] = settings.tint;
+    rows[1] = [red, green, blue, 0.0];
+    SimplePass {
+        stage: H2VertexStage::CeActiveCamo,
+        fragment: settings.fragment.clone(),
+        blend: plain_blend(H2BlendFactor::One, H2BlendFactor::Zero),
+        two_sided,
+        write_depth: true,
+        channels: [true, true, true, false],
+        textures: vec![texture(0, SamplerKind::Cube, distortion), frame],
+        constants: vec![
+            (settings.effect_register, [1.0; 4]),
+            (settings.screen_register, [0.0, 1.0, 0.0, 1.0]),
+        ],
+        rows,
+    }
+    .build()
 }
 
 /// `rasterizer_plasma_energy_draw`. All the kit's are shield hits, unseen until
@@ -1750,6 +1827,39 @@ mod tests {
                 String::from_utf8_lossy(&output.stdout)
             );
         }
+    }
+
+    /// With `BLAM_TEST_HCEEK`: the kit's camouflage reads and links.
+    #[test]
+    fn active_camo_links_with_its_stage() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        if std::process::Command::new("glslangValidator").arg("--version").output().is_err() {
+            eprintln!("skipping: glslangValidator is not on PATH");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloCe),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let settings = read_ce_camo_settings(&source).expect("the kit's camo reads");
+        assert!(settings.refraction > 0.0);
+        assert!(settings.distortion.is_some());
+        let pass = ce_camo_pass(&settings, false, &mut |_, _| None);
+        let dir = crate::core::test_kits::unique_temp_dir("ce_active_camo");
+        let (vertex, pixel) = (dir.join("pass.vert"), dir.join("pass.frag"));
+        std::fs::write(&vertex, pass.stage.source(H2_GLSL_VERSION)).unwrap();
+        std::fs::write(&pixel, &pass.fragment).unwrap();
+        let output = std::process::Command::new("glslangValidator")
+            .arg("-l")
+            .arg(&vertex)
+            .arg(&pixel)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
     }
 
     /// With `BLAM_TEST_HCEEK`: every transparent shader in the kit translates

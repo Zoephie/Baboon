@@ -131,6 +131,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         blend: None,
         depth: H2Depth { compare: Some(compare), write },
         cull: H2Cull::Frame,
+        hidden_by_camo: false,
         channels: [false; 4],
         textures: Vec::new(),
         constants: Vec::new(),
@@ -922,6 +923,8 @@ pub(crate) struct H2DrawPass {
     pub(crate) blend: Option<H2Blend>,
     pub(crate) depth: H2Depth,
     pub(crate) cull: H2Cull,
+    /// Faded out entirely on a fully camouflaged object.
+    pub(crate) hidden_by_camo: bool,
     pub(crate) channels: [bool; 4],
     pub(crate) textures: Vec<H2DrawTexture>,
     /// Pixel constant registers, by register index.
@@ -956,6 +959,7 @@ impl H2DrawPass {
             blend: None,
             depth,
             cull: H2Cull::Frame,
+            hidden_by_camo: false,
             channels: [true; 4],
             textures: Vec::new(),
             constants: Vec::new(),
@@ -1458,6 +1462,7 @@ pub(in crate::app) fn prepare_draw_pass(
         blend: pass.blend,
         depth: pass.depth,
         cull: H2Cull::Frame,
+        hidden_by_camo: false,
         channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
         textures,
         constants,

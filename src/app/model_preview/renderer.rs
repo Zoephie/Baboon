@@ -2266,11 +2266,11 @@ impl ModelGlRenderer {
     }
 
     fn h2_replaces_slots(&self, frame: &ModelGpuFrame, material: usize) -> bool {
-        if self.h2_camo_on(frame) {
-            return self.h2_material_ready(frame, material, H2Layer::ActiveCamo);
-        }
         if self.h2_material_ready(frame, material, H2Layer::Transparent) {
             return true;
+        }
+        if self.h2_camo_on(frame) {
+            return self.h2_material_ready(frame, material, H2Layer::ActiveCamo);
         }
         if !frame.game_shaders {
             return false;
@@ -2570,6 +2570,7 @@ impl ModelGlRenderer {
     ) {
         let eye = h2_eye_position(&frame.camera);
         let mut drew = false;
+        let camouflaged = self.h2_camo_on(frame);
         for &batch_index in order {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
@@ -2588,6 +2589,9 @@ impl ModelGlRenderer {
                 continue;
             };
             for (pass_index, pass) in Self::h2_passes(frame, material, layer).iter().enumerate() {
+                if camouflaged && pass.hidden_by_camo {
+                    continue;
+                }
                 let key = (pass.stage, pass.fragment.clone());
                 let Some(Some(mut program)) = self.h2_programs.remove(&key) else {
                     continue;
@@ -2783,6 +2787,10 @@ impl ModelGlRenderer {
             gl.uniform_3_f32_slice(location.as_ref(), &camera.center);
             let location = program.location(gl, "u_eye");
             gl.uniform_3_f32_slice(location.as_ref(), &eye);
+            if let Some(copy) = &self.h2_frame_copy {
+                let location = program.location(gl, "u_view_size");
+                gl.uniform_2_f32(location.as_ref(), copy.size[0] as f32, copy.size[1] as f32);
+            }
             let location = program.location(gl, "u_angles");
             gl.uniform_2_f32(location.as_ref(), camera.yaw, camera.pitch);
             let location = program.location(gl, "u_clip_scale");
@@ -3974,6 +3982,7 @@ pub(super) fn render_model_to_preview(
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
                 overlay: false,
+                permutation: 0,
             })
             .collect(),
         nodes: preview_skeleton_nodes(&model.nodes),

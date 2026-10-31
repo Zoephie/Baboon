@@ -8,7 +8,10 @@ use blam_tags::render_method::{
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, ResolvedRenderMethod,
     ResolvedValue,
 };
-use super::ce_passes::{CeModelCommon, ce_model_passes, ce_transparent_passes};
+use super::ce_passes::{
+    CeCamoSettings, CeModelCommon, ce_camo_pass, ce_model_passes, ce_transparent_passes,
+    read_ce_camo_settings,
+};
 use super::h2_stage::H2VertexStage;
 use super::h2_passes::{
     H2DrawPass, H2Image, H2Layer, H2ParameterValue, H2_LAYER_COUNT, animation_function,
@@ -183,7 +186,12 @@ struct ResolveCaches {
     /// The kit's `global shader`, read at most once; see [`prepare_h2_camo_passes`].
     h2_camo_shader: Option<Option<Arc<TagFile>>>,
     /// Pass maps by path and shape; a shader samples each in only one shape.
-    h2_images: HashMap<(String, bool), Option<Arc<H2Image>>>,
+    /// By path, whether flat, and image.
+    h2_images: HashMap<(String, bool, usize), Option<Arc<H2Image>>>,
+    /// Halo CE's camouflage, read once.
+    ce_camo: Option<Option<CeCamoSettings>>,
+    /// How many images a Halo CE bitmap holds.
+    ce_image_counts: HashMap<String, usize>,
     /// The kit's model shader as GLSL, read once. `None` until asked for.
     ce_model_common: Option<Option<CeModelCommon>>,
     /// The kit's own group → extension names. The cross-game table answers
@@ -289,7 +297,9 @@ fn resolve_one_material(
             Err(error) => return MaterialTextures::failed(error.to_string()),
         };
     match blam_tags::game::Game::of(&shader) {
-        blam_tags::game::Game::Halo1 => return resolve_ce_shader(source, &shader, group, caches),
+        blam_tags::game::Game::Halo1 => {
+            return resolve_ce_shader(source, &shader, group, material.permutation, caches);
+        },
         blam_tags::game::Game::Halo2 if group == *b"shad" => {
             return resolve_h2_shader(source, &shader, caches);
         }
@@ -372,6 +382,7 @@ fn resolve_ce_shader(
     source: &TagSource,
     shader: &TagFile,
     group: [u8; 4],
+    permutation: usize,
     caches: &mut ResolveCaches,
 ) -> MaterialTextures {
     let root = shader.root();
@@ -396,9 +407,10 @@ fn resolve_ce_shader(
     let factor = |value: Option<f32>| value.filter(|v| v.is_finite() && *v != 0.0).unwrap_or(1.0);
     let mut bind = |path: Option<String>, scale: [f32; 2]| {
         let path = path.filter(|path| !path.is_empty())?;
+        let image_index = ce_image_index(source, &path, permutation, &mut caches.ce_image_counts);
         let binding = SlotBitmap {
             path,
-            image_index: 0,
+            image_index: image_index as i16,
             repeat_x: true,
             repeat_y: true,
             scale,
@@ -456,11 +468,12 @@ fn resolve_ce_shader(
     }
     let mut common = caches.ce_model_common.take();
     let mut bitmap = |path: &str, kind: SamplerKind| {
-        let key = (path.to_owned(), kind == SamplerKind::Texture2D);
+        let image = ce_image_index(source, path, permutation, &mut caches.ce_image_counts);
+        let key = (path.to_owned(), kind == SamplerKind::Texture2D, image);
         if let Some(cached) = caches.h2_images.get(&key) {
             return cached.clone();
         }
-        let decoded = decode_h2_image(source, path, kind).map(Arc::new);
+        let decoded = decode_h2_image(source, path, kind, image).map(Arc::new);
         caches.h2_images.insert(key, decoded.clone());
         decoded
     };
@@ -468,6 +481,14 @@ fn resolve_ce_shader(
         ce_model_passes(source, root, &group, &flags, &mut common, &mut bitmap);
     textures.h2_layers[H2Layer::Transparent as usize] =
         ce_transparent_passes(source, root, &group, &mut bitmap);
+    if matches!(&group, b"soso" | b"senv") {
+        let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(source));
+        if let Some(settings) = settings {
+            let two_sided = flags.iter().any(|name| name == "two-sided");
+            textures.h2_layers[H2Layer::ActiveCamo as usize] =
+                vec![ce_camo_pass(settings, two_sided, &mut bitmap)];
+        }
+    }
     caches.ce_model_common = common;
     if !textures.h2_layers[H2Layer::Transparent as usize].is_empty() {
         return textures;
@@ -691,11 +712,31 @@ fn h2_bitmap_scale(
         .unwrap_or([inherited, inherited])
 }
 
+/// The image a Halo CE permutation picks of a bitmap: `rasterizer_set_texture`
+/// wraps it at the bitmap's count.
+fn ce_image_index(
+    source: &TagSource,
+    path: &str,
+    permutation: usize,
+    counts: &mut HashMap<String, usize>,
+) -> usize {
+    if permutation == 0 {
+        return 0;
+    }
+    let count = *counts.entry(path.to_owned()).or_insert_with(|| {
+        load_referenced_tag_from_source(source, path, "bitmap", b"bitm")
+            .ok()
+            .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
+            .unwrap_or(1)
+    });
+    permutation % count.max(1)
+}
+
 /// Decode a map in the shape its sampler asks for.
-fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<H2Image> {
+fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
-        let image = decode_thumbnail(&tag, 0, MAX_TEXTURE_EDGE).ok()?;
+        let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;
         return Some(H2Image::Flat(TextureImage {
             rgba: image.rgba,
             width: image.width,
@@ -706,7 +747,7 @@ fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind) -> Option<
         }));
     }
     let bitmap = blam_tags::bitmap::Bitmap::new(&tag).ok()?;
-    let image = bitmap.image(0)?;
+    let image = bitmap.image(index)?;
     let (width, height) = (image.width(), image.height());
     let format = image.format().ok()?;
     let decode = |data: &[u8]| {
@@ -792,11 +833,11 @@ fn prepare_h2_passes(
             cases.clone(),
             specular_brightness,
             |path, kind| {
-                let key = (path.to_owned(), kind == SamplerKind::Texture2D);
+                let key = (path.to_owned(), kind == SamplerKind::Texture2D, 0);
                 if let Some(cached) = caches.h2_images.get(&key) {
                     return cached.clone();
                 }
-                let decoded = decode_h2_image(source, path, kind).map(Arc::new);
+                let decoded = decode_h2_image(source, path, kind, 0).map(Arc::new);
                 caches.h2_images.insert(key, decoded.clone());
                 decoded
             },
@@ -1092,6 +1133,7 @@ mod tests {
                     shader_path: material.render_method.clone(),
                     shader_group: material.render_method_group,
                     overlay: false,
+                    permutation: 0,
                 })
                 .collect(),
         )
@@ -1259,6 +1301,7 @@ mod tests {
                 shader_path: String::new(),
                 shader_group: 0,
                 overlay: false,
+                permutation: 0,
             }],
         );
         assert_eq!(resolved.len(), 1);
@@ -1324,6 +1367,7 @@ mod tests {
                 shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
                 shader_group: u32::from_be_bytes(*b"rmsh"),
                 overlay: false,
+                permutation: 0,
             }],
         );
         let material = &resolved[0];
@@ -1356,6 +1400,7 @@ mod tests {
                 shader_path: path.to_owned(),
                 shader_group: u32::from_be_bytes(*group),
                 overlay: false,
+                permutation: 0,
             }],
         )
         .remove(0)
@@ -1425,6 +1470,53 @@ mod tests {
         let meter = resolve_classic(&source, r"vehicles\warthog\shaders\meter engine", b"smet");
         assert!(meter.error.is_none(), "{:?}", meter.error);
         assert_eq!(meter.h2_layers[H2Layer::Transparent as usize].len(), 1);
+    }
+
+    /// With `BLAM_TEST_HCEEK`: a permutation draws its own image of a bitmap,
+    /// in both drawing paths, and past the last one wraps.
+    #[test]
+    fn a_halo_ce_permutation_picks_the_image_and_wraps() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(crate::core::game::GameId::HaloCe),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let path = r"characters\grunt\shaders\grunt torso";
+        let resolve = |permutation| {
+            let material = RenderModelPreviewMaterial {
+                shader_path: path.to_owned(),
+                shader_group: u32::from_be_bytes(*b"soso"),
+                overlay: false,
+                permutation,
+            };
+            resolve_model_textures(&source, &[material]).remove(0)
+        };
+        let shader = load_referenced_tag_from_source(&source, path, "shader_model", b"soso").unwrap();
+        let base = shader.root().read_tag_ref_path("base map").unwrap();
+        let tag = load_referenced_tag_from_source(&source, &base, "bitmap", b"bitm").unwrap();
+        let count = blam_tags::bitmap::Bitmap::new(&tag).unwrap().len();
+        assert!(count > 1, "{base} holds {count}");
+        let slot = |textures: &MaterialTextures| {
+            textures.get(TextureSlot::Base).map(|image| image.rgba.clone()).unwrap()
+        };
+        let pass = |textures: &MaterialTextures| match textures.h2_layers
+            [H2Layer::Lightmap as usize][0]
+            .textures[0]
+            .image
+            .as_deref()
+        {
+            Some(H2Image::Flat(image)) => image.rgba.clone(),
+            _ => panic!("no base map"),
+        };
+        let (first, second, wrapped) = (resolve(0), resolve(1), resolve(count));
+        assert_ne!(slot(&first), slot(&second));
+        assert_ne!(pass(&first), pass(&second));
+        assert_eq!(slot(&first), slot(&wrapped));
+        assert_eq!(pass(&first), pass(&wrapped));
     }
 
     /// Halo 2, against `BLAM_TEST_H2EK` (the kit's `tags`).
@@ -1516,7 +1608,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let path = "objects\\bitmaps\\reflection_maps\\vehicle_glass";
-        let Some(H2Image::Cube { size, faces }) = decode_h2_image(&source, path, SamplerKind::Cube)
+        let Some(H2Image::Cube { size, faces }) = decode_h2_image(&source, path, SamplerKind::Cube, 0)
         else {
             panic!("{path} should decode as a cube");
         };
@@ -1556,6 +1648,7 @@ mod tests {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"shad"),
             overlay: false,
+            permutation: 0,
         };
         let camo = |path: &str| {
             let textures = resolve_model_textures(&source, &[material(path)]);
@@ -1585,7 +1678,7 @@ mod tests {
             definitions_root: crate::core::bundled::locate_definitions_root(),
         };
         let Some(H2Image::Volume { width, height, depth, rgba }) =
-            decode_h2_image(&source, "rasterizer\\plasma_shield_noise", SamplerKind::Volume)
+            decode_h2_image(&source, "rasterizer\\plasma_shield_noise", SamplerKind::Volume, 0)
         else {
             panic!("the plasma noise should decode as a volume");
         };

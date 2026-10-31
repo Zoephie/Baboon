@@ -387,6 +387,46 @@ fn splat_scalars(code: &str, widths: &HashMap<String, usize>) -> String {
     code
 }
 
+/// In `x.rgb = ...`, HLSL cuts a `float4` down to fit the `float3`s beside it.
+/// Inside a call the parameter decides, so those are left alone.
+fn truncate_to_rgb(code: &str, widths: &HashMap<String, usize>) -> String {
+    let Some((target, value)) = code.split_once('=') else {
+        return code.to_owned();
+    };
+    if !target.trim_end().ends_with(".rgb") || value.starts_with('=') {
+        return code.to_owned();
+    }
+    let bytes = value.as_bytes();
+    let mut out = String::with_capacity(code.len());
+    let mut at = 0;
+    let mut depth = 0usize;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if bytes[at].is_ascii_alphabetic() || bytes[at] == b'_' {
+            let end = word_at(bytes, at);
+            let word = &value[at..end];
+            out.push_str(word);
+            let bare = depth == 0 && !matches!(bytes.get(end), Some(b'.' | b'(' | b'['));
+            if bare && widths.get(word) == Some(&4) && (at == 0 || bytes[at - 1] != b'.') {
+                out.push_str(".rgb");
+            }
+            at = end;
+        } else if bytes[at].is_ascii_digit() {
+            let end = word_at(bytes, at);
+            out.push_str(&value[at..end]);
+            at = end;
+        } else {
+            out.push(bytes[at] as char);
+            at += 1;
+        }
+    }
+    format!("{target}={out}")
+}
+
 fn renamed(code: &str) -> String {
     let bytes = code.as_bytes();
     let mut out = String::with_capacity(code.len());
@@ -441,7 +481,8 @@ fn translate_body_line(
             code.replace_range(start..comma, &format!("texture(s{slot}"));
         }
     }
-    convert_assignments(&translate_statement(&splat_scalars(&code, widths), None), widths)
+    let code = truncate_to_rgb(&splat_scalars(&code, widths), widths);
+    convert_assignments(&translate_statement(&code, None), widths)
 }
 
 /// A body's statements as GLSL, dropping what a literal condition rules out.
@@ -694,6 +735,15 @@ mod tests {
         ];
         assert_eq!(rewrite_registers("table[6*(p)-3 + 0].x", &constants), "ce_registers[int(1 + (6*(p)-3 + 0))].x");
         assert_eq!(rewrite_registers("flags[1].y ? a : one.x", &constants), "(ce_registers[int(19 + (1))].y != 0.0) ? a : ce_registers[16].x");
+    }
+
+    #[test]
+    fn a_float4_beside_a_float3_is_cut_down() {
+        let widths = HashMap::from([("t2".to_owned(), 4), ("mask".to_owned(), 1)]);
+        assert_eq!(truncate_to_rgb("r0.rgb = r1 * t2 * mask;", &widths), "r0.rgb = r1 * t2.rgb * mask;");
+        assert_eq!(truncate_to_rgb("r0.rgb = t2.aaa;", &widths), "r0.rgb = t2.aaa;");
+        assert_eq!(truncate_to_rgb("r0 = t2;", &widths), "r0 = t2;");
+        assert_eq!(truncate_to_rgb("r0.rgb = mix(t2, 1);", &widths), "r0.rgb = mix(t2, 1);");
     }
 
     #[test]

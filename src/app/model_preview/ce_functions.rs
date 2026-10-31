@@ -300,6 +300,14 @@ pub(in crate::app) fn read_ce_modifier_shader(object: &TagFile) -> Option<(u32, 
     (!path.is_empty()).then_some((group, path))
 }
 
+/// The bitmap image the object makes every shader draw, 0 for each its own.
+pub(in crate::app) fn read_ce_forced_permutation(object: &TagFile) -> usize {
+    struct_chain(object)
+        .and_then(|chain| chain.last()?.read_int_any("forced shader permutation index"))
+        .unwrap_or(0)
+        .max(0) as usize
+}
+
 /// An object's functions, reading its chain of parent structs from the object
 /// up: a type's inputs replace those of the groups beneath it.
 pub(in crate::app) fn read_ce_object_functions(object: &TagFile) -> Option<CeObjectFunctions> {

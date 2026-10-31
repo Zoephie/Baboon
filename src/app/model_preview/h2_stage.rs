@@ -104,6 +104,9 @@ pub(in crate::app) enum H2VertexStage {
     CeWaterOpacity,
     /// Two 3D noise lookups by position, pushed out along the normal.
     CePlasma,
+    /// `model_active_camouflage.vsh`: the view-space normal, and how far the
+    /// surface bends the frame behind it at this distance.
+    CeActiveCamo,
 }
 
 /// The first map's cube coordinate, from `cube` and the map's transform, and
@@ -323,6 +326,15 @@ impl H2VertexStage {
                 "v_tc0.xy = uv.xy;
     v_tc1.xyz = tangent_space(to_eye, tangent, binormal, normal);"
             }
+            Self::CeActiveCamo => {
+                "float depth = dot(to_eye, u_view_back);
+    float near = clamp(u_texture_rows[0].y / (depth * depth), 0.0, 1.0);
+    v_color0 = vec4(u_texture_rows[1].rgb, near);
+    v_tc0.xyz = vec3(dot(normal, u_view_right), dot(normal, u_view_up), -dot(normal, u_view_back));
+    v_tc1.xyz = vec3(near * u_texture_rows[0].x, 0.0, 1.0 / u_view_size.x);
+    // The game's screen runs down, a framebuffer's up.
+    v_tc2.xyz = vec3(0.0, -near * u_texture_rows[0].x, 1.0 / u_view_size.y);"
+            }
             Self::CePlasma => {
                 "vec4 place = vec4(a_position, 1.0);
     v_tc0.xyz = vec3(dot(place, u_texture_rows[0]), dot(place, u_texture_rows[1]),
@@ -507,6 +519,7 @@ out vec4 v_tc6;
 out vec4 v_tc7;
 out float v_fog;
 uniform vec3 u_eye;
+uniform vec2 u_view_size;
 uniform vec3 u_view_right;
 uniform vec3 u_view_up;
 uniform vec3 u_view_back;
@@ -560,7 +573,8 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 40] = [
+    const STAGES: [H2VertexStage; 41] = [
+        H2VertexStage::CeActiveCamo,
         H2VertexStage::CePlasma,
         H2VertexStage::CeGlassLit,
         H2VertexStage::CeGlassFlat,

@@ -141,6 +141,8 @@ pub(crate) struct RenderModelPreviewMaterial {
     /// Drawn over the whole model, from no batch of its own: a Halo CE
     /// object's `modifier shader`.
     pub overlay: bool,
+    /// Halo CE: which image of each bitmap it draws, wrapping at their count.
+    pub permutation: usize,
 }
 
 #[derive(Debug, Clone, Default)]
