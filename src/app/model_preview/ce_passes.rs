@@ -286,6 +286,39 @@ pub(crate) struct CeModelAnimation {
     plasma: Option<CePlasma>,
 }
 
+/// A `numeric` shader: its first map holds digits, and which one draws comes
+/// from an object output, as `rasterizer_dx9_transparent_chicago_draw` has it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CeNumeric {
+    /// The first map, whose images are the digits.
+    pub(super) map: String,
+    /// How many digits it holds, the base of the count.
+    pub(super) count: usize,
+    /// `numeric counter limit`.
+    pub(super) limit: i32,
+    /// The digit of this pass.
+    pub(super) digit: usize,
+    /// The material's permutation: which place of the number it shows.
+    pub(super) place: usize,
+}
+
+impl CeNumeric {
+    fn number(&self, outputs: &[f32; 4]) -> i32 {
+        // Eight images mean a different output from the usual ten.
+        let output = outputs[if self.count == 8 { 3 } else { 0 }];
+        ((output * self.limit as f32 + 0.5).floor() as i32).clamp(0, self.limit)
+    }
+
+    pub(crate) fn shows(&self, outputs: &[f32; 4]) -> bool {
+        let base = self.count.max(1) as i32;
+        let mut number = self.number(outputs);
+        for _ in 0..self.place {
+            number /= base;
+        }
+        (number % base) as usize == self.digit
+    }
+}
+
 /// One of plasma's two noise lookups.
 #[derive(Debug, Clone, PartialEq)]
 struct CePlasmaNoise {
@@ -943,6 +976,20 @@ fn identity_map_rows() -> [[f32; 4]; H2_TEXTURE_ROWS] {
     })
 }
 
+/// A `numeric` shader's digits, before they are split across passes.
+fn first_map_digits(root: TagStruct<'_>) -> Option<CeNumeric> {
+    let block = ["maps", "4 stage maps"]
+        .into_iter()
+        .find_map(|name| root.field(name).and_then(|field| field.as_block()))?;
+    Some(CeNumeric {
+        map: block.element(0)?.read_tag_ref_path("map").filter(|path| !path.is_empty())?,
+        count: 0,
+        limit: root.read_int_any("numeric counter limit").unwrap_or(0) as i32,
+        digit: 0,
+        place: 0,
+    })
+}
+
 /// A transparent pass's state, whichever group fills its constants.
 fn transparent_pass(
     root: TagStruct<'_>,
@@ -962,6 +1009,7 @@ fn transparent_pass(
         Some(framebuffer_blend(option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS)));
     pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
+    pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
     pass.textures = textures;
     pass.constants = constants;
     pass.texture_rows = identity_map_rows();
@@ -2073,6 +2121,27 @@ mod tests {
         let animation = CeModelAnimation { maps: vec![map], fade_source: Some(1), ..Default::default() };
         assert_eq!(animation.outputs_read(), [false, true, true, false]);
         assert_eq!(CeModelAnimation::default().outputs_read(), [false; 4]);
+    }
+
+    #[test]
+    fn a_numeric_pass_shows_its_digit_of_its_place() {
+        let digit = |digit, place| CeNumeric {
+            map: String::new(),
+            count: 10,
+            limit: 60,
+            digit,
+            place,
+        };
+        // Half of 60 is 30, read off the first output for ten images.
+        let outputs = [0.5, 0.0, 0.0, 0.0];
+        assert!(digit(0, 0).shows(&outputs));
+        assert!(digit(3, 1).shows(&outputs));
+        assert!(!digit(3, 0).shows(&outputs));
+        assert!(digit(0, 2).shows(&outputs));
+        // Eight images read the fourth output instead.
+        let octal = CeNumeric { count: 8, ..digit(1, 0) };
+        assert!(octal.shows(&[0.0, 0.0, 0.0, 1.0 / 60.0]));
+        assert!(!octal.shows(&[1.0 / 60.0, 0.0, 0.0, 0.0]));
     }
 
     #[test]

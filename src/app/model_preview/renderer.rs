@@ -2592,6 +2592,9 @@ impl ModelGlRenderer {
                 if camouflaged && pass.hidden_by_camo {
                     continue;
                 }
+                if pass.numeric.as_ref().is_some_and(|numeric| !numeric.shows(&frame.object_outputs)) {
+                    continue;
+                }
                 let key = (pass.stage, pass.fragment.clone());
                 let Some(Some(mut program)) = self.h2_programs.remove(&key) else {
                     continue;

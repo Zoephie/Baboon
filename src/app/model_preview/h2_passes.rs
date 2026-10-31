@@ -15,7 +15,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::h2_prt::H2PrtLight;
-use super::ce_passes::CeModelAnimation;
+use super::ce_passes::{CeModelAnimation, CeNumeric};
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::materials::TextureImage;
 use crate::core::h2_pixel_shader::{
@@ -132,6 +132,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         depth: H2Depth { compare: Some(compare), write },
         cull: H2Cull::Frame,
         hidden_by_camo: false,
+        numeric: None,
         channels: [false; 4],
         textures: Vec::new(),
         constants: Vec::new(),
@@ -925,6 +926,8 @@ pub(crate) struct H2DrawPass {
     pub(crate) cull: H2Cull,
     /// Faded out entirely on a fully camouflaged object.
     pub(crate) hidden_by_camo: bool,
+    /// One digit of a Halo CE numeric display: drawn while that digit shows.
+    pub(crate) numeric: Option<CeNumeric>,
     pub(crate) channels: [bool; 4],
     pub(crate) textures: Vec<H2DrawTexture>,
     /// Pixel constant registers, by register index.
@@ -960,6 +963,7 @@ impl H2DrawPass {
             depth,
             cull: H2Cull::Frame,
             hidden_by_camo: false,
+            numeric: None,
             channels: [true; 4],
             textures: Vec::new(),
             constants: Vec::new(),
@@ -995,7 +999,8 @@ impl H2DrawPass {
 
     /// Whether it changes with the object's outputs.
     pub(crate) fn reads_outputs(&self) -> bool {
-        self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())
+        self.numeric.is_some()
+            || self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())
     }
 
     pub(crate) fn texture_rows_at(&self, time: f32, outputs: &[f32; 4]) -> [[f32; 4]; H2_TEXTURE_ROWS] {
@@ -1463,6 +1468,7 @@ pub(in crate::app) fn prepare_draw_pass(
         depth: pass.depth,
         cull: H2Cull::Frame,
         hidden_by_camo: false,
+        numeric: None,
         channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
         textures,
         constants,

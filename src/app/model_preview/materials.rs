@@ -9,7 +9,7 @@ use blam_tags::render_method::{
     ResolvedValue,
 };
 use super::ce_passes::{
-    CeCamoSettings, CeModelCommon, ce_camo_pass, ce_model_passes, ce_transparent_passes,
+    CeCamoSettings, CeModelCommon, CeNumeric, ce_camo_pass, ce_model_passes, ce_transparent_passes,
     read_ce_camo_settings,
 };
 use super::h2_stage::H2VertexStage;
@@ -479,8 +479,7 @@ fn resolve_ce_shader(
     };
     textures.h2_layers[H2Layer::Lightmap as usize] =
         ce_model_passes(source, root, &group, &flags, &mut common, &mut bitmap);
-    textures.h2_layers[H2Layer::Transparent as usize] =
-        ce_transparent_passes(source, root, &group, &mut bitmap);
+    let transparent = ce_transparent_passes(source, root, &group, &mut bitmap);
     if matches!(&group, b"soso" | b"senv") {
         let settings = caches.ce_camo.get_or_insert_with(|| read_ce_camo_settings(source));
         if let Some(settings) = settings {
@@ -489,6 +488,8 @@ fn resolve_ce_shader(
                 vec![ce_camo_pass(settings, two_sided, &mut bitmap)];
         }
     }
+    textures.h2_layers[H2Layer::Transparent as usize] =
+        expand_ce_digits(source, transparent, permutation, caches);
     caches.ce_model_common = common;
     if !textures.h2_layers[H2Layer::Transparent as usize].is_empty() {
         return textures;
@@ -502,6 +503,46 @@ fn resolve_ce_shader(
         textures.error = Some("the shader names no base or detail map".to_owned());
     }
     textures
+}
+
+/// Split each numeric pass into one per digit its bitmap holds.
+fn expand_ce_digits(
+    source: &TagSource,
+    passes: Vec<H2DrawPass>,
+    place: usize,
+    caches: &mut ResolveCaches,
+) -> Vec<H2DrawPass> {
+    let mut expanded = Vec::with_capacity(passes.len());
+    for pass in passes {
+        let Some(numeric) = pass.numeric.clone() else {
+            expanded.push(pass);
+            continue;
+        };
+        // `ce_image_index` wraps at the count, so this is the count itself.
+        let count = caches.ce_image_counts.get(&numeric.map).copied().unwrap_or_else(|| {
+            load_referenced_tag_from_source(source, &numeric.map, "bitmap", b"bitm")
+                .ok()
+                .and_then(|tag| blam_tags::bitmap::Bitmap::new(&tag).ok().map(|bitmap| bitmap.len()))
+                .unwrap_or(1)
+        });
+        for digit in 0..count {
+            let key = (numeric.map.clone(), true, digit);
+            let image = caches
+                .h2_images
+                .entry(key)
+                .or_insert_with(|| {
+                    decode_h2_image(source, &numeric.map, SamplerKind::Texture2D, digit).map(Arc::new)
+                })
+                .clone();
+            let mut pass = pass.clone();
+            if let Some(first) = pass.textures.first_mut() {
+                first.image = image;
+            }
+            pass.numeric = Some(CeNumeric { count, digit, place, ..numeric.clone() });
+            expanded.push(pass);
+        }
+    }
+    expanded
 }
 
 /// Halo CE `detail mask` options in order; the index is what the fragment
