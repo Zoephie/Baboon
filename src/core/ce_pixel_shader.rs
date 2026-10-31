@@ -510,14 +510,15 @@ pub(crate) fn translate_fx(
             registers.push(RegisterConstant { name: name.to_owned(), base, array, boolean });
             continue;
         }
-        if let Some(rest) = line.strip_prefix("Texture2D ").or(line.strip_prefix("TextureCube ")) {
-            let cube = line.starts_with("TextureCube");
+        let texture = [
+            ("Texture2D ", SamplerKind::Texture2D, "sampler2D"),
+            ("TextureCube ", SamplerKind::Cube, "samplerCube"),
+            ("Texture3D ", SamplerKind::Volume, "sampler3D"),
+        ]
+        .into_iter()
+        .find_map(|(prefix, kind, name)| Some((line.strip_prefix(prefix)?, kind, name)));
+        if let Some((rest, kind, name)) = texture {
             let slot = register_of(rest, 't').ok_or_else(|| format!("Unreadable texture: {line}"))?;
-            let (kind, name) = if cube {
-                (SamplerKind::Cube, "samplerCube")
-            } else {
-                (SamplerKind::Texture2D, "sampler2D")
-            };
             samplers.push(SamplerBinding { slot, kind });
             uniforms.push_str(&format!("uniform {name} s{slot};\n"));
             continue;

@@ -132,7 +132,10 @@ pub(super) fn draw_model_viewport(
         object_outputs: data
             .ce_object_functions
             .as_ref()
-            .map_or([0.0; 4], |functions| functions.outputs(time)),
+            .map_or([0.0; 4], |functions| {
+                let set = state.ce_function_inputs.as_ref();
+                functions.outputs(&functions.inputs_for(set, data.geometry_id), time)
+            }),
         object_moves: data
             .ce_object_functions
             .as_ref()
@@ -811,7 +814,11 @@ impl ModelGpuFrame {
                         .iter()
                         .filter(|layer| self.h2_draws(**layer))
                         .flat_map(|layer| &material.h2_layers[*layer as usize])
-                        .any(|pass| pass.moves() || (self.object_moves && pass.reads_outputs()))
+                        .any(|pass| {
+                            pass.moves()
+                                || pass.moves_with(&self.object_outputs)
+                                || (self.object_moves && pass.reads_outputs())
+                        })
                 })
         })
     }
@@ -3966,6 +3973,7 @@ pub(super) fn render_model_to_preview(
             .map(|material| RenderModelPreviewMaterial {
                 shader_path: material.render_method.clone(),
                 shader_group: material.render_method_group,
+                overlay: false,
             })
             .collect(),
         nodes: preview_skeleton_nodes(&model.nodes),

@@ -102,6 +102,8 @@ pub(in crate::app) enum H2VertexStage {
     CeMeter,
     /// Water's base map, and the eye in tangent space.
     CeWaterOpacity,
+    /// Two 3D noise lookups by position, pushed out along the normal.
+    CePlasma,
 }
 
 /// The first map's cube coordinate, from `cube` and the map's transform, and
@@ -321,6 +323,14 @@ impl H2VertexStage {
                 "v_tc0.xy = uv.xy;
     v_tc1.xyz = tangent_space(to_eye, tangent, binormal, normal);"
             }
+            Self::CePlasma => {
+                "vec4 place = vec4(a_position, 1.0);
+    v_tc0.xyz = vec3(dot(place, u_texture_rows[0]), dot(place, u_texture_rows[1]),
+        dot(place, u_texture_rows[2]));
+    v_tc1.xyz = vec3(dot(place, u_texture_rows[3]), dot(place, u_texture_rows[4]),
+        dot(place, u_texture_rows[5]));
+    v_color0 = clamp(u_texture_rows[7] * dot(normalize(to_eye), normal) + u_texture_rows[6], 0.0, 1.0);"
+            }
             Self::CeTransparent => CE_TRANSPARENT,
             Self::CeTransparentReflection => "vec3 cube = normal * dot(to_eye, normal) * 2.0 - to_eye;",
             Self::CeTransparentObject => "vec3 cube = normal;",
@@ -438,6 +448,7 @@ impl H2VertexStage {
     fn drawn_position(self) -> &'static str {
         match self {
             Self::Offset => "position + normal * u_texture_rows[8].w",
+            Self::CePlasma => "position + normal * u_texture_rows[0].z",
             _ => "position",
         }
     }
@@ -549,7 +560,8 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 39] = [
+    const STAGES: [H2VertexStage; 40] = [
+        H2VertexStage::CePlasma,
         H2VertexStage::CeGlassLit,
         H2VertexStage::CeGlassFlat,
         H2VertexStage::CeMeter,

@@ -242,6 +242,8 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) h2_active_camo: bool,
     pub(in crate::app) h2_bloom: bool,
     pub(in crate::app) h2_self_shadow: bool,
+    /// What the panel set an opened Halo CE object's function inputs to.
+    pub(in crate::app) ce_function_inputs: Option<super::ce_functions::CeFunctionInputs>,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -301,6 +303,7 @@ impl Default for ModelPreviewState {
             h2_active_camo: false,
             h2_bloom: true,
             h2_self_shadow: false,
+            ce_function_inputs: None,
             textures_pending: false,
             show_render: true,
             perspective: true,

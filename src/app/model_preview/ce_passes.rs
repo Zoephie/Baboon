@@ -28,6 +28,7 @@ const GLASS_FLAT_FILE: &str = "transparent_glass_reflection_flat.psh";
 const GLASS_BUMPED_FILE: &str = "transparent_glass_reflection_bumped.psh";
 const GLASS_DIFFUSE_FILE: &str = "transparent_glass_diffuse.psh";
 const METER_FILE: &str = "transparent_meter.psh";
+const PLASMA_FILE: &str = "transparent_plasma.psh";
 const WATER_OPACITY_FILE: &str = "transparent_water_opacity.psh";
 const WATER_REFLECTION_FILE: &str = "transparent_water_reflection.psh";
 const AMBIENT: [f32; 3] = [0.2, 0.2, 0.2];
@@ -281,6 +282,65 @@ pub(crate) struct CeModelAnimation {
     /// The object output a `framebuffer fade source` reads.
     fade_source: Option<usize>,
     meter: Option<CeMeter>,
+    plasma: Option<CePlasma>,
+}
+
+/// One of plasma's two noise lookups.
+#[derive(Debug, Clone, PartialEq)]
+struct CePlasmaNoise {
+    period: f32,
+    direction: [f32; 3],
+    scale: f32,
+}
+
+/// What `rasterizer_plasma_energy_draw` works out from its sources.
+#[derive(Debug, Clone, PartialEq)]
+struct CePlasma {
+    intensity_source: Option<usize>,
+    intensity_exponent: f32,
+    offset_source: Option<usize>,
+    offset_exponent: f32,
+    offset_amount: f32,
+    perpendicular: [f32; 4],
+    parallel: [f32; 4],
+    primary: CePlasmaNoise,
+    secondary: CePlasmaNoise,
+}
+
+impl CePlasma {
+    fn intensity(&self, outputs: &[f32; 4]) -> f32 {
+        self.intensity_source.map_or(1.0, |source| outputs[source].powf(self.intensity_exponent))
+    }
+
+    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32, outputs: &[f32; 4]) {
+        const LEAST_OFFSET: f32 = 0.0005;
+        let offset = self.offset_source.map_or(0.0, |source| {
+            outputs[source].powf(self.offset_exponent) * self.offset_amount
+        });
+        let offset = if offset < LEAST_OFFSET { 0.0 } else { offset };
+        for (first, noise) in [(0, &self.primary), (3, &self.secondary)] {
+            let moved = time / noise.period;
+            for axis in 0..3 {
+                let mut row = [0.0; 4];
+                row[axis] = noise.scale;
+                row[3] = noise.direction[axis] * moved;
+                rows[first + axis] = row;
+            }
+        }
+        // The game keeps the push in a spare slot of this row, and its vertex
+        // shader's dot with position then picks it up as well.
+        rows[0][2] = offset;
+        let intensity = self.intensity(outputs);
+        let [red, green, blue, alpha] = self.perpendicular;
+        let parallel = self.parallel;
+        rows[6] = [
+            red - parallel[0],
+            green - parallel[1],
+            blue - parallel[2],
+            (alpha - parallel[3]) * intensity,
+        ];
+        rows[7] = [parallel[0], parallel[1], parallel[2], parallel[3] * intensity];
+    }
 }
 
 /// What `shader_transparent_meter` works out from its sources.
@@ -329,10 +389,32 @@ impl CeModelAnimation {
             || self.colors.iter().any(CeColorAnimation::moves)
     }
 
+    /// Whether it moves by itself while `outputs` hold: plasma's noise always
+    /// runs, but there is nothing to see of it at no intensity.
+    pub(crate) fn moves_with(&self, outputs: &[f32; 4]) -> bool {
+        self.plasma.as_ref().is_some_and(|plasma| plasma.intensity(outputs) > 0.0)
+    }
+
+    /// Which of the object's outputs this reads.
+    pub(crate) fn outputs_read(&self) -> [bool; 4] {
+        let mut read = [false; 4];
+        let sources = self
+            .maps
+            .iter()
+            .flat_map(|map| map.sources)
+            .chain(self.meter.iter().flat_map(|meter| meter.sources))
+            .chain(self.plasma.iter().flat_map(|plasma| [plasma.intensity_source, plasma.offset_source]))
+            .chain([self.fade_source]);
+        sources.flatten().for_each(|source| read[source] = true);
+        read[0] |= self.colors.iter().any(|color| color.follows_output);
+        read
+    }
+
     /// Whether anything here follows an object output.
     pub(crate) fn reads_outputs(&self) -> bool {
         self.fade_source.is_some()
             || self.meter.is_some()
+            || self.plasma.is_some()
             || self.maps.iter().any(|map| map.sources.iter().any(Option::is_some))
             || self.colors.iter().any(|color| color.follows_output)
     }
@@ -346,6 +428,9 @@ impl CeModelAnimation {
         self.maps.iter().for_each(|map| map.apply(rows, time, outputs));
         if let Some(source) = self.fade_source {
             rows[8][0] = outputs[source];
+        }
+        if let Some(plasma) = &self.plasma {
+            plasma.apply(rows, time, outputs);
         }
     }
 
@@ -607,6 +692,7 @@ fn read_model_animation(root: TagStruct<'_>, scale: [f32; 2], detail_mask: i32) 
         eye_register: None,
         fade_source: None,
         meter: None,
+        plasma: None,
         colors: (detail_mask == 0)
             .then(|| CeColorAnimation {
                 register: 0,
@@ -1067,7 +1153,7 @@ pub(super) fn ce_transparent_passes(
         b"sgla" => Some(glass_passes(&directory, root, &every_flag(root), bitmap)),
         b"smet" => Some(meter_pass(&directory, root, &every_flag(root), bitmap).map(|pass| vec![pass])),
         b"swat" => Some(water_passes(&directory, root, &every_flag(root), bitmap)),
-        b"spla" => Some(Ok(vec![unseen_pass()])),
+        b"spla" => Some(plasma_pass(&directory, root, bitmap).map(|pass| vec![pass])),
         _ => None,
     };
     if let Some(passes) = single {
@@ -1425,9 +1511,66 @@ fn water_passes(
     Ok(passes)
 }
 
+/// `rasterizer_plasma_energy_draw`. All the kit's are shield hits, unseen until
+/// `recent shield damage` raises their intensity. `tint color source` is none
+/// on all of them, so it is not read.
+fn plasma_pass(
+    directory: &std::path::Path,
+    root: TagStruct<'_>,
+    bitmap: &mut impl FnMut(&str, SamplerKind) -> Option<Arc<H2Image>>,
+) -> Result<H2DrawPass, String> {
+    let real = |name: &str| root.read_real(name).unwrap_or(0.0);
+    let tinted = |brightness: &str, tint: &str| {
+        let color = root.read_rgb(tint);
+        [color.red, color.green, color.blue, real(brightness)]
+    };
+    let noise = |name: &str| {
+        let direction = root.read_vec3(&format!("{name} animation direction"));
+        CePlasmaNoise {
+            period: nonzero(root.read_real(&format!("{name} animation period")), 1.0),
+            direction: [direction.i, direction.j, direction.k],
+            scale: real(&format!("{name} noise map scale")),
+        }
+    };
+    let plasma = CePlasma {
+        intensity_source: function_source(root, "intensity source"),
+        intensity_exponent: nonzero(root.read_real("intensity exponent"), 1.0),
+        offset_source: function_source(root, "offset source"),
+        offset_exponent: nonzero(root.read_real("offset exponent"), 1.0),
+        offset_amount: real("offset amount"),
+        perpendicular: tinted("perpendicular brightness", "perpendicular tint color"),
+        parallel: tinted("parallel brightness", "parallel tint color"),
+        primary: noise("primary"),
+        secondary: noise("secondary"),
+    };
+    let mut volume = |slot, name: &str| {
+        let image = root
+            .read_tag_ref_path(name)
+            .filter(|path| !path.is_empty())
+            .and_then(|path| bitmap(&path, SamplerKind::Volume));
+        texture(slot, SamplerKind::Volume, image)
+    };
+    let textures = vec![volume(0, "primary noise map"), volume(1, "secondary noise map")];
+    let read = |name: &str| read_shader_source(directory, name);
+    let shader = translate_fx(PLASMA_FILE, H2_GLSL_VERSION, &[], read)?;
+    let mut pass = SimplePass {
+        stage: H2VertexStage::CePlasma,
+        fragment: shader.entry("pixel_main(i)"),
+        blend: plain_blend(H2BlendFactor::SrcAlpha, H2BlendFactor::One),
+        two_sided: true,
+        write_depth: false,
+        channels: [true, true, true, false],
+        textures,
+        constants: Vec::new(),
+        rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+    }
+    .build();
+    pass.ce_animation =
+        Some(Arc::new(CeModelAnimation { plasma: Some(plasma), ..Default::default() }));
+    Ok(pass)
+}
+
 /// A pass that draws nothing, for a surface with nothing to show a lone model.
-/// Every plasma in the kit is a shield hit, whose intensity reads an object
-/// function that rests at 0.
 fn unseen_pass() -> H2DrawPass {
     let fragment = format!(
         "{H2_GLSL_VERSION}in vec4 v_color0;\nout vec4 out_color;\nvoid main() {{ discard; }}\n"
@@ -1652,9 +1795,14 @@ mod tests {
                 let tag = load_referenced_tag_from_source(&source, &relative, extension, group).unwrap();
                 shaders += 1;
                 let passes = ce_transparent_passes(&source, tag.root(), group, &mut |_, kind| {
-                    (kind == SamplerKind::Cube).then(|| {
-                        Arc::new(H2Image::Cube { size: 1, faces: std::array::from_fn(|_| vec![0; 4]) })
-                    }).or_else(|| Some(flat(WHITE)))
+                    match kind {
+                        SamplerKind::Cube => Some(Arc::new(H2Image::Cube {
+                            size: 1,
+                            faces: std::array::from_fn(|_| vec![0; 4]),
+                        })),
+                        SamplerKind::Volume => None,
+                        SamplerKind::Texture2D => Some(flat(WHITE)),
+                    }
                 });
                 assert!(!passes.is_empty(), "{} has no passes", path.display());
                 for pass in passes {
@@ -1779,6 +1927,42 @@ mod tests {
         assert_eq!(constants[2][3], 0.75);
         assert_eq!(constants[1][3], 1.0 / 8.0);
         assert_eq!(constants[5], [-1.0, -0.5, -0.0, -1.0]);
+    }
+
+    #[test]
+    fn plasma_rests_unseen_and_its_output_brings_it_up() {
+        let noise = CePlasmaNoise { period: 2.0, direction: [1.0, 0.0, 0.0], scale: 3.0 };
+        let plasma = CePlasma {
+            intensity_source: Some(1),
+            intensity_exponent: 1.0,
+            offset_source: Some(1),
+            offset_exponent: 2.0,
+            offset_amount: 0.03,
+            perpendicular: [1.0; 4],
+            parallel: [1.0; 4],
+            primary: noise.clone(),
+            secondary: noise,
+        };
+        let animation = CeModelAnimation { plasma: Some(plasma), ..Default::default() };
+        let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+        animation.apply_rows(&mut rows, 4.0, &[0.0; 4]);
+        assert_eq!(rows[7][3], 0.0);
+        assert_eq!(rows[0], [3.0, 0.0, 0.0, 2.0]);
+        assert!(!animation.moves_with(&[0.0; 4]));
+
+        animation.apply_rows(&mut rows, 4.0, &[0.0, 0.5, 0.0, 0.0]);
+        assert_eq!(rows[7][3], 0.5);
+        assert!((rows[0][2] - 0.0075).abs() < 1e-6);
+        assert!(animation.moves_with(&[0.0, 0.5, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn a_pass_says_which_outputs_it_reads() {
+        let idle = TextureWave { function: PERIODIC_ONE, period: 1.0, phase: 0.0, scale: 1.0 };
+        let map = map([idle.clone(), idle.clone(), idle], [None, Some(2), None]);
+        let animation = CeModelAnimation { maps: vec![map], fade_source: Some(1), ..Default::default() };
+        assert_eq!(animation.outputs_read(), [false, true, true, false]);
+        assert_eq!(CeModelAnimation::default().outputs_read(), [false; 4]);
     }
 
     #[test]

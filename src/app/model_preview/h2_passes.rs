@@ -984,6 +984,11 @@ impl H2DrawPass {
             || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
     }
 
+    /// Whether it moves by itself while `outputs` hold.
+    pub(crate) fn moves_with(&self, outputs: &[f32; 4]) -> bool {
+        self.ce_animation.as_ref().is_some_and(|animation| animation.moves_with(outputs))
+    }
+
     /// Whether it changes with the object's outputs.
     pub(crate) fn reads_outputs(&self) -> bool {
         self.ce_animation.as_ref().is_some_and(|animation| animation.reads_outputs())

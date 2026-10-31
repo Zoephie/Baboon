@@ -4,7 +4,7 @@
 //! `H2_SHOT="<model path>|<out file>|<shaders 0/1>|<lights 0/1>|<yaw>|<pitch>"`,
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
 //! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
-//! bipeds with `H2_SHOT_BIPED`.
+//! bipeds with `H2_SHOT_BIPED`, whose function inputs `H2_SHOT_INPUTS` can set.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -124,7 +124,14 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         object_outputs: data
             .ce_object_functions
             .as_ref()
-            .map_or([0.0; 4], |functions| functions.outputs(time)),
+            .map_or([0.0; 4], |functions| {
+                let mut inputs = functions.inputs_for(None, data.geometry_id);
+                if let Ok(set) = std::env::var("H2_SHOT_INPUTS") {
+                    let values = set.split(',').map(|value| value.parse().unwrap());
+                    inputs.iter_mut().zip(values).for_each(|(input, value)| *input = value);
+                }
+                functions.outputs(&inputs, time)
+            }),
         object_moves: data
             .ce_object_functions
             .as_ref()

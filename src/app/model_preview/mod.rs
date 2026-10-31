@@ -138,6 +138,9 @@ pub(crate) struct RenderModelPreviewMaterial {
     /// Decides which extension the path resolves with, and which resolver
     /// understands the tag behind it.
     pub shader_group: u32,
+    /// Drawn over the whole model, from no batch of its own: a Halo CE
+    /// object's `modifier shader`.
+    pub overlay: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -747,6 +750,7 @@ pub(super) fn draw_model_preview_panel(
                                     .show(ui, |ui| {
                                         draw_scenario_setup(ui, state);
                                         draw_variant_controls(ui, data, state);
+                                        draw_object_functions(ui, data, state);
                                     });
                             }
                         },
@@ -791,6 +795,7 @@ pub(super) fn draw_model_preview_panel(
                 } else {
                     draw_scenario_setup(ui, state);
                     draw_variant_controls(ui, data, state);
+                    draw_object_functions(ui, data, state);
                 }
             });
         }
@@ -887,6 +892,28 @@ fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
                 draw_loading_section_body(ui, 160.0);
             }
         });
+    }
+}
+
+fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut ModelPreviewState) {
+    if let Some(functions) = &data.ce_object_functions {
+        let read = data.textures.as_ref().map(|textures| {
+            let mut read = [false; 4];
+            let passes = textures.iter().flat_map(|material| material.h2_layers.iter().flatten());
+            for animation in passes.filter_map(|pass| pass.ce_animation.as_ref()) {
+                for (read, output) in read.iter_mut().zip(animation.outputs_read()) {
+                    *read |= output;
+                }
+            }
+            read
+        });
+        ce_functions::draw_ce_function_controls(
+            ui,
+            functions,
+            data.geometry_id,
+            &mut state.ce_function_inputs,
+            read,
+        );
     }
 }
 

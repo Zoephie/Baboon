@@ -6,7 +6,8 @@
 //! comes from no code in reach: `rate`, the bounds' default and the step size
 //! are as Xbox maps have them baked, against their fields.
 
-use blam_tags::{TagFile, TagStruct};
+use blam_tags::{TagFieldData, TagFile, TagStruct};
+use eframe::egui::{self, Ui};
 
 use super::ce_passes::{option_index, periodic_evaluate};
 
@@ -18,6 +19,7 @@ const MAP_TO: [&str; 6] = ["linear", "early", "very early", "late", "very late",
 const BOUNDS_MODES: [&str; 3] = ["clip", "clip and normalize", "scale to fit"];
 const ACTIVATING_ABOVE: f32 = 0.0001;
 const TICKS_PER_SECOND: f32 = 30.0;
+const OUTPUTS: [&str; 4] = ["A out", "B out", "C out", "D out"];
 
 /// An input's value on an object at rest. Most read damage or motion, of
 /// which there is none. `random constant` is drawn per object, so a middle.
@@ -58,6 +60,7 @@ struct CeFunction {
     bounds_mode: usize,
     bounds: [f32; 2],
     scale_by: f32,
+    usage: String,
 }
 
 fn inverse(value: f32) -> f32 {
@@ -80,7 +83,7 @@ impl CeFunction {
     fn read(block: TagStruct<'_>) -> Self {
         let source = |field: &str| option_index(block, field, &SOURCES) as usize;
         let bounds = match block.field("bounds").and_then(|field| field.value()) {
-            Some(blam_tags::TagFieldData::FractionBounds(bounds)) => [bounds.lower, bounds.upper],
+            Some(TagFieldData::FractionBounds(bounds)) => [bounds.lower, bounds.upper],
             _ => [0.0; 2],
         };
         let flags = block.read_flag_names("flags").unwrap_or_default();
@@ -105,6 +108,7 @@ impl CeFunction {
             bounds_mode: option_index(block, "bounds mode", &BOUNDS_MODES) as usize,
             bounds: if bounds == [0.0; 2] { [0.0, 1.0] } else { bounds },
             scale_by: real("scale by"),
+            usage: block.read_string("usage").unwrap_or_default(),
         }
     }
 
@@ -164,6 +168,11 @@ impl CeFunction {
         if self.additive { (value * time * TICKS_PER_SECOND).rem_euclid(1.0) } else { value }
     }
 
+    /// The values it reads, as `SOURCES` numbers them.
+    fn sources(&self) -> [usize; 4] {
+        [self.scale_period_by, self.scale_function_by, self.add, self.scale_result_by]
+    }
+
     fn moves(&self) -> bool {
         const STILL: [usize; 2] = [0, 1];
         self.additive || !STILL.contains(&self.function) || self.wobble_magnitude != 0.0
@@ -174,14 +183,16 @@ impl CeFunction {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct CeObjectFunctions {
     inputs: [f32; 4],
+    /// What each input reads, for those the object uses.
+    input_names: [Option<String>; 4],
     functions: Vec<CeFunction>,
 }
 
 impl CeObjectFunctions {
-    /// The object's `A out` to `D out`.
-    pub(crate) fn outputs(&self, time: f32) -> [f32; 4] {
+    /// The object's `A out` to `D out`, its inputs at `inputs`.
+    pub(crate) fn outputs(&self, inputs: &[f32; 4], time: f32) -> [f32; 4] {
         let mut values = [0.0; 9];
-        values[1..5].copy_from_slice(&self.inputs);
+        values[1..5].copy_from_slice(inputs);
         for (index, function) in self.functions.iter().take(4).enumerate() {
             values[5 + index] = function.output(&values, time);
         }
@@ -191,32 +202,123 @@ impl CeObjectFunctions {
     pub(crate) fn move_at_rest(&self) -> bool {
         self.functions.iter().take(4).any(CeFunction::moves)
     }
+
+    /// Which inputs can change the outputs marked in `read`, following one
+    /// function's reads of another's output.
+    fn inputs_reaching(&self, mut read: [bool; 4]) -> [bool; 4] {
+        let mut inputs = [false; 4];
+        loop {
+            let before = read;
+            for (index, function) in self.functions.iter().take(4).enumerate() {
+                if !read[index] {
+                    continue;
+                }
+                for source in function.sources() {
+                    match source {
+                        1..=4 => inputs[source - 1] = true,
+                        5..=8 => read[source - 5] = true,
+                        _ => {}
+                    }
+                }
+            }
+            if read == before {
+                return inputs;
+            }
+        }
+    }
+
+    /// The inputs to draw with: what the panel set for this model, or rest.
+    pub(crate) fn inputs_for(&self, set: Option<&CeFunctionInputs>, geometry: u64) -> [f32; 4] {
+        set.filter(|set| set.geometry == geometry).map_or(self.inputs, |set| set.values)
+    }
+}
+
+/// Inputs set by hand, for the model they were set on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CeFunctionInputs {
+    geometry: u64,
+    values: [f32; 4],
+}
+
+/// Sliders for an opened object's inputs, and what its functions make of them.
+/// `read` is which outputs the model's shaders read, once they have resolved:
+/// the rest cannot change the picture, whatever the game uses them for.
+pub(super) fn draw_ce_function_controls(
+    ui: &mut Ui,
+    functions: &CeObjectFunctions,
+    geometry: u64,
+    set: &mut Option<CeFunctionInputs>,
+    read: Option<[bool; 4]>,
+) {
+    const UNREAD: &str = "No shader on this model reads this.";
+    let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
+    let read = read.unwrap_or([true; 4]);
+    let mut values = functions.inputs_for(set.as_ref(), geometry);
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.strong("Object Functions");
+        let changed = values != functions.inputs;
+        if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() {
+            values = functions.inputs;
+            *set = None;
+        }
+    });
+    let before = values;
+    for ((value, name), active) in values.iter_mut().zip(&functions.input_names).zip(reaching) {
+        let Some(name) = name else {
+            continue;
+        };
+        ui.add_enabled(active, egui::Slider::new(value, 0.0..=1.0).text(name))
+            .on_disabled_hover_text(UNREAD);
+    }
+    if values != before {
+        *set = Some(CeFunctionInputs { geometry, values });
+    }
+    let time = ui.input(|input| input.time) as f32;
+    let outputs = functions.outputs(&values, time);
+    for (index, function) in functions.functions.iter().take(OUTPUTS.len()).enumerate() {
+        let text = format!("{}: {:.2}  {}", OUTPUTS[index], outputs[index], function.usage);
+        ui.add_enabled(read[index], egui::Label::new(text)).on_disabled_hover_text(UNREAD);
+    }
+}
+
+/// An object's chain of parent structs, ending at `object`.
+fn struct_chain(object: &TagFile) -> Option<Vec<TagStruct<'_>>> {
+    let mut chain = vec![object.root()];
+    loop {
+        let last = *chain.last()?;
+        if last.field("functions").is_some() {
+            return Some(chain);
+        }
+        chain.push(last.fields_all().find_map(|field| field.as_struct())?);
+    }
+}
+
+/// The shader `render_object_list` lays over the object: group and path.
+pub(in crate::app) fn read_ce_modifier_shader(object: &TagFile) -> Option<(u32, String)> {
+    let (group, path) = struct_chain(object)?.last()?.read_tag_ref_with_group("modifier shader")?;
+    (!path.is_empty()).then_some((group, path))
 }
 
 /// An object's functions, reading its chain of parent structs from the object
 /// up: a type's inputs replace those of the groups beneath it.
 pub(in crate::app) fn read_ce_object_functions(object: &TagFile) -> Option<CeObjectFunctions> {
-    let mut chain = vec![object.root()];
-    loop {
-        let last = *chain.last()?;
-        if last.field("functions").is_some() {
-            break;
-        }
-        chain.push(last.fields_all().find_map(|field| field.as_struct())?);
-    }
+    let chain = struct_chain(object)?;
     let mut inputs = [0.0; 4];
+    let mut input_names: [Option<String>; 4] = Default::default();
     let weapon = chain.iter().copied().find(|level| level.field("magazines").is_some());
     for level in chain.iter().rev() {
-        for (input, name) in inputs.iter_mut().zip(INPUTS) {
+        for (index, name) in INPUTS.into_iter().enumerate() {
             let Some(option) = level.read_enum_name(name).filter(|option| option != "none") else {
                 continue;
             };
-            *input = resting_input(&option, weapon);
+            inputs[index] = resting_input(&option, weapon);
+            input_names[index] = Some(option);
         }
     }
     let block = chain.last()?.field("functions")?.as_block()?;
     let functions = (0..block.len()).filter_map(|index| block.element(index)).map(CeFunction::read);
-    Some(CeObjectFunctions { inputs, functions: functions.collect() })
+    Some(CeObjectFunctions { inputs, input_names, functions: functions.collect() })
 }
 
 #[cfg(test)]
@@ -241,15 +343,28 @@ mod tests {
             let tag = load_referenced_tag_from_source(&source, path, "biped", b"bipd").unwrap();
             read_ce_object_functions(&tag).unwrap()
         };
+        let rest = |objects: &CeObjectFunctions, time| objects.outputs(&objects.inputs, time);
+        let tag = load_referenced_tag_from_source(&source, "characters\\cyborg\\cyborg", "biped", b"bipd")
+            .unwrap();
+        // Only the shield hit reads an output, the second, off one input.
+        let chief = read_ce_object_functions(&tag).unwrap();
+        assert_eq!(chief.inputs_reaching([false, true, false, false]), [true, false, false, false]);
+        let (group, path) = read_ce_modifier_shader(&tag).unwrap();
+        assert_eq!(group, u32::from_be_bytes(*b"spla"));
+        assert!(path.ends_with("shield hit"), "{path}");
         // `recent shield damage` drives the glow a shield hit's plasma reads.
-        assert_eq!(biped("characters\\cyborg\\cyborg").outputs(1.0)[1], 0.0);
-        assert_eq!(biped("characters\\elite\\elite").outputs(1.0)[0], 0.0);
+        let cyborg = biped("characters\\cyborg\\cyborg");
+        assert_eq!(rest(&cyborg, 1.0)[1], 0.0);
+        assert_eq!(cyborg.input_names[0].as_deref(), Some("recent shield damage"));
+        assert_eq!(cyborg.functions[1].usage, "shield glow source");
+        assert_eq!(cyborg.outputs(&[1.0, 1.0, 0.0, 0.0], 1.0)[1], 1.0);
+        assert_eq!(rest(&biped("characters\\elite\\elite"), 1.0)[0], 0.0);
         // The sentinel's last function runs off `alive`.
-        assert_eq!(biped("characters\\sentinel\\sentinel").outputs(1.0)[3], 1.0);
+        assert_eq!(rest(&biped("characters\\sentinel\\sentinel"), 1.0)[3], 1.0);
         // The monitor's idle animation has no input to hold it still.
         let monitor = biped("characters\\monitor\\monitor");
         assert!(monitor.move_at_rest());
-        assert_ne!(monitor.outputs(1.0)[2], monitor.outputs(2.0)[2]);
+        assert_ne!(rest(&monitor, 1.0)[2], rest(&monitor, 2.0)[2]);
     }
 
     fn function(function: usize) -> CeFunction {
@@ -272,26 +387,24 @@ mod tests {
             bounds_mode: 0,
             bounds: [0.0, 1.0],
             scale_by: 0.0,
+            usage: String::new(),
         }
     }
 
     #[test]
     fn a_shield_glow_rests_at_nothing_and_rises_with_its_input() {
         let glow = CeFunction { scale_function_by: 1, map_to: 2, ..function(0) };
-        let objects = |input| CeObjectFunctions {
-            inputs: [input, 0.0, 0.0, 0.0],
-            functions: vec![glow.clone()],
-        };
-        assert_eq!(objects(0.0).outputs(3.0)[0], 0.0);
-        assert!((objects(0.5).outputs(3.0)[0] - 0.5f32.powf(0.25)).abs() < 1e-5);
+        let objects = CeObjectFunctions { functions: vec![glow], ..Default::default() };
+        assert_eq!(objects.outputs(&[0.0; 4], 3.0)[0], 0.0);
+        assert!((objects.outputs(&[0.5, 0.0, 0.0, 0.0], 3.0)[0] - 0.5f32.powf(0.25)).abs() < 1e-5);
     }
 
     #[test]
     fn a_later_function_can_read_an_earlier_output() {
         let first = CeFunction { scale_function_by: 1, ..function(0) };
         let second = CeFunction { scale_function_by: 5, invert: true, ..function(0) };
-        let objects = CeObjectFunctions { inputs: [1.0, 0.0, 0.0, 0.0], functions: vec![first, second] };
-        assert_eq!(objects.outputs(0.0)[..2], [1.0, 0.0]);
+        let objects = CeObjectFunctions { functions: vec![first, second], ..Default::default() };
+        assert_eq!(objects.outputs(&[1.0, 0.0, 0.0, 0.0], 0.0)[..2], [1.0, 0.0]);
     }
 
     #[test]
@@ -333,10 +446,31 @@ mod tests {
     }
 
     #[test]
+    fn inputs_set_on_one_model_do_not_carry_to_another() {
+        let objects = CeObjectFunctions { inputs: [1.0, 0.0, 0.0, 0.0], ..Default::default() };
+        let set = CeFunctionInputs { geometry: 7, values: [0.25; 4] };
+        assert_eq!(objects.inputs_for(Some(&set), 7), [0.25; 4]);
+        assert_eq!(objects.inputs_for(Some(&set), 8), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(objects.inputs_for(None, 7), [1.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn an_input_reaches_a_read_output_through_another_output() {
+        let first = CeFunction { scale_function_by: 2, ..function(0) };
+        let second = CeFunction { add: 5, ..function(0) };
+        let third = CeFunction { scale_result_by: 3, ..function(0) };
+        let objects =
+            CeObjectFunctions { functions: vec![first, second, third], ..Default::default() };
+        assert_eq!(objects.inputs_reaching([false, true, false, false]), [false, true, false, false]);
+        assert_eq!(objects.inputs_reaching([false, false, true, false]), [false, false, true, false]);
+        assert_eq!(objects.inputs_reaching([false; 4]), [false; 4]);
+    }
+
+    #[test]
     fn only_a_running_function_moves() {
-        let objects = CeObjectFunctions { inputs: [0.0; 4], functions: vec![function(0)] };
+        let objects = CeObjectFunctions { functions: vec![function(0)], ..Default::default() };
         assert!(!objects.move_at_rest());
-        let objects = CeObjectFunctions { inputs: [0.0; 4], functions: vec![function(6)] };
+        let objects = CeObjectFunctions { functions: vec![function(6)], ..Default::default() };
         assert!(objects.move_at_rest());
     }
 }

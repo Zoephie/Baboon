@@ -256,9 +256,18 @@ pub(super) fn load_model_preview(
             .ok_or("This object references no gbxmodel.")?;
         let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
             .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
-        let preview = build_render_preview(&render)?;
+        let mut preview = build_render_preview(&render)?;
         if preview.batches.is_empty() {
             return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
+        }
+        if let Some((shader_group, shader_path)) =
+            super::ce_functions::read_ce_modifier_shader(model_tag)
+        {
+            preview.materials.push(RenderModelPreviewMaterial {
+                shader_path,
+                shader_group,
+                overlay: true,
+            });
         }
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
@@ -415,7 +424,7 @@ pub(super) fn load_model_preview(
         && group == shader_group
         && !shader_path.is_empty()
     {
-        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group });
+        preview.materials.push(RenderModelPreviewMaterial { shader_path, shader_group, overlay: false });
     }
     // The collision/physics overlays are NOT built here: this parse runs on
     // the UI thread, and walking the collision BSP plus tessellating the

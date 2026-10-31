@@ -231,6 +231,12 @@ pub(crate) fn resolve_model_textures(
         .collect();
     // A model's hologram shader is on no batch: every material takes its passes.
     let hologram = H2Layer::Hologram as usize;
+    let transparent = H2Layer::Transparent as usize;
+    for (material, texture) in materials.iter().zip(&mut textures) {
+        if material.overlay {
+            texture.h2_layers[hologram] = std::mem::take(&mut texture.h2_layers[transparent]);
+        }
+    }
     let overlay = textures.iter().find(|texture| !texture.h2_layers[hologram].is_empty());
     if let Some(passes) = overlay.map(|texture| texture.h2_layers[hologram].clone()) {
         for texture in &mut textures {
@@ -1085,6 +1091,7 @@ mod tests {
                 .map(|material| RenderModelPreviewMaterial {
                     shader_path: material.render_method.clone(),
                     shader_group: material.render_method_group,
+                    overlay: false,
                 })
                 .collect(),
         )
@@ -1251,6 +1258,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: String::new(),
                 shader_group: 0,
+                overlay: false,
             }],
         );
         assert_eq!(resolved.len(), 1);
@@ -1315,6 +1323,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: r"objects\characters\dervish\shaders\dervish_armor".to_owned(),
                 shader_group: u32::from_be_bytes(*b"rmsh"),
+                overlay: false,
             }],
         );
         let material = &resolved[0];
@@ -1346,6 +1355,7 @@ mod tests {
             &[RenderModelPreviewMaterial {
                 shader_path: path.to_owned(),
                 shader_group: u32::from_be_bytes(*group),
+                overlay: false,
             }],
         )
         .remove(0)
@@ -1545,6 +1555,7 @@ mod tests {
         let material = |path: &str| RenderModelPreviewMaterial {
             shader_path: path.to_owned(),
             shader_group: u32::from_be_bytes(*b"shad"),
+            overlay: false,
         };
         let camo = |path: &str| {
             let textures = resolve_model_textures(&source, &[material(path)]);
