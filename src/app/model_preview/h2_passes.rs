@@ -189,6 +189,20 @@ pub(crate) fn h2_object_light_direction() -> [f32; 3] {
     [-x / length, -y / length, -z / length]
 }
 
+/// The object path's lighting as a PRT pass takes it: the indirect light,
+/// then the direct one from `direction`. The game samples a level's probes
+/// here, which a preview stands in for with the same colors the other passes
+/// light by. The indirect light alone is what a shadow leaves.
+pub(crate) fn h2_prt_object_lights(direction: [f32; 3]) -> ([H2PrtLight; 2], [f32; 3]) {
+    let channels = |[r, g, b, _]: [f32; 4]| [r, g, b];
+    let [x, y, z, _] = DEFAULT_INDIRECT_VECTOR;
+    let lights = [
+        H2PrtLight { direction: [-x, -y, -z], color: channels(DEFAULT_INDIRECT_COLOR) },
+        H2PrtLight { direction, color: channels(DEFAULT_DIRECT_COLOR) },
+    ];
+    (lights, channels(DEFAULT_AMBIENT))
+}
+
 /// Enough to clear a surface of its own shadow, as a share of the depth range.
 const H2_SHADOW_BIAS: f32 = 0.004;
 
@@ -318,6 +332,8 @@ pub(crate) struct H2Animation {
     kind: H2AnimationKind,
     /// Seconds to a cycle. At zero the function reads the time itself.
     period: f32,
+    /// What an object input reads instead of time.
+    held_input: Option<f32>,
     function: Arc<TagFunction>,
 }
 
@@ -325,13 +341,18 @@ impl PartialEq for H2Animation {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
             && self.period == other.period
+            && self.held_input == other.held_input
             && self.function.to_bytes() == other.function.to_bytes()
     }
 }
 
 impl H2Animation {
     fn input(&self, time: f32) -> f32 {
-        if self.period > 0.0 { (time / self.period).rem_euclid(1.0) } else { time }
+        match self.held_input {
+            Some(input) => input,
+            None if self.period > 0.0 => (time / self.period).rem_euclid(1.0),
+            None => time,
+        }
     }
 
     fn scalar(&self, time: f32) -> f32 {
@@ -351,7 +372,7 @@ impl H2Animation {
     /// Whether this shows: a transform always can, but a value or color may
     /// wander by less than a step of the frame.
     fn moves(&self) -> bool {
-        if self.function.as_constant().is_some() {
+        if self.held_input.is_some() || self.function.as_constant().is_some() {
             return false;
         }
         if self.is_transform() {
@@ -388,13 +409,26 @@ pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction
     crate::app::editor::function_editor::h2_tag_function(&bytes)
 }
 
-/// The animations of a parameter that time alone drives. One with an input
-/// reads a value of the object, which a preview does not have, so such a
-/// parameter keeps its constant.
+/// What a whole, idle object reads for an input: full for what measures its
+/// condition, and otherwise the zero the game falls back on when nothing
+/// exports the name, which leaves boosts, hits and open doors off.
+fn object_input(name: &str) -> f32 {
+    match name {
+        "alive" | "body_vitality" | "device_power" | "electrical_power" | "health" | "one"
+        | "power" | "shield" | "shield_strength" | "shield_vitality" => 1.0,
+        _ => 0.0,
+    }
+}
+
+/// The animations of a parameter. The game reads these and never the
+/// parameter's constant, so an input a preview has no value for still counts.
 fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
     elements(parameter, "animation properties")
-        .filter(|property| property.read_string_id("input name").is_none_or(|name| name.is_empty()))
         .filter_map(|property| {
+            let held_input = property
+                .read_string_id("input name")
+                .filter(|name| !name.is_empty())
+                .map(|name| object_input(&name));
             let kind = match property.read_enum_name("type")?.as_str() {
                 "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
                 "bitmap scale x" => H2AnimationKind::ScaleX,
@@ -409,6 +443,7 @@ fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
             Some(H2Animation {
                 kind,
                 period: property.read_real("time period").unwrap_or(0.0),
+                held_input,
                 function: Arc::new(animation_function(&property)?),
             })
         })
@@ -975,14 +1010,19 @@ pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors 
 /// of the weights and the middle of its range. White with nothing allowed, as
 /// the game does.
 fn change_color_for(permutations: &[H2ChangePermutation], variant: &str) -> [f32; 3] {
+    // `object_postprocess` shares out a block with no weights evenly, so
+    // there a zero is as likely as any other entry and not ruled out.
+    let unweighted = permutations.iter().all(|entry| entry.weight <= 0.0);
+    let weight = |entry: &H2ChangePermutation| if unweighted { 1.0 } else { entry.weight };
     let allowed: Vec<_> = permutations
         .iter()
-        .filter(|entry| entry.weight > 0.0 && (entry.variant.is_empty() || entry.variant == variant))
+        .filter(|entry| weight(entry) > 0.0)
+        .filter(|entry| entry.variant.is_empty() || entry.variant == variant)
         .collect();
-    let total: f32 = allowed.iter().map(|entry| entry.weight).sum();
+    let total: f32 = allowed.iter().map(|entry| weight(entry)).sum();
     let mut remaining = total / 2.0;
     for entry in allowed {
-        remaining -= entry.weight;
+        remaining -= weight(entry);
         if remaining <= 0.0 {
             return std::array::from_fn(|axis| (entry.lower[axis] + entry.upper[axis]) / 2.0);
         }
@@ -1418,6 +1458,7 @@ mod tests {
         H2Animation {
             kind,
             period,
+            held_input: None,
             function: Arc::new(TagFunction::parse_encoded(
                 blam_tags::tag_function::FunctionEncoding::H2,
                 &function.to_bytes(),
@@ -1456,6 +1497,16 @@ mod tests {
         assert!(turned[0].abs() < 1e-6, "{turned:?}");
         assert!((turned[1] + 2.0).abs() < 1e-6, "{turned:?}");
         assert!((turned[3] - 2.0).abs() < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn an_object_input_holds_still_at_what_a_whole_object_exports() {
+        assert_eq!(object_input("shield_vitality"), 1.0);
+        assert_eq!(object_input("object_overshield_amount"), 0.0);
+        assert_eq!(object_input("boost"), 0.0);
+        let held = H2Animation { held_input: Some(1.0), ..animation(H2AnimationKind::Value, 4.0, 0.0) };
+        assert_eq!(held.input(3.0), 1.0);
+        assert!(!held.moves());
     }
 
     #[test]
@@ -1543,6 +1594,20 @@ mod tests {
         assert_eq!(change_color_for(&[], "minor"), [1.0; 3]);
         let shared = [entry(1.0, 0.0, ""), entry(2.0, 0.5, ""), entry(1.0, 0.75, "")];
         assert_eq!(change_color_for(&shared, "any"), [0.625; 3], "the middle of the weights");
+    }
+
+    #[test]
+    fn a_block_with_no_weights_shares_them_evenly() {
+        let entry = |value: f32, variant: &str| H2ChangePermutation {
+            weight: 0.0,
+            lower: [value; 3],
+            upper: [value; 3],
+            variant: variant.to_owned(),
+        };
+        let list = [entry(0.25, "minor"), entry(0.5, "major"), entry(0.75, "major")];
+        assert_eq!(change_color_for(&list, "minor"), [0.25; 3]);
+        assert_eq!(change_color_for(&list, "major"), [0.5; 3]);
+        assert_eq!(change_color_for(&list, "ultra"), [1.0; 3], "no entry for this variant");
     }
 
     #[test]
@@ -1731,6 +1796,30 @@ mod tests {
         let root = pass.root();
         let implementation = elements(root, "implementations").next().unwrap();
         assert_eq!(read_custom_channels(implementation), Some([false; 4]));
+    }
+
+    /// With `BLAM_TEST_H2EK`: the constant is 1, and reading it instead of
+    /// the function leaves a parked ghost boosting.
+    #[test]
+    fn an_idle_ghost_is_not_boosting() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let file = root.join("objects/vehicles/ghost/shaders/plasma_vent.shader");
+        let shader = crate::core::source::read_tag_at_path(
+            &file,
+            Some(crate::core::game::GameId::Halo2),
+            Some(&definitions),
+            u32::from_be_bytes(*b"shad"),
+        )
+        .unwrap();
+        let root = shader.root();
+        let levels = shader_parameters(root);
+        let animations = &levels["framebuffer_fade"].animations;
+        assert_eq!(animated_vector(animations, 3.0).map(|value| value[0]), Some(0.0));
     }
 
     /// With `BLAM_TEST_H2EK`: the brute hair that drew untextured.

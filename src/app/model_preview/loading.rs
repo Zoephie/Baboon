@@ -252,7 +252,7 @@ pub(super) fn load_model_preview(
         let Some(source) = source else {
             return Err("Halo CE object preview requires a loaded source.".to_owned());
         };
-        let reference = halo1_object_reference(model_tag, "model")
+        let reference = object_reference(model_tag, "model")
             .ok_or("This object references no gbxmodel.")?;
         let render = load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2")
             .map_err(|error| format!("Could not load {reference}.gbxmodel: {error}"))?;
@@ -266,6 +266,21 @@ pub(super) fn load_model_preview(
             preview,
             Vec::new(),
         ));
+    }
+
+    // Every later object names a `.model`, which previews as itself. The
+    // object has the change colors, so nothing needs to go looking for it.
+    if is_object_family_group(model_tag.header.group_tag) {
+        let Some(source) = source else {
+            return Err("Object preview requires a loaded source.".to_owned());
+        };
+        let model = preview_model_tag(source, model_tag)?;
+        let model = model.as_ref().unwrap_or(model_tag);
+        let mut data = load_model_preview(model, entry, names, Some(source), settings)?;
+        if matches!(source, TagSource::LooseFolder { game: Some(GameId::Halo2), .. }) {
+            data.h2_change_colors = read_h2_change_colors(model_tag);
+        }
+        return Ok(data);
     }
 
     // Collision and physics tags carry no render geometry of their own —
@@ -428,6 +443,20 @@ pub(super) fn load_model_preview(
         .map(|object| read_h2_change_colors(&object))
         .unwrap_or_default();
     Ok(data)
+}
+
+/// The `.model` an object stands for. `None` for any other tag, which is its
+/// own model, and for a Halo CE object, which has no `.model` to name.
+pub(super) fn preview_model_tag(source: &TagSource, tag: &TagFile) -> Result<Option<TagFile>, String> {
+    if !is_object_family_group(tag.header.group_tag)
+        || blam_tags::game::Game::of(tag) == blam_tags::game::Game::Halo1
+    {
+        return Ok(None);
+    }
+    let reference = object_reference(tag, "model").ok_or("This object references no model.")?;
+    load_referenced_tag_from_source(source, &reference, "model", b"hlmt")
+        .map(Some)
+        .map_err(|error| format!("Could not load {reference}.model: {error}"))
 }
 
 /// The object a Halo 2 model belongs to: the kit keeps them side by side
@@ -2606,7 +2635,7 @@ mod tests {
     }
 
     #[test]
-    fn object_family_preview_is_halo_ce_only() {
+    fn an_object_previews_in_any_kit_and_needs_one() {
         let names = bundled_names();
         for group in [b"bipd", b"vehi", b"weap", b"eqip", b"scen"] {
             let tag = u32::from_be_bytes(*group);
@@ -2615,7 +2644,7 @@ mod tests {
                 &names,
                 Some(GameId::HaloCe)
             ));
-            assert!(!is_previewable_geometry_group_for_game(
+            assert!(is_previewable_geometry_group_for_game(
                 tag,
                 &names,
                 Some(GameId::Halo3)
@@ -3503,7 +3532,7 @@ mod tests {
         let biped = new_tag_for("halo3_mcc", "biped");
         assert_eq!(
             load(&biped, "objects/thing/thing.biped", None).err().as_deref(),
-            Some("This model tag has no render model reference.")
+            Some("Object preview requires a loaded source.")
         );
         let physics = new_tag_for("halo3_mcc", "physics_model");
         assert!(

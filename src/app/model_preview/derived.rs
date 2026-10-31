@@ -1504,8 +1504,8 @@ pub(super) fn halo1_object_collision_overlay(
     object_tag: &TagFile,
     source: &TagSource,
 ) -> Option<RenderModelPreview> {
-    let model_reference = halo1_object_reference(object_tag, "model")?;
-    let collision_reference = halo1_object_reference(object_tag, "collision model")?;
+    let model_reference = object_reference(object_tag, "model")?;
+    let collision_reference = object_reference(object_tag, "collision model")?;
     let render =
         load_referenced_tag_from_source(source, &model_reference, "gbxmodel", b"mod2").ok()?;
     let collision = load_referenced_tag_from_source(
@@ -1595,6 +1595,7 @@ impl Baboon {
                 {
                     return Some((halo1_object_collision_overlay(&model, &source), None));
                 }
+                let model = super::loading::preview_model_tag(&source, &model).ok()?.unwrap_or(model);
                 // Classic models only: a Campaign Evolved hlmt previews
                 // through Unreal geometry and hides the overlay toggles.
                 model.root().read_tag_ref_with_group("render model")?;

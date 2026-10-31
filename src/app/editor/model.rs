@@ -25,11 +25,11 @@ pub(in crate::app) fn is_object_family_group(group_tag: u32) -> bool {
     )
 }
 
-/// A Halo CE object tag's own reference (`model`, `animation graph`,
-/// `collision model`, …). A child group opens with its parent's struct, so
+/// An object tag's own reference (Halo CE's `model`, `animation graph`,
+/// `collision model`, …; a `.model` after that). A child group opens with its parent's struct, so
 /// the object fields sit under `unit/object`, `item/object`, `device/object`
 /// or, for a direct child, `object`.
-pub(in crate::app) fn halo1_object_reference(tag: &TagFile, field: &str) -> Option<String> {
+pub(in crate::app) fn object_reference(tag: &TagFile, field: &str) -> Option<String> {
     const PARENTS: [&str; 4] = ["unit/object", "item/object", "device/object", "object"];
     let root = tag.root();
     PARENTS
@@ -195,14 +195,15 @@ pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagN
         )
 }
 
-/// Halo CE object tags own the references later engines moved into `.model`.
+/// An object previews what it references: its gbxmodel on Halo CE, its
+/// `.model` after that. Either way that takes a kit to read it from.
 pub(in crate::app) fn is_previewable_geometry_group_for_game(
     group_tag: u32,
     names: &TagNameIndex,
     source_game: Option<GameId>,
 ) -> bool {
     is_previewable_geometry_group(group_tag, names)
-        || (source_game == Some(GameId::HaloCe) && is_object_family_group(group_tag))
+        || (source_game.is_some() && is_object_family_group(group_tag))
 }
 
 pub(in crate::app) fn format_reference_path(

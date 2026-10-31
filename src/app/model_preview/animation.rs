@@ -1055,7 +1055,7 @@ mod tests {
         let animations = CeAnimations::new(&antr);
         let animation = animations.get(index).unwrap();
         assert_eq!(ce_jma_kind(animation), JmaKind::Jmo, "{name} is not an overlay");
-        let gbxmodel = halo1_object_reference(&object, "model").and_then(|reference| {
+        let gbxmodel = object_reference(&object, "model").and_then(|reference| {
             load_referenced_tag_from_source(&source, &reference, "gbxmodel", b"mod2").ok()
         });
         let skeleton = blam_tags::extract::animation::ce_skeleton(&animations, &antr, gbxmodel.as_ref());
@@ -1152,6 +1152,45 @@ mod tests {
         assert!(decoded.skeleton_names.iter().any(|name| name == "pelvis"));
     }
 
+    /// `BLAM_TEST_H2EK`: a vehicle draws, animates and colors through the
+    /// `.model` it names, and the `.model` is what holds what it draws.
+    #[test]
+    fn an_object_previews_through_its_model() {
+        let tags = crate::core::test_kits::h2ek_tags();
+        let rel = "objects/vehicles/pelican/pelican.vehicle";
+        if !tags.join(rel).is_file() {
+            eprintln!("skipping: set BLAM_TEST_H2EK to a Halo 2 kit's tags folder");
+            return;
+        }
+        let source = TagSource::LooseFolder {
+            root: tags.clone(),
+            game: Some(GameId::Halo2),
+            definitions_root: crate::core::test_kits::definitions().to_path_buf(),
+        };
+        let entry = TagEntry {
+            key: file_entry_key(&tags.join(rel)),
+            display_path: rel.to_owned(),
+            group_tag: u32::from_be_bytes(*b"vehi"),
+            group_name: Some("vehicle".to_owned()),
+            location: TagEntryLocation::LooseFile(tags.join(rel)),
+        };
+        let tag = crate::core::source::read_entry(&source, &entry).unwrap();
+        let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = crate::core::format::TagNameIndex::load_from_definitions(&defs);
+        let data = super::super::loading::load_model_preview(
+            &tag,
+            &entry,
+            &names,
+            Some(&source),
+            &super::super::loading::PreviewLoadSettings::default(),
+        )
+        .expect("the vehicle's model loads");
+        assert!(!data.preview.batches.is_empty());
+        assert!(!data.variants.is_empty(), "variants come from the .model");
+        let list = list_model_animations(&source, &entry).expect("animation list");
+        assert!(!list.is_empty());
+    }
+
     /// Only Halo CE's objects stand in for a `.model`. Campaign Evolved's game id
     /// also starts with `haloce`, but its tags are Reach's.
     #[test]
@@ -1201,8 +1240,9 @@ impl Baboon {
         };
         // A `.model` names its graph; a Halo CE object has no `.model` and
         // names its `model_animations` itself, the way it names its gbxmodel.
+        // Any other object reaches a graph through its `.model`.
         let names_a_graph = entry.group_tag == u32::from_be_bytes(*b"hlmt")
-            || (is_object_family_group(entry.group_tag) && source_is_halo1(&source));
+            || is_object_family_group(entry.group_tag);
         if !names_a_graph {
             return false;
         }
@@ -1449,6 +1489,7 @@ fn list_model_animations(
                 .collect())
         }
         blam_tags::game::Game::Halo2 | blam_tags::game::Game::Halo3 => {
+            let model = preview_model_tag(source, &model)?.unwrap_or(model);
             let jmad_ref = tag_ref_path(&model.root(), "animation")
                 .ok_or("This model references no animation graph.")?;
             let chain = load_graph_chain(source, &jmad_ref)?;
@@ -1518,7 +1559,7 @@ fn inherited_animation_order(animations: &[Animation<'_>]) -> Vec<(usize, usize)
 
 /// A Halo CE object's `model_animations`.
 fn load_object_animations(source: &TagSource, object: &TagFile) -> Result<TagFile, String> {
-    let reference = halo1_object_reference(object, "animation graph")
+    let reference = object_reference(object, "animation graph")
         .ok_or("This object references no model_animations.")?;
     load_referenced_tag_from_source(source, &reference, "model_animations", b"antr")
         .map_err(|error| error.to_string())
@@ -1574,6 +1615,7 @@ fn decode_model_animation(
     if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1 {
         return decode_ce_animation(source, &model, animation_index);
     }
+    let model = preview_model_tag(source, &model)?.unwrap_or(model);
     let root = model.root();
     let jmad_ref =
         tag_ref_path(&root, "animation").ok_or("This model references no animation graph.")?;
@@ -1676,7 +1718,7 @@ fn decode_ce_animation(
     let animation = animations
         .get(animation_index)
         .ok_or("The graph no longer lists this animation.")?;
-    let gbxmodel = halo1_object_reference(object, "model").and_then(|reference| {
+    let gbxmodel = object_reference(object, "model").and_then(|reference| {
         load_referenced_tag_from_source(source, &reference, "gbxmodel", b"mod2").ok()
     });
     // The extractor's skeleton: a graph that lists no nodes of its own

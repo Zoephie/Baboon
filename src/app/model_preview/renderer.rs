@@ -5,7 +5,7 @@ use super::*;
 use super::h2_passes::{
     H2BlendEquation, H2BlendFactor, H2Compare, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
     H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT, H2_REFLECTION_SCALE, H2_SHADOWED_LIGHT,
-    h2_change_colors_for, h2_normalization_face, h2_object_light_direction,
+    h2_change_colors_for, h2_normalization_face, h2_object_light_direction, h2_prt_object_lights,
 };
 use super::h2_bloom::H2Bloom;
 use super::h2_passes::h2_prt_lights;
@@ -127,6 +127,7 @@ pub(super) fn draw_model_viewport(
         self_shadow: state.h2_self_shadow,
         light_follows_camera: state.h2_light_follows_camera,
         time: ui.input(|input| input.time % H2_TIME_WRAP) as f32,
+        h2_prt_clusters: None,
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -135,6 +136,8 @@ pub(super) fn draw_model_viewport(
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
+    let mut frame = frame;
+    frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     if frame.h2_moves() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -758,6 +761,8 @@ struct ModelGpuFrame {
     light_follows_camera: bool,
     /// Seconds, for what Halo 2 shaders animate.
     time: f32,
+    /// A PRT model's constants on the object path: lit, then in shadow.
+    h2_prt_clusters: Option<[Vec<[f32; 4]>; 2]>,
 }
 
 /// Wrapped to keep a frame time precise in the `f32` the shaders take.
@@ -771,6 +776,12 @@ impl ModelGpuFrame {
             H2Layer::ActiveCamo => self.active_camo,
             _ => self.game_shaders,
         }
+    }
+
+    fn h2_object_prt_clusters(&self) -> Option<[Vec<[f32; 4]>; 2]> {
+        let prt = self.preview.h2_prt.as_ref().filter(|_| self.game_shaders && !self.default_lights)?;
+        let (lights, ambient) = h2_prt_object_lights(self.h2_object_light());
+        Some([prt.clusters_lit_by(&lights, ambient), prt.clusters_lit_by(&lights[..1], ambient)])
     }
 
     fn h2_moves(&self) -> bool {
@@ -2152,6 +2163,7 @@ impl ModelGlRenderer {
                     self.fill_h2_texaccum(gl, frame, slot, &order);
                     let lightmap = frame.h2_lightmap_layer();
                     self.draw_h2_passes(gl, frame, slot, &order, lightmap, None);
+                    self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, None);
                     if frame.self_shadow
                         && !frame.default_lights
                         && self.draw_h2_shadow(gl, frame, slot, &order)
@@ -2161,10 +2173,10 @@ impl ModelGlRenderer {
                         gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
                         let shadowed = Some(&H2_SHADOWED_LIGHT);
                         self.draw_h2_passes(gl, frame, slot, &order, lightmap, shadowed);
+                        self.draw_h2_passes(gl, frame, slot, &order, H2Layer::Prt, shadowed);
                         gl.disable(glow::STENCIL_TEST);
                     }
                     for layer in [
-                        H2Layer::Prt,
                         H2Layer::Environment,
                         H2Layer::SelfIllumination,
                         H2Layer::Overlay,
@@ -2247,14 +2259,13 @@ impl ModelGlRenderer {
         self.h2_material_ready(frame, material, lightmap)
             || self.h2_material_ready(frame, material, H2Layer::Prt)
             || (Self::h2_passes(frame, material, lightmap).is_empty()
-                && !frame
-                    .textures
-                    .as_ref()
-                    .and_then(|textures| textures.get(material))
-                    .is_some_and(|material| material.get(TextureSlot::Base).is_some())
-                && [H2Layer::SelfIllumination, H2Layer::Overlay]
-                    .iter()
-                    .any(|layer| self.h2_material_ready(frame, material, *layer)))
+                && (self.h2_material_ready(frame, material, H2Layer::Overlay)
+                    || (!frame
+                        .textures
+                        .as_ref()
+                        .and_then(|textures| textures.get(material))
+                        .is_some_and(|material| material.get(TextureSlot::Base).is_some())
+                        && self.h2_material_ready(frame, material, H2Layer::SelfIllumination))))
     }
 
     /// Whether a material draws through its passes rather than the slots: it
@@ -2694,9 +2705,20 @@ impl ModelGlRenderer {
             if let Some(prt) = &frame.preview.h2_prt {
                 let location = program.location(gl, "u_prt");
                 if location.is_some() {
-                    gl.uniform_4_f32_slice(location.as_ref(), prt.clusters.as_flattened());
-                    let light = program.location(gl, "u_prt_light");
-                    gl.uniform_3_f32_slice(light.as_ref(), &prt.light);
+                    let clusters = match &frame.h2_prt_clusters {
+                        Some([lit, shadowed]) => {
+                            if light.is_some() { shadowed } else { lit }
+                        }
+                        None => &prt.clusters,
+                    };
+                    gl.uniform_4_f32_slice(location.as_ref(), clusters.as_flattened());
+                    let direction = if frame.h2_prt_clusters.is_some() {
+                        frame.h2_object_light()
+                    } else {
+                        prt.light
+                    };
+                    let location = program.location(gl, "u_prt_light");
+                    gl.uniform_3_f32_slice(location.as_ref(), &direction);
                 }
             }
             let camera = &frame.camera;

@@ -78,7 +78,7 @@ pub(super) fn draw_tag(
     if expert_mode {
         draw_tag_metadata(ui, tag, entry, names);
     }
-    if !is_object_family {
+    if is_object_family {
         draw_object_model_summary(ui, tag, entry, names, edit);
     }
     if is_sound_classes_group(entry.group_tag) {

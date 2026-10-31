@@ -7,7 +7,7 @@ use crate::app::kits::KitStamp;
 use crate::app::editor::{
     BlockConfirm, FieldEditContext, cached_render_method_definition, cached_render_method_option,
     clean_field_name, clean_field_name_basic, combo_scroll_next_index, dropdown_wheel_delta,
-    halo1_object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
+    object_reference, is_object_family_group, is_previewable_geometry_group_for_game,
     picker_button, picker_popup_width, picker_results, picker_search_field, viewport_wheel_zoom,
 };
 use crate::app::export::{
@@ -716,7 +716,11 @@ pub(super) fn draw_model_preview_panel(
                                     data,
                                     state,
                                     |ui, state| {
-                                        if draw_variant_header_actions(ui, data, state, edit) {
+                                        // An object shows its `.model`'s variants but
+                                        // holds none, so there is nothing here to write.
+                                        if entry.group_tag == u32::from_be_bytes(*b"hlmt")
+                                            && draw_variant_header_actions(ui, data, state, edit)
+                                        {
                                             mutation_requested = true;
                                         }
                                         if icon_text_button(
@@ -768,7 +772,9 @@ pub(super) fn draw_model_preview_panel(
             draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
                 if part == ModelPreviewSectionPart::Header {
                     draw_model_setup_header_controls(ui, setup_width, data, state, |ui, state| {
-                        if draw_variant_header_actions(ui, data, state, edit) {
+                        if entry.group_tag == u32::from_be_bytes(*b"hlmt")
+                            && draw_variant_header_actions(ui, data, state, edit)
+                        {
                             mutation_requested = true;
                         }
                         if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
@@ -1123,9 +1129,9 @@ fn draw_model_view_settings_menu(
             }
             ui.separator();
 
-            if (tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved)
-                || (source_game == Some(GameId::HaloCe)
-                    && is_object_family_group(tag.header.group_tag))
+            if !is_campaign_evolved
+                && (tag.header.group_tag.to_be_bytes() == *b"hlmt"
+                    || is_object_family_group(tag.header.group_tag))
             {
                 model_view_icon_checkbox(
                     ui,

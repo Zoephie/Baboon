@@ -31,6 +31,21 @@ pub(crate) struct H2Prt {
     pub(crate) vertices: Vec<[f32; VERTEX_FLOATS]>,
     pub(crate) clusters: Vec<[f32; 4]>,
     pub(crate) light: [f32; 3],
+    /// Every LOD's clusters in order, for lighting them again.
+    basis: Vec<f32>,
+}
+
+impl H2Prt {
+    /// The constants of every cluster under `lights` and an ambient color.
+    pub(crate) fn clusters_lit_by(&self, lights: &[H2PrtLight], ambient: [f32; 3]) -> Vec<[f32; 4]> {
+        let mut coefficients = sh_project(lights);
+        // A uniform light holds only the first band, at root(4 pi) a unit.
+        let band = 2.0 * std::f32::consts::PI.sqrt();
+        for (channel, ambient) in coefficients.iter_mut().zip(ambient) {
+            channel[0] += ambient * band;
+        }
+        cluster_constants(&self.basis, &coefficients)
+    }
 }
 
 /// One light of what stands in for a level's light probes.
@@ -132,6 +147,7 @@ pub(in crate::app) fn read_h2_prt(
     let cluster_floats = cluster_count * CLUSTER_VECTOR * (PCA_VECTORS + 1);
 
     let mut clusters = Vec::new();
+    let mut all_basis = Vec::new();
     // Section index to where its data starts and the first cluster of its LOD.
     let mut sections = HashMap::new();
     let lods = info.field("lod info*")?.as_block()?;
@@ -139,10 +155,9 @@ pub(in crate::app) fn read_h2_prt(
         let lod = lods.element(lod_index)?;
         let offset = usize::try_from(lod.read_int_any("cluster offset*")?).ok()?;
         let first_cluster = lod_index * cluster_count;
-        clusters.extend(cluster_constants(
-            basis.get(offset..offset + cluster_floats)?,
-            &light_coefficients,
-        ));
+        let lod_basis = basis.get(offset..offset + cluster_floats)?;
+        all_basis.extend_from_slice(lod_basis);
+        clusters.extend(cluster_constants(lod_basis, &light_coefficients));
         let block = lod.field("section info*")?.as_block()?;
         for index in 0..block.len() {
             let section = block.element(index)?;
@@ -183,7 +198,7 @@ pub(in crate::app) fn read_h2_prt(
             }
         }
     }
-    Some(H2Prt { vertices, clusters, light: lights.first()?.direction })
+    Some(H2Prt { vertices, clusters, light: lights.first()?.direction, basis: all_basis })
 }
 
 #[cfg(test)]
@@ -199,6 +214,20 @@ mod tests {
         assert!((up[6] - 0.630_783).abs() < 1e-5);
         let right = sh_evaluate([1.0, 0.0, 0.0]);
         assert!((right[3] + 0.488_603).abs() < 1e-5);
+    }
+
+    #[test]
+    fn relighting_keeps_what_each_light_adds_apart() {
+        let mut basis = vec![0.0; CLUSTER_VECTOR * (PCA_VECTORS + 1)];
+        basis[0] = 1.0;
+        let prt = H2Prt { basis, ..H2Prt::default() };
+        let light = H2PrtLight { direction: [0.0, 0.0, 1.0], color: [1.0; 3] };
+        let lit = prt.clusters_lit_by(&[light], [0.0; 3])[0][0];
+        let ambient = prt.clusters_lit_by(&[], [0.5; 3])[0][0];
+        assert!(lit > 0.0);
+        assert!((ambient - std::f32::consts::PI.sqrt()).abs() < 1e-5);
+        let both = prt.clusters_lit_by(&[light], [0.5; 3])[0][0];
+        assert!((both - lit - ambient).abs() < 1e-5);
     }
 
     #[test]

@@ -105,6 +105,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
         light_follows_camera: state.h2_light_follows_camera,
         time: std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap()),
+        h2_prt_clusters: None,
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -113,6 +114,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
+    let mut frame = frame;
+    frame.h2_prt_clusters = frame.h2_object_prt_clusters();
     unsafe {
         let color = gl.create_renderbuffer().unwrap();
         gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
