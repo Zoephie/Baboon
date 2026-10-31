@@ -249,7 +249,7 @@ pub(super) fn draw_ce_function_controls(
     set: &mut CeFunctionInputs,
     read: Option<[bool; 4]>,
 ) {
-    const UNREAD: &str = "No shader on this model reads this.";
+    const UNREAD: &str = "No shader or light on this model reads this.";
     let reaching = read.map_or([true; 4], |read| functions.inputs_reaching(read));
     let read = read.unwrap_or([true; 4]);
     let mut values = functions.inputs_for(set, key);

@@ -314,6 +314,15 @@ pub(super) fn load_model_preview(
         let attached = held.and_then(|path| {
             super::ce_attachments::attach_ce_weapon(source, model_tag, &path, &mut preview)
         });
+        let own = super::ce_lights::read_ce_lights(source, model_tag, 0, &preview.markers, |marker| {
+            let frame = super::ce_attachments::MarkerFrame {
+                axes: marker.axes,
+                position: marker.position,
+                node: marker.node_index.max(0),
+            };
+            (frame, marker.node_index.max(0) as usize)
+        });
+        preview.ce_lights.extend(own);
         let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
         data.h2_change_colors = read_h2_change_colors(model_tag);
         data.ce_object_functions = super::ce_functions::read_ce_object_functions(model_tag);

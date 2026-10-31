@@ -302,10 +302,10 @@ impl CeWeaponIk {
 
 /// A marker as a rigid transform: its three axes, then its position.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct MarkerFrame {
-    axes: [[f32; 3]; 3],
-    position: [f32; 3],
-    node: i16,
+pub(super) struct MarkerFrame {
+    pub(super) axes: [[f32; 3]; 3],
+    pub(super) position: [f32; 3],
+    pub(super) node: i16,
 }
 
 impl MarkerFrame {
@@ -352,7 +352,7 @@ fn attach_vector(parent: &MarkerFrame, child: &MarkerFrame, vector: [f32; 3]) ->
     parent.rotate(child.unrotate(vector))
 }
 
-fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
+pub(super) fn elements<'a>(holder: TagStruct<'a>, name: &str) -> Vec<TagStruct<'a>> {
     let block = holder.field(name).and_then(|field| field.as_block());
     (0..block.as_ref().map_or(0, |block| block.len()))
         .filter_map(|index| block.as_ref()?.element(index))
@@ -550,16 +550,35 @@ pub(super) fn clip_after_weapon_change(
     shown(clip.split('%').next()?).or_else(|| shown(&format!("{seat} {class} idle")))
 }
 
-/// The unit's first weapon, which it has ready, by path.
-pub(super) fn first_weapon(object: &TagFile) -> Option<String> {
+/// The struct of an object tag holding a block, down its inherited structs.
+pub(super) fn object_block<'a>(object: &'a TagFile, block: &str) -> Option<TagStruct<'a>> {
     let mut holder = object.root();
     loop {
-        if let Some(weapons) = holder.field("weapons").and_then(|field| field.as_block()) {
-            return (0..weapons.len())
-                .filter_map(|index| weapons.element(index)?.read_tag_ref_path("weapon"))
-                .find(|path| !path.is_empty());
+        if holder.field(block).is_some() {
+            return Some(holder);
         }
         holder = holder.fields_all().find_map(|field| field.as_struct())?;
+    }
+}
+
+/// The unit's first weapon, which it has ready, by path.
+pub(super) fn first_weapon(object: &TagFile) -> Option<String> {
+    let weapons = object_block(object, "weapons")?.field("weapons")?.as_block()?;
+    (0..weapons.len())
+        .filter_map(|index| weapons.element(index)?.read_tag_ref_path("weapon"))
+        .find(|path| !path.is_empty())
+}
+
+/// A marker of a held object, where holding it puts it.
+pub(super) fn attached_marker_frame(
+    marker: &RenderModelPreviewMarker,
+    parent: &MarkerFrame,
+    child: &MarkerFrame,
+) -> MarkerFrame {
+    MarkerFrame {
+        axes: marker.axes.map(|axis| attach_vector(parent, child, axis)),
+        position: attach_point(parent, child, marker.position),
+        node: parent.node,
     }
 }
 
@@ -669,6 +688,8 @@ pub(super) fn attach_ce_weapon(
     for (marker, attach_to) in &hold.ik_points {
         preview.weapon_ik.extend(weapon_ik(preview, &attached, &hold.class, parent, child, marker, attach_to));
     }
+    let lights = super::ce_lights::read_attached_lights(source, &weapon, 1, &attached, parent, child);
+    preview.ce_lights.extend(lights);
     merge_attached(preview, attached, parent, child, 1, &name);
     Some(CeAttachedObject {
         name,

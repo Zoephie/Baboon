@@ -774,7 +774,7 @@ fn ce_image_index(
 }
 
 /// Decode a map in the shape its sampler asks for.
-fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
+pub(super) fn decode_h2_image(source: &TagSource, path: &str, kind: SamplerKind, index: usize) -> Option<H2Image> {
     let tag = load_referenced_tag_from_source(source, path, "bitmap", b"bitm").ok()?;
     if kind == SamplerKind::Texture2D {
         let image = decode_thumbnail(&tag, index, MAX_TEXTURE_EDGE).ok()?;

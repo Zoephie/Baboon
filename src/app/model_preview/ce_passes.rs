@@ -900,7 +900,7 @@ fn enum_values(stage: TagStruct<'_>, after: &str) -> Vec<i32> {
 }
 
 /// The `color1` of a stage, then its animated `color0`, alpha first as stored.
-fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
+pub(super) fn argb(root: TagStruct<'_>, name: &str) -> [f32; 4] {
     match root.field(name).and_then(|field| field.value()) {
         Some(TagFieldData::RealArgbColor(color)) => [color.red, color.green, color.blue, color.alpha],
         _ => [0.0; 4],

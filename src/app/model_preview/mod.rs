@@ -25,6 +25,7 @@ pub(in crate::app) mod derived;
 mod errors;
 mod ce_attachments;
 mod ce_functions;
+mod ce_lights;
 mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_passes;
@@ -96,6 +97,8 @@ pub(crate) struct RenderModelPreview {
     pub h2_prt: Option<h2_prt::H2Prt>,
     /// Halo CE: where a held weapon pulls the unit's hands.
     pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
+    /// Halo CE: the lens flares of the object and what it holds.
+    pub ce_lights: Vec<ce_lights::CeLight>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1028,6 +1031,7 @@ fn draw_object_functions(ui: &mut Ui, data: &ModelPreviewData, state: &mut Model
                     *read |= output;
                 }
             }
+            ce_lights::mark_outputs_read(&data.preview.ce_lights, object, &mut read);
             read
         })
     };

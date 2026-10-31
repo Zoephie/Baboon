@@ -842,6 +842,9 @@ impl ModelGpuFrame {
     }
 
     fn h2_moves(&self) -> bool {
+        if self.object_moves && !self.preview.ce_lights.is_empty() {
+            return true;
+        }
         let Some(textures) = self.textures.as_ref() else {
             return false;
         };
@@ -1479,6 +1482,9 @@ struct ModelGpuSlot {
     /// model, or another model given this slot, re-uploads rather than drawing
     /// the wrong textures.
     uploaded_textures: Option<u64>,
+    /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
+    flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
+    flare_geometry: Option<u64>,
 }
 
 impl ModelGpuSlot {
@@ -1518,6 +1524,8 @@ impl ModelGpuSlot {
                 grid_built: false,
                 materials: Vec::new(),
                 uploaded_textures: None,
+                flare_textures: Vec::new(),
+                flare_geometry: None,
             })
         }
     }
@@ -1958,7 +1966,41 @@ fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
     std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
 }
 
+/// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
+const CE_FLARE_STRIDE: i32 = 6 * 4;
+
+const CE_FLARE_VERTEX: &str = "#version 330
+layout(location = 0) in vec4 a_clip;
+layout(location = 1) in vec2 a_uv;
+out vec2 v_uv;
+void main() {
+    gl_Position = a_clip;
+    v_uv = a_uv;
+}
+";
+
+const CE_FLARE_FRAGMENT: &str = "#version 330
+in vec2 v_uv;
+uniform sampler2D u_map;
+uniform vec4 u_color;
+out vec4 out_color;
+void main() {
+    vec4 map = texture(u_map, v_uv);
+    out_color = vec4(u_color.rgb * map.rgb, u_color.a * map.a);
+}
+";
+
+/// What Halo CE's lens flares draw with, made on first use.
+struct CeFlareGl {
+    program: glow::NativeProgram,
+    vertex_array: glow::NativeVertexArray,
+    buffer: glow::NativeBuffer,
+    color: Option<glow::NativeUniformLocation>,
+    map: Option<glow::NativeUniformLocation>,
+}
+
 struct ModelGlRenderer {
+    ce_flares: Option<CeFlareGl>,
     /// Whether this context can draw Halo 2 passes; see `H2_GLSL_VERSION`.
     h2_supported: bool,
     /// Linked pass programs. `None` records a failure, so it is not retried
@@ -2056,6 +2098,7 @@ impl ModelGlRenderer {
             };
             let version = gl.version();
             Ok(Self {
+                ce_flares: None,
                 h2_supported: h2_context_supported(version.major, version.minor, version.is_embedded),
                 h2_programs: HashMap::new(),
                 h2_black_cube: upload_black_cube(gl),
@@ -2277,6 +2320,9 @@ impl ModelGlRenderer {
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
                 self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
+            if frame.game_shaders && self.h2_supported && !frame.preview.ce_lights.is_empty() {
+                self.draw_ce_flares(gl, frame, slot);
+            }
 
             // Polygon mode is not reset by egui_glow's generic callback-state
             // restoration and would otherwise turn subsequent UI meshes into wireframes.
@@ -2287,6 +2333,74 @@ impl ModelGlRenderer {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
+        }
+    }
+
+    /// `rasterizer_lens_flares_draw`: added to the frame by their alpha, on
+    /// color alone. The game fades a covered flare by occlusion query; here
+    /// each is depth tested from its marker, brought forward by its occlusion
+    /// radius so a marker on the surface still shows.
+    unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
+        unsafe {
+            if self.ce_flares.is_none() {
+                self.ce_flares = ce_flare_gl(gl, self.program);
+            }
+            let Some(flares) = self.ce_flares.as_mut() else {
+                return;
+            };
+            let uploaded = &mut self.slots[slot];
+            if uploaded.flare_geometry != Some(frame.geometry_id) {
+                for texture in uploaded.flare_textures.drain(..).flatten().flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.flare_textures = frame
+                    .preview
+                    .ce_lights
+                    .iter()
+                    .map(|light| {
+                        light.flare.images.iter().map(|image| upload_h2_image(gl, image)).collect()
+                    })
+                    .collect();
+                uploaded.flare_geometry = Some(frame.geometry_id);
+            }
+            let camera = &frame.camera;
+            let view = ce_flare_view(camera);
+            gl.use_program(Some(flares.program));
+            gl.bind_vertex_array(Some(flares.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(flares.buffer));
+            gl.active_texture(glow::TEXTURE0);
+            gl.uniform_1_i32(flares.map.as_ref(), 0);
+            gl.enable(glow::BLEND);
+            gl.blend_equation(glow::FUNC_ADD);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE);
+            gl.color_mask(true, true, true, false);
+            gl.depth_mask(false);
+            gl.depth_func(glow::LEQUAL);
+            gl.disable(glow::CULL_FACE);
+            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            for (index, light) in frame.preview.ce_lights.iter().enumerate() {
+                let state = frame.object_states.get(usize::from(light.object));
+                let outputs = state.map_or([0.0; 4], |state| state.outputs);
+                let colors = state.map_or([[1.0; 3]; 4], |state| state.change_colors);
+                let toward = view.forward.map(|axis| -axis * light.flare.occlusion_radius);
+                for sprite in light.sprites(&outputs, &colors, bones, &view, frame.time) {
+                    let Some(texture) = uploaded.flare_textures[index].get(sprite.image).copied().flatten() else {
+                        continue;
+                    };
+                    let vertices = ce_flare_quad(camera, &view, &sprite, toward);
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                    let [red, green, blue] = sprite.color;
+                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, sprite.alpha);
+                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                }
+            }
+            gl.color_mask(true, true, true, true);
+            gl.depth_mask(true);
+            gl.disable(glow::BLEND);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
         }
     }
 
@@ -4296,6 +4410,76 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
+fn ce_flare_view(camera: &ModelGpuCamera) -> ce_lights::CeFlareView {
+    let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
+    ce_lights::CeFlareView {
+        eye: h2_eye_position(camera),
+        forward: along([0.0, 1.0, 0.0]),
+        right: along([1.0, 0.0, 0.0]),
+        up: along([0.0, 0.0, 1.0]),
+    }
+}
+
+/// The vertex shader's `clip_position`.
+fn ce_flare_clip(camera: &ModelGpuCamera, point: [f32; 3]) -> [f32; 4] {
+    let scaled = std::array::from_fn(|axis| (point[axis] - camera.center[axis]) * camera.scale);
+    let view = rotate_view_vector(camera.yaw, camera.pitch, scaled);
+    [
+        view[0] * camera.clip_scale[0],
+        view[2] * camera.clip_scale[1],
+        view[1] * camera.depth_scale * camera.depth_map[0] + camera.depth_map[1],
+        1.0 + view[1] * camera.perspective,
+    ]
+}
+
+/// A sprite's four corners, all at the depth of its center.
+fn ce_flare_quad(
+    camera: &ModelGpuCamera,
+    view: &ce_lights::CeFlareView,
+    sprite: &ce_lights::CeSprite,
+    toward: [f32; 3],
+) -> [[f32; 6]; 4] {
+    let (sine, cosine) = sprite.rotation.sin_cos();
+    let center: [f32; 3] = std::array::from_fn(|axis| sprite.center[axis] + toward[axis]);
+    let depth = ce_flare_clip(camera, center);
+    [[0.0, 0.0, -1.0, -1.0], [1.0, 0.0, 1.0, -1.0], [0.0, 1.0, -1.0, 1.0], [1.0, 1.0, 1.0, 1.0]].map(
+        |[u, v, x, y]| {
+            let across = x * sprite.extent[0];
+            let upward = y * sprite.extent[1];
+            let (right, up) = (across * cosine - upward * sine, across * sine + upward * cosine);
+            let corner = std::array::from_fn(|axis| {
+                center[axis] + view.right[axis] * right + view.up[axis] * up
+            });
+            let clip = ce_flare_clip(camera, corner);
+            let scale = depth[3] / clip[3];
+            [clip[0] * scale, clip[1] * scale, depth[2], depth[3], u, 1.0 - v]
+        },
+    )
+}
+
+unsafe fn ce_flare_gl(gl: &glow::Context, main: glow::NativeProgram) -> Option<CeFlareGl> {
+    unsafe {
+        let program = link_h2_program(gl, main, CE_FLARE_VERTEX, CE_FLARE_FRAGMENT)
+            .map_err(|error| eprintln!("model preview: {error}"))
+            .ok()?;
+        let vertex_array = gl.create_vertex_array().ok()?;
+        let buffer = gl.create_buffer().ok()?;
+        gl.bind_vertex_array(Some(vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, CE_FLARE_STRIDE, 0);
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, CE_FLARE_STRIDE, 16);
+        Some(CeFlareGl {
+            program,
+            vertex_array,
+            buffer,
+            color: gl.get_uniform_location(program, "u_color"),
+            map: gl.get_uniform_location(program, "u_map"),
+        })
+    }
+}
+
 unsafe fn upload_h2_image(gl: &glow::Context, image: &H2Image) -> Option<glow::NativeTexture> {
     let texture_parameters = |target| unsafe {
         gl.generate_mipmap(target);
