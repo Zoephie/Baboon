@@ -171,6 +171,19 @@ void main() {{
     ]
 }
 
+/// Stands in for the direct light on the object path, where a shadow leaves
+/// the pass only its ambient, indirect and reflected light.
+pub(crate) const H2_SHADOWED_LIGHT: H2DefaultLight =
+    H2DefaultLight { position: [0.0; 3], color: [0.0; 3], radius: 1.0 };
+
+/// Which way the object path's direct light lies from a surface. A pass
+/// lights by the negated vector.
+pub(crate) fn h2_object_light_direction() -> [f32; 3] {
+    let [x, y, z, _] = DEFAULT_DIRECT_VECTOR;
+    let length = (x * x + y * y + z * z).sqrt();
+    [-x / length, -y / length, -z / length]
+}
+
 /// Enough to clear a surface of its own shadow, as a share of the depth range.
 const H2_SHADOW_BIAS: f32 = 0.004;
 
@@ -185,6 +198,8 @@ pub(crate) fn h2_prt_lights() -> [H2PrtLight; 2] {
     })
 }
 
+/// The object function that shows a player's emblem.
+const EMBLEM_INPUT: &str = "emblem_active";
 const TRANSPARENT_LAYER: &str = "transparent";
 const LIGHTMAP_LAYER: &str = "lightmap (indirect)";
 const TEXACCUM_LAYER: &str = "texaccum";
@@ -382,6 +397,14 @@ fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
     let mut parameters = Parameters::new();
     for parameter in elements(shader, "parameters") {
         insert_level(&mut parameters, parameter, "bitmap", "const value", "const color");
+        // Only a player has an emblem, which a preview's object is not.
+        if elements(parameter, "animation properties")
+            .any(|animation| animation.read_string_id("input name").as_deref() == Some(EMBLEM_INPUT))
+            && let Some(level) =
+                parameter.read_string_id("name").and_then(|name| parameters.get_mut(&name))
+        {
+            level.value = 0.0;
+        }
     }
     parameters
 }
@@ -895,7 +918,14 @@ pub(in crate::app) fn prepare_draw_pass(
                 change_colors.push((binding.register, index, channel));
             }
             if let Some(H2ParameterValue::Extern(source)) = lookup(&binding.source)
-                && matches!(source.as_str(), "LIGHT diffuse color" | "LIGHT specular color")
+                && matches!(
+                    source.as_str(),
+                    "LIGHT diffuse color"
+                        | "LIGHT specular color"
+                        | "LIGHTMAP object direct color"
+                        | "LIGHTMAP object specular color"
+                        | "LIGHTMAP object specular color times one half"
+                )
                 && index < 3
             {
                 light_colors.push((binding.register, index));
@@ -1299,6 +1329,37 @@ mod tests {
         assert_eq!(diffuse.len(), 1);
         assert!(h2_pass_needs_frame_texture(&diffuse[0], false));
         assert!(!h2_pass_needs_frame_texture(&diffuse[0], true));
+    }
+
+    /// With `BLAM_TEST_H2EK`: the tag's constant is 1, so a resolve that
+    /// ignores the shader's input would leave the emblem on.
+    #[test]
+    fn a_player_emblem_is_off_without_a_player() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let read = |path: &str, extension: &str, group: &[u8; 4]| {
+            let file = root.join(format!("{}.{extension}", path.replace('\\', "/")));
+            crate::core::source::read_tag_at_path(
+                &file,
+                Some(crate::core::game::GameId::Halo2),
+                Some(&definitions),
+                u32::from_be_bytes(*group),
+            )
+            .ok()
+        };
+        for path in [
+            "objects\\characters\\masterchief\\shaders\\mc_emblem",
+            "objects\\characters\\elite\\shaders\\elite_emblem",
+        ] {
+            let shader = read(path, "shader", b"shad").unwrap();
+            let passes = resolve_h2_layer_passes(&shader, read, H2Layer::Overlay.tag_name(), 0).unwrap();
+            let value = passes[0].parameters.iter().find(|(name, _)| name == EMBLEM_INPUT);
+            assert_eq!(value.map(|(_, value)| value), Some(&H2ParameterValue::Value(0.0)), "{path}");
+        }
     }
 
     /// With `BLAM_TEST_H2EK`: the brute hair that drew untextured.

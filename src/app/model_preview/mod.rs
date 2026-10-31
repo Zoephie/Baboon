@@ -1241,12 +1241,12 @@ fn draw_model_view_settings_menu(
                  follows the exposure of the whole scene.",
             );
             ui.add_enabled(
-                state.h2_game_shaders && state.h2_default_lights,
+                state.h2_game_shaders,
                 egui::Checkbox::new(&mut state.h2_self_shadow, "Self Shadow"),
             )
             .on_hover_text(
-                "Shadow Halo 2 models from their key light. The game has no such \
-                 shadow under its default lights, so this is the preview's own.",
+                "Shadow Halo 2 models from their main light. The game draws no such \
+                 shadow on these paths, so this is the preview's own.",
             );
         },
     );

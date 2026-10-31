@@ -4,8 +4,8 @@
 use super::*;
 use super::h2_passes::{
     H2BlendEquation, H2BlendFactor, H2Compare, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
-    H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT,
-    H2_REFLECTION_SCALE, h2_change_colors_for, h2_normalization_face,
+    H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT, H2_REFLECTION_SCALE, H2_SHADOWED_LIGHT,
+    h2_change_colors_for, h2_normalization_face, h2_object_light_direction,
 };
 use super::h2_bloom::H2Bloom;
 use super::h2_passes::h2_prt_lights;
@@ -1236,9 +1236,8 @@ unsafe fn h2_shadow_map(gl: &glow::Context) -> Option<(glow::NativeFramebuffer, 
     }
 }
 
-/// The view from the key light, an orthographic box around the whole model.
-fn h2_shadow_matrix(preview: &RenderModelPreview) -> [f32; 16] {
-    let toward = h2_prt_lights()[0].direction;
+/// The view from the light, an orthographic box around the whole model.
+fn h2_shadow_matrix(preview: &RenderModelPreview, toward: [f32; 3]) -> [f32; 16] {
     let center: [f32; 3] =
         std::array::from_fn(|axis| (preview.bounds_min[axis] + preview.bounds_max[axis]) * 0.5);
     let radius = (0..3)
@@ -2076,8 +2075,20 @@ impl ModelGlRenderer {
                     let order = frame.visible_batches.clone();
                     self.copy_h2_frame(gl, frame, &order);
                     self.fill_h2_texaccum(gl, frame, slot, &order);
+                    let lightmap = frame.h2_lightmap_layer();
+                    self.draw_h2_passes(gl, frame, slot, &order, lightmap, None);
+                    if frame.self_shadow
+                        && !frame.default_lights
+                        && self.draw_h2_shadow(gl, frame, slot, &order)
+                    {
+                        gl.enable(glow::STENCIL_TEST);
+                        gl.stencil_func(glow::EQUAL, 1, 0xFF);
+                        gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                        let shadowed = Some(&H2_SHADOWED_LIGHT);
+                        self.draw_h2_passes(gl, frame, slot, &order, lightmap, shadowed);
+                        gl.disable(glow::STENCIL_TEST);
+                    }
                     for layer in [
-                        frame.h2_lightmap_layer(),
                         H2Layer::Prt,
                         H2Layer::Environment,
                         H2Layer::SelfIllumination,
@@ -2579,7 +2590,12 @@ impl ModelGlRenderer {
         unsafe {
             if matches!(pass.stage, H2VertexStage::ShadowCaster | H2VertexStage::ShadowMask) {
                 let location = program.location(gl, "u_shadow_matrix");
-                let matrix = h2_shadow_matrix(&frame.preview);
+                let toward = if frame.default_lights {
+                    h2_prt_lights()[0].direction
+                } else {
+                    h2_object_light_direction()
+                };
+                let matrix = h2_shadow_matrix(&frame.preview, toward);
                 gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &matrix);
                 if let Some((_, map)) = self.h2_shadow_map {
                     gl.active_texture(glow::TEXTURE0 + H2_SHADOW_MAP_UNIT);
