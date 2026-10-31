@@ -1994,6 +1994,9 @@ fn h2_eye_position(camera: &ModelGpuCamera) -> [f32; 3] {
     std::array::from_fn(|axis| camera.center[axis] + eye[axis] / camera.scale.max(1e-6))
 }
 
+/// Polygon offset units in one whole of window depth, on a 24 bit buffer.
+const DEPTH_UNITS: f32 = (1 << 24) as f32;
+
 /// The vertex stream of Halo CE's lens flares: clip position, then texcoord.
 const CE_FLARE_STRIDE: i32 = 6 * 4;
 
@@ -2915,6 +2918,12 @@ impl ModelGlRenderer {
                         None => gl.disable(glow::DEPTH_TEST),
                     }
                     gl.depth_mask(pass.depth.write);
+                    if pass.depth_bias != 0.0 {
+                        gl.enable(glow::POLYGON_OFFSET_FILL);
+                        gl.polygon_offset(0.0, pass.depth_bias * DEPTH_UNITS);
+                    } else {
+                        gl.disable(glow::POLYGON_OFFSET_FILL);
+                    }
                     let [r, g, b, a] = pass.channels;
                     gl.color_mask(r, g, b, a);
                     match pass.cull {
@@ -2948,6 +2957,7 @@ impl ModelGlRenderer {
             unsafe {
                 gl.use_program(Some(self.program));
                 gl.disable(glow::BLEND);
+                gl.disable(glow::POLYGON_OFFSET_FILL);
                 gl.blend_equation(glow::FUNC_ADD);
                 gl.enable(glow::DEPTH_TEST);
                 gl.depth_func(glow::LESS);

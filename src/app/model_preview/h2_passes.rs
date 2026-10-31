@@ -129,6 +129,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         stage,
         fragment,
         blend: None,
+        depth_bias: 0.0,
         depth: H2Depth { compare: Some(compare), write },
         cull: H2Cull::Frame,
         hidden_by_camo: false,
@@ -923,6 +924,8 @@ pub(crate) struct H2DrawPass {
     pub(crate) fragment: String,
     pub(crate) blend: Option<H2Blend>,
     pub(crate) depth: H2Depth,
+    /// Added to its window depth: what `rasterizer_dx9_set_decal_zbias` sets.
+    pub(crate) depth_bias: f32,
     pub(crate) cull: H2Cull,
     /// Faded out entirely on a fully camouflaged object.
     pub(crate) hidden_by_camo: bool,
@@ -961,6 +964,7 @@ impl H2DrawPass {
             fragment,
             blend: None,
             depth,
+            depth_bias: 0.0,
             cull: H2Cull::Frame,
             hidden_by_camo: false,
             numeric: None,
@@ -1545,6 +1549,7 @@ pub(in crate::app) fn prepare_draw_pass(
         fragment: translated.glsl,
         blend: pass.blend,
         depth: pass.depth,
+        depth_bias: 0.0,
         cull: H2Cull::Frame,
         hidden_by_camo: false,
         numeric: None,

@@ -592,6 +592,7 @@ fn build_passes(pass: ModelPass<'_>) -> Vec<H2DrawPass> {
     let mut draw = H2DrawPass::new(H2VertexStage::CeModel, fragment, depth);
     draw.channels = [true, true, true, false];
     if pass.decal {
+        draw.depth_bias = MODEL_DECAL_DEPTH_BIAS;
         draw.blend = Some(H2Blend {
             equation: H2BlendEquation::Add,
             source: H2BlendFactor::SrcAlpha,
@@ -999,6 +1000,12 @@ fn first_map_digits(root: TagStruct<'_>) -> Option<CeNumeric> {
     })
 }
 
+/// `cf_DecalZBiasValue`, as `rasterizer_model_draw_model_shader_pp` sets it.
+const MODEL_DECAL_DEPTH_BIAS: f32 = -5.5e-5;
+/// `cf_TransparentDecalZBiasValue`, as `rasterizer_transparent_geometry_group_draw`
+/// sets it. Neither has a slope term.
+const TRANSPARENT_DECAL_DEPTH_BIAS: f32 = -5e-6;
+
 /// A transparent pass's state, whichever group fills its constants.
 fn transparent_pass(
     root: TagStruct<'_>,
@@ -1018,6 +1025,7 @@ fn transparent_pass(
         Some(framebuffer_blend(option_index(root, "framebuffer blend function", &BLEND_FUNCTIONS)));
     pass.cull = if has("two-sided") { H2Cull::None } else { H2Cull::Back };
     pass.hidden_by_camo = !has("don't fade active-camouflage");
+    pass.depth_bias = decal_bias(flags);
     pass.numeric = has("numeric").then(|| first_map_digits(root)).flatten();
     pass.textures = textures;
     pass.constants = constants;
@@ -1210,7 +1218,13 @@ pub(super) fn ce_transparent_passes(
     };
     let single = match group {
         b"sgla" => Some(glass_passes(&directory, root, &every_flag(root), bitmap)),
-        b"smet" => Some(meter_pass(&directory, root, &every_flag(root), bitmap).map(|pass| vec![pass])),
+        b"smet" => {
+            let flags = every_flag(root);
+            Some(meter_pass(&directory, root, &flags, bitmap).map(|mut pass| {
+                pass.depth_bias = decal_bias(&flags);
+                vec![pass]
+            }))
+        }
         b"swat" => Some(water_passes(&directory, root, &every_flag(root), bitmap)),
         b"spla" => Some(plasma_pass(&directory, root, bitmap).map(|pass| vec![pass])),
         _ => None,
@@ -1439,8 +1453,16 @@ fn glass_passes(
     if passes.is_empty() {
         passes.push(unseen_pass());
     }
-    passes.iter_mut().for_each(|pass| pass.hidden_by_camo = true);
+    for pass in &mut passes {
+        pass.hidden_by_camo = true;
+        pass.depth_bias = decal_bias(flags);
+    }
     Ok(passes)
+}
+
+/// The depth bias of a transparent shader by its `decal` flag.
+fn decal_bias(flags: &[String]) -> f32 {
+    if flags.iter().any(|flag| flag == "decal") { TRANSPARENT_DECAL_DEPTH_BIAS } else { 0.0 }
 }
 
 /// The `shader_transparent_meter` case of
@@ -2130,6 +2152,16 @@ mod tests {
         let animation = CeModelAnimation { maps: vec![map], fade_source: Some(1), ..Default::default() };
         assert_eq!(animation.outputs_read(), [false, true, true, false]);
         assert_eq!(CeModelAnimation::default().outputs_read(), [false; 4]);
+    }
+
+    #[test]
+    fn only_a_decal_shader_takes_the_depth_bias() {
+        let flags = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        assert_eq!(decal_bias(&flags(&["two-sided", "decal"])), TRANSPARENT_DECAL_DEPTH_BIAS);
+        assert_eq!(decal_bias(&flags(&["two-sided"])), 0.0);
+        // A bias pulls toward the viewer, by what a 24 bit buffer can hold.
+        assert!(MODEL_DECAL_DEPTH_BIAS < TRANSPARENT_DECAL_DEPTH_BIAS);
+        assert!(TRANSPARENT_DECAL_DEPTH_BIAS < 0.0);
     }
 
     #[test]
