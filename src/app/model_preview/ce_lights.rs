@@ -8,6 +8,152 @@ use super::materials::decode_h2_image;
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
 
+/// One segment of an antenna: a bitmap sprite stretched along it.
+#[derive(Debug, Clone)]
+pub(crate) struct CeAntennaSegment {
+    length: f32,
+    color: [f32; 4],
+    /// Left, right, top and bottom of the sprite, across the bitmap.
+    rect: [f32; 4],
+    /// The sprite's registration point.
+    registration: [f32; 2],
+    /// World units per width of the bitmap: what `antenna_new` works out so
+    /// the sprite runs the length of the segment.
+    scale: f32,
+}
+
+/// A `widget` that hangs a line of sprites from a marker.
+#[derive(Debug, Clone)]
+pub(crate) struct CeAntenna {
+    node: usize,
+    position: [f32; 3],
+    forward: [f32; 3],
+    segments: Vec<CeAntennaSegment>,
+    pub(crate) image: Arc<H2Image>,
+}
+
+/// One antenna sprite's corners, in strip order, with texture coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CeAntennaQuad {
+    pub(crate) corners: [[f32; 5]; 4],
+    pub(crate) color: [f32; 4],
+}
+
+/// A point and direction on `node`, where the pose puts them.
+fn posed_on(node: usize, position: [f32; 3], direction: [f32; 3], bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
+    let Some(rows) = bones.and_then(|bones| bones.get(node * 3..node * 3 + 3)) else {
+        return (position, direction);
+    };
+    let [x, y, z] = position;
+    let [i, j, k] = direction;
+    let place = |row: &[f32; 4]| row[0] * x + row[1] * y + row[2] * z + row[3];
+    let turn = |row: &[f32; 4]| row[0] * i + row[1] * j + row[2] * k;
+    ([place(&rows[0]), place(&rows[1]), place(&rows[2])], [turn(&rows[0]), turn(&rows[1]), turn(&rows[2])])
+}
+
+impl CeAntenna {
+    /// `antenna_render_proper`, for an antenna at rest: its vertices lie
+    /// straight out of the marker, which is where `antenna_update`'s spring
+    /// pulls them, without the point physics that sway them.
+    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+        let (mut origin, forward) = posed_on(self.node, self.position, self.forward, bones);
+        let length = dot(forward, forward).sqrt().max(0.0001);
+        let forward = forward.map(|axis| axis / length);
+        let mut quads = Vec::with_capacity(self.segments.len());
+        for segment in &self.segments {
+            let to_eye: [f32; 3] = std::array::from_fn(|axis| view.eye[axis] - origin[axis]);
+            let across = [
+                forward[1] * to_eye[2] - forward[2] * to_eye[1],
+                forward[2] * to_eye[0] - forward[0] * to_eye[2],
+                forward[0] * to_eye[1] - forward[1] * to_eye[0],
+            ];
+            let width = dot(across, across).sqrt().max(0.0001);
+            let across = across.map(|axis| axis / width);
+            let [left, right, top, bottom] = segment.rect;
+            let [x, y] = segment.registration;
+            let corner = |u: f32, v: f32| {
+                let along = (u - (x + left)) * segment.scale;
+                let side = (y + top - v) * segment.scale;
+                let place: [f32; 3] =
+                    std::array::from_fn(|axis| origin[axis] + forward[axis] * along + across[axis] * side);
+                [place[0], place[1], place[2], u, v]
+            };
+            quads.push(CeAntennaQuad {
+                corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
+                color: segment.color,
+            });
+            origin = std::array::from_fn(|axis| origin[axis] + forward[axis] * segment.length);
+        }
+        quads
+    }
+}
+
+/// `antenna_new`'s scale for a sprite, or none where a bitmap has no such
+/// sprite to draw.
+fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32; 4], [f32; 2], usize, f32)> {
+    let root = bitmap.root();
+    let sequences = elements(root, "sequences");
+    let sprite = *elements(*sequences.get(sequence)?, "sprites").first()?;
+    let read = |name: &str| sprite.read_real(name).unwrap_or(0.0);
+    let index = sprite.read_int_any("bitmap index")?.max(0) as usize;
+    let width = elements(root, "bitmaps").get(index)?.read_int_any("width")? as f32;
+    let spacing = root.read_int_any("sprite spacing").unwrap_or(0) as f32;
+    let rect = [read("left"), read("right"), read("top"), read("bottom")];
+    let registration = sprite.read_point2d("registration point");
+    let pixels = (rect[1] - rect[0]) * width - spacing * 2.0 - 1.0;
+    (pixels > 0.0).then_some((rect, [registration.x, registration.y], index, pixels / width))
+}
+
+fn read_antenna(source: &TagSource, path: &str, markers: &[RenderModelPreviewMarker]) -> Option<CeAntenna> {
+    let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
+    let root = tag.root();
+    let name = root.read_string("attachment marker name")?;
+    let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
+    let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
+    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let mut image_index = None;
+    let mut segments = Vec::new();
+    for vertex in elements(root, "vertices") {
+        let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
+        let (rect, registration, index, covered) = antenna_sprite(&bitmap, sequence)?;
+        image_index.get_or_insert(index);
+        let length = vertex.read_real("length").unwrap_or(0.0);
+        segments.push(CeAntennaSegment {
+            length,
+            color: argb(vertex, "color"),
+            rect,
+            registration,
+            scale: length / covered,
+        });
+    }
+    let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, image_index?)?;
+    Some(CeAntenna {
+        node: marker.node_index.max(0) as usize,
+        position: marker.position,
+        forward: marker.axes[0],
+        segments,
+        image: Arc::new(image),
+    })
+}
+
+/// The antennas among `object`'s widgets.
+pub(super) fn read_ce_antennas(
+    source: &TagSource,
+    object: &TagFile,
+    markers: &[RenderModelPreviewMarker],
+) -> Vec<CeAntenna> {
+    let Some(block) = object_block(object, "widgets") else {
+        return Vec::new();
+    };
+    let antenna_group = u32::from_be_bytes(*b"ant!");
+    elements(block, "widgets")
+        .iter()
+        .filter_map(|widget| widget.read_tag_ref_with_group("reference"))
+        .filter(|(group, _)| *group == antenna_group)
+        .filter_map(|(_, path)| read_antenna(source, &path, markers))
+        .collect()
+}
+
 /// Colors of a reflection that all read zero take the light's instead.
 const NO_COLOR: [f32; 4] = [0.0; 4];
 
@@ -271,14 +417,7 @@ impl CeLight {
     }
 
     fn posed(&self, bones: Option<&[[f32; 4]]>) -> ([f32; 3], [f32; 3]) {
-        let Some(rows) = bones.and_then(|bones| bones.get(self.node * 3..self.node * 3 + 3)) else {
-            return (self.position, self.forward);
-        };
-        let [x, y, z] = self.position;
-        let [i, j, k] = self.forward;
-        let place = |row: &[f32; 4]| row[0] * x + row[1] * y + row[2] * z + row[3];
-        let turn = |row: &[f32; 4]| row[0] * i + row[1] * j + row[2] * k;
-        ([place(&rows[0]), place(&rows[1]), place(&rows[2])], [turn(&rows[0]), turn(&rows[1]), turn(&rows[2])])
+        posed_on(self.node, self.position, self.forward, bones)
     }
 }
 
@@ -676,6 +815,41 @@ mod tests {
         assert_eq!(patch(2), [1.0, 0.0, 0.0]);
         // A dark light tests nothing.
         assert!(light(Vec::new()).occlusion_patch(&[0.0; 4], &[[1.0; 3]; 4], None, &VIEW).is_none());
+    }
+
+    #[test]
+    fn an_antenna_runs_straight_out_of_its_marker_facing_the_viewer() {
+        let segment = CeAntennaSegment {
+            length: 0.05,
+            color: [1.0; 4],
+            rect: [0.0, 1.0, 0.25, 0.75],
+            registration: [0.0, 0.25],
+            scale: 0.05,
+        };
+        let antenna = CeAntenna {
+            node: 0,
+            position: [0.0, 0.0, 1.0],
+            forward: [0.0, 0.0, 2.0],
+            segments: vec![segment.clone(), segment],
+            image: Arc::new(H2Image::Flat(crate::app::model_preview::materials::TextureImage {
+                rgba: Vec::new(),
+                width: 0,
+                height: 0,
+                repeat_x: true,
+                repeat_y: true,
+                scale: [1.0; 2],
+            })),
+        };
+        let quads = antenna.quads(None, &VIEW);
+        assert_eq!(quads.len(), 2);
+        let [first, _, _, last] = quads[0].corners;
+        assert!((first[2] - 1.0).abs() < 1e-6);
+        assert!((last[2] - 1.05).abs() < 1e-6);
+        // The second starts where the first ends.
+        assert!((quads[1].corners[0][2] - 1.05).abs() < 1e-6);
+        // Facing the viewer down y, its width lies along x.
+        assert!(first[1].abs() < 1e-6);
+        assert!((first[0] - last[0]).abs() > 0.02);
     }
 
     #[test]

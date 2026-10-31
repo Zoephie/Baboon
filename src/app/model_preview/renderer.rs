@@ -1511,6 +1511,7 @@ struct ModelGpuSlot {
     /// Halo CE's lens flares: per light, then per image, of `flare_geometry`.
     flare_textures: Vec<Vec<Option<glow::NativeTexture>>>,
     flare_geometry: Option<u64>,
+    antenna_textures: Vec<Option<glow::NativeTexture>>,
 }
 
 impl ModelGpuSlot {
@@ -1552,6 +1553,7 @@ impl ModelGpuSlot {
                 uploaded_textures: None,
                 flare_textures: Vec::new(),
                 flare_geometry: None,
+                antenna_textures: Vec::new(),
             })
         }
     }
@@ -2348,7 +2350,11 @@ impl ModelGlRenderer {
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
                 self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
-            if frame.game_shaders && self.h2_supported && !frame.preview.ce_lights.is_empty() {
+            let preview = &frame.preview;
+            if frame.game_shaders
+                && self.h2_supported
+                && !(preview.ce_lights.is_empty() && preview.ce_antennas.is_empty())
+            {
                 self.draw_ce_flares(gl, frame, slot);
             }
 
@@ -2391,6 +2397,15 @@ impl ModelGlRenderer {
                         images.map(|image| upload_h2_image(gl, image)).collect()
                     })
                     .collect();
+                for texture in uploaded.antenna_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.antenna_textures = frame
+                    .preview
+                    .ce_antennas
+                    .iter()
+                    .map(|antenna| upload_h2_image(gl, &antenna.image))
+                    .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);
             }
             let camera = &frame.camera;
@@ -2402,12 +2417,27 @@ impl ModelGlRenderer {
             gl.uniform_1_i32(flares.map.as_ref(), 0);
             gl.enable(glow::BLEND);
             gl.blend_equation(glow::FUNC_ADD);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE);
             gl.color_mask(true, true, true, false);
             gl.depth_mask(false);
             gl.depth_func(glow::LEQUAL);
             gl.disable(glow::CULL_FACE);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            // `global_shader_effect_alpha_blended`, among the model's depth.
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            for (antenna, texture) in preview_antennas(frame, &uploaded.antenna_textures) {
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                for quad in antenna.quads(bones, &view) {
+                    let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                        let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                        [a, b, c, d, u, v]
+                    });
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                    let [red, green, blue, alpha] = quad.color;
+                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                }
+            }
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE);
             for (index, light) in frame.preview.ce_lights.iter().enumerate() {
                 let state = frame.object_states.get(usize::from(light.object));
                 let outputs = state.map_or([0.0; 4], |state| state.outputs);
@@ -4478,6 +4508,14 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
+fn preview_antennas<'a>(
+    frame: &'a ModelGpuFrame,
+    textures: &'a [Option<glow::NativeTexture>],
+) -> impl Iterator<Item = (&'a ce_lights::CeAntenna, glow::NativeTexture)> {
+    let antennas = frame.preview.ce_antennas.iter().zip(textures);
+    antennas.filter_map(|(antenna, texture)| Some((antenna, (*texture)?)))
+}
+
 fn ce_flare_view(camera: &ModelGpuCamera) -> ce_lights::CeFlareView {
     let along = |vector| unrotate_view_vector(camera.yaw, camera.pitch, vector);
     ce_lights::CeFlareView {

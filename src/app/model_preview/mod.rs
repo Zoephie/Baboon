@@ -99,6 +99,8 @@ pub(crate) struct RenderModelPreview {
     pub weapon_ik: Vec<ce_attachments::CeWeaponIk>,
     /// Halo CE: the lens flares of the object and what it holds.
     pub ce_lights: Vec<ce_lights::CeLight>,
+    /// Halo CE: the antennas among the object's widgets.
+    pub ce_antennas: Vec<ce_lights::CeAntenna>,
 }
 
 #[derive(Debug, Clone, Default)]
