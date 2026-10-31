@@ -1,7 +1,8 @@
 //! Halo CE's lens flares: what `attachments_new` hangs on an object as a
 //! `light`, and the sprites `rasterizer_lens_flares_draw` makes of one.
 
-use super::ce_attachments::{MarkerFrame, attached_marker_frame, elements, object_block};
+use super::attachment::MarkerFrame;
+use super::ce_attachments::{attached_marker_frame, elements, object_block};
 use super::ce_passes::{argb, periodic_evaluate};
 use super::h2_passes::{H2Image, ce_color_interpolate};
 use super::materials::decode_h2_image;

@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
+mod attachment;
 mod ce_attachments;
 mod ce_functions;
 mod ce_lights;

@@ -315,7 +315,7 @@ pub(super) fn load_model_preview(
             super::ce_attachments::attach_ce_weapon(source, model_tag, &path, &mut preview)
         });
         let own = super::ce_lights::read_ce_lights(source, model_tag, 0, &preview.markers, |marker| {
-            let frame = super::ce_attachments::MarkerFrame {
+            let frame = super::attachment::MarkerFrame {
                 axes: marker.axes,
                 position: marker.position,
                 node: marker.node_index.max(0),
