@@ -14,3 +14,6 @@ pub(in crate::app) use game_assets::*;
 
 pub(in crate::app) mod checkbox;
 pub(in crate::app) use checkbox::*;
+
+pub(in crate::app) mod radio;
+pub(in crate::app) use radio::*;

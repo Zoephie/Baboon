@@ -89,6 +89,7 @@ pub(in crate::app) enum ButtonIcon {
     Json,
     Loop,
     Markers,
+    MarkersLookup,
     Model,
     JumpTo,
     JumpUp,
@@ -184,7 +185,8 @@ pub(in crate::app) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::InsertRowBelow => include_root_str!("assets/Button Icons/Insert Row (below).svg"),
         ButtonIcon::Json => include_root_str!("assets/Button Icons/JSON.svg"),
         ButtonIcon::Loop => include_root_str!("assets/Button Icons/Loop.svg"),
-        ButtonIcon::Markers => include_root_str!("assets/Button Icons/Markers.svg"),
+        ButtonIcon::Markers => include_root_str!("assets/icons/markers.svg"),
+        ButtonIcon::MarkersLookup => include_root_str!("assets/Button Icons/Markers.svg"),
         ButtonIcon::Model => include_root_str!("assets/Button Icons/Model.svg"),
         ButtonIcon::JumpTo => include_root_str!("assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpUp => include_root_str!("assets/Button Icons/Jump Up.svg"),
@@ -386,32 +388,18 @@ pub(in crate::app) fn icon_button(
     response.on_hover_text(tooltip)
 }
 
-/// Repaint a native checkbox with its hovered visuals when an adjacent icon
+/// Repaint a themed checkbox with its hovered visuals when an adjacent icon
 /// or label owns the pointer. Icon checkbox rows are assembled from multiple
 /// widgets, while a normal text checkbox has one response spanning the row.
 pub(in crate::app) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, checked: bool) {
     if !ui.is_enabled() {
         return;
     }
-    let visuals = &ui.visuals().widgets.hovered;
-    let (small_icon_rect, big_icon_rect) = ui.spacing().icon_rectangles(checkbox_rect);
-    ui.painter().add(egui::epaint::RectShape::new(
-        big_icon_rect.expand(visuals.expansion),
-        visuals.corner_radius,
-        visuals.bg_fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Middle,
-    ));
-    if checked {
-        ui.painter().add(egui::Shape::line(
-            vec![
-                egui::pos2(small_icon_rect.left(), small_icon_rect.center().y),
-                egui::pos2(small_icon_rect.center().x, small_icon_rect.bottom()),
-                egui::pos2(small_icon_rect.right(), small_icon_rect.top()),
-            ],
-            visuals.fg_stroke,
-        ));
-    }
+    let glyph = egui::Rect::from_center_size(
+        egui::pos2(checkbox_rect.left() + 8.0, checkbox_rect.center().y),
+        Vec2::splat(16.0),
+    );
+    paint_checkbox_at(ui, glyph, checked, true);
 }
 
 pub(in crate::app) fn icon_for_foundation_button(label: &str) -> Option<ButtonIcon> {
@@ -1011,6 +999,7 @@ mod tests {
             ButtonIcon::Left,
             ButtonIcon::Loop,
             ButtonIcon::Markers,
+            ButtonIcon::MarkersLookup,
             ButtonIcon::ListDropdownLeft,
             ButtonIcon::ListDropdownRight,
             ButtonIcon::Move,
@@ -1042,8 +1031,14 @@ mod tests {
     }
 
     #[test]
+    fn marker_view_icon_keeps_its_blue_color() {
+        let svg = colorized_icon_svg(ButtonIcon::Markers, Color32::from_rgb(1, 2, 3));
+        assert!(svg.contains("#00B2FF"), "View marker artwork must retain its original blue");
+    }
+
+    #[test]
     fn colorized_icon_replaces_current_color() {
-        for icon in [ButtonIcon::Open, ButtonIcon::Markers] {
+        for icon in [ButtonIcon::Open, ButtonIcon::MarkersLookup] {
             let svg = colorized_icon_svg(icon, Color32::from_rgb(1, 2, 3));
             assert!(svg.contains("#010203"));
             assert!(!svg.contains("currentColor"));

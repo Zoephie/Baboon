@@ -393,7 +393,7 @@ pub(super) fn draw_row(
                 let width = popup_width(ui, &list, &filter, grouped);
                 string_picker::search(ui, &mut filter, filter_id, just_opened, width, "Search String IDs or Text");
                 if can_group {
-                    ui.checkbox(&mut grouped, "Group by Prefix");
+                    ui.baboon_checkbox(&mut grouped, "Group by Prefix");
                 }
                 ui.separator();
                 if let Some(reason) = &list.unavailable {

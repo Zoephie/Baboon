@@ -787,7 +787,8 @@ pub(in crate::app) fn draw_foundation_flags_row(
     let panel_height = if display_flags.is_empty() {
         32.0
     } else {
-        12.0 + flag_row_height * display_flags.len() as f32 + 24.0
+        12.0 + flag_row_height * display_flags.len() as f32
+            + if edit.expert_mode { 24.0 } else { 0.0 }
     };
     let total_height = panel_height.max(32.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, total_height), Sense::hover());
@@ -822,7 +823,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
             ui,
             flags_rect.left_center() + Vec2::new(8.0, 0.0),
             Align2::LEFT_CENTER,
-            &format!("0x{raw:04X} (none set)"),
+            &if edit.expert_mode { format!("0x{raw:04X} (none set)") } else { "No visible flags".to_owned() },
             FontId::proportional(12.5),
             text_dark(),
             FindTargetKind::Value,
@@ -837,8 +838,8 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 Vec2::new(flags_rect.width() - 16.0, flag_row_height),
             );
             let checkbox_rect = egui::Rect::from_min_size(
-                row_rect.left_top() + Vec2::new(0.0, 3.0),
-                Vec2::splat(13.0),
+                row_rect.left_top() + Vec2::new(0.0, 2.5),
+                Vec2::splat(16.0),
             );
             let enabled = edit.can_edit(meta);
             let response = ui.interact(
@@ -858,30 +859,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 });
             }
 
-            painter.rect_filled(checkbox_rect, 0.0, foundation_checkbox_bg(enabled));
-            painter.rect_stroke(
-                checkbox_rect,
-                0.0,
-                Stroke::new(1.0_f32, foundation_input_edge()),
-                egui::StrokeKind::Middle,
-            );
-            if *is_set {
-                let stroke = Stroke::new(1.6_f32, text_dark());
-                painter.line_segment(
-                    [
-                        checkbox_rect.left_center() + Vec2::new(3.0, 0.0),
-                        checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                    ],
-                    stroke,
-                );
-                painter.line_segment(
-                    [
-                        checkbox_rect.center() + Vec2::new(-1.0, 3.0),
-                        checkbox_rect.right_center() + Vec2::new(-2.0, -4.0),
-                    ],
-                    stroke,
-                );
-            }
+            let mut checkbox_ui = ui.new_child(egui::UiBuilder::new().max_rect(checkbox_rect));
+            if !enabled { checkbox_ui.disable(); }
+            paint_checkbox_at(&checkbox_ui, checkbox_rect, *is_set,
+                response.hovered() || response.has_focus());
 
             paint_findable_text(
                 ui,
@@ -908,15 +889,17 @@ pub(in crate::app) fn draw_foundation_flags_row(
             }
         }
 
-        paint_findable_text(
-            ui,
-            flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
-            Align2::LEFT_BOTTOM,
-            &format!("0x{raw:04X}"),
-            FontId::proportional(11.5),
-            subtle_dark(),
-            FindTargetKind::Value,
-        );
+        if edit.expert_mode {
+            paint_findable_text(
+                ui,
+                flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
+                Align2::LEFT_BOTTOM,
+                &format!("0x{raw:04X}"),
+                FontId::proportional(11.5),
+                subtle_dark(),
+                FindTargetKind::Value,
+            );
+        }
     }
 
     ui.add_space(4.0);
@@ -1073,7 +1056,10 @@ mod tests {
         assert!(normal.iter().all(|text| !text.contains(['#', '!', '*'])), "{normal:?}");
         assert!(!normal.iter().any(|text| text == "unused0"), "{normal:?}");
 
+        assert!(normal.iter().all(|text| !text.starts_with("0x")), "normal mode hides raw flag values: {normal:?}");
+
         let expert = painted(true);
+        assert!(expert.iter().any(|text| text.starts_with("0x")), "expert mode retains raw flag values: {expert:?}");
         assert!(expert.iter().any(|text| text == "unused0"), "{expert:?}");
         assert!(expert.len() > normal.len(), "expert mode lists the `!` options too");
     }

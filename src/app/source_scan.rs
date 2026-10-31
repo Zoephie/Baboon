@@ -53,7 +53,7 @@ pub(crate) fn app_product_sources() -> Vec<(String, String)> {
                 }
             } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
                 let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-                out.push((rel, product_code(&std::fs::read_to_string(&path).unwrap())));
+                out.push((rel, product_code(&std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n"))));
             }
         }
     }

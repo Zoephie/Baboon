@@ -417,7 +417,7 @@ pub(super) fn draw_model_preview_panel(
                         };
                         let mut checked = state.scenario_bsp_selection.contains(&index);
                         if ui
-                            .checkbox(&mut checked, bsp_display_name(reference))
+                            .baboon_checkbox(&mut checked, bsp_display_name(reference))
                             .on_hover_text(reference.as_str())
                             .changed()
                         {
@@ -1104,11 +1104,11 @@ fn draw_model_view_settings_menu(
             ui.label(RichText::new("Shading").color(subtle_dark()).small());
             for mode in ModelRenderMode::ALL {
                 if supports_textures || !mode.uses_textures() {
-                    ui.radio_value(&mut state.render_mode, mode, mode.label());
+                    ui.baboon_radio_value(&mut state.render_mode, mode, mode.label());
                 }
             }
             if is_campaign_evolved {
-                ui.checkbox(&mut state.high_detail, "High Detail")
+                ui.baboon_checkbox(&mut state.high_detail, "High Detail")
                     .on_hover_text(
                         "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
                     );
@@ -1186,7 +1186,7 @@ fn draw_model_view_settings_menu(
                 ));
                 if state.show_errors {
                     ui.indent("model_error_filters", |ui| {
-                        ui.checkbox(
+                        ui.baboon_checkbox(
                             &mut state.show_non_critical_errors,
                             "Show Non-Critical",
                         )
@@ -1196,11 +1196,11 @@ fn draw_model_view_settings_menu(
             });
 
             ui.separator();
-            ui.checkbox(&mut state.show_grid, "Show Grid")
+            ui.baboon_checkbox(&mut state.show_grid, "Show Grid")
                 .on_hover_text(
                     "Ground-reference grid on the z = 0 plane, spaced to the model's size.",
                 );
-            ui.checkbox(&mut state.show_backfaces, "Render Backfaces");
+            ui.baboon_checkbox(&mut state.show_backfaces, "Render Backfaces");
         },
     );
     preview_header_menu(ui, ButtonIcon::Find, "Camera", |ui| {
@@ -1222,7 +1222,7 @@ fn draw_model_view_settings_menu(
                     .suffix("×"),
             );
         });
-        ui.checkbox(&mut state.perspective, "Perspective Projection")
+        ui.baboon_checkbox(&mut state.perspective, "Perspective Projection")
             .on_hover_text(
                 "Perspective projection with a 60° lens; zooming moves the camera closer. Clear \
                  it for the flat orthographic view. The framing at the orbit point stays \
@@ -1275,40 +1275,52 @@ fn model_view_icon_checkbox(
     label: &str,
     game: Option<GameId>,
 ) -> egui::Response {
-    let row = ui.horizontal(|ui| {
-        let checkbox_response = ui.checkbox(checked, "");
-        // Native checkbox text starts before the end of an empty checkbox's
-        // 24-point hitbox. Put the icon at that same text start, without
-        // overlapping the two clickable hitboxes.
-        let icon_left =
-            checkbox_response.rect.left() + ui.spacing().icon_width + ui.spacing().icon_spacing;
-        let interaction_left = icon_left.max(checkbox_response.rect.right());
-        ui.spacing_mut().item_spacing.x = interaction_left - checkbox_response.rect.right();
-        let interaction_width = (icon_left + 16.0 - interaction_left).max(1.0);
-        let (icon_hit_rect, icon_response) =
-            ui.allocate_exact_size(Vec2::new(interaction_width, BUTTON_HEIGHT), Sense::click());
-        let icon_rect = egui::Rect::from_min_size(
-            egui::pos2(icon_left, icon_hit_rect.center().y - 8.0),
-            Vec2::splat(16.0),
-        );
-        match icon {
-            ModelViewCheckboxIcon::Tag(group) => {
-                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect);
-            }
-            ModelViewCheckboxIcon::Markers => {
-                paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());
-            }
-            ModelViewCheckboxIcon::Errors => {
-                paint_button_icon_at(ui, ButtonIcon::Errors, icon_rect, text_dark());
-            }
-        }
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let label_response = ui.add(egui::Label::new(label).sense(Sense::click()));
-        if icon_response.clicked() || label_response.clicked() {
-            *checked = !*checked;
-        }
-        checkbox_response
-    });
+    let row = Frame::NONE
+        .inner_margin(menu_control_margin(ui))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let checkbox_response = ui.baboon_checkbox(checked, "");
+                // Native checkbox text starts before the end of an empty checkbox's
+                // 24-point hitbox. Put the icon at that same text start, without
+                // overlapping the two clickable hitboxes.
+                let icon_left = checkbox_response.rect.left()
+                    + ui.spacing().icon_width
+                    + ui.spacing().icon_spacing;
+                let interaction_left = icon_left.max(checkbox_response.rect.right());
+                ui.spacing_mut().item_spacing.x = interaction_left - checkbox_response.rect.right();
+                let interaction_width = (icon_left + 16.0 - interaction_left).max(1.0);
+                let (icon_hit_rect, icon_response) = ui.allocate_exact_size(
+                    Vec2::new(interaction_width, BUTTON_HEIGHT),
+                    Sense::click(),
+                );
+                let icon_rect = egui::Rect::from_min_size(
+                    egui::pos2(icon_left, icon_hit_rect.center().y - 8.0),
+                    Vec2::splat(16.0),
+                );
+                match icon {
+                    ModelViewCheckboxIcon::Tag(group) => {
+                        paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), game, icon_rect);
+                    }
+                    ModelViewCheckboxIcon::Markers => {
+                        paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());
+                    }
+                    ModelViewCheckboxIcon::Errors => {
+                        paint_button_icon_at(ui, ButtonIcon::Errors, icon_rect, text_dark());
+                    }
+                }
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let label_response = ui.add(
+                    egui::Label::new(label)
+                        .selectable(false)
+                        .sense(Sense::click()),
+                );
+                if icon_response.clicked() || label_response.clicked() {
+                    *checked = !*checked;
+                }
+                checkbox_response
+            })
+        })
+        .inner;
     if ui.rect_contains_pointer(row.response.rect) && !row.inner.hovered() {
         paint_checkbox_row_hover(ui, row.inner.rect, *checked);
     }
@@ -1587,13 +1599,13 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
                     ui.selectable_value(&mut state.render_mode, mode, mode.label());
                 }
             });
-        ui.checkbox(&mut state.perspective, "Perspective")
+        ui.baboon_checkbox(&mut state.perspective, "Perspective")
             .on_hover_text("Perspective projection instead of the flat orthographic view.");
-        ui.checkbox(&mut state.show_grid, "Grid")
+        ui.baboon_checkbox(&mut state.show_grid, "Grid")
             .on_hover_text("Ground-reference grid on the z = 0 plane.");
         ui.add_enabled(
             false,
-            egui::Checkbox::new(&mut state.show_backfaces, "Backfaces"),
+            ThemedCheckbox::new(&mut state.show_backfaces, "Backfaces"),
         )
         .on_hover_text("Chimp always displays backfaces");
     });

@@ -752,7 +752,7 @@ fn restore_path_row(
             egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(20.0, 0.0))),
             |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.checkbox(checked, "");
+                    ui.baboon_checkbox(checked, "");
                     let (icon_rect, _) =
                         ui.allocate_exact_size(Vec2::splat(BUTTON_ICON_SIZE), Sense::hover());
                     if folder {
@@ -819,7 +819,7 @@ fn restore_workspace_row(ui: &mut Ui, kit: &mut LastOpenedWindowsKit) -> (egui::
     }
     checkbox_ui.put(
         checkbox_rect,
-        egui::Checkbox::without_text(&mut kit.checked),
+        ThemedCheckbox::without_text(&mut kit.checked),
     );
     let text_rect = egui::Rect::from_min_size(
         egui::pos2(rect.left() + 32.0, rect.center().y - text_height * 0.5),
@@ -935,7 +935,7 @@ pub(in crate::app) fn render_last_opened_windows_prompt(
                     Vec2::new(ui.available_width(), 24.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                ui.checkbox(&mut prompt.dont_ask_again, "Don't ask me again")
+                ui.baboon_checkbox(&mut prompt.dont_ask_again, "Don't ask me again")
                     .on_hover_text("Remember this choice: Restore Selected always reopens the last session; Close All never does. Change it later in File > Settings.");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Close All").min_size(Vec2::new(78.0, 24.0))).clicked() {

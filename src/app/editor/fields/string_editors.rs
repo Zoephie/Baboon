@@ -256,7 +256,7 @@ pub(in crate::app) fn draw_string_editor_row(
                     };
                     let width = string_picker::menu_popup_width(ui, &items, &filter);
                     string_picker::search(ui, &mut filter, filter_id, just_opened, width, &search_hint);
-                    if can_group && ui.checkbox(&mut grouped, "Group by Prefix").changed() {
+                    if can_group && ui.baboon_checkbox(&mut grouped, "Group by Prefix").changed() {
                         items = if grouped {
                             std::borrow::Cow::Owned(string_picker::prefix_groups(&menu.items))
                         } else {

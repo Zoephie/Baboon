@@ -601,7 +601,7 @@ pub(in crate::app) fn render_save_changes_prompt(
             ScrollArea::both().max_height(150.0).show(ui, |ui| {
                 for dirty in &mut prompt.dirty_tags {
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut dirty.checked, "");
+                        ui.baboon_checkbox(&mut dirty.checked, "");
                         ui.label(RichText::new(&dirty.path).color(text_dark()));
                     });
                 }

@@ -1899,7 +1899,7 @@ pub(in crate::app) fn draw_sound_player(
                     .on_hover_text("Fraction of requests for this permutation that are ignored");
             }
             if has_inline_ogg {
-                ui.checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
+                ui.baboon_checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
                     "Extract CE audio as the tag's original Ogg stream (lossless) \
                      instead of decoding to WAV",
                 );

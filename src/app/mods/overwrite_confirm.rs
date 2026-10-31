@@ -61,7 +61,7 @@ impl Dialog for OverwriteConfirm {
                     .small(),
                 );
                 ui.add_space(8.0);
-                ui.checkbox(
+                ui.baboon_checkbox(
                     &mut dont_ask,
                     "Don't ask again (changeable in Settings)",
                 );

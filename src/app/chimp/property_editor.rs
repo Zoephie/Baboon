@@ -283,7 +283,7 @@ fn draw_chimp_value(
         return changed;
     }
     match value {
-        PropValue::Bool(value) => ui.checkbox(value, "").changed(),
+        PropValue::Bool(value) => ui.baboon_checkbox(value, "").changed(),
         PropValue::Int(value) => draw_chimp_integer(ui, value, declared, usmap),
         PropValue::Float(value) => ui.add(egui::DragValue::new(value).speed(0.01)).changed(),
         PropValue::Str(value) => {
@@ -374,7 +374,7 @@ fn draw_chimp_value(
                 .show(ui, |ui| {
                     let mut replace_whole = removals.is_none();
                     if ui
-                        .checkbox(&mut replace_whole, "Replace whole container")
+                        .baboon_checkbox(&mut replace_whole, "Replace whole container")
                         .changed()
                     {
                         *removals = (!replace_whole).then(Vec::new);
@@ -1016,7 +1016,7 @@ fn draw_chimp_native(ui: &mut Ui, id: egui::Id, value: &mut NativeStruct) -> boo
                     changed
                 }
                 NativeStruct::PerPlatform { cooked, value } => {
-                    let mut changed = ui.checkbox(cooked, "Cooked").changed();
+                    let mut changed = ui.baboon_checkbox(cooked, "Cooked").changed();
                     changed |= match value {
                         PerPlatformValue::Int(value) => {
                             ui.add(egui::DragValue::new(value)).changed()
@@ -1024,7 +1024,7 @@ fn draw_chimp_native(ui: &mut Ui, id: egui::Id, value: &mut NativeStruct) -> boo
                         PerPlatformValue::Float(value) => {
                             ui.add(egui::DragValue::new(value).speed(0.01)).changed()
                         }
-                        PerPlatformValue::Bool(value) => ui.checkbox(value, "Value").changed(),
+                        PerPlatformValue::Bool(value) => ui.baboon_checkbox(value, "Value").changed(),
                         PerPlatformValue::FrameRate(numerator, denominator) => {
                             let mut inner = ui
                                 .add(egui::DragValue::new(numerator).prefix("Numerator: "))
@@ -1048,7 +1048,7 @@ fn draw_chimp_native(ui: &mut Ui, id: egui::Id, value: &mut NativeStruct) -> boo
 
 fn draw_chimp_optional_f32(ui: &mut Ui, label: &str, value: &mut Option<f32>) -> bool {
     let mut present = value.is_some();
-    let mut changed = ui.checkbox(&mut present, label).changed();
+    let mut changed = ui.baboon_checkbox(&mut present, label).changed();
     if present && value.is_none() {
         *value = Some(0.0);
     } else if !present {
@@ -1062,7 +1062,7 @@ fn draw_chimp_optional_f32(ui: &mut Ui, label: &str, value: &mut Option<f32>) ->
 
 fn draw_chimp_optional_i32(ui: &mut Ui, label: &str, value: &mut Option<i32>) -> bool {
     let mut present = value.is_some();
-    let mut changed = ui.checkbox(&mut present, label).changed();
+    let mut changed = ui.baboon_checkbox(&mut present, label).changed();
     if present && value.is_none() {
         *value = Some(0);
     } else if !present {
@@ -1076,7 +1076,7 @@ fn draw_chimp_optional_i32(ui: &mut Ui, label: &str, value: &mut Option<i32>) ->
 
 fn draw_chimp_optional_u64(ui: &mut Ui, label: &str, value: &mut Option<u64>) -> bool {
     let mut present = value.is_some();
-    let mut changed = ui.checkbox(&mut present, label).changed();
+    let mut changed = ui.baboon_checkbox(&mut present, label).changed();
     if present && value.is_none() {
         *value = Some(0);
     } else if !present {
@@ -1138,7 +1138,7 @@ fn draw_chimp_shader_value(
         .add(egui::DragValue::new(&mut value.kind).prefix("Kind: "))
         .changed();
     changed |= ui
-        .checkbox(&mut value.is_dynamic_array, "Dynamic array")
+        .baboon_checkbox(&mut value.is_dynamic_array, "Dynamic array")
         .changed();
     match &mut value.body {
         chimp_hw::ShaderValueTypeBody::Struct { name, elements } => {
@@ -1210,7 +1210,7 @@ fn draw_chimp_text(
         chimp_hw::TextHistory::None { culture_invariant } => {
             let mut present = culture_invariant.is_some();
             if ui
-                .checkbox(&mut present, "Culture-invariant string")
+                .baboon_checkbox(&mut present, "Culture-invariant string")
                 .changed()
             {
                 *culture_invariant = present.then(Default::default);
@@ -1285,10 +1285,10 @@ fn draw_chimp_text(
             changed |= draw_chimp_text_argument(ui, id.with("value"), source_value, names);
             if let Some(options) = options {
                 changed |= ui
-                    .checkbox(&mut options.always_sign, "Always sign")
+                    .baboon_checkbox(&mut options.always_sign, "Always sign")
                     .changed();
                 changed |= ui
-                    .checkbox(&mut options.use_grouping, "Use grouping")
+                    .baboon_checkbox(&mut options.use_grouping, "Use grouping")
                     .changed();
                 changed |= ui
                     .add(egui::DragValue::new(&mut options.rounding_mode).prefix("Rounding: "))
@@ -1323,7 +1323,7 @@ fn draw_chimp_text(
                 .changed();
             for (label, value) in [("Date style", date_style), ("Time style", time_style)] {
                 let mut present = value.is_some();
-                if ui.checkbox(&mut present, label).changed() {
+                if ui.baboon_checkbox(&mut present, label).changed() {
                     *value = present.then_some(0);
                     changed = true;
                 }
@@ -1565,7 +1565,7 @@ fn draw_chimp_hand_written(
                     draw_chimp_shader_value(ui, id, value, names)
                 }
                 chimp_hw::HandWritten::PerQualityLevel(value) => {
-                    let mut inner = ui.checkbox(&mut value.cooked, "Cooked").changed();
+                    let mut inner = ui.baboon_checkbox(&mut value.cooked, "Cooked").changed();
                     inner |= ui
                         .add(egui::DragValue::new(&mut value.default_bits).prefix("Default bits: "))
                         .changed();
@@ -1591,7 +1591,7 @@ fn draw_chimp_hand_written(
                         )
                         .changed();
                     let mut inline = value.inline_face.is_some();
-                    if ui.checkbox(&mut inline, "Inline face").changed() {
+                    if ui.baboon_checkbox(&mut inline, "Inline face").changed() {
                         value.inline_face = inline.then(|| chimp_hw::InlineFontFace {
                             filename: Default::default(),
                             hinting: 0,
@@ -1614,7 +1614,7 @@ fn draw_chimp_hand_written(
                     inner
                 }
                 chimp_hw::HandWritten::MaterialOverrideNanite(value) => {
-                    let mut inner = ui.checkbox(&mut value.cooked, "Cooked").changed();
+                    let mut inner = ui.baboon_checkbox(&mut value.cooked, "Cooked").changed();
                     inner |= draw_chimp_optional_i32(
                         ui,
                         "Override material",
@@ -1687,7 +1687,7 @@ fn draw_chimp_hand_written(
                         )
                         .changed();
                     inner |= ui
-                        .checkbox(&mut value.has_default_value, "Has default")
+                        .baboon_checkbox(&mut value.has_default_value, "Has default")
                         .changed();
                     inner |= ui
                         .add(
@@ -1701,7 +1701,7 @@ fn draw_chimp_hand_written(
                                 .prefix("Tick denominator: "),
                         )
                         .changed();
-                    inner |= ui.checkbox(&mut value.show_curve, "Show curve").changed();
+                    inner |= ui.baboon_checkbox(&mut value.show_curve, "Show curve").changed();
                     inner
                 }
                 chimp_hw::HandWritten::PcgPoint(value) => {
@@ -1712,7 +1712,7 @@ fn draw_chimp_hand_written(
                         ("Bounds maximum", &mut value.bounds_max),
                     ] {
                         let mut present = point.is_some();
-                        if ui.checkbox(&mut present, label).changed() {
+                        if ui.baboon_checkbox(&mut present, label).changed() {
                             *point = present.then_some([0.0; 3]);
                             inner = true;
                         }
@@ -1721,7 +1721,7 @@ fn draw_chimp_hand_written(
                         }
                     }
                     let mut color = value.color.is_some();
-                    if ui.checkbox(&mut color, "Color").changed() {
+                    if ui.baboon_checkbox(&mut color, "Color").changed() {
                         value.color = color.then_some([0.0; 4]);
                         inner = true;
                     }

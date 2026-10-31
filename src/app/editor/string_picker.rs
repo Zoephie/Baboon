@@ -55,7 +55,7 @@ pub(super) fn image(ui: &Ui, editor: &str) -> Option<egui::Image<'static>> {
         "object_function" | "object_function_no_own" | "object_function_panel" => {
             ButtonIcon::Function
         }
-        "object_marker" | "marker_names" => ButtonIcon::Markers,
+        "object_marker" | "marker_names" => ButtonIcon::MarkersLookup,
         "default_model_variant" | "child_model_variant" => ButtonIcon::Model,
         _ => return None,
     };

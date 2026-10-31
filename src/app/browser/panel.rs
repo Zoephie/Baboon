@@ -1190,7 +1190,7 @@ fn browser_toolbar_controls(
             }
         }
         ui.separator();
-        ui.checkbox(folders_before_tags, "Folders before tags");
+        ui.baboon_checkbox(folders_before_tags, "Folders before tags");
     });
     if show_modes {
         icon_text_dropdown_button(ui, ButtonIcon::View, "View", |ui| {
@@ -1205,7 +1205,7 @@ fn browser_toolbar_controls(
                 close_menu(ui);
             }
             ui.separator();
-            ui.checkbox(show_prefixes, "Show prefixes");
+            ui.baboon_checkbox(show_prefixes, "Show prefixes");
         });
     }
     icon_menu_button(ui, ButtonIcon::Other, "Other browser options", |ui| {
@@ -1246,8 +1246,8 @@ fn draw_folder_browser_controls(
         icon_menu_button(ui, ButtonIcon::Filter, "Filter asset types", |ui| {
             style_list_menu(ui);
             ui.label("Asset types");
-            ui.checkbox(&mut pane.asset_bitmaps, "Bitmaps");
-            ui.checkbox(&mut pane.asset_models, "Models");
+            ui.baboon_checkbox(&mut pane.asset_bitmaps, "Bitmaps");
+            ui.baboon_checkbox(&mut pane.asset_models, "Models");
         });
         icon_menu_button(ui, ButtonIcon::View, "Thumbnail size", |ui| {
             ui.label("Thumbnail size");

@@ -39,9 +39,9 @@ impl BrowserSearchScope {
 
 pub(in crate::app) fn search_scope_controls(ui: &mut Ui, scope: &mut BrowserSearchScope) {
     ui.label(RichText::new("Search in").color(subtle_dark()));
-    ui.checkbox(&mut scope.tags, "Tags");
-    ui.checkbox(&mut scope.folders, "Folders");
-    ui.checkbox(&mut scope.keywords, "Keywords");
+    ui.baboon_checkbox(&mut scope.tags, "Tags");
+    ui.baboon_checkbox(&mut scope.folders, "Folders");
+    ui.baboon_checkbox(&mut scope.keywords, "Keywords");
     // A search always has at least one target.
     if !scope.tags && !scope.folders && !scope.keywords {
         scope.tags = true;

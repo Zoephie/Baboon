@@ -197,13 +197,13 @@ impl Dialog for FindWindow {
                                 changed |= ui
                                     .add_enabled(
                                         has_ids,
-                                        egui::Checkbox::new(&mut options.ids, if hud { "Names" } else { "String IDs" }),
+                                        ThemedCheckbox::new(&mut options.ids, if hud { "Names" } else { "String IDs" }),
                                     )
                                     .on_disabled_hover_text(
                                         "Halo CE string lists have no string IDs",
                                     )
                                     .changed();
-                                changed |= ui.checkbox(&mut options.text, if hud { "Text" } else { "String Text" }).changed();
+                                changed |= ui.baboon_checkbox(&mut options.text, if hud { "Text" } else { "String Text" }).changed();
                             });
                         } else {
                             if replace_mode {
@@ -223,13 +223,13 @@ impl Dialog for FindWindow {
                                 .width(option_width)
                                 .show_ui(ui, |ui| {
                                     changed |= ui
-                                        .checkbox(&mut query.look_in.field_names, "Field names")
+                                        .baboon_checkbox(&mut query.look_in.field_names, "Field names")
                                         .changed();
                                     changed |= ui
-                                        .checkbox(&mut query.look_in.field_values, "Field values")
+                                        .baboon_checkbox(&mut query.look_in.field_values, "Field values")
                                         .changed();
                                     changed |=
-                                        ui.checkbox(&mut query.look_in.blocks, "Blocks").changed();
+                                        ui.baboon_checkbox(&mut query.look_in.blocks, "Blocks").changed();
                                 });
                             }
                         }
@@ -304,8 +304,8 @@ impl Dialog for FindWindow {
                         // row around their smaller square, inflating visible gaps.
                         ui.spacing_mut().interact_size.y = ui.spacing().icon_width;
                         ui.label(RichText::new("Selection Options").strong().color(subtle_dark()));
-                        changed |= ui.checkbox(&mut query.match_case, "Match Case").changed();
-                        changed |= ui.checkbox(&mut query.whole_word, "Match Whole Word").changed();
+                        changed |= ui.baboon_checkbox(&mut query.match_case, "Match Case").changed();
+                        changed |= ui.baboon_checkbox(&mut query.whole_word, "Match Whole Word").changed();
                         });
                     });
                 });
@@ -602,6 +602,7 @@ mod tests {
             let ctx = egui::Context::default();
             ctx.set_global_style(foundation_style());
             ctx.set_fonts(foundation_fonts());
+            egui_extras::install_image_loaders(&ctx);
             let mut app = Baboon::for_test();
             app.open_find();
             app.set_find_mode(replace, &ctx);
@@ -611,10 +612,19 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0))),
                     ..Default::default()
                 }, |_ui| { app.dialogs.draw(&cx!(app, &ctx), &app_reads!(app)); });
-                boxes = output.shapes.iter().filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.rect.size() == Vec2::splat(ctx.global_style().spacing.icon_width) => Some(rect.rect),
+                let labels: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if matches!(text.galley.job.text.as_str(), "Match Case" | "Match Whole Word") =>
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
                     _ => None,
                 }).collect();
+                boxes = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.brush.is_some() && rect.rect.size() == Vec2::splat(16.0) => Some(rect.rect),
+                    egui::Shape::Mesh(mesh) if mesh.calc_bounds().size() == Vec2::splat(16.0) => Some(mesh.calc_bounds()),
+                    _ => None,
+                }).filter(|rect| labels.iter().any(|label|
+                    (rect.center().y - label.center().y).abs() < 1.0
+                    && rect.right() <= label.left() && label.left() - rect.right() < 20.0
+                )).collect();
             }
             boxes.sort_by(|a, b| a.top().total_cmp(&b.top()));
             assert_eq!(boxes.len(), 2);

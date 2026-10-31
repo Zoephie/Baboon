@@ -871,7 +871,7 @@ fn draw_shader_grid_row_inner(
             ui.spacing_mut().item_spacing.y = 0.0;
             for (bit, option) in options.iter().enumerate() {
                 let mut checked = mask & (1 << bit) != 0;
-                ui.add_enabled(false, egui::Checkbox::new(&mut checked, option));
+                ui.add_enabled(false, ThemedCheckbox::new(&mut checked, option));
             }
         });
     } else {
@@ -1195,7 +1195,7 @@ fn shader_grid_row_height(ui: &mut Ui, row: &ShaderGridRow, value_width: f32) ->
         );
         measure.spacing_mut().item_spacing.y = 0.0;
         for option in options {
-            measure.checkbox(&mut false, option);
+            measure.baboon_checkbox(&mut false, option);
         }
         (measure.min_rect().height() + 16.0).max(BUTTON_HEIGHT + 8.0)
     } else {
@@ -1530,7 +1530,7 @@ fn draw_shader_range_checkbox(
     let mut editor = TagFunctionEditor::from_function(control.function.clone());
     let mut ranged = editor.is_ranged();
     let response = shader_cell_scope(ui, rect, |ui| {
-        ui.add_enabled(edit.editable, egui::Checkbox::new(&mut ranged, "range:"))
+        ui.add_enabled(edit.editable, ThemedCheckbox::new(&mut ranged, "range:"))
     })
     .inner;
     if response.changed() && set_function_ranged(&mut editor, ranged) {
@@ -1855,7 +1855,7 @@ fn draw_shader_editable_value_with_color_preview(
                         let mut checked = current_mask & (1u64 << bit) != 0;
                         let response = ui.add_enabled(
                             edit.editable,
-                            egui::Checkbox::new(&mut checked, option.as_str()),
+                            ThemedCheckbox::new(&mut checked, option.as_str()),
                         );
                         if response.changed() {
                             let mut next_mask = current_mask;
@@ -2029,7 +2029,7 @@ fn draw_shader_editable_value_with_color_preview(
             let current_raw = row_edit.current.trim().parse::<i32>().unwrap_or(0);
             let mut checked = current_raw != 0;
             let response = shader_cell_scope(ui, rect, |ui| {
-                ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
+                ui.add_enabled(edit.editable, ThemedCheckbox::new(&mut checked, ""))
             })
             .inner;
             if response.changed() {

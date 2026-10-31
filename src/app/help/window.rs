@@ -326,7 +326,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
                 }
             });
         ui.separator();
-        ui.checkbox(&mut state.losses_only, "Only what is lost")
+        ui.baboon_checkbox(&mut state.losses_only, "Only what is lost")
             .on_hover_text(
                 "Hide every field that transfers unchanged. There are tens of thousands                  of those, and they are not what you came to find out.",
             );

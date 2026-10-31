@@ -44,7 +44,7 @@ fn draw_outside_folder(
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, depth == 0);
     state
         .show_header(ui, |ui| {
-            if ui.checkbox(&mut all, "").changed() {
+            if ui.baboon_checkbox(&mut all, "").changed() {
                 for key in tree.keys_under(folder) {
                     picked.insert(key, all);
                 }
@@ -72,7 +72,7 @@ fn draw_outside_folder(
                 for (key, name) in tags {
                     let mut wanted = picked.get(key).copied().unwrap_or(false);
                     if ui
-                        .checkbox(&mut wanted, RichText::new(name).monospace())
+                        .baboon_checkbox(&mut wanted, RichText::new(name).monospace())
                         .changed()
                     {
                         picked.insert(key.clone(), wanted);
@@ -148,12 +148,12 @@ fn draw_cache_import_body(
                 tags_root.display()
             );
             let mut chosen = dialog.destination.is_some();
-            if ui.radio_value(&mut chosen, false, own).clicked() {
+            if ui.baboon_radio_value(&mut chosen, false, own).clicked() {
                 dialog.destination = None;
                 dialog.conflicts_stale = true;
             }
             ui.horizontal(|ui| {
-                ui.radio_value(&mut chosen, true, "A folder I choose");
+                ui.baboon_radio_value(&mut chosen, true, "A folder I choose");
                 if ui.button("Choose folder...").clicked()
                     && let Some(picked) = rfd::FileDialog::new()
                         .set_directory(&tags_root)
@@ -212,9 +212,9 @@ fn draw_cache_import_body(
         ui.label(RichText::new("Tags the kit already has").strong());
         ui.add_enabled_ui(!dialog.running, |ui| {
             let before = dialog.replace;
-            ui.radio_value(&mut dialog.replace, ReplaceChoice::Always, "Replace them");
-            ui.radio_value(&mut dialog.replace, ReplaceChoice::Never, "Keep them");
-            ui.radio_value(&mut dialog.replace, ReplaceChoice::Chosen, "Let me pick");
+            ui.baboon_radio_value(&mut dialog.replace, ReplaceChoice::Always, "Replace them");
+            ui.baboon_radio_value(&mut dialog.replace, ReplaceChoice::Never, "Keep them");
+            ui.baboon_radio_value(&mut dialog.replace, ReplaceChoice::Chosen, "Let me pick");
             if dialog.replace != before && dialog.replace == ReplaceChoice::Chosen {
                 dialog.conflicts_stale = true;
             }
@@ -418,7 +418,7 @@ fn draw_cache_import_body(
                     for (key, name) in loose {
                         let mut wanted = outside_picked.get(&key).copied().unwrap_or(false);
                         if ui
-                            .checkbox(&mut wanted, RichText::new(&name).monospace())
+                            .baboon_checkbox(&mut wanted, RichText::new(&name).monospace())
                             .changed()
                         {
                             outside_picked.insert(key, wanted);

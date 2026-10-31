@@ -4,6 +4,16 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Match the content inset of neighboring menu buttons without shifting tables.
+pub(in crate::app) fn menu_control_margin(ui: &Ui) -> egui::Margin {
+    let inset = if egui::containers::menu::is_in_menu(ui) {
+        ui.spacing().button_padding.x.round() as i8
+    } else {
+        0
+    };
+    egui::Margin::symmetric(inset, 0)
+}
+
 /// Shared dimensions for ordinary, single-line application buttons.
 pub(in crate::app) const BUTTON_HEIGHT: f32 = 24.0;
 pub(in crate::app) const BUTTON_ICON_SIZE: f32 = 16.0;
@@ -721,17 +731,6 @@ pub(in crate::app) fn foundation_flag_hover() -> Color32 {
     } else {
         Color32::from_rgb(232, 232, 228)
     }
-}
-
-pub(in crate::app) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
-    if !enabled {
-        return if is_dark_mode() {
-            Color32::from_rgb(44, 44, 42)
-        } else {
-            Color32::from_rgb(226, 226, 222)
-        };
-    }
-    foundation_input()
 }
 
 pub(in crate::app) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);

@@ -704,7 +704,7 @@ fn draw_chimp_identity_panel(
                 .color(Color32::from_rgb(170, 130, 60))
                 .small(),
             );
-            ui.checkbox(&mut edit.is_unversioned, "Unversioned");
+            ui.baboon_checkbox(&mut edit.is_unversioned, "Unversioned");
             if edit.is_unversioned {
                 // Worth stating rather than leaving the fields looking live: an
                 // unversioned package stores no versioning block, so the reader
@@ -851,7 +851,7 @@ fn draw_chimp_export_edit_panel(
                 .small(),
             );
             if expert_mode {
-                ui.checkbox(
+                ui.baboon_checkbox(
                     &mut edit.recompute_hash,
                     format!("Recompute it as 0x{new_hash:016X} (importers keep the old one)"),
                 );
@@ -863,7 +863,7 @@ fn draw_chimp_export_edit_panel(
         ui.horizontal_wrapped(|ui| {
             for (bit, label) in CHIMP_OBJECT_FLAG_BITS {
                 let mut set = edit.object_flags & bit != 0;
-                if ui.checkbox(&mut set, label).changed() {
+                if ui.baboon_checkbox(&mut set, label).changed() {
                     if set {
                         edit.object_flags |= bit;
                     } else {

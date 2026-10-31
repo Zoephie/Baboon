@@ -741,16 +741,16 @@ fn draw_view_menu(cx: &Ctx, ui: &mut Ui, view: &mut KitView) {
     let mut angles_in_degrees = prefs.angles_in_degrees;
     let mut scroll_to_cycle_dropdowns = prefs.scroll_to_cycle_dropdowns;
     let mut expert_mode = prefs.expert_mode;
-    ui.checkbox(&mut show_browser_prefixes, "Show [tag]/[folder]");
-    ui.checkbox(&mut show_block_sizes, "Show block sizes");
-    ui.checkbox(&mut angles_in_degrees, "Angles in degrees")
+    ui.baboon_checkbox(&mut show_browser_prefixes, "Show [tag]/[folder]");
+    ui.baboon_checkbox(&mut show_block_sizes, "Show block sizes");
+    ui.baboon_checkbox(&mut angles_in_degrees, "Angles in degrees")
         .on_hover_text(
             "Angle fields hold radians on disk. Guerilla and the other Halo \
              tools show them in degrees, and so does Baboon — turn this off to \
              read and type the stored radians instead.",
         );
-    ui.checkbox(&mut scroll_to_cycle_dropdowns, "Scroll wheel cycles dropdowns");
-    ui.checkbox(&mut expert_mode, "Expert mode");
+    ui.baboon_checkbox(&mut scroll_to_cycle_dropdowns, "Scroll wheel cycles dropdowns");
+    ui.baboon_checkbox(&mut expert_mode, "Expert mode");
     if (show_browser_prefixes, show_block_sizes, angles_in_degrees, scroll_to_cycle_dropdowns, expert_mode)
         != (
             prefs.show_browser_prefixes,

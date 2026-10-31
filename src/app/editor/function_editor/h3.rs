@@ -463,7 +463,7 @@ fn draw_function_editor_contents(
                                         if ui
                                             .add_enabled(
                                                 editable,
-                                                egui::Checkbox::without_text(&mut ranged),
+                                                ThemedCheckbox::without_text(&mut ranged),
                                             )
                                             .changed()
                                             && set_function_ranged(&mut editor, ranged)
@@ -1043,7 +1043,7 @@ fn draw_curve_panel(
             ui.label(RichText::new("Curve Options").color(text_dark().gamma_multiply(0.5)));
             let mut clamped = editor.is_clamped();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut clamped, "Clamped"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut clamped, "Clamped"))
                 .changed()
             {
                 set_editor_flag(editor, FunctionFlags::CLAMPED, clamped);
@@ -1051,7 +1051,7 @@ fn draw_curve_panel(
             }
             let mut cyclic = editor.is_cyclic();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut cyclic, "Cyclic"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut cyclic, "Cyclic"))
                 .changed()
             {
                 set_function_cyclic(editor, cyclic);
@@ -1059,7 +1059,7 @@ fn draw_curve_panel(
             }
             let mut exclusion = editor.is_exclusion();
             if ui
-                .add_enabled(editable, egui::Checkbox::new(&mut exclusion, "Exclusion"))
+                .add_enabled(editable, ThemedCheckbox::new(&mut exclusion, "Exclusion"))
                 .changed()
             {
                 set_editor_flag(editor, FunctionFlags::EXCLUSION, exclusion);

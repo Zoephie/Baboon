@@ -210,7 +210,7 @@ impl Dialog for ImportTagDialog {
                                     .color(Color32::from_rgb(242, 196, 48))
                                     .small(),
                                 );
-                                ui.checkbox(import_anyway, "Import anyway");
+                                ui.baboon_checkbox(import_anyway, "Import anyway");
                             }
                             blam_tags::LayoutSeverity::Incompatible => {
                                 ui.label(

@@ -777,7 +777,7 @@ impl Dialog for ModExportDialog {
                                     let mut include = row.include;
                                     let enabled = row.kind != ModExportChange::Unresolved;
                                     if ui
-                                        .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
+                                        .add_enabled(enabled, ThemedCheckbox::new(&mut include, ""))
                                         .changed()
                                     {
                                         toggled = Some(index);
@@ -934,7 +934,7 @@ impl Dialog for ModExportDialog {
                     // more than not noticing a line of text.
                     let mut acknowledged = dialog.overwrite_acknowledged;
                     if ui
-                        .checkbox(&mut acknowledged, "Replace these files")
+                        .baboon_checkbox(&mut acknowledged, "Replace these files")
                         .changed()
                     {
                         acknowledge = Some(acknowledged);

@@ -101,12 +101,9 @@ impl<'a> ThemedCheckbox<'a> {
         self
     }
 }
-impl egui::Widget for ThemedCheckbox<'_> {
-    fn ui(self, ui: &mut Ui) -> egui::Response {
+impl ThemedCheckbox<'_> {
+    fn show(self, ui: &mut Ui) -> egui::Response {
         let original = ui.style().clone();
-        let foreground = ui.ctx().global_style().visuals.text_color();
-        let accent = ui.ctx().global_style().visuals.selection.bg_fill;
-        let dark = ui.visuals().dark_mode;
         // Leave the native glyph's space in the layout and suppress its paint.
         // Preserve text colour explicitly while hiding only the glyph strokes.
         {
@@ -145,17 +142,53 @@ impl egui::Widget for ThemedCheckbox<'_> {
                 ),
                 Vec2::splat(16.0),
             );
-            image(Palette {
-                state,
-                dark,
-                hovered,
-                foreground,
-                accent,
-            })
-            .paint_at(ui, rect);
+            paint_themed_checkbox(ui, rect, state, hovered);
         }
         response
     }
+}
+
+impl egui::Widget for ThemedCheckbox<'_> {
+    fn ui(self, ui: &mut Ui) -> egui::Response {
+        // Icon-only checkboxes belong to a composed row or a table; that
+        // owner supplies the row's padding and preserves its column placement.
+        if egui::containers::menu::is_in_menu(ui)
+            && self.atoms.text().is_some_and(|text| !text.is_empty())
+        {
+            Frame::NONE
+                .inner_margin(menu_control_margin(ui))
+                .show(ui, |ui| self.show(ui))
+                .inner
+        } else {
+            self.show(ui)
+        }
+    }
+}
+
+/// Shared artwork for native-layout widgets and custom allocated checkbox rows.
+fn paint_themed_checkbox(ui: &Ui, rect: egui::Rect, state: State, hovered: bool) {
+    image(Palette {
+        state,
+        dark: ui.visuals().dark_mode,
+        hovered,
+        foreground: ui.ctx().global_style().visuals.text_color(),
+        accent: ui.ctx().global_style().visuals.selection.bg_fill,
+    })
+    .paint_at(ui, rect);
+}
+
+/// Custom rows supply the glyph rect; their parent UI owns disabled opacity.
+pub(in crate::app) fn paint_checkbox_at(ui: &Ui, rect: egui::Rect, checked: bool, hovered: bool) {
+    paint_themed_checkbox(
+        ui,
+        rect,
+        if checked {
+            State::Checked
+        } else {
+            State::Unchecked
+        },
+        hovered,
+    );
 }
 
 pub(in crate::app) trait CheckboxUi {

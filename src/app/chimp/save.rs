@@ -838,12 +838,12 @@ impl Dialog for ChimpSaveDialog {
                 // rather than offered as a choice of one.
                 if expert_mode {
                     let mode_before = dialog.mode;
-                    ui.radio_value(
+                    ui.baboon_radio_value(
                         &mut dialog.mode,
                         ChimpSaveMode::ExportMod,
                         "Export mod (recommended)",
                     );
-                    ui.radio_value(
+                    ui.baboon_radio_value(
                         &mut dialog.mode,
                         ChimpSaveMode::OverwriteSources,
                         "Overwrite source PAKs",
@@ -900,7 +900,7 @@ impl Dialog for ChimpSaveDialog {
                                 Color32::from_rgb(210, 120, 80),
                                 format!("This will replace: {}", existing.join(", ")),
                             );
-                            ui.checkbox(
+                            ui.baboon_checkbox(
                                 &mut dialog.overwrite_acknowledged,
                                 "Replace the existing mod container",
                             );
@@ -915,7 +915,7 @@ impl Dialog for ChimpSaveDialog {
                         for path in &source_containers {
                             ui.label(path.display().to_string());
                         }
-                        ui.checkbox(
+                        ui.baboon_checkbox(
                             &mut dialog.overwrite_acknowledged,
                             "I understand these source containers will be modified",
                         );

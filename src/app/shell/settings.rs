@@ -475,7 +475,7 @@ fn draw_editing_kit_form(
     if !draft.is_campaign_evolved() {
         ui.add_space(8.0);
         editing_kit_field_label(ui, "Options");
-        ui.checkbox(&mut draft.read_only, "Read-Only");
+        ui.baboon_checkbox(&mut draft.read_only, "Read-Only");
         ui.indent("editing_kit_read_only_help", |ui| {
             ui.label(
                 RichText::new("Make this editing kit read-only within Baboon.")
@@ -490,7 +490,7 @@ fn draw_editing_kit_form(
             );
         });
         ui.add_space(8.0);
-        ui.checkbox(&mut draft.git_tracked, "Tracked in Git");
+        ui.baboon_checkbox(&mut draft.git_tracked, "Tracked in Git");
         ui.indent("editing_kit_git_help", |ui| {
             ui.label(
                 RichText::new(
@@ -1606,12 +1606,12 @@ pub(in crate::app) fn draw_update_channel_picker(ui: &mut Ui, prefs: &mut GuiPre
     let mut changed = false;
     for option in UpdateChannel::ALL {
         changed |= ui
-            .radio_value(&mut prefs.update_channel, option, option.label())
+            .baboon_radio_value(&mut prefs.update_channel, option, option.label())
             .on_hover_text(option.help())
             .changed();
     }
     ui.add_space(4.0);
-    ui.checkbox(
+    ui.baboon_checkbox(
         &mut prefs.check_updates_on_startup,
         "Check for updates when Baboon starts",
     );
@@ -1645,7 +1645,7 @@ pub(in crate::app) fn draw_nested_default_picker(ui: &mut Ui, nested_default: &m
     ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
     ui.horizontal(|ui| {
         for option in NestedDefault::ALL {
-            ui.radio_value(nested_default, option, option.label())
+            ui.baboon_radio_value(nested_default, option, option.label())
                 .on_hover_text(option.help());
         }
     });

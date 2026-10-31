@@ -620,9 +620,9 @@ pub(in crate::app) fn draw_tag_diff_list(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
-                    ui.checkbox(&mut filters.both, "Both versions");
-                    ui.checkbox(&mut filters.current_only, "Before only");
-                    ui.checkbox(&mut filters.comparison_only, "After only");
+                    ui.baboon_checkbox(&mut filters.both, "Both versions");
+                    ui.baboon_checkbox(&mut filters.current_only, "Before only");
+                    ui.baboon_checkbox(&mut filters.comparison_only, "After only");
                 });
                 if icon_text_button(ui, ButtonIcon::Swap, "Swap", true)
                     .on_hover_text("Swap the two sides of the comparison")
@@ -1466,7 +1466,7 @@ impl Dialog for TagDiffState {
                         ui.horizontal(|ui| {
                             icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
                                 let history = state.source == TagCompareSource::GitHistory;
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.both,
                                     if history {
                                         "Both versions"
@@ -1474,7 +1474,7 @@ impl Dialog for TagDiffState {
                                         "Both tags"
                                     },
                                 );
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.current_only,
                                     if history {
                                         "Before only"
@@ -1482,7 +1482,7 @@ impl Dialog for TagDiffState {
                                         "Current tag only"
                                     },
                                 );
-                                ui.checkbox(
+                                ui.baboon_checkbox(
                                     &mut state.filters.comparison_only,
                                     if history {
                                         "After only"
