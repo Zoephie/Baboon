@@ -9,7 +9,7 @@ use blam_tags::render_method::{
     ResolvedValue,
 };
 use super::h2_passes::{
-    H2DrawPass, H2Image, H2Layer, H2_LAYER_COUNT, h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
+    H2DrawPass, H2Image, H2Layer, H2_LAYER_COUNT, animation_function, h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
     resolve_h2_layer_passes,
 };
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -753,15 +753,7 @@ fn h2_scale_animation(parameter: &TagStruct<'_>) -> Option<[Option<f32>; 2]> {
         (0..block.len())
             .filter_map(|index| block.element(index))
             .find(|property| property.read_enum_name("type").as_deref() == Some(kind))
-            .and_then(|property| {
-                let data = property.field_path("function/data")?.as_block()?;
-                let bytes: Vec<u8> = (0..data.len())
-                    .filter_map(|index| data.element(index))
-                    .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))
-                    .collect();
-                let function = crate::app::editor::function_editor::h2_tag_function(&bytes)?;
-                Some(function.evaluate(0.0, 0.0))
-            })
+            .and_then(|property| Some(animation_function(&property)?.evaluate(0.0, 0.0)))
             .filter(|value| value.is_finite())
     };
     let uniform = value_of("bitmap scale uniform");

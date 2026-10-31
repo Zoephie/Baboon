@@ -93,6 +93,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         visible_batches,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
+        background: preview_background(&egui::Visuals::dark()),
         show_backfaces: state.show_backfaces,
         show_grid: false,
         textures: data.textures.clone(),
@@ -103,6 +104,7 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         bloom: std::env::var_os("H2_SHOT_BLOOM").is_some(),
         self_shadow: std::env::var_os("H2_SHOT_SHADOW").is_some(),
         light_follows_camera: state.h2_light_follows_camera,
+        time: std::env::var("H2_SHOT_TIME").map_or(0.0, |time| time.parse().unwrap()),
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -126,7 +128,8 @@ fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagS
         gl.viewport(0, 0, width, height);
         gl.color_mask(true, true, true, true);
         gl.depth_mask(true);
-        gl.clear_color(PREVIEW_CLEAR[0], PREVIEW_CLEAR[1], PREVIEW_CLEAR[2], 1.0);
+        let [r, g, b] = frame.background;
+        gl.clear_color(r, g, b, 1.0);
         gl.clear_depth_f32(1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         renderer.paint(gl, &frame);

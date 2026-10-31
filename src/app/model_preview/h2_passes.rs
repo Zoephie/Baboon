@@ -10,8 +10,9 @@
 //! chooses them for something with no lightmap of its own.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use blam_tags::{TagFieldData, TagFile, TagStruct};
+use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::h2_prt::H2PrtLight;
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
@@ -138,6 +139,10 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         light_colors: Vec::new(),
         light_direct: [0.0; 3],
         light_indirect: [0.0; 3],
+        animated_constants: Vec::new(),
+        animated_rows: Vec::new(),
+        animated_tint_facing: Vec::new(),
+        animated_tint_glancing: Vec::new(),
     };
     [
         (
@@ -293,6 +298,176 @@ pub(in crate::app) struct H2Depth {
     pub(in crate::app) write: bool,
 }
 
+/// What one of a shader parameter's `animation properties` drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum H2AnimationKind {
+    ScaleUniform,
+    ScaleX,
+    ScaleY,
+    TranslationX,
+    TranslationY,
+    Rotation,
+    Value,
+    Color,
+}
+
+/// A parameter function the game reads by time, as in
+/// `shader_setup_evaluate_overlay_animation`.
+#[derive(Debug, Clone)]
+pub(crate) struct H2Animation {
+    kind: H2AnimationKind,
+    /// Seconds to a cycle. At zero the function reads the time itself.
+    period: f32,
+    function: Arc<TagFunction>,
+}
+
+impl PartialEq for H2Animation {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.period == other.period
+            && self.function.to_bytes() == other.function.to_bytes()
+    }
+}
+
+impl H2Animation {
+    fn input(&self, time: f32) -> f32 {
+        if self.period > 0.0 { (time / self.period).rem_euclid(1.0) } else { time }
+    }
+
+    fn scalar(&self, time: f32) -> f32 {
+        self.function.evaluate(self.input(time), 0.0)
+    }
+
+    fn vector(&self, time: f32) -> [f32; 4] {
+        match self.kind {
+            H2AnimationKind::Color => {
+                let color = self.function.evaluate_color(self.input(time), 0.0);
+                [color.red, color.green, color.blue, 1.0]
+            }
+            _ => [self.scalar(time); 4],
+        }
+    }
+
+    /// Whether this shows: a transform always can, but a value or color may
+    /// wander by less than a step of the frame.
+    fn moves(&self) -> bool {
+        if self.function.as_constant().is_some() {
+            return false;
+        }
+        if self.is_transform() {
+            return true;
+        }
+        const SAMPLES: usize = 16;
+        const VISIBLE: f32 = 2.0 / 255.0;
+        let span = if self.period > 0.0 { self.period } else { 1.0 };
+        let first = self.vector(0.0);
+        (1..SAMPLES).any(|sample| {
+            let vector = self.vector(span * sample as f32 / SAMPLES as f32);
+            vector.iter().zip(first).any(|(value, first)| (value - first).abs() >= VISIBLE)
+        })
+    }
+
+    fn is_transform(&self) -> bool {
+        !matches!(self.kind, H2AnimationKind::Value | H2AnimationKind::Color)
+    }
+}
+
+/// The last value or color of a parameter's animations, as they overwrite
+/// one another in the game.
+fn animated_vector(animations: &[H2Animation], time: f32) -> Option<[f32; 4]> {
+    animations.iter().rev().find(|animation| !animation.is_transform()).map(|last| last.vector(time))
+}
+
+/// The bytes of a `mapping_function`, as the engine's H2 function.
+pub(super) fn animation_function(property: &TagStruct<'_>) -> Option<TagFunction> {
+    let data = property.field_path("function/data")?.as_block()?;
+    let bytes: Vec<u8> = (0..data.len())
+        .filter_map(|index| data.element(index))
+        .filter_map(|byte| byte.read_int_any("Value").map(|value| value as i8 as u8))
+        .collect();
+    crate::app::editor::function_editor::h2_tag_function(&bytes)
+}
+
+/// The animations of a parameter that time alone drives. One with an input
+/// reads a value of the object, which a preview does not have, so such a
+/// parameter keeps its constant.
+fn read_animations(parameter: TagStruct<'_>) -> Vec<H2Animation> {
+    elements(parameter, "animation properties")
+        .filter(|property| property.read_string_id("input name").is_none_or(|name| name.is_empty()))
+        .filter_map(|property| {
+            let kind = match property.read_enum_name("type")?.as_str() {
+                "bitmap scale uniform" => H2AnimationKind::ScaleUniform,
+                "bitmap scale x" => H2AnimationKind::ScaleX,
+                "bitmap scale y" => H2AnimationKind::ScaleY,
+                "bitmap translation x" => H2AnimationKind::TranslationX,
+                "bitmap translation y" => H2AnimationKind::TranslationY,
+                "bitmap rotation angle" => H2AnimationKind::Rotation,
+                "value" => H2AnimationKind::Value,
+                "color" => H2AnimationKind::Color,
+                _ => return None,
+            };
+            Some(H2Animation {
+                kind,
+                period: property.read_real("time period").unwrap_or(0.0),
+                function: Arc::new(animation_function(&property)?),
+            })
+        })
+        .collect()
+}
+
+/// How a pass holds a texture transform in one register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum H2RowForm {
+    Row1,
+    Row2,
+    SimpleXform,
+    ScaleXy,
+    ScaleZw,
+}
+
+/// A texture transform to rebuild each frame.
+#[derive(Debug, Clone)]
+pub(crate) struct H2AnimatedRow {
+    register: usize,
+    form: H2RowForm,
+    scale: [f32; 2],
+    animations: Vec<H2Animation>,
+}
+
+impl H2AnimatedRow {
+    /// `shader_setup_evaluate_overlay_bitmap_xform_animation`, which turns
+    /// about the middle of the map.
+    fn apply(&self, rows: &mut [[f32; 4]; H2_TEXTURE_ROWS], time: f32) {
+        let [mut scale_x, mut scale_y] = self.scale;
+        let (mut move_x, mut move_y, mut angle) = (0.0, 0.0, 0.0);
+        for animation in &self.animations {
+            let value = animation.scalar(time);
+            match animation.kind {
+                H2AnimationKind::ScaleUniform => (scale_x, scale_y) = (value, value),
+                H2AnimationKind::ScaleX => scale_x = value,
+                H2AnimationKind::ScaleY => scale_y = value,
+                H2AnimationKind::TranslationX => move_x = value,
+                H2AnimationKind::TranslationY => move_y = value,
+                H2AnimationKind::Rotation => angle = value,
+                H2AnimationKind::Value | H2AnimationKind::Color => {}
+            }
+        }
+        let (sin, cos): (f32, f32) = f32::sin_cos(angle);
+        let offset_x = ((sin + 1.0 - cos) * 0.5 + move_x) * scale_x;
+        let offset_y = ((1.0 - cos - sin) * 0.5 + move_y) * scale_y;
+        let Some(row) = rows.get_mut(self.register) else {
+            return;
+        };
+        match self.form {
+            H2RowForm::Row1 => *row = [cos * scale_x, -sin * scale_x, 0.0, offset_x],
+            H2RowForm::Row2 => *row = [sin * scale_y, cos * scale_y, 0.0, offset_y],
+            H2RowForm::SimpleXform => *row = [cos * scale_x, cos * scale_y, offset_x, offset_y],
+            H2RowForm::ScaleXy => (row[0], row[1]) = (cos * scale_x, cos * scale_y),
+            H2RowForm::ScaleZw => (row[2], row[3]) = (cos * scale_x, cos * scale_y),
+        }
+    }
+}
+
 /// A vertex constant the pass fills from a parameter: for a bitmap, a row of
 /// its texture transform.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,11 +494,14 @@ pub(in crate::app) struct H2Pass {
     pub(in crate::app) blend: Option<H2Blend>,
     pub(in crate::app) depth: H2Depth,
     pub(in crate::app) channels: String,
+    pub(in crate::app) custom_channels: Option<[bool; 4]>,
     pub(in crate::app) alpha_test: Option<AlphaTest>,
     /// One per texture stage, in stage order.
     pub(in crate::app) textures: Vec<H2PassTexture>,
     pub(in crate::app) parameters: Vec<(String, H2ParameterValue)>,
     pub(in crate::app) vertex_constants: Vec<H2VertexConstant>,
+    /// What the shader animates of `parameters`, by parameter.
+    pub(in crate::app) animations: HashMap<String, Vec<H2Animation>>,
 }
 
 impl H2Pass {
@@ -341,6 +519,8 @@ struct ParameterLevel {
     bitmap: String,
     value: f32,
     color: [f32; 3],
+    /// A shader's own: `shader_setup_get_shader_parameters` is all the game reads.
+    animations: Vec<H2Animation>,
 }
 
 type Parameters = HashMap<String, ParameterLevel>;
@@ -386,6 +566,7 @@ fn insert_level(
         return;
     };
     into.entry(name).or_insert_with(|| ParameterLevel {
+        animations: Vec::new(),
         kind: parameter.read_enum_name("type").unwrap_or_default(),
         bitmap: parameter.read_tag_ref_path(bitmap).unwrap_or_default(),
         value: parameter.read_real(value).unwrap_or(0.0),
@@ -395,6 +576,7 @@ fn insert_level(
 
 fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
     let mut parameters = Parameters::new();
+    let mut hidden = false;
     for parameter in elements(shader, "parameters") {
         insert_level(&mut parameters, parameter, "bitmap", "const value", "const color");
         // Only a player has an emblem, which a preview's object is not.
@@ -404,7 +586,17 @@ fn shader_parameters(shader: TagStruct<'_>) -> Parameters {
                 parameter.read_string_id("name").and_then(|name| parameters.get_mut(&name))
         {
             level.value = 0.0;
+            hidden = true;
         }
+        if let Some(level) =
+            parameter.read_string_id("name").and_then(|name| parameters.get_mut(&name))
+            && level.animations.is_empty()
+        {
+            level.animations = read_animations(parameter);
+        }
+    }
+    if hidden {
+        parameters.values_mut().for_each(|level| level.animations.clear());
     }
     parameters
 }
@@ -595,6 +787,14 @@ fn read_pass(
         })
         .collect();
     parameters.sort_by(|a, b| a.0.cmp(&b.0));
+    let animations = own
+        .keys()
+        .filter(|name| !externs.contains_key(*name))
+        .filter_map(|name| {
+            let level = shader.get(name).filter(|level| !level.animations.is_empty())?;
+            Some((name.clone(), level.animations.clone()))
+        })
+        .collect();
 
     let textures = elements(implementation, "textures")
         .map(|texture| {
@@ -620,9 +820,11 @@ fn read_pass(
         blend: read_blend(implementation),
         depth: read_depth(implementation),
         channels: implementation.read_enum_name("channels").unwrap_or_default(),
+        custom_channels: read_custom_channels(implementation),
         alpha_test: read_alpha_test(implementation),
         textures,
         parameters,
+        animations,
         vertex_constants: elements(implementation, "vs constants")
             .map(|constant| H2VertexConstant {
                 parameter: constant.read_string_id("source parameter").unwrap_or_default(),
@@ -684,6 +886,46 @@ pub(crate) struct H2DrawPass {
     /// tag, each as its pixel shader expects: some negate them.
     pub(crate) light_direct: [f32; 3],
     pub(crate) light_indirect: [f32; 3],
+    /// Components of `constants` the shader animates: register, component.
+    animated_constants: Vec<(u32, usize, Vec<H2Animation>)>,
+    animated_rows: Vec<H2AnimatedRow>,
+    animated_tint_facing: Vec<H2Animation>,
+    animated_tint_glancing: Vec<H2Animation>,
+}
+
+impl H2DrawPass {
+    /// Whether this pass looks different from one moment to the next.
+    pub(crate) fn moves(&self) -> bool {
+        self.animated_constants.iter().flat_map(|(_, _, animations)| animations)
+            .chain(self.animated_rows.iter().flat_map(|row| &row.animations))
+            .chain(&self.animated_tint_facing)
+            .chain(&self.animated_tint_glancing)
+            .any(H2Animation::moves)
+    }
+
+    pub(crate) fn texture_rows_at(&self, time: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
+        let mut rows = self.texture_rows;
+        self.animated_rows.iter().for_each(|row| row.apply(&mut rows, time));
+        rows
+    }
+
+    pub(crate) fn tints_at(&self, time: f32) -> ([f32; 4], [f32; 4]) {
+        (
+            animated_vector(&self.animated_tint_facing, time).unwrap_or(self.tint_facing),
+            animated_vector(&self.animated_tint_glancing, time).unwrap_or(self.tint_glancing),
+        )
+    }
+
+    /// Fill what the shader animates of `value`, the constant at `register`.
+    pub(crate) fn animate_constant(&self, register: u32, value: &mut [f32; 4], time: f32) {
+        for (animated, component, animations) in &self.animated_constants {
+            if *animated == register
+                && let Some(vector) = animated_vector(animations, time)
+            {
+                value[*component] = vector[*component];
+            }
+        }
+    }
 }
 
 /// One initial permutation of a change color channel.
@@ -869,6 +1111,18 @@ fn channel_mask(channels: &str) -> [bool; 4] {
     }
 }
 
+/// A `custom` pass's own mask. None set, as on `z_prepass`, writes depth alone.
+fn read_custom_channels(implementation: TagStruct<'_>) -> Option<[bool; 4]> {
+    if implementation.read_enum_name("channels").as_deref() != Some("custom") {
+        return None;
+    }
+    let flags = implementation
+        .descend("channels state[0]")
+        .and_then(|state| state.read_flag_names("flags"))
+        .unwrap_or_default();
+    Some(["R", "G", "B", "A"].map(|channel| flags.iter().any(|(_, name)| name == channel)))
+}
+
 /// Rows of an identity 2D transform: `x` in even registers, `y` in odd ones.
 fn identity_rows() -> [[f32; 4]; H2_TEXTURE_ROWS] {
     std::array::from_fn(|row| if row % 2 == 0 { [1.0, 0.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0] })
@@ -892,7 +1146,9 @@ pub(in crate::app) fn prepare_draw_pass(
         pass.parameters.iter().find(|(parameter, _)| parameter == name).map(|(_, value)| value)
     };
 
+    let animations_of = |name: &str| pass.animations.get(name).cloned().unwrap_or_default();
     let mut constants: Vec<(u32, [f32; 4])> = Vec::new();
+    let mut animated_constants = Vec::new();
     let mut change_colors = Vec::new();
     let mut light_colors = Vec::new();
     for binding in &translated.constants {
@@ -911,6 +1167,10 @@ pub(in crate::app) fn prepare_draw_pass(
                 _ => 3,
             };
             constants[at].1[index] = value[index];
+            let animations = animations_of(&binding.source);
+            if animations.iter().any(|animation| !animation.is_transform()) {
+                animated_constants.push((binding.register, index, animations));
+            }
             if let Some(H2ParameterValue::Extern(source)) = lookup(&binding.source)
                 && let Some(channel) = change_color_channel(source)
                 && index < 3
@@ -998,6 +1258,8 @@ pub(in crate::app) fn prepare_draw_pass(
         identity_rows()
     };
     let (mut tint_facing, mut tint_glancing) = ([1.0; 4], [1.0; 4]);
+    let (mut animated_tint_facing, mut animated_tint_glancing) = (Vec::new(), Vec::new());
+    let mut animated_rows = Vec::new();
     let [x, y, z, _] = DEFAULT_DIRECT_VECTOR;
     let mut light_direct = [x, y, z];
     let [x, y, z, _] = DEFAULT_INDIRECT_VECTOR;
@@ -1025,8 +1287,14 @@ pub(in crate::app) fn prepare_draw_pass(
             let value = lookup(&constant.parameter)
                 .map_or([1.0; 4], |value| parameter_vector(value, specular_brightness));
             match constant.register {
-                10 => tint_facing = value,
-                11 => tint_glancing = value,
+                10 => {
+                    tint_facing = value;
+                    animated_tint_facing = animations_of(&constant.parameter);
+                }
+                11 => {
+                    tint_glancing = value;
+                    animated_tint_glancing = animations_of(&constant.parameter);
+                }
                 _ => {}
             }
             continue;
@@ -1046,18 +1314,37 @@ pub(in crate::app) fn prepare_draw_pass(
             }
         }
         let [x, y] = scale(&constant.parameter);
-        if constant.components.contains("row1") {
+        let form = if constant.components.contains("row1") {
             *row = [x, 0.0, 0.0, 0.0];
+            H2RowForm::Row1
         } else if constant.components.contains("row2") {
             *row = [0.0, y, 0.0, 0.0];
+            H2RowForm::Row2
         } else if constant.components.contains("simple xform") {
             *row = [x, y, 0.0, 0.0];
+            H2RowForm::SimpleXform
         } else if constant.components.starts_with("xy (2D scale") {
             row[0] = x;
             row[1] = y;
+            H2RowForm::ScaleXy
         } else if constant.components.starts_with("zw (2D scale") {
             row[2] = x;
             row[3] = y;
+            H2RowForm::ScaleZw
+        } else {
+            continue;
+        };
+        let animations: Vec<_> = animations_of(&constant.parameter)
+            .into_iter()
+            .filter(H2Animation::is_transform)
+            .collect();
+        if !animations.is_empty() {
+            animated_rows.push(H2AnimatedRow {
+                register: constant.register.max(0) as usize,
+                form,
+                scale: [x, y],
+                animations,
+            });
         }
     }
 
@@ -1066,7 +1353,7 @@ pub(in crate::app) fn prepare_draw_pass(
         fragment: translated.glsl,
         blend: pass.blend,
         depth: pass.depth,
-        channels: channel_mask(&pass.channels),
+        channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
         textures,
         constants,
         texture_rows,
@@ -1076,6 +1363,10 @@ pub(in crate::app) fn prepare_draw_pass(
         light_colors,
         light_direct,
         light_indirect,
+        animated_constants,
+        animated_rows,
+        animated_tint_facing,
+        animated_tint_glancing,
     })
 }
 
@@ -1122,6 +1413,56 @@ pub(in crate::app) fn resolve_h2_layer_passes(
 mod tests {
     use super::*;
 
+    fn animation(kind: H2AnimationKind, period: f32, value: f32) -> H2Animation {
+        let function = blam_tags::tag_function::H2Function::new_constant(value);
+        H2Animation {
+            kind,
+            period,
+            function: Arc::new(TagFunction::parse_encoded(
+                blam_tags::tag_function::FunctionEncoding::H2,
+                &function.to_bytes(),
+            ).unwrap()),
+        }
+    }
+
+    #[test]
+    fn a_period_wraps_time_and_no_period_reads_it_raw() {
+        let cycling = animation(H2AnimationKind::Value, 4.0, 0.0);
+        assert_eq!(cycling.input(1.0), 0.25);
+        assert_eq!(cycling.input(5.0), 0.25);
+        assert_eq!(animation(H2AnimationKind::Value, 0.0, 0.0).input(5.0), 5.0);
+    }
+
+    #[test]
+    fn a_texture_transform_moves_scales_and_turns_as_the_game_builds_it() {
+        let row = |form, animations| {
+            let mut rows = [[0.0; 4]; H2_TEXTURE_ROWS];
+            H2AnimatedRow { register: 1, form, scale: [2.0, 4.0], animations }.apply(&mut rows, 0.0);
+            rows[1]
+        };
+        let moved = vec![
+            animation(H2AnimationKind::TranslationX, 0.0, 0.25),
+            animation(H2AnimationKind::TranslationY, 0.0, 0.5),
+        ];
+        assert_eq!(row(H2RowForm::SimpleXform, moved.clone()), [2.0, 4.0, 0.5, 2.0]);
+        assert_eq!(row(H2RowForm::Row1, moved.clone()), [2.0, 0.0, 0.0, 0.5]);
+        assert_eq!(row(H2RowForm::Row2, moved), [0.0, 4.0, 0.0, 2.0]);
+
+        let turned = row(
+            H2RowForm::Row1,
+            vec![animation(H2AnimationKind::Rotation, 0.0, std::f32::consts::FRAC_PI_2)],
+        );
+        // A quarter turn about the middle of the map keeps the middle in place.
+        assert!(turned[0].abs() < 1e-6, "{turned:?}");
+        assert!((turned[1] + 2.0).abs() < 1e-6, "{turned:?}");
+        assert!((turned[3] - 2.0).abs() < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn only_a_non_constant_function_moves() {
+        assert!(!animation(H2AnimationKind::Value, 1.0, 0.5).moves());
+    }
+
     #[test]
     fn the_lights_choose_between_the_game_s_two_lightmap_paths() {
         assert_eq!(H2Layer::Lightmap.implementation(), 3);
@@ -1140,6 +1481,7 @@ mod tests {
             .iter()
             .map(|(name, kind, bitmap, value)| {
                 ((*name).to_owned(), ParameterLevel {
+                    animations: Vec::new(),
                     kind: (*kind).to_owned(),
                     bitmap: (*bitmap).to_owned(),
                     value: *value,
@@ -1212,6 +1554,7 @@ mod tests {
             blend: None,
             depth: H2Depth { compare: None, write: false },
             channels: "color only".to_owned(),
+            custom_channels: None,
             alpha_test: None,
             textures: Vec::new(),
             parameters: vec![
@@ -1224,6 +1567,7 @@ mod tests {
                 H2VertexConstant { parameter: "map".to_owned(), bank: "Cn [0,12]".to_owned(), register: 3, components: "xyw row2 (2D affine xform)".to_owned() },
                 H2VertexConstant { parameter: "tint".to_owned(), bank: "Vn [0,15]".to_owned(), register: 10, components: "xyzw".to_owned() },
             ],
+            animations: HashMap::new(),
         };
         let psh = "#const C1.rgb= $tint\n#const C1.a= $glow\n#const C2.rgb= $primary\n\
                    float4 c1 : register(C1);\nfloat4 c2 : register(C2);\n\
@@ -1262,6 +1606,7 @@ mod tests {
             blend: None,
             depth: H2Depth { compare: None, write: false },
             channels: String::new(),
+            custom_channels: None,
             alpha_test: None,
             textures: vec![H2PassTexture {
                 parameter: String::new(),
@@ -1270,6 +1615,7 @@ mod tests {
             }],
             parameters: Vec::new(),
             vertex_constants: Vec::new(),
+            animations: HashMap::new(),
         };
         assert!(h2_pass_needs_frame_texture(&pass(TEXACCUM_TARGET), false));
         assert!(!h2_pass_needs_frame_texture(&pass(TEXACCUM_TARGET), true));
@@ -1289,10 +1635,12 @@ mod tests {
             blend: None,
             depth: H2Depth { compare: None, write: false },
             channels: String::new(),
+            custom_channels: None,
             alpha_test: None,
             textures: Vec::new(),
             parameters: Vec::new(),
             vertex_constants: Vec::new(),
+            animations: HashMap::new(),
         };
         assert_eq!(pass.pixel_shader_file(), "shaders_shader_passes_transparent_lit_0.psh");
     }
@@ -1360,6 +1708,29 @@ mod tests {
             let value = passes[0].parameters.iter().find(|(name, _)| name == EMBLEM_INPUT);
             assert_eq!(value.map(|(_, value)| value), Some(&H2ParameterValue::Value(0.0)), "{path}");
         }
+    }
+
+    /// With `BLAM_TEST_H2EK`: this pass's pixel shader is solid white, which
+    /// shows through whatever is translucent over it unless the mask stops it.
+    #[test]
+    fn a_depth_prepass_writes_no_color() {
+        let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
+            eprintln!("skipping: BLAM_TEST_H2EK is not set");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let definitions = crate::core::bundled::locate_definitions_root();
+        let file = root.join("shaders/shader_passes/z_prepass/z_prepass.shader_pass");
+        let pass = crate::core::source::read_tag_at_path(
+            &file,
+            Some(crate::core::game::GameId::Halo2),
+            Some(&definitions),
+            u32::from_be_bytes(*b"spas"),
+        )
+        .unwrap();
+        let root = pass.root();
+        let implementation = elements(root, "implementations").next().unwrap();
+        assert_eq!(read_custom_channels(implementation), Some([false; 4]));
     }
 
     /// With `BLAM_TEST_H2EK`: the brute hair that drew untextured.

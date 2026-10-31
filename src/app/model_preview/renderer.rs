@@ -111,6 +111,7 @@ pub(super) fn draw_model_viewport(
         visible_batches,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
+        background: preview_background(ui.visuals()),
         show_backfaces: state.show_backfaces,
         show_grid: state.show_grid,
         textures: state
@@ -125,6 +126,7 @@ pub(super) fn draw_model_viewport(
         bloom: state.h2_bloom,
         self_shadow: state.h2_self_shadow,
         light_follows_camera: state.h2_light_follows_camera,
+        time: ui.input(|input| input.time % H2_TIME_WRAP) as f32,
         change_colors: h2_change_colors_for(
             &data.h2_change_colors,
             state
@@ -133,6 +135,9 @@ pub(super) fn draw_model_viewport(
                 .map_or("", |variant| variant.name.as_str()),
         ),
     };
+    if frame.h2_moves() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    }
     painter.add(egui::PaintCallback {
         rect,
         callback: Arc::new(eframe::egui_glow::CallbackFn::new(move |info, painter| {
@@ -733,6 +738,8 @@ struct ModelGpuFrame {
     camera: ModelGpuCamera,
     render_mode: ModelRenderMode,
     show_backfaces: bool,
+    /// What the frame clears to.
+    background: [f32; 3],
     /// Draw the world-unit ground grid on the z = 0 plane.
     show_grid: bool,
     /// `None` until the worker has resolved them, or when shading is off.
@@ -749,9 +756,42 @@ struct ModelGpuFrame {
     bloom: bool,
     self_shadow: bool,
     light_follows_camera: bool,
+    /// Seconds, for what Halo 2 shaders animate.
+    time: f32,
 }
 
+/// Wrapped to keep a frame time precise in the `f32` the shaders take.
+const H2_TIME_WRAP: f64 = 3600.0;
+
 impl ModelGpuFrame {
+    /// Transparent passes draw whether or not game shaders are on.
+    fn h2_draws(&self, layer: H2Layer) -> bool {
+        match layer {
+            H2Layer::Transparent => true,
+            H2Layer::ActiveCamo => self.active_camo,
+            _ => self.game_shaders,
+        }
+    }
+
+    fn h2_moves(&self) -> bool {
+        let Some(textures) = self.textures.as_ref() else {
+            return false;
+        };
+        self.visible_batches.iter().any(|&index| {
+            self.preview
+                .batches
+                .get(index)
+                .and_then(|batch| textures.get(batch.material_index as usize))
+                .is_some_and(|material| {
+                    H2Layer::ALL
+                        .iter()
+                        .filter(|layer| self.h2_draws(**layer))
+                        .flat_map(|layer| &material.h2_layers[*layer as usize])
+                        .any(|pass| pass.moves())
+                })
+        })
+    }
+
     fn h2_lightmap_layer(&self) -> H2Layer {
         if self.default_lights { H2Layer::Lightmap } else { H2Layer::ObjectLightmap }
     }
@@ -805,7 +845,8 @@ fn paint_model_gl(
         gl.scissor(left, bottom, right - left, top - bottom);
         gl.color_mask(true, true, true, true);
         gl.depth_mask(true);
-        gl.clear_color(PREVIEW_CLEAR[0], PREVIEW_CLEAR[1], PREVIEW_CLEAR[2], 1.0);
+        let [r, g, b] = frame.background;
+        gl.clear_color(r, g, b, 1.0);
         gl.clear_depth_f32(1.0);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
     }
@@ -1612,7 +1653,22 @@ impl H2Target {
 }
 
 /// The clear color of the preview, shared with the scene target.
-const PREVIEW_CLEAR: [f32; 3] = [228.0 / 255.0, 238.0 / 255.0, 244.0 / 255.0];
+/// The theme's panel color, so a preview sits in the UI around it.
+fn preview_background(visuals: &egui::Visuals) -> [f32; 3] {
+    let [r, g, b, _] = visuals.panel_fill.to_array();
+    [r, g, b].map(|channel| channel as f32 / 255.0)
+}
+
+fn background_is_dark(background: [f32; 3]) -> bool {
+    background.iter().sum::<f32>() / 3.0 < 0.5
+}
+
+/// Minor grid lines: a step off the background, toward the contrast.
+fn grid_line_color(background: [f32; 3]) -> [f32; 3] {
+    const STEP: f32 = 0.11;
+    let step = if background_is_dark(background) { STEP } else { -STEP };
+    background.map(|channel| (channel + step).clamp(0.0, 1.0))
+}
 
 /// The framebuffer state a render target borrows and must return.
 struct H2FramebufferState {
@@ -2059,9 +2115,9 @@ impl ModelGlRenderer {
                     let flat = |gl: &glow::Context, location, [r, g, b]: [f32; 3]| {
                         gl.uniform_3_f32(Some(location), r, g, b);
                     };
-                    // Minor lines a step below the clear color; the world X
+                    // Minor lines a step off the clear color; the world X
                     // and Y axes in Blender's muted red and green.
-                    flat(gl, &self.base_color, [0.78, 0.82, 0.85]);
+                    flat(gl, &self.base_color, grid_line_color(frame.background));
                     gl.draw_arrays(glow::LINES, 0, grid_axis_start);
                     let axis_verts = grid_vertex_count - grid_axis_start;
                     if axis_verts >= 2 {
@@ -2267,7 +2323,8 @@ impl ModelGlRenderer {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene.framebuffer));
             gl.viewport(0, 0, size[0], size[1]);
             gl.disable(glow::SCISSOR_TEST);
-            gl.clear_color(PREVIEW_CLEAR[0], PREVIEW_CLEAR[1], PREVIEW_CLEAR[2], 1.0);
+            let [r, g, b] = frame.background;
+            gl.clear_color(r, g, b, 1.0);
             gl.clear_depth_f32(1.0);
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
             Some(state)
@@ -2676,13 +2733,16 @@ impl ModelGlRenderer {
                 gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
             }
             let location = program.location(gl, "u_texture_rows");
-            gl.uniform_4_f32_slice(location.as_ref(), pass.texture_rows.as_flattened());
+            let rows = pass.texture_rows_at(frame.time);
+            gl.uniform_4_f32_slice(location.as_ref(), rows.as_flattened());
+            let (tint_facing, tint_glancing) = pass.tints_at(frame.time);
             let location = program.location(gl, "u_tint_facing");
-            gl.uniform_4_f32_slice(location.as_ref(), &pass.tint_facing);
+            gl.uniform_4_f32_slice(location.as_ref(), &tint_facing);
             let location = program.location(gl, "u_tint_glancing");
-            gl.uniform_4_f32_slice(location.as_ref(), &pass.tint_glancing);
+            gl.uniform_4_f32_slice(location.as_ref(), &tint_glancing);
             for (register, value) in &pass.constants {
                 let mut value = *value;
+                pass.animate_constant(*register, &mut value, frame.time);
                 for (changed, component, channel) in &pass.change_colors {
                     if changed == register {
                         value[*component] = frame.change_colors[*channel][*component];
@@ -2786,7 +2846,9 @@ impl ModelGlRenderer {
             ) else {
                 continue;
             };
-            let color = if wire {
+            let color = if wire && background_is_dark(frame.background) {
+                Color32::from_rgb(190, 205, 215)
+            } else if wire {
                 Color32::from_rgb(38, 55, 65)
             } else {
                 batch
@@ -2865,6 +2927,18 @@ fn slice_bytes<T>(slice: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_background_is_the_theme_s_and_grid_lines_stay_visible_on_it() {
+        for visuals in [egui::Visuals::dark(), egui::Visuals::light()] {
+            let background = preview_background(&visuals);
+            assert_eq!(background_is_dark(background), visuals.dark_mode);
+            let line = grid_line_color(background);
+            let (line, background) = (line[0], background[0]);
+            assert!((line - background).abs() > 0.05);
+            assert_eq!(line > background, visuals.dark_mode);
+        }
+    }
 
     #[test]
     fn the_camera_light_keeps_its_place_as_the_view_orbits() {
