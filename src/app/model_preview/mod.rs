@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 mod errors;
+mod ce_passes;
 mod h2_bloom;
 pub(in crate::app) mod h2_passes;
 pub(in crate::app) mod h2_prt;
@@ -1218,8 +1219,8 @@ fn draw_model_view_settings_menu(
             ui.checkbox(&mut state.show_backfaces, "Render Backfaces");
             ui.checkbox(&mut state.h2_game_shaders, "Game Shaders")
                 .on_hover_text(
-                    "Draw Halo 2 opaque materials through the game's own passes, \
-                     lit by its default lighting.",
+                    "Draw Halo CE and Halo 2 opaque materials through the game's own \
+                     shaders, lit by its default lighting.",
                 );
             ui.add_enabled(
                 state.h2_game_shaders,

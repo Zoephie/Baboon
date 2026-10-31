@@ -260,12 +260,9 @@ pub(super) fn load_model_preview(
         if preview.batches.is_empty() {
             return Err("Referenced gbxmodel has no previewable draw batches.".to_owned());
         }
-        return Ok(model_preview_data(
-            entry.key.clone(),
-            reference,
-            preview,
-            Vec::new(),
-        ));
+        let mut data = model_preview_data(entry.key.clone(), reference, preview, Vec::new());
+        data.h2_change_colors = read_h2_change_colors(model_tag);
+        return Ok(data);
     }
 
     // Every later object names a `.model`, which previews as itself. The
@@ -424,23 +421,12 @@ pub(super) fn load_model_preview(
     // physics shapes froze the frame every time a toggle rebuilt the merge.
     // `maybe_request_model_overlays` builds them once on a worker after this
     // load lands, and the toggles are draw-time filters from then on.
-    let mut data = model_preview_data(
+    Ok(model_preview_data(
         render_entry.key,
         normalized,
         preview,
         read_model_variants(model_tag),
-    );
-    data.h2_change_colors = source
-        .filter(|source| {
-            matches!(
-                source,
-                TagSource::LooseFolder { game: Some(crate::core::game::GameId::Halo2), .. }
-            )
-        })
-        .and_then(|source| load_h2_object(source, &entry.display_path))
-        .map(|object| read_h2_change_colors(&object))
-        .unwrap_or_default();
-    Ok(data)
+    ))
 }
 
 /// The `.model` an object stands for. `None` for any other tag, which is its
@@ -455,26 +441,6 @@ pub(super) fn preview_model_tag(source: &TagSource, tag: &TagFile) -> Result<Opt
     load_referenced_tag_from_source(source, &reference, "model", b"hlmt")
         .map(Some)
         .map_err(|error| format!("Could not load {reference}.model: {error}"))
-}
-
-/// The object a Halo 2 model belongs to: the kit keeps them side by side
-/// under one name, as `brute.biped` beside `brute.model`.
-fn load_h2_object(source: &TagSource, model_path: &str) -> Option<TagFile> {
-    const OBJECTS: [(&str, &[u8; 4]); 7] = [
-        ("biped", b"bipd"),
-        ("vehicle", b"vehi"),
-        ("weapon", b"weap"),
-        ("equipment", b"eqip"),
-        ("garbage", b"garb"),
-        ("scenery", b"scen"),
-        ("crate", b"bloc"),
-    ];
-    let stem = model_path.strip_suffix(".model").unwrap_or(model_path);
-    OBJECTS
-        .iter()
-        .find_map(|(extension, group)| {
-            load_referenced_tag_from_source(source, stem, extension, group).ok()
-        })
 }
 
 /// Build preview geometry from a render-geometry tag — a `render_model`
@@ -3629,26 +3595,57 @@ mod tests {
 }
 
 #[cfg(test)]
-mod h2_object_tests {
+mod change_color_tests {
     use super::*;
+    use crate::core::format::TagNameIndex;
+    use crate::core::game::GameId;
+    use crate::core::source::TagEntryLocation;
 
-    /// With `BLAM_TEST_H2EK`: the object is found from the path a preview has.
+    /// Whether previewing the tag at `path` comes with any change colors.
+    fn has_colors(root: &str, game: GameId, path: &str, extension: &str, group: &[u8; 4]) -> bool {
+        let source = TagSource::LooseFolder {
+            root: root.into(),
+            game: Some(game),
+            definitions_root: crate::core::bundled::locate_definitions_root(),
+        };
+        let TagSource::LooseFolder { definitions_root, .. } = &source else { unreachable!() };
+        let names = TagNameIndex::load_game(definitions_root, game).unwrap();
+        let tag = load_referenced_tag_from_source(&source, path, extension, group).unwrap();
+        let key = format!("{path}.{extension}");
+        let entry = TagEntry {
+            key: key.clone(),
+            display_path: key.clone(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: Some(extension.to_owned()),
+            location: TagEntryLocation::LooseFile(std::path::Path::new(root).join(key.replace('\\', "/"))),
+        };
+        let settings = PreviewLoadSettings::default();
+        let data = load_model_preview(&tag, &entry, &names, Some(&source), &settings).unwrap();
+        data.h2_change_colors.iter().any(|channel| !channel.is_empty())
+    }
+
+    /// With `BLAM_TEST_HCEEK`: change colors are the object's, so a gbxmodel
+    /// beside one has none.
     #[test]
-    fn a_model_finds_the_object_beside_it() {
+    fn only_a_halo_ce_object_has_change_colors() {
+        let Ok(root) = std::env::var("BLAM_TEST_HCEEK") else {
+            eprintln!("skipping: BLAM_TEST_HCEEK is not set");
+            return;
+        };
+        let path = "characters\\cyborg\\cyborg";
+        assert!(has_colors(&root, GameId::HaloCe, path, "biped", b"bipd"));
+        assert!(!has_colors(&root, GameId::HaloCe, path, "gbxmodel", b"mod2"));
+    }
+
+    /// With `BLAM_TEST_H2EK`: the same for a `.model`.
+    #[test]
+    fn only_a_halo_2_object_has_change_colors() {
         let Ok(root) = std::env::var("BLAM_TEST_H2EK") else {
             eprintln!("skipping: BLAM_TEST_H2EK is not set");
             return;
         };
-        let source = TagSource::LooseFolder {
-            root: root.into(),
-            game: Some(crate::core::game::GameId::Halo2),
-            definitions_root: crate::core::bundled::locate_definitions_root(),
-        };
-        let object = load_h2_object(&source, "objects\\characters\\brute\\brute.model")
-            .expect("brute.biped sits beside brute.model");
-        assert_eq!(object.header.group_tag, u32::from_be_bytes(*b"bipd"));
-        let colors = read_h2_change_colors(&object);
-        assert!(colors.iter().any(|channel| !channel.is_empty()));
-        assert!(load_h2_object(&source, "objects\\no\\such\\model.model").is_none());
+        let path = "objects\\characters\\brute\\brute";
+        assert!(has_colors(&root, GameId::Halo2, path, "biped", b"bipd"));
+        assert!(!has_colors(&root, GameId::Halo2, path, "model", b"hlmt"));
     }
 }

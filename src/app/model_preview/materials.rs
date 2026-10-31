@@ -8,6 +8,8 @@ use blam_tags::render_method::{
     RenderMethodDefinition, RenderMethodOption, RenderMethodParameter, ResolvedRenderMethod,
     ResolvedValue,
 };
+use super::ce_passes::{CeModelCommon, ce_model_passes, ce_transparent_passes};
+use super::h2_stage::H2VertexStage;
 use super::h2_passes::{
     H2DrawPass, H2Image, H2Layer, H2ParameterValue, H2_LAYER_COUNT, animation_function,
     h2_pass_needs_frame_texture, h2_shadow_passes, prepare_draw_pass,
@@ -182,6 +184,8 @@ struct ResolveCaches {
     h2_camo_shader: Option<Option<Arc<TagFile>>>,
     /// Pass maps by path and shape; a shader samples each in only one shape.
     h2_images: HashMap<(String, bool), Option<Arc<H2Image>>>,
+    /// The kit's model shader as GLSL, read once. `None` until asked for.
+    ce_model_common: Option<Option<CeModelCommon>>,
     /// The kit's own group → extension names. The cross-game table answers
     /// with the H3+ meaning on a collision, and Halo CE's
     /// `shader_transparent_meter` (`smet`) is Halo 4's `structure_meta` there.
@@ -241,7 +245,8 @@ pub(crate) fn resolve_model_textures(
         }
         let lit = [H2Layer::Lightmap, H2Layer::Prt]
             .iter()
-            .any(|layer| !texture.h2_layers[*layer as usize].is_empty());
+            .flat_map(|layer| &texture.h2_layers[*layer as usize])
+            .any(|pass| pass.stage != H2VertexStage::CeModel);
         if lit {
             for (layer, pass) in h2_shadow_passes() {
                 texture.h2_layers[layer as usize] = vec![pass];
@@ -441,12 +446,30 @@ fn resolve_ce_shader(
                     bind(root.read_tag_ref_path("bump map"), [1.0; 2]);
             }
         }
-        _ => {
-            return MaterialTextures::failed(
-                "a Halo CE transparent shader — drawn blended in game, so not textured \
-                 in this opaque preview",
-            );
+        _ => {}
+    }
+    let mut common = caches.ce_model_common.take();
+    let mut bitmap = |path: &str, kind: SamplerKind| {
+        let key = (path.to_owned(), kind == SamplerKind::Texture2D);
+        if let Some(cached) = caches.h2_images.get(&key) {
+            return cached.clone();
         }
+        let decoded = decode_h2_image(source, path, kind).map(Arc::new);
+        caches.h2_images.insert(key, decoded.clone());
+        decoded
+    };
+    textures.h2_layers[H2Layer::Lightmap as usize] =
+        ce_model_passes(source, root, &group, &flags, &mut common, &mut bitmap);
+    textures.h2_layers[H2Layer::Transparent as usize] =
+        ce_transparent_passes(source, root, &group, &mut bitmap);
+    caches.ce_model_common = common;
+    if !textures.h2_layers[H2Layer::Transparent as usize].is_empty() {
+        return textures;
+    }
+    if !matches!(&group, b"soso" | b"senv") {
+        return MaterialTextures::failed(
+            "a Halo CE transparent shader the preview does not draw yet",
+        );
     }
     if textures.slots.iter().all(Option::is_none) {
         textures.error = Some("the shader names no base or detail map".to_owned());
@@ -456,7 +479,7 @@ fn resolve_ce_shader(
 
 /// Halo CE `detail mask` options in order; the index is what the fragment
 /// shader decodes (see [`DetailComposition::mask`]).
-const CE_DETAIL_MASKS: [&str; 9] = [
+pub(super) const CE_DETAIL_MASKS: [&str; 9] = [
     "none",
     "reflection mask inverse",
     "reflection mask",
@@ -1377,14 +1400,15 @@ mod tests {
         assert!(teleporter.get(TextureSlot::Bump).is_none());
         assert_eq!(teleporter.detail.mask, 0);
 
-        // Transparent effects stay untextured, and say why.
+        // A chicago shader draws through its pass, not through the slots.
         let shield = resolve_classic(
             &source,
             r"characters\cyborg\shaders\light shield",
             b"schi",
         );
-        assert!(shield.error.as_deref().is_some_and(|error| error.contains("transparent")));
+        assert!(shield.error.is_none());
         assert!(shield.slots.iter().all(Option::is_none));
+        assert_eq!(shield.h2_layers[H2Layer::Transparent as usize].len(), 1);
         // `smet` is Halo 4's `structure_meta` in the cross-game extension table;
         // the kit's own names make it `shader_transparent_meter`, so the shader
         // loads and is reported as what it is rather than as a missing file.

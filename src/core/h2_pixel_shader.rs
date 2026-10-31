@@ -63,7 +63,7 @@ pub(crate) struct TranslatedPixelShader {
 /// HLSL behaviour GLSL has no direct spelling for. `hlsl_any` keeps `any` of
 /// a scalar, which the generated alpha tests subtract from. The `toN`
 /// overloads are HLSL's implicit splat and truncation on assignment.
-const HELPERS: &str = "\
+pub(crate) const HELPERS: &str = "\
 float saturate(float x) { return clamp(x, 0.0, 1.0); }
 vec2 saturate(vec2 x) { return clamp(x, 0.0, 1.0); }
 vec3 saturate(vec3 x) { return clamp(x, 0.0, 1.0); }
@@ -98,7 +98,7 @@ float hlsl_max(float a, float b) { return max(a, b); }
 ";
 
 /// `dot`, `lerp` and `max` promote scalar arguments in HLSL, in any position.
-fn promoting_helpers() -> String {
+pub(crate) fn promoting_helpers() -> String {
     let mut out = String::new();
     for ty in ["vec2", "vec3", "vec4"] {
         out.push_str(&format!(
@@ -227,7 +227,7 @@ pub(crate) fn translate(
 
 /// Generated files can end in a `/* */` copy of their combiner source, which
 /// reads as code to anything working line by line.
-fn strip_block_comments(source: &str) -> String {
+pub(crate) fn strip_block_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut rest = source;
     while let Some(start) = rest.find("/*") {
@@ -387,7 +387,7 @@ fn translate_declaration(
 
 /// Rewrite one statement token by token. Integer literals become floats so
 /// the result does not lean on implicit conversions, except a loop's counter.
-fn translate_statement(code: &str, alpha_test: Option<AlphaTest>) -> String {
+pub(crate) fn translate_statement(code: &str, alpha_test: Option<AlphaTest>) -> String {
     let bytes = code.as_bytes();
     let integers = code.starts_with("for");
     let mut out = String::with_capacity(code.len());
@@ -413,9 +413,10 @@ fn translate_statement(code: &str, alpha_test: Option<AlphaTest>) -> String {
             }
             match word {
                 _ if after_dot => out.push_str(word),
-                "float4" => out.push_str("vec4"),
-                "float3" => out.push_str("vec3"),
-                "float2" => out.push_str("vec2"),
+                "float4" | "half4" => out.push_str("vec4"),
+                "float3" | "half3" => out.push_str("vec3"),
+                "float2" | "half2" => out.push_str("vec2"),
+                "half" => out.push_str("float"),
                 "frac" => out.push_str("fract"),
                 "lerp" => out.push_str("hlsl_lerp"),
                 "dot" => out.push_str("hlsl_dot"),
@@ -502,7 +503,7 @@ fn target_width(target: &str, widths: &HashMap<String, usize>) -> Option<usize> 
 }
 
 /// Record declarations, and give each assignment HLSL's implicit conversion.
-fn convert_assignments(statement: &str, widths: &mut HashMap<String, usize>) -> String {
+pub(crate) fn convert_assignments(statement: &str, widths: &mut HashMap<String, usize>) -> String {
     let Some(code) = statement.trim_end().strip_suffix(';') else {
         return statement.to_owned();
     };

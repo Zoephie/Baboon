@@ -15,6 +15,7 @@ use std::sync::Arc;
 use blam_tags::{TagFieldData, TagFile, TagFunction, TagStruct};
 
 use super::h2_prt::H2PrtLight;
+use super::ce_passes::CeModelAnimation;
 use super::h2_stage::{H2_TEXTURE_ROWS, H2VertexStage};
 use super::materials::TextureImage;
 use crate::core::h2_pixel_shader::{
@@ -129,6 +130,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         fragment,
         blend: None,
         depth: H2Depth { compare: Some(compare), write },
+        cull: H2Cull::Frame,
         channels: [false; 4],
         textures: Vec::new(),
         constants: Vec::new(),
@@ -143,6 +145,7 @@ pub(crate) fn h2_shadow_passes() -> [(H2Layer, H2DrawPass); 2] {
         animated_rows: Vec::new(),
         animated_tint_facing: Vec::new(),
         animated_tint_glancing: Vec::new(),
+        ce_animation: None,
     };
     [
         (
@@ -305,6 +308,17 @@ pub(in crate::app) enum H2Compare {
     NotEqual,
     GreaterOrEqual,
     Always,
+}
+
+/// Which faces a pass draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum H2Cull {
+    /// As the preview's Render Backfaces has it.
+    Frame,
+    Back,
+    Front,
+    /// Both sides, whatever Render Backfaces says.
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -907,6 +921,7 @@ pub(crate) struct H2DrawPass {
     pub(crate) fragment: String,
     pub(crate) blend: Option<H2Blend>,
     pub(crate) depth: H2Depth,
+    pub(crate) cull: H2Cull,
     pub(crate) channels: [bool; 4],
     pub(crate) textures: Vec<H2DrawTexture>,
     /// Pixel constant registers, by register index.
@@ -928,9 +943,37 @@ pub(crate) struct H2DrawPass {
     animated_rows: Vec<H2AnimatedRow>,
     animated_tint_facing: Vec<H2Animation>,
     animated_tint_glancing: Vec<H2Animation>,
+    /// Halo CE reworks its rows and a constant by its own functions.
+    pub(crate) ce_animation: Option<std::sync::Arc<CeModelAnimation>>,
 }
 
 impl H2DrawPass {
+    /// A pass with nothing bound, its stage's values and textures to fill.
+    pub(super) fn new(stage: H2VertexStage, fragment: String, depth: H2Depth) -> Self {
+        Self {
+            stage,
+            fragment,
+            blend: None,
+            depth,
+            cull: H2Cull::Frame,
+            channels: [true; 4],
+            textures: Vec::new(),
+            constants: Vec::new(),
+            texture_rows: [[0.0; 4]; H2_TEXTURE_ROWS],
+            tint_facing: [1.0; 4],
+            tint_glancing: [1.0; 4],
+            change_colors: Vec::new(),
+            light_colors: Vec::new(),
+            light_direct: [0.0; 3],
+            light_indirect: [0.0; 3],
+            animated_constants: Vec::new(),
+            animated_rows: Vec::new(),
+            animated_tint_facing: Vec::new(),
+            animated_tint_glancing: Vec::new(),
+            ce_animation: None,
+        }
+    }
+
     /// Whether this pass looks different from one moment to the next.
     pub(crate) fn moves(&self) -> bool {
         self.animated_constants.iter().flat_map(|(_, _, animations)| animations)
@@ -938,11 +981,15 @@ impl H2DrawPass {
             .chain(&self.animated_tint_facing)
             .chain(&self.animated_tint_glancing)
             .any(H2Animation::moves)
+            || self.ce_animation.as_ref().is_some_and(|animation| animation.moves())
     }
 
     pub(crate) fn texture_rows_at(&self, time: f32) -> [[f32; 4]; H2_TEXTURE_ROWS] {
         let mut rows = self.texture_rows;
         self.animated_rows.iter().for_each(|row| row.apply(&mut rows, time));
+        if let Some(animation) = &self.ce_animation {
+            animation.apply_rows(&mut rows, time);
+        }
         rows
     }
 
@@ -995,7 +1042,12 @@ pub(in crate::app) fn read_h2_change_colors(object: &TagFile) -> H2ChangeColors 
         return colors;
     };
     for (channel, entry) in elements(block, "change colors").take(4).enumerate() {
-        colors[channel] = elements(entry, "initial permutations")
+        // Halo CE's block has another name, and no variants.
+        let permutations = ["initial permutations", "permutations"]
+            .into_iter()
+            .find(|name| entry.field(name).is_some())
+            .unwrap_or("initial permutations");
+        colors[channel] = elements(entry, permutations)
             .map(|permutation| H2ChangePermutation {
                 weight: permutation.read_real("weight").unwrap_or(0.0),
                 lower: rgb(permutation, "color lower bound"),
@@ -1395,6 +1447,7 @@ pub(in crate::app) fn prepare_draw_pass(
         fragment: translated.glsl,
         blend: pass.blend,
         depth: pass.depth,
+        cull: H2Cull::Frame,
         channels: pass.custom_channels.unwrap_or_else(|| channel_mask(&pass.channels)),
         textures,
         constants,
@@ -1409,6 +1462,7 @@ pub(in crate::app) fn prepare_draw_pass(
         animated_rows,
         animated_tint_facing,
         animated_tint_glancing,
+        ce_animation: None,
     })
 }
 

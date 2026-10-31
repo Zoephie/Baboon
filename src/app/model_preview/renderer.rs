@@ -3,7 +3,7 @@
 
 use super::*;
 use super::h2_passes::{
-    H2BlendEquation, H2BlendFactor, H2Compare, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
+    H2BlendEquation, H2BlendFactor, H2Compare, H2Cull, H2DefaultLight, H2DrawPass, H2Image, H2Layer,
     H2_DEFAULT_LIGHTS, H2_GLSL_VERSION, H2_LAYER_COUNT, H2_REFLECTION_SCALE, H2_SHADOWED_LIGHT,
     h2_change_colors_for, h2_normalization_face, h2_object_light_direction, h2_prt_object_lights,
 };
@@ -2641,12 +2641,29 @@ impl ModelGlRenderer {
                     gl.depth_mask(pass.depth.write);
                     let [r, g, b, a] = pass.channels;
                     gl.color_mask(r, g, b, a);
+                    match pass.cull {
+                        H2Cull::Frame => {}
+                        H2Cull::Back | H2Cull::Front => {
+                            let front = pass.cull == H2Cull::Front;
+                            gl.enable(glow::CULL_FACE);
+                            gl.cull_face(if front { glow::FRONT } else { glow::BACK });
+                        }
+                        H2Cull::None => gl.disable(glow::CULL_FACE),
+                    }
                     gl.draw_elements(
                         glow::TRIANGLES,
                         index_count,
                         glow::UNSIGNED_INT,
                         byte_offset,
                     );
+                    if pass.cull != H2Cull::Frame {
+                        gl.cull_face(glow::BACK);
+                        if frame.show_backfaces {
+                            gl.disable(glow::CULL_FACE);
+                        } else {
+                            gl.enable(glow::CULL_FACE);
+                        }
+                    }
                 }
                 self.h2_programs.insert(key, Some(program));
             }
@@ -2732,7 +2749,8 @@ impl ModelGlRenderer {
             set_1(gl, program, "u_reflection_scale", H2_REFLECTION_SCALE);
             set_1(gl, program, "u_animated", if frame.bones.is_some() { 1.0 } else { 0.0 });
             let location = program.location(gl, "u_light_direct");
-            let direct = if frame.default_lights || !pass.stage.is_lightmap() {
+            let follows = pass.stage == H2VertexStage::CeModel && frame.light_follows_camera;
+            let direct = if !follows && (frame.default_lights || !pass.stage.is_lightmap()) {
                 pass.light_direct
             } else {
                 frame.h2_object_light().map(|value| -value)
@@ -2765,6 +2783,9 @@ impl ModelGlRenderer {
             for (register, value) in &pass.constants {
                 let mut value = *value;
                 pass.animate_constant(*register, &mut value, frame.time);
+                if let Some(animation) = &pass.ce_animation {
+                    animation.constant(*register, &mut value, frame.time, &frame.change_colors);
+                }
                 for (changed, component, channel) in &pass.change_colors {
                     if changed == register {
                         value[*component] = frame.change_colors[*channel][*component];
@@ -2778,6 +2799,7 @@ impl ModelGlRenderer {
                     }
                 }
                 let location = program.location(gl, &format!("c{register}"));
+                let location = location.or_else(|| program.location(gl, &format!("ce_registers[{register}]")));
                 gl.uniform_4_f32_slice(location.as_ref(), &value);
             }
             if let Some(light) = light {

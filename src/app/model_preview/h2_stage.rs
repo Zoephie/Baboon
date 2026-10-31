@@ -80,7 +80,42 @@ pub(in crate::app) enum H2VertexStage {
     LightDiffuseDetail,
     /// A sphere light's specular pass: light and eye in tangent space.
     LightSpecular,
+    /// Halo CE's `model.vsh` for a lone object: the two distant lights and
+    /// ambient of `CeModelRows`, with no point lights or fog.
+    CeModel,
+    /// Halo CE's `transparent_generic`: four maps through their transforms,
+    /// the fades in the colors.
+    CeTransparent,
+    /// With the first map a cube, by the reflection.
+    CeTransparentReflection,
+    /// By the normal.
+    CeTransparentObject,
+    /// By the vector to the eye.
+    CeTransparentViewer,
+    /// With the first map laid across the view.
+    CeTransparentScreen,
 }
+
+/// The first map's cube coordinate, from `cube` and the map's transform, and
+/// everything else as `CE_TRANSPARENT` has it.
+const CE_TRANSPARENT_CUBE: &str = "vec3 across = u_texture_rows[0].xyz;
+    vec3 up = u_texture_rows[1].xyz;
+    v_tc0 = vec4(dot(cube, across), dot(cube, up), dot(cube, cross(across, up)), 1.0);
+    v_tc1.xy = vec2(row(2, uv), row(3, uv));
+    v_tc2.xy = vec2(row(4, uv), row(5, uv));
+    v_tc3.xy = vec2(row(6, uv), row(7, uv));
+    float face = abs(dot(normal, u_view_back));
+    v_color0 = vec4(0.0, 0.0, 0.0, u_texture_rows[8].x);
+    v_color1 = vec4(vec3(face), 1.0 - face) * u_texture_rows[8].x;";
+
+/// `transparent_generic.vsh` without its fog, whatever the first map does.
+const CE_TRANSPARENT: &str = "v_tc0.xy = vec2(row(0, uv), row(1, uv));
+    v_tc1.xy = vec2(row(2, uv), row(3, uv));
+    v_tc2.xy = vec2(row(4, uv), row(5, uv));
+    v_tc3.xy = vec2(row(6, uv), row(7, uv));
+    float face = abs(dot(normal, u_view_back));
+    v_color0 = vec4(0.0, 0.0, 0.0, u_texture_rows[8].x);
+    v_color1 = vec4(vec3(face), 1.0 - face) * u_texture_rows[8].x;";
 
 impl H2VertexStage {
     /// From a pass's `vertex shader` reference.
@@ -239,6 +274,31 @@ impl H2VertexStage {
     v_color0 = u_tint_facing;
     v_color1 = u_tint_glancing;"
             }
+            Self::CeModel => {
+                "v_tc0.xy = vec2(row(0, uv), row(1, uv));
+    v_tc1.xy = v_tc0.xy * u_texture_rows[2].xy;
+    v_tc2.xy = v_tc0.xy;
+    vec3 surface = normal * u_texture_rows[3].y;
+    v_tc3.xyz = surface * dot(to_eye, surface) * 2.0 - to_eye;
+    float first = dot(surface, -u_light_direct);
+    first = max(first, -first * u_texture_rows[3].x);
+    float second = dot(surface, -u_texture_rows[6].xyz);
+    v_color0 = vec4(clamp(u_texture_rows[4].rgb
+        + max(first, 0.0) * u_texture_rows[5].rgb
+        + max(second, 0.0) * u_texture_rows[7].rgb, 0.0, 1.0), 0.0);
+    float view = dot(normalize(to_eye), surface);
+    v_color1 = clamp(u_tint_facing * view + u_tint_glancing, 0.0, 1.0);
+    if (u_texture_rows[8].x != 0.0) {
+        float along = dot(u_view_back, position - u_eye) * -1.0;
+        v_color1.a *= clamp((along - u_texture_rows[8].x)
+            / (u_texture_rows[8].y - u_texture_rows[8].x), 0.0, 1.0);
+    }"
+            }
+            Self::CeTransparent => CE_TRANSPARENT,
+            Self::CeTransparentReflection => "vec3 cube = normal * dot(to_eye, normal) * 2.0 - to_eye;",
+            Self::CeTransparentObject => "vec3 cube = normal;",
+            Self::CeTransparentViewer => "vec3 cube = to_eye;",
+            Self::CeTransparentScreen => CE_TRANSPARENT,
             Self::Bumped => {
                 "v_tc0.xy = uv.xy * u_texture_rows[0].xy + u_texture_rows[0].zw;
     v_tc0.xy = v_tc0.xy * u_texture_rows[2].xy + u_texture_rows[2].zw;
@@ -362,6 +422,13 @@ impl H2VertexStage {
             Self::LightDiffuseTarget => {
                 "v_tc0 = vec4((gl_Position.xy + gl_Position.w) * 0.5, gl_Position.ww);"
             }
+            Self::CeTransparentReflection | Self::CeTransparentObject | Self::CeTransparentViewer => {
+                CE_TRANSPARENT_CUBE
+            }
+            Self::CeTransparentScreen => {
+                "v_tc0 = vec4(row(0, vec3(gl_Position.xy, 0.0)) + u_texture_rows[0].w * (gl_Position.w - 1.0), \
+                 row(1, vec3(gl_Position.xy, 0.0)) + u_texture_rows[1].w * (gl_Position.w - 1.0), 0.0, gl_Position.w);"
+            }
             Self::LightDiffuseDetail => {
                 "v_tc4.xy = base * u_texture_rows[1].xy + u_texture_rows[1].zw;"
             }
@@ -455,7 +522,13 @@ mod tests {
     use super::*;
     use crate::core::h2_pixel_shader::{PixelShaderOptions, translate};
 
-    const STAGES: [H2VertexStage; 29] = [
+    const STAGES: [H2VertexStage; 35] = [
+        H2VertexStage::CeModel,
+        H2VertexStage::CeTransparent,
+        H2VertexStage::CeTransparentReflection,
+        H2VertexStage::CeTransparentObject,
+        H2VertexStage::CeTransparentViewer,
+        H2VertexStage::CeTransparentScreen,
         H2VertexStage::LightDiffuseTarget,
         H2VertexStage::LightDiffuseDetail,
         H2VertexStage::LightDiffuse,

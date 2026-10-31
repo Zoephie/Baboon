@@ -3,6 +3,8 @@
 //!
 //! `H2_SHOT="<model path>|<out file>|<shaders 0/1>|<lights 0/1>|<yaw>|<pitch>"`,
 //! several separated by `;`, with `BLAM_TEST_H2EK` naming the kit's tags.
+//! With `H2_SHOT_CE` set, that kit is Halo CE's and the models gbxmodels, or
+//! bipeds with `H2_SHOT_BIPED`.
 
 use super::*;
 use crate::core::format::TagNameIndex;
@@ -39,6 +41,10 @@ fn headless_gl() -> glow::Context {
     }
 }
 
+fn shot_game() -> GameId {
+    if std::env::var_os("H2_SHOT_CE").is_some() { GameId::HaloCe } else { GameId::Halo2 }
+}
+
 struct Shot {
     model: String,
     out: String,
@@ -51,14 +57,22 @@ struct Shot {
 fn render(gl: &Arc<glow::Context>, renderer: &mut ModelGlRenderer, source: &TagSource, shot: &Shot) {
     let names = match source {
         TagSource::LooseFolder { definitions_root, .. } => {
-            TagNameIndex::load_game(definitions_root, GameId::Halo2).unwrap()
+            TagNameIndex::load_game(definitions_root, shot_game()).unwrap()
         }
         _ => unreachable!(),
     };
     let TagSource::LooseFolder { root, .. } = source else { unreachable!() };
     // A sky has a render_model and nothing above it.
     let file = root.join(format!("{}.model", shot.model.replace('\\', "/")));
-    let (extension, group) = if file.exists() { ("model", b"hlmt") } else { ("render_model", b"mode") };
+    let (extension, group) = if std::env::var_os("H2_SHOT_BIPED").is_some() {
+        ("biped", b"bipd")
+    } else if shot_game() == GameId::HaloCe {
+        ("gbxmodel", b"mod2")
+    } else if file.exists() {
+        ("model", b"hlmt")
+    } else {
+        ("render_model", b"mode")
+    };
     let tag = load_referenced_tag_from_source(source, &shot.model, extension, group).unwrap();
     let entry = TagEntry {
         key: format!("{}.{extension}", shot.model),
@@ -159,7 +173,7 @@ fn h2_shot() {
     };
     let source = TagSource::LooseFolder {
         root: root.into(),
-        game: Some(GameId::Halo2),
+        game: Some(shot_game()),
         definitions_root: crate::core::bundled::locate_definitions_root(),
     };
     let gl = Arc::new(headless_gl());
