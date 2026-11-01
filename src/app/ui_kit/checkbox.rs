@@ -1,76 +1,5 @@
-//! SVG checkbox artwork over egui's native layout, input and accessibility.
+//! SVG checkbox artwork over native layout, input and accessibility.
 use super::*;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum State {
-    Unchecked,
-    Checked,
-    Indeterminate,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Palette {
-    state: State,
-    dark: bool,
-    hovered: bool,
-    foreground: Color32,
-    accent: Color32,
-}
-
-fn svg(palette: Palette) -> String {
-    let source = match palette.state {
-        State::Unchecked => include_root_str!("assets/Button Icons/Checkbox-Unchecked.svg"),
-        State::Checked => include_root_str!("assets/Button Icons/Checkbox-Checked.svg"),
-        State::Indeterminate => include_root_str!("assets/Button Icons/Checkbox-Indeterminate.svg"),
-    };
-    let colour = |c: Color32| format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b());
-    let mut source = source
-        .replace("currentColor", &colour(palette.foreground))
-        .replace("#47AEEB", &colour(palette.accent));
-    if !palette.dark {
-        source = source.replace("fill=\"black\"", "fill=\"white\"");
-    }
-    if palette.hovered {
-        source = source
-            .replace("opacity=\"0.2\"", "opacity=\"0.5\"")
-            .replace("opacity=\"0.4\"", "opacity=\"0.7\"")
-            .replace("opacity=\"0.8\"", "opacity=\"1\"");
-    } else if palette.state == State::Checked {
-        // Only the outer border softens; the checkmark stays fully legible.
-        source = source.replacen("<path ", "<path opacity=\"0.5\" ", 1);
-    }
-    source
-}
-
-fn image(palette: Palette) -> egui::Image<'static> {
-    thread_local! {
-        static SVGS: RefCell<HashMap<Palette, (String, Arc<[u8]>)>> = RefCell::new(HashMap::new());
-    }
-    let (uri, bytes) = SVGS.with(|cache| {
-        cache
-            .borrow_mut()
-            .entry(palette)
-            .or_insert_with(|| {
-                (
-                    format!(
-                        "bytes://baboon_checkboxes/{:?}-{}-{}-{:08x}-{:08x}.svg",
-                        palette.state,
-                        palette.dark,
-                        palette.hovered,
-                        u32::from_le_bytes(palette.foreground.to_array()),
-                        u32::from_le_bytes(palette.accent.to_array())
-                    ),
-                    svg(palette).into_bytes().into(),
-                )
-            })
-            .clone()
-    });
-    egui::Image::from_bytes(uri, egui::load::Bytes::Shared(bytes))
-        .fit_to_exact_size(Vec2::splat(16.0))
-}
 
 /// Retains egui's response, keyboard activation, focus, labels and mixed-state semantics.
 pub(in crate::app) struct ThemedCheckbox<'a> {
@@ -103,36 +32,19 @@ impl<'a> ThemedCheckbox<'a> {
 }
 impl ThemedCheckbox<'_> {
     fn show(self, ui: &mut Ui) -> egui::Response {
-        let original = ui.style().clone();
-        // Leave the native glyph's space in the layout and suppress its paint.
-        // Preserve text colour explicitly while hiding only the glyph strokes.
-        {
-            let style = ui.style_mut();
-            style.spacing.icon_width = 16.0;
-            style.visuals.override_text_color = Some(original.visuals.text_color());
-            for widget in [
-                &mut style.visuals.widgets.noninteractive,
-                &mut style.visuals.widgets.inactive,
-                &mut style.visuals.widgets.hovered,
-                &mut style.visuals.widgets.active,
-                &mut style.visuals.widgets.open,
-            ] {
-                widget.bg_fill = Color32::TRANSPARENT;
-                widget.bg_stroke = Stroke::NONE;
-                widget.fg_stroke = Stroke::NONE;
-            }
-        }
-        let response = ui.add(
-            egui::Checkbox::new(&mut *self.checked, self.atoms).indeterminate(self.indeterminate),
-        );
-        ui.set_style(original);
+        let response = native_selection_response(ui, |ui| {
+            ui.add(
+                egui::Checkbox::new(&mut *self.checked, self.atoms)
+                    .indeterminate(self.indeterminate),
+            )
+        });
         if ui.is_rect_visible(response.rect) {
             let state = if self.indeterminate {
-                State::Indeterminate
+                SelectionState::Indeterminate
             } else if *self.checked {
-                State::Checked
+                SelectionState::Checked
             } else {
-                State::Unchecked
+                SelectionState::Unchecked
             };
             let hovered = response.hovered() || response.has_focus();
             let rect = egui::Rect::from_center_size(
@@ -142,7 +54,7 @@ impl ThemedCheckbox<'_> {
                 ),
                 Vec2::splat(16.0),
             );
-            paint_themed_checkbox(ui, rect, state, hovered);
+            paint_selection_control(ui, rect, state, hovered);
         }
         response
     }
@@ -165,27 +77,15 @@ impl egui::Widget for ThemedCheckbox<'_> {
     }
 }
 
-/// Shared artwork for native-layout widgets and custom allocated checkbox rows.
-fn paint_themed_checkbox(ui: &Ui, rect: egui::Rect, state: State, hovered: bool) {
-    image(Palette {
-        state,
-        dark: ui.visuals().dark_mode,
-        hovered,
-        foreground: ui.ctx().global_style().visuals.text_color(),
-        accent: ui.ctx().global_style().visuals.selection.bg_fill,
-    })
-    .paint_at(ui, rect);
-}
-
 /// Custom rows supply the glyph rect; their parent UI owns disabled opacity.
 pub(in crate::app) fn paint_checkbox_at(ui: &Ui, rect: egui::Rect, checked: bool, hovered: bool) {
-    paint_themed_checkbox(
+    paint_selection_control(
         ui,
         rect,
         if checked {
-            State::Checked
+            SelectionState::Checked
         } else {
-            State::Unchecked
+            SelectionState::Unchecked
         },
         hovered,
     );
@@ -211,61 +111,6 @@ impl CheckboxUi for Ui {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn palette(state: State, dark: bool, hovered: bool) -> Palette {
-        Palette {
-            state,
-            dark,
-            hovered,
-            foreground: if dark { Color32::WHITE } else { Color32::BLACK },
-            accent: Color32::from_rgb(64, 108, 134),
-        }
-    }
-    fn raster(palette: Palette) -> egui::ColorImage {
-        egui_extras::image::load_svg_bytes(svg(palette).as_bytes(), &Default::default()).unwrap()
-    }
-
-    #[test]
-    fn checkbox_art_rasterizes_all_states_and_hover_strengthens_the_border() {
-        for dark in [false, true] {
-            for state in [State::Unchecked, State::Checked, State::Indeterminate] {
-                let normal = raster(palette(state, dark, false));
-                let hover = raster(palette(state, dark, true));
-                assert_eq!(normal.size, [16, 16]);
-                assert!(normal.pixels.iter().any(|pixel| pixel.a() > 0));
-                assert!(
-                    hover[(0, 8)].a() > normal[(0, 8)].a(),
-                    "hover border: {state:?}, dark={dark}"
-                );
-            }
-        }
-        let light = raster(palette(State::Checked, false, false));
-        let dark = raster(palette(State::Checked, true, false));
-        assert!(
-            light[(1, 8)].r() > dark[(1, 8)].r(),
-            "the translucent well reverses for light mode"
-        );
-    }
-
-    #[test]
-    fn checkbox_images_load_through_the_apps_svg_loader() {
-        let ctx = egui::Context::default();
-        egui_extras::install_image_loaders(&ctx);
-        for dark in [false, true] {
-            for hovered in [false, true] {
-                for state in [State::Unchecked, State::Checked, State::Indeterminate] {
-                    let image = image(palette(state, dark, hovered));
-                    let loaded = image.load_for_size(&ctx, Vec2::splat(16.0));
-                    assert!(
-                        matches!(loaded, Ok(egui::load::TexturePoll::Ready { .. })),
-                        "checkbox image must load in the app: {:?}, URI={:?}",
-                        loaded.as_ref().err(),
-                        image.uri()
-                    );
-                }
-            }
-        }
-    }
 
     #[test]
     fn svg_checkbox_retains_native_layout_click_keyboard_and_disabled_behaviour() {

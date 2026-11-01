@@ -17,3 +17,6 @@ pub(in crate::app) use checkbox::*;
 
 pub(in crate::app) mod radio;
 pub(in crate::app) use radio::*;
+
+mod selection_art;
+pub(in crate::app) use selection_art::{SelectionState, native_selection_response, paint_selection_control};
