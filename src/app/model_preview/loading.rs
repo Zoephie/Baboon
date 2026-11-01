@@ -367,6 +367,7 @@ pub(super) fn load_model_preview(
                 (place, marker.node_index.max(0) as usize)
             });
             (preview.h2_flares, preview.h2_point_lights) = found;
+            preview.h2_antennas = super::h2_lights::read_h2_antennas(source, model_tag, &markers);
             preview.markers = markers;
             if model_tag.header.group_tag == u32::from_be_bytes(*b"bipd") {
                 let known = settings.h2_equippable.as_deref();

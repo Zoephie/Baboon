@@ -9,7 +9,8 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 
 use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
-use super::ce_lights::{CeFlareView, CeSprite, posed_on};
+use super::ce_lights::{CeAntennaQuad, CeFlareView, CeSprite, antenna_sprite, posed_on};
+use super::ce_passes::argb;
 use super::h2_functions::H2FunctionValues;
 use super::h2_passes::{
     H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
@@ -100,6 +101,152 @@ struct H2Light {
     contrast: i128,
     radius: f32,
     specular_radius: f32,
+}
+
+/// One link of a Halo 2 antenna.
+#[derive(Debug, Clone)]
+struct H2AntennaVertex {
+    /// `sub_A63CD0`: where the next vertex lies, with +Z the way this one points.
+    offset: [f32; 3],
+    color: [f32; 4],
+    /// Left, right, top and bottom of the sprite, across the bitmap.
+    rect: [f32; 4],
+    registration: [f32; 2],
+    /// World units per width of the bitmap: `antenna_new` runs the sprite the
+    /// length of the link.
+    scale: f32,
+}
+
+/// A `widget` that hangs a line of sprites from a marker.
+#[derive(Debug, Clone)]
+pub(crate) struct H2Antenna {
+    node: usize,
+    position: [f32; 3],
+    forward: [f32; 3],
+    vertices: Vec<H2AntennaVertex>,
+    pub(crate) image: Arc<H2Image>,
+}
+
+/// `sub_421A90`: `vector` turned about the unit `axis`.
+fn rotated(vector: [f32; 3], axis: [f32; 3], sine: f32, cosine: f32) -> [f32; 3] {
+    let along = dot(vector, axis) * (1.0 - cosine);
+    let across = cross(axis, vector);
+    std::array::from_fn(|i| axis[i] * along + vector[i] * cosine + across[i] * sine)
+}
+
+/// `offset`, with its +Z swung onto `direction`, as `antenna_update_points`
+/// lays out a link.
+fn aimed(offset: [f32; 3], direction: [f32; 3]) -> [f32; 3] {
+    let length = dot(direction, direction).sqrt();
+    if length < UNSET {
+        return offset;
+    }
+    let [x, y, z] = direction.map(|axis| axis / length);
+    let axis = [-y, x, 0.0];
+    let width = dot(axis, axis).sqrt();
+    let axis = if width < UNSET { [0.0, 1.0, 0.0] } else { axis.map(|a| a / width) };
+    rotated(offset, axis, width, z)
+}
+
+impl H2Antenna {
+    /// `antenna_render`, at rest: the spring has every link at the place it
+    /// pulls toward, with no wind or motion to sway it.
+    pub(crate) fn quads(&self, bones: Option<&[[f32; 4]]>, view: &CeFlareView) -> Vec<CeAntennaQuad> {
+        let (mut origin, mut direction) = posed_on(self.node, self.position, self.forward, bones);
+        let mut points = vec![origin];
+        for vertex in &self.vertices {
+            let link = aimed(vertex.offset, direction);
+            origin = std::array::from_fn(|axis| origin[axis] + link[axis]);
+            direction = link;
+            points.push(origin);
+        }
+        let quad = |(index, vertex): (usize, &H2AntennaVertex)| {
+            let (start, end) = (points[index], points[index + 1]);
+            let link: [f32; 3] = std::array::from_fn(|axis| end[axis] - start[axis]);
+            let length = dot(link, link).sqrt().max(UNSET);
+            let link = link.map(|axis| axis / length);
+            let across = cross(view.forward, link);
+            let width = dot(across, across).sqrt().max(UNSET);
+            let across = across.map(|axis| axis / width);
+            let [left, right, top, bottom] = vertex.rect;
+            let [x, y] = vertex.registration;
+            let corner = |u: f32, v: f32| {
+                let along = (u - (x + left)) * vertex.scale;
+                let side = (top + y - v) * vertex.scale;
+                let place: [f32; 3] =
+                    std::array::from_fn(|axis| start[axis] + link[axis] * along - across[axis] * side);
+                [place[0], place[1], place[2], u, v]
+            };
+            CeAntennaQuad {
+                corners: [corner(left, bottom), corner(right, bottom), corner(left, top), corner(right, top)],
+                color: vertex.color,
+            }
+        };
+        self.vertices.iter().enumerate().map(quad).collect()
+    }
+}
+
+fn read_h2_antenna(
+    source: &TagSource,
+    path: &str,
+    markers: &[RenderModelPreviewMarker],
+) -> Option<H2Antenna> {
+    /// The pixels `antenna_render` takes an antenna to cover, whatever it does.
+    const PIXELS: f32 = 100.0;
+    let tag = load_referenced_tag_from_source(source, path, "antenna", b"ant!").ok()?;
+    let root = tag.root();
+    let name = root.read_string_id("attachment marker name")?;
+    let marker = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name))?;
+    let bitmap_path = root.read_tag_ref_path("bitmaps").filter(|path| !path.is_empty())?;
+    let bitmap = load_referenced_tag_from_source(source, &bitmap_path, "bitmap", b"bitm").ok()?;
+    let falloff = root.read_real("falloff pixels").unwrap_or(0.0);
+    let cutoff = root.read_real("cutoff pixels").unwrap_or(0.0);
+    let alpha = ((PIXELS - cutoff) / (falloff - cutoff)).clamp(0.0, 1.0);
+    let mut vertices = Vec::new();
+    for vertex in elements(root, "vertices") {
+        let sequence = vertex.read_int_any("sequence index").unwrap_or(0).max(0) as usize;
+        let (rect, registration, _, covered) = antenna_sprite(&bitmap, sequence)?;
+        let length = vertex.read_real("length").unwrap_or(0.0);
+        let angles = vertex.read_euler2d("angles");
+        let [red, green, blue, _] = argb(vertex, "color");
+        vertices.push(H2AntennaVertex {
+            offset: [
+                angles.yaw.cos() * length * angles.pitch.sin(),
+                angles.yaw.sin() * length * angles.pitch.sin(),
+                angles.pitch.cos() * length,
+            ],
+            color: [red, green, blue, alpha],
+            rect,
+            registration,
+            scale: length / covered,
+        });
+    }
+    let image = decode_h2_image(source, &bitmap_path, SamplerKind::Texture2D, 0)?;
+    Some(H2Antenna {
+        node: marker.node_index.max(0) as usize,
+        position: marker.position,
+        forward: marker.axes[0],
+        vertices,
+        image: Arc::new(image),
+    })
+}
+
+/// The antennas among `object`'s widgets.
+pub(super) fn read_h2_antennas(
+    source: &TagSource,
+    object: &TagFile,
+    markers: &[RenderModelPreviewMarker],
+) -> Vec<H2Antenna> {
+    let Some(block) = object_block(object, "widgets") else {
+        return Vec::new();
+    };
+    let antenna_group = u32::from_be_bytes(*b"ant!");
+    elements(block, "widgets")
+        .iter()
+        .filter_map(|widget| widget.read_tag_ref_with_group("type"))
+        .filter(|(group, _)| *group == antenna_group)
+        .filter_map(|(_, path)| read_h2_antenna(source, &path, markers))
+        .collect()
 }
 
 /// A sphere light at the marker an object attaches it to, lighting the model.
@@ -868,6 +1015,28 @@ mod tests {
         assert_eq!((dim.color, draws), ([1.0, 0.5, 0.25], 4));
         let brighter_specular = H2DefaultLight { specular: [3.0; 3], ..light([1.0; 3]) };
         assert_eq!(overbrighten(&brighter_specular).1, 4, "the brighter of the two decides");
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3]) -> bool {
+        a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-5)
+    }
+
+    #[test]
+    fn a_link_keeps_its_offset_along_plus_z() {
+        assert!(close(aimed([0.1, 0.2, 0.3], [0.0, 0.0, 2.0]), [0.1, 0.2, 0.3]));
+    }
+
+    #[test]
+    fn a_link_swings_plus_z_onto_the_way_the_last_points() {
+        assert!(close(aimed([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]));
+        assert!(close(aimed([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]), [0.0, -1.0, 0.0]));
+        assert!(close(aimed([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]));
+    }
+
+    #[test]
+    fn a_link_pointed_straight_down_turns_about_the_games_fallback_axis() {
+        assert!(close(aimed([0.0, 0.0, 1.0], [0.0, 0.0, -1.0]), [0.0, 0.0, -1.0]));
+        assert!(close(aimed([0.0, 1.0, 0.0], [0.0, 0.0, -1.0]), [0.0, 1.0, 0.0]));
     }
 
     #[test]

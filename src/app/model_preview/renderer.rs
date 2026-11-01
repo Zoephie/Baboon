@@ -2474,6 +2474,7 @@ impl ModelGlRenderer {
                 && self.h2_supported
                 && !(preview.ce_lights.is_empty()
                     && preview.ce_antennas.is_empty()
+                    && preview.h2_antennas.is_empty()
                     && preview.h2_flares.is_empty())
             {
                 self.draw_ce_flares(gl, frame, slot);
@@ -2528,7 +2529,9 @@ impl ModelGlRenderer {
                     .preview
                     .ce_antennas
                     .iter()
-                    .map(|antenna| upload_h2_image(gl, &antenna.image))
+                    .map(|antenna| &antenna.image)
+                    .chain(frame.preview.h2_antennas.iter().map(|antenna| &antenna.image))
+                    .map(|image| upload_h2_image(gl, image))
                     .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);
             }
@@ -2548,9 +2551,9 @@ impl ModelGlRenderer {
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             // `global_shader_effect_alpha_blended`, among the model's depth.
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            for (antenna, texture) in preview_antennas(frame, &uploaded.antenna_textures) {
+            for (quads, texture) in preview_antennas(frame, &uploaded.antenna_textures, bones, &view) {
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                for quad in antenna.quads(bones, &view) {
+                for quad in quads {
                     let vertices = quad.corners.map(|[x, y, z, u, v]| {
                         let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
                         [a, b, c, d, u, v]
@@ -4629,12 +4632,16 @@ unsafe fn upload_placeholder_texture(gl: &glow::Context) -> Option<glow::NativeT
 /// Mipmaps matter here beyond quality: a detail map tiling twenty times across
 /// a model aliases into noise without them, which is exactly where a preview
 /// looks worst.
-fn preview_antennas<'a>(
-    frame: &'a ModelGpuFrame,
-    textures: &'a [Option<glow::NativeTexture>],
-) -> impl Iterator<Item = (&'a ce_lights::CeAntenna, glow::NativeTexture)> {
-    let antennas = frame.preview.ce_antennas.iter().zip(textures);
-    antennas.filter_map(|(antenna, texture)| Some((antenna, (*texture)?)))
+fn preview_antennas(
+    frame: &ModelGpuFrame,
+    textures: &[Option<glow::NativeTexture>],
+    bones: Option<&[[f32; 4]]>,
+    view: &ce_lights::CeFlareView,
+) -> Vec<(Vec<ce_lights::CeAntennaQuad>, glow::NativeTexture)> {
+    let preview = &frame.preview;
+    let ce = preview.ce_antennas.iter().map(|antenna| antenna.quads(bones, view));
+    let h2 = preview.h2_antennas.iter().map(|antenna| antenna.quads(bones, view));
+    ce.chain(h2).zip(textures).filter_map(|(quads, texture)| Some((quads, (*texture)?))).collect()
 }
 
 fn ce_flare_view(camera: &ModelGpuCamera) -> ce_lights::CeFlareView {

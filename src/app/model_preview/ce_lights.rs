@@ -92,7 +92,7 @@ impl CeAntenna {
 
 /// `antenna_new`'s scale for a sprite, or none where a bitmap has no such
 /// sprite to draw.
-fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32; 4], [f32; 2], usize, f32)> {
+pub(super) fn antenna_sprite(bitmap: &TagFile, sequence: usize) -> Option<([f32; 4], [f32; 2], usize, f32)> {
     let root = bitmap.root();
     let sequences = elements(root, "sequences");
     let sprite = *elements(*sequences.get(sequence)?, "sprites").first()?;
