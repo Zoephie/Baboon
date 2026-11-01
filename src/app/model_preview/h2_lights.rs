@@ -11,7 +11,9 @@ use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, CeSprite, posed_on};
 use super::h2_functions::H2FunctionValues;
-use super::h2_passes::{H2DefaultLight, H2Image, ce_color_interpolate, object_input, tag_function_at};
+use super::h2_passes::{
+    H2DefaultLight, H2Image, H2Layer, ce_color_interpolate, object_input, tag_function_at,
+};
 use super::materials::decode_h2_image;
 use super::*;
 use crate::core::h2_pixel_shader::SamplerKind;
@@ -94,6 +96,8 @@ struct H2Light {
     brightness: [f32; 2],
     color_animation: Option<Arc<TagFunction>>,
     brightness_animation: Option<Arc<TagFunction>>,
+    /// `diffuse contrast`, which picks the variant of the diffuse pass.
+    contrast: i128,
     radius: f32,
     specular_radius: f32,
 }
@@ -251,6 +255,7 @@ fn read_h2_light(source: &TagSource, path: &str) -> Option<(H2Light, bool, Optio
         brightness,
         color_animation: scale_function(root, "color animation"),
         brightness_animation: scale_function(root, "brightness animation"),
+        contrast: root.read_int_any("diffuse contrast").unwrap_or(0),
         radius,
         specular_radius: specular_radius.unwrap_or(radius),
     };
@@ -417,6 +422,11 @@ impl H2Light {
 }
 
 impl H2PointLight {
+    /// The layer its diffuse draws on.
+    pub(crate) fn diffuse_layer(&self) -> H2Layer {
+        H2Layer::diffuse_with_contrast(self.light.contrast)
+    }
+
     /// The function that scales it, which sliders and frames must answer for.
     pub(crate) fn scale_name(&self) -> &str {
         &self.scale_by
@@ -767,6 +777,7 @@ mod tests {
             brightness: [1.0, 1.0],
             color_animation: None,
             brightness_animation: None,
+            contrast: 0,
             radius: 2.0,
             specular_radius: 3.0,
         }

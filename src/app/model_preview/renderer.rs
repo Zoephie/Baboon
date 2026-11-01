@@ -2446,7 +2446,7 @@ impl ModelGlRenderer {
                         let specular = H2DefaultLight { color: light.specular, ..light };
                         for _ in 0..draws {
                             for (layer, light) in
-                                [(H2Layer::LightDiffuse, &light), (H2Layer::LightSpecular, &specular)]
+                                [(point.diffuse_layer(), &light), (H2Layer::LightSpecular, &specular)]
                             {
                                 self.draw_h2_passes(gl, frame, slot, &order, layer, Some(light));
                             }

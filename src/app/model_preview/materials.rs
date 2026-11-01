@@ -849,6 +849,7 @@ fn prepare_h2_passes(
     }));
     // A default light's definition has specular on; see `rasterizer_get_switch_extern`.
     cases.insert("light_definition_specular_enabled".to_owned(), 1);
+    cases.insert("light_diffuse_contrast".to_owned(), layer.diffuse_contrast());
     let directory = root.join("rasterizer").join("pixel_shaders_dx9");
     let specular_brightness =
         shader.root().read_real("lightmap specular brightness").unwrap_or(1.0);
