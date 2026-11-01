@@ -387,8 +387,57 @@ pub(crate) struct H3Flare {
     tint_power: f32,
     aspect: [f32; 2],
     time_brightness: Option<Arc<TagFunction>>,
+    age_brightness: Option<Arc<TagFunction>>,
     time_rotation: Option<Arc<TagFunction>>,
+    age_rotation: Option<Arc<TagFunction>>,
+    time_color: Option<H3FlareColor>,
+    age_color: Option<H3FlareColor>,
+    /// `lens_flares_evaluate_corona_rotation_function`'s, and its scale in radians.
+    rotation_function: i128,
+    rotation_scale: f32,
+    rotates_from_center: bool,
+    radius_by_distance: bool,
+    radius_by_occlusion: bool,
     bitmap: H3Bitmap,
+}
+
+/// `s_editing_function`: a color curve, and what can drive it off the object.
+#[derive(Debug, Clone)]
+struct H3FlareColor {
+    function: Arc<TagFunction>,
+    input: String,
+}
+
+impl H3FlareColor {
+    fn read(root: TagStruct<'_>, block: &str) -> Option<Self> {
+        let first = elements(root, block).into_iter().next()?;
+        Some(Self {
+            function: Arc::new(tag_function_at(&first, "function")?),
+            input: first.read_string_id("input name").or_else(|| first.read_string_id("Input Variable")).unwrap_or_default(),
+        })
+    }
+
+    fn at(&self, input: f32, values: Option<&H2FunctionValues>) -> [f32; 3] {
+        let driven = values.filter(|_| !self.input.is_empty()).and_then(|values| values.get(&self.input)).copied();
+        let input = driven.unwrap_or_else(|| self.function.evaluate(input, 0.0));
+        let color = self.function.evaluate_color(input, 1.0);
+        [color.red, color.green, color.blue]
+    }
+}
+
+/// `lens_flares_evaluate_corona_rotation_function`.
+fn corona_rotation(function: i128, scale: f32, position: [f32; 3], forward: [f32; 3], view: &CeFlareView) -> f32 {
+    let across = cross(cross(forward, view.forward), forward);
+    let to_flare: [f32; 3] = std::array::from_fn(|axis| position[axis] - view.eye[axis]);
+    let back = forward.map(|axis| -axis);
+    let (x, y) = match function {
+        1 => (dot(view.forward, across), -dot(view.forward, forward)),
+        2 => (dot(back, view.forward), -dot(back, view.up)),
+        3 => (dot(to_flare, across), -dot(to_flare, forward)),
+        4 => (dot(to_flare, view.forward), -dot(to_flare, view.up)),
+        _ => return 0.0,
+    };
+    if x == 0.0 { 0.0 } else { x.atan2(y) * scale / std::f32::consts::PI }
 }
 
 /// A flare at a marker of the object it is attached to.
@@ -433,6 +482,8 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         return None;
     }
     let reflection = *elements(root, "reflections").first()?;
+    let reflection_flags = reflection.read_flag_names("flags").unwrap_or_default();
+    let reflected = |wanted: &str| reflection_flags.iter().any(|(_, name)| name.starts_with(wanted));
     let bitmap = root.read_tag_ref_path("bitmap").filter(|bitmap| !bitmap.is_empty());
     let override_map = reflection.read_tag_ref_path("bitmapOverride").filter(|bitmap| !bitmap.is_empty());
     let bitmap = override_map.or(bitmap)?;
@@ -471,7 +522,22 @@ fn read_h3_flare(source: &TagSource, path: &str) -> Option<H3Flare> {
         tint_power: reflection.read_real("tint power").filter(|power| *power > SMALLEST).unwrap_or(4.0),
         aspect,
         time_brightness: block_function(root, "time brightness"),
+        age_brightness: block_function(root, "age brightness"),
         time_rotation: block_function(root, "time rotation"),
+        age_rotation: block_function(root, "age rotation"),
+        time_color: H3FlareColor::read(root, "time color"),
+        age_color: H3FlareColor::read(root, "age color"),
+        rotation_function: match root.read_enum_name("rotation function").as_deref() {
+            Some("rotation A") => 1,
+            Some("rotation B") => 2,
+            Some("rotation-translation") => 3,
+            Some("translation") => 4,
+            _ => 0,
+        },
+        rotation_scale: root.read_real("rotation function scale").unwrap_or(0.0),
+        rotates_from_center: reflected("rotate from center of screen"),
+        radius_by_distance: reflected("radius scaled by distance"),
+        radius_by_occlusion: reflected("radius scaled by occlusion factor"),
         bitmap,
     })
 }
@@ -685,24 +751,49 @@ impl H3FlareAt {
                 corona *= 1.0 - ((angle - falloff) / (cutoff - falloff)).clamp(0.0, 1.0);
             }
         }
+        let age = self.event.as_ref().and_then(|(times, event)| times.age(*event, time)).unwrap_or(0.0);
         if let Some(function) = &flare.time_brightness {
             corona *= function.evaluate(time, 0.0);
         }
+        if let Some(function) = &flare.age_brightness {
+            corona *= function.evaluate(age, 0.0);
+        }
         let [lower, upper] = flare.brightness;
         let brightness = ((upper - lower) * scale + lower).clamp(0.0, 1.0) * corona;
-        let radius = self.radius(scale);
+        let mut radius = self.radius(scale);
+        if flare.radius_by_occlusion {
+            radius *= ((1.0 + occlusion) * 0.5).clamp(0.0, 1.0);
+        }
+        if flare.radius_by_distance {
+            radius *= distance;
+        }
         if brightness <= 0.0 || radius <= 0.0 {
             return None;
         }
-        let mut rotation = flare.rotation_offset;
-        if let Some(function) = &flare.time_rotation {
-            rotation += std::f32::consts::PI * function.evaluate(time, 0.0);
+        let spin = |function: &Option<Arc<TagFunction>>, input: f32| {
+            function.as_ref().map_or(0.0, |function| std::f32::consts::PI * function.evaluate(input, 0.0))
+        };
+        let mut rotation = flare.rotation_offset
+            + corona_rotation(flare.rotation_function, flare.rotation_scale, position, forward, view)
+            + spin(&flare.time_rotation, time)
+            + spin(&flare.age_rotation, age);
+        if flare.rotates_from_center {
+            let left = view.right.map(|axis| -axis);
+            rotation += dot(to_flare, view.forward).atan2(dot(to_flare, left));
+        }
+        let mut color = flare.color;
+        let curves = [(&flare.time_color, time), (&flare.age_color, age)];
+        for (curve, input) in curves {
+            if let Some(curve) = curve {
+                let tint = curve.at(input, values);
+                (0..3).for_each(|channel| color[channel] *= tint[channel]);
+            }
         }
         Some(CeSprite {
             center: position,
             extent: [radius * flare.aspect[0], radius * flare.aspect[1]],
             rotation,
-            color: flare.color,
+            color,
             // `lens_flare.hlsl` lights itself by `ILLUM_EXPOSURE`.
             alpha: brightness * EXPOSURE,
             image,
@@ -726,6 +817,14 @@ mod tests {
         assert_eq!(occlusion_fraction(0, true, 0.5), 0.5, "linear takes no table");
         assert_eq!(occlusion_fraction(0, true, MINIMUM_VISIBLE), 0.0, "too little to draw");
         assert_eq!(occlusion_fraction(0, false, 0.02), 0.02, "only a tested share has a floor");
+    }
+
+    #[test]
+    fn a_coronas_rotation_follows_the_eye_only_when_it_has_a_function() {
+        let view = CeFlareView { eye: [0.0; 3], forward: [1.0, 0.0, 0.0], right: [0.0, -1.0, 0.0], up: [0.0, 0.0, 1.0] };
+        assert_eq!(corona_rotation(0, 1.0, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], &view), 0.0);
+        let turned = corona_rotation(4, std::f32::consts::PI, [1.0, 0.0, 1.0], [0.0, 1.0, 0.0], &view);
+        assert!((turned - (1.0f32).atan2(-1.0)).abs() < 1e-5, "{turned}");
     }
 
     #[test]

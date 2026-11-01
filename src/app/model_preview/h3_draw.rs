@@ -82,11 +82,19 @@ const COMPOSITE_FRAGMENT: &str = "#version 410 core
 uniform sampler2D accumulation;
 uniform sampler2D bloom;
 uniform vec4 tone_curve_constants;
+uniform mat4 hue_saturation;
+uniform float contrast;
+uniform float exposure;
 out vec4 color;
 void main() {
     vec4 accumulated = texelFetch(accumulation, ivec2(gl_FragCoord.xy), 0);
     vec2 place = gl_FragCoord.xy / vec2(textureSize(accumulation, 0));
-    vec3 blend = accumulated.rgb + texture(bloom, place).rgb;
+    vec3 blend = (accumulated.rgb + texture(bloom, place).rgb) * exposure;
+    blend = (vec4(blend, 1.0) * hue_saturation).rgb;
+    float luminance = dot(blend, vec3(0.333));
+    if (luminance > 0.0) {
+        blend *= pow(luminance, contrast) / luminance;
+    }
     vec3 clamped = min(blend, tone_curve_constants.xxx);
     vec3 toned = ((clamped * tone_curve_constants.w + tone_curve_constants.z) * clamped
         + tone_curve_constants.y) * clamped;
@@ -1057,7 +1065,14 @@ impl ModelGlRenderer {
             if frame.bloom && bloom.is_none() {
                 bloom = self.h3_built_bloom(gl, framebuffer, accumulation, size);
             }
-            self.h3_composite(gl, accumulation, bloom);
+            let uploaded = &mut self.slots[slot];
+            let values = |object: u8| frame.h2_values_of_object(object);
+            let view = ce_flare_view(&frame.camera);
+            let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
+            let effects = &frame.preview.h3_screen_effects;
+            let screen =
+                h3_screen_effects::h3_screen_settings(effects, values, &mut uploaded.h3_onsets, bones, &view, frame.time);
+            self.h3_composite(gl, accumulation, bloom, screen);
             gl.depth_mask(true);
             gl.disable(glow::BLEND);
             gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
@@ -1121,6 +1136,7 @@ impl ModelGlRenderer {
         gl: &glow::Context,
         accumulation: glow::NativeTexture,
         bloom: Option<glow::NativeTexture>,
+        screen: h3_screen_effects::H3ScreenSettings,
     ) {
         unsafe {
             if self.h3_composite_program.is_none() {
@@ -1141,6 +1157,12 @@ impl ModelGlRenderer {
             gl.active_texture(glow::TEXTURE0);
             let location = gl.get_uniform_location(program, "tone_curve_constants");
             gl.uniform_4_f32_slice(location.as_ref(), &TONE_CURVE);
+            let matrix = screen.color_matrix();
+            let columns: [f32; 16] = std::array::from_fn(|at| matrix[at % 4][at / 4]);
+            let location = gl.get_uniform_location(program, "hue_saturation");
+            gl.uniform_matrix_4_f32_slice(location.as_ref(), false, &columns);
+            gl.uniform_1_f32(gl.get_uniform_location(program, "contrast").as_ref(), screen.gamma());
+            gl.uniform_1_f32(gl.get_uniform_location(program, "exposure").as_ref(), screen.exposure());
             gl.disable(glow::DEPTH_TEST);
             gl.enable(glow::BLEND);
             // The accumulation is premultiplied: what adds light covers nothing.

@@ -37,6 +37,7 @@ pub(in crate::app) mod h2_stage;
 mod h3_effects;
 pub(crate) mod h3_light_volumes;
 pub(crate) mod h3_particles;
+pub(crate) mod h3_screen_effects;
 pub(crate) mod h3_strips;
 pub(crate) mod h3_lights;
 pub(in crate::app) mod h3_prt;
@@ -123,6 +124,7 @@ pub(crate) struct RenderModelPreview {
     pub h3_light_volumes: Vec<h3_light_volumes::H3LightVolumeAt>,
     pub h3_particles: Vec<Arc<h3_particles::H3ParticleSystem>>,
     pub h3_strips: Vec<Arc<h3_strips::H3StripAt>>,
+    pub h3_screen_effects: Vec<h3_screen_effects::H3ScreenEffectAt>,
     pub instances: RenderModelInstances,
     /// Halo 2 antennas, on the markers of the opened object.
     pub h2_antennas: Vec<h2_lights::H2Antenna>,

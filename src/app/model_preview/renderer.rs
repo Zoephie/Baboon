@@ -879,6 +879,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == 0);
     let h3_systems = data.preview.h3_particles.iter().filter(|at| at.object == 0);
     let h3_strips = data.preview.h3_strips.iter().filter(|at| at.object == 0);
+    let h3_screens = data.preview.h3_screen_effects.iter().filter(|at| at.object == 0);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
     let h3 = data.textures.iter().flat_map(|textures| textures.iter());
     let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
@@ -890,6 +891,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(h3_systems.flat_map(|at| at.scale_names()))
         .chain(h3_strips.flat_map(|at| at.scale_names()))
+        .chain(h3_screens.map(|at| at.scale_name()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
         .filter(|name| !name.is_empty());
@@ -962,6 +964,7 @@ pub(super) fn object_moves(
         || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || !data.preview.h3_particles.is_empty()
         || !data.preview.h3_strips.is_empty()
+        || !data.preview.h3_screen_effects.is_empty()
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())

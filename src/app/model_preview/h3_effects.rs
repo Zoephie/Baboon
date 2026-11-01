@@ -123,6 +123,20 @@ impl H3EffectTimes {
         None
     }
 
+    /// Seconds since `index` began, ended or not, for what outlives its event.
+    pub(super) fn since_begun(&self, index: usize, time: f32) -> Option<f32> {
+        let event = *self.events.get(index)?;
+        let before: f32 = if self.parallel {
+            0.0
+        } else {
+            self.events.iter().take(index).map(|event| event.length()).sum()
+        };
+        let cycle = self.once();
+        let time = if self.once || cycle <= 0.0 { time } else { time.rem_euclid(cycle.max(ONE_TICK)) };
+        let age = time - before - event.delay;
+        (age >= 0.0).then_some(age)
+    }
+
     /// How long a run that does not loop takes.
     pub(super) fn once(&self) -> f32 {
         let lengths = self.events.iter().map(|event| event.length());
