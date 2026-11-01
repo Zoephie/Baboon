@@ -3592,6 +3592,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_permutation_of_mesh_none_draws_nothing_whatever_its_count() {
+        let permutation = |mesh_index, mesh_count| blam_tags::Permutation {
+            name: String::new(),
+            mesh_index,
+            mesh_count,
+            instance_mask: [0; 4],
+        };
+        let region = |permutations| blam_tags::Region { name: String::new(), permutations };
+        let model = RenderModel {
+            regions: vec![
+                region(vec![permutation(0, 1)]),
+                region(vec![permutation(-1, 1)]),
+                region(vec![permutation(1, 2)]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(preview_mesh_order(&model, 3), [(0, 0, 0), (2, 0, 1), (2, 0, 2)]);
+    }
+
+    #[test]
     fn the_background_is_the_theme_s_and_grid_lines_stay_visible_on_it() {
         for visuals in [egui::Visuals::dark(), egui::Visuals::light()] {
             let background = preview_background(&visuals);
@@ -4544,6 +4564,7 @@ pub(super) fn render_model_to_preview(
         regions: model
             .regions
             .iter()
+            .filter(|region| region.permutations.iter().any(|permutation| permutation.mesh_index >= 0))
             .map(|region| RenderModelPreviewRegion {
                 name: region.name.clone(),
                 permutations: region
@@ -4604,7 +4625,10 @@ pub(super) fn preview_mesh_order(model: &RenderModel, mesh_count: usize) -> Vec<
     let mut order = Vec::new();
     for (region_index, region) in model.regions.iter().enumerate() {
         for (permutation_index, permutation) in region.permutations.iter().enumerate() {
-            let first_mesh = permutation.mesh_index.max(0) as usize;
+            // NONE, whatever its count says: a permutation with no geometry.
+            let Ok(first_mesh) = usize::try_from(permutation.mesh_index) else {
+                continue;
+            };
             let count = permutation.mesh_count.max(0) as usize;
             for mesh_index in first_mesh..first_mesh.saturating_add(count) {
                 if mesh_index < mesh_count {

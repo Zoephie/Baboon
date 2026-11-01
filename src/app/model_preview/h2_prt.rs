@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use blam_tags::{RenderMesh, RenderModel, TagFile, TagStruct};
 
+use super::renderer::preview_mesh_order;
+
 /// `info->m_sh_order` is asserted to be 3 in the game.
 const SH_ORDER: i128 = 3;
 const SH_COEFFICIENTS: usize = 9;
@@ -178,30 +180,15 @@ pub(in crate::app) fn read_h2_prt(
     }
 
     let mut vertices = Vec::new();
-    for region in &model.regions {
-        for permutation in &region.permutations {
-            let first = permutation.mesh_index.max(0) as usize;
-            let count = permutation.mesh_count.max(0) as usize;
-            for mesh_index in first..first.saturating_add(count) {
-                let Some(mesh) = meshes.get(mesh_index) else {
-                    continue;
-                };
-                let section = sections.get(&mesh_index);
-                for vertex in 0..mesh.vertices.len() {
-                    let floats = section.and_then(|(offset, first_cluster)| {
-                        let start = offset + vertex * VERTEX_FLOATS;
-                        let data = raw.get(start..start + VERTEX_FLOATS)?;
-                        Some([
-                            data[0] + *first_cluster as f32,
-                            data[1],
-                            data[2],
-                            data[3],
-                            data[4],
-                        ])
-                    });
-                    vertices.push(floats.unwrap_or_default());
-                }
-            }
+    for (_, _, mesh_index) in preview_mesh_order(model, meshes.len()) {
+        let section = sections.get(&mesh_index);
+        for vertex in 0..meshes[mesh_index].vertices.len() {
+            let floats = section.and_then(|(offset, first_cluster)| {
+                let start = offset + vertex * VERTEX_FLOATS;
+                let data = raw.get(start..start + VERTEX_FLOATS)?;
+                Some([data[0] + *first_cluster as f32, data[1], data[2], data[3], data[4]])
+            });
+            vertices.push(floats.unwrap_or_default());
         }
     }
     Some(H2Prt { vertices, clusters, light: lights.first()?.direction, basis: all_basis })
