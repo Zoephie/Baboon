@@ -861,6 +861,9 @@ impl ModelGlRenderer {
             gl.blend_func(glow::ONE, glow::ONE);
             let bones = frame.bones.as_ref().map(|bones| bones.as_slice());
             for (index, light) in frame.preview.h3_lights.iter().enumerate() {
+                if !frame.h3_lights_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
                 let values = frame.h2_values_of_object(light.object);
                 let colors = if light.object == 0 { frame.change_colors } else { [[1.0; 3]; 4] };
                 let Some(lit) = light.lit(values, &colors, bones, frame.time) else {
@@ -1041,7 +1044,7 @@ fn h3_adds_light(blend: H3Blend) -> bool {
     )
 }
 
-unsafe fn h3_set_blend(gl: &glow::Context, blend: H3Blend) {
+pub(super) unsafe fn h3_set_blend(gl: &glow::Context, blend: H3Blend) {
     let ([source, destination, source_alpha, destination_alpha], equation) = h3_blend_state(blend);
     unsafe {
         gl.blend_equation(equation);

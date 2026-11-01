@@ -548,7 +548,9 @@ fn fold_attached(
         let markers = &attached.markers;
         let lights = super::h3_lights::read_h3_lights(source, object, owner, markers, frame);
         let flares = super::h3_lights::read_h3_flares(source, object, owner, markers, frame);
-        preview.h3_lights.extend(lights);
+        let volumes = super::h3_light_volumes::read_h3_light_volumes(source, object, owner, markers, frame);
+        preview.h3_light_volumes.extend(volumes.into_iter().map(|volume| volume.on_attached(name)));
+        preview.h3_lights.extend(lights.into_iter().map(|light| light.on_attached(name)));
         preview.h3_flares.extend(flares.into_iter().map(|flare| flare.on_attached(name)));
     } else {
         let (flares, lights, gels) =

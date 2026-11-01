@@ -138,6 +138,8 @@ pub(super) fn draw_model_viewport(
         h2_values,
         h2_attached_values: h2_attached_values(data, time),
         h3_flares_shown: h3_flares_shown(&data.preview, state),
+        h3_lights_shown: h3_lights_shown(&data.preview, state),
+        h3_volumes_shown: h3_volumes_shown(&data.preview, state),
         h2_flares_shown: h2_flares_shown(&data.preview, state),
         ce_points: Vec::new(),
         change_colors: h2_change_colors_for(
@@ -338,6 +340,18 @@ fn visible_instances(preview: &RenderModelPreview, state: &ModelPreviewState) ->
 fn h3_flares_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
     let shown = |only| marker_active(only, &state.region_selections);
     preview.h3_flares.iter().map(|at| at.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Halo 3's lights.
+fn h3_lights_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h3_lights.iter().map(|light| light.only_under().is_none_or(shown)).collect()
+}
+
+/// The same of Halo 3's light volumes.
+fn h3_volumes_shown(preview: &RenderModelPreview, state: &ModelPreviewState) -> Vec<bool> {
+    let shown = |only| marker_active(only, &state.region_selections);
+    preview.h3_light_volumes.iter().map(|at| at.only_under().is_none_or(shown)).collect()
 }
 
 /// The same of Halo 2's.
@@ -808,6 +822,8 @@ struct ModelGpuFrame {
     /// What a held weapon's own functions read, by owner.
     h2_attached_values: Vec<(u8, h2_functions::H2FunctionValues)>,
     h3_flares_shown: Vec<bool>,
+    h3_lights_shown: Vec<bool>,
+    h3_volumes_shown: Vec<bool>,
     h2_flares_shown: Vec<bool>,
     /// Each object's point lights this frame, in step with `object_states`.
     ce_points: Vec<[[f32; 4]; ce_lights::CE_POINT_LIGHT_ROWS]>,
@@ -844,6 +860,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
     let lights = data.preview.h2_point_lights.iter().filter(|light| light.object == 0);
     let h3_lights = data.preview.h3_lights.iter().filter(|light| light.object == 0);
     let h3_flares = data.preview.h3_flares.iter().filter(|at| at.object == 0);
+    let h3_volumes = data.preview.h3_light_volumes.iter().filter(|at| at.object == 0);
     let gels = data.preview.h2_gel_lights.iter().filter(|light| light.object == 0);
     let h3 = data.textures.iter().flat_map(|textures| textures.iter());
     let h3 = h3.filter_map(|texture| texture.h3.as_ref()).flat_map(|material| &material.animations);
@@ -852,6 +869,7 @@ pub(super) fn h2_shader_inputs(data: &ModelPreviewData) -> Vec<String> {
         .chain(h3)
         .chain(h3_lights.flat_map(|light| light.inputs()))
         .chain(h3_flares.map(|at| at.scale_name()))
+        .chain(h3_volumes.flat_map(|at| at.scale_names()))
         .chain(lights.map(|light| light.scale_name()))
         .chain(gels.map(|light| light.scale_name()))
         .filter(|name| !name.is_empty());
@@ -921,6 +939,7 @@ pub(super) fn object_moves(
         || data.preview.h2_gel_lights.iter().any(|light| light.animates())
         || data.preview.h3_lights.iter().any(|light| light.animates())
         || data.preview.h3_flares.iter().any(|at| at.animates())
+        || data.preview.h3_light_volumes.iter().any(|at| at.animates())
         || data.textures.iter().flat_map(|textures| textures.iter()).any(|texture| {
             texture.h3.as_ref().is_some_and(|material| {
                 material.animations.iter().any(|animation| animation.moves())
@@ -1702,6 +1721,7 @@ struct ModelGpuSlot {
     h3_textures: h3_draw::H3SlotTextures,
     flare_geometry: Option<u64>,
     antenna_textures: Vec<Option<glow::NativeTexture>>,
+    volume_textures: Vec<Option<glow::NativeTexture>>,
 }
 
 impl ModelGpuSlot {
@@ -1747,6 +1767,7 @@ impl ModelGpuSlot {
                 h3_textures: Default::default(),
                 flare_geometry: None,
                 antenna_textures: Vec::new(),
+                volume_textures: Vec::new(),
             })
         }
     }
@@ -2680,7 +2701,8 @@ impl ModelGlRenderer {
                 && preview.ce_antennas.is_empty()
                 && preview.h2_antennas.is_empty()
                 && preview.h2_flares.is_empty()
-                && preview.h3_flares.is_empty())
+                && preview.h3_flares.is_empty()
+                && preview.h3_light_volumes.is_empty())
     }
 
     pub(super) unsafe fn draw_ce_flares(&mut self, gl: &glow::Context, frame: &ModelGpuFrame, slot: usize) {
@@ -2733,6 +2755,18 @@ impl ModelGlRenderer {
                         None => upload_h2_image(gl, &antenna.image),
                     }))
                     .collect();
+                for texture in uploaded.volume_textures.drain(..).flatten() {
+                    gl.delete_texture(texture);
+                }
+                uploaded.volume_textures = frame
+                    .preview
+                    .h3_light_volumes
+                    .iter()
+                    .map(|at| {
+                        let (image, texels, mips) = at.bitmap();
+                        h3_draw::upload_h2_image_linear(gl, image, *texels, mips, None)
+                    })
+                    .collect();
                 uploaded.flare_geometry = Some(frame.geometry_id);
             }
             let camera = &frame.camera;
@@ -2779,6 +2813,35 @@ impl ModelGlRenderer {
                 }
             }
             gl.color_mask(true, true, true, false);
+            // `render_effects`, among the transparents: every profile is its own quad.
+            // `c_transparency_renderer` sorts far to near, each from its location.
+            let mut volumes: Vec<_> = frame.preview.h3_light_volumes.iter().enumerate().collect();
+            let distance = |at: &h3_light_volumes::H3LightVolumeAt| {
+                let origin = at.origin(bones);
+                (0..3).map(|axis| (origin[axis] - view.eye[axis]).powi(2)).sum::<f32>()
+            };
+            volumes.sort_by(|(_, a), (_, b)| distance(b).total_cmp(&distance(a)));
+            for (index, at) in volumes {
+                if !frame.h3_volumes_shown.get(index).copied().unwrap_or(true) {
+                    continue;
+                }
+                let Some(texture) = uploaded.volume_textures.get(index).copied().flatten() else {
+                    continue;
+                };
+                h3_draw::h3_set_blend(gl, at.blend());
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                for quad in at.quads(frame.h2_values_of_object(at.object), bones, &view, frame.time) {
+                    let vertices = quad.corners.map(|[x, y, z, u, v]| {
+                        let [a, b, c, d] = ce_flare_clip(camera, [x, y, z]);
+                        [a, b, c, d, u, v]
+                    });
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STREAM_DRAW);
+                    let [red, green, blue, alpha] = quad.color;
+                    gl.uniform_4_f32(flares.color.as_ref(), red, green, blue, alpha);
+                    gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+                }
+            }
+            gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE);
             for (index, light) in frame.preview.ce_lights.iter().enumerate() {
                 let state = frame.object_states.get(usize::from(light.object));
@@ -2800,7 +2863,7 @@ impl ModelGlRenderer {
                     continue;
                 }
                 let values = frame.h2_values_of_object(at.object);
-                let occlusion = match at.occlusion_patch(values, bones, &view) {
+                let occlusion = match at.occlusion_patch(values, bones, &view, frame.time) {
                     None => Some(1.0),
                     Some(patch) => ce_flare_occlusion(gl, flares, camera, &view, &patch),
                 };

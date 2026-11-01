@@ -9,7 +9,12 @@ use blam_tags::{TagFile, TagFunction, TagStruct};
 use super::attachment::MarkerFrame;
 use super::ce_attachments::{elements, object_block};
 use super::ce_lights::{CeFlareView, CeSprite, posed_on};
+use super::h3_effects::{
+    H3EffectTimes, MOST_MARKERS, for_each_attached_part, marker_name, part_frame, read_part_placement,
+};
 use super::h2_functions::H2FunctionValues;
+use blam_tags::tag_function::transition_function_evaluate;
+
 use super::h2_passes::{H2Image, tag_function_at};
 use super::renderer::H3_EXPOSURE as EXPOSURE;
 use super::materials::{H3Bitmap, read_h3_bitmap};
@@ -63,7 +68,11 @@ pub(crate) struct H3Light {
     position: [f32; 3],
     forward: [f32; 3],
     up: [f32; 3],
+    /// The region and permutation its marker belongs to, if only one.
+    only_under: Option<(String, String)>,
     scale_by: String,
+    /// Set for a light an attached effect makes.
+    by_effect: Option<H3EffectScale>,
     /// `light_update` multiplies in the object's change color.
     change_color: Option<usize>,
     frustum: bool,
@@ -126,6 +135,18 @@ fn simple_light(
 }
 
 impl H3Light {
+    pub(crate) fn only_under(&self) -> Option<&(String, String)> {
+        self.only_under.as_ref()
+    }
+
+    /// Follow the regions `merge_attached` renames for what `name` brings.
+    pub(crate) fn on_attached(mut self, name: &str) -> Self {
+        if let Some((region, _)) = &mut self.only_under {
+            *region = format!("{name}: {region}");
+        }
+        self
+    }
+
     pub(crate) fn inputs(&self) -> impl Iterator<Item = &str> {
         [&self.color.input, &self.color.range, &self.intensity.input, &self.intensity.range]
             .into_iter()
@@ -152,7 +173,8 @@ impl H3Light {
         let (input, range) = self.intensity.sample(values, time);
         let mut intensity = self.intensity.function.evaluate(input, range);
         if !self.scale_by.is_empty() {
-            intensity *= values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
+            let scale = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
+            intensity *= self.by_effect.map_or(scale, |effect| effect.of(scale));
         }
         let tint = self.change_color.and_then(|channel| change_colors.get(channel)).copied();
         let [red, green, blue] = tint.unwrap_or([1.0; 3]);
@@ -241,7 +263,8 @@ struct H3LightTag {
     gel: Option<Arc<H2Image>>,
 }
 
-/// An object's attached `light`s, at the first marker of each name.
+/// An object's attached `light`s, at the first marker of each name, and those
+/// its attached effects make, `light_new_unattached` at each of a location's.
 pub(super) fn read_h3_lights(
     source: &TagSource,
     object: &TagFile,
@@ -254,6 +277,34 @@ pub(super) fn read_h3_lights(
         return lights;
     };
     let light_group = u32::from_be_bytes(*b"ligh");
+    let place_light = |tag: H3LightTag,
+                           place: MarkerFrame,
+                           node: usize,
+                           only_under: Option<(String, String)>,
+                           attachment: TagStruct<'_>,
+                           by_effect: Option<H3EffectScale>| H3Light {
+        object: owner,
+        node,
+        position: place.position,
+        forward: place.axes[0],
+        up: place.axes[2],
+        only_under,
+        scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
+        by_effect,
+        // The tag's first option is none; the channels follow.
+        change_color: usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok(),
+        frustum: tag.frustum,
+        maximum_distance: tag.maximum_distance,
+        near_width: tag.near_width,
+        height_scale: tag.height_scale,
+        field_of_view: tag.field_of_view,
+        diffusion: tag.diffusion,
+        smoothness: tag.smoothness,
+        spherical: tag.spherical,
+        color: tag.color,
+        intensity: tag.intensity,
+        gel: tag.gel,
+    };
     for attachment in elements(block, "attachments") {
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
@@ -264,36 +315,30 @@ pub(super) fn read_h3_lights(
         let Some(tag) = read_h3_light(source, &path) else {
             continue;
         };
-        let name = attachment
-            .read_string_id("marker")
-            .or_else(|| attachment.read_string("marker"))
-            .unwrap_or_default();
+        let name = marker_name(attachment, "marker");
         let Some(marker) = markers.iter().find(|marker| marker.name.eq_ignore_ascii_case(&name)) else {
             continue;
         };
         let (place, node) = frame(marker);
-        lights.push(H3Light {
-            object: owner,
-            node,
-            position: place.position,
-            forward: place.axes[0],
-            up: place.axes[2],
-            scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
-            // The tag's first option is none; the channels follow.
-            change_color: usize::try_from(attachment.read_int_any("change color").unwrap_or(0) - 1).ok(),
-            frustum: tag.frustum,
-            maximum_distance: tag.maximum_distance,
-            near_width: tag.near_width,
-            height_scale: tag.height_scale,
-            field_of_view: tag.field_of_view,
-            diffusion: tag.diffusion,
-            smoothness: tag.smoothness,
-            spherical: tag.spherical,
-            color: tag.color,
-            intensity: tag.intensity,
-            gel: tag.gel,
-        });
+        lights.push(place_light(tag, place, node, None, attachment, None));
     }
+    for_each_attached_part(source, object, |part| {
+        if part.group != light_group {
+            return;
+        }
+        let (offset, yaw, pitch) = read_part_placement(part.part);
+        let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(&part.marker));
+        for marker in named.take(MOST_MARKERS) {
+            let Some(tag) = read_h3_light(source, &part.path) else {
+                return;
+            };
+            let (place, node) = frame(marker);
+            let place = part_frame(&place, offset, yaw, pitch);
+            let by_effect = Some(H3EffectScale { scaled: part.scaled });
+            let only_under = marker.only_under.clone();
+            lights.push(place_light(tag, place, node, only_under, part.attachment, by_effect));
+        }
+    });
     lights
 }
 
@@ -333,6 +378,8 @@ pub(crate) struct H3FlareAt {
     scale_by: String,
     /// Set for a flare an attached effect draws.
     by_effect: Option<H3EffectScale>,
+    /// When its effect's event runs, for a flare an attached effect draws.
+    event: Option<(Arc<H3EffectTimes>, usize)>,
     flare: Arc<H3Flare>,
 }
 
@@ -345,8 +392,6 @@ struct H3EffectScale {
 }
 
 const NO_OCCLUSION_TEST: i128 = 2;
-/// `_effect_part_type_scale_bit`, by its option's name.
-const PART_SCALE: &str = "type-specific scale";
 const ONLY_FIRST_PERSON_FLARE: i128 = 4;
 /// `occlusion offset direction` toward the eye.
 const OFFSET_TOWARD_EYE: i128 = 1;
@@ -420,11 +465,11 @@ pub(super) fn read_h3_flares(
         return flares;
     };
     let flare_group = u32::from_be_bytes(*b"lens");
-    let effect_group = u32::from_be_bytes(*b"effe");
     let mut place_flare = |path: &str,
                            name: &str,
                            attachment: TagStruct<'_>,
-                           by_effect: Option<H3EffectScale>| {
+                           by_effect: Option<H3EffectScale>,
+                           event: Option<(Arc<H3EffectTimes>, usize)>| {
         let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
             return;
         };
@@ -438,6 +483,7 @@ pub(super) fn read_h3_flares(
                 only_under: marker.only_under.clone(),
                 scale_by: attachment.read_string_id("primary scale").unwrap_or_default(),
                 by_effect,
+                event: event.clone(),
                 flare: Arc::clone(&flare),
             });
         }
@@ -446,39 +492,19 @@ pub(super) fn read_h3_flares(
         let Some((group, path)) = attachment.read_tag_ref_with_group("type") else {
             continue;
         };
-        if path.is_empty() {
-            continue;
-        }
-        if group == flare_group {
-            let name = marker_of(attachment, "marker");
-            place_flare(&path, &name, attachment, None);
-        } else if group == effect_group {
-            let Ok(effect) = load_referenced_tag_from_source(source, &path, "effect", b"effe") else {
-                continue;
-            };
-            let locations = elements(effect.root(), "locations");
-            for event in elements(effect.root(), "events") {
-                for part in elements(event, "parts") {
-                    let Some((group, part_path)) = part.read_tag_ref_with_group("type") else {
-                        continue;
-                    };
-                    let location = usize::try_from(part.read_block_index("location")).ok();
-                    let location = location.and_then(|location| locations.get(location));
-                    if let (true, false, Some(location)) = (group == flare_group, part_path.is_empty(), location) {
-                        let name = marker_of(*location, "marker name");
-                        let scales = part.read_flag_names("A scales values").unwrap_or_default();
-                        let scaled = scales.iter().any(|(_, name)| name == PART_SCALE);
-                        place_flare(&part_path, &name, attachment, Some(H3EffectScale { scaled }));
-                    }
-                }
-            }
+        if group == flare_group && !path.is_empty() {
+            let name = marker_name(attachment, "marker");
+            place_flare(&path, &name, attachment, None, None);
         }
     }
+    for_each_attached_part(source, object, |part| {
+        if part.group == flare_group {
+            let by_effect = Some(H3EffectScale { scaled: part.scaled });
+            let event = Some((Arc::clone(&part.times), part.event));
+            place_flare(&part.path, &part.marker, part.attachment, by_effect, event);
+        }
+    });
     flares
-}
-
-fn marker_of(holder: TagStruct<'_>, field: &str) -> String {
-    holder.read_string_id(field).or_else(|| holder.read_string(field)).unwrap_or_default()
 }
 
 /// `k_minimum_visible_lens_flare`.
@@ -490,7 +516,7 @@ fn occlusion_fraction(falloff: u8, tested: bool, visible: f32) -> f32 {
     if tested && visible <= MINIMUM_VISIBLE {
         return 0.0;
     }
-    blam_tags::tag_function::transition_function_evaluate(falloff, visible)
+    transition_function_evaluate(falloff, visible)
 }
 
 impl H3EffectScale {
@@ -529,16 +555,26 @@ impl H3FlareAt {
         let moving = |function: &Option<Arc<TagFunction>>| {
             function.as_ref().is_some_and(|function| function.as_constant().is_none())
         };
-        moving(&self.flare.time_brightness) || moving(&self.flare.time_rotation)
+        moving(&self.flare.time_brightness)
+            || moving(&self.flare.time_rotation)
+            || self.event.as_ref().is_some_and(|(times, _)| times.moves())
     }
 
     /// The object's `primary scale`, which also runs the flare's bounds.
-    fn scale(&self, values: Option<&H2FunctionValues>) -> f32 {
+    fn scale(&self, values: Option<&H2FunctionValues>, time: f32) -> f32 {
+        // `effect_generate_lens_flares`: out with its event, fading as it ages.
+        let aged = match &self.event {
+            Some((times, event)) => match times.age(*event, time) {
+                Some(age) => 1.0 - transition_function_evaluate(self.flare.falloff, age),
+                None => return 0.0,
+            },
+            None => 1.0,
+        };
         if self.scale_by.is_empty() {
-            return 1.0;
+            return aged;
         }
         let value = values.and_then(|values| values.get(&self.scale_by)).copied().unwrap_or(0.0);
-        self.by_effect.map_or(value, |scale| scale.of(value))
+        aged * self.by_effect.map_or(value, |scale| scale.of(value))
     }
 
     fn radius(&self, scale: f32) -> f32 {
@@ -554,9 +590,10 @@ impl H3FlareAt {
         values: Option<&H2FunctionValues>,
         bones: Option<&[[f32; 4]]>,
         view: &CeFlareView,
+        time: f32,
     ) -> Option<CeSprite> {
         let flare = &*self.flare;
-        let scale = self.scale(values);
+        let scale = self.scale(values, time);
         if !flare.tests_occlusion || scale <= 0.0 {
             return None;
         }
@@ -589,7 +626,7 @@ impl H3FlareAt {
         image: usize,
     ) -> Option<CeSprite> {
         let flare = &*self.flare;
-        let scale = self.scale(values);
+        let scale = self.scale(values, time);
         if scale <= 0.0 || occlusion <= 0.0 {
             return None;
         }
