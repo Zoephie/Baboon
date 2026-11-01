@@ -1156,7 +1156,7 @@ pub(super) fn read_h3_particles(
                     .flat_map(|(_, path)| read_carried_strips(source, path))
                     .map(Arc::new)
                     .collect();
-                for marker in part_markers(markers, &name, object_effect.once) {
+                for marker in &part_markers(markers, &name, object_effect.once) {
                     let (place, node) = frame(marker);
                     let attached = children.iter().enumerate().map(|(at, child)| (child.0, at + 1)).collect();
                     let parts = parts.clone();
@@ -1777,6 +1777,15 @@ impl H3ParticleField {
         let Some(mut now) = self.time else {
             return;
         };
+        // By the frame's clock, which the steps trail: a function that has
+        // just come on must not read as having come on in their future.
+        let onset_of: Vec<f32> = systems
+            .iter()
+            .map(|system| {
+                let scope = values(system.object);
+                onsets.of(system.object, &system.scale_by, scope.as_ref(), time)
+            })
+            .collect();
         while now + STEP <= time {
             now += STEP;
             let mut spawned = Vec::new();
@@ -1810,7 +1819,7 @@ impl H3ParticleField {
                     continue;
                 }
                 let scope = values(system.object);
-                let onset = onsets.of(system.object, &system.scale_by, scope.as_ref(), now);
+                let onset = onset_of[index];
                 let state = system_state_stepped(system, scope.as_ref(), now, onset);
                 let (origin, axes) = location(system, bones);
                 let state = with_lod(system, state, origin, eye);

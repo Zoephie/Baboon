@@ -226,6 +226,8 @@ fn draw_event_effects(ui: &mut Ui, events: &[&str], key: u64, set: &mut H2Functi
         for name in events {
             if ui.small_button(format!("Play {name}")).clicked() {
                 set.insert((key, (*name).to_owned()), STARTING);
+                // It has to be seen off for a frame before it can come on.
+                ui.ctx().request_repaint();
             }
         }
     });

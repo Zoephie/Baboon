@@ -263,7 +263,7 @@ pub(super) fn read_h3_screen_effects(
         if definitions.is_empty() {
             return;
         }
-        for marker in part_markers(markers, &part.marker, part.effect.once) {
+        for marker in &part_markers(markers, &part.marker, part.effect.once) {
             let (place, node) = frame(marker);
             effects.push(H3ScreenEffectAt {
                 object: owner,

@@ -359,7 +359,7 @@ pub(super) fn read_h3_lights(
             return;
         }
         let (offset, yaw, pitch) = read_part_placement(part.part);
-        for marker in part_markers(markers, &part.marker, part.effect.once) {
+        for marker in &part_markers(markers, &part.marker, part.effect.once) {
             let Some(tag) = read_h3_light(source, &part.path) else {
                 return;
             };
@@ -575,7 +575,7 @@ pub(super) fn read_h3_flares(
         let Some(flare) = read_h3_flare(source, path).map(Arc::new) else {
             return;
         };
-        for marker in part_markers(markers, name, once) {
+        for marker in &part_markers(markers, name, once) {
             let (place, node) = frame(marker);
             let (place, node) = placed(place, node);
             flares.push(H3FlareAt {

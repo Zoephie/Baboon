@@ -348,15 +348,50 @@ impl H3ObjectEffect {
     }
 }
 
-/// What a location of this name lands on. An event's effect with no such
-/// marker plays on the object, where the first marker stands in for it.
-pub(super) fn part_markers<'a>(
-    markers: &'a [RenderModelPreviewMarker],
+/// What a location of this name lands on: its markers, or, for what no marker
+/// answers, the effect's own point. `build_common_effect_vectors` names those
+/// directions at the point an event happened, and `root` is the object's.
+pub(super) fn part_markers(
+    markers: &[RenderModelPreviewMarker],
     name: &str,
     once: bool,
-) -> Vec<&'a RenderModelPreviewMarker> {
-    let named: Vec<_> = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(name)).collect();
-    if named.is_empty() && once { markers.first().into_iter().collect() } else { named.into_iter().take(MOST_MARKERS).collect() }
+) -> Vec<RenderModelPreviewMarker> {
+    let named = markers.iter().filter(|marker| marker.name.eq_ignore_ascii_case(name));
+    let named: Vec<_> = named.take(MOST_MARKERS).cloned().collect();
+    if !named.is_empty() {
+        return named;
+    }
+    if !once && !name.eq_ignore_ascii_case("root") {
+        return Vec::new();
+    }
+    vec![RenderModelPreviewMarker {
+        name: name.to_owned(),
+        node_index: 0,
+        position: [0.0; 3],
+        axes: axes_of_vector(effect_vector(name)),
+        scale: 1.0,
+        only_under: None,
+    }]
+}
+
+/// Where a named vector points, on an object facing along x with nothing under
+/// it but the ground. Anything else, such as `root`, is the object's own.
+fn effect_vector(name: &str) -> [f32; 3] {
+    match name {
+        "gravity" => [0.0, 0.0, -1.0],
+        "up" | "normal" => [0.0, 0.0, 1.0],
+        "backward" => [-1.0, 0.0, 0.0],
+        _ => [1.0, 0.0, 0.0],
+    }
+}
+
+fn axes_of_vector(forward: [f32; 3]) -> [[f32; 3]; 3] {
+    let [x, y, z] = forward;
+    if z.abs() > 0.5 {
+        [forward, [0.0, 1.0, 0.0], [-z, 0.0, x]]
+    } else {
+        [forward, [-y, x, 0.0], [0.0, 0.0, 1.0]]
+    }
 }
 
 /// Every effect `object` and its `.model` name, attachments first.
@@ -575,6 +610,34 @@ mod tests {
         assert_eq!(two.begins_within(1, 0.05, 0.1), None);
         assert_eq!(two.begins_within(0, -0.01, 0.05), Some(0.0));
         assert_eq!(two.begins_within(0, 0.0, 0.05), None, "already begun");
+    }
+
+    #[test]
+    fn a_named_vector_sits_at_the_object_and_points_its_way() {
+        let down = part_markers(&[], "gravity", true);
+        assert_eq!(down[0].position, [0.0; 3]);
+        assert_eq!(down[0].axes[0], [0.0, 0.0, -1.0]);
+        assert_eq!(part_markers(&[], "up", true)[0].axes[0], [0.0, 0.0, 1.0]);
+        assert_eq!(part_markers(&[], "backward", true)[0].axes[0], [-1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_looping_effect_needs_its_marker_unless_it_asks_for_the_root() {
+        assert!(part_markers(&[], "fx_vent", false).is_empty());
+        assert_eq!(part_markers(&[], "root", false).len(), 1);
+    }
+
+    #[test]
+    fn a_real_marker_of_that_name_wins() {
+        let marker = RenderModelPreviewMarker {
+            name: "up".to_owned(),
+            node_index: 3,
+            position: [1.0, 2.0, 3.0],
+            axes: axes_of_vector([1.0, 0.0, 0.0]),
+            scale: 1.0,
+            only_under: None,
+        };
+        assert_eq!(part_markers(&[marker], "up", true)[0].position, [1.0, 2.0, 3.0]);
     }
 
     #[test]

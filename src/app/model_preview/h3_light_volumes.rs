@@ -288,7 +288,7 @@ pub(super) fn read_h3_light_volumes(
             let Some(definition) = read_definition(source, element).map(Arc::new) else {
                 continue;
             };
-            for marker in part_markers(markers, &part.marker, part.effect.once) {
+            for marker in &part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);

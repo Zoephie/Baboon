@@ -412,7 +412,7 @@ pub(super) fn read_h3_strips(
                 continue;
             };
             let (look, kind) = (Arc::new(look), Arc::new(kind));
-            for marker in part_markers(markers, &part.marker, part.effect.once) {
+            for marker in &part_markers(markers, &part.marker, part.effect.once) {
                 let (place, node) = frame(marker);
                 let (place, node) = part.placed(place, node);
                 let place = part_frame(&place, offset, yaw, pitch);
